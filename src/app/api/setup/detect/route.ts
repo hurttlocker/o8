@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,6 +72,23 @@ function safeWhich(bin: string, deadlineAt?: number): string {
   }
 }
 
+/**
+ * Locate a runtime CLI: PATH first, then the deterministic well-known-dirs
+ * scan (Claude native installer's ~/.local/bin, per-version nvm/fnm bins, bun,
+ * pnpm, …). The scan also repairs ~/.o8/bin symlinks so PATH-based consumers
+ * work afterward. Bare `which` alone missed real installs whenever the PATH
+ * line lived in ~/.zshrc — the v0.1.548 "Claude/Gemini not detected" report.
+ */
+function locateBin(bin: string, deadlineAt?: number): string {
+  const fromPath = safeWhich(bin, deadlineAt);
+  if (fromPath) return fromPath;
+  try {
+    return scanAndLink(bin) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 async function safeFetch(url: string, timeoutMs = 2000, deadlineAt?: number): Promise<Response | null> {
   const timeout = boundedTimeout(timeoutMs, deadlineAt);
   if (timeout === 0) return null;
@@ -122,13 +140,13 @@ function keyPresent(names: string[], configured: Set<string>): boolean {
 
 function detectCodex(deadlineAt?: number): DetectedTool {
   const home = homedir();
-  const path = safeWhich('codex', deadlineAt);
+  const path = locateBin('codex', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let threadCount = 0;
 
   if (detected) {
-    version = safeExec('codex', ['--version'], 2000, deadlineAt);
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
   }
 
   const sqlitePath = join(home, '.codex', 'state_5.sqlite');
@@ -163,13 +181,13 @@ function detectCodex(deadlineAt?: number): DetectedTool {
 
 function detectClaudeCode(deadlineAt?: number): DetectedTool {
   const home = homedir();
-  const path = safeWhich('claude', deadlineAt);
+  const path = locateBin('claude', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let sessionCount = 0;
 
   if (detected) {
-    version = safeExec('claude', ['--version'], 2000, deadlineAt);
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
   }
 
   const projectsDir = join(home, '.claude', 'projects');
@@ -207,12 +225,12 @@ function detectClaudeCode(deadlineAt?: number): DetectedTool {
 }
 
 function detectGemini(deadlineAt?: number): DetectedTool {
-  const path = safeWhich('gemini', deadlineAt);
+  const path = locateBin('gemini', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
 
   if (detected) {
-    version = safeExec('gemini', ['--version'], 2000, deadlineAt);
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
   }
 
   const authPresent = keyPresent(
@@ -232,13 +250,13 @@ function detectGemini(deadlineAt?: number): DetectedTool {
 }
 
 function detectOpenCode(deadlineAt?: number): DetectedTool {
-  const path = safeWhich('opencode', deadlineAt);
+  const path = locateBin('opencode', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let authedProviders: string[] = [];
 
   if (detected) {
-    version = safeExec('opencode', ['--version'], 2000, deadlineAt);
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
   }
 
   // Best-effort: peek at the auth manifest to see which providers the user has authed.
