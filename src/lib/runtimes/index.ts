@@ -45,6 +45,7 @@ import { geminiRuntime } from './gemini';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
+import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
 import { invalidateOwnedGeminiFleetCache } from '@/lib/gemini/owned';
 import { invalidateOwnedOpencodeFleetCache } from '@/lib/opencode/owned';
 import './opencode-cost-parser';
@@ -56,6 +57,7 @@ import './opencode-cost-parser';
  */
 export function invalidateAllOwnedFleets(): void {
   invalidateOwnedCodexFleetCache();
+  invalidateOwnedClaudeCodeFleetCache();
   invalidateOwnedGeminiFleetCache();
   invalidateOwnedOpencodeFleetCache();
 }

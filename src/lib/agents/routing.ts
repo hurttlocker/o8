@@ -14,8 +14,8 @@ import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinki
 const EFFORT_CAPABLE_RUNTIMES: readonly OrchestratorRuntime[] = ['codex', 'claude-code'];
 
 // Codex stays the always-on fallback workhorse when no dispatchable runtime is
-// requested. Other runtimes (Gemini today) are honored when the capability map
-// marks them dispatchable — that's what makes a mixed Codex+Gemini swarm work.
+// requested. Other runtimes are honored when the capability map marks them
+// dispatchable — that's what makes mixed-runtime swarms work.
 export const PRODUCTION_AGENT_RUNTIME: OrchestratorRuntime = 'codex';
 export const PRODUCTION_AGENT_PROVIDER: WorkerProvider = 'codex';
 export const PRODUCTION_AGENT_ENFORCEMENT = 'dispatchable_runtimes' as const;
@@ -121,9 +121,8 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const requestedModel = normalizeModel(input.requestedModel);
   const requestedEffort = normalizeEffort(input.requestedEffort);
 
-  // Honor a requested runtime when the capability map marks it dispatchable
-  // (Codex + Gemini today). Anything else — including a request for a
-  // non-dispatchable runtime like claude-code — falls back to Codex.
+  // Honor a requested runtime when the capability map marks it dispatchable.
+  // Anything else falls back to Codex.
   const dispatchable = listDispatchableRuntimes({ includeExperimental: true });
   const selectedRuntime = requestedRuntime && dispatchable.includes(requestedRuntime)
     ? requestedRuntime

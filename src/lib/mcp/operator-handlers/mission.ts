@@ -74,8 +74,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         runtime: {
           type: 'string',
-          enum: ['codex', 'gemini'],
-          description: 'Worker runtime for all mission packets. Codex (default) and Gemini are both dispatchable — mix them across packets for a coding + thinking swarm. Claude runs only as the orchestrator (REPL via stream-json), never as a packet worker; opencode is not dispatchable.',
+          enum: ['codex', 'claude-code', 'gemini'],
+          description: 'Worker runtime for all mission packets. Codex (default), Claude Code, and Gemini are dispatchable; Claude workers launch as sub-billed interactive stream-json, never --print. opencode is not dispatchable.',
         },
         workerIntent: {
           type: 'string',
@@ -275,8 +275,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex', 'gemini'],
-          description: 'Worker runtime for this task. Codex (default) or Gemini — both are dispatchable.',
+          enum: ['codex', 'claude-code', 'gemini'],
+          description: 'Worker runtime for this task. Codex (default), Claude Code, or Gemini — all are dispatchable. Claude Code uses interactive stream-json, never --print.',
         },
         model: {
           type: 'string',
@@ -372,8 +372,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex', 'gemini'],
-          description: 'Worker runtime for this task. Codex (default) or Gemini — both are dispatchable.',
+          enum: ['codex', 'claude-code', 'gemini'],
+          description: 'Worker runtime for this task. Codex (default), Claude Code, or Gemini — all are dispatchable. Claude Code uses interactive stream-json, never --print.',
         },
         projectId: {
           type: 'string',

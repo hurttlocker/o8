@@ -6,13 +6,11 @@
  * via the `claude` CLI.
  */
 
-import { execFile, spawn } from 'node:child_process';
-import { closeSync, openSync } from 'node:fs';
-import { access, mkdtemp, open, readdir, readFile, stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { access, open, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { resolveCli, CliNotFoundError } from '@/lib/runtimes/shared/cli-resolver';
 import type {
   AgentRuntime,
   RuntimeCapabilities,
@@ -32,50 +30,19 @@ import {
 // Side-effect import: registers the 'claude-code' cost parser in the registry.
 import '@/lib/runtimes/cost-parser';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
-import { tmuxSessionName } from '@/lib/terminal/tmux';
-import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
-import { getRuntimeTerminalSession, registerRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
-import { monitorUsageDispatch, readClaudeUsageSnapshot, type UsageSnapshot } from '@/lib/usage-log';
+import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import {
+  getOwnedClaudeCodeFleetAdditions,
+  getOwnedClaudeCodeRuntimeTail,
+  launchOwnedClaudeCodeSession,
+} from '@/lib/claude-code/owned';
 
 const execFileAsync = promisify(execFile);
 
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 
-/**
- * Lazily resolve the claude CLI binary path using the shared resolver.
- *
- * Respects O8_CLAUDE_CODE_BIN (primary) and CLAUDE_BIN (legacy) env overrides
- * before falling back to which / login-shell / static paths. The result is
- * cached by the resolver for 10 minutes so repeated calls are cheap.
- */
-async function resolveClaudeBin(): Promise<string> {
-  try {
-    const resolved = await resolveCli({
-      runtimeId: 'claude-code',
-      binaryName: 'claude',
-      envOverride: 'O8_CLAUDE_CODE_BIN',
-      // CLAUDE_BIN is the historical env-var — keep honouring it
-      extraEnvOverrides: ['CLAUDE_BIN'],
-      aliases: ['claude-code'],
-    });
-    return resolved.path;
-  } catch (err) {
-    // Surface a clear error message rather than ENOENT deep inside spawn
-    if (err instanceof CliNotFoundError) {
-      throw new Error(`Claude Code binary not found. Set O8_CLAUDE_CODE_BIN or CLAUDE_BIN to the full path. ${err.message}`);
-    }
-    throw err;
-  }
-}
 const RECENT_WINDOW_MS = 6 * 60 * 60_000; // 6 hours
-// 45s was 12s. Under parallel dispatch (5+ claude-code procs spawning at
-// once), the cold-start of `claude --print` can take 8-15s before the first
-// jsonl write hits ~/.claude/projects/<encoded-cwd>/. Lanes were timing out
-// with "could not resolve the persistent session id" and the lane retry
-// loop minted fresh worktrees on every miss, leaking ~150 worktrees in one
-// dispatch. 45s gives the parallel cold-starts comfortable headroom.
-const LAUNCH_SESSION_ID_TIMEOUT_MS = 45_000;
 const CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 const CLAUDE_ONE_MILLION_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const CLAUDE_CONTEXT_RESERVE_MAX_OUTPUT_TOKENS = 20_000;
@@ -125,55 +92,8 @@ function decodeProjectPath(encodedName: string): string {
   return '/' + encodedName.slice(1).replace(/-/g, '/');
 }
 
-function shortenPath(filePath: string): string {
-  return filePath.replace(`${os.homedir()}/`, '~/');
-}
-
 function normalizeFsPath(filePath?: string) {
   return (filePath ?? '').replace(/\/+$/, '');
-}
-
-function encodeProjectPath(projectPath: string): string {
-  const resolved = path.resolve(projectPath);
-  return `-${resolved.replace(/^\/+/, '').replace(/\//g, '-')}`;
-}
-
-function quoteShellArg(value: string) {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-async function spawnDetached(command: string, args: string[], cwd: string) {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: 'ignore',
-      detached: true,
-      cwd,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-    });
-
-    const handleSpawn = () => {
-      child.off('error', handleError);
-      child.unref();
-      resolve();
-    };
-    const handleError = (error: Error) => {
-      child.off('spawn', handleSpawn);
-      reject(error);
-    };
-
-    child.once('spawn', handleSpawn);
-    child.once('error', handleError);
-  });
-}
-
-async function listProjectSessionIds(projectPath: string) {
-  const projectDir = path.join(CLAUDE_PROJECTS_DIR, encodeProjectPath(projectPath));
-  const entries = await readdir(projectDir).catch(() => []);
-  return new Set(
-    entries
-      .filter((entry) => entry.endsWith('.jsonl'))
-      .map((entry) => entry.replace(/\.jsonl$/, '')),
-  );
 }
 
 async function findSessionJsonl(sessionId: string) {
@@ -271,98 +191,6 @@ async function resolveLiveSessionIdFromPid(pid: number) {
   } catch {
     return null;
   }
-}
-
-function extractSessionIdFromOutput(raw: string) {
-  for (const line of raw.split('\n').filter(Boolean)) {
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>;
-      if (typeof event.session_id === 'string' && event.session_id) {
-        return event.session_id;
-      }
-      if (typeof event.sessionId === 'string' && event.sessionId) {
-        return event.sessionId;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-async function waitForLaunchSessionId(
-  outputPath: string,
-  projectPaths: string[],
-  knownSessionIds: Map<string, Set<string>>,
-  timeoutMs = LAUNCH_SESSION_ID_TIMEOUT_MS,
-) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const raw = await readFile(outputPath, 'utf8').catch(() => '');
-    const streamedSessionId = extractSessionIdFromOutput(raw);
-    if (streamedSessionId) {
-      return streamedSessionId;
-    }
-
-    for (const projectPath of projectPaths) {
-      const known = knownSessionIds.get(projectPath) ?? new Set<string>();
-      const current = await listProjectSessionIds(projectPath);
-      const nextId = [...current].find((sessionId) => !known.has(sessionId));
-      if (nextId) {
-        return nextId;
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  return null;
-}
-
-async function waitForClaudeRunToFinish(sessionId: string, startedAtMs: number) {
-  let lastMtimeMs = 0;
-  let settledPolls = 0;
-
-  for (let attempt = 0; attempt < 7200; attempt += 1) {
-    const sessionProject = await resolveSessionProjectPath(sessionId).catch(() => null);
-    const sessionCwd = normalizeFsPath(sessionProject?.cwd ?? sessionProject?.projectPath);
-    const liveProcesses = sessionCwd ? await findLiveClaudeProcesses().catch(() => []) : [];
-    const runningInSessionCwd = sessionCwd
-      ? liveProcesses.some((proc) => {
-          const procCwd = normalizeFsPath(proc.cwd);
-          return Boolean(procCwd) && (
-            procCwd === sessionCwd
-            || procCwd.startsWith(`${sessionCwd}/`)
-            || sessionCwd.startsWith(`${procCwd}/`)
-          );
-        })
-      : false;
-    const fileStat = sessionProject?.jsonlPath ? await stat(sessionProject.jsonlPath).catch(() => null) : null;
-    const nextMtimeMs = fileStat?.mtimeMs ?? lastMtimeMs;
-
-    if (nextMtimeMs !== lastMtimeMs) {
-      lastMtimeMs = nextMtimeMs;
-      settledPolls = 0;
-    } else if (!runningInSessionCwd && sessionProject?.jsonlPath) {
-      settledPolls += 1;
-      if (settledPolls >= 2) {
-        return {
-          finishedAtMs: Math.max(startedAtMs, lastMtimeMs || Date.now()),
-          snapshot: sessionProject?.jsonlPath ? await readClaudeUsageSnapshot(sessionProject.jsonlPath).catch(() => null) : null,
-        };
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  const sessionProject = await resolveSessionProjectPath(sessionId).catch(() => null);
-  return {
-    finishedAtMs: Math.max(startedAtMs, Date.now()),
-    snapshot: sessionProject?.jsonlPath ? await readClaudeUsageSnapshot(sessionProject.jsonlPath).catch(() => null) : null,
-  };
 }
 
 /**
@@ -1101,10 +929,59 @@ export const claudeCodeRuntime: AgentRuntime = {
       });
     }
 
+    const owned = await getOwnedClaudeCodeFleetAdditions({ fresh: true }).catch((error) => {
+      console.error('[claude-code-runtime] owned-session discovery failed:', error);
+      return null;
+    });
+    if (owned) {
+      for (const agent of owned.agents) {
+        const lifecycle = agent.runtimeSurface?.lifecycle?.availability
+          ? agent.runtimeSurface.lifecycle as RuntimeSession['lifecycle']
+          : undefined;
+        results.push({
+          sessionKey: agent.sessionKey,
+          runtimeId: 'claude-code',
+          displayName: agent.name,
+          cwd: agent.runtimeSurface?.cwd ?? agent.workspace,
+          branch: agent.runtimeSurface?.reviewContext?.branch ?? agent.branch,
+          headSha: agent.runtimeSurface?.reviewContext?.head,
+          repoSlug: agent.runtimeSurface?.reviewContext?.repoSlug,
+          status: agent.status === 'running' ? 'running' : agent.status === 'failed' ? 'failed' : 'reviewing',
+          ownership: 'owned',
+          sessionCapabilities: {
+            canSendInput: false,
+            canInterrupt: agent.runtimeSurface?.capabilities?.interrupt ?? false,
+            canReviewDiffs: agent.runtimeSurface?.capabilities?.diffContext ?? true,
+          },
+          lastActivityAt: new Date(agent.lastEventAt),
+          initialTask: agent.currentTask,
+          model: agent.model,
+          lifecycle,
+          tmuxSession: agent.tmuxSession,
+        });
+      }
+    }
+
     return results;
   },
 
   async readTranscript(sessionKey: string, sinceId?: string, limit = 50): Promise<RuntimeTranscriptEntry[]> {
+    if (sessionKey.startsWith('claude-code-owned:')) {
+      const tail = await getOwnedClaudeCodeRuntimeTail(sessionKey);
+      const entries = tail.entries.map((entry) => ({
+        id: entry.id,
+        role: entry.kind === 'tool' ? 'tool' as const : entry.kind === 'tool-output' ? 'system' as const : 'assistant' as const,
+        text: entry.text,
+        timestamp: entry.timestamp ? new Date(entry.timestamp) : new Date(),
+        type: 'message' as const,
+        toolName: entry.kind === 'tool' ? entry.label : undefined,
+      }));
+      const filtered = sinceId
+        ? entries.slice(Math.max(0, entries.findIndex((entry) => entry.id === sinceId) + 1))
+        : entries;
+      return filtered.slice(-limit);
+    }
+
     const sessionId = sessionKey.replace('claude-code:', '');
 
     // Find the JSONL file across all projects
@@ -1234,26 +1111,23 @@ export const claudeCodeRuntime: AgentRuntime = {
     return result.slice(-limit);
   },
 
-  async launch(_opts: LaunchOptions): Promise<RuntimeActionResult> {
-    // Claude Code dispatch is retired (memory: o8_no_claude_dispatch).
-    // Anthropic's June 15 2026 pricing change makes every `claude -p` turn
-    // bill against the user's Agent SDK credit pool ($20-$200/mo cap) — and
-    // we never wanted Claude in the workhorse seat anyway. The adapter still
-    // ships for read-only discovery of user-launched Claude Code sessions
-    // (their interactive subscription pool, unaffected). Dispatch packets
-    // route through Codex / Gemini / opencode instead.
+  async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
+    const result = await launchOwnedClaudeCodeSession({
+      cwd: opts.cwd,
+      prompt: opts.prompt,
+      model: opts.model,
+    });
     return {
-      ok: false,
-      note: 'Claude Code dispatch is disabled. Use Codex, Gemini, or opencode for packet dispatch — Claude orchestrates from your own Claude Code or Desktop client via the operator MCP server.',
+      ok: result.ok,
+      note: result.note,
+      sessionKey: result.surfaceId,
     };
   },
 
-  async resume(_sessionKey: string, _message: string): Promise<RuntimeActionResult> {
-    // Same rationale as launch — `claude -p`/`claude --continue` bills the
-    // Agent SDK pool after Anthropic's June 15 2026 change, and the runtime
-    // is retired from the dispatch picker. Discovery + transcript reads
-    // remain so the operator can still see in-flight user-driven Claude
-    // Code sessions on the desktop SessionVisualizer.
+  async resume(): Promise<RuntimeActionResult> {
+    // Resume for discovered Claude sessions stays disabled: `claude --continue`
+    // is not the owned interactive stream-json worker path. Owned dispatched
+    // workers are intentionally one prompt per launch.
     return {
       ok: false,
       note: 'Claude Code resume is disabled. Continue the conversation in your own Claude Code client; o8 will pick up the updated transcript via JSONL discovery.',

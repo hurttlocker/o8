@@ -210,6 +210,9 @@ export interface OwnedRuntimeAdapter {
   /** Build argv for a fresh (launch) run. */
   launchArgs(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string[];
 
+  /** Optional stdin payload for runtimes launched as interactive stream processors. */
+  launchStdin?(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string | null;
+
   /**
    * Build argv for a resume run. Return null to signal this runtime cannot
    * thread-resume via CLI — the store will raise a friendly "no resume

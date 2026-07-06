@@ -129,7 +129,7 @@ function normalizeResumeSessionId(sessionId?: string | null): string | null {
   return unprefixed.trim() || null;
 }
 
-function buildClaudeArgs(
+export function buildClaudeStreamJsonArgs(
   model: string | null,
   permissionMode: ClaudeCodePermissionMode,
   resumeSessionId?: string | null,
@@ -160,6 +160,16 @@ function buildClaudeArgs(
   }
 
   return args;
+}
+
+export function buildClaudeStreamJsonUserPayload(text: string): string {
+  return `${JSON.stringify({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: text,
+    },
+  })}\n`;
 }
 
 function clearIdleTimer(session: InternalClaudeCodeInteractiveSession): void {
@@ -350,7 +360,7 @@ function spawnSession(
   resumeSessionId?: string | null,
 ): InternalClaudeCodeInteractiveSession {
   const normalizedResumeSessionId = normalizeResumeSessionId(resumeSessionId);
-  const proc = spawn(claudeCodeBin(), buildClaudeArgs(model, permissionMode, normalizedResumeSessionId), {
+  const proc = spawn(claudeCodeBin(), buildClaudeStreamJsonArgs(model, permissionMode, normalizedResumeSessionId), {
     cwd,
     env: {
       ...process.env,
@@ -492,13 +502,7 @@ export async function sendMessage(
       options.signal.addEventListener('abort', turn.abortListener, { once: true });
     }
 
-    const payload = `${JSON.stringify({
-      type: 'user',
-      message: {
-        role: 'user',
-        content: text,
-      },
-    })}\n`;
+    const payload = buildClaudeStreamJsonUserPayload(text);
 
     try {
       internal.proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
