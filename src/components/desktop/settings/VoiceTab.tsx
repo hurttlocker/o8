@@ -49,7 +49,6 @@ import {
   type DictationInputMode,
 } from '@/lib/appearance/dictation-input-mode';
 import { useSyncExternalStore } from 'react';
-import { VoiceHistorySection } from './VoiceHistorySection';
 
 // macOS System Settings deep-links.
 const URL_ACCESSIBILITY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
@@ -476,8 +475,6 @@ export function VoiceTab() {
               />
             </SettingsGroup>
           </section>
-
-          <VoiceHistorySection />
         </>
       )}
 
