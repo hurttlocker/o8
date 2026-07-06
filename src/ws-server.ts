@@ -68,6 +68,7 @@ import {
   appendMobileOrchestratorUserMessage,
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
+  mobileOrchestratorThreadHistoryStatToken,
   upsertMobileOrchestratorAssistantMessage,
   writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
@@ -1883,10 +1884,14 @@ function orchestratorThreadFingerprint(thread: MobileOrchestratorThread): string
 
 let lastOrchestratorThreadFingerprints = new Map<string, string>();
 let lastOrchestratorRevealCursor = new Date(Date.now() - 3000).toISOString();
+let lastOrchestratorThreadHistoryStatToken: string | null = null;
 
 function pushOrchestratorThreadChanges() {
   if (clients.size === 0) return;
   try {
+    const statToken = mobileOrchestratorThreadHistoryStatToken();
+    if (lastOrchestratorThreadHistoryStatToken === statToken) return;
+
     const threads = listMobileOrchestratorThreads({ backend: null });
     const nextFingerprints = new Map<string, string>();
     for (const thread of threads) {
@@ -1913,6 +1918,7 @@ function pushOrchestratorThreadChanges() {
         data: request,
       });
     }
+    lastOrchestratorThreadHistoryStatToken = statToken;
   } catch (error) {
     console.warn('[ws-server] orchestrator thread sync failed:', error instanceof Error ? error.message : String(error));
   }
