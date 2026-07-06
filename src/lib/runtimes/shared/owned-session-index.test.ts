@@ -21,11 +21,13 @@ function writeSession(dir: string, surfaceId: string, activeRun: unknown) {
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'o8-owned-idx-'));
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = root;
+  process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = root;
   resetOwnedSessionIndex();
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  delete process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
   resetOwnedSessionIndex();
 });
 
@@ -44,6 +46,12 @@ describe('lookupOwnedActiveRun', () => {
     writeSession('s2', 'codex-owned:live', { pid: 4242, tmuxSession: 'sess-x' });
     resetOwnedSessionIndex();
     expect(await lookupOwnedActiveRun('codex-owned:live', 1000)).toEqual({ pid: 4242, tmuxSession: 'sess-x' });
+  });
+
+  it('indexes Claude Code owned workers under their own root marker', async () => {
+    writeSession('s-claude', 'claude-code-owned:live', { pid: 31337 });
+    resetOwnedSessionIndex();
+    expect(await lookupOwnedActiveRun('claude-code-owned:live', 1000)).toEqual({ pid: 31337, tmuxSession: undefined });
   });
 
   it('null for a surfaceId that matches no known root marker', async () => {

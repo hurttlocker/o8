@@ -35,6 +35,10 @@ export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
       root: process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.o8', 'owned-codex'),
     },
     {
+      marker: 'claude-code-owned:',
+      root: process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT || path.join(os.homedir(), '.o8', 'owned-claude-code'),
+    },
+    {
       marker: 'gemini-owned:',
       root: process.env.O8_OWNED_GEMINI_ROOT || path.join(os.homedir(), '.o8', 'owned-gemini'),
     },

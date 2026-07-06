@@ -169,6 +169,9 @@ async function archiveSession(target: PostMergeCleanupTarget) {
     if (target.runtime === 'codex') {
       return (await import('@/lib/codex/owned')).archiveOwnedCodexSession(sessionKey).then((result) => result.archived);
     }
+    if (target.runtime === 'claude-code') {
+      return (await import('@/lib/claude-code/owned')).archiveOwnedClaudeCodeSession(sessionKey).then((result) => result.archived);
+    }
     if (target.runtime === 'gemini') {
       return (await import('@/lib/gemini/owned')).archiveOwnedGeminiSession(sessionKey).then((result) => result.archived);
     }

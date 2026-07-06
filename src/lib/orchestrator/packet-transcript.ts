@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
 import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
+import { getOwnedClaudeCodeTelemetrySources } from '@/lib/claude-code/owned';
 import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { getOwnedOpencodeTelemetrySources } from '@/lib/opencode/owned';
@@ -145,6 +146,16 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
       return { raw: await readOwnedRunStdouts(sources.stdoutPaths), runtime: 'opencode' };
     } catch {
       return { raw: '', runtime: 'opencode' };
+    }
+  }
+
+  if (sessionKey.startsWith('claude-code-owned:')) {
+    try {
+      const sources = await getOwnedClaudeCodeTelemetrySources(sessionKey);
+      if (!sources) return { raw: '', runtime: 'claude-code' };
+      return { raw: await readOwnedRunStdouts(sources.stdoutPaths), runtime: 'claude-code' };
+    } catch {
+      return { raw: '', runtime: 'claude-code' };
     }
   }
 
