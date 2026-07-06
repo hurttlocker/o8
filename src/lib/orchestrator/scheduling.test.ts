@@ -27,6 +27,7 @@ vi.mock('@/lib/runtime/actions', () => ({
 
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { readDispatchHaltState, setDispatchHaltState } = await import('@/lib/orchestrator/dispatch-halt');
 const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
 const {
   MAX_PARALLEL_DISPATCHES,
@@ -95,6 +96,7 @@ function missionFixture(repoPath: string, packets: OrchestratorPacket[]): Orches
 describe('dispatch scheduling caps and waves', () => {
   beforeEach(() => {
     launchMock.calls.length = 0;
+    setDispatchHaltState(false);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
 
@@ -187,6 +189,38 @@ describe('dispatch scheduling caps and waves', () => {
     expect(next.packets[0].status).toBe('recovering');
   }, 20_000);
 
+  it('persists the dispatch halt gate and blocks launches until cleared', async () => {
+    const repoPath = makeRepo();
+    const packet = packetFixture(repoPath, 'halt-gate');
+
+    setDispatchHaltState(true, 'test halt');
+    expect(readDispatchHaltState()).toMatchObject({
+      halted: true,
+      reason: 'test halt',
+    });
+
+    const halted = await runDispatchTick(missionFixture(repoPath, [packet]), {
+      launchBudget: { maxLaunches: 1 },
+    });
+
+    expect(launchMock.calls).toHaveLength(0);
+    expect(halted.packets[0].status).toBe('queued');
+    expect(readDispatchHaltState().halted).toBe(true);
+
+    setDispatchHaltState(false);
+    expect(readDispatchHaltState()).toMatchObject({
+      halted: false,
+      reason: null,
+    });
+
+    const resumed = await runDispatchTick(missionFixture(repoPath, [packet]), {
+      launchBudget: { maxLaunches: 1 },
+    });
+
+    expect(launchMock.calls.map((call) => call.packetId)).toEqual(['halt-gate']);
+    expect(resumed.packets[0].status).toBe('launching');
+  }, 20_000);
+
   it('salvages committed recovery work to review instead of redispatching', async () => {
     const repoPath = makeRepo();
     execFileSync('git', ['checkout', '-b', 'inline/recovery-committed'], { cwd: repoPath, stdio: 'pipe' });
@@ -263,6 +297,7 @@ describe('dispatch scheduling caps and waves', () => {
 describe('boot recovery launch guard (#1460)', () => {
   beforeEach(() => {
     launchMock.calls.length = 0;
+    setDispatchHaltState(false);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
 
