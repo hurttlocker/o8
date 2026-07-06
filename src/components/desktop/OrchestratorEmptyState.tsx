@@ -87,6 +87,7 @@ interface OrchestratorEmptyStateProps {
   onWorktreeModeChange: (mode: WorktreeMode) => void;
   // Branch picker (stub — main-only for v1)
   branch: string;
+  onBranchChange?: (branch: string) => void;
   // Kind picker (orchestrator vs chat). When `kindLocked` is true, the
   // chip renders read-only — e.g. llm-chat tabs that can't pivot to
   // orchestrator without spawning a new tab.
@@ -176,6 +177,26 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
             lifts up via -32cqh and lands just below this block, so
             the visual stack reads: title → suggestions → composer. */}
         <QuickActionPills onActionClick={onActionClick} />
+
+        {/* Run-context chips (project · worktree · branch) moved UP here
+            from below the composer (operator, 2026-07-06) — down there
+            they collided with the bottom status bar. The stack reads:
+            title → suggestions → context chips → composer. */}
+        <div style={{ marginTop: 10 }}>
+          <OrchestratorComposerBelow
+            worktreeMode={props.worktreeMode}
+            onWorktreeModeChange={props.onWorktreeModeChange}
+            branch={props.branch}
+            repoPath={repoPath}
+            onBranchChange={props.onBranchChange}
+            onActionClick={onActionClick}
+            repoLabel={repoLabel}
+            workspaceTargets={workspaceTargets}
+            onSelectProject={props.onSelectProject}
+            onAddProject={onAddProject}
+            onWorkWithoutProject={props.onWorkWithoutProject}
+          />
+        </div>
       </div>
     </div>
   );
