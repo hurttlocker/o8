@@ -14,6 +14,9 @@ JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 | `o8 doctor` | Verify port + token resolution; ping `/api/panel/status` |
 | `o8 status` | Snapshot: running packets, active lanes, recent merges, pending approvals |
 | `o8 packet info` | Info about the packet bound to the current worktree (auto-discovered via cwd) |
+| `o8 packet stop <id>` | Interrupt the worker and hold the packet; resume with `packet reset` or `packet rerun`; `packet cancel` is an alias |
+| `o8 mission stop --mission <id>` | Interrupt and hold every packet in a mission, then print per-packet results |
+| `o8 run stop <runId>` | Stop an o8-managed run listed by `o8 run --list` |
 | `o8 packet log <event>` | (Phase-1 stub) — will append a structured lane event once the backend route lands |
 
 ## Configuration
