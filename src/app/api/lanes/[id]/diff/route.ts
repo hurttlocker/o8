@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
+import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 32 * 1024 * 1024;
@@ -47,15 +48,8 @@ export async function GET(
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const headSha = await readHeadSha(cwd);
-      // Diff against the merge-base so base advancing doesn't pollute the output
-      // with commits the lane didn't make.
-      let against = base;
-      try {
-        const { stdout } = await execFileAsync('git', ['merge-base', base, headSha], { cwd, maxBuffer: COMMAND_MAX_BUFFER });
-        against = stdout.trim() || base;
-      } catch {
-        // base unresolvable in this worktree — fall back to the base ref name.
-      }
+      const diffBase = await resolvePacketDiffBase(cwd, base, headSha);
+      const against = diffBase.mergeBase ?? diffBase.comparisonRef;
 
       const [stat, full] = await Promise.all([
         execFileAsync('git', ['diff', '--stat', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
@@ -81,6 +75,7 @@ export async function GET(
         packetId: lane.packetId ?? null,
         headSha,
         base,
+        diffBase,
         branch: lane.branch,
         worktreePath: lane.worktreePath ?? null,
         stat: stat.trim(),
