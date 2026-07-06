@@ -5,7 +5,15 @@ import { isSafeGitRef } from '@/lib/git/refs';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 1024 * 1024;
-const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+const DEFAULT_FETCH_TIMEOUT_MS = 4_000;
+const FETCH_MEMO_TTL_MS = 60_000;
+
+interface FetchOutcome {
+  comparisonRef: string;
+  fetchedRemoteBase: boolean;
+  usedFallback: boolean;
+  warning: string | null;
+}
 
 export interface PacketDiffBaseResolution {
   baseBranch: string;
@@ -40,6 +48,60 @@ async function refExists(cwd: string, ref: string): Promise<boolean> {
   }
 }
 
+const fetchMemo = new Map<string, FetchOutcome & { attemptedAt: number }>();
+
+export function resetPacketDiffBaseFetchMemoForTest(): void {
+  fetchMemo.clear();
+}
+
+async function resolveFetchOutcome(
+  cwd: string,
+  base: string,
+  originRef: string,
+  fetchTimeoutMs: number,
+): Promise<FetchOutcome> {
+  const memoKey = `${cwd}\0${base}`;
+  const cached = fetchMemo.get(memoKey);
+  if (cached && Date.now() - cached.attemptedAt < FETCH_MEMO_TTL_MS) {
+    return {
+      comparisonRef: cached.comparisonRef,
+      fetchedRemoteBase: cached.fetchedRemoteBase,
+      usedFallback: cached.usedFallback,
+      warning: cached.warning,
+    };
+  }
+
+  let outcome: FetchOutcome;
+  try {
+    await gitStdout(cwd, ['fetch', 'origin', base, '--quiet'], fetchTimeoutMs);
+    if (await refExists(cwd, originRef)) {
+      outcome = {
+        comparisonRef: originRef,
+        fetchedRemoteBase: true,
+        usedFallback: false,
+        warning: null,
+      };
+    } else {
+      outcome = {
+        comparisonRef: base,
+        fetchedRemoteBase: false,
+        usedFallback: true,
+        warning: `Fetched origin ${base}, but ${originRef} is unavailable; using local ${base}.`,
+      };
+    }
+  } catch (error) {
+    outcome = {
+      comparisonRef: base,
+      fetchedRemoteBase: false,
+      usedFallback: true,
+      warning: `Could not refresh ${originRef}: ${gitErrorMessage(error)}; using local ${base}.`,
+    };
+  }
+
+  fetchMemo.set(memoKey, { ...outcome, attemptedAt: Date.now() });
+  return outcome;
+}
+
 export async function resolvePacketDiffBase(
   cwd: string,
   baseBranch: string,
@@ -52,41 +114,26 @@ export async function resolvePacketDiffBase(
   }
 
   const originRef = `origin/${base}`;
-  let comparisonRef = base;
-  let fetchedRemoteBase = false;
-  let usedFallback = false;
-  let warning: string | null = null;
-
-  try {
-    await gitStdout(cwd, ['fetch', 'origin', base, '--quiet'], fetchTimeoutMs);
-    if (await refExists(cwd, originRef)) {
-      comparisonRef = originRef;
-      fetchedRemoteBase = true;
-    } else {
-      usedFallback = true;
-      warning = `Fetched origin ${base}, but ${originRef} is unavailable; using local ${base}.`;
-    }
-  } catch (error) {
-    usedFallback = true;
-    warning = `Could not refresh ${originRef}: ${gitErrorMessage(error)}; using local ${base}.`;
-  }
+  const fetchOutcome = await resolveFetchOutcome(cwd, base, originRef, fetchTimeoutMs);
+  let usedFallback = fetchOutcome.usedFallback;
+  let warning = fetchOutcome.warning;
 
   let mergeBase: string | null = null;
   try {
-    mergeBase = await gitStdout(cwd, ['merge-base', comparisonRef, headSha]);
+    mergeBase = await gitStdout(cwd, ['merge-base', fetchOutcome.comparisonRef, headSha]);
   } catch (error) {
     usedFallback = true;
     warning = warning
-      ? `${warning} merge-base failed for ${comparisonRef}: ${gitErrorMessage(error)}.`
-      : `merge-base failed for ${comparisonRef}: ${gitErrorMessage(error)}.`;
+      ? `${warning} merge-base failed for ${fetchOutcome.comparisonRef}: ${gitErrorMessage(error)}.`
+      : `merge-base failed for ${fetchOutcome.comparisonRef}: ${gitErrorMessage(error)}.`;
   }
 
   return {
     baseBranch: base,
     requestedRef: originRef,
-    comparisonRef,
+    comparisonRef: fetchOutcome.comparisonRef,
     mergeBase,
-    fetchedRemoteBase,
+    fetchedRemoteBase: fetchOutcome.fetchedRemoteBase,
     usedFallback,
     warning,
   };
