@@ -177,6 +177,20 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
         </div>
       ) : null}
 
+      {/* Live rescan — the detection scan reads well-known install dirs
+          directly (no PATH dependency), so a CLI installed in Terminal while
+          this screen is open shows up on the next scan, no app restart. */}
+      {!loading && !error ? (
+        <button
+          type="button"
+          onClick={detectRuntimes}
+          style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, fontWeight: 500, cursor: 'pointer', fontFamily: FONT, padding: 4 }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          Just installed one? Scan again
+        </button>
+      ) : null}
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
         <button type="button" onClick={onContinue} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip for now</button>
         {renderButton({
