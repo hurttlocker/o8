@@ -400,10 +400,10 @@ fn begin_system_dictation() {
     // own TTS, so the user can talk back while it's still speaking (#1207).
     crate::audio_ducker::duck();
     crate::sound::play_sound("Tink"); // start-listening cue (#1208)
-    // Save the paste target BEFORE any focus could shift. Crucially this also
-    // happens BEFORE the dock pill is ordered front — the dock window is
-    // nonactivating so it shouldn't steal focus, but capturing the frontmost
-    // app first is the belt-and-suspenders guarantee for the paste target.
+                                      // Save the paste target BEFORE any focus could shift. Crucially this also
+                                      // happens BEFORE the dock pill is ordered front — the dock window is
+                                      // nonactivating so it shouldn't steal focus, but capturing the frontmost
+                                      // app first is the belt-and-suspenders guarantee for the paste target.
     crate::paste::save_frontmost_app();
     set_system_origin(true);
 
@@ -421,8 +421,7 @@ fn begin_system_dictation() {
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                let payload =
-                    serde_json::json!({ "type": "system-start", "origin": "system" });
+                let payload = serde_json::json!({ "type": "system-start", "origin": "system" });
                 // Emit DIRECTLY to the dock window so the morph (idle → recording)
                 // always lands — the broadcast `app.emit` can miss the second
                 // (dock) webview. `emit_to(DOCK_LABEL, …)` is the reliable path.
@@ -473,8 +472,7 @@ fn morph_dock_idle() {
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
-                let payload =
-                    serde_json::json!({ "type": "system-idle", "origin": "system" });
+                let payload = serde_json::json!({ "type": "system-idle", "origin": "system" });
                 // Direct-to-dock so the morph back to the idle capsule always lands.
                 log::info!("[fn-hotkey] morph dock → idle (system-idle → dock)");
                 let _ = app.emit_to(
@@ -496,9 +494,9 @@ fn end_system_dictation() {
     // Restore ducked volume the instant the user stops talking (#1207).
     crate::audio_ducker::restore();
     crate::sound::play_sound("Pop"); // stop-listening cue (#1208)
-    // Fence on the push-to-talk session so a release that raced a newer session
-    // (e.g. a double-tap that already promoted to long-form) can't stop the
-    // wrong one. For a normal hold this is just the active session.
+                                     // Fence on the push-to-talk session so a release that raced a newer session
+                                     // (e.g. a double-tap that already promoted to long-form) can't stop the
+                                     // wrong one. For a normal hold this is just the active session.
     let sid = CURRENT_PTT_SESSION_ID.load(Ordering::SeqCst);
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] stop failed: {e}");
@@ -541,8 +539,7 @@ fn begin_long_form_dictation() {
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                let payload =
-                    serde_json::json!({ "type": "system-start", "origin": "system" });
+                let payload = serde_json::json!({ "type": "system-start", "origin": "system" });
                 log::info!("[fn-hotkey] morph dock → recording (long-form start)");
                 let _ = app.emit_to(
                     crate::dock_window::DOCK_LABEL,
@@ -1104,11 +1101,21 @@ pub fn start(app: tauri::AppHandle) {
                             let option_down = (flags & RIGHT_OPTION_DEVICE_FLAG) != 0;
                             let opt_down_edge = option_down
                                 && OPTION_HELD
-                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .compare_exchange(
+                                        false,
+                                        true,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
                                     .is_ok();
                             let opt_up_edge = !option_down
                                 && OPTION_HELD
-                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                                    .compare_exchange(
+                                        true,
+                                        false,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
                                     .is_ok();
                             if opt_down_edge {
                                 if AGENT_LONG_FORM_ACTIVE.load(Ordering::SeqCst)
@@ -1168,11 +1175,21 @@ pub fn start(app: tauri::AppHandle) {
                             let cmd_down = (flags & COMMAND_FLAG) != 0;
                             let cmd_down_edge = cmd_down
                                 && RIGHT_CMD_HELD
-                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .compare_exchange(
+                                        false,
+                                        true,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
                                     .is_ok();
                             let cmd_up_edge = !cmd_down
                                 && RIGHT_CMD_HELD
-                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                                    .compare_exchange(
+                                        true,
+                                        false,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
                                     .is_ok();
                             if cmd_down_edge {
                                 RIGHT_CMD_CHORDED.store(false, Ordering::SeqCst);
@@ -1187,8 +1204,7 @@ pub fn start(app: tauri::AppHandle) {
                                     .unwrap_or_else(std::time::Instant::now);
                                 let hold = std::time::Instant::now().duration_since(press);
                                 let chorded = RIGHT_CMD_CHORDED.load(Ordering::SeqCst);
-                                if !chorded
-                                    && hold < std::time::Duration::from_millis(CMD_BRUSH_MS)
+                                if !chorded && hold < std::time::Duration::from_millis(CMD_BRUSH_MS)
                                 {
                                     if consume_right_cmd_double_tap() {
                                         // Double-tap → toggle realtime voice mode.

@@ -5,11 +5,20 @@ use super::{as_escape, run_applescript};
 use serde_json::{json, Value};
 
 pub async fn search(args: Value) -> Result<Value, String> {
-    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if query.is_empty() {
         return Err("query is required".into());
     }
-    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(5).max(1);
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(5)
+        .max(1);
     let query = as_escape(&query);
 
     let script = format!(

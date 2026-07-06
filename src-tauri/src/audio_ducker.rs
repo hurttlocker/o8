@@ -60,24 +60,24 @@ pub fn duck() {
             return;
         }
         std::thread::spawn(|| {
-        let mut saved = match SAVED_VOLUME.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
-        if saved.is_some() {
-            return; // already ducked
-        }
-        let Some(current) = read_output_volume() else {
-            return;
-        };
-        // If the system is already silent, nothing to duck — don't save a zero
-        // that would prevent future restores from ever raising it back up.
-        if current == 0 {
-            return;
-        }
-        let target = (current as f32 * DUCK_SCALAR).round() as u32;
-        set_output_volume(target);
-        *saved = Some(current);
+            let mut saved = match SAVED_VOLUME.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            if saved.is_some() {
+                return; // already ducked
+            }
+            let Some(current) = read_output_volume() else {
+                return;
+            };
+            // If the system is already silent, nothing to duck — don't save a zero
+            // that would prevent future restores from ever raising it back up.
+            if current == 0 {
+                return;
+            }
+            let target = (current as f32 * DUCK_SCALAR).round() as u32;
+            set_output_volume(target);
+            *saved = Some(current);
         });
     }
 }

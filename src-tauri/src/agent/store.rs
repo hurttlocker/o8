@@ -71,7 +71,14 @@ pub fn finish_task(
                  SET status = ?2, finished_at = ?3, result_text = ?4,
                      model_used = ?5, tool_calls_json = ?6
                  WHERE id = ?1",
-                params![id, status, now_ts(), result_text, model_used, tool_calls_json],
+                params![
+                    id,
+                    status,
+                    now_ts(),
+                    result_text,
+                    model_used,
+                    tool_calls_json
+                ],
             ) {
                 log::warn!("[symon-agent] finish_task failed: {e}");
             }
@@ -84,7 +91,9 @@ pub fn finish_task(
 /// rolling conversation context. Only `done` tasks with a non-empty reply
 /// inside the age window count — a denied card or a crash is not conversation.
 pub fn recent_exchanges(max_age_secs: i64, limit: usize) -> Vec<(String, String)> {
-    let Ok(conn) = open_db() else { return Vec::new() };
+    let Ok(conn) = open_db() else {
+        return Vec::new();
+    };
     let cutoff = now_ts() - max_age_secs;
     let Ok(mut stmt) = conn.prepare(
         "SELECT intent_text, result_text FROM agent_tasks

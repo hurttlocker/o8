@@ -35,13 +35,21 @@ fn run(cmd: &str, args: &[&str], cwd: &str) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() { format!("{cmd} failed") } else { err })
+        Err(if err.is_empty() {
+            format!("{cmd} failed")
+        } else {
+            err
+        })
     }
 }
 
 /// Resolve the `repo` arg (folder name or absolute path) to a repo dir.
 async fn repo_arg(args: &Value) -> Result<String, String> {
-    let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let repo = args
+        .get("repo")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if repo.is_empty() {
         return Err("which repo? (e.g. 'o8')".into());
     }
@@ -56,7 +64,11 @@ pub async fn git_status(args: Value) -> Result<Value, String> {
 
 pub async fn git_log(args: Value) -> Result<Value, String> {
     let path = repo_arg(&args).await?;
-    let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 30);
+    let count = args
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10)
+        .clamp(1, 30);
     let n = format!("-n{count}");
     let out = run("git", &["log", "--oneline", &n], &path)?;
     Ok(json!({ "commits": out }))
@@ -66,7 +78,14 @@ pub async fn pr_list(args: Value) -> Result<Value, String> {
     let path = repo_arg(&args).await?;
     let out = run(
         "gh",
-        &["pr", "list", "--limit", "15", "--json", "number,title,state,author"],
+        &[
+            "pr",
+            "list",
+            "--limit",
+            "15",
+            "--json",
+            "number,title,state,author",
+        ],
         &path,
     )?;
     let prs: Value = serde_json::from_str(&out).unwrap_or_else(|_| json!([]));
@@ -78,7 +97,14 @@ pub async fn issue_list(args: Value) -> Result<Value, String> {
     let path = repo_arg(&args).await?;
     let out = run(
         "gh",
-        &["issue", "list", "--limit", "15", "--json", "number,title,state"],
+        &[
+            "issue",
+            "list",
+            "--limit",
+            "15",
+            "--json",
+            "number,title,state",
+        ],
         &path,
     )?;
     let issues: Value = serde_json::from_str(&out).unwrap_or_else(|_| json!([]));
@@ -92,7 +118,11 @@ pub async fn issue_list(args: Value) -> Result<Value, String> {
 /// anything lands on GitHub.
 pub async fn issue_create(args: Value) -> Result<Value, String> {
     let path = repo_arg(&args).await?;
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if title.is_empty() {
         return Err("gh_issue_create needs a 'title'".into());
     }
@@ -104,7 +134,11 @@ pub async fn issue_create(args: Value) -> Result<Value, String> {
         .map(|s| s.to_string())
         .unwrap_or_else(|| "Filed by voice via Symon.".to_string());
 
-    let out = run("gh", &["issue", "create", "--title", title, "--body", &body], &path)?;
+    let out = run(
+        "gh",
+        &["issue", "create", "--title", title, "--body", &body],
+        &path,
+    )?;
     // gh prints the new issue URL on success.
     let url = out
         .lines()

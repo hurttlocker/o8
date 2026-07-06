@@ -14,9 +14,9 @@ pub mod git_github;
 pub mod mac_calendar;
 pub mod mac_contacts;
 pub mod mac_mail;
+pub mod mac_music;
 pub mod mac_notes;
 pub mod mac_reminders;
-pub mod mac_music;
 pub mod mac_shortcuts;
 pub mod mac_system;
 pub mod mac_weather;
@@ -950,8 +950,7 @@ pub fn enabled_tools_for(escalation: &str) -> Vec<Value> {
     enabled_tools()
         .into_iter()
         .filter(|tool| {
-            escalation != "off"
-                || tool.get("name").and_then(|n| n.as_str()) != Some("escalate")
+            escalation != "off" || tool.get("name").and_then(|n| n.as_str()) != Some("escalate")
         })
         .collect()
 }
@@ -1030,7 +1029,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
                 // its confirm card here: `escalate` is ReadOnly, so the loop did
                 // NOT card it, and a worker spawn must never go silent.
                 if !super::confirm_if_needed(ctx, "o8_dispatch", &args).await {
-                    return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
+                    return Ok(
+                        json!({ "error": "User declined this action", "declined_by_user": true }),
+                    );
                 }
                 o8_bridge::dispatch(args).await
             } else {
@@ -1167,7 +1168,9 @@ pub(crate) fn run_applescript(script: &str) -> Result<String, String> {
 
 /// Escape a string for embedding inside an AppleScript double-quoted literal.
 pub(crate) fn as_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 /// Parse a model-emitted ISO 8601 date/time into (year, month, day, hour, min).
@@ -1222,9 +1225,18 @@ mod escalation_tests {
 
     #[test]
     fn off_withholds_escalate_other_policies_keep_it() {
-        assert!(!has_escalate(&enabled_tools_for("off")), "off must hide escalate");
-        assert!(has_escalate(&enabled_tools_for("auto")), "auto must offer escalate");
-        assert!(has_escalate(&enabled_tools_for("deep")), "deep must offer escalate");
+        assert!(
+            !has_escalate(&enabled_tools_for("off")),
+            "off must hide escalate"
+        );
+        assert!(
+            has_escalate(&enabled_tools_for("auto")),
+            "auto must offer escalate"
+        );
+        assert!(
+            has_escalate(&enabled_tools_for("deep")),
+            "deep must offer escalate"
+        );
     }
 
     #[test]
