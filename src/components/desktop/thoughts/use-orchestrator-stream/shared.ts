@@ -1,11 +1,12 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
+import { MODEL_IDS } from '@/lib/models';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
 export type OrchestratorPermissionMode = 'full' | 'plan';
-export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-8';
+export const DEFAULT_ORCHESTRATOR_MODEL: string = MODEL_IDS.orchestratorDefault;
 
 export const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
 export const ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR = 250_000;
