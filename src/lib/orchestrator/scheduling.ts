@@ -135,10 +135,34 @@ interface RecoveryDispatchContext {
   worktreePath: string | null;
   laneId: string | null;
   baseBranch: string;
+  runtime: OrchestratorRuntime | null;
 }
 
 function isDispatchReadyStatus(packet: OrchestratorPacket) {
   return packet.status === 'queued' || packet.status === 'recovering';
+}
+
+export function getBootRecoveryLaunchBlocker(input: {
+  missionArchived?: boolean;
+  missionLive?: boolean;
+  packet: Pick<OrchestratorPacket, 'id' | 'status' | 'queueState' | 'archivedAt' | 'releaseState' | 'workerRouting'>;
+  pinnedRuntime?: OrchestratorRuntime | null;
+}): string | null {
+  const packet = input.packet;
+  if (input.missionArchived || input.missionLive === false || packet.archivedAt || packet.releaseState === 'released') {
+    return 'mission is not live';
+  }
+  if (packet.status !== 'queued' && packet.status !== 'recovering') {
+    return `lane state does not expect a worker (${packet.status})`;
+  }
+  if (packet.queueState !== 'queued') {
+    return `queue state is ${packet.queueState}`;
+  }
+  const pinnedRuntime = input.pinnedRuntime ?? packet.workerRouting?.requestedRuntime ?? packet.workerRouting?.selectedRuntime ?? null;
+  if (!pinnedRuntime) {
+    return 'runtime is not pinned';
+  }
+  return null;
 }
 
 async function hasUncommittedWorktreeChanges(worktreePath: string): Promise<boolean> {
@@ -213,7 +237,18 @@ async function dispatchOrRecoverPacket(
     }
   }
 
-  const launchResult = await dispatchPacket(packet, allPackets);
+  const launchPacket = recoveryContext?.runtime
+    ? {
+        ...packet,
+        runtime: recoveryContext.runtime,
+        workerRouting: {
+          ...packet.workerRouting,
+          requestedRuntime: recoveryContext.runtime,
+          selectedRuntime: recoveryContext.runtime,
+        },
+      }
+    : packet;
+  const launchResult = await dispatchPacket(launchPacket, allPackets);
   return {
     kind: 'launched',
     laneId: launchResult.laneId,
@@ -369,7 +404,7 @@ export function getDispatchBlocker(
  */
 export async function runDispatchTick(
   state: OrchestratorMissionState,
-  options: { launchBudget?: DispatchLaunchBudget } = {},
+  options: { launchBudget?: DispatchLaunchBudget; enforceBootRecoveryGuard?: boolean; missionArchived?: boolean } = {},
 ): Promise<OrchestratorMissionState> {
   let nextState = normalizeOrchestratorMissionState(state);
   nextState = fanOutComparisonPackets(nextState);
@@ -390,6 +425,7 @@ export async function runDispatchTick(
         worktreePath,
         laneId: packet.lane?.laneId ?? row?.id ?? null,
         baseBranch: row?.baseBranch ?? 'main',
+        runtime: row?.runtime ?? packet.lane?.runtime ?? null,
       } satisfies RecoveryDispatchContext] as const];
     }),
   );
@@ -478,7 +514,19 @@ export async function runDispatchTick(
       packet,
       recoveryContext: recoveryContextByPacketId.get(packet.id) ?? null,
     }))
-    .filter(({ packet }) => {
+    .filter(({ packet, recoveryContext }) => {
+      const recoveryBlocker = options.enforceBootRecoveryGuard
+        ? getBootRecoveryLaunchBlocker({
+            missionArchived: options.missionArchived,
+            missionLive: !nextState.packets.every((candidate) => candidate.archivedAt || candidate.releaseState === 'released'),
+            packet,
+            pinnedRuntime: recoveryContext?.runtime ?? packet.workerRouting?.requestedRuntime ?? packet.workerRouting?.selectedRuntime ?? null,
+          })
+        : null;
+      if (recoveryBlocker) {
+        console.log(`[recovery] Packet ${packet.id} skipped — ${recoveryBlocker}`);
+        return false;
+      }
       if (getDispatchBlocker(packet, nextState.packets) !== null) {
         return false;
       }
