@@ -43,6 +43,24 @@ type OrchestratorHistoryRecord = {
   orchestratorSessionUpdatedAt?: string | null;
 };
 
+type OrchestratorHistoryFileStat = {
+  file: string;
+  filePath: string;
+  tabId: string;
+  mtimeMs: number;
+  size: number;
+  modifiedAt: string;
+};
+
+type CachedHistoryRecord = {
+  mtimeMs: number;
+  size: number;
+  parsed: OrchestratorHistoryRecord;
+};
+
+const historyParseCache = new Map<string, CachedHistoryRecord>();
+let historyWriteVersion = 0;
+
 function ensureHistoryDir() {
   mkdirSync(ORCHESTRATOR_HISTORY_DIR, { recursive: true });
 }
@@ -62,7 +80,10 @@ function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
 
 function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   ensureHistoryDir();
-  writeFileSync(safeOrchestratorHistoryPath(tabId), JSON.stringify(record));
+  const filePath = safeOrchestratorHistoryPath(tabId);
+  writeFileSync(filePath, JSON.stringify(record));
+  historyParseCache.delete(filePath);
+  historyWriteVersion += 1;
 }
 
 // Marker so the one-time transcript-order repair runs once per install.
@@ -270,6 +291,65 @@ function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
   }
 }
 
+function listThoughtHistoryFileStats(): OrchestratorHistoryFileStat[] {
+  if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) {
+    historyParseCache.clear();
+    return [];
+  }
+
+  const stats: OrchestratorHistoryFileStat[] = [];
+  const livePaths = new Set<string>();
+  const files = readdirSync(ORCHESTRATOR_HISTORY_DIR)
+    .filter((file) => file.endsWith('.json'))
+    .sort();
+  for (const file of files) {
+    const tabId = basename(file, '.json');
+    if (!tabId.startsWith('thoughts-')) continue;
+    try {
+      const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
+      const stat = statSync(filePath);
+      livePaths.add(filePath);
+      stats.push({
+        file,
+        filePath,
+        tabId,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        modifiedAt: stat.mtime.toISOString(),
+      });
+    } catch {
+      // skip files that moved during the scan
+    }
+  }
+
+  for (const filePath of historyParseCache.keys()) {
+    if (!livePaths.has(filePath)) historyParseCache.delete(filePath);
+  }
+  return stats;
+}
+
+function readCachedHistoryRecord(fileStat: OrchestratorHistoryFileStat): OrchestratorHistoryRecord {
+  const cached = historyParseCache.get(fileStat.filePath);
+  if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
+    return cached.parsed;
+  }
+
+  const parsed = JSON.parse(readFileSync(fileStat.filePath, 'utf-8')) as OrchestratorHistoryRecord;
+  historyParseCache.set(fileStat.filePath, {
+    mtimeMs: fileStat.mtimeMs,
+    size: fileStat.size,
+    parsed,
+  });
+  return parsed;
+}
+
+export function mobileOrchestratorThreadHistoryStatToken(): string {
+  const fileToken = listThoughtHistoryFileStats()
+    .map((fileStat) => `${fileStat.file}:${fileStat.mtimeMs}:${fileStat.size}`)
+    .join('|');
+  return `${historyWriteVersion}:${fileToken}`;
+}
+
 function nextThreadId(): string {
   let candidate = `thoughts-${Date.now()}`;
   let suffix = 0;
@@ -287,17 +367,10 @@ export function listMobileOrchestratorThreads(options: {
   const backendFilter = options.backend ?? null;
   const limit = options.limit ?? MAX_THREADS;
   const threads: MobileOrchestratorThread[] = [];
-  if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) return threads;
 
-  const files = readdirSync(ORCHESTRATOR_HISTORY_DIR).filter((file) => file.endsWith('.json'));
-  for (const file of files) {
-    const tabId = basename(file, '.json');
-    if (!tabId.startsWith('thoughts-')) continue;
-
+  for (const fileStat of listThoughtHistoryFileStats()) {
     try {
-      const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
-      const stat = statSync(filePath);
-      const record = JSON.parse(readFileSync(filePath, 'utf-8')) as OrchestratorHistoryRecord;
+      const record = readCachedHistoryRecord(fileStat);
       // Archived threads are off the active list — the operator archived them to
       // declutter; they must not reappear in the orchestrator history/past-thread
       // surfaces (which is where they were leaking back in).
@@ -306,7 +379,7 @@ export function listMobileOrchestratorThreads(options: {
       if (backendFilter ? threadBackend !== backendFilter : threadBackend === 'openclaw') {
         continue;
       }
-      threads.push(projectThread(tabId, record, stat.mtime.toISOString()));
+      threads.push(projectThread(fileStat.tabId, record, fileStat.modifiedAt));
     } catch {
       // skip unreadable files
     }

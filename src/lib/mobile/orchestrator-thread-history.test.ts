@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -50,5 +50,22 @@ describe('orchestrator thread history persistence', () => {
       'user-1234',
       'assistant-1234',
     ]);
+  });
+
+  it('reuses cached parses until the history file mtime or size changes', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Alpha' });
+    const filePath = history.safeOrchestratorHistoryPath(thread.id);
+
+    expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Alpha');
+    const originalStat = statSync(filePath);
+    const raw = readFileSync(filePath, 'utf-8');
+    writeFileSync(filePath, raw.replace('"Alpha"', '"Bravo"'));
+    utimesSync(filePath, originalStat.atimeMs / 1000, originalStat.mtimeMs / 1000);
+
+    expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Alpha');
+    writeFileSync(filePath, raw.replace('"Alpha"', '"Charlie"'));
+
+    expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Charlie');
   });
 });
