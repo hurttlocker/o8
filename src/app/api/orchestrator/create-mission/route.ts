@@ -3,6 +3,7 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -77,6 +78,10 @@ export async function POST(request: NextRequest) {
   // requested routing metadata.
   const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
   const requestedModel = record.requestedModel ?? record.model;
+  const requestedEffortRaw = record.requestedEffort ?? record.thinkingEffort;
+  const requestedEffort = isThinkingEffort(requestedEffortRaw)
+    ? requestedEffortRaw
+    : null;
   const requestedRuntime = requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === ''
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(requestedRuntimeRaw);
@@ -88,6 +93,7 @@ export async function POST(request: NextRequest) {
     requestedProvider: record.requestedProvider,
     requestedRuntime,
     requestedModel,
+    requestedEffort,
     source: 'create-mission-api',
   });
   const existingBranchPolicy = normalizeExistingBranchPolicy(record.existingBranchPolicy);
@@ -104,6 +110,7 @@ export async function POST(request: NextRequest) {
       requestedProvider: workerRouting.requestedProvider,
       requestedRuntime,
       requestedModel: workerRouting.requestedModel,
+      requestedEffort,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       sequential: record.sequential === true,
       existingBranchPolicy,

@@ -49,6 +49,9 @@ const PARALLEL_CAP_PRESETS: Array<{ key: string; label: string; value: number }>
   { key: 'power-user', label: '8', value: 8 },
 ];
 
+const DEFAULT_WORKER_RUNTIME_OPTIONS = DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
+  opt.value === 'codex' || opt.value === 'claude-code');
+
 // ── Minimal raw-SVG glyphs for row icon tiles ──
 
 function LanesIcon() {
@@ -417,10 +420,7 @@ export function OperatorDefaultsTab() {
             accessory={
               <PickerMenu<DispatchRuntime>
                 value={values.defaultDispatchRuntime}
-                options={DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
-                  (opt.value !== 'opencode' || values.experimentalOpencode)
-                  && (opt.value !== 'gemini' || values.experimentalGemini),
-                )}
+                options={DEFAULT_WORKER_RUNTIME_OPTIONS}
                 onChange={(next) => { updateField('defaultDispatchRuntime', next); }}
                 disabled={envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
                 minWidth={150}
