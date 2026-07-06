@@ -37,6 +37,10 @@ export interface SteerPacketResult {
 const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
 const STARTUP_FAILURE_PROBE_MS = 2_000;
 
+export class SteerPacketUnavailableError extends Error {
+  readonly code = 'steer_unavailable';
+}
+
 function normalizeSource(source: string | undefined): string {
   const normalized = source?.trim().toLowerCase();
   if (normalized === 'operator' || normalized === 'heal-bot' || normalized === 'orchestrator') {
@@ -98,7 +102,7 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
     if (!packetExists) {
       throw new Error(`Packet ${packetId} not found.`);
     }
-    throw new Error(NO_STEERABLE_SESSION);
+    throw new SteerPacketUnavailableError(NO_STEERABLE_SESSION);
   }
 
   const steerSource = normalizeSource(source);
@@ -123,7 +127,7 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
         message,
         note: resumed?.note || result.note || NO_STEERABLE_SESSION,
       });
-      throw new Error(resumed?.note || result.note || NO_STEERABLE_SESSION);
+      throw new SteerPacketUnavailableError(resumed?.note || result.note || NO_STEERABLE_SESSION);
     }
   } else {
     rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
@@ -143,7 +147,7 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
 
   const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
   if (!updated || updated.status !== 'running') {
-    throw new Error(NO_STEERABLE_SESSION);
+    throw new SteerPacketUnavailableError(NO_STEERABLE_SESSION);
   }
 
   return { packetId, laneId: lane.id, note: 'Steered packet via warm session.' };
