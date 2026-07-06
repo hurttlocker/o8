@@ -2,6 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import {
+  createO8WebviewCompositeHandlers,
+  O8_WEBVIEW_COMPOSITE_TOOLS,
+} from '@/lib/mcp/o8-webview-composites';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 
 type TextContent = { type: 'text'; text: string };
@@ -366,6 +370,7 @@ async function withStructuredErrors(
 }
 
 export const O8_WEBVIEW_TOOLS: McpTool[] = [
+  ...O8_WEBVIEW_COMPOSITE_TOOLS,
   {
     name: 'o8_view_screenshot',
     description: 'USE THIS WHEN the user asks what their o8 screen looks like, wants you to debug a visual bug, or says "look at o8 / take a screenshot / what do you see". Returns base64 PNG of the running o8 desktop app window. The Rust-side capture works even when the JS thread is busy.',
@@ -774,6 +779,7 @@ async function browserAgentPost(verb: string, args: Record<string, unknown>): Pr
 
 export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): Record<string, ToolHandler> {
   return {
+    ...createO8WebviewCompositeHandlers(getClient),
     o8_view_screenshot: async () => withStructuredErrors(async () => {
       const screenshot = await getClient().screenshot();
       const path = persistScreenshot(screenshot.imageBase64, screenshot.mimeType);
