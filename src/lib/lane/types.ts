@@ -35,6 +35,34 @@ export type LaneStatus =
   | 'completed'       // done and merged
   | 'archived';       // no longer active
 
+const LANE_STATUS_RECORD = {
+  idle: true,
+  launching: true,
+  running: true,
+  paused: true,
+  awaiting_input: true,
+  awaiting_orchestrator: true,
+  recovering: true,
+  reviewing: true,
+  merging: true,
+  failed: true,
+  completed: true,
+  archived: true,
+} satisfies Record<LaneStatus, true>;
+
+export const LANE_STATUSES = Object.keys(LANE_STATUS_RECORD) as LaneStatus[];
+
+const TERMINAL_LANE_STATUS_VALUES = new Set<LaneStatus>([
+  'reviewing',
+  'failed',
+  'completed',
+  'archived',
+]);
+
+export function isTerminalLaneStatus(status: LaneStatus | null | undefined): boolean {
+  return Boolean(status && TERMINAL_LANE_STATUS_VALUES.has(status));
+}
+
 /**
  * Managed = IDE spawned it, full control (steer, interrupt, review).
  * Attached = discovered existing session, inspect + capability-gated.
