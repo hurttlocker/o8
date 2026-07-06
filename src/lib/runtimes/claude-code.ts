@@ -1116,6 +1116,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       cwd: opts.cwd,
       prompt: opts.prompt,
       model: opts.model,
+      effort: opts.effort,
     });
     return {
       ok: result.ok,
