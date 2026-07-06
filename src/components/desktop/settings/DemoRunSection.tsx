@@ -26,8 +26,8 @@ import {
   RAMS_ACCENT,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  SectionLabel,
 } from './shared';
+import { GroupHeader, GroupFootnote } from './grouped';
 
 // ── Types (mirror runDemoSequence's output) ──
 
@@ -120,7 +120,7 @@ function statusTone(status: DemoStepStatus): { dot: string; label: string; pill:
 
 // ── Component ──
 
-export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
+export function DemoRunSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DemoRunResult | null>(null);
@@ -164,15 +164,23 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
   }, []);
 
   return (
-    <section style={{ marginTop: 32 }}>
-      <SectionLabel number={sectionNumber}>DEMO SEQUENCE</SectionLabel>
+    <div>
+      <GroupHeader>Demo sequence</GroupHeader>
 
+      <div style={{
+        borderRadius: 14,
+        border: '1px solid var(--t-panel-border)',
+        background: 'var(--t-bg-card)',
+        overflow: 'hidden',
+        paddingLeft: 14,
+        paddingRight: 14,
+      }}>
       <div style={{
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
         gap: 20,
-        paddingTop: 4,
+        paddingTop: 14,
         paddingBottom: 16,
         borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
         flexWrap: 'wrap',
@@ -249,7 +257,7 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
       ) : null}
 
       {result ? (
-        <div style={{ marginTop: 14, borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+        <div style={{ paddingTop: 14, paddingBottom: 4 }}>
           {result.steps.map((step) => (
             <StepRow
               key={step.name}
@@ -261,21 +269,16 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
           <RunDirRow runDir={result.runDir} />
         </div>
       ) : null}
+      </div>
 
-      <div style={{
-        marginTop: 16,
-        fontFamily: APP_FONT_STACK,
-        fontSize: 12,
-        color: 'var(--t-text-secondary)',
-        lineHeight: 1.55,
-      }}>
+      <GroupFootnote>
         Screenshots saved locally under{' '}
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>
           ~/.o8/demo-runs/&lt;timestamp&gt;/
         </span>
         . Last 10 runs retained, older runs auto-pruned.
-      </div>
-    </section>
+      </GroupFootnote>
+    </div>
   );
 }
 
