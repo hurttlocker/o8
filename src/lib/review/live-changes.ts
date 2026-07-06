@@ -11,6 +11,7 @@ const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
 const REVIEW_SCAN_SKIP_DIRS = new Set([
   '.git',
   '.next',
+  '.cortex-worktrees',
   'node_modules',
   'dist',
   'out',
