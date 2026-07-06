@@ -5,6 +5,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { MODEL_IDS } from '@/lib/models';
 const HISTORY_DIR = path.join(homedir(), '.o8', 'chat-history');
 const ARCHIVE_DIR = path.join(homedir(), '.o8', 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
@@ -123,7 +124,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
         '-s',
         'read-only',
         '-c',
-        'model=gpt-5.5',
+        `model=${MODEL_IDS.codexDefault}`,
         '-c',
         'model_reasoning_effort=medium',
         '-C',

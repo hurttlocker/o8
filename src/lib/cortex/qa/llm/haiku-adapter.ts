@@ -31,6 +31,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
+import { MODEL_IDS } from '@/lib/models';
 
 const execFileAsync = promisify(execFile);
 
@@ -148,7 +149,7 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
   return text;
 }
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const HAIKU_MODEL = MODEL_IDS.claudeHaikuQaDefault;
 
 /**
  * Fire-and-forget: pre-spawn a warm Haiku REPL so the next `callHaiku` skips
