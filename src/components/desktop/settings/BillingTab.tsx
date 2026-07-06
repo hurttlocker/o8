@@ -29,6 +29,7 @@ import {
   RAMS_CONTROL_ACTIVE_BORDER,
   RAMS_INK_QUIET,
   BracketLabel,
+  KeyIcon,
   RamsButton,
   TabBreadcrumb,
   TabHeading,
@@ -118,6 +119,7 @@ export function BillingTab() {
   const [loading, setLoading] = useState(true);
   const [licenseInput, setLicenseInput] = useState('');
   const [busy, setBusy] = useState<'apply' | 'clear' | null>(null);
+  const [licenseOpen, setLicenseOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   const applyEntitlement = useCallback((data: EntitlementResponse) => {
@@ -196,6 +198,7 @@ export function BillingTab() {
 
   const envManaged = source === 'env';
   const isPaid = plan === 'pro' || plan === 'team';
+  const hasFileLicense = source === 'file';
 
   if (loading) {
     return (
@@ -222,7 +225,7 @@ export function BillingTab() {
       <TabBreadcrumb tab="billing" />
       <TabHeading
         title="plan & billing"
-        subtitle="o8 is free — the whole product runs on your own CLI subscriptions, and nothing here is gated. Paid plans add managed inference, off-network mobile, and cloud agents; they're on the way. Paste a license key or founding pass to activate one."
+        subtitle="o8 is free — the whole product runs on your own CLI subscriptions, and nothing here is gated. Paid plans add managed inference, off-network mobile, and cloud agents; they're on the way."
       />
 
       {notice ? (
@@ -342,10 +345,21 @@ export function BillingTab() {
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="License key"
-          footnote={<>Paste a signed license key or founding pass. It is verified offline and stored locally in{' '}
-            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>~/.o8/entitlement.json</span>.</>}
+          footnote={licenseOpen
+            ? <>Verified offline, stored locally in{' '}
+              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>~/.o8/entitlement.json</span>. Signing in with a founding account activates automatically — this is the manual path.</>
+            : undefined}
         >
+          <SettingsRow
+            icon={<KeyIcon />}
+            label="Have a license key?"
+            subtitle={hasFileLicense ? 'A license is active on this machine' : 'Founding passes activate here — or just sign in'}
+            accessory={hasFileLicense ? <ValuePill tone="success">Active</ValuePill> : undefined}
+            onPress={() => setLicenseOpen((v) => !v)}
+            chevron
+            divider={licenseOpen}
+          />
+          {licenseOpen ? (
           <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
             <textarea
               value={licenseInput}
@@ -401,23 +415,7 @@ export function BillingTab() {
               </RamsButton>
             </div>
           </div>
-        </SettingsGroup>
-      </section>
-
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Billing"
-          footnote={<>Paid plans aren&apos;t live yet — managed inference, off-network mobile, and cloud agents are coming. Self-serve checkout will open on{' '}
-            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>o8.run/pricing</span>.</>}
-        >
-          <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
-            <RamsButton
-              variant="ghost"
-              onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
-            >
-              View pricing
-            </RamsButton>
-          </div>
+          ) : null}
         </SettingsGroup>
       </section>
     </div>
