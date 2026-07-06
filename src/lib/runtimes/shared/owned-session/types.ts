@@ -73,6 +73,9 @@ export interface OwnedSessionRecord {
   recentRuns: OwnedRunRecord[];
   autoRetry?: boolean;
   retryCount?: number;
+  orphanedAt?: string;
+  orphanedReason?: string;
+  orphanedCostLine?: string;
 }
 
 // ── Tail entries / groups ────────────────────────────────────────────────────

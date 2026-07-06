@@ -243,7 +243,11 @@ async function runRegistryMissionTicks(
       if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
         return { state: fanned, result: 0 };
       }
-      const dispatched = await runDispatchTick(fanned, { launchBudget: budget });
+      const dispatched = await runDispatchTick(fanned, {
+        launchBudget: budget,
+        enforceBootRecoveryGuard: true,
+        missionArchived: entry.archivedAt !== null,
+      });
       return { state: dispatched, result: countLaunchedPackets(fanned, dispatched) };
     });
     launched += entryLaunched;
@@ -266,7 +270,11 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
     if (fanned !== reconciled) {
       writeOrchestratorControlPlaneState(fanned);
     }
-    const dispatched = await runDispatchTick(fanned, { launchBudget: buildRemainingLaunchBudget() });
+    const dispatched = await runDispatchTick(fanned, {
+      launchBudget: buildRemainingLaunchBudget(),
+      enforceBootRecoveryGuard: true,
+      missionArchived: false,
+    });
     // #1293 ROOT FIX — make withLockedState persist the post-dispatch state.
     // withLockedState does a FINAL reconcile+write at end-of-lock, and its basis
     // falls back to the (unmutated) pre-callback `current` when the callback

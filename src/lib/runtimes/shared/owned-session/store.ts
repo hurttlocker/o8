@@ -100,6 +100,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   const humanLabel = adapter.humanLabel;
   const launchGroupLabel = adapter.launchGroupLabel ?? 'Launch turn';
   const resumeGroupLabel = adapter.resumeGroupLabel ?? 'Resume turn';
+  const ACTIVE_ORPHAN_GRACE_MS = 120_000;
 
   function quoteShellArg(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
@@ -232,6 +233,14 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     // lives on stderr (TerminalQuotaError) while other runtimes may put it
     // on stdout.
     return `${stdoutRaw}\n${stderrRaw}`;
+  }
+
+  async function readCostLine(run: OwnedRunRecord): Promise<string | undefined> {
+    const raw = await readOwnedRunStdout(run).catch(() => '');
+    return raw.split(/\r?\n/)
+      .reverse()
+      .map((line) => line.trim())
+      .find((line) => /\$\d+(?:\.\d+)?/.test(line) || /\bcost\b/i.test(line));
   }
 
   async function recordDetachedChildExit(
@@ -772,6 +781,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     await saveSession(session);
     const run = await spawnOwnedRun(session, prompt, 'launch');
     invalidateFleetCache();
+    void sweepRecentlyOrphanedActiveRuns().catch(() => {});
     const failedBeforeLaunch = run.outcome === 'failed';
 
     return {
@@ -864,6 +874,40 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : `Unable to interrupt the owned ${adapter.squadShortName} run.`);
     }
+  }
+
+  async function markActiveRunOrphaned(session: OwnedSessionRecord, reason: string) {
+    const activeRun = session.activeRun;
+    if (!activeRun) return false;
+    const costLine = await readCostLine(activeRun);
+    const orphanedAt = nowIso();
+    if (await isOwnedRunAlive(activeRun)) {
+      try {
+        if (activeRun.tmuxSession) {
+          await signalBridgeTerminalSession(activeRun.tmuxSession, 'SIGINT');
+        } else {
+          const cmd = await pidCommandLine(activeRun.pid);
+          if (cmd && cmd.includes(adapter.binaryName)) {
+            process.kill(-activeRun.pid, 'SIGINT');
+          }
+        }
+      } catch (error) {
+        console.warn(`[owned-store] Failed to interrupt orphaned ${runtimeId} session ${session.surfaceId}:`, error instanceof Error ? error.message : error);
+      }
+    }
+    session.orphanedAt = orphanedAt;
+    session.orphanedReason = reason;
+    session.orphanedCostLine = costLine;
+    session.latestSummary = costLine ? `${reason} Cost: ${costLine}` : reason;
+    session.activeRun = undefined;
+    session.recentRuns = session.recentRuns.map((run) =>
+      run.id === activeRun.id
+        ? { ...run, outcome: 'interrupted', interruptRequestedAt: orphanedAt, finishedAt: run.finishedAt ?? orphanedAt }
+        : run,
+    );
+    await saveSession(session);
+    console.warn(`[owned-store] Orphaned ${runtimeId} session ${session.surfaceId}: ${reason}${costLine ? ` cost=${costLine}` : ''}`);
+    return true;
   }
 
   function setReviewDisposition(surfaceId: string, disposition: OwnedReviewDisposition) {
@@ -1293,10 +1337,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     globalStore[TIMER_KEY] = timer;
   }
 
-  // #1292 — startup orphan sweep: archive any owned-session dir NOT bound to an
-  // active lane and past the in-flight window, so fleet discovery can't re-spawn
-  // a phantom lane from it (the multiply). Guarded: skips active-lane sessions,
-  // live runs, and recently-active dirs; best-effort per dir. The dominant case
+  // #1292/#1460 — startup orphan sweep: archive any owned-session dir NOT bound
+  // to an active lane and past the in-flight window. Active runs older than the
+  // caller's grace are interrupted and marked orphaned before archive. The dominant case
   // is handled by reset archiving its own dir — this is the self-healing belt-
   // and-suspenders for orphans from OTHER paths (supervisor relaunch, crashes).
   async function sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number> {
@@ -1306,10 +1349,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         if (!(await pathExists(metadataPath(sessionDir)))) continue;
         const session = await loadSession(sessionDir);
         if (activeSurfaceIds.has(session.surfaceId)) continue; // bound to a live lane — keep
-        if (session.activeRun) continue;                        // a run is in flight — keep
         const latest = latestRun(session);
         const lastActivity = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
         if (Date.now() - new Date(lastActivity).getTime() < maxAgeMs) continue; // recently active — keep
+        if (session.activeRun) {
+          await markActiveRunOrphaned(session, `No lane referenced this owned ${runtimeId} session within ${Math.round(maxAgeMs / 1000)}s of launch.`);
+        }
         const result = await archiveOwnedSessionDir(root, session);
         if (result.archived) archived += 1;
       } catch { /* best-effort per dir — never block startup */ }
@@ -1317,6 +1362,18 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     if (archived > 0) invalidateFleetCache();
     return archived;
   }
+
+  async function sweepRecentlyOrphanedActiveRuns(): Promise<number> {
+    const { listActiveLanes } = await import('@/lib/lane/registry');
+    const activeSurfaceIds = new Set(
+      listActiveLanes()
+        .map((lane) => lane.sessionKey?.trim())
+        .filter((key): key is string => Boolean(key)),
+    );
+    return sweepOrphanedSessions(activeSurfaceIds, ACTIVE_ORPHAN_GRACE_MS);
+  }
+
+  void sweepRecentlyOrphanedActiveRuns().catch(() => {});
 
   // ── Assembled store ────────────────────────────────────────────────────────
 

@@ -33,6 +33,7 @@ const {
   MAX_LAUNCH_ATTEMPTS,
   RUNTIME_PARALLEL_CAP,
   buildRemainingLaunchBudget,
+  getBootRecoveryLaunchBlocker,
   getDispatchBlocker,
   runDispatchTick,
 } = await import('@/lib/orchestrator/scheduling');
@@ -256,5 +257,49 @@ describe('dispatch scheduling caps and waves', () => {
     expect(
       getDispatchBlocker({ ...base, launchAttempts: MAX_LAUNCH_ATTEMPTS }, []),
     ).toMatch(/Launch attempts exceeded/);
+  });
+});
+
+describe('boot recovery launch guard (#1460)', () => {
+  const guardedPacket = (overrides: Partial<OrchestratorPacket> = {}) =>
+    packetFixture('/tmp/o8-boot-guard', 'boot-guard', {
+      status: 'queued',
+      queueState: 'queued',
+      releaseState: 'pending',
+      workerRouting: undefined,
+      ...overrides,
+    });
+
+  it('allows a live queued packet with a pinned runtime', () => {
+    expect(getBootRecoveryLaunchBlocker({
+      missionLive: true,
+      packet: guardedPacket(),
+      pinnedRuntime: 'claude-code',
+    })).toBeNull();
+  });
+
+  it('skips archived missions', () => {
+    expect(getBootRecoveryLaunchBlocker({
+      missionArchived: true,
+      missionLive: true,
+      packet: guardedPacket(),
+      pinnedRuntime: 'codex',
+    })).toBe('mission is not live');
+  });
+
+  it('skips unpinned runtime recovery', () => {
+    expect(getBootRecoveryLaunchBlocker({
+      missionLive: true,
+      packet: guardedPacket(),
+      pinnedRuntime: null,
+    })).toBe('runtime is not pinned');
+  });
+
+  it('skips review states that no longer expect a worker', () => {
+    expect(getBootRecoveryLaunchBlocker({
+      missionLive: true,
+      packet: guardedPacket({ status: 'awaiting_review' }),
+      pinnedRuntime: 'codex',
+    })).toBe('lane state does not expect a worker (awaiting_review)');
   });
 });
