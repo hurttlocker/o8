@@ -129,6 +129,12 @@ function evaluateToolUse(input: PreToolUseHookInput): PreToolUseHookOutput {
   return { decision: 'approve' };
 }
 
+function approvalEndpoint() {
+  const host = process.env.O8_API_HOST || 'localhost';
+  const port = process.env.O8_API_PORT || process.env.PORT || '3001';
+  return `http://${host}:${port}/api/panel/approvals`;
+}
+
 async function createApproval(input: PreToolUseHookInput, outcome: PreToolUseHookOutput) {
   if (!outcome.reason) {
     return;
@@ -138,7 +144,7 @@ async function createApproval(input: PreToolUseHookInput, outcome: PreToolUseHoo
   const filePath = extractFilePath(input.tool_input) || undefined;
   const risk = outcome.decision === 'block' ? 'high' : 'medium';
 
-  await fetch('http://localhost:3001/api/panel/approvals', {
+  await fetch(approvalEndpoint(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -227,7 +233,7 @@ async function main() {
     return;
   }
 
-  if (outcome.decision !== 'approve' && isManagedSession) {
+  if (outcome.decision === 'block' && isManagedSession) {
     await createApproval(parsed, outcome);
   }
 
