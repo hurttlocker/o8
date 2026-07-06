@@ -256,6 +256,7 @@ describe('seam E — create-mission without a runtime uses the paired operator d
 
     const res = await createMissionRoute.POST(operatorReq(url, {
       repoPath: process.cwd(),
+      requestedEffort: 'high',
       issues: [{
         number: 90_000_123,
         title: 'dispatch paired default seam',
@@ -270,6 +271,8 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
     expect(packet.runtime).toBe('claude-code');
     expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
+    expect(packet.workerRouting.requestedEffort).toBe('high');
+    expect(packet.workerRouting.selectedEffort).toBe('high');
   });
 });
 
