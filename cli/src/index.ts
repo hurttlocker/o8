@@ -39,6 +39,7 @@ import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
+import { runPacketStop } from './commands/packet/stop.js';
 import {
   runPacketMergePreview,
   runPacketRerun,
@@ -118,6 +119,7 @@ commands:
   status               snapshot: running packets, lanes, merges, approvals
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
+  run stop <runId>     stop a managed run from o8 run --list
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
   app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
@@ -131,6 +133,7 @@ commands:
   mission create       create a mission from an inline task (--title --body [--compare m1,m2])
   mission dispatch     dispatch a created mission's packets to workers (async; --wait blocks for launch) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
+  mission stop         stop every packet in a mission [--mission <id>]
   mission wait         block until a packet hits a review/terminal state [--timeout --poll]
   mission tail         stream packet status transitions until terminal [--timeout --poll]
   mcp install          install/print the o8 MCP config (--claude-code | --cursor | --print)
@@ -153,6 +156,8 @@ commands:
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet reset         wipe a stuck packet's worktree + lane (then mission dispatch)
+  packet stop          stop a packet lane; alias: packet cancel
+  packet cancel        alias for packet stop
   packet retry         reset but KEEP the worktree (resume work; then mission dispatch)
   packet rerun         fresh worker with --feedback (relaunches immediately)
   packet steer         nudge a packet's warm session with --message (layer-3 escalation)
@@ -244,6 +249,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
       if (secondary === 'reset') return runPacketReset(args.mode, args.rest);
+      if (secondary === 'stop' || secondary === 'cancel') return runPacketStop(args.mode, args.rest);
       if (secondary === 'retry') return runPacketRetry(args.mode, args.rest);
       if (secondary === 'rerun') return runPacketRerun(args.mode, args.rest);
       if (secondary === 'steer') return runPacketSteer(args.mode, args.rest);

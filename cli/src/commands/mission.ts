@@ -12,6 +12,7 @@
  *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
  *   o8 mission dispatch [--mission <id>]
  *   o8 mission status   [--mission <id>] [--cost]
+ *   o8 mission stop     --mission <id>
  *   o8 mission wait     [--mission <id>] [--packet <id>] [--timeout ms] [--poll ms]
  *   o8 mission tail     [--mission <id>] [--timeout ms] [--poll ms]
  */
@@ -50,6 +51,19 @@ interface MissionStatusResult {
   [key: string]: unknown;
 }
 
+interface MissionStopResult {
+  missionId: string;
+  stoppedPackets: number;
+  results: Array<{
+    packetId: string;
+    ok: boolean;
+    note?: string;
+    error?: string;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
 // Mirror of PACKET_TERMINAL_STATUSES in operator-handlers/mission.ts — the set
 // `wait_for_mission_ready` treats as "ready for the operator". Kept in sync by
 // the Stage-7 parity audit; duplicated here because the CLI is a standalone
@@ -67,6 +81,39 @@ function flag(rest: string[], name: string): string | null {
 
 function hasFlag(rest: string[], name: string): boolean {
   return rest.includes(`--${name}`);
+}
+
+export function parseMissionStopArgs(rest: string[]): { missionId: string } {
+  let missionId: string | null = null;
+  for (let i = 0; i < rest.length; i += 1) {
+    const tok = rest[i];
+    if (tok === '--mission') {
+      const value = rest[i + 1];
+      if (!value || value.startsWith('--')) {
+        throw new CliError('invalid_args', '--mission requires a value.', EXIT.INVALID_ARGS);
+      }
+      missionId = value;
+      i += 1;
+    } else if (tok.startsWith('--mission=')) {
+      missionId = tok.slice('--mission='.length);
+    } else {
+      throw new CliError(
+        'invalid_args',
+        `Unexpected mission stop argument: ${tok}`,
+        EXIT.INVALID_ARGS,
+        'usage: o8 mission stop --mission <missionId>',
+      );
+    }
+  }
+  if (!missionId?.trim()) {
+    throw new CliError(
+      'invalid_args',
+      'o8 mission stop requires --mission.',
+      EXIT.INVALID_ARGS,
+      'Example: o8 mission stop --mission mission-abc123',
+    );
+  }
+  return { missionId: missionId.trim() };
 }
 
 function responseError(payload: OperatorResponse<unknown> | null | undefined, fallback: string): string {
@@ -205,6 +252,32 @@ async function runMissionStatus(mode: OutputMode, rest: string[]): Promise<numbe
   return 0;
 }
 
+async function runMissionStop(mode: OutputMode, rest: string[]): Promise<number> {
+  const { missionId } = parseMissionStopArgs(rest);
+  const cfg = resolveConfig();
+  const res = await apiFetch<OperatorResponse<MissionStopResult>>(cfg, '/api/orchestrator/stop-mission', {
+    method: 'POST',
+    body: { missionId },
+  });
+  const result = unwrap(res.data, 'Mission stop was rejected.');
+
+  const payload = { schema: 'o8/cli/mission.stop/v1', mission: result };
+  if (mode.human) {
+    printHumanHeading('mission stop');
+    printHumanKv([
+      ['mission', result.missionId],
+      ['stopped packets', String(result.stoppedPackets)],
+      ...result.results.map((item) => [
+        `  · ${item.packetId}`,
+        item.ok ? item.note ?? 'stopped' : item.error ?? item.note ?? 'failed',
+      ] as [string, string]),
+    ]);
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
 async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number> {
   const missionId = flag(rest, 'mission')?.trim() || undefined;
   const packetFilter = flag(rest, 'packet')?.trim() || null;
@@ -308,6 +381,8 @@ export async function runMission(mode: OutputMode, secondary: string | undefined
       return runMissionDispatch(mode, rest);
     case 'status':
       return runMissionStatus(mode, rest);
+    case 'stop':
+      return runMissionStop(mode, rest);
     case 'wait':
       return runMissionWait(mode, rest);
     case 'tail':
@@ -317,7 +392,7 @@ export async function runMission(mode: OutputMode, secondary: string | undefined
         'unknown_mission_subcommand',
         `Unknown mission subcommand: ${secondary ?? '(none)'}`,
         EXIT.INVALID_ARGS,
-        'Subcommands: create | dispatch | status | wait | tail. Run `o8 --help`.',
+        'Subcommands: create | dispatch | status | stop | wait | tail. Run `o8 --help`.',
       );
   }
 }
