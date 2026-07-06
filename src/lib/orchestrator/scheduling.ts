@@ -145,7 +145,7 @@ function isDispatchReadyStatus(packet: OrchestratorPacket) {
 export function getBootRecoveryLaunchBlocker(input: {
   missionArchived?: boolean;
   missionLive?: boolean;
-  packet: Pick<OrchestratorPacket, 'id' | 'status' | 'queueState' | 'archivedAt' | 'releaseState' | 'workerRouting'>;
+  packet: Pick<OrchestratorPacket, 'id' | 'status' | 'queueState' | 'archivedAt' | 'releaseState' | 'dispatchRuntimePin'>;
   pinnedRuntime?: OrchestratorRuntime | null;
 }): string | null {
   const packet = input.packet;
@@ -158,8 +158,7 @@ export function getBootRecoveryLaunchBlocker(input: {
   if (packet.queueState !== 'queued') {
     return `queue state is ${packet.queueState}`;
   }
-  const pinnedRuntime = input.pinnedRuntime ?? packet.workerRouting?.requestedRuntime ?? packet.workerRouting?.selectedRuntime ?? null;
-  if (!pinnedRuntime) {
+  if (!input.pinnedRuntime) {
     return 'runtime is not pinned';
   }
   return null;
@@ -522,7 +521,7 @@ export async function runDispatchTick(
             missionArchived: options.missionArchived,
             missionLive: !nextState.packets.every((candidate) => candidate.archivedAt || candidate.releaseState === 'released'),
             packet,
-            pinnedRuntime: recoveryContext?.runtime ?? packet.workerRouting?.requestedRuntime ?? packet.workerRouting?.selectedRuntime ?? null,
+            pinnedRuntime: recoveryContext?.runtime ?? packet.dispatchRuntimePin ?? null,
           })
         : null;
       if (recoveryBlocker) {

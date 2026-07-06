@@ -224,14 +224,17 @@ export function isOwnedCodexRuntimeSession(sessionKey?: string | null) {
 }
 
 /**
- * True for any owned CLI runtime session key — codex, gemini, or opencode.
+ * True for any owned CLI runtime session key.
  * Used to route the chat-pane send path through the generic /api/runtime/action
  * steering verb instead of the runtime-specific /api/<runtime>/send endpoints.
  */
 export function isOwnedCliRuntimeSession(sessionKey?: string | null) {
   const key = sessionKey?.trim();
   if (!key) return false;
-  return key.startsWith('codex-owned:') || key.startsWith('gemini-owned:') || key.startsWith('opencode-owned:');
+  return key.startsWith('codex-owned:')
+    || key.startsWith('claude-code-owned:')
+    || key.startsWith('gemini-owned:')
+    || key.startsWith('opencode-owned:');
 }
 
 export function resolveWorkspaceChatLaneStatus(tab: TerminalTab) {
