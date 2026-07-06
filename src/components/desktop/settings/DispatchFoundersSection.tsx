@@ -173,7 +173,7 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
               env) but the orchestrator is the only conversational surface. */}
           <SettingsRow
             icon={<CanvasIcon />}
-            label="Canvas mode"
+            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>Canvas mode <ValuePill>Experimental</ValuePill></span>}
             subtitle={lockedSub('experimentalCanvas', 'The glass canvas — voice-first fleet surface. Sole gate.')}
             checked={values.experimentalCanvas}
             disabled={envLocked(sources, 'experimentalCanvas') || busyField === 'experimentalCanvas'}
