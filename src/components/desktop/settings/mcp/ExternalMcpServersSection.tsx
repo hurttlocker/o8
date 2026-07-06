@@ -25,7 +25,7 @@ import {
 import { useExternalMcpServers, type McpServerTestOutcome } from './useExternalMcpServers';
 import type { ExternalMcpServer } from './shared';
 import {
-  parseMcpConfigInput,
+  parseMcpAnyInput,
   parsedServerToFormValues,
   type ParsedMcpServer,
 } from '@/lib/mcp/parse-config';
@@ -60,6 +60,7 @@ export function ExternalMcpServersSection() {
     form,
     setForm,
     create,
+    createServer,
     remove,
     testingId,
     testingNpxFamily,
@@ -69,11 +70,23 @@ export function ExternalMcpServersSection() {
 
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
-  const [pasteNote, setPasteNote] = useState<string | null>(null);
-  const [pasteCandidates, setPasteCandidates] = useState<ParsedMcpServer[] | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
   const [expandedStderrId, setExpandedStderrId] = useState<string | null>(null);
   // Inline remove confirmation — replaces window.confirm (disabled in Tauri).
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
+
+  // Smart box (operator, 2026-07-06 — "typing JSON args is 2024"): the input
+  // live-parses as you type. JSON config, a raw "npx ..." command line, or a
+  // bare URL all resolve to candidate cards; Add lands the server directly.
+  const pasteCandidates = useMemo<ParsedMcpServer[] | null>(() => {
+    const trimmed = pasteText.trim();
+    if (!trimmed) return null;
+    try {
+      return parseMcpAnyInput(trimmed).servers;
+    } catch {
+      return null; // stay quiet while typing — Add surfaces the real error
+    }
+  }, [pasteText]);
 
   const applyParsedServer = (server: ParsedMcpServer, fallbackName?: string) => {
     const values = parsedServerToFormValues(server);
@@ -81,34 +94,37 @@ export function ExternalMcpServersSection() {
       ...current,
       name: values.name || fallbackName || current.name,
       transport: values.transport,
-      command: values.command,
+      command: values.transport === 'http' ? (server.url ?? values.command) : values.command,
       argsJson: values.transport === 'stdio' ? values.argsJson : current.argsJson,
       envJson: values.transport === 'stdio' ? values.envJson : current.envJson,
     }));
   };
 
-  const handleParsePaste = () => {
+  const handleAddCandidate = async (server: ParsedMcpServer) => {
     setPasteError(null);
-    setPasteNote(null);
-    setPasteCandidates(null);
-    try {
-      const parsed = parseMcpConfigInput(pasteText);
-      if (parsed.servers.length === 1) {
-        applyParsedServer(parsed.servers[0]);
-        setPasteNote('Parsed — review the fields below and add the server.');
-      } else {
-        setPasteCandidates(parsed.servers);
-        setPasteNote(`${parsed.servers.length} servers detected — pick which one to populate.`);
-      }
-    } catch (e) {
-      setPasteError(e instanceof Error ? e.message : 'Failed to parse config');
-    }
+    const ok = await createServer({
+      name: server.name || 'server',
+      transport: server.transport,
+      command: server.transport === 'http' ? (server.url ?? server.command) : server.command,
+      args: server.transport === 'stdio' ? server.args : [],
+      env: server.transport === 'stdio' && Object.keys(server.env).length > 0 ? server.env : null,
+    });
+    if (ok) setPasteText('');
   };
 
-  const handlePickCandidate = (server: ParsedMcpServer) => {
+  const handleEditCandidate = (server: ParsedMcpServer) => {
     applyParsedServer(server);
-    setPasteCandidates(null);
-    setPasteNote(`Populated with "${server.name ?? 'unnamed'}". Edit and add the server when ready.`);
+    setManualOpen(true);
+  };
+
+  const handleSmartAdd = () => {
+    setPasteError(null);
+    try {
+      const parsed = parseMcpAnyInput(pasteText);
+      void handleAddCandidate(parsed.servers[0]);
+    } catch (e) {
+      setPasteError(e instanceof Error ? e.message : 'Could not parse that.');
+    }
   };
 
   return (
@@ -153,123 +169,62 @@ export function ExternalMcpServersSection() {
           <BuiltinServerPill icon={<Globe size={11} strokeWidth={1.8} />} label="cortex" />
         </div>
 
-        {/* ── Paste config (JSON) ── */}
+        {/* ── Smart add box — paste anything, we figure it out ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <FieldLabel>paste config</FieldLabel>
+          <FieldLabel>add a server</FieldLabel>
           <textarea
             value={pasteText}
             onChange={(e) => {
               setPasteText(e.target.value);
               if (pasteError) setPasteError(null);
-              if (pasteNote && !pasteCandidates) setPasteNote(null);
             }}
-            rows={5}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSmartAdd();
+              }
+            }}
+            rows={3}
             spellCheck={false}
-            placeholder={'{"mcpServers": {...}} or a single server object'}
+            placeholder={'Paste anything — a config JSON, an "npx …" command line, or a server URL'}
             style={textareaStyle()}
             onFocus={(e) => { e.currentTarget.style.borderColor = RAMS_ACCENT; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = RAMS_HAIRLINE_SOFT; }}
           />
-          <div style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 400,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-          }}>
-            reads the standard Claude Desktop / Cursor config shape.
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 20,
-            flexWrap: 'wrap',
-            marginTop: 4,
-          }}>
-            <button
-              type="button"
-              onClick={handleParsePaste}
-              disabled={!pasteText.trim()}
-              style={parseButtonStyle(!pasteText.trim())}
-            >
-              parse &amp; populate
-            </button>
-            {pasteText ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setPasteText('');
-                  setPasteError(null);
-                  setPasteNote(null);
-                  setPasteCandidates(null);
-                }}
-                style={quietActionStyle(false)}
-              >
-                clear
-              </button>
-            ) : null}
-          </div>
 
           {pasteError ? (
-            <div style={{
-              marginTop: 4,
-              border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-              borderRadius: 4,
-              paddingTop: 8,
-              paddingBottom: 8,
-              paddingLeft: 12,
-              paddingRight: 12,
-              fontSize: 12,
-              lineHeight: 1.55,
-              color: '#dc2626',
-              background: 'transparent',
-            }}>
+            <div style={{ fontSize: 12, color: '#dc2626', lineHeight: 1.55 }}>
               {pasteError}
             </div>
           ) : null}
 
-          {pasteNote && !pasteCandidates ? (
-            <div style={{
-              marginTop: 4,
-              fontSize: 12,
-              color: RAMS_INK_QUIET,
-              lineHeight: 1.55,
-            }}>
-              {pasteNote}
+          {pasteText.trim() && !pasteCandidates && !pasteError ? (
+            <div style={{ fontSize: 12, color: RAMS_INK_QUIET, lineHeight: 1.55 }}>
+              Keep going — a full JSON config, a command line, or a URL will light up here.
             </div>
           ) : null}
 
           {pasteCandidates ? (
             <div style={{
-              marginTop: 6,
               border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-              borderRadius: 4,
+              borderRadius: 10,
               background: 'var(--t-panel)',
               paddingTop: 4,
               paddingBottom: 4,
             }}>
               {pasteCandidates.map((candidate, idx) => (
-                <button
+                <div
                   key={`${candidate.name ?? 'srv'}-${idx}`}
-                  type="button"
-                  onClick={() => handlePickCandidate(candidate)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
                     gap: 12,
-                    width: '100%',
                     minHeight: 44,
-                    paddingTop: 10,
-                    paddingBottom: 10,
+                    paddingTop: 8,
+                    paddingBottom: 8,
                     paddingLeft: 14,
-                    paddingRight: 14,
-                    background: 'transparent',
-                    border: 'none',
+                    paddingRight: 10,
                     borderBottom: idx < pasteCandidates.length - 1 ? `1px solid ${RAMS_HAIRLINE_SOFT}` : 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
                     color: 'var(--t-text)',
                     fontFamily: APP_FONT_STACK,
                     fontSize: 13,
@@ -281,7 +236,7 @@ export function ExternalMcpServersSection() {
                         ? <Globe size={13} strokeWidth={1.8} />
                         : <Terminal size={13} strokeWidth={1.8} />}
                     </span>
-                    <span style={{ fontWeight: 300 }}>{candidate.name ?? 'unnamed'}</span>
+                    <span style={{ fontWeight: 400, flexShrink: 0 }}>{candidate.name ?? 'unnamed'}</span>
                     <span style={{
                       fontFamily: MONO_FONT,
                       fontSize: 11,
@@ -292,20 +247,30 @@ export function ExternalMcpServersSection() {
                       minWidth: 0,
                     }}>
                       {candidate.transport === 'http'
-                        ? candidate.command
+                        ? (candidate.url ?? candidate.command)
                         : `${candidate.command}${candidate.args.length ? ' ' + candidate.args.join(' ') : ''}`}
                     </span>
+                    {candidate.transport === 'stdio' && Object.keys(candidate.env).length > 0 ? (
+                      <BracketLabel tone="quiet">env {Object.keys(candidate.env).length}</BracketLabel>
+                    ) : null}
                   </span>
-                  <span style={{
-                    fontFamily: APP_FONT_STACK,
-                    fontSize: 10,
-                    letterSpacing: '0.14em',
-                    textTransform: 'uppercase',
-                    color: RAMS_ACCENT,
-                  }}>
-                    use ›
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => handleEditCandidate(candidate)}
+                    style={quietActionStyle(false)}
+                  >
+                    edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void handleAddCandidate(candidate); }}
+                    disabled={creating}
+                    style={submitButtonStyle(creating)}
+                  >
+                    <Plus size={12} strokeWidth={2} />
+                    {creating ? 'adding…' : 'add'}
+                  </button>
+                </div>
               ))}
             </div>
           ) : null}
@@ -353,6 +318,34 @@ export function ExternalMcpServersSection() {
           </div>
         ) : null}
 
+        {/* Manual setup — the old field-by-field form, demoted to a disclosure
+            (the smart box above covers the normal path). */}
+        <button
+          type="button"
+          onClick={() => setManualOpen((v) => !v)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            border: 'none',
+            background: 'transparent',
+            padding: 0,
+            cursor: 'pointer',
+            fontFamily: APP_FONT_STACK,
+            fontSize: 10,
+            fontWeight: 400,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: RAMS_INK_QUIET,
+          }}
+        >
+          <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden style={{ transform: manualOpen ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}>
+            <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Manual setup
+        </button>
+
+        {manualOpen ? (<>
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 200px)',
@@ -465,6 +458,7 @@ export function ExternalMcpServersSection() {
             inactiveLabel="Disabled"
           />
         </div>
+        </>) : null}
       </div>
 
       <div style={{
@@ -809,30 +803,6 @@ function transportPillStyle(active: boolean): React.CSSProperties {
   };
 }
 
-function parseButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
-    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize',
-    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-  };
-}
 
 function submitButtonStyle(disabled: boolean): React.CSSProperties {
   return {
