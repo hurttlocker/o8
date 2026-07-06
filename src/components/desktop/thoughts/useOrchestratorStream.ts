@@ -103,6 +103,14 @@ interface OrchestratorSendOptions {
    */
   swarm?: boolean;
   /**
+   * Solo mode (operator, 2026-07-06): the orchestrator works the repo ITSELF —
+   * same brain, zero dispatch. A hint prepended to the outbound turn forbids
+   * mission/dispatch tools for the turn. Mutually exclusive with swarm and
+   * collide (both imply fan-out; solo wins by suppressing neither — callers
+   * should not send solo together with them).
+   */
+  solo?: boolean;
+  /**
    * Collide / MoA mode. When true, the turn routes to the `collide` backend:
    * Claude + Codex propose independently (read-only), Claude synthesizes + does
    * the work. Forces `backend: 'collide'` on the outbound payload; the swarm
@@ -125,6 +133,13 @@ interface OrchestratorSendOptions {
 // sub-agents in parallel" — so the orchestrator fans out via its Task/Agent
 // tool regardless, then synthesizes alongside the o8 Codex dispatch. (On a
 // Codex orchestrator backend only the Codex-dispatch track runs.)
+// Prepended when Solo mode is on: the orchestrator does the work itself and
+// must not dispatch. Kept out of the transcript via `displayMessage`.
+const SOLO_TURN_HINT = [
+  '[Solo mode active]',
+  'Work this turn yourself, directly in the repo — do NOT dispatch workers or fan out. No create_mission, dispatch_mission, o8 task dispatch, or spawning parallel worker agents. Use your own tools (read, edit, bash, tests) to do the work end-to-end and report back. If the task genuinely needs a dispatched fleet, say so and ask before dispatching.',
+].join('\n');
+
 const SWARM_TURN_HINT = [
   '[Ultracode / parallel swarm mode active]',
   'Don\'t run this turn single-threaded — orchestrate a parallel swarm across two tracks at the same time, then synthesize. (1) For implementation/coding that should land as a reviewable diff, dispatch Codex workers through the o8 mission tools (create_mission with runtime "codex", then dispatch_mission) — fire them in parallel, one per scoped task, and review each diff before merging. (2) For analysis, multi-file reading, research, or cross-checking, run a workflow that fans the work out across native Claude sub-agents in parallel and returns a synthesized result. Run both tracks concurrently, then combine the native sub-agent findings with the Codex diffs into one answer for me. If the task is genuinely single-threaded, say so briefly and just do it.',
@@ -854,6 +869,8 @@ export function useOrchestratorStream(
     const backend = collide ? 'collide' : options?.backend;
     // Collide is its own fusion — the swarm hint does not apply on a Collide turn.
     const swarm = options?.swarm === true && !collide;
+    // Solo forbids fan-out entirely — it never combines with swarm or collide.
+    const solo = options?.solo === true && !swarm && !collide;
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
@@ -949,6 +966,9 @@ export function useOrchestratorStream(
       // user's transcript bubble already rendered with the raw `displayMessage`.
       if (swarm) {
         outboundMessage = `${SWARM_TURN_HINT}\n\n${outboundMessage}`;
+      }
+      if (solo) {
+        outboundMessage = `${SOLO_TURN_HINT}\n\n${outboundMessage}`;
       }
       const payload = JSON.stringify({
         type: 'orchestrator-send',
