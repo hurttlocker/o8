@@ -11,7 +11,6 @@ import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
-  RAMS_CONTROL_BG,
   RAMS_CONTROL_BORDER,
   RAMS_CONTROL_ACTIVE_BG,
   RAMS_CONTROL_ACTIVE_BORDER,
@@ -21,12 +20,13 @@ import {
   FieldLabel,
   LockIcon,
   GlobeIcon,
+  GitHubIcon,
   RamsButton,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
-import { SettingsGroup, SettingsRow } from './grouped';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
 export function GitHubTab({
   accounts,
@@ -141,50 +141,32 @@ export function GitHubTab({
       <section>
         <SettingsGroup header="Accounts">
           {activeAccount ? (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 14,
-              paddingTop: 14,
-              paddingBottom: 14,
-              paddingLeft: 14,
-              paddingRight: 14,
-            }}>
-              <AccountAvatar login={activeAccount.login} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 15, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-                    {activeAccount.login}
-                  </span>
-                  <BracketLabel tone="quiet">active</BracketLabel>
+            <SettingsRow
+              icon={<GitHubIcon size={16} />}
+              label={activeAccount.login}
+              subtitle={`${activeAccount.protocol} · ${activeAccount.scopes.length} ${activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}`}
+              accessory={
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <ValuePill tone="success">Active</ValuePill>
+                  <RamsButton
+                    variant="ghost"
+                    onClick={onRefresh}
+                    disabled={actionBusy === 'refresh'}
+                    busy={actionBusy === 'refresh'}
+                  >
+                    Refresh
+                  </RamsButton>
+                  <RamsButton
+                    variant="ghost"
+                    onClick={() => onDisconnect?.(activeAccount.login)}
+                    disabled={actionBusy === 'logout'}
+                    busy={actionBusy === 'logout'}
+                  >
+                    Disconnect
+                  </RamsButton>
                 </div>
-                <div style={{
-                  fontSize: 12,
-                  color: 'var(--t-text-muted)',
-                  marginTop: 4,
-                  fontFamily: APP_FONT_STACK,
-                  letterSpacing: '-0.01em',
-                }}>
-                  {activeAccount.protocol} · {activeAccount.scopes.length} {activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}
-                </div>
-              </div>
-              <RamsButton
-                variant="ghost"
-                onClick={onRefresh}
-                disabled={actionBusy === 'refresh'}
-                busy={actionBusy === 'refresh'}
-              >
-                Refresh
-              </RamsButton>
-              <RamsButton
-                variant="ghost"
-                onClick={() => onDisconnect?.(activeAccount.login)}
-                disabled={actionBusy === 'logout'}
-                busy={actionBusy === 'logout'}
-              >
-                Disconnect
-              </RamsButton>
-            </div>
+              }
+            />
           ) : (
             <div style={{
               paddingTop: 14,
@@ -203,13 +185,17 @@ export function GitHubTab({
       </section>
 
       <section style={{ marginTop: 28 }}>
-        <SettingsGroup header="Device flow">
+        <SettingsGroup
+          header="Device flow"
+          footnote={deviceFlowEnabled
+            ? 'Opens a GitHub device code flow — the verification code appears below; paste it into github.com/login/device.'
+            : 'Set GITHUB_OAUTH_CLIENT_ID to enable device-flow sign-in.'}
+        >
           {!cliConnected && !deviceFlow ? (
             <SettingsRow
+              icon={<GitHubIcon size={16} />}
               label="Sign in with GitHub"
-              subtitle={deviceFlowEnabled
-                ? 'Opens a GitHub device code flow. The verification code appears below, paste it into github.com/login/device.'
-                : 'Set GITHUB_OAUTH_CLIENT_ID to enable device-flow sign-in.'}
+              subtitle={deviceFlowEnabled ? 'Start the device code flow' : 'Requires GITHUB_OAUTH_CLIENT_ID'}
               onPress={onStartDeviceFlow}
               disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
               chevron
@@ -258,28 +244,27 @@ export function GitHubTab({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-                <button
-                  type="button"
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <RamsButton
+                  variant="ghost"
                   onClick={() => openExternalUrl(deviceFlow.verificationUriComplete || deviceFlow.verificationUri)}
-                  style={quietActionStyle(false)}
                 >
-                  open github
-                </button>
-                <button type="button" onClick={() => { void copyDeviceCode(); }} style={quietActionStyle(false)}>
-                  {deviceCodeCopied ? 'copied' : 'copy code'}
-                </button>
-                <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={quietActionStyle(false)}>
-                  poll now
-                </button>
-                <button
-                  type="button"
+                  Open GitHub
+                </RamsButton>
+                <RamsButton variant="ghost" onClick={() => { void copyDeviceCode(); }}>
+                  {deviceCodeCopied ? 'Copied' : 'Copy code'}
+                </RamsButton>
+                <RamsButton variant="ghost" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)}>
+                  Poll now
+                </RamsButton>
+                <RamsButton
+                  variant="ghost"
                   onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
                   disabled={actionBusy === 'cancel_device'}
-                  style={quietActionStyle(actionBusy === 'cancel_device')}
+                  busy={actionBusy === 'cancel_device'}
                 >
-                  {actionBusy === 'cancel_device' ? 'cancelling...' : 'cancel'}
-                </button>
+                  {actionBusy === 'cancel_device' ? 'Cancelling…' : 'Cancel'}
+                </RamsButton>
               </div>
             </div>
           ) : null}
@@ -362,7 +347,7 @@ export function GitHubTab({
                 color: 'var(--t-text)',
                 letterSpacing: '-0.01em',
               }}>
-                o8 github app
+                o8 GitHub App
               </span>
               <BracketLabel tone={appConnected ? 'quiet' : 'accent'}>
                 {appConnected ? 'connected' : appConfigured ? 'needs attention' : 'not configured'}
@@ -433,7 +418,7 @@ export function GitHubTab({
                   rel="noreferrer"
                   style={primaryLinkStyle(false)}
                 >
-                  open installation ›
+                  Open installation ›
                 </a>
               ) : null}
               <a
@@ -442,7 +427,7 @@ export function GitHubTab({
                 rel="noreferrer"
                 style={primaryLinkStyle(false)}
               >
-                app settings ›
+                App settings ›
               </a>
             </div>
           </div>
@@ -453,30 +438,6 @@ export function GitHubTab({
 }
 
 // ── Support primitives ──
-
-function AccountAvatar({ login }: { login: string }) {
-  const letter = (login || '?').slice(0, 1).toUpperCase();
-  return (
-    <div style={{
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-      background: 'transparent',
-      color: 'var(--t-text-muted)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: MONO_FONT_STACK,
-      fontSize: 14,
-      fontWeight: 400,
-      letterSpacing: '0.04em',
-      flexShrink: 0,
-    }}>
-      {letter}
-    </div>
-  );
-}
 
 function DiagnosticRow({
   title,
@@ -559,31 +520,6 @@ function primaryLinkStyle(disabled: boolean): React.CSSProperties {
     textTransform: 'capitalize',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     textDecoration: 'none',
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-  };
-}
-
-function quietActionStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: RAMS_CONTROL_BORDER,
-    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize',
-    color: 'var(--t-text-secondary)',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
