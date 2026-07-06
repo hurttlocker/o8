@@ -53,12 +53,15 @@ interface MissionStatusResult {
 
 interface MissionStopResult {
   missionId: string;
-  stoppedPackets: number;
-  results: Array<{
+  event?: {
+    type?: string;
+    recordedAt?: string;
+  };
+  packets: Array<{
     packetId: string;
-    ok: boolean;
+    status: string;
+    laneId: string | null;
     note?: string;
-    error?: string;
     [key: string]: unknown;
   }>;
   [key: string]: unknown;
@@ -266,10 +269,10 @@ async function runMissionStop(mode: OutputMode, rest: string[]): Promise<number>
     printHumanHeading('mission stop');
     printHumanKv([
       ['mission', result.missionId],
-      ['stopped packets', String(result.stoppedPackets)],
-      ...result.results.map((item) => [
+      ['packets', String(result.packets.length)],
+      ...result.packets.map((item) => [
         `  · ${item.packetId}`,
-        item.ok ? item.note ?? 'stopped' : item.error ?? item.note ?? 'failed',
+        `${item.status}${item.laneId ? ` · ${item.laneId}` : ''}${item.note ? ` · ${item.note}` : ''}`,
       ] as [string, string]),
     ]);
   } else {

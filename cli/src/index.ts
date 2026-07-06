@@ -133,7 +133,7 @@ commands:
   mission create       create a mission from an inline task (--title --body [--compare m1,m2])
   mission dispatch     dispatch a created mission's packets to workers (async; --wait blocks for launch) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
-  mission stop         stop every packet in a mission [--mission <id>]
+  mission stop         interrupt and hold every packet in a mission [--mission <id>]
   mission wait         block until a packet hits a review/terminal state [--timeout --poll]
   mission tail         stream packet status transitions until terminal [--timeout --poll]
   mcp install          install/print the o8 MCP config (--claude-code | --cursor | --print)
@@ -156,8 +156,8 @@ commands:
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet reset         wipe a stuck packet's worktree + lane (then mission dispatch)
-  packet stop          stop a packet lane; alias: packet cancel
-  packet cancel        alias for packet stop
+  packet stop          interrupt the worker and hold the packet (resume with packet reset/rerun)
+  packet cancel        alias for packet stop; interrupt and hold the packet
   packet retry         reset but KEEP the worktree (resume work; then mission dispatch)
   packet rerun         fresh worker with --feedback (relaunches immediately)
   packet steer         nudge a packet's warm session with --message (layer-3 escalation)
