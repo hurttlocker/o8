@@ -435,7 +435,9 @@ export function O8ScratchChat({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'e') return;
+      // ⌘E toggles the Brain — but NOT ⌘⇧E, which is the global report-issue
+      // hotkey (ReportIssueHost). Without this Shift guard both fired at once.
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'e') return;
       const target = event.target as HTMLElement | null;
       if (target?.dataset.o8ScratchInput === 'true') return;
       if (!buttonRef.current?.getClientRects().length) return;
