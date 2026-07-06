@@ -39,4 +39,28 @@ describe('realtime bridge backoff', () => {
     expect(state.failureCount).toBe(0);
     expect(canAttemptRealtimeBridge(state, 1_000)).toBe(true);
   });
+
+  it('matches the realtime bridge spam contract: five failures, capped delay, reset', () => {
+    const state = createRealtimeBridgeBackoffState();
+    for (let i = 0; i < 4; i += 1) {
+      expect(recordRealtimeBridgeFailure(state, i * 1_000).transition).toBeNull();
+    }
+
+    const firstDown = recordRealtimeBridgeFailure(state, 5_000, { maxDelayMs: 30_000 });
+    expect(firstDown.transition).toBe('down');
+    expect(firstDown.delayMs).toBe(1_000);
+
+    const capped = recordRealtimeBridgeFailure(state, 35_000, {
+      initialDelayMs: 1_000,
+      maxDelayMs: 30_000,
+      threshold: 5,
+    });
+    expect(capped.transition).toBeNull();
+    expect(capped.delayMs).toBeLessThanOrEqual(30_000);
+    expect(canAttemptRealtimeBridge(state, 35_000 + capped.delayMs - 1)).toBe(false);
+
+    expect(recordRealtimeBridgeSuccess(state).transition).toBe('up');
+    expect(state.failureCount).toBe(0);
+    expect(canAttemptRealtimeBridge(state, 35_000)).toBe(true);
+  });
 });
