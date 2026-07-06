@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolvePacketDiffBase } from './base-resolution';
+import { resetPacketDiffBaseFetchMemoForTest, resolvePacketDiffBase } from './base-resolution';
 
 const tempDirs: string[] = [];
 
@@ -42,6 +42,7 @@ function makeRepo(name: string) {
 }
 
 afterEach(() => {
+  resetPacketDiffBaseFetchMemoForTest();
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
@@ -94,5 +95,35 @@ describe('resolvePacketDiffBase', () => {
     expect(result.warning).toContain('using local main');
     expect(result.comparisonRef).toBe('main');
     expect(result.mergeBase).toBe(baseSha);
+  });
+
+  it('reuses the fetch outcome within the TTL instead of fetching again', async () => {
+    const { origin, repo } = makeRepo('o8-diff-base-memo');
+    git(repo, ['checkout', '-b', 'packet']);
+    writeFileSync(join(repo, 'packet.txt'), 'packet\n');
+    const headSha = commitAll(repo, 'packet');
+
+    const remoteClone = join(repo, '..', 'memo-remote-clone');
+    execFileSync('git', ['clone', origin, remoteClone], { stdio: 'pipe' });
+    git(remoteClone, ['checkout', 'main']);
+    git(remoteClone, ['config', 'user.name', 'o8-test']);
+    git(remoteClone, ['config', 'user.email', 'o8@example.test']);
+    writeFileSync(join(remoteClone, 'upstream-one.txt'), 'upstream one\n');
+    const upstreamOneSha = commitAll(remoteClone, 'upstream one');
+    git(remoteClone, ['push', 'origin', 'main']);
+
+    const first = await resolvePacketDiffBase(repo, 'main', headSha);
+    expect(first.fetchedRemoteBase).toBe(true);
+    expect(git(repo, ['rev-parse', 'origin/main'])).toBe(upstreamOneSha);
+
+    writeFileSync(join(remoteClone, 'upstream-two.txt'), 'upstream two\n');
+    const upstreamTwoSha = commitAll(remoteClone, 'upstream two');
+    git(remoteClone, ['push', 'origin', 'main']);
+
+    const second = await resolvePacketDiffBase(repo, 'main', headSha);
+
+    expect(second.fetchedRemoteBase).toBe(true);
+    expect(git(repo, ['rev-parse', 'origin/main'])).toBe(upstreamOneSha);
+    expect(git(remoteClone, ['rev-parse', 'origin/main'])).toBe(upstreamTwoSha);
   });
 });
