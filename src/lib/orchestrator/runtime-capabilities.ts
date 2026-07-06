@@ -53,7 +53,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     // stream-json spawn only so they stay sub-billed, never Agent SDK --print.
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'claude-sonnet-4-5',
+    defaultModel: 'claude-sonnet-5',
     accentColor: '#e07a3a', // orange — matches existing claude-code tone in display.ts
     binaryName: 'claude',
     tier: 'frontier',
