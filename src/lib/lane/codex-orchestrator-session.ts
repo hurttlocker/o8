@@ -19,10 +19,9 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
@@ -39,6 +38,19 @@ import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { handleCodexJsonLine } from './codex-orchestrator-events';
+import {
+  ensureRegisteredSession,
+  getRegisteredSession,
+  normalizeRepoPath,
+  normalizeThoughtsThreadId,
+  orchestratorDataDir,
+  PREEMPT_SETTLE_MS,
+  PROCESS_TIMEOUT_MS,
+  repoHash,
+  requestRegisteredSessionReset,
+  sessionNameForRepo,
+  waitForSessionIdle,
+} from './orchestrator-session-core';
 import {
   crashSurvivableOrchestratorEnabled,
   createOrchestratorTurnRecord,
@@ -88,47 +100,13 @@ export interface SendToCodexOrchestratorOptions {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_CODEX_MODEL = MODEL_IDS.codexDefault;
-/** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (4 hr — hang watchdog, not a work budget). */
-const PROCESS_TIMEOUT_MS = 14_400_000;
-/** Mirror of orchestrator-session.ts PREEMPT_SETTLE_MS — see that file for why. */
-const PREEMPT_SETTLE_MS = 4_000;
-
-/** Poll until the session leaves 'busy' (a turn closed) or the window elapses. */
-async function waitForCodexOrchestratorIdle(session: CodexOrchestratorSession, timeoutMs: number): Promise<void> {
-  if (session.status !== 'busy') return;
-  const deadline = Date.now() + timeoutMs;
-  while (session.status === 'busy' && Date.now() < deadline) {
-    await new Promise((resolveTick) => setTimeout(resolveTick, 50));
-  }
-}
 const USER_CODEX_HOME = join(homedir(), '.codex');
 const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
-const CODEX_ORCHESTRATOR_HOME_DIR = join(
-  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
-  'codex-orchestrator',
-);
+const CODEX_ORCHESTRATOR_HOME_DIR = orchestratorDataDir('codex-orchestrator');
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 const sessions = new Map<string, CodexOrchestratorSession>();
-
-function normalizeRepoPath(repoPath: string): string {
-  return resolve(repoPath).replace(/\/+$/, '');
-}
-
-function repoHash(repoPath: string): string {
-  return createHash('sha256').update(repoPath).digest('hex').slice(0, 8);
-}
-
-function normalizeHistoryThreadId(threadId?: string | null): string | null {
-  const trimmed = threadId?.trim() ?? '';
-  return trimmed.startsWith('thoughts-') ? trimmed : null;
-}
-
-function historyThreadKey(threadId?: string | null): string | null {
-  const normalized = normalizeHistoryThreadId(threadId);
-  return normalized ? normalized.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) : null;
-}
 
 // tomlKey is retained here because the managed-section STRIP logic
 // (isManagedMcpSection/stripManagedMcpSections) below quotes server names the
@@ -264,36 +242,29 @@ export function ensureCodexHome(repoPath: string, profile: ToolProfile = 'full')
 }
 
 export function codexOrchestratorSessionName(repoPath: string, threadId?: string | null): string {
-  const threadSuffix = historyThreadKey(threadId);
-  return `cortex-codex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}${threadSuffix ? `-${threadSuffix}` : ''}`;
+  return sessionNameForRepo('cortex-codex-orchestrator', repoPath, threadId);
 }
 
 export function getCodexOrchestratorSession(repoPath: string, threadId?: string | null): CodexOrchestratorSession | null {
-  return sessions.get(codexOrchestratorSessionName(repoPath, threadId)) ?? null;
+  return getRegisteredSession(sessions, codexOrchestratorSessionName(repoPath, threadId));
 }
 
 export function ensureCodexOrchestratorSession(repoPath: string, threadId?: string | null): CodexOrchestratorSession {
-  const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const normalizedThreadId = normalizeHistoryThreadId(threadId);
-  const sessionName = codexOrchestratorSessionName(normalizedRepoPath, normalizedThreadId);
-  const existing = sessions.get(sessionName);
-
-  if (existing && existing.status !== 'dead') {
-    return existing;
-  }
-
-  const session: CodexOrchestratorSession = {
-    sessionName,
-    repoPath: normalizedRepoPath,
-    historyThreadId: normalizedThreadId,
-    threadId: readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
-    status: 'ready',
-    proc: null,
-    createdAt: Date.now(),
-  };
-  sessions.set(sessionName, session);
-  console.log(`[codex-orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}${normalizedThreadId ? ` (${normalizedThreadId})` : ''}`);
-  return session;
+  return ensureRegisteredSession(sessions, {
+    repoPath,
+    threadId,
+    sessionNameFor: codexOrchestratorSessionName,
+    logPrefix: '[codex-orchestrator-session]',
+    create: (normalizedRepoPath, normalizedThreadId, sessionName) => ({
+      sessionName,
+      repoPath: normalizedRepoPath,
+      historyThreadId: normalizedThreadId,
+      threadId: readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
+      status: 'ready',
+      proc: null,
+      createdAt: Date.now(),
+    }),
+  });
 }
 
 interface CodexOrchestratorRehydrateOptions {
@@ -310,8 +281,8 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
       session = {
         sessionName,
         repoPath: normalizeRepoPath(record.repoPath),
-        historyThreadId: normalizeHistoryThreadId(record.threadId),
-        threadId: readOrchestratorBackendSessionId(normalizeHistoryThreadId(record.threadId), 'codex'),
+        historyThreadId: normalizeThoughtsThreadId(record.threadId),
+        threadId: readOrchestratorBackendSessionId(normalizeThoughtsThreadId(record.threadId), 'codex'),
         status: 'busy',
         proc: null,
         createdAt: record.startedAt,
@@ -465,7 +436,7 @@ export async function sendToCodexOrchestrator(
   // just-interrupted subprocess mid-teardown. Wait for it to close rather than
   // dropping the steered message. See orchestrator-session.ts for the full why.
   if (session.status === 'busy') {
-    await waitForCodexOrchestratorIdle(session, PREEMPT_SETTLE_MS);
+    await waitForSessionIdle(session, PREEMPT_SETTLE_MS);
   }
 
   // A SIGTERM'd turn exits non-zero → 'dead', so the settle wait above commonly
@@ -710,15 +681,13 @@ export function requestCodexOrchestratorSessionReset(repoPath: string, threadId?
   sessionName: string;
   threadId: string | null;
 } {
-  const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const normalizedThreadId = normalizeHistoryThreadId(threadId);
-  const sessionName = codexOrchestratorSessionName(normalizedRepoPath, normalizedThreadId);
-  const session = sessions.get(sessionName);
-  if (session) {
-    session.threadId = null;
-  }
-  if (normalizedThreadId) {
-    writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null);
-  }
-  return { repoPath: normalizedRepoPath, sessionName, threadId: normalizedThreadId };
+  return requestRegisteredSessionReset(sessions, {
+    repoPath,
+    threadId,
+    sessionNameFor: codexOrchestratorSessionName,
+    resetExisting: (session) => {
+      session.threadId = null;
+    },
+    resetPersistedThread: (normalizedThreadId) => writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null),
+  });
 }
