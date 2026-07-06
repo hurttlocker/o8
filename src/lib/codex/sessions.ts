@@ -10,6 +10,7 @@ import type {
   RuntimeSurfaceSummary,
   SquadSummary,
 } from '@/lib/fleet/types';
+import { MODEL_IDS } from '@/lib/models';
 import { truncateText } from '@/lib/util/text';
 
 const execFileAsync = promisify(execFile);
@@ -666,7 +667,7 @@ export async function getCodexDiscoveredFleetAdditions(
         name: surface.title,
         squadId: 'squad-codex-local',
         runtime: 'codex',
-        model: thread.model || 'gpt-5.5',
+        model: thread.model || MODEL_IDS.codexDefault,
         status,
         currentTask: buildCurrentTask(thread, activity),
         workspace,
@@ -699,7 +700,7 @@ export async function getCodexDiscoveredFleetAdditions(
         name: surface.title,
         squadId: 'squad-codex-local',
         runtime: 'codex',
-        model: 'gpt-5.5',
+        model: MODEL_IDS.codexDefault,
         status: 'running',
         currentTask: `Live Codex terminal detected${proc.tty ? ` on ${proc.tty}` : ''}. Durable thread binding has not been recovered yet, so transcript/resume stay disabled.`,
         workspace: surface.cwd ?? shortenPath(proc.cwd ?? ''),

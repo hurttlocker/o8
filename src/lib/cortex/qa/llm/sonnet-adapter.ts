@@ -24,10 +24,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
+import { MODEL_IDS } from '@/lib/models';
 
 const execFileAsync = promisify(execFile);
 
-const SONNET_CLI_MODEL = 'claude-sonnet-5';
+const SONNET_CLI_MODEL = MODEL_IDS.claudeQaDefault;
 
 // ── Provider tier ─────────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ async function callSonnetApi(
   const apiKey = process.env.ANTHROPIC_API_KEY!;
 
   const body = {
-    model: 'claude-sonnet-5',
+    model: MODEL_IDS.claudeQaDefault,
     max_tokens: 1024,
     system: opts.system,
     messages: opts.messages,

@@ -10,6 +10,7 @@ mod first_run_install;
 mod point_overlay;
 mod launch_updater;
 mod mac_perms;
+mod models;
 mod paste;
 mod sidecar_lifecycle;
 mod sound;

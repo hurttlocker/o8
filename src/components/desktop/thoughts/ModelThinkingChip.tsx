@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
+import { MODEL_IDS } from '@/lib/models';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -38,9 +39,9 @@ type ComposerModelOption = {
 
 const COMPOSER_MODEL_OPTIONS: ComposerModelOption[] = [
   { value: 'codex-gpt-5-5', label: 'Codex GPT-5.5', backend: 'codex' },
-  { value: 'claude-fable-5', label: 'Fable 5', backend: 'fable', model: 'claude-fable-5' },
-  { value: 'claude-opus-4-8', label: 'Opus 4.8', backend: 'claude', model: 'claude-opus-4-8' },
-  { value: 'claude-sonnet-5', label: 'Sonnet 5', backend: 'claude', model: 'claude-sonnet-5' },
+  { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5', backend: 'fable', model: MODEL_IDS.fableDefault },
+  { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.orchestratorDefault },
+  { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', backend: 'claude', model: MODEL_IDS.claudeQaDefault },
 ];
 
 function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; active?: boolean }) {
