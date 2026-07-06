@@ -111,6 +111,10 @@ export interface MergePacketResult {
   note: string;
   /** True when the requested packet had already reached a released/closed state before this call. */
   alreadyReleased?: boolean;
+  /** Verified merge commit for already-released or newly merged packets. */
+  mergeSha?: string;
+  /** True when `mergeSha` was checked as an ancestor of the main checkout HEAD. */
+  ancestryVerified?: boolean;
   approvalId?: string;
   /**
    * Structured gate verdict (#623). Populated when the merge path ran the

@@ -24,7 +24,9 @@ const loadDispatch = () => import('@/lib/orchestrator/dispatch');
 const loadWorktreeCleanup = () => import('@/lib/orchestrator/worktree-cleanup');
 const loadWorktreeConflicts = () => import('@/lib/worktree/conflicts');
 const loadWorktreeLaunch = () => import('@/lib/worktree/launch');
+const loadMergeTruth = () => import('./merge-truth');
 const loadPostMergeCleanup = () => import('./post-merge-cleanup');
+const loadReviewCarry = () => import('./review-carry');
 const loadReview = () => import('./review');
 const loadShared = () => import('./shared');
 
@@ -76,10 +78,6 @@ export function isHeadShaMismatchError(error: unknown): error is HeadShaMismatch
   return error instanceof HeadShaMismatchError;
 }
 
-function resolveExpectedHeadSha(input: ApproveAndMergeInput, packet: OrchestratorPacket) {
-  return input.expectedHeadSha?.trim() || packet.review?.reviewedHeadSha?.trim() || undefined;
-}
-
 function isPacketAwaitingMerge(packet: OrchestratorPacket) {
   return packet.status === 'awaiting_review'
     && packet.releaseState !== 'released'
@@ -104,11 +102,13 @@ export async function isTerminalReleaseLane(packetId: string) {
   });
 }
 
-function buildAlreadyReleasedResult(): MergePacketResult {
+function buildAlreadyReleasedResult(mergeSha: string): MergePacketResult {
   return {
     merged: true,
     note: 'Already released (via auto-merge)',
     alreadyReleased: true,
+    mergeSha,
+    ancestryVerified: true,
   };
 }
 
@@ -116,16 +116,65 @@ function isAlreadyReleasedPacket(packet: OrchestratorPacket | null | undefined) 
   return packet?.releaseState === 'released' || packet?.status === 'released';
 }
 
-function alreadyReleasedResultForPacket(packet: OrchestratorPacket | null | undefined) {
-  if (isAlreadyReleasedPacket(packet)) {
-    return buildAlreadyReleasedResult();
+function recordedMergeSha(packet: OrchestratorPacket | null | undefined) {
+  return packet?.releaseStatePayload?.mergeCommit?.trim() || null;
+}
+
+async function clearStaleReleaseClaim(packetId: string, reason: string) {
+  const { withLockedState } = await loadControlPlane();
+  await withLockedState((state) => {
+    const packet = state.packets.find((candidate) => candidate.id === packetId);
+    if (!packet || !isAlreadyReleasedPacket(packet)) return;
+    packet.releaseState = 'pending';
+    if (packet.status === 'released') packet.status = 'awaiting_review';
+    packet.releaseStatePayload = {
+      ...(packet.releaseStatePayload ?? {}),
+      source: reason,
+    };
+  });
+}
+
+async function alreadyReleasedResultForPacket(
+  packet: OrchestratorPacket | null | undefined,
+  lane: ActivePacketLane | null | undefined,
+) {
+  if (!isAlreadyReleasedPacket(packet)) {
+    return null;
   }
+  const mergeSha = recordedMergeSha(packet);
+  if (mergeSha && lane?.repoPath) {
+    const { isAncestorCommit } = await loadMergeTruth();
+    if (await isAncestorCommit(lane.repoPath, mergeSha, 'HEAD')) {
+      return buildAlreadyReleasedResult(mergeSha);
+    }
+    console.error('[merge-truth] stale released packet flag; merge SHA is not on main ancestry', {
+      packetId: packet?.id,
+      mergeSha,
+      repoPath: lane.repoPath,
+    });
+    await clearStaleReleaseClaim(packet!.id, 'stale_release_flag_ancestry_failed');
+    return null;
+  }
+  console.error('[merge-truth] stale released packet flag; no merge SHA available for ancestry verification', {
+    packetId: packet?.id,
+    repoPath: lane?.repoPath ?? null,
+  });
+  if (packet?.id) await clearStaleReleaseClaim(packet.id, 'stale_release_flag_missing_merge_sha');
   return null;
 }
 
 async function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {
-  return alreadyReleasedResultForPacket(packets.find((candidate) => candidate.id === packetId))
-    ?? (await isTerminalReleaseLane(packetId) ? buildAlreadyReleasedResult() : null);
+  const { findLatestLaneByPacket } = await loadLaneRegistry();
+  const lane = findLatestLaneByPacket(packetId);
+  const packet = packets.find((candidate) => candidate.id === packetId);
+  const packetResult = await alreadyReleasedResultForPacket(packet, lane);
+  if (packetResult) return packetResult;
+  if (await isTerminalReleaseLane(packetId) && lane?.repoPath) {
+    const { readGitHead } = await loadMergeTruth();
+    const mergeSha = await readGitHead(lane.repoPath);
+    return buildAlreadyReleasedResult(mergeSha);
+  }
+  return null;
 }
 
 async function getWaveMergeOrder(
@@ -296,23 +345,41 @@ async function dispatchPacketMerge(
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }
+  let carriedReviewedHeadSha: string | undefined;
   const reviewedHead = await checkReviewedHeadIntegrity(lane, lane.worktreePath || lane.repoPath);
   if (!reviewedHead.ok) {
-    setLaneStatus(lane.id, 'reviewing', 'system', 'review_invalidated');
-    appendEvent(lane.id, 'review_invalidated', actor, {
+    const { carryReviewAcrossRebaseIfSamePatch } = await loadReviewCarry();
+    const carried = await carryReviewAcrossRebaseIfSamePatch({
+      packet,
+      lane,
       reviewedHeadSha: reviewedHead.reviewedHeadSha,
       currentHeadSha: reviewedHead.currentHeadSha,
-      branch: lane.branch,
-      baseBranch: lane.baseBranch,
-      packetId: lane.packetId,
+      actor,
     });
-    return {
-      merged: false,
-      note: formatReviewedHeadMismatchNote(reviewedHead),
-      reason: 'head_moved_since_review',
-      reviewedHeadSha: reviewedHead.reviewedHeadSha,
-      currentHeadSha: reviewedHead.currentHeadSha,
-    };
+    if (carried) {
+      carriedReviewedHeadSha = reviewedHead.currentHeadSha;
+      log(`Carried review pin across rebase for packet ${packet.id}.`, {
+        from: reviewedHead.reviewedHeadSha,
+        to: reviewedHead.currentHeadSha,
+        actor,
+      });
+    } else {
+      setLaneStatus(lane.id, 'reviewing', 'system', 'review_invalidated');
+      appendEvent(lane.id, 'review_invalidated', actor, {
+        reviewedHeadSha: reviewedHead.reviewedHeadSha,
+        currentHeadSha: reviewedHead.currentHeadSha,
+        branch: lane.branch,
+        baseBranch: lane.baseBranch,
+        packetId: lane.packetId,
+      });
+      return {
+        merged: false,
+        note: formatReviewedHeadMismatchNote(reviewedHead),
+        reason: 'head_moved_since_review',
+        reviewedHeadSha: reviewedHead.reviewedHeadSha,
+        currentHeadSha: reviewedHead.currentHeadSha,
+      };
+    }
   }
   const cleanupTarget = await capturePostMergeCleanupTarget(lane);
 
@@ -321,13 +388,24 @@ async function dispatchPacketMerge(
     laneId: lane.id,
     commitMessage: input.commitMessage?.trim() || undefined,
     reviewSummary: mapReviewSummary(packet),
-    // Advisory for merge-gate budget downgrade only; commands.ts re-derives merge authorization from the durable HEAD-matched review row.
+    // Advisory only; commands.ts re-derives authorization from durable review rows.
     orchestratorReviewed: packet.review?.approved === true,
-    expectedHeadSha: resolveExpectedHeadSha(input, packet),
+    expectedHeadSha: input.expectedHeadSha?.trim() || carriedReviewedHeadSha || packet.review?.reviewedHeadSha?.trim() || undefined,
     actor,
   });
 
   if (!result.ok && result.reason === 'head_moved_since_review' && result.reviewedHeadSha && result.currentHeadSha) {
+    const { carryReviewAcrossRebaseIfSamePatch } = await loadReviewCarry();
+    const carried = await carryReviewAcrossRebaseIfSamePatch({
+      packet,
+      lane,
+      reviewedHeadSha: result.reviewedHeadSha,
+      currentHeadSha: result.currentHeadSha,
+      actor,
+    });
+    if (carried) {
+      return dispatchPacketMerge(packet, input, actor);
+    }
     log(`Merge refused for packet ${packet.id}: reviewed HEAD moved.`, {
       reviewedHeadSha: result.reviewedHeadSha,
       currentHeadSha: result.currentHeadSha,
@@ -347,12 +425,6 @@ async function dispatchPacketMerge(
   }
 
   // #622 — Synchronous worktree cleanup guarantee.
-  // The verb=merge path in lane/commands.ts already removes the worktree on
-  // success, but its prune step is fire-and-forget and the control-plane
-  // lifecycle event below (`lastEventLabel = 'merged'`) must see a clean
-  // working tree so the next dispatch doesn't race against a half-gone
-  // directory. The helper is idempotent — if commands.ts already removed
-  // the worktree, this call reports `already-removed` and exits quickly.
   if (result.ok) {
     // #1110 follow-up — stamp mergedClean on the session_outcomes row so the
     // routing recommender (#747) can score successful merges. Fire-and-forget:
@@ -443,6 +515,12 @@ async function dispatchPacketMerge(
         packetState.status = 'released';
         packetState.queueState = 'held';
         packetState.releaseState = 'released';
+        packetState.releaseStatePayload = {
+          ...(packetState.releaseStatePayload ?? {}),
+          mergeCommit: result.mergeSha ?? null,
+          releasedAt: new Date().toISOString(),
+          source: 'approve_and_merge',
+        };
         packetState.blockedReason = null;
         if (packetState.lane) {
           packetState.lane.lastEventLabel = 'merged';
@@ -464,6 +542,7 @@ async function dispatchPacketMerge(
   return withGateVerdict(packet.id, {
     merged: result.ok,
     note: result.note,
+    ...(result.mergeSha ? { mergeSha: result.mergeSha } : {}),
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
     ...(result.reason ? { reason: result.reason } : {}),
     ...(result.reviewedHeadSha ? { reviewedHeadSha: result.reviewedHeadSha } : {}),
@@ -475,16 +554,12 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   const { currentMissionState } = await loadShared();
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-  const alreadyReleased = alreadyReleasedResultForPacket(packet);
+  const alreadyReleased = await alreadyReleasedResultForPacketId(input.packetId, state.packets);
   if (alreadyReleased) {
     return alreadyReleased;
   }
 
   if (!packet) {
-    if (await isTerminalReleaseLane(input.packetId)) {
-      return buildAlreadyReleasedResult();
-    }
-
     // #557 — Fall through to lane-only merge when the mission packet is missing.
     // #622 — wrapper captures lane pre-merge and runs synchronous cleanup on
     // success, making the bash-merge fallback atomic with the merge commit.
