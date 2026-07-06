@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 
@@ -6,6 +8,15 @@ const execFileAsync = promisify(execFile);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 // o8's own machinery living inside the repo — never part of "your changes".
 const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
+const REVIEW_SCAN_SKIP_DIRS = new Set([
+  '.git',
+  '.next',
+  'node_modules',
+  'dist',
+  'out',
+  'coverage',
+]);
+const liveReviewChangeCache = new Map<string, { token: string; changeSet: LiveReviewChangeSet }>();
 
 export interface LiveReviewChangeSet {
   repoPath: string;
@@ -21,6 +32,99 @@ function isReviewNoisePath(filePath: string) {
   const trimmed = filePath.trim();
   if (REVIEW_NOISE_PATHS.has(trimmed)) return true;
   return REVIEW_NOISE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+function safeMtimeMs(filePath: string) {
+  try {
+    return statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+function resolveGitDir(workspacePath: string) {
+  const dotGitPath = join(workspacePath, '.git');
+  try {
+    const dotGitStat = statSync(dotGitPath);
+    if (dotGitStat.isDirectory()) return dotGitPath;
+    if (!dotGitStat.isFile()) return null;
+    const raw = readFileSync(dotGitPath, 'utf-8').trim();
+    const match = raw.match(/^gitdir:\s*(.+)$/i);
+    if (!match) return null;
+    return resolve(workspacePath, match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function commonGitDir(gitDir: string) {
+  try {
+    const raw = readFileSync(join(gitDir, 'commondir'), 'utf-8').trim();
+    return isAbsolute(raw) ? raw : resolve(gitDir, raw);
+  } catch {
+    return gitDir;
+  }
+}
+
+function headRefPath(gitDir: string, commonDir: string) {
+  try {
+    const headPath = join(gitDir, 'HEAD');
+    const raw = readFileSync(headPath, 'utf-8').trim();
+    const match = raw.match(/^ref:\s*(.+)$/);
+    if (!match) return null;
+    const refPath = match[1];
+    return isAbsolute(refPath) ? refPath : join(commonDir, refPath);
+  } catch {
+    return null;
+  }
+}
+
+function workingTreeMtimeToken(workspacePath: string) {
+  let newest = 0;
+  let files = 0;
+  const stack = [workspacePath];
+
+  while (stack.length > 0) {
+    const dir = stack.pop() as string;
+    let entries: ReturnType<typeof readdirSync>;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (REVIEW_SCAN_SKIP_DIRS.has(entry.name)) continue;
+        stack.push(join(dir, entry.name));
+        continue;
+      }
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      const absPath = join(dir, entry.name);
+      const relativePath = absPath.slice(workspacePath.length + 1);
+      if (isReviewNoisePath(relativePath)) continue;
+      newest = Math.max(newest, safeMtimeMs(absPath));
+      files += 1;
+    }
+  }
+
+  return `${files}:${newest}`;
+}
+
+function reviewMtimeToken(workspacePath: string) {
+  const gitDir = resolveGitDir(workspacePath);
+  if (!gitDir) return `nogit:${workingTreeMtimeToken(workspacePath)}`;
+  const headPath = join(gitDir, 'HEAD');
+  const commonDir = commonGitDir(gitDir);
+  const refPath = headRefPath(gitDir, commonDir);
+  const packedRefsPath = join(commonDir, 'packed-refs');
+  return [
+    safeMtimeMs(join(gitDir, 'index')),
+    safeMtimeMs(headPath),
+    refPath ? safeMtimeMs(refPath) : 0,
+    safeMtimeMs(packedRefsPath),
+    workingTreeMtimeToken(workspacePath),
+  ].join(':');
 }
 
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {
@@ -85,6 +189,13 @@ export async function getLiveReviewChangeSet(
   repoPath = workspacePath,
   sessionKey?: string,
 ): Promise<LiveReviewChangeSet> {
+  const cacheKey = resolve(workspacePath);
+  const token = reviewMtimeToken(cacheKey);
+  const cached = liveReviewChangeCache.get(cacheKey);
+  if (cached?.token === token) {
+    return cached.changeSet;
+  }
+
   const [nameStatusRaw, numStatRaw, untrackedRaw] = await Promise.all([
     execFileAsync('git', ['-C', workspacePath, 'diff', '--name-status', '--relative', '-M', 'HEAD'], {
       timeout: 5000,
@@ -104,7 +215,7 @@ export async function getLiveReviewChangeSet(
   const additions = changedFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0);
   const deletions = changedFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
 
-  return {
+  const changeSet = {
     repoPath,
     workspacePath,
     sessionKey,
@@ -113,4 +224,6 @@ export async function getLiveReviewChangeSet(
     deletions,
     files: changedFiles.length,
   };
+  liveReviewChangeCache.set(cacheKey, { token, changeSet });
+  return changeSet;
 }
