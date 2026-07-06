@@ -25,7 +25,7 @@ This README is honest about state. Everything under **Real** ships in the curren
 - **Mission dispatch + governance** — `create_mission` → `dispatch_mission` → review the diff → `approve_and_merge`. Every worker runs in an isolated worktree; nothing merges without an operator review. A 5-layer merge-failure escalation chain.
 - **Cortex v2 organizational memory** — operator directives + a session-outcome ledger (SQLite), auto-directive proposals, and the **Engineering Brain** Q&A surface ("what did Codex do today?", "how does dispatch work?").
 - **The MCP surface** — two stdio servers (operator + cortex) exposing o8 to Claude, plus 12 `o8_view_*` webview-control tools that let an external Claude drive the running app.
-- **The `o8` CLI** — agents inside packet worktrees get `packet info/scope/heartbeat/report`, `lane touches`, `cortex observe`, `o8 run`, `o8 spec …`, `o8 doctor`.
+- **The `o8` CLI** — agents inside packet worktrees get `packet info/scope/heartbeat/report/stop`, `mission stop`, `run stop`, `lane touches`, `cortex observe`, `o8 run`, `o8 spec …`, `o8 doctor`.
 - **Symon, the voice agent** — a full macOS chief-of-staff by voice, every consequential action behind a spoken confirm card:
   - **Your Mac:** Reminders + Calendar (create *and* move/rename, recurring events), Notes, Mail, Contacts, Shortcuts, Apple Music (play/pause/next/previous/playlists), weather (keyless), system volume, open/list apps, in-place text rewrite with a one-tap dock Revert chip.
   - **o8 itself:** open any surface (settings, mobile QR, automations, browser, panels), read panels (automations/projects/repos), add a repo, **"what needs me?"** approval triage (approve/reject by name through a card), recap ("what happened while I was gone"), CLI quota, steer/rerun a packet, file a GitHub issue, draft a message to the orchestrator, ask the Engineering Brain.
@@ -62,7 +62,7 @@ So *"remind me to call Q at 3"* → Symon does it; *"what's on my calendar?"* �
 Install from **Settings → MCP** (writes Claude Desktop / Claude Code config with merge-preserving backups).
 
 ### The `o8` CLI
-Symlinked to `/usr/local/bin/o8` after first launch. Dispatched agents use it inside worktrees; operators use it directly. See [`AGENTS.md`](./AGENTS.md) for the full command list (`packet *`, `lane touches`, `cortex observe`, `run`, `spec *`, `doctor`).
+Symlinked to `/usr/local/bin/o8` after first launch. Dispatched agents use it inside worktrees; operators use it directly. Stop parity is available headlessly with `o8 packet stop <packetId>` / `o8 packet cancel`, `o8 mission stop --mission <missionId>`, and `o8 run stop <runId>`. See [`AGENTS.md`](./AGENTS.md) for the full command list (`packet *`, `mission *`, `lane touches`, `cortex observe`, `run`, `spec *`, `doctor`).
 
 ### The mobile app
 A remote-control surface (`src/components/mobile/`) — a separate codebase from desktop by design, paired to the local backend. Approve, dispatch, and watch the fleet from your phone.
