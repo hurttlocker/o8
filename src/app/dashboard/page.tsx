@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
+import { isTauri, browserViewHide } from '@/lib/tauri/bridge';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
@@ -644,6 +644,27 @@ function DashboardInner() {
     mobileRemoteHref,
     handleOpenSettingsTab,
   } = uiChrome;
+
+  // Native browser-view janitor (deep audit, operator 2026-07-06 — "a little
+  // too persistent"). Two holes in the occlusion machinery:
+  // 1. RELOAD ORPHAN — the browser view is a separate always-on-top OS window;
+  //    a webview reload kills every JS owner, so nothing hides it and it
+  //    floats over the boot splash forever. Hide once on dashboard mount; the
+  //    Browser tab re-adopts it when its placeholder mounts.
+  useEffect(() => {
+    if (!isTauri()) return;
+    void browserViewHide();
+  }, []);
+  // 2. FULL-SURFACE OVERLAYS — Settings/Automations cover the workspace, but
+  //    the geometric occlusion sampler only samples the placeholder rect, so a
+  //    drifted or larger native window can still paint over them. Force-occlude
+  //    (existing event; the visible NativeBrowserSurface hides + snapshots)
+  //    while any nav overlay is open.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const overlayOpen = activeNavSection === 'settings' || activeNavSection === 'automations';
+    window.dispatchEvent(new CustomEvent('o8:native-browser-occlude', { detail: { occlude: overlayOpen } }));
+  }, [activeNavSection]);
 
   const session = useSessionState();
   const {

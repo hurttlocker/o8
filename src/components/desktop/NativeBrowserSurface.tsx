@@ -205,13 +205,12 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       return false;
     };
     const inset = 6;
-    const pts: Array<[number, number]> = [
-      [r.left + r.width / 2, r.top + r.height / 2],
-      [r.left + inset, r.top + inset],
-      [r.right - inset, r.top + inset],
-      [r.left + inset, r.bottom - inset],
-      [r.right - inset, r.bottom - inset],
-    ];
+    // 3×3 grid (was center + 4 corners): popovers that overlap only an edge —
+    // the repo drawer, the context meter — slipped between the 5 points and
+    // the window kept painting over them (operator, 2026-07-06).
+    const xs = [r.left + inset, r.left + r.width / 2, r.right - inset];
+    const ys = [r.top + inset, r.top + r.height / 2, r.bottom - inset];
+    const pts: Array<[number, number]> = xs.flatMap((x) => ys.map((y) => [x, y] as [number, number]));
     let occluded = false;
     for (const [px, py] of pts) {
       const top = document.elementsFromPoint(px, py)[0];
