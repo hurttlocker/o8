@@ -424,7 +424,8 @@ compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 // Ships alongside the bundled Next.js backend so the packaged Tauri app
 // can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
 // a source checkout. See docs/cortex-v2-dogfood-report-2026-04-09.md.
-compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
+compileServerBundle('operator-mcp-server-main', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
+compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts', NATIVE_EXTERNALS);
 compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
 
 // ── Copy runtime-read prompt templates next to the bundles ──
@@ -511,7 +512,7 @@ exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
 
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
-const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'cortex-mcp-server.mjs'];
+const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
 for (const bundle of REQUIRED_BUNDLES) {
   const bundlePath = join(server, bundle);
   if (!existsSync(bundlePath)) {
