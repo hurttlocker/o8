@@ -994,32 +994,88 @@ fn resolve_login_shell_path() -> Option<String> {
     None
 }
 
+/// Directories runtime CLIs (claude / codex / gemini / opencode / gh) are known
+/// to land in but that a NON-INTERACTIVE login shell (`zsh -l -c`) often can't
+/// see: nvm / fnm / the Claude native installer (~/.local/bin) all add their
+/// PATH lines to ~/.zshrc, which only INTERACTIVE shells source. The v0.1.548
+/// beta report ("Claude/Gemini not detected" while Codex — brew, ~/.zprofile —
+/// showed green) is exactly this gap. Mirrors wellKnownCliDirs() in
+/// src/lib/runtimes/shared/cli-locate.ts — keep the two lists in sync.
+fn well_known_cli_bin_dirs() -> Vec<String> {
+    let mut dirs: Vec<String> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        for rel in [
+            ".o8/bin",                    // o8's own symlink farm (cli-locate.ts)
+            ".local/bin",                 // Claude Code native installer default
+            ".claude/local",              // claude migrate-installer target
+            ".npm-global/bin",
+            ".bun/bin",
+            "Library/pnpm",               // pnpm global bin (macOS)
+            ".local/share/pnpm",          // pnpm global bin (XDG)
+            ".deno/bin",
+            ".volta/bin",
+            ".asdf/shims",
+            ".fnm/aliases/default/bin",
+        ] {
+            dirs.push(format!("{}/{}", home, rel));
+        }
+        // Per-version global bins from nvm / fnm. Order among versions barely
+        // matters here (these are appended fallbacks), so a simple reverse
+        // lexicographic sort is enough.
+        for (root, sub) in [
+            (format!("{}/.nvm/versions/node", home), "bin"),
+            (format!("{}/.fnm/node-versions", home), "installation/bin"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(&root) {
+                let mut versions: Vec<std::path::PathBuf> =
+                    entries.flatten().map(|e| e.path()).collect();
+                versions.sort();
+                versions.reverse();
+                for v in versions {
+                    dirs.push(format!("{}/{}", v.to_string_lossy(), sub));
+                }
+            }
+        }
+    }
+    dirs.push("/opt/homebrew/bin".to_string());
+    dirs.push("/usr/local/bin".to_string());
+    dirs.retain(|d| std::path::Path::new(d).is_dir());
+    dirs
+}
+
 /// Prepend the login-shell PATH onto this process's PATH so every child we
 /// spawn (Next server, ws-server, MCP, dispatched Codex workers) sees the same
-/// PATH a terminal would. The sidecar still launches on the explicit Node 22
-/// binary (`O8_NODE_BIN`), so this never disturbs the better-sqlite3 ABI pin —
-/// it only widens what children can find. Dedup'd; minimal PATH kept as fallback.
+/// PATH a terminal would — then append the well-known CLI dirs the login shell
+/// itself misses (~/.zshrc-managed entries; see well_known_cli_bin_dirs). Runs
+/// even when the login-shell probe fails: the well-known dirs alone rescue CLI
+/// detection on machines where no shell probe works. The sidecar still launches
+/// on the explicit Node 22 binary (`O8_NODE_BIN`), so this never disturbs the
+/// better-sqlite3 ABI pin — it only widens what children can find. Dedup'd;
+/// minimal PATH kept as fallback.
 fn augment_process_path_from_login_shell() {
-    let login_path = match resolve_login_shell_path() {
-        Some(p) => p,
-        None => {
-            log::warn!(
-                "Could not resolve login-shell PATH; sidecar children keep the minimal \
-                 Finder PATH — CLI detection (codex/claude/gh) and worktree installs may fail"
-            );
-            return;
-        }
-    };
+    let login_path = resolve_login_shell_path().unwrap_or_else(|| {
+        log::warn!(
+            "Could not resolve login-shell PATH; falling back to the well-known \
+             CLI dirs + minimal Finder PATH for sidecar children"
+        );
+        String::new()
+    });
     let current = std::env::var("PATH").unwrap_or_default();
-    let mut merged: Vec<&str> = Vec::new();
-    for entry in login_path.split(':').chain(current.split(':')) {
+    let well_known = well_known_cli_bin_dirs();
+    let mut merged: Vec<String> = Vec::new();
+    for entry in login_path
+        .split(':')
+        .chain(current.split(':'))
+        .map(str::to_string)
+        .chain(well_known.into_iter())
+    {
         if !entry.is_empty() && !merged.contains(&entry) {
             merged.push(entry);
         }
     }
     let merged = merged.join(":");
     log::info!(
-        "Augmented PATH from login shell ({} entries) for sidecar children",
+        "Augmented PATH from login shell + well-known CLI dirs ({} entries) for sidecar children",
         merged.split(':').count()
     );
     std::env::set_var("PATH", merged);
@@ -1147,19 +1203,23 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
         NodePreflightError::Missing => (
             "Node.js not found",
             format!(
-                "o8 needs Node.js v{}+ to run its backend.\n\n\
-                 Install the latest LTS from https://nodejs.org and launch o8 again.\n\n\
+                "o8 needs Node.js v{major}.x to run its backend.\n\n\
+                 Install it with `brew install node@{major}` or `nvm install {major}`,\n\
+                 then launch o8 again. (Node {major} specifically — o8's native modules\n\
+                 are built against the Node {major} ABI; newer majors aren't supported yet.)\n\n\
                  If Node.js is already installed via nvm, fnm, or Volta, make sure it is\n\
                  available to a login shell (zsh/bash with -l flag).",
-                MIN_NODE_MAJOR
+                major = PREFERRED_NODE_MAJOR
             ),
         ),
         NodePreflightError::TooOld { raw } => (
             "Node.js is too old",
             format!(
-                "o8 needs Node.js v{}+ but found {}.\n\n\
-                 Upgrade from https://nodejs.org and launch o8 again.",
-                MIN_NODE_MAJOR, raw
+                "o8 needs Node.js v{major}.x but found {raw}.\n\n\
+                 Install it with `brew install node@{major}` or `nvm install {major}`,\n\
+                 then launch o8 again.",
+                major = PREFERRED_NODE_MAJOR,
+                raw = raw
             ),
         ),
     };
