@@ -1,4 +1,5 @@
 import type { EventSeverity } from '@/lib/fleet/types';
+import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 
 export type ApprovalRisk = 'low' | 'medium' | 'high';
@@ -42,6 +43,7 @@ export interface ApprovalDiffPreview {
 /** Structured merge gate result attached to lane-merge approval cards */
 export interface ApprovalGateResult {
   passed: boolean;
+  diffBase?: PacketDiffBaseResolution;
   violations: Array<{
     category: 'security' | 'budget' | 'integrity';
     severity: 'block' | 'warn';

@@ -245,7 +245,7 @@ async function createRebaseConflictApproval(
       FailureCategory: 'rebase-conflict',
     },
     note: `Rebase conflict escalated to operator. ${files.length} conflicting file${files.length === 1 ? '' : 's'}.`,
-    gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+    gateResult: { passed: gateResult.passed, violations: gateResult.violations, diffBase: gateResult.diffBase },
     conflictReport: {
       files,
       mergeError: error.message,
@@ -288,7 +288,7 @@ async function createFastForwardFailureApproval(
       FailureCategory: failureCategory,
     },
     note: `Fast-forward escalated to operator (${failureCategory}): ${message}`,
-    gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+    gateResult: { passed: gateResult.passed, violations: gateResult.violations, diffBase: gateResult.diffBase },
     conflictReport: {
       files: [],
       mergeError: message,
