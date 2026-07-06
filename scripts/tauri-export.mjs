@@ -480,7 +480,19 @@ if (existsSync(CLI_BUILD)) {
   cpSync(CLI_OUTPUT, CLI_BUNDLE_DST);
   writeFileSync(CLI_BIN_DST, `#!/bin/sh
 set -eu
-DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# Resolve the REAL script location through symlinks — o8 is invoked via
+# /usr/local/bin/o8 -> <app bundle>/server/bin/o8, and dirname "$0" alone
+# pointed at /usr/local/bin, so o8.mjs was never found (every PATH invocation,
+# including dispatched workers' \`o8 packet report\`, died MODULE_NOT_FOUND).
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink -- "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname -- "$SELF")/$LINK" ;;
+  esac
+done
+DIR="$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)"
 NODE_BIN="\${O8_NODE_BIN:-}"
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
   NODE_BIN="$(zsh -l -c 'command -v node' 2>/dev/null || bash -l -c 'command -v node' 2>/dev/null || sh -lc 'command -v node' 2>/dev/null || true)"
