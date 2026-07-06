@@ -78,11 +78,26 @@ export function persistUiZoom(level: number): void {
 // Apply the zoom to the document root via setProperty (avoids relying on the
 // `zoom` typing in CSSStyleDeclaration) plus mirror it into a `--ui-zoom` var so
 // any consumer can read the live value.
+//
+// WEBKIT COMPENSATION (operator video, 2026-07-06 — "zoom completely breaks the
+// UI"): in WKWebView, CSS `zoom` scales rendered output but viewport units keep
+// computing against the UNSCALED window — a 100vh-sized shell renders at
+// zoom×100vh, so zooming out shrank the whole app into the top-left corner and
+// left a dead L-shaped void right+bottom (and zooming in overflowed). Sizing the
+// root to 100/zoom vh/vw cancels it exactly: rendered = zoom × (100/zoom)vh =
+// the full window at every level.
 export function applyUiZoom(level: number): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.style.setProperty('zoom', String(level));
   root.style.setProperty('--ui-zoom', String(level));
+  if (level === 1) {
+    root.style.removeProperty('width');
+    root.style.removeProperty('height');
+  } else {
+    root.style.setProperty('width', `${100 / level}vw`);
+    root.style.setProperty('height', `${100 / level}vh`);
+  }
 }
 
 // Drop the inline zoom override (used on IDE unmount so the IDE zoom never leaks
@@ -91,6 +106,8 @@ export function clearUiZoom(): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.style.removeProperty('zoom');
+  root.style.removeProperty('width');
+  root.style.removeProperty('height');
   root.style.setProperty('--ui-zoom', '1');
 }
 

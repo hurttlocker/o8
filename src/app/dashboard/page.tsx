@@ -4142,7 +4142,10 @@ function DashboardInner() {
       <RealtimeVoiceHost />
       <ReportIssueHost />
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
-      height: '100vh',
+      // Divided by --ui-zoom: WebKit CSS zoom scales output but vh keeps
+      // computing against the unscaled window, so a plain 100vh shell shrinks
+      // into the corner when zooming out (operator video, 2026-07-06).
+      height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
       background: 'var(--t-bg-gradient)',
@@ -4923,7 +4926,7 @@ function DashboardInner() {
                   // so it matches the open AgentPanel column. top went
                   // 44 → 35 to close the click-gap, so the height grew
                   // proportionally (was 100vh - 90 from the old top).
-                  height: 'calc(100vh - 81px)',
+                  height: 'calc(100vh / var(--ui-zoom, 1) - 81px)',
                   display: 'flex',
                   flexDirection: 'column',
                   zIndex: 200,
