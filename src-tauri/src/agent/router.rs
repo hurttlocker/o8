@@ -8,12 +8,11 @@
 //! fast-path (lower latency, no vision-on-the-front). A model id containing `/`
 //! routes to OpenRouter — the one-flip A/B.
 
-use serde::{Deserialize, Serialize};
 use crate::models::{
-    AGENT_INTENT_CLASSIFICATION_DEFAULT,
-    AGENT_MAC_NATIVE_ACTION_DEFAULT,
+    AGENT_INTENT_CLASSIFICATION_DEFAULT, AGENT_MAC_NATIVE_ACTION_DEFAULT,
     AGENT_RESULT_SUMMARIZATION_DEFAULT,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

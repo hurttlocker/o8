@@ -7,11 +7,18 @@ use std::io::Write;
 
 fn agent_output_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".o8").join("agent-output")
+    std::path::PathBuf::from(home)
+        .join(".o8")
+        .join("agent-output")
 }
 
 pub async fn read(args: Value) -> Result<Value, String> {
-    let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let path_str = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if path_str.is_empty() {
         return Err("path is required".into());
     }
@@ -40,14 +47,23 @@ pub async fn read(args: Value) -> Result<Value, String> {
 }
 
 pub async fn write(args: Value) -> Result<Value, String> {
-    let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let filename = args
+        .get("filename")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if filename.is_empty() {
         return Err("filename is required".into());
     }
     let headers: Vec<String> = args
         .get("headers")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     let rows: Vec<Vec<String>> = args
         .get("rows")
@@ -55,8 +71,11 @@ pub async fn write(args: Value) -> Result<Value, String> {
         .map(|arr| {
             arr.iter()
                 .filter_map(|row| {
-                    row.as_array()
-                        .map(|r| r.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    row.as_array().map(|r| {
+                        r.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                 })
                 .collect()
         })
@@ -140,13 +159,20 @@ mod tests {
 
     #[test]
     fn csv_row_escapes_commas() {
-        let row = vec!["hello".to_string(), "world,comma".to_string(), "plain".to_string()];
+        let row = vec![
+            "hello".to_string(),
+            "world,comma".to_string(),
+            "plain".to_string(),
+        ];
         assert_eq!(csv_row(&row), "hello,\"world,comma\",plain");
     }
 
     #[test]
     fn parse_csv_line_quoted() {
-        assert_eq!(parse_csv_line("\"hello, world\",b"), vec!["hello, world", "b"]);
+        assert_eq!(
+            parse_csv_line("\"hello, world\",b"),
+            vec!["hello, world", "b"]
+        );
     }
 
     #[test]

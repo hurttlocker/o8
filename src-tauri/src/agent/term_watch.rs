@@ -68,7 +68,9 @@ fn ensure_poller(app: &tauri::AppHandle) {
         if tokens.is_empty() {
             continue;
         }
-        let Some(states) = probe(&tokens) else { continue };
+        let Some(states) = probe(&tokens) else {
+            continue;
+        };
         for state in states {
             let fired = {
                 let mut watches = WATCHES.lock().unwrap_or_else(|p| p.into_inner());
@@ -173,11 +175,18 @@ fn probe(tokens: &[String]) -> Option<Vec<ProbeState>> {
         parsed
             .iter()
             .map(|v| ProbeState {
-                id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                id: v
+                    .get("id")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 gone: v.get("gone").and_then(|x| x.as_bool()).unwrap_or(false),
                 working: v.get("working").and_then(|x| x.as_bool()).unwrap_or(false),
                 idle: v.get("idle").and_then(|x| x.as_bool()).unwrap_or(false),
-                needs_input: v.get("needsInput").and_then(|x| x.as_bool()).unwrap_or(false),
+                needs_input: v
+                    .get("needsInput")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false),
             })
             .collect(),
     )
@@ -195,6 +204,10 @@ fn announce(app: &tauri::AppHandle, title: &str, what: &str) {
     crate::tts::playback::play_thread(line.clone(), crate::tts::load_config());
     let payload = json!({ "kind": "glint", "text": line });
     use tauri::Emitter;
-    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:agent-task-event", payload.clone());
+    let _ = app.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:agent-task-event",
+        payload.clone(),
+    );
     let _ = app.emit("o8:agent-task-event", payload);
 }

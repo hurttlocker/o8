@@ -26,7 +26,10 @@ pub fn nudge() {
 /// mirroring `spawn_agent`). Call once from setup after the bundled server is up.
 pub fn spawn(app: tauri::AppHandle) {
     std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[worker-pulse] failed to build runtime: {e}");
@@ -52,13 +55,15 @@ async fn run(app: tauri::AppHandle) {
                     "waiting": waiting,
                     "repos": repos,
                 });
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:worker-status", payload.clone());
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
+                    "o8:worker-status",
+                    payload.clone(),
+                );
                 let _ = app.emit("o8:worker-status", payload);
             }
             if changed {
-                log::info!(
-                    "[worker-pulse] {working} working, {waiting} waiting on the operator"
-                );
+                log::info!("[worker-pulse] {working} working, {waiting} waiting on the operator");
             }
             last = Some((working, waiting, repos));
         }
@@ -108,8 +113,14 @@ const WAITING_STATUSES: &[&str] = &[
 /// None on transport failure (server restarting, port moved) — keep the last
 /// known state rather than flickering the orbit off.
 async fn poll() -> Option<(usize, usize, Vec<String>)> {
-    let resp = super::o8_http::get_json("/api/lanes?active=true").await.ok()?;
-    let lanes = resp.get("lanes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let resp = super::o8_http::get_json("/api/lanes?active=true")
+        .await
+        .ok()?;
+    let lanes = resp
+        .get("lanes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut repos: Vec<String> = Vec::new();
     let mut working = 0usize;
     let mut waiting = 0usize;

@@ -1,29 +1,29 @@
+#[cfg(target_os = "macos")]
+mod agent;
+#[cfg(target_os = "macos")]
+mod ai;
 mod audio_ducker;
 mod background;
 mod browser_view;
 mod dev_frontend;
 mod dictation_history;
 mod dock_window;
-mod fn_hotkey;
 #[cfg(target_os = "macos")]
 mod first_run_install;
-mod point_overlay;
+mod fn_hotkey;
 mod launch_updater;
 mod mac_perms;
 mod models;
 mod paste;
+mod point_overlay;
 mod sidecar_lifecycle;
 mod sound;
 mod speech_text;
-mod window_restore;
 #[cfg(target_os = "macos")]
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
-#[cfg(target_os = "macos")]
-mod ai;
-#[cfg(target_os = "macos")]
-mod agent;
+mod window_restore;
 // Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
 // (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
 #[cfg(target_os = "macos")]
@@ -43,10 +43,10 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 use webview_latch::WebviewLatch;
-#[cfg(target_os = "macos")]
-use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg(target_os = "windows")]
 use window_vibrancy::apply_blur;
+#[cfg(target_os = "macos")]
+use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 // ── macOS Keychain integration ──
 //
@@ -75,8 +75,16 @@ fn base64_encode_url(data: &[u8]) -> String {
     let mut i = 0;
     while i < data.len() {
         let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
+        let b1 = if i + 1 < data.len() {
+            data[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < data.len() {
+            data[i + 2] as u32
+        } else {
+            0
+        };
         out.push(TABLE[((b0 >> 2) & 0x3f) as usize] as char);
         out.push(TABLE[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
         if i + 1 < data.len() {
@@ -95,8 +103,10 @@ fn keychain_find_password() -> Option<String> {
     let out = Command::new("security")
         .args([
             "find-generic-password",
-            "-s", KEYCHAIN_SERVICE,
-            "-a", KEYCHAIN_ACCOUNT,
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
             "-w",
         ])
         .output()
@@ -105,7 +115,11 @@ fn keychain_find_password() -> Option<String> {
         return None;
     }
     let pw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if pw.is_empty() { None } else { Some(pw) }
+    if pw.is_empty() {
+        None
+    } else {
+        Some(pw)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -114,9 +128,12 @@ fn keychain_add_password(password: &str) -> bool {
     Command::new("security")
         .args([
             "add-generic-password",
-            "-s", KEYCHAIN_SERVICE,
-            "-a", KEYCHAIN_ACCOUNT,
-            "-w", password,
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-w",
+            password,
             "-U",
         ])
         .status()
@@ -157,7 +174,11 @@ fn master_key_ensure() -> Result<String, String> {
     }
     let key = generate_master_key();
     if keychain_add_password(&key) {
-        log::info!("[keychain] Master key created and stored (service={} account={})", KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+        log::info!(
+            "[keychain] Master key created and stored (service={} account={})",
+            KEYCHAIN_SERVICE,
+            KEYCHAIN_ACCOUNT
+        );
         Ok(key)
     } else {
         Err("keychain-write-failed".to_string())
@@ -200,7 +221,10 @@ fn migrate_data_dir_once(home: &str, new_dir: &str) {
 
     if !new_exists && !old_exists {
         let _ = std::fs::create_dir_all(new_dir);
-        let _ = std::fs::write(&marker, format!("Fresh install on {:?}\n", std::time::SystemTime::now()));
+        let _ = std::fs::write(
+            &marker,
+            format!("Fresh install on {:?}\n", std::time::SystemTime::now()),
+        );
         return;
     }
     if new_exists {
@@ -208,7 +232,10 @@ fn migrate_data_dir_once(home: &str, new_dir: &str) {
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false);
         if has_content {
-            let _ = std::fs::write(&marker, format!("Existing dir on {:?}\n", std::time::SystemTime::now()));
+            let _ = std::fs::write(
+                &marker,
+                format!("Existing dir on {:?}\n", std::time::SystemTime::now()),
+            );
             return;
         }
     }
@@ -218,8 +245,18 @@ fn migrate_data_dir_once(home: &str, new_dir: &str) {
         if let Err(e) = copy_dir_recursive(&old_dir, new_dir) {
             log::warn!("[data-dir] Migration failed: {}", e);
         } else {
-            let _ = std::fs::write(&marker, format!("Migrated from {} on {:?}\n", old_dir, std::time::SystemTime::now()));
-            log::info!("[data-dir] Migration complete. Old dir left at {} for rollback.", old_dir);
+            let _ = std::fs::write(
+                &marker,
+                format!(
+                    "Migrated from {} on {:?}\n",
+                    old_dir,
+                    std::time::SystemTime::now()
+                ),
+            );
+            log::info!(
+                "[data-dir] Migration complete. Old dir left at {} for rollback.",
+                old_dir
+            );
         }
     }
 }
@@ -232,7 +269,10 @@ fn copy_dir_recursive(src: &str, dst: &str) -> std::io::Result<()> {
         let file_name = entry.file_name();
         let dst_path = std::path::Path::new(dst).join(&file_name);
         if entry.file_type()?.is_dir() {
-            copy_dir_recursive(src_path.to_str().unwrap_or(""), dst_path.to_str().unwrap_or(""))?;
+            copy_dir_recursive(
+                src_path.to_str().unwrap_or(""),
+                dst_path.to_str().unwrap_or(""),
+            )?;
         } else {
             std::fs::copy(&src_path, &dst_path)?;
         }
@@ -277,11 +317,21 @@ const CODEBASE_MEMORY_REPO: &str = "DeusData/codebase-memory-mcp";
 /// with `CODEBASE_MEMORY_VERSION`.
 fn codebase_memory_archive_sha(asset: &str) -> Option<&'static str> {
     match asset {
-        "codebase-memory-mcp-darwin-amd64.tar.gz" => Some("a4d09d97fe1f47e1a0a23309bc34d9937f74c61950bed3259f9576800cc78727"),
-        "codebase-memory-mcp-darwin-arm64.tar.gz" => Some("a1d3f8a4c353ab94ea8fe1fb60159758020f2f256c9652699a0bd6725189a439"),
-        "codebase-memory-mcp-linux-amd64.tar.gz"  => Some("0dfd70f73337219925f3ec6a572fe776dbbe1c4c8c6ab546ab214fe16e56a426"),
-        "codebase-memory-mcp-linux-arm64.tar.gz"  => Some("f1fad27262fe7af4a356af128e43942355cb2189491079b6790ecc5ae3af069c"),
-        "codebase-memory-mcp-windows-amd64.zip"   => Some("da3d7d7bd6f687b697145457ff9d113ecf6daffe173d236457a43223e89a5e9c"),
+        "codebase-memory-mcp-darwin-amd64.tar.gz" => {
+            Some("a4d09d97fe1f47e1a0a23309bc34d9937f74c61950bed3259f9576800cc78727")
+        }
+        "codebase-memory-mcp-darwin-arm64.tar.gz" => {
+            Some("a1d3f8a4c353ab94ea8fe1fb60159758020f2f256c9652699a0bd6725189a439")
+        }
+        "codebase-memory-mcp-linux-amd64.tar.gz" => {
+            Some("0dfd70f73337219925f3ec6a572fe776dbbe1c4c8c6ab546ab214fe16e56a426")
+        }
+        "codebase-memory-mcp-linux-arm64.tar.gz" => {
+            Some("f1fad27262fe7af4a356af128e43942355cb2189491079b6790ecc5ae3af069c")
+        }
+        "codebase-memory-mcp-windows-amd64.zip" => {
+            Some("da3d7d7bd6f687b697145457ff9d113ecf6daffe173d236457a43223e89a5e9c")
+        }
         _ => None,
     }
 }
@@ -292,20 +342,40 @@ fn codebase_memory_archive_sha(asset: &str) -> Option<&'static str> {
 fn detect_codebase_memory_asset() -> Option<(&'static str, &'static str, bool)> {
     if cfg!(target_os = "macos") {
         if cfg!(target_arch = "x86_64") {
-            return Some(("codebase-memory-mcp-darwin-amd64.tar.gz", "codebase-memory-mcp", false));
+            return Some((
+                "codebase-memory-mcp-darwin-amd64.tar.gz",
+                "codebase-memory-mcp",
+                false,
+            ));
         }
         if cfg!(target_arch = "aarch64") {
-            return Some(("codebase-memory-mcp-darwin-arm64.tar.gz", "codebase-memory-mcp", false));
+            return Some((
+                "codebase-memory-mcp-darwin-arm64.tar.gz",
+                "codebase-memory-mcp",
+                false,
+            ));
         }
     } else if cfg!(target_os = "linux") {
         if cfg!(target_arch = "x86_64") {
-            return Some(("codebase-memory-mcp-linux-amd64.tar.gz", "codebase-memory-mcp", false));
+            return Some((
+                "codebase-memory-mcp-linux-amd64.tar.gz",
+                "codebase-memory-mcp",
+                false,
+            ));
         }
         if cfg!(target_arch = "aarch64") {
-            return Some(("codebase-memory-mcp-linux-arm64.tar.gz", "codebase-memory-mcp", false));
+            return Some((
+                "codebase-memory-mcp-linux-arm64.tar.gz",
+                "codebase-memory-mcp",
+                false,
+            ));
         }
     } else if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
-        return Some(("codebase-memory-mcp-windows-amd64.zip", "codebase-memory-mcp.exe", true));
+        return Some((
+            "codebase-memory-mcp-windows-amd64.zip",
+            "codebase-memory-mcp.exe",
+            true,
+        ));
     }
     None
 }
@@ -319,7 +389,9 @@ fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(hex::encode(hasher.finalize()))
@@ -336,7 +408,8 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         let Some((asset_name, binary_name, is_zip)) = detect_codebase_memory_asset() else {
             log::info!(
                 "[codebase-memory] no prebuilt for {}/{} — skipping",
-                std::env::consts::OS, std::env::consts::ARCH
+                std::env::consts::OS,
+                std::env::consts::ARCH
             );
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
             return;
@@ -365,7 +438,11 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if bin_path.exists() {
             if let Ok(tag) = std::fs::read_to_string(&sentinel_path) {
                 if tag.trim() == expected_tag {
-                    log::info!("[codebase-memory] cached: {} v{}", binary_name, CODEBASE_MEMORY_VERSION);
+                    log::info!(
+                        "[codebase-memory] cached: {} v{}",
+                        binary_name,
+                        CODEBASE_MEMORY_VERSION
+                    );
                     let bin_str = bin_path.to_string_lossy().to_string();
                     std::env::set_var("O8_CODEBASE_MEMORY_BIN", &bin_str);
                     let _ = app.emit("codebase-memory:status", "ready");
@@ -392,17 +469,25 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         }
         let archive_path = tmp_root.join(asset_name);
 
-        log::info!("[codebase-memory] fetching {} v{}", asset_name, CODEBASE_MEMORY_VERSION);
+        log::info!(
+            "[codebase-memory] fetching {} v{}",
+            asset_name,
+            CODEBASE_MEMORY_VERSION
+        );
         let download_result: Result<(), String> = (|| {
             let client = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
                 .map_err(|e| format!("client build: {}", e))?;
-            let mut resp = client.get(&url).send().map_err(|e| format!("send: {}", e))?;
+            let mut resp = client
+                .get(&url)
+                .send()
+                .map_err(|e| format!("send: {}", e))?;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));
             }
-            let mut out = std::fs::File::create(&archive_path).map_err(|e| format!("create archive: {}", e))?;
+            let mut out = std::fs::File::create(&archive_path)
+                .map_err(|e| format!("create archive: {}", e))?;
             std::io::copy(&mut resp, &mut out).map_err(|e| format!("write archive: {}", e))?;
             Ok(())
         })();
@@ -428,7 +513,8 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if actual_sha != expected_sha {
             log::warn!(
                 "[codebase-memory] SHA mismatch: expected {}, got {}",
-                expected_sha, actual_sha
+                expected_sha,
+                actual_sha
             );
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
             let _ = app.emit("codebase-memory:status", "error");
@@ -472,7 +558,10 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
 
         let extracted = tmp_root.join(binary_name);
         if !extracted.exists() {
-            log::warn!("[codebase-memory] binary not found in archive: {:?}", extracted);
+            log::warn!(
+                "[codebase-memory] binary not found in archive: {:?}",
+                extracted
+            );
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
             let _ = app.emit("codebase-memory:status", "error");
             let _ = std::fs::remove_dir_all(&tmp_root);
@@ -637,19 +726,16 @@ fn classify_port_listener(port: u16) -> PortListener {
     // Find the owning PID via lsof. `-t` prints only the pid, `-sTCP:LISTEN`
     // filters to listeners, and we scope to the port to keep output tiny.
     let lsof = Command::new("lsof")
-        .args([
-            "-nP",
-            &format!("-iTCP:{}", port),
-            "-sTCP:LISTEN",
-            "-t",
-        ])
+        .args(["-nP", &format!("-iTCP:{}", port), "-sTCP:LISTEN", "-t"])
         .output();
     let pid = match lsof {
         Ok(out) if out.status.success() => {
             let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
             // lsof can return multiple pids on separate lines when IPv4 and
             // IPv6 share the same listener — take the first.
-            raw.lines().next().and_then(|s| s.trim().parse::<u32>().ok())
+            raw.lines()
+                .next()
+                .and_then(|s| s.trim().parse::<u32>().ok())
         }
         _ => None,
     };
@@ -657,7 +743,10 @@ fn classify_port_listener(port: u16) -> PortListener {
     let Some(pid) = pid else {
         // Something is listening per TCP connect, but lsof couldn't tell us
         // who. Treat as legit to stay conservative.
-        log::warn!("[orphan-check] Port :{} is bound but lsof returned no pid", port);
+        log::warn!(
+            "[orphan-check] Port :{} is bound but lsof returned no pid",
+            port
+        );
         return PortListener::Legit {
             pid: 0,
             command: "<unknown>".to_string(),
@@ -676,7 +765,10 @@ fn classify_port_listener(port: u16) -> PortListener {
             // The first whitespace-separated token is ppid; the rest is the
             // full command line (which may itself contain spaces).
             let mut parts = raw.splitn(2, char::is_whitespace);
-            let ppid = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+            let ppid = parts
+                .next()
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .unwrap_or(0);
             let command = parts.next().unwrap_or("").trim().to_string();
             (ppid, command)
         }
@@ -686,7 +778,11 @@ fn classify_port_listener(port: u16) -> PortListener {
     let cwd = sidecar_lifecycle::process_cwd(pid);
     log::info!(
         "[orphan-check] :{} bound by pid={} ppid={} cwd={:?} cmd={:?}",
-        port, pid, ppid, cwd, command
+        port,
+        pid,
+        ppid,
+        cwd,
+        command
     );
 
     // Orphan signature: parent is launchd (pid 1) AND the binary path
@@ -694,8 +790,7 @@ fn classify_port_listener(port: u16) -> PortListener {
     // `/Applications/o8.app/Contents/Resources/server/server.js` (signed
     // install) or the more general `.app/Contents/Resources/server`
     // substring in case someone installed under a different prefix.
-    let looks_bundled =
-        command.contains(".app/Contents/Resources/server")
+    let looks_bundled = command.contains(".app/Contents/Resources/server")
         || command.contains("/Resources/server/server.js")
         || cwd.contains(".app/Contents/Resources/server")
         || (command.ends_with("server.js") && sidecar_lifecycle::cwd_looks_o8_owned(&cwd));
@@ -799,7 +894,12 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         // 4-attempt warm-only loop) gives a cold next-server time to bind.
         let mut server_up = false;
         for attempt in 0..40 {
-            if client.get(&url).header("Connection", "close").send().is_ok() {
+            if client
+                .get(&url)
+                .header("Connection", "close")
+                .send()
+                .is_ok()
+            {
                 server_up = true;
                 break;
             }
@@ -838,7 +938,12 @@ fn spawn_bundled_ws_server(
 ) {
     let ws_server_js = server_dir.join("ws-server.mjs");
     if ws_server_js.exists() {
-        log::info!("Starting WS server: {} {:?} on :{}", node_bin, ws_server_js, ws_port);
+        log::info!(
+            "Starting WS server: {} {:?} on :{}",
+            node_bin,
+            ws_server_js,
+            ws_port
+        );
         let mut ws_cmd = Command::new(node_bin);
         ws_cmd
             .arg(&ws_server_js)
@@ -893,11 +998,19 @@ const MIN_NODE_MAJOR: u32 = 22;
 // We prefer Node 22.x specifically when available, even if the user's
 // login-shell default is a newer Node.
 const PREFERRED_NODE_MAJOR: u32 = 22;
+const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR];
 
 /// Look in well-known places for a Node 22.x install regardless of the user's
 /// nvm/fnm/volta default. Order matches the rough population of users on each.
 fn find_preferred_node_22() -> Option<String> {
     let home = std::env::var("HOME").ok()?;
+    find_preferred_node_22_in(&home, check_node_version)
+}
+
+fn find_preferred_node_22_in<F>(home: &str, mut check_node: F) -> Option<String>
+where
+    F: FnMut(&str) -> Option<(u32, String)>,
+{
     let glob_dirs: [(String, &str); 5] = [
         (format!("{}/.nvm/versions/node", home), "v22"),
         (format!("{}/.fnm/node-versions", home), "v22"),
@@ -910,7 +1023,7 @@ fn find_preferred_node_22() -> Option<String> {
         // version-dir traversal needed.
         if prefix.is_empty() {
             let candidate = format!("{}/bin/node", dir);
-            if let Some((22, _)) = check_node_version(&candidate) {
+            if let Some((22, _)) = check_node(&candidate) {
                 return Some(candidate);
             }
             continue;
@@ -930,7 +1043,7 @@ fn find_preferred_node_22() -> Option<String> {
                 ];
                 for base in bases {
                     if let Some(p) = base.to_str() {
-                        if let Some((22, _)) = check_node_version(p) {
+                        if let Some((22, _)) = check_node(p) {
                             return Some(p.to_string());
                         }
                     }
@@ -1006,13 +1119,13 @@ fn well_known_cli_bin_dirs() -> Vec<String> {
     let mut dirs: Vec<String> = Vec::new();
     if let Ok(home) = std::env::var("HOME") {
         for rel in [
-            ".o8/bin",                    // o8's own symlink farm (cli-locate.ts)
-            ".local/bin",                 // Claude Code native installer default
-            ".claude/local",              // claude migrate-installer target
+            ".o8/bin",       // o8's own symlink farm (cli-locate.ts)
+            ".local/bin",    // Claude Code native installer default
+            ".claude/local", // claude migrate-installer target
             ".npm-global/bin",
             ".bun/bin",
-            "Library/pnpm",               // pnpm global bin (macOS)
-            ".local/share/pnpm",          // pnpm global bin (XDG)
+            "Library/pnpm",      // pnpm global bin (macOS)
+            ".local/share/pnpm", // pnpm global bin (XDG)
             ".deno/bin",
             ".volta/bin",
             ".asdf/shims",
@@ -1115,10 +1228,7 @@ fn load_ai_keys_from_login_shell() -> Vec<(String, String)> {
         ("sh", &["-l", "-c", &script]),
     ];
     for (shell, _args) in shells {
-        if let Ok(out) = Command::new(shell)
-            .args(["-l", "-c", &script])
-            .output()
-        {
+        if let Ok(out) = Command::new(shell).args(["-l", "-c", &script]).output() {
             if out.status.success() {
                 let mut pairs = Vec::new();
                 for line in String::from_utf8_lossy(&out.stdout).lines() {
@@ -1152,10 +1262,126 @@ fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
     Some((major, raw))
 }
 
+fn supports_native_node_major(major: u32) -> bool {
+    SUPPORTED_NATIVE_NODE_MAJORS.contains(&major)
+}
+
+#[cfg(test)]
+mod node_preflight_tests {
+    use super::{find_preferred_node_22_in, supports_native_node_major, PREFERRED_NODE_MAJOR};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempHome {
+        path: PathBuf,
+    }
+
+    impl TempHome {
+        fn new(name: &str) -> Self {
+            let suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "o8-node-preflight-{}-{}-{}",
+                name,
+                std::process::id(),
+                suffix
+            ));
+            fs::create_dir_all(&path).expect("create temp home");
+            Self { path }
+        }
+
+        fn str(&self) -> &str {
+            self.path.to_str().expect("utf8 temp path")
+        }
+
+        fn touch_node(&self, rel: &str) -> PathBuf {
+            let path = self.path.join(rel);
+            fs::create_dir_all(path.parent().expect("node path parent"))
+                .expect("create node parent");
+            fs::write(&path, b"fake node").expect("write fake node");
+            path
+        }
+    }
+
+    impl Drop for TempHome {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn checker(path: &str) -> Option<(u32, String)> {
+        if !Path::new(path).exists() {
+            return None;
+        }
+        if path.contains("/v22.") || path.contains("/node/22.") {
+            return Some((22, "v22.19.0".to_string()));
+        }
+        if path.contains("/v24.") || path.contains("/node/24.") {
+            return Some((24, "v24.11.1".to_string()));
+        }
+        None
+    }
+
+    #[test]
+    fn preferred_node_discovery_uses_nvm_before_other_managers() {
+        let home = TempHome::new("nvm-first");
+        let nvm_node = home.touch_node(".nvm/versions/node/v22.19.0/bin/node");
+        home.touch_node(".fnm/node-versions/v22.18.0/installation/bin/node");
+        home.touch_node(".volta/tools/image/node/22.17.0/bin/node");
+
+        assert_eq!(
+            find_preferred_node_22_in(home.str(), checker),
+            Some(nvm_node.to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_node_discovery_supports_fnm_installation_layout() {
+        let home = TempHome::new("fnm-installation");
+        let fnm_node = home.touch_node(".fnm/node-versions/v22.18.0/installation/bin/node");
+
+        assert_eq!(
+            find_preferred_node_22_in(home.str(), checker),
+            Some(fnm_node.to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_node_discovery_supports_volta_image_layout() {
+        let home = TempHome::new("volta");
+        let volta_node = home.touch_node(".volta/tools/image/node/22.17.1/bin/node");
+
+        assert_eq!(
+            find_preferred_node_22_in(home.str(), checker),
+            Some(volta_node.to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_node_discovery_ignores_newer_native_abi_majors() {
+        let home = TempHome::new("ignore-newer");
+        home.touch_node(".nvm/versions/node/v24.11.1/bin/node");
+        home.touch_node(".fnm/node-versions/v24.11.1/installation/bin/node");
+        home.touch_node(".volta/tools/image/node/24.11.1/bin/node");
+
+        assert_eq!(find_preferred_node_22_in(home.str(), checker), None);
+    }
+
+    #[test]
+    fn native_abi_support_is_limited_to_shipped_node_major() {
+        assert!(supports_native_node_major(PREFERRED_NODE_MAJOR));
+        assert!(!supports_native_node_major(24));
+    }
+}
+
 #[derive(Debug)]
 enum NodePreflightError {
     Missing,
     TooOld { raw: String },
+    UnsupportedNativeAbi { raw: String, major: u32 },
 }
 
 /// Full pre-flight: returns the resolved node path on success, or an error
@@ -1181,19 +1407,10 @@ fn run_node_preflight() -> Result<String, NodePreflightError> {
     if major < MIN_NODE_MAJOR {
         return Err(NodePreflightError::TooOld { raw });
     }
-    if major != PREFERRED_NODE_MAJOR {
-        log::warn!(
-            "Node.js pre-flight: using {} at {} — Node {}.x preferred for native module ABI; \
-             install via `nvm install {} && nvm alias default {}` if you hit a NODE_MODULE_VERSION error",
-            raw,
-            node_bin,
-            PREFERRED_NODE_MAJOR,
-            PREFERRED_NODE_MAJOR,
-            PREFERRED_NODE_MAJOR
-        );
-    } else {
-        log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
+    if !supports_native_node_major(major) {
+        return Err(NodePreflightError::UnsupportedNativeAbi { raw, major });
     }
+    log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
     Ok(node_bin)
 }
 
@@ -1221,6 +1438,18 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
                  then launch o8 again.",
                 major = PREFERRED_NODE_MAJOR,
                 raw = raw
+            ),
+        ),
+        NodePreflightError::UnsupportedNativeAbi { raw, major: found_major } => (
+            "Node.js version is not supported by o8 yet",
+            format!(
+                "o8 found {raw}, but this build ships native SQLite modules for Node {major}.x only.\n\n\
+                 Install Node {major} with `brew install node@{major}` or `nvm install {major}`,\n\
+                 then launch o8 again. If you use nvm, also run `nvm alias default {major}`.\n\n\
+                 Node {found_major}.x support needs a matching better-sqlite3 ABI bundled before o8 can run on it.",
+                major = PREFERRED_NODE_MAJOR,
+                raw = raw,
+                found_major = found_major
             ),
         ),
     };
@@ -1265,11 +1494,7 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
         let _ = Command::new("zenity")
             .args(["--error", "--title", title, "--text", &full])
             .status()
-            .or_else(|_| {
-                Command::new("kdialog")
-                    .args(["--error", &full])
-                    .status()
-            });
+            .or_else(|_| Command::new("kdialog").args(["--error", &full]).status());
         eprintln!("{}: {}", title, body);
     }
 
@@ -1380,8 +1605,8 @@ fn read_repos() -> Result<serde_json::Value, String> {
     let repos_path = format!("{}/repos.json", o8_data_dir());
     let content = std::fs::read_to_string(&repos_path)
         .map_err(|e| format!("Failed to read repos.json: {}", e))?;
-    let store: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse repos.json: {}", e))?;
+    let store: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse repos.json: {}", e))?;
     // repos.json has { repos: [...], ... } — return the whole store
     Ok(store)
 }
@@ -1627,8 +1852,16 @@ fn base64_encode_standard(data: &[u8]) -> String {
     let mut i = 0;
     while i < data.len() {
         let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
+        let b1 = if i + 1 < data.len() {
+            data[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < data.len() {
+            data[i + 2] as u32
+        } else {
+            0
+        };
         out.push(TABLE[((b0 >> 2) & 0x3f) as usize] as char);
         out.push(TABLE[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
         if i + 1 < data.len() {
@@ -1695,8 +1928,7 @@ fn read_dropped_file(path: String) -> Result<DroppedFileResult, String> {
         return Err(format!("path outside $HOME: {}", canonical.display()));
     }
 
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|e| format!("stat failed: {}", e))?;
+    let metadata = std::fs::metadata(&canonical).map_err(|e| format!("stat failed: {}", e))?;
     if !metadata.is_file() {
         return Err("path is not a regular file".to_string());
     }
@@ -1791,7 +2023,9 @@ fn o8_view_active_route(app: AppHandle) -> Result<serde_json::Value, String> {
     let Some(window) = app.get_webview_window("main") else {
         return Err("main webview not found".to_string());
     };
-    let url = window.url().map_err(|e| format!("webview.url() failed: {}", e))?;
+    let url = window
+        .url()
+        .map_err(|e| format!("webview.url() failed: {}", e))?;
     let pathname = url.path().to_string();
     let search = match url.query() {
         Some(q) if !q.is_empty() => format!("?{}", q),
@@ -2050,9 +2284,15 @@ fn store_tray(tray: TrayIcon) {
 /// other platforms `set_title` is a no-op, which is fine: we still update the
 /// tooltip elsewhere.
 fn apply_tray_badge(count: u32) {
-    let Ok(guard) = tray_handle().lock() else { return };
+    let Ok(guard) = tray_handle().lock() else {
+        return;
+    };
     let Some(tray) = guard.as_ref() else { return };
-    let title = if count == 0 { None } else { Some(format!("[{}]", count)) };
+    let title = if count == 0 {
+        None
+    } else {
+        Some(format!("[{}]", count))
+    };
     if let Err(err) = tray.set_title(title.as_deref()) {
         log::warn!("[tray-badge] set_title failed: {}", err);
     }
@@ -2069,7 +2309,9 @@ fn apply_tray_badge(count: u32) {
 /// up the dynamic API port and ws-token written by the sidecar.
 fn read_data_file(name: &str) -> Option<String> {
     let path = format!("{}/{}", o8_data_dir(), name);
-    std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// Resolve the API port the Next server is bound to. Mirrors the precedence
@@ -2077,10 +2319,14 @@ fn read_data_file(name: &str) -> Option<String> {
 /// default 3001 last.
 fn resolve_api_port() -> u16 {
     if let Ok(p) = std::env::var("O8_API_PORT") {
-        if let Ok(parsed) = p.parse() { return parsed; }
+        if let Ok(parsed) = p.parse() {
+            return parsed;
+        }
     }
     if let Some(raw) = read_data_file("api-port") {
-        if let Ok(parsed) = raw.parse() { return parsed; }
+        if let Ok(parsed) = raw.parse() {
+            return parsed;
+        }
     }
     3001
 }
@@ -2103,12 +2349,15 @@ fn http_get_local(path: &str) -> Option<String> {
     let port = resolve_api_port();
     let token = resolve_ws_token();
     let addr = format!("127.0.0.1:{}", port);
-    let mut stream = std::net::TcpStream::connect_timeout(
-        &addr.parse().ok()?,
-        Duration::from_millis(750),
-    ).ok()?;
-    stream.set_read_timeout(Some(Duration::from_millis(1500))).ok();
-    stream.set_write_timeout(Some(Duration::from_millis(1500))).ok();
+    let mut stream =
+        std::net::TcpStream::connect_timeout(&addr.parse().ok()?, Duration::from_millis(750))
+            .ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(1500)))
+        .ok();
+    stream
+        .set_write_timeout(Some(Duration::from_millis(1500)))
+        .ok();
     let auth = if token.is_empty() {
         String::new()
     } else {
@@ -2126,7 +2375,9 @@ fn http_get_local(path: &str) -> Option<String> {
             Ok(0) => break,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                if buf.len() > 1024 * 1024 { break; } // 1 MiB cap
+                if buf.len() > 1024 * 1024 {
+                    break;
+                } // 1 MiB cap
             }
             Err(_) => break,
         }
@@ -2150,18 +2401,35 @@ struct AwaitingLane {
 /// Falls back to an empty list on any parse / network error so the menu
 /// degrades to the static `Show / Quit` entries.
 fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
-    let Some(body) = http_get_local("/api/lanes?active=true") else { return Vec::new() };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else { return Vec::new() };
-    let Some(lanes) = json.get("lanes").and_then(|v| v.as_array()) else { return Vec::new() };
+    let Some(body) = http_get_local("/api/lanes?active=true") else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return Vec::new();
+    };
+    let Some(lanes) = json.get("lanes").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
     lanes
         .iter()
         .filter_map(|lane| {
             let status = lane.get("status").and_then(|s| s.as_str())?;
-            if status != "reviewing" { return None; }
+            if status != "reviewing" {
+                return None;
+            }
             let id = lane.get("id").and_then(|s| s.as_str())?.to_string();
-            let label = lane.get("label").and_then(|s| s.as_str()).unwrap_or("Untitled").to_string();
+            let label = lane
+                .get("label")
+                .and_then(|s| s.as_str())
+                .unwrap_or("Untitled")
+                .to_string();
             let repo_path = lane.get("repoPath").and_then(|s| s.as_str()).unwrap_or("");
-            let repo = repo_path.trim_end_matches('/').rsplit('/').next().unwrap_or("").to_string();
+            let repo = repo_path
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .to_string();
             Some(AwaitingLane { id, label, repo })
         })
         .collect()
@@ -2172,7 +2440,9 @@ fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
 /// ellipsis so each row stays scannable.
 fn truncate_label(label: &str) -> String {
     const MAX: usize = 48;
-    if label.chars().count() <= MAX { return label.to_string() }
+    if label.chars().count() <= MAX {
+        return label.to_string();
+    }
     let truncated: String = label.chars().take(MAX - 1).collect();
     format!("{}…", truncated.trim_end())
 }
@@ -2211,7 +2481,9 @@ fn build_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) -> tauri::Result<Men
 /// Called from the poller when the set changes. Errors are logged + skipped
 /// so a transient menu-build hiccup never kills the poller thread.
 fn apply_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) {
-    let Ok(guard) = tray_handle().lock() else { return };
+    let Ok(guard) = tray_handle().lock() else {
+        return;
+    };
     let Some(tray) = guard.as_ref() else { return };
     match build_tray_menu(app, lanes) {
         Ok(menu) => {
@@ -2269,7 +2541,11 @@ fn notify_review_ready(
     body: String,
     packet_id: Option<String>,
 ) -> Result<(), String> {
-    let display_title = if title.is_empty() { "Awaiting review".to_string() } else { title };
+    let display_title = if title.is_empty() {
+        "Awaiting review".to_string()
+    } else {
+        title
+    };
     let display_body = if body.is_empty() {
         "A packet is ready for review".to_string()
     } else {
@@ -2285,21 +2561,28 @@ fn notify_review_ready(
     // when the notification is clicked. We can't intercept the click on
     // macOS through the notify-rust path, but emitting here means anything
     // listening on `notification-fired` knows the most recent packet.
-    let _ = app.emit("notification-fired", serde_json::json!({
-        "title": display_title,
-        "body": display_body,
-        "packetId": packet_id,
-    }));
+    let _ = app.emit(
+        "notification-fired",
+        serde_json::json!({
+            "title": display_title,
+            "body": display_body,
+            "packetId": packet_id,
+        }),
+    );
     Ok(())
 }
 
 // Drop only malformed saved window-state before tauri-plugin-window-state reads it.
 // Geometry that is merely stale is clamped after restore, once Tauri can see monitors.
 fn sanitize_window_state() {
-    let Some(home) = std::env::var_os("HOME") else { return };
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
     let path = std::path::PathBuf::from(home)
         .join("Library/Application Support/ai.o8.desktop/.window-state.json");
-    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return;
+    };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
         let _ = std::fs::remove_file(&path);
         return;
@@ -2321,7 +2604,10 @@ fn sanitize_window_state() {
 #[cfg(target_os = "macos")]
 fn ensure_cli_on_path(cli_source: &Path) {
     if !cli_source.exists() {
-        eprintln!("[cli-symlink] bundled CLI missing at {}", cli_source.display());
+        eprintln!(
+            "[cli-symlink] bundled CLI missing at {}",
+            cli_source.display()
+        );
         return;
     }
 
@@ -2357,11 +2643,16 @@ fn ensure_cli_on_path(cli_source: &Path) {
                     match std::fs::read_link(target) {
                         Ok(existing) if existing == cli_source => {
                             // Already pointing where we want — nothing to do.
-                            std::env::set_var("O8_CLI_INSTALL_PATH", target.to_string_lossy().to_string());
+                            std::env::set_var(
+                                "O8_CLI_INSTALL_PATH",
+                                target.to_string_lossy().to_string(),
+                            );
                             std::env::set_var("O8_CLI_INSTALL_STATUS", "already-linked");
                             return;
                         }
-                        Ok(existing) if existing.to_string_lossy().contains("/Applications/o8.app/") => {
+                        Ok(existing)
+                            if existing.to_string_lossy().contains("/Applications/o8.app/") =>
+                        {
                             // Stale symlink from a previous install — replace.
                             let _ = std::fs::remove_file(target);
                         }
@@ -2376,7 +2667,10 @@ fn ensure_cli_on_path(cli_source: &Path) {
                         }
                         Ok(_) => {
                             // User-owned symlink to something else — leave alone.
-                            failures.push(format!("{} points to a user-owned symlink", target.display()));
+                            failures.push(format!(
+                                "{} points to a user-owned symlink",
+                                target.display()
+                            ));
                             continue;
                         }
                         Err(_) => {
@@ -2403,7 +2697,11 @@ fn ensure_cli_on_path(cli_source: &Path) {
 
         match std::os::unix::fs::symlink(cli_source, target) {
             Ok(()) => {
-                eprintln!("[cli-symlink] linked {} -> {}", target.display(), cli_source.display());
+                eprintln!(
+                    "[cli-symlink] linked {} -> {}",
+                    target.display(),
+                    cli_source.display()
+                );
                 std::env::set_var("O8_CLI_INSTALL_PATH", target.to_string_lossy().to_string());
                 std::env::set_var("O8_CLI_INSTALL_STATUS", "linked");
                 return;
@@ -2547,32 +2845,64 @@ mod stt_engine {
         let origin = origin_str();
         match event {
             TE::Partial { session_id, text } => {
-                emit_stt(app, origin, serde_json::json!({ "type": "partial", "origin": origin, "sessionId": session_id, "text": text }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "partial", "origin": origin, "sessionId": session_id, "text": text }),
+                );
             }
             TE::Level { session_id, level } => {
-                emit_stt(app, origin, serde_json::json!({ "type": "level", "origin": origin, "sessionId": session_id, "level": level }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "level", "origin": origin, "sessionId": session_id, "level": level }),
+                );
             }
             TE::Final { session_id, text } => {
                 // Stash Apple's transcript; the polished result is emitted once
                 // the AudioFile event lands (so polish can ground on the WAV).
                 stash_final(session_id, text.clone());
-                emit_stt(app, origin, serde_json::json!({ "type": "final", "origin": origin, "sessionId": session_id, "text": text }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "final", "origin": origin, "sessionId": session_id, "text": text }),
+                );
             }
             TE::AudioFile { session_id, path } => {
-                emit_stt(app, origin, serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }),
+                );
                 run_finalize(app.clone(), session_id, path);
             }
             TE::Status { session_id, text } => {
-                emit_stt(app, origin, serde_json::json!({ "type": "status", "origin": origin, "sessionId": session_id, "text": text }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "status", "origin": origin, "sessionId": session_id, "text": text }),
+                );
             }
             TE::Error { session_id, text } => {
-                emit_stt(app, origin, serde_json::json!({ "type": "error", "origin": origin, "sessionId": session_id, "text": text }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "error", "origin": origin, "sessionId": session_id, "text": text }),
+                );
             }
             TE::Complete { session_id } => {
-                emit_stt(app, origin, serde_json::json!({ "type": "complete", "origin": origin, "sessionId": session_id }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "complete", "origin": origin, "sessionId": session_id }),
+                );
             }
             TE::Ready => {
-                emit_stt(app, origin, serde_json::json!({ "type": "ready", "origin": origin }));
+                emit_stt(
+                    app,
+                    origin,
+                    serde_json::json!({ "type": "ready", "origin": origin }),
+                );
             }
         }
     }
@@ -2675,8 +3005,13 @@ mod stt_engine {
                         let _ = std::fs::remove_file(&audio_file);
                         #[cfg(target_os = "macos")]
                         {
-                            let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                            let idle =
+                                serde_json::json!({ "type": "system-idle", "origin": "system" });
+                            let _ = app.emit_to(
+                                crate::dock_window::DOCK_LABEL,
+                                "o8:stt-event",
+                                idle.clone(),
+                            );
                             let _ = app.emit("o8:stt-event", idle);
                         }
                         return;
@@ -2691,8 +3026,13 @@ mod stt_engine {
                             if !t.trim().is_empty() {
                                 crate::tts::playback::play_thread(t, crate::tts::load_config());
                             }
-                            let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                            let idle =
+                                serde_json::json!({ "type": "system-idle", "origin": "system" });
+                            let _ = app.emit_to(
+                                crate::dock_window::DOCK_LABEL,
+                                "o8:stt-event",
+                                idle.clone(),
+                            );
                             let _ = app.emit("o8:stt-event", idle);
                         }
                         #[cfg(not(target_os = "macos"))]
@@ -2807,7 +3147,8 @@ mod stt_engine {
                     // false "Pasted". Symon parity: never claim a paste it didn't
                     // make. emit_to(DOCK_LABEL) + broadcast (same reliable path).
                     let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                    let _ =
+                        app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
                     let did_paste = crate::paste::paste_text(&polished);
@@ -2842,7 +3183,11 @@ mod stt_engine {
                         // than a false "pasted".
                         "clipboardOnly": !did_paste,
                     });
-                    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", pasted.clone());
+                    let _ = app.emit_to(
+                        crate::dock_window::DOCK_LABEL,
+                        "o8:stt-event",
+                        pasted.clone(),
+                    );
                     let _ = app.emit("o8:stt-event", pasted);
                     // Cue: paste landed (#1208).
                     crate::sound::play_sound("Done");
@@ -3021,7 +3366,11 @@ fn stt_list_input_devices() -> Result<Vec<InputDeviceDto>, String> {
 #[tauri::command]
 fn stt_set_input_device(device_uid: String) -> Result<(), String> {
     let uid = device_uid.trim();
-    stt_engine::set_input_device(if uid.is_empty() || uid == "default" { None } else { Some(uid) })
+    stt_engine::set_input_device(if uid.is_empty() || uid == "default" {
+        None
+    } else {
+        Some(uid)
+    })
 }
 
 /// Speak `text` aloud via the native TTS engine (voice P4): ElevenLabs/Google →
@@ -3345,8 +3694,7 @@ fn spawn_ask_and_speak(app: tauri::AppHandle, question: String) {
         match rt.block_on(async { ai::gemini_ask::ask(&question, None).await }) {
             Ok(answer) => {
                 log::info!("[ask] answer: {} chars", answer.len());
-                let answer_payload =
-                    serde_json::json!({ "question": question, "answer": answer });
+                let answer_payload = serde_json::json!({ "question": question, "answer": answer });
                 // Emit ONLY to the screen dock — the Ask answer panel lives in the
                 // dock webview. (Emitting to `main` too made the dock receive it
                 // twice → duplicated turns.)
@@ -3750,7 +4098,10 @@ pub fn run() {
     let mut context = tauri::generate_context!();
     if let Some(dev_frontend) = dev_frontend.as_ref() {
         if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
-            eprintln!("[dev-frontend] main window config not found for {}", dev_frontend::ENV_VAR);
+            eprintln!(
+                "[dev-frontend] main window config not found for {}",
+                dev_frontend::ENV_VAR
+            );
         }
     }
 
@@ -3766,9 +4117,11 @@ pub fn run() {
 
     #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())

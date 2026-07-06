@@ -73,7 +73,11 @@ pub async fn realtime_invoke_tool(
         Ok(output) => {
             log::info!(
                 "[symon-rt] tool {name} = {}",
-                if output.get("error").is_some() { "error" } else { "ok" }
+                if output.get("error").is_some() {
+                    "error"
+                } else {
+                    "ok"
+                }
             );
             Ok(output)
         }
@@ -108,6 +112,10 @@ pub fn record_realtime_event(line: String) {
 pub fn realtime_status_changed(app: tauri::AppHandle, status: String) {
     log::info!("[symon-rt] presence → {status}");
     let payload = json!({ "status": status });
-    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:realtime-status", payload.clone());
+    let _ = app.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:realtime-status",
+        payload.clone(),
+    );
     let _ = app.emit("o8:realtime-status", payload);
 }

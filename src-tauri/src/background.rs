@@ -86,7 +86,11 @@ pub fn set_background_mode<R: Runtime>(app: &AppHandle<R>, on: bool, persist: bo
         };
         if let Err(err) = app.set_activation_policy(policy) {
             let label = if on { "Accessory" } else { "Regular" };
-            log::warn!("[background] set_activation_policy({}) failed: {}", label, err);
+            log::warn!(
+                "[background] set_activation_policy({}) failed: {}",
+                label,
+                err
+            );
         }
     }
     #[cfg(not(target_os = "macos"))]

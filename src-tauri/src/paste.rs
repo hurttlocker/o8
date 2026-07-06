@@ -81,8 +81,10 @@ struct ClipboardGuard {
 }
 
 #[cfg(target_os = "macos")]
-static CLIPBOARD_GUARD: Mutex<ClipboardGuard> =
-    Mutex::new(ClipboardGuard { user: None, last_injected: -1 });
+static CLIPBOARD_GUARD: Mutex<ClipboardGuard> = Mutex::new(ClipboardGuard {
+    user: None,
+    last_injected: -1,
+});
 
 /// How long Symon's pasted text stays on the clipboard before we hand it back
 /// to the user, for the synthetic-Cmd+V path. Long enough for normal fields +
@@ -417,11 +419,18 @@ pub(crate) fn ax_frame_at_screen_point(gx: f64, gy: f64) -> Option<(f64, f64, f6
         }
         let element = OwnedAxElement::new(hit)?;
 
-        let pos_val = ax_copy_attribute_value(element.as_ptr(), ax_name("AXPosition").as_concrete_TypeRef())?;
-        let size_val = ax_copy_attribute_value(element.as_ptr(), ax_name("AXSize").as_concrete_TypeRef())?;
+        let pos_val = ax_copy_attribute_value(
+            element.as_ptr(),
+            ax_name("AXPosition").as_concrete_TypeRef(),
+        )?;
+        let size_val =
+            ax_copy_attribute_value(element.as_ptr(), ax_name("AXSize").as_concrete_TypeRef())?;
 
         let mut pt = CGPoint { x: 0.0, y: 0.0 };
-        let mut sz = CGSize { width: 0.0, height: 0.0 };
+        let mut sz = CGSize {
+            width: 0.0,
+            height: 0.0,
+        };
         let got_pos = unsafe {
             AXValueGetValue(
                 pos_val.as_CFTypeRef(),
@@ -525,8 +534,7 @@ pub(crate) fn read_focused_field() -> Option<FocusedField> {
             let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2);
         }
         let focused_attr = ax_name("AXFocusedUIElement");
-        let focused =
-            ax_copy_attribute_value(system.as_ptr(), focused_attr.as_concrete_TypeRef())?;
+        let focused = ax_copy_attribute_value(system.as_ptr(), focused_attr.as_concrete_TypeRef())?;
 
         let role_attr = ax_name("AXRole");
         let role = ax_copy_attribute_value(focused.as_CFTypeRef(), role_attr.as_concrete_TypeRef())
@@ -555,7 +563,11 @@ pub(crate) fn read_focused_field() -> Option<FocusedField> {
         if !texty && !settable {
             return None;
         }
-        Some(FocusedField { value, role, settable })
+        Some(FocusedField {
+            value,
+            role,
+            settable,
+        })
     })
 }
 
@@ -1001,7 +1013,11 @@ pub fn paste_text(text: &str) -> bool {
              (grant o8 in System Settings → Privacy & Security → Accessibility, or move o8 to /Applications if it is running from a disk image)",
             text.len()
         );
-        restore_clipboard_delayed(saved_clipboard, injected_change_count, MANUAL_PASTE_RESTORE_MS);
+        restore_clipboard_delayed(
+            saved_clipboard,
+            injected_change_count,
+            MANUAL_PASTE_RESTORE_MS,
+        );
         return false;
     }
 
@@ -1035,7 +1051,11 @@ pub fn paste_text(text: &str) -> bool {
     // restore_clipboard_if_match still skips the restore if the user copied
     // something new in the window, and the ClipboardGuard above guarantees the
     // thing we restore is the user's REAL original, not Symon's own output.
-    restore_clipboard_delayed(saved_clipboard, injected_change_count, CLIPBOARD_RESTORE_DELAY_MS);
+    restore_clipboard_delayed(
+        saved_clipboard,
+        injected_change_count,
+        CLIPBOARD_RESTORE_DELAY_MS,
+    );
     true
 }
 
@@ -1166,14 +1186,16 @@ fn simulate_command_keypress(keycode: u16, label: &str) {
     };
 
     // Post one keyboard event (down/up) for `kc` with `flags`; log + skip on err.
-    let post = |kc: u16, down: bool, flags: CGEventFlags| {
-        match CGEvent::new_keyboard_event(source.clone(), kc, down) {
-            Ok(e) => {
-                e.set_flags(flags);
-                e.post(CGEventTapLocation::HID);
-            }
-            Err(()) => tracing::error!("{label}: failed to create key event (kc={kc}, down={down})"),
+    let post = |kc: u16, down: bool, flags: CGEventFlags| match CGEvent::new_keyboard_event(
+        source.clone(),
+        kc,
+        down,
+    ) {
+        Ok(e) => {
+            e.set_flags(flags);
+            e.post(CGEventTapLocation::HID);
         }
+        Err(()) => tracing::error!("{label}: failed to create key event (kc={kc}, down={down})"),
     };
 
     let gap = std::time::Duration::from_millis(COMMAND_KEY_GAP_MS);
@@ -1242,7 +1264,10 @@ pub(crate) fn grab_selection() -> Option<String> {
     // MUST hop to the main thread or it silently fails and we fall through to
     // the held-modifier-broken Cmd+C path.
     if let Some(text) = run_on_main_thread(read_selected_text_via_accessibility) {
-        log::info!("[tts] grab_selection: AXSelectedText got {} chars", text.len());
+        log::info!(
+            "[tts] grab_selection: AXSelectedText got {} chars",
+            text.len()
+        );
         return Some(text);
     }
 
@@ -1287,7 +1312,10 @@ pub(crate) fn grab_selection() -> Option<String> {
             new_clipboard
         }
         (Some(new), None) if !new.trim().is_empty() => {
-            log::info!("[tts] grab_selection: Cmd+C got {} chars (no prior clipboard)", new.len());
+            log::info!(
+                "[tts] grab_selection: Cmd+C got {} chars (no prior clipboard)",
+                new.len()
+            );
             new_clipboard
         }
         _ => {
