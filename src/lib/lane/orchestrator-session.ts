@@ -26,9 +26,9 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
 import {
@@ -48,6 +48,21 @@ import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { MODEL_IDS } from '@/lib/models';
 import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
+import {
+  consumeResetSignal,
+  ensureRegisteredSession,
+  getRegisteredSession,
+  normalizeRepoPath,
+  normalizeThoughtsThreadId,
+  orchestratorDataDir,
+  PREEMPT_SETTLE_MS,
+  PROCESS_TIMEOUT_MS,
+  repoHash,
+  requestRegisteredSessionReset,
+  sessionNameForRepo,
+  waitForSessionIdle,
+  writeResetSignal,
+} from './orchestrator-session-core';
 import {
   crashSurvivableOrchestratorEnabled,
   createOrchestratorTurnRecord,
@@ -82,10 +97,7 @@ export interface OrchestratorSession {
 // ── Constants ──
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
-const ORCHESTRATOR_STATE_DIR = join(
-  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
-  'orchestrator',
-);
+const ORCHESTRATOR_STATE_DIR = orchestratorDataDir('orchestrator');
 
 const MCP_CONFIG_DIR = join(homedir(), '.o8', 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
@@ -113,7 +125,6 @@ const LOG_PREFIX = '[orchestrator-rehydrate]';
 // clearTimeout in the 'close'/'error' handlers), so a turn still alive at 4hr
 // is wedged, not productive. The operator actively watches turns and can
 // interrupt manually — this only reaps unattended hangs.
-const PROCESS_TIMEOUT_MS = 14_400_000;
 
 /**
  * Steer-Now / preempt settle window. A follow-up send fired while a turn is
@@ -123,69 +134,15 @@ const PROCESS_TIMEOUT_MS = 14_400_000;
  * 2s). Waiting that window out lets the dying turn settle so the new message is
  * accepted instead of being dropped with a hard "busy" rejection.
  */
-const PREEMPT_SETTLE_MS = 4_000;
-
-/** Poll until the session leaves 'busy' (a turn closed) or the window elapses. */
-async function waitForOrchestratorIdle(session: OrchestratorSession, timeoutMs: number): Promise<void> {
-  if (session.status !== 'busy') return;
-  const deadline = Date.now() + timeoutMs;
-  while (session.status === 'busy' && Date.now() < deadline) {
-    await new Promise((resolveTick) => setTimeout(resolveTick, 50));
-  }
-}
-
 let startupRehydrationPromise: Promise<void> | null = null;
 let startupRehydrationComplete = false;
 
-function normalizeRepoPath(repoPath: string): string {
-  return resolve(repoPath).replace(/\/+$/, '');
-}
-
-function ensureOrchestratorStateDir(): void {
-  if (!existsSync(ORCHESTRATOR_STATE_DIR)) {
-    mkdirSync(ORCHESTRATOR_STATE_DIR, { recursive: true });
-  }
-}
-
-function normalizeThreadId(threadId?: string | null): string | null {
-  const trimmed = threadId?.trim() ?? '';
-  return trimmed.startsWith('thoughts-') ? trimmed : null;
-}
-
-function threadKey(threadId?: string | null): string | null {
-  const normalized = normalizeThreadId(threadId);
-  return normalized ? normalized.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) : null;
-}
-
-function orchestratorResetSignalPath(repoPath: string, threadId?: string | null): string {
-  const threadSuffix = threadKey(threadId);
-  return join(
-    ORCHESTRATOR_STATE_DIR,
-    `session-reset-${repoHash(normalizeRepoPath(repoPath))}${threadSuffix ? `-${threadSuffix}` : ''}.json`,
-  );
-}
-
 function writeOrchestratorResetSignal(repoPath: string, threadId?: string | null): void {
-  ensureOrchestratorStateDir();
-  writeFileSync(
-    orchestratorResetSignalPath(repoPath, threadId),
-    `${JSON.stringify({ repoPath: normalizeRepoPath(repoPath), threadId: normalizeThreadId(threadId), requestedAt: Date.now() })}\n`,
-    'utf8',
-  );
+  writeResetSignal(ORCHESTRATOR_STATE_DIR, repoPath, threadId);
 }
 
 function consumeOrchestratorResetSignal(repoPath: string, threadId?: string | null): boolean {
-  const signalPath = orchestratorResetSignalPath(repoPath, threadId);
-  if (!existsSync(signalPath)) {
-    return false;
-  }
-
-  try {
-    rmSync(signalPath, { force: true });
-    return true;
-  } catch {
-    return false;
-  }
+  return consumeResetSignal(ORCHESTRATOR_STATE_DIR, repoPath, threadId);
 }
 
 function extractClaudeSessionId(sessionKey: string): string | null {
@@ -235,8 +192,8 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord, options: Or
     session = {
       sessionName,
       repoPath: normalizeRepoPath(record.repoPath),
-      threadId: normalizeThreadId(record.threadId),
-      claudeSessionId: readOrchestratorBackendSessionId(normalizeThreadId(record.threadId), 'claude'),
+      threadId: normalizeThoughtsThreadId(record.threadId),
+      claudeSessionId: readOrchestratorBackendSessionId(normalizeThoughtsThreadId(record.threadId), 'claude'),
       status: 'busy',
       proc: null,
       createdAt: record.startedAt,
@@ -434,40 +391,31 @@ function ensureMcpConfig(repoPath: string, profile: ToolProfile = 'full'): strin
 
 const sessions = new Map<string, OrchestratorSession>();
 
-function repoHash(repoPath: string): string {
-  return createHash('sha256').update(repoPath).digest('hex').slice(0, 8);
-}
-
 export function orchestratorSessionName(repoPath: string, threadId?: string | null): string {
-  const threadSuffix = threadKey(threadId);
-  return `cortex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}${threadSuffix ? `-${threadSuffix}` : ''}`;
+  return sessionNameForRepo('cortex-orchestrator', repoPath, threadId);
 }
 
 export function getOrchestratorSession(repoPath: string, threadId?: string | null): OrchestratorSession | null {
   void rehydrateOrchestratorSessions().catch(() => {
     // Startup rehydration is best-effort; callers can still create a fresh session.
   });
-  return sessions.get(orchestratorSessionName(repoPath, threadId)) ?? null;
+  return getRegisteredSession(sessions, orchestratorSessionName(repoPath, threadId));
 }
 
 export function requestOrchestratorSessionReset(repoPath: string, threadId?: string | null): { repoPath: string; sessionName: string; threadId: string | null } {
-  const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const normalizedThreadId = normalizeThreadId(threadId);
-  const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
-
-  writeOrchestratorResetSignal(normalizedRepoPath, normalizedThreadId);
-
-  const session = sessions.get(sessionName);
-  if (session) {
-    session.claudeSessionId = null;
-    // Reset = fresh conversation — recycle the resident proc (it holds the old one).
-    if (session.proc) killOrchestratorProc(session, getWarmState(sessionName));
-  }
-  if (normalizedThreadId) {
-    writeOrchestratorBackendSessionId(normalizedThreadId, 'claude', null);
-  }
-
-  return { repoPath: normalizedRepoPath, sessionName, threadId: normalizedThreadId };
+  const result = requestRegisteredSessionReset(sessions, {
+    repoPath,
+    threadId,
+    sessionNameFor: orchestratorSessionName,
+    resetExisting: (session, sessionName) => {
+      session.claudeSessionId = null;
+      // Reset = fresh conversation — recycle the resident proc (it holds the old one).
+      if (session.proc) killOrchestratorProc(session, getWarmState(sessionName));
+    },
+    resetPersistedThread: (normalizedThreadId) => writeOrchestratorBackendSessionId(normalizedThreadId, 'claude', null),
+  });
+  writeOrchestratorResetSignal(result.repoPath, result.threadId);
+  return result;
 }
 
 /**
@@ -488,7 +436,7 @@ export function reloadOrchestratorSession(repoPath: string, threadId?: string | 
   claudeSessionId: string | null;
 } {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const normalizedThreadId = normalizeThreadId(threadId);
+  const normalizedThreadId = normalizeThoughtsThreadId(threadId);
   const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
   const session = sessions.get(sessionName);
   // MCP-config change → recycle the resident proc so the next turn spawns with
@@ -509,27 +457,21 @@ export function ensureOrchestratorSession(repoPath: string, threadId?: string | 
     // Startup rehydration is best-effort; callers can still create a fresh session.
   });
 
-  const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const normalizedThreadId = normalizeThreadId(threadId);
-  const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
-  const existing = sessions.get(sessionName);
-
-  if (existing && existing.status !== 'dead') {
-    return existing;
-  }
-
-  const session: OrchestratorSession = {
-    sessionName,
-    repoPath: normalizedRepoPath,
-    threadId: normalizedThreadId,
-    claudeSessionId: readOrchestratorBackendSessionId(normalizedThreadId, 'claude'),
-    status: 'ready',
-    proc: null,
-    createdAt: Date.now(),
-  };
-  sessions.set(sessionName, session);
-  console.log(`[orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}${normalizedThreadId ? ` (${normalizedThreadId})` : ''}`);
-  return session;
+  return ensureRegisteredSession(sessions, {
+    repoPath,
+    threadId,
+    sessionNameFor: orchestratorSessionName,
+    logPrefix: '[orchestrator-session]',
+    create: (normalizedRepoPath, normalizedThreadId, sessionName) => ({
+      sessionName,
+      repoPath: normalizedRepoPath,
+      threadId: normalizedThreadId,
+      claudeSessionId: readOrchestratorBackendSessionId(normalizedThreadId, 'claude'),
+      status: 'ready',
+      proc: null,
+      createdAt: Date.now(),
+    }),
+  });
 }
 
 // ── Send message (spawn process, stream JSON) ──
@@ -965,7 +907,7 @@ export async function sendToOrchestrator(
   // just-interrupted subprocess that's mid-teardown. Wait for it to close
   // rather than rejecting the steered message outright.
   if (session.status === 'busy') {
-    await waitForOrchestratorIdle(session, PREEMPT_SETTLE_MS);
+    await waitForSessionIdle(session, PREEMPT_SETTLE_MS);
   }
 
   // #457 — Auto-recover dead sessions by creating a fresh one. A SIGTERM'd turn
