@@ -24,13 +24,14 @@ import path from 'node:path';
 import type { OwnedRuntimeAdapter, OwnedRunRecord, OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
 import { createOwnedSessionStore } from '@/lib/runtimes/shared/owned-session';
 import { compactText, formatClock } from '@/lib/runtimes/shared/owned-session/helpers';
+import { MODEL_IDS } from '@/lib/models';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const OPENCODE_OWNED_ROOT = process.env.O8_OWNED_OPENCODE_ROOT
   ?? path.join(os.homedir(), '.o8', 'owned-opencode');
 
-const OPENCODE_DEFAULT_MODEL = 'opencode/gpt-5-nano';
+const OPENCODE_DEFAULT_MODEL = MODEL_IDS.opencodeDefault;
 
 /** Stderr patterns that are non-fatal noise for opencode. */
 export const OPENCODE_STDERR_NOISE_PATTERNS: RegExp[] = [

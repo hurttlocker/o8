@@ -1,4 +1,5 @@
 // Capability map for orchestrator runtime adapters. See docs/runtime-adapter-contract.md.
+import { MODEL_IDS } from '@/lib/models';
 import type { OrchestratorRuntime } from './types';
 
 export interface OrchestratorRuntimeCapability {
@@ -39,7 +40,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     // started returning HTTP 400 invalid_request_error "model is not supported
     // when using Codex with a ChatGPT account" for gpt-5-codex. gpt-5.5 is the
     // current supported model on ChatGPT-account Codex CLI.
-    defaultModel: 'gpt-5.5',
+    defaultModel: MODEL_IDS.codexDefault,
     accentColor: '#2563eb', // blue — matches existing codex tone in display.ts
     binaryName: 'codex',
     tier: 'frontier',
@@ -53,7 +54,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     // stream-json spawn only so they stay sub-billed, never Agent SDK --print.
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'claude-sonnet-5',
+    defaultModel: MODEL_IDS.claudeWorkerDefault,
     accentColor: '#e07a3a', // orange — matches existing claude-code tone in display.ts
     binaryName: 'claude',
     tier: 'frontier',

@@ -32,6 +32,7 @@ import { promisify } from 'node:util';
 
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { codexModelArgs, parseLocalModel } from '@/lib/codex/local-model';
+import { MODEL_IDS } from '@/lib/models';
 
 const execFileAsync = promisify(execFile);
 
@@ -107,7 +108,7 @@ export interface CallCodexOptions {
 }
 
 /** Default Codex model. gpt-5.5 replaces gpt-5.4 as the orchestrator-class default (epic #1044). */
-export const CODEX_DEFAULT_MODEL = 'gpt-5.5';
+export const CODEX_DEFAULT_MODEL = MODEL_IDS.codexDefault;
 
 /**
  * Resolve the Codex model for a Q&A call. An explicit model wins. Otherwise, if
