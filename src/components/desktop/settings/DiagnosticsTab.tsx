@@ -4,17 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
-  RAMS_ACCENT,
-  RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
-  HairlineRule,
   RamsButton,
-  SectionLabel,
+  ActivityIcon,
+  PlugIcon,
+  LayersIcon,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { RecallHealthSection } from './RecallHealthSection';
 import { LoopStatusSection } from './LoopStatusSection';
 import { DemoRunSection } from './DemoRunSection';
@@ -58,6 +58,18 @@ function formatDuration(durationMs: number) {
     return `${durationMs}ms`;
   }
   return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function formatToolLabel(id: string): string {
+  if (id === 'opencode') return 'opencode';
+  if (id === 'api-keys') return 'API keys';
+  return id.split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function toolStatusLine(tool: DiagnosticTool): string {
+  if (!tool.detected) return 'Not found';
+  if (tool.ready === false) return tool.authHint ?? 'Auth missing';
+  return tool.path ?? tool.version ?? 'Detected';
 }
 
 // ── Diagnostics Tab ──
@@ -175,40 +187,12 @@ export function DiagnosticsTab() {
       <TabBreadcrumb tab="diagnostics" />
       <TabHeading
         title="diagnostics"
-        subtitle="Runtime and tool health. Quiet neutral dots when everything is fine; colored dots only when action is demanded."
+        subtitle="Runtime and tool health. Quiet neutral dots when everything is fine; colored badges only when action is demanded."
       />
-
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 20,
-        marginBottom: 28,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{
-          fontFamily: APP_FONT_STACK,
-          fontSize: 11,
-          fontWeight: 400,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: RAMS_INK_QUIET,
-        }}>
-          {lastChecked ? `last checked ${lastChecked}` : 'not yet checked'}
-        </div>
-        <button
-          type="button"
-          onClick={() => { void runDiagnostics(); }}
-          disabled={loading}
-          style={accentLinkStyle(loading)}
-        >
-          {loading ? 'checking...' : 're-run ›'}
-        </button>
-      </div>
 
       {error ? (
         <div style={{
-          marginBottom: 28,
+          marginTop: 20,
           paddingTop: 2,
           paddingBottom: 2,
           fontSize: 13,
@@ -230,229 +214,205 @@ export function DiagnosticsTab() {
         </div>
       ) : null}
 
-      {/* 01 — RUNTIMES */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="01">RUNTIMES</SectionLabel>
-
-        <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
-          {tools.map((tool) => (
-            <ToolRow key={tool.id} tool={tool} />
+      {/* Runtimes */}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Runtimes"
+          footnote="Re-run any time to refresh detected versions, paths, and auth status."
+        >
+          <SettingsRow
+            icon={<ActivityIcon />}
+            label="Runtime diagnostics"
+            subtitle={lastChecked ? `Last checked ${lastChecked}` : 'Not yet checked'}
+            accessory={
+              <RamsButton variant="ghost" onClick={() => { void runDiagnostics(); }} disabled={loading} busy={loading}>
+                {loading ? 'Checking…' : 'Re-run'}
+              </RamsButton>
+            }
+            divider={tools.length > 0 || (!loading && tools.length === 0)}
+          />
+          {tools.map((tool, index) => (
+            <SettingsRow
+              key={tool.id}
+              icon={<PlugIcon />}
+              label={formatToolLabel(tool.id)}
+              subtitle={toolStatusLine(tool)}
+              accessory={!tool.detected || tool.ready === false ? (
+                <ValuePill tone="destructive">{!tool.detected ? 'Missing' : 'Needs auth'}</ValuePill>
+              ) : undefined}
+              divider={index < tools.length - 1}
+            />
           ))}
           {!loading && tools.length === 0 && !error ? (
-            <div style={{
-              paddingTop: 14,
-              paddingBottom: 14,
-              fontSize: 13,
-              color: RAMS_INK_QUIET,
-              lineHeight: 1.55,
-            }}>
-              No tools detected. Re-run to check your environment.
-            </div>
+            <SettingsRow
+              icon={<PlugIcon />}
+              label="No tools detected"
+              subtitle="Re-run to check your environment"
+            />
           ) : null}
-        </div>
+        </SettingsGroup>
       </section>
 
-      {/* 02 — RECALL HEALTH (#749 substrate eval gate) */}
-      <RecallHealthSection />
+      {/* Recall health (#749 substrate eval gate) */}
+      <section style={{ marginTop: 28 }}>
+        <RecallHealthSection />
+      </section>
 
-      {/* 03 — LOOP STATUS (#796 in-app dogfood-loop visibility) */}
-      <LoopStatusSection sectionNumber="03" />
+      {/* Loop status (#796 in-app dogfood-loop visibility) */}
+      <section style={{ marginTop: 28 }}>
+        <LoopStatusSection />
+      </section>
 
-      {/* 04 — MAINTENANCE */}
-      <section style={{ marginTop: 32 }}>
-        <SectionLabel number="04">MAINTENANCE</SectionLabel>
+      {/* Maintenance */}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Maintenance"
+          footnote="Moves stale Codex session transcripts older than 14 days, or pointing at missing worktrees, from ~/.codex/sessions/ into ~/.codex/sessions-archive/. Only runs when you trigger it here."
+        >
+          <SettingsRow
+            icon={<LayersIcon />}
+            label="Prune Codex session archive"
+            subtitle="Archive sessions older than 14 days"
+            accessory={
+              <RamsButton variant="ghost" onClick={() => { void runPrune(); }} disabled={pruneBusy} busy={pruneBusy}>
+                {pruneBusy ? 'Pruning…' : 'Prune'}
+              </RamsButton>
+            }
+            divider={!!pruneError || !!pruneResult}
+          />
 
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 20,
-          paddingTop: 4,
-          paddingBottom: 16,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
+          {pruneError ? (
             <div style={{
-              fontSize: 14,
-              fontWeight: 300,
+              paddingTop: 10,
+              paddingRight: 14,
+              paddingBottom: 10,
+              paddingLeft: 14,
+              fontSize: 13,
               color: 'var(--t-text)',
-              marginBottom: 4,
-              letterSpacing: '-0.01em',
-            }}>
-              Codex session archive prune
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
-              Move stale Codex session transcripts older than 14 days, or pointing at missing worktrees, from{' '}
-              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.codex/sessions/</span>{' '}
-              into{' '}
-              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.codex/sessions-archive/</span>.
-              Only runs when you trigger it here.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => { void runPrune(); }}
-            disabled={pruneBusy}
-            style={accentLinkStyle(pruneBusy)}
-          >
-            {pruneBusy ? 'pruning...' : 'prune old sessions ›'}
-          </button>
-        </div>
-
-        {pruneError ? (
-          <div style={{
-            marginTop: 14,
-            paddingTop: 2,
-            paddingBottom: 2,
-            fontSize: 13,
-            color: 'var(--t-text)',
-            lineHeight: 1.55,
-          }}>
-            <span style={{
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
-              fontWeight: 300,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: '#ef4444',
-              marginRight: 8,
-            }}>
-              [error]
-            </span>
-            {pruneError}
-          </div>
-        ) : null}
-
-        {pruneResult ? (
-          <div style={{
-            marginTop: 14,
-            paddingTop: 12,
-            paddingBottom: 12,
-            borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
-              marginBottom: 12,
+              lineHeight: 1.55,
             }}>
               <span style={{
-                fontSize: 14,
-                fontWeight: 300,
-                color: 'var(--t-text)',
-                letterSpacing: '-0.01em',
-              }}>
-                Prune finished in {formatDuration(pruneResult.durationMs)}
-              </span>
-              <span style={{
-                fontFamily: APP_FONT_STACK,
-                fontSize: 11,
-                letterSpacing: '0.04em',
-                color: RAMS_INK_QUIET,
-              }}>
-                scanned {pruneResult.scanned} files
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              <BracketLabel tone="quiet">{pruneResult.moved} archived</BracketLabel>
-              <BracketLabel tone="quiet">{pruneResult.deleted} deleted</BracketLabel>
-              <BracketLabel tone="quiet">{pruneResult.missingCwd} missing cwd</BracketLabel>
-              <BracketLabel tone="quiet">{pruneResult.olderThanDays} older than {pruneResult.maxAgeDays}d</BracketLabel>
-              {pruneResult.skipped > 0
-                ? <BracketLabel tone="accent">{pruneResult.skipped} skipped</BracketLabel>
-                : <BracketLabel tone="quiet">0 skipped</BracketLabel>}
-            </div>
-            {pruneResult.archiveRoot ? (
-              <div style={{
-                marginTop: 10,
                 fontFamily: MONO_FONT_STACK,
                 fontSize: 11,
-                letterSpacing: '0.02em',
-                color: 'var(--t-text-secondary)',
-                wordBreak: 'break-all',
+                fontWeight: 300,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: '#ef4444',
+                marginRight: 8,
               }}>
-                {pruneResult.archiveRoot}
+                [error]
+              </span>
+              {pruneError}
+            </div>
+          ) : null}
+
+          {pruneResult ? (
+            <div style={{
+              paddingTop: 12,
+              paddingRight: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                flexWrap: 'wrap',
+                marginBottom: 12,
+              }}>
+                <span style={{
+                  fontSize: 14,
+                  fontWeight: 300,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.01em',
+                }}>
+                  Prune finished in {formatDuration(pruneResult.durationMs)}
+                </span>
+                <span style={{
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 11,
+                  letterSpacing: '0.04em',
+                  color: RAMS_INK_QUIET,
+                }}>
+                  scanned {pruneResult.scanned} files
+                </span>
               </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div style={{ marginTop: 20 }}>
-          <HairlineRule />
-        </div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <BracketLabel tone="quiet">{pruneResult.moved} archived</BracketLabel>
+                <BracketLabel tone="quiet">{pruneResult.deleted} deleted</BracketLabel>
+                <BracketLabel tone="quiet">{pruneResult.missingCwd} missing cwd</BracketLabel>
+                <BracketLabel tone="quiet">{pruneResult.olderThanDays} older than {pruneResult.maxAgeDays}d</BracketLabel>
+                {pruneResult.skipped > 0
+                  ? <BracketLabel tone="accent">{pruneResult.skipped} skipped</BracketLabel>
+                  : <BracketLabel tone="quiet">0 skipped</BracketLabel>}
+              </div>
+              {pruneResult.archiveRoot ? (
+                <div style={{
+                  marginTop: 10,
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 11,
+                  letterSpacing: '0.02em',
+                  color: 'var(--t-text-secondary)',
+                  wordBreak: 'break-all',
+                }}>
+                  {pruneResult.archiveRoot}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </SettingsGroup>
       </section>
 
-      {/* 05 — DANGER */}
-      <section style={{ marginTop: 32 }}>
-        <SectionLabel number="05">DANGER</SectionLabel>
+      {/* Danger */}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Danger"
+          footnote="You will need to quit and reopen o8 afterward to reinitialize. The legacy ~/.cortex-ide dir is left in place as a rollback safety net."
+        >
+          <SettingsRow
+            icon={<TrashIcon />}
+            label="Factory reset"
+            subtitle="Wipes ~/.o8 — sessions, keys, mission state, watched repos"
+            destructive
+            accessory={
+              <RamsButton variant="danger" onClick={openResetConfirm}>
+                Factory reset
+              </RamsButton>
+            }
+            divider={!!resetResult && resetStage === 'idle'}
+          />
 
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 20,
-          paddingTop: 4,
-          paddingBottom: 16,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
+          {resetResult && resetStage === 'idle' ? (
             <div style={{
-              fontSize: 14,
-              fontWeight: 300,
-              color: 'var(--t-text)',
-              marginBottom: 4,
-              letterSpacing: '-0.01em',
+              paddingTop: 12,
+              paddingRight: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
             }}>
-              Factory reset
+              <div style={{
+                fontSize: 13,
+                color: 'var(--t-text)',
+                lineHeight: 1.55,
+                marginBottom: 8,
+              }}>
+                Reset complete in {resetResult.durationMs}ms. Quit and reopen o8 to reinitialize.
+              </div>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                <BracketLabel tone="quiet">{resetResult.removed.length} removed</BracketLabel>
+                {resetResult.failed.length > 0
+                  ? <BracketLabel tone="accent">{resetResult.failed.length} failed</BracketLabel>
+                  : null}
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
-              Wipes the contents of <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.o8</span>{' '}
-              — sessions, mission state, encrypted API keys, watched repos, and the WS token.
-              You will need to quit and reopen o8 afterward to reinitialize. The legacy{' '}
-              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.cortex-ide</span>{' '}
-              dir is left in place as a rollback safety net.
-            </div>
-          </div>
-          <RamsButton variant="danger" onClick={openResetConfirm}>
-            factory reset ›
-          </RamsButton>
-        </div>
-
-        {resetResult && resetStage === 'idle' ? (
-          <div style={{
-            marginTop: 14,
-            paddingTop: 12,
-            paddingBottom: 12,
-            borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          }}>
-            <div style={{
-              fontSize: 13,
-              color: 'var(--t-text)',
-              lineHeight: 1.55,
-              marginBottom: 8,
-            }}>
-              Reset complete in {resetResult.durationMs}ms. Quit and reopen o8 to reinitialize.
-            </div>
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-              <BracketLabel tone="quiet">{resetResult.removed.length} removed</BracketLabel>
-              {resetResult.failed.length > 0
-                ? <BracketLabel tone="accent">{resetResult.failed.length} failed</BracketLabel>
-                : null}
-            </div>
-          </div>
-        ) : null}
-
-        <div style={{ marginTop: 20 }}>
-          <HairlineRule />
-        </div>
+          ) : null}
+        </SettingsGroup>
       </section>
 
-      {/* 06 — DEMO SEQUENCE (#800 in-app golden-path runner) */}
-      <DemoRunSection sectionNumber="06" />
+      {/* Demo sequence (#800 in-app golden-path runner) */}
+      <section style={{ marginTop: 28 }}>
+        <DemoRunSection />
+      </section>
 
       {/* Two-step confirmation modal */}
       {resetStage === 'confirm' || resetStage === 'busy' || resetStage === 'error' ? (
@@ -476,86 +436,13 @@ export function DiagnosticsTab() {
   );
 }
 
-function ToolRow({ tool }: { tool: DiagnosticTool }) {
-  // Three states: not installed (red), installed-but-unauthed (amber), ready (quiet).
-  const dotColor = !tool.detected ? '#ef4444' : tool.ready === false ? '#f59e0b' : RAMS_INK_QUIET;
+function TrashIcon() {
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 14,
-      paddingTop: 12,
-      paddingBottom: 12,
-      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-    }}>
-      <span style={{
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        background: dotColor,
-        flexShrink: 0,
-      }} />
-      <span style={{
-        fontFamily: APP_FONT_STACK,
-        fontSize: 11,
-        fontWeight: 400,
-        color: RAMS_INK_QUIET,
-        textTransform: 'uppercase',
-        letterSpacing: '0.14em',
-        minWidth: 120,
-      }}>
-        {tool.id}
-      </span>
-      <span style={{
-        fontSize: 13,
-        fontWeight: 400,
-        color: 'var(--t-text)',
-        flex: 1,
-        minWidth: 0,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-        fontFamily: tool.path ? MONO_FONT_STACK : APP_FONT_STACK,
-        letterSpacing: tool.path ? '0.02em' : '-0.005em',
-      }}>
-        {tool.path || (tool.detected ? (tool.version ?? 'detected') : 'not found')}
-      </span>
-      <span style={{
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 11,
-        fontWeight: 400,
-        letterSpacing: '0.04em',
-        color: !tool.detected ? '#dc2626' : tool.ready === false ? '#b45309' : 'var(--t-text-secondary)',
-      }}>
-        {!tool.detected ? 'missing' : tool.ready === false ? (tool.authHint ?? 'auth missing') : (tool.version ?? 'detected')}
-      </span>
-    </div>
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
   );
-}
-
-// Symon-clean button shape (system, sentence/title case, 32h, radius 9) — match
-// the shared RamsButton + GitHubTab links. Was: mono / 11.5px / 300 / UPPERCASE / 44h.
-function accentLinkStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: disabled ? RAMS_HAIRLINE_SOFT : 'var(--t-settings-accent-active-border, rgba(29, 78, 216, 0.32))',
-    background: disabled ? 'transparent' : 'var(--t-settings-accent-active-bg, rgba(29, 78, 216, 0.1))',
-    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize' as const,
-    cursor: disabled ? 'default' : 'pointer',
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-    opacity: disabled ? 0.6 : 1,
-  };
 }
