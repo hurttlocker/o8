@@ -1059,6 +1059,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const autoRestoreAttemptedRef = useRef(false);
   const AUTO_RESTORE_SUPPRESSED_KEY = 'o8:orchestrator:auto-restore-suppressed';
+  // #1459 — live view of "has the user done anything yet". The auto-restore
+  // guard below is checked when the effect fires (transcript empty at mount),
+  // but its fetches can resolve SECONDS later while the post-relaunch server
+  // is still booting. A send in that window appends the user bubble and mints
+  // a threadId; applying the restore afterwards would clobber the bubble (and
+  // any delivery-failure entry) and re-route the live turn — the observed
+  // "sent and nothing happened" total silence.
+  const transcriptTouchedRef = useRef(false);
+  useEffect(() => {
+    transcriptTouchedRef.current = orchStream.messages.length > 0 || chatMessages.length > 0;
+  }, [orchStream.messages, chatMessages]);
   useEffect(() => {
     if (!isOrchestratorMode || isChatMode) return;
     if (autoRestoreAttemptedRef.current) return;
@@ -1101,6 +1112,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // every reload. They can still pick it up explicitly from History.
         if (msgs.length > 100) {
           console.log(`[orchestrator] Skipping auto-restore — latest thread has ${msgs.length} messages (>100 cap)`);
+          return;
+        }
+        // #1459 — re-check AFTER the awaits: if a send landed (bubble appended
+        // and/or threadId minted) while the restore fetches were in flight,
+        // applying the restore now would eat the user's message and re-route
+        // the in-flight turn. The user acted first — they win; History still
+        // offers the old thread explicitly.
+        if (transcriptTouchedRef.current || threadIdRef.current) {
+          console.log('[orchestrator] Skipping auto-restore — user activity landed while restore was in flight (#1459)');
           return;
         }
         setPlanText(histData.planText ?? null);
