@@ -22,7 +22,11 @@
 import { useState } from 'react';
 import {
   RamsButton,
+  TabBreadcrumb,
+  TabHeading,
+  SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup } from './grouped';
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
@@ -71,7 +75,7 @@ export function ProjectsPanel() {
       paddingLeft: 8,
       paddingRight: 32,
       paddingBottom: 40,
-      maxWidth: 820,
+      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <div style={{
@@ -79,41 +83,13 @@ export function ProjectsPanel() {
         alignItems: 'flex-start',
         justifyContent: 'space-between',
         gap: 24,
-        marginBottom: 22,
       }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10.5,
-            fontWeight: 350,
-            letterSpacing: '0.2em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-            marginBottom: 14,
-          }}>
-            Settings / Projects
-          </div>
-          <h1 style={{
-            margin: 0,
-            fontFamily: APP_FONT_STACK,
-            fontSize: 32,
-            lineHeight: 1.08,
-            letterSpacing: '-0.045em',
-            color: 'var(--t-text)',
-          }}>
-            Projects
-          </h1>
-          <p style={{
-            marginTop: 10,
-            marginBottom: 0,
-            maxWidth: 560,
-            fontFamily: APP_FONT_STACK,
-            fontSize: 14,
-            lineHeight: 1.55,
-            color: 'var(--t-text-secondary)',
-          }}>
-            A project is the shared context for a product: multiple repositories, standing instructions, and attached files.
-          </p>
+          <TabBreadcrumb tab="projects" />
+          <TabHeading
+            title="projects"
+            subtitle="A project is the shared context for a product: multiple repositories, standing instructions, and attached files."
+          />
         </div>
 
         {!isAnythingOpen ? (
@@ -129,25 +105,37 @@ export function ProjectsPanel() {
         ) : null}
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        gap: 10,
-        marginBottom: 22,
-      }}>
-        <ProjectCapability label="Repositories" value={`${repos.length} available`} />
-        <ProjectCapability label="Context" value={runtimeContext ? `${runtimeContext.repos.length} scoped` : 'Resolving'} />
-        <ProjectCapability
-          label="Locks"
-          value={`${projectLocks.length} active${projectLocks.some((lock) => lock.stale) ? ' / stale' : ''}`}
-          muted={projectLocks.length === 0}
-        />
-      </div>
+      <section>
+        <SettingsGroup header="Overview">
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 10,
+            paddingTop: 14,
+            paddingRight: 14,
+            paddingBottom: 14,
+            paddingLeft: 14,
+          }}>
+            <ProjectCapability label="Repositories" value={`${repos.length} available`} />
+            <ProjectCapability label="Context" value={runtimeContext ? `${runtimeContext.repos.length} scoped` : 'Resolving'} />
+            <ProjectCapability
+              label="Locks"
+              value={`${projectLocks.length} active${projectLocks.some((lock) => lock.stale) ? ' / stale' : ''}`}
+              muted={projectLocks.length === 0}
+            />
+          </div>
+        </SettingsGroup>
+      </section>
 
-      <RuntimeContextPanel context={runtimeContext} locks={projectLocks} />
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Runtime context">
+          <RuntimeContextPanel context={runtimeContext} locks={projectLocks} />
+        </SettingsGroup>
+      </section>
 
       {topError ? (
         <div style={{
+          marginTop: 28,
           marginBottom: 18,
           paddingTop: 10,
           paddingRight: 14,
@@ -166,7 +154,7 @@ export function ProjectsPanel() {
         </div>
       ) : null}
 
-      <section>
+      <section style={{ marginTop: 28 }}>
         {loading ? (
           <div style={{ paddingTop: 20, paddingBottom: 20, color: RAMS_INK_QUIET, fontSize: 13 }}>
             Loading...
@@ -270,33 +258,16 @@ function RuntimeContextPanel({
   const staleCount = locks.filter((lock) => lock.stale).length;
 
   return (
-    <section
+    <div
       style={{
-        borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: RAMS_HAIRLINE_SOFT,
         paddingTop: 14,
         paddingRight: 16,
         paddingBottom: 14,
         paddingLeft: 16,
-        marginBottom: 20,
-        background: 'color-mix(in srgb, var(--t-panel-solid, #fff) 72%, transparent)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 350,
-            letterSpacing: '0.16em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-            marginBottom: 8,
-          }}>
-            Runtime context
-          </div>
           <div style={{
             fontFamily: APP_FONT_STACK,
             fontSize: 16,
@@ -408,7 +379,7 @@ function RuntimeContextPanel({
           The app is resolving the active project context.
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
