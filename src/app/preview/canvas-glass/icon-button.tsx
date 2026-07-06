@@ -70,7 +70,7 @@ export function IconButton({
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
-        style={{ flexShrink: 0, display: 'block' }}
+        style={{ flexShrink: 0, display: 'block', pointerEvents: 'none' }}
       >
         {children}
       </svg>

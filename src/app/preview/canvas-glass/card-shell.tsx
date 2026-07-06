@@ -181,7 +181,7 @@ export function GlassCardShell({
       onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
       onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
-      ✕
+      <span aria-hidden style={{ pointerEvents: 'none' }}>✕</span>
     </button>
   );
 
@@ -241,7 +241,7 @@ export function GlassCardShell({
               flexShrink: 0,
             }}
           >
-            {icon ? <span aria-hidden style={{ display: 'flex', flexShrink: 0, color: 'var(--cnv-ink-muted)' }}>{icon}</span> : null}
+            {icon ? <span aria-hidden style={{ display: 'flex', flexShrink: 0, color: 'var(--cnv-ink-muted)', pointerEvents: 'none' }}>{icon}</span> : null}
             <span style={{ flex: 1, minWidth: 0, fontSize: CHROME.titleSize * s, fontWeight: CHROME.titleWeight, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {title}
             </span>
@@ -348,7 +348,9 @@ export function ShellAction({ label, onClick, children }: { label: string; onCli
       onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
       onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
-      {children}
+      <span aria-hidden style={{ display: 'inline-flex', pointerEvents: 'none' }}>
+        {children}
+      </span>
     </button>
   );
 }
