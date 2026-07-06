@@ -474,6 +474,10 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
     }
   };
 
+  const inferReleaseState = (lane: ReturnType<typeof findLaneByPacket>) => (
+    lane?.status === 'completed' ? 'released' : 'pending'
+  );
+
   const packets = record.packetMeta.map((meta) => {
     const lane = lanesByPacket.get(meta.id) ?? null;
     return {
@@ -483,7 +487,7 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
       wave: 1,
       status: inferPacketStatus(lane),
       queueState: lane ? 'released' : 'unknown',
-      releaseState: lane ? 'released' : 'pending',
+      releaseState: inferReleaseState(lane),
       blockedBy: [] as string[],
       blockedReason: null,
       lane: lane ? {

@@ -80,9 +80,14 @@ const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
-const { createLane, findLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, findLaneByPacket, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service');
+const { recordMission } = await import('@/lib/db/missions-store');
+const { getSqlite } = await import('@/lib/db');
+const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
@@ -386,6 +391,70 @@ function makeDirtyGitRepo(): string {
   return repoPath;
 }
 
+function gitOut(cwd: string, args: string[]): string {
+  return git(cwd, args).trim();
+}
+
+function makeMergeRepo(prefix: string): string {
+  const repoPath = mkdtempSync(join(os.tmpdir(), prefix));
+  const originPath = mkdtempSync(join(os.tmpdir(), `${prefix}origin-`));
+  tempDirs.push(repoPath);
+  tempDirs.push(originPath);
+  git(repoPath, ['init', '-q', '-b', 'main']);
+  git(repoPath, ['config', 'user.email', 'test@o8.dev']);
+  git(repoPath, ['config', 'user.name', 'o8 test']);
+  writeFileSync(join(repoPath, 'base.txt'), 'base\n');
+  git(repoPath, ['add', 'base.txt']);
+  git(repoPath, ['commit', '-q', '-m', 'base']);
+  git(originPath, ['init', '-q', '--bare']);
+  git(repoPath, ['remote', 'add', 'origin', originPath]);
+  git(repoPath, ['push', '-u', 'origin', 'main']);
+  return repoPath;
+}
+
+function commitMergeFile(cwd: string, file: string, body: string, message: string): string {
+  writeFileSync(join(cwd, file), body);
+  git(cwd, ['add', file]);
+  git(cwd, ['commit', '-q', '-m', message]);
+  return gitOut(cwd, ['rev-parse', 'HEAD']);
+}
+
+async function makeMergeWorktree(repoPath: string, packetId: string, branch: string): Promise<string> {
+  const previous = process.env.O8_SKIP_PRELAUNCH_TYPECHECK;
+  process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
+  const launch = await prepareLaunchWorktree({
+    repoRoot: repoPath,
+    agentType: 'codex',
+    taskName: `merge truth ${packetId}`,
+    branchName: branch,
+    baseBranch: 'main',
+    isolate: true,
+    skipSetup: true,
+    packetId,
+  }).finally(() => {
+    if (previous === undefined) delete process.env.O8_SKIP_PRELAUNCH_TYPECHECK;
+    else process.env.O8_SKIP_PRELAUNCH_TYPECHECK = previous;
+  });
+  expect(launch).toBeTruthy();
+  tempDirs.push(launch!.cwd);
+  return launch!.cwd;
+}
+
+function mergePacketFixture(packetId: string, repoPath: string, overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
+  return packetFixture({
+    id: packetId,
+    referenceLabel: 'PKT-MERGE',
+    title: 'merge truth seam',
+    summary: 'Exercise merge truth through the real service.',
+    status: 'awaiting_review',
+    queueState: 'held',
+    releaseState: 'pending',
+    workspaceTargetPath: repoPath,
+    branchTarget: 'main',
+    ...overrides,
+  });
+}
+
 describe('seam F — merge preview blocks dirty review worktrees', () => {
   it('real merge-preview route returns clean-worktree blocker for uncommitted writes after review', async () => {
     const packetId = 'pkt-seam-F-dirty-preview';
@@ -411,4 +480,110 @@ describe('seam F — merge preview blocks dirty review worktrees', () => {
       check.name === 'clean-worktree' && check.verdict === 'fail'
     )).toBe(true);
   });
+});
+
+// ── Seam G — merge truth: release flags and review pins are git-verified ────
+
+describe('seam G — merge truth verifies release claims and carries same-patch reviews', () => {
+  it('reconstruction leaves live unmerged lanes pending and approve_and_merge does not short-circuit', async () => {
+    const repoPath = makeMergeRepo('o8-seam-G-reconstruct-');
+    const packetId = 'pkt-seam-G-reconstruct';
+    const missionId = `mission-seam-G-historical-${Date.now()}`;
+    createLane({ repoPath, worktreePath: repoPath, branch: 'inline/seam-g-reconstruct', runtime: 'codex', packetId });
+    recordMission({
+      id: missionId,
+      repoPath,
+      runtime: 'codex',
+      prompt: 'historical reconstruction',
+      summary: 'historical reconstruction',
+      constraints: '',
+      packetMeta: [{ id: packetId, title: 'historical packet', referenceLabel: 'PKT-HIST' }],
+      totalWaves: 1,
+    });
+    getSqlite().prepare('UPDATE missions SET mission_state_json = NULL WHERE id = ?').run(missionId);
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+
+    const status = await getMissionStatus({ missionId, includeCost: false });
+    const packet = status.packets.find((candidate) => candidate.id === packetId);
+    expect(packet).toBeTruthy();
+    expect(packet?.releaseState).toBe('pending');
+    await expect(approveAndMergePacket({ packetId })).resolves.not.toMatchObject({
+      alreadyReleased: true,
+    });
+  });
+
+  it('stale released flag with no main ancestry self-repairs and merge proceeds', async () => {
+    const repoPath = makeMergeRepo('o8-seam-G-stale-');
+    const packetId = 'pkt-seam-G-stale';
+    const branch = 'inline/seam-g-stale';
+    const worktreePath = await makeMergeWorktree(repoPath, packetId, branch);
+    const lane = createLane({ repoPath, worktreePath, branch, baseBranch: 'main', runtime: 'codex', packetId });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const reviewedHead = commitMergeFile(worktreePath, 'feature.txt', 'feature\n', 'feat: stale release seam [via-o8]');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      repoPath,
+      packets: [mergePacketFixture(packetId, repoPath, {
+        releaseState: 'released',
+        releaseStatePayload: { mergeCommit: '0123456789012345678901234567890123456789' },
+      })],
+    });
+    await submitPacketReview({ packetId, approved: true, findings: [], reviewedHeadSha: reviewedHead });
+
+    const result = await approveAndMergePacket({ packetId });
+    expect(result.merged).toBe(true);
+    expect(result.alreadyReleased).toBeUndefined();
+    expect(result.mergeSha).toBe(gitOut(repoPath, ['rev-parse', 'HEAD']));
+  }, 20_000);
+
+  it('patch-id carry allows unchanged rebased review and still rejects changed content', async () => {
+    const repoPath = makeMergeRepo('o8-seam-G-patch-id-');
+    const packetId = 'pkt-seam-G-patch-id';
+    const branch = 'inline/seam-g-patch-id';
+    const worktreePath = await makeMergeWorktree(repoPath, packetId, branch);
+    const lane = createLane({ repoPath, worktreePath, branch, baseBranch: 'main', runtime: 'codex', packetId });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const reviewedHead = commitMergeFile(worktreePath, 'feature.txt', 'feature\n', 'feat: patch id seam [via-o8]');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      repoPath,
+      packets: [mergePacketFixture(packetId, repoPath)],
+    });
+    await submitPacketReview({ packetId, approved: true, findings: [], reviewedHeadSha: reviewedHead });
+
+    commitMergeFile(repoPath, 'base.txt', 'base\nadvanced\n', 'chore: advance base');
+    git(worktreePath, ['rebase', 'main']);
+    const rebasedHead = gitOut(worktreePath, ['rev-parse', 'HEAD']);
+    expect(rebasedHead).not.toBe(reviewedHead);
+
+    const merged = await approveAndMergePacket({ packetId });
+    expect(merged.merged).toBe(true);
+    expect(getLaneEvents(lane.id).some((event) =>
+      event.verb === 'review_carried_across_rebase'
+      && event.payload.from === reviewedHead
+      && event.payload.to === rebasedHead
+    )).toBe(true);
+
+    const changedPacketId = 'pkt-seam-G-patch-id-changed';
+    const changedBranch = 'inline/seam-g-patch-id-changed';
+    const changedWorktree = await makeMergeWorktree(repoPath, changedPacketId, changedBranch);
+    const changedLane = createLane({ repoPath, worktreePath: changedWorktree, branch: changedBranch, baseBranch: 'main', runtime: 'codex', packetId: changedPacketId });
+    setLaneStatus(changedLane.id, 'reviewing', 'system', 'review_requested');
+    const changedReviewed = commitMergeFile(changedWorktree, 'changed.txt', 'reviewed\n', 'feat: reviewed changed seam [via-o8]');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      repoPath,
+      packets: [mergePacketFixture(changedPacketId, repoPath)],
+    });
+    await submitPacketReview({ packetId: changedPacketId, approved: true, findings: [], reviewedHeadSha: changedReviewed });
+    const changedHead = commitMergeFile(changedWorktree, 'changed.txt', 'reviewed\nnew content\n', 'feat: post review changed seam [via-o8]');
+
+    const refused = await approveAndMergePacket({ packetId: changedPacketId });
+    expect(refused).toMatchObject({
+      merged: false,
+      reason: 'head_moved_since_review',
+      reviewedHeadSha: changedReviewed,
+      currentHeadSha: changedHead,
+    });
+  }, 30_000);
 });

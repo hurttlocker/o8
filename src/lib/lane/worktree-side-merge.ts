@@ -757,8 +757,9 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       await deleteRefBestEffort(lane.repoPath, integrationRef);
     }
 
-    let pushedToOrigin = false;
-    let pushError: string | undefined;
+    const { stdout: mergeShaStdout } = await git(lane.repoPath, ['rev-parse', 'HEAD'], { timeout: 5000 });
+    const mergeSha = mergeShaStdout.trim();
+    let pushedToOrigin = false, pushError: string | undefined;
     try {
       await git(lane.repoPath, ['push', 'origin', lane.baseBranch], { timeout: 60_000 });
       pushedToOrigin = true;
@@ -774,10 +775,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     updateLane(command.laneId, { worktreePath: null }, 'system');
     setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
 
-    // Coarse product signal — the governance loop closed: an agent's work merged
-    // (#1249). Runtime enum + whether it reached origin; never the diff/repo.
-    // Merges land via MCP approve_and_merge far more than a UI click, so this is
-    // the only chokepoint that sees them all. Fire-and-forget.
+    // Coarse product signal: the governance loop closed. Fire-and-forget.
     void emitProductEvent('merge.approved', { runtime: lane.runtime, pushed: pushedToOrigin });
 
     const decompositionNote = await enqueueDecompositions(lane.repoPath, lane.runtime);
@@ -790,6 +788,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       laneId: command.laneId,
       note: mergeNote,
       lane: updated ?? undefined,
+      mergeSha,
       pushedToOrigin,
       pushError,
     };
