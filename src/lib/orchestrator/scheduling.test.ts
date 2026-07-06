@@ -30,8 +30,10 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
 const {
   MAX_PARALLEL_DISPATCHES,
+  MAX_LAUNCH_ATTEMPTS,
   RUNTIME_PARALLEL_CAP,
   buildRemainingLaunchBudget,
+  getDispatchBlocker,
   runDispatchTick,
 } = await import('@/lib/orchestrator/scheduling');
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -224,4 +226,35 @@ describe('dispatch scheduling caps and waves', () => {
     expect(next.packets[0].status).toBe('awaiting_review');
     expect(next.packets[0].lastEventLabel).toBe('session_recovery_autocommit');
   }, 20_000);
+
+  it('caps launch/attach relaunches on the PACKET so a fresh lane cannot reset the budget', () => {
+    const repoPath = makeRepo();
+    // A launch that failed to attach: the lane fell back to idle with a
+    // launch_error label, which getDispatchBlocker normally re-admits for retry.
+    const launchFailedLane = {
+      tileId: 'tile-thrash',
+      tabId: 'tab-thrash',
+      repoPath,
+      worktreePath: repoPath,
+      runtime: 'codex' as const,
+      laneId: 'lane-thrash',
+      lastEventLabel: 'launch_error',
+    };
+    const base = packetFixture(repoPath, 'launch-thrash', {
+      status: 'queued',
+      queueState: 'queued',
+      lane: launchFailedLane,
+    });
+
+    // Below the cap: the launch_error retry path re-admits the packet (null).
+    expect(
+      getDispatchBlocker({ ...base, launchAttempts: MAX_LAUNCH_ATTEMPTS - 1 }, []),
+    ).toBeNull();
+
+    // At the cap: blocked — even though it's a fresh lane, the packet-scoped
+    // counter survived the redispatch and stops the launching<->idle thrash.
+    expect(
+      getDispatchBlocker({ ...base, launchAttempts: MAX_LAUNCH_ATTEMPTS }, []),
+    ).toMatch(/Launch attempts exceeded/);
+  });
 });

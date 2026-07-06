@@ -45,6 +45,9 @@ const ORCHESTRATOR_MODEL_STORAGE_PREFIX = 'o8:orchestrator:model:';
 const ORCHESTRATOR_PRELUDE_STORAGE_PREFIX = 'o8:orchestrator:resume-prelude:';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
 const MAX_RECOVERY_ATTEMPTS = 2;
+// Mirrors MAX_LAUNCH_ATTEMPTS in scheduling.ts (duplicated across files like the
+// recovery cap above) — the packet-scoped launch/attach retry ceiling.
+const MAX_LAUNCH_ATTEMPTS = 5;
 const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 
@@ -331,6 +334,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // Stop forget itself on the next state read.
     typecheckAutoRetries: normalizeAttemptCount(packet.typecheckAutoRetries),
     stallRetries: normalizeAttemptCount(packet.stallRetries),
+    launchAttempts: normalizeAttemptCount(packet.launchAttempts),
     operatorStopped: packet.operatorStopped === true ? true : undefined,
     // Huddle mode (per-mission alignment turn) lives only on the packet — drop
     // it here and a rerun/re-read would silently disarm the huddle.
@@ -943,6 +947,13 @@ export function reconcileOrchestratorMissionState(
       }
       if (laneMatch.sessionKey) {
         next.status = 'idle';
+      } else if ((packet.launchAttempts ?? 0) >= MAX_LAUNCH_ATTEMPTS) {
+        // Packet-scoped launch cap → terminal. The 90s launch-timeout net below
+        // was defeated by the fast relaunch resetting the clock every ~5-10s
+        // (the 4,119× launching<->idle thrash); a COUNT bound is the fix (proven
+        // via LaunchHandshake.tla — a delay/timeout can't stop it, only a bound).
+        next.status = 'failed';
+        next.blockedReason = `Launch failed after ${packet.launchAttempts} attempts. Manual reset required.`;
       } else {
         // Launch timeout: if launching > 90s without a session, mark recovering
         const lastActivity = packet.lane?.lastHeartbeatAt ?? packet.lastEventAt ?? null;
