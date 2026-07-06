@@ -32,6 +32,10 @@ import { computePredictedFiles, filterOverlappingPackets } from './preservation-
 // then the locked fallback (5). Existing imports keep working.
 export const MAX_PARALLEL_DISPATCHES = resolveParallelCapSync();
 export const MAX_RECOVERY_DISPATCHES = 2;
+// Packet-scoped launch/attach cap. The per-lane LAUNCH_ATTEMPT_CAP (lane/commands.ts)
+// resets when a fresh lane is minted on redispatch, so it never accumulated — the
+// launching<->idle thrash. This counter lives on the packet so it survives.
+export const MAX_LAUNCH_ATTEMPTS = 5;
 export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> = {
   gemini: 3,
 };
@@ -330,6 +334,12 @@ export function getDispatchBlocker(
   if (candidate.status === 'recovering' && (candidate.recoveryCount ?? 0) >= MAX_RECOVERY_DISPATCHES) {
     return `Recovery limit exceeded (${candidate.recoveryCount}/${MAX_RECOVERY_DISPATCHES})`;
   }
+  // Packet-scoped launch cap — stop the launching<->idle relaunch thrash. The
+  // per-lane cap resets when a fresh lane is minted on redispatch (proven
+  // lane-scoped-counter runaway); this one lives on the packet.
+  if ((candidate.launchAttempts ?? 0) >= MAX_LAUNCH_ATTEMPTS) {
+    return `Launch attempts exceeded (${candidate.launchAttempts}/${MAX_LAUNCH_ATTEMPTS})`;
+  }
   const dependency = packetReleaseBlockedBy(candidate, allPackets);
   if (dependency) {
     return `Blocked by ${dependency.id}`;
@@ -600,6 +610,10 @@ export async function runDispatchTick(
             return {
               ...candidate,
               ...recoveryFields,
+              // Packet-scoped launch counter (survives the fresh lane minted on
+              // each redispatch, unlike the per-lane cap). getDispatchBlocker
+              // stops re-admitting this packet once it hits MAX_LAUNCH_ATTEMPTS.
+              launchAttempts: (candidate.launchAttempts ?? 0) + 1,
               runtime: workerRouting.selectedRuntime,
               workerIntent: workerRouting.workerIntent,
               workerRouting,

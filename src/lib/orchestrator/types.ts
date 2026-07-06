@@ -184,6 +184,19 @@ export interface OrchestratorPacket {
    */
   stallRetries?: number;
   /**
+   * Launch/attach retry budget spent. Lives ON the packet for the same reason
+   * as {@link recoveryCount}: the per-LANE `LAUNCH_ATTEMPT_CAP` (lane/commands.ts)
+   * resets to 0 whenever a fresh lane is minted on redispatch, so it never
+   * accumulated — a launch that fails to attach fell back to idle and was
+   * relaunched every ~5-10s indefinitely (observed: one lane relaunched 4,119×
+   * over ~6h, never attaching). A time-based 90s launch-timeout net existed but
+   * the fast relaunch reset the clock every cycle. The cure is a COUNT bound,
+   * not a delay (proven via TLA+/TLC, LaunchHandshake.tla). Reset on operator
+   * reset_packet and on rerun_with_feedback (a fresh dispatch earns a fresh
+   * launch budget); the intra-cycle cap still stops the thrash.
+   */
+  launchAttempts?: number;
+  /**
    * Operator hit Stop — terminal "do not re-dispatch" marker. Checked first in
    * getDispatchBlocker so NO path (headless loop, stall escalation, ralph
    * requeue) can relaunch it. Cleared by reset_packet / explicit relaunch.
