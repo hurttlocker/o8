@@ -21,6 +21,7 @@ import { execSync } from 'node:child_process';
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 import { defaultClaudeBin } from '@/lib/claude-code/one-shot-repl';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { MODEL_IDS } from '@/lib/models';
 import { appendComment, insertSuggestion, type SuggestionKind } from './mutate';
 
 /** One annotation the LLM proposes. Mirrors the comment/suggest write surface. */
@@ -50,7 +51,7 @@ const MAX_CONTENT_CHARS = 24_000;
  * routing lives in {@link runLLM}). Deliberately NOT the shared SONNET_CLI_MODEL
  * in sonnet-adapter.ts, which has other callers pinned to a different model.
  */
-const REVIEW_MODEL = 'claude-sonnet-5';
+const REVIEW_MODEL = MODEL_IDS.claudeReviewDefault;
 const REVIEW_EFFORT = 'xhigh';
 /** System framing prepended to the user prompt for the warm one-shot frame
  *  (mirrors callSonnetCli's `<system>…</system>` shape, sonnet-adapter.ts). */

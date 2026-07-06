@@ -4,11 +4,12 @@ import {
   writePersistedLlmChat,
   type PersistedLlmChatHistory,
 } from '@/lib/llm/chat-history-store';
+import { MODEL_IDS } from '@/lib/models';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 
-const DEFAULT_MOBILE_GEMINI_MODEL = 'gemini-2.5-flash';
-const DEFAULT_MOBILE_OPENAI_MODEL = 'gpt-5.5';
-const DEFAULT_MOBILE_CLI_MODEL = 'cli:codex:gpt-5.5';
+const DEFAULT_MOBILE_GEMINI_MODEL = MODEL_IDS.mobileGeminiDefault;
+const DEFAULT_MOBILE_OPENAI_MODEL = MODEL_IDS.mobileOpenAiDefault;
+const DEFAULT_MOBILE_CLI_MODEL = MODEL_IDS.mobileCliDefault;
 const DEFAULT_MOBILE_CHAT_TITLE = 'Assistant';
 
 export function createMobileLlmTabId() {

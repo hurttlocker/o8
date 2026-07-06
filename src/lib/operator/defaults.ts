@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { MODEL_IDS } from '@/lib/models';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -264,7 +265,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // existing Claude Code MAX plan — not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
-  orchestratorModel: 'claude-opus-4-8',
+  orchestratorModel: MODEL_IDS.orchestratorDefault,
   defaultDispatchRuntime: 'codex',
   defaultDispatchModel: '',
   localInferenceBaseUrl: '',
@@ -326,13 +327,13 @@ export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'p
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   // Subscription-billed via the claude CLI like every other entry. Fable is
   // included in Claude Code MAX subscriptions through 2026-06-22.
-  { value: 'claude-fable-5', label: 'Fable 5' },
-  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { value: 'claude-opus-4-7', label: 'Opus 4.7' },
-  { value: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { value: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5' },
+  { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8' },
+  { value: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7' },
+  { value: MODEL_IDS.raw.anthropicClaudeOpus46, label: 'Opus 4.6' },
+  { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5' },
+  { value: MODEL_IDS.raw.anthropicClaudeSonnet45, label: 'Sonnet 4.5' },
+  { value: MODEL_IDS.raw.anthropicClaudeHaiku45, label: 'Haiku 4.5' },
 ];
 
 const OPERATOR_DEFAULTS_FILE = 'operator-defaults.json';

@@ -12,16 +12,17 @@
 import type { OrchestratorBackendId } from './types';
 import type { MoaConfig, MoaParticipant } from './moa';
 import { resolveCollideAggregatorSync, type CollideAggregator } from '@/lib/operator/defaults';
+import { MODEL_IDS } from '@/lib/models';
 
 /** Default brain — Claude (opus, max) + Codex (gpt-5.5, xhigh) → Claude (opus, max). */
 export const DEFAULT_COLLIDE_CONFIG: MoaConfig = {
   id: 'collide',
   label: 'Collide',
   proposers: [
-    { backend: 'claude', model: 'claude-opus-4-8', thinkingEffort: 'max' },
-    { backend: 'codex', model: 'gpt-5.5', thinkingEffort: 'xhigh' },
+    { backend: 'claude', model: MODEL_IDS.orchestratorDefault, thinkingEffort: 'max' },
+    { backend: 'codex', model: MODEL_IDS.codexDefault, thinkingEffort: 'xhigh' },
   ],
-  aggregator: { backend: 'claude', model: 'claude-opus-4-8', thinkingEffort: 'max' },
+  aggregator: { backend: 'claude', model: MODEL_IDS.orchestratorDefault, thinkingEffort: 'max' },
 };
 
 const VALID_BACKENDS: OrchestratorBackendId[] = ['claude', 'codex'];
