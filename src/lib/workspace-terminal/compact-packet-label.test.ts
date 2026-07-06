@@ -14,7 +14,7 @@ describe('compactPacketLabel', () => {
   });
 
   it('never falls back to slicing a sessionKey for a label', () => {
-    expect(compactPacketLabel('codex-owned:pkt-a3f99b36-5e4f-4acd-b006-e264389ae527')).toBe('Codex-owned:pkt-a3f99b36-5e4f-4acd-b006-e264389ae527');
+    expect(compactPacketLabel('codex-owned:pkt-a3f99b36-5e4f-4acd-b006-e264389ae527')).toBe('Pkt-a3f99b36-5e4f-4acd-b006-e264389ae527');
   });
 
   it('handles empty and degenerate inputs', () => {

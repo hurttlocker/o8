@@ -13,7 +13,7 @@ import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
 import { isRefusedTerminalTransition } from './terminal-states';
-import { isTerminalStatus } from './types';
+import { isTerminalLaneStatus } from './types';
 import type {
   Lane,
   LaneEvent,
@@ -721,7 +721,7 @@ export function reconcileLanesWithSessions(
       // wakes). The lane status is the truth here; the session is a heuristic.
       // (`awaiting_orchestrator` — incl. the Huddle alignment turn — keeps its
       // own continue below so the warm session survives for steer_packet.)
-      if (isTerminalStatus(lane.status) || lane.status === 'merging') continue;
+      if (isTerminalLaneStatus(lane.status) || lane.status === 'merging') continue;
 
       if (lane.sessionKey) {
         const session = sessionByKey.get(lane.sessionKey);
