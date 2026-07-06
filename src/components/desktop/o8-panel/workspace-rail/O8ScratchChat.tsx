@@ -19,8 +19,8 @@ import { track } from '@/lib/analytics/track';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
-const O8_ICON_ACTIVE = 'var(--t-chat-surface-text, #0f172a)';
-const O8_ICON_INACTIVE = 'var(--t-chat-surface-text-secondary, #64748b)';
+const O8_ICON_ACTIVE = 'var(--t-text)';
+const O8_ICON_INACTIVE = 'var(--t-text-muted)';
 const SCRATCH_LOCAL_TOKENS: CSSProperties = {
   ['--o8-scratch-surface' as string]: 'var(--t-chat-surface-bg, #f4f2ed)',
   ['--o8-scratch-card' as string]: 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))',
