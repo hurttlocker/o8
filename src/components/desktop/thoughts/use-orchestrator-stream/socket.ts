@@ -39,6 +39,11 @@ interface CreateOrchestratorMessageHandlerOptions {
   lastBackendRef?: RefLike<string | null>;
   lastEventAtRef: RefLike<number>;
   messagesRef: RefLike<MobileTranscriptEntry[]>;
+  onOrchestratorActivity?: (event: {
+    event: string;
+    data?: Record<string, unknown>;
+    observedAt: number;
+  }) => void;
   resetEpochRef: RefLike<number>;
   setMessages: Dispatch<SetStateAction<MobileTranscriptEntry[]>>;
   setStatus: Dispatch<SetStateAction<OrchestratorStreamStatus>>;
@@ -98,6 +103,13 @@ export function createOrchestratorMessageHandler(
 
     if (msg.channel !== 'orchestrator') return;
 
+    const observedAt = Date.now();
+    options.onOrchestratorActivity?.({
+      event: typeof msg.event === 'string' ? msg.event : '',
+      data: msg.data,
+      observedAt,
+    });
+
     // Track the active backend BEFORE seq-dedup/snapshot gating — a snapshot or
     // replayed event is still truthful about which backend owns the session.
     if (options.lastBackendRef && typeof msg.data?.backend === 'string') {
@@ -115,7 +127,7 @@ export function createOrchestratorMessageHandler(
     // would pin the "Working" timer forever. Only live events advance these. (#1282)
     if (msg.data?.snapshot !== true) {
       options.eventCountRef.current += 1;
-      options.lastEventAtRef.current = Date.now();
+      options.lastEventAtRef.current = observedAt;
     }
 
     // #register-mcp — transient banner notices ride the same channel but

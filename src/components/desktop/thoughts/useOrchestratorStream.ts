@@ -17,7 +17,14 @@ import {
 } from '@/lib/orchestrator/store';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
-import { appendOrchestratorDeliveryFailureEntry, deliverOrchestratorPayload } from './use-orchestrator-stream/delivery';
+import {
+  appendOrchestratorDeliveryFailureEntry,
+  armOrchestratorSendWatchdog,
+  createOrchestratorClientMessageId,
+  deliverOrchestratorPayload,
+  settleOrchestratorSendWatchdog,
+  type PendingOrchestratorSend,
+} from './use-orchestrator-stream/delivery';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import {
   primeCompactedOrchestratorSession,
@@ -231,6 +238,7 @@ export function useOrchestratorStream(
   const missionRotationInFlightRef = useRef(false);
   const pendingMissionCompletionRef = useRef<OrchestratorMissionCompletedDetail | null>(null);
   const transitionStripTimerRef = useRef<number | null>(null);
+  const pendingSendWatchdogRef = useRef<PendingOrchestratorSend | null>(null);
 
   // #539 — reconnect reconciliation. eventCountRef advances on every relevant
   // orchestrator event; lastEventAtRef tracks wall-clock time of the last
@@ -406,6 +414,10 @@ export function useOrchestratorStream(
       clearTimeout(transitionStripTimerRef.current);
       transitionStripTimerRef.current = null;
     }
+    if (pendingSendWatchdogRef.current) {
+      window.clearTimeout(pendingSendWatchdogRef.current.timeoutId);
+      pendingSendWatchdogRef.current = null;
+    }
     clearQueuedOrchestratorSessionPrelude(repoPathRef.current, threadIdRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture, syncMessages, updateRunningTotal]);
@@ -486,6 +498,14 @@ export function useOrchestratorStream(
       );
     }
   }, [endTurn]);
+
+  const settlePendingSend = useCallback((event: {
+    event: string;
+    data?: Record<string, unknown>;
+    observedAt: number;
+  }) => {
+    settleOrchestratorSendWatchdog(pendingSendWatchdogRef, event);
+  }, []);
 
   const flushCurrentAssistant = useCallback(() => {
     // An immediate flush supersedes any queued frame — cancel it so a late
@@ -606,6 +626,7 @@ export function useOrchestratorStream(
       lastSeqRef,
       lastEventAtRef,
       messagesRef,
+      onOrchestratorActivity: settlePendingSend,
       resetEpochRef,
       setMessages,
       setStatus,
@@ -629,7 +650,7 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState]);
+  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, settlePendingSend]);
 
   useEffect(() => {
     if (!repoPath || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -683,6 +704,10 @@ export function useOrchestratorStream(
         }
         wsRef.current.close();
         wsRef.current = null;
+      }
+      if (pendingSendWatchdogRef.current) {
+        window.clearTimeout(pendingSendWatchdogRef.current.timeoutId);
+        pendingSendWatchdogRef.current = null;
       }
     };
   }, [repoPath, connect, refreshTokenTelemetry, updateRunningTotal]);
@@ -970,10 +995,12 @@ export function useOrchestratorStream(
       if (solo) {
         outboundMessage = `${SOLO_TURN_HINT}\n\n${outboundMessage}`;
       }
+      const clientMessageId = createOrchestratorClientMessageId();
       const payload = JSON.stringify({
         type: 'orchestrator-send',
         repoPath: activeRepoPath,
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
+        clientMessageId,
         message: outboundMessage,
         permissionMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
@@ -1002,6 +1029,23 @@ export function useOrchestratorStream(
       const deliveredAt = Date.now();
       lastSendAtRef.current = deliveredAt;
       lastEventAtRef.current = deliveredAt;
+      armOrchestratorSendWatchdog({
+        clientMessageId,
+        deliveredAt,
+        originalText: displayMessage,
+        pendingRef: pendingSendWatchdogRef,
+        setStatusReady: () => {
+          const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
+          statusRef.current = nextStatus;
+          setStatus(nextStatus);
+          setBusyState(createIdleBusyState());
+          activeTurnRef.current = null;
+          currentAssistantRef.current = null;
+          resetFirstTurnPlanCapture();
+        },
+        setMessages,
+        messagesRef,
+      });
       statusRef.current = 'busy';
       setStatus('busy');
     })();

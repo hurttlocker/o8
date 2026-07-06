@@ -2976,7 +2976,14 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
   const threadId = resolveMsgThreadId(msg);
+  const clientMessageId = typeof msg.clientMessageId === 'string' ? msg.clientMessageId : undefined;
   const abortKey = orchestratorAbortKey(repoPath, backend.id, agentId, threadId);
+
+  send(client, {
+    channel: 'orchestrator',
+    event: 'send-ack',
+    data: { repoPath, threadId, clientMessageId },
+  });
 
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
