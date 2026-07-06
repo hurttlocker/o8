@@ -271,44 +271,6 @@ export function ProjectForm({
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
-          Files
-        </span>
-        <button
-          type="button"
-          disabled
-          style={{
-            minHeight: 70,
-            borderRadius: 6,
-            borderWidth: 1,
-            borderStyle: 'dashed',
-            borderColor: RAMS_HAIRLINE_SOFT,
-            background: 'transparent',
-            color: RAMS_INK_QUIET,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            fontFamily: APP_FONT_STACK,
-            fontSize: 13,
-            cursor: 'default',
-          }}
-        >
-          <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>+</span>
-          Add files
-          <span style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 9.5,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-          }}>
-            soon
-          </span>
-        </button>
-      </div>
-
       {error ? (
         <div style={{
           fontFamily: APP_FONT_STACK,
