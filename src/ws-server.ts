@@ -2001,6 +2001,7 @@ let runtimeRefreshFreshRequested = false;
 let mobileRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileRefreshFreshRequested = false;
 const mobileInboxBridgeBackoff = createRealtimeBridgeBackoffState();
+const globalSnapshotBridgeBackoff = createRealtimeBridgeBackoffState();
 const headlessTickBridgeBackoff = createRealtimeBridgeBackoffState();
 let headlessTickBridgeInFlight = false;
 // Single-flight guards. The snapshot/inbox fetches take 3-5s in dev; the debounce
@@ -2035,7 +2036,7 @@ function currentIsoTime() {
 let realtimeBridgeMutationSeq = 0;
 
 function publishRealtimeBridgeConnectionState(
-  bridge: 'mobile-inbox' | 'headless-tick',
+  bridge: 'mobile-inbox' | 'headless-tick' | 'global-snapshot',
   state: 'down' | 'up',
   reason?: string,
 ) {
@@ -2474,6 +2475,9 @@ function deriveRuntimeHealth(fleet: CommandCenterSnapshot['fleet']): RealtimeHea
 }
 
 async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?: string } = {}) {
+  // Backoff gate: after consecutive bridge failures, skip attempts until the
+  // retry window opens — the periodic caller re-invokes, so no reschedule needed.
+  if (!canAttemptRealtimeBridge(globalSnapshotBridgeBackoff)) return;
   // Single-flight: fold an overlapping call into one trailing re-fire instead of
   // launching a second concurrent fetch (which is how the timeout spiral started).
   if (globalSnapshotInFlight) {
@@ -2486,6 +2490,11 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
   globalSnapshotInFlight = true;
   try {
     const snapshot = await fetchCommandCenterSnapshot(Boolean(options.fresh));
+    const success = recordRealtimeBridgeSuccess(globalSnapshotBridgeBackoff);
+    if (success.transition === 'up') {
+      console.log('[ws-server] realtime global snapshot recovered');
+      publishRealtimeBridgeConnectionState('global-snapshot', 'up');
+    }
     const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
     const events: RealtimeEventEnvelope[] = [];
 
@@ -2551,7 +2560,11 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
     // Silently skip transient 404s during startup / packet transitions — the route
     // exists but Next.js may not have compiled/rendered it yet.
     if (typeof msg === 'string' && msg.includes('(404)')) return;
-    console.error('[ws-server] realtime global snapshot failed:', msg);
+    const failure = recordRealtimeBridgeFailure(globalSnapshotBridgeBackoff);
+    if (failure.transition === 'down') {
+      console.error('[ws-server] realtime global snapshot unavailable:', msg);
+      publishRealtimeBridgeConnectionState('global-snapshot', 'down', msg);
+    }
   } finally {
     globalSnapshotInFlight = false;
     if (globalSnapshotRerequest) {
