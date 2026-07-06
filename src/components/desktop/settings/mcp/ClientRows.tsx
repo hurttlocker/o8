@@ -2,9 +2,29 @@ import type React from 'react';
 import {
   MONO_FONT_STACK,
   RAMS_INK_QUIET,
+  PlugIcon,
   RamsButton,
 } from '../shared';
 import { SettingsRow, ValuePill } from '../grouped';
+
+function MonitorIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+function TerminalGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
 
 export type Target = 'claude-desktop' | 'claude-code';
 export type ExternalTarget = 'hermes' | 'openclaw';
@@ -31,6 +51,7 @@ export interface ExternalTargetStatus {
 }
 
 export function ClaudeTargetRow({
+  target,
   label,
   status,
   installing,
@@ -75,6 +96,7 @@ export function ClaudeTargetRow({
 
   return (
     <SettingsRow
+      icon={target === 'claude-desktop' ? <MonitorIcon /> : <TerminalGlyph />}
       label={label}
       subtitle={<RowBody statusLine={statusLine} path={status?.path ?? null} note={note} restartHint={restartHint} />}
       accessory={
@@ -133,6 +155,7 @@ export function ExternalClientRow({
 
   return (
     <SettingsRow
+      icon={<PlugIcon />}
       label={labelText}
       subtitle={
         <RowBody

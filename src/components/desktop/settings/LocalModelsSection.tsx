@@ -11,8 +11,8 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
-  SectionLabel,
 } from './shared';
+import { SettingsGroup } from './grouped';
 
 type SettingSource = 'env' | 'file' | 'default';
 
@@ -177,20 +177,21 @@ function ProbeBadge({ configured, checking, running, modelCount }: {
 
 // ── Row (mirrors the parent tab's Row geometry) ──
 
-function FieldRow({ label, description, source, control }: {
+function FieldRow({ label, description, source, control, divider = false }: {
   label: string;
   description: React.ReactNode;
   source: SettingSource;
   control: React.ReactNode;
+  divider?: boolean;
 }) {
   return (
     <div
       style={{
-        paddingTop: 14,
-        paddingBottom: 14,
-        paddingLeft: 2,
-        paddingRight: 2,
-        borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+        paddingTop: 12,
+        paddingBottom: 12,
+        paddingLeft: 14,
+        paddingRight: 14,
+        borderBottom: divider ? `1px solid ${RAMS_HAIRLINE_SOFT}` : 'none',
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
@@ -200,10 +201,10 @@ function FieldRow({ label, description, source, control }: {
     >
       <div style={{ minWidth: 0, flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
             {label}
           </span>
-          <BracketLabel tone="quiet">{sourceLabel(source)}</BracketLabel>
+          {source === 'env' ? <BracketLabel tone="quiet">{sourceLabel(source)}</BracketLabel> : null}
         </div>
         <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
           {description}
@@ -255,15 +256,13 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
   }, [values.localInferenceBaseUrl]);
 
   return (
-    <section style={{ marginBottom: 32 }}>
-      <SectionLabel number="10">LOCAL MODELS</SectionLabel>
-      <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.6, marginBottom: 14, maxWidth: 560 }}>
-        Run o8 with zero cloud keys. Point dispatch at a model on your own machine
-        (Ollama / LM Studio) and the Engineering Brain embeds locally too.
-        Environment variables still win — these are the persisted fallback.
-      </div>
-
+    <section style={{ marginTop: 28 }}>
+      <SettingsGroup
+        header="Local models"
+        footnote="Run o8 with zero cloud keys. Point dispatch at a model on your own machine (Ollama / LM Studio) and the Engineering Brain embeds locally too. Environment variables still win — these are the persisted fallback."
+      >
       <FieldRow
+        divider
         label="Dispatch model"
         source={sources.defaultDispatchModel}
         description={(
@@ -293,6 +292,7 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
       />
 
       <FieldRow
+        divider
         label="Local endpoint"
         source={sources.localInferenceBaseUrl}
         description={(
@@ -327,6 +327,7 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
       />
 
       <FieldRow
+        divider
         label="Chat model"
         source={sources.localChatModel}
         description={(
@@ -373,6 +374,7 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
           />
         )}
       />
+      </SettingsGroup>
     </section>
   );
 }
