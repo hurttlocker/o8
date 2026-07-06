@@ -3,6 +3,7 @@
 import type { CSSProperties } from 'react';
 import type { ApprovalRecord, ApprovalRisk } from '@/lib/approvals/types';
 import { isGateApprovalRow } from '@/lib/approvals/gating';
+import { composeApprovalCardCopy } from '@/lib/inbox/card-copy';
 
 type ApprovalAction = 'approve' | 'reject';
 
@@ -144,6 +145,7 @@ function ApprovalRequestCard({
   const busyAction = busyApproval?.id === approval.id ? busyApproval.action : null;
   const disabled = busyAction !== null;
   const tool = toolLabel(approval);
+  const copy = composeApprovalCardCopy(approval);
 
   return (
     <article
@@ -203,10 +205,10 @@ function ApprovalRequestCard({
             </span>
           </div>
           <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, color: 'var(--t-text)', overflowWrap: 'anywhere' }}>
-            {approval.title}
+            {copy.headline}
           </div>
           <div style={{ marginTop: 4, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>
-            {approval.agent} / {approval.runtime} / {approval.sessionKey}
+            {copy.subline}
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
+import { composeSupervisorInboxCardCopy } from '@/lib/inbox/card-copy';
 import { fireInvalidation } from '@/lib/query/use-reactive-query';
 import { O8ApprovalCards } from './o8-panel/O8ApprovalCards';
 
@@ -44,13 +45,6 @@ function formatTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
-function packetLabel(item: SupervisorInboxItem) {
-  if (item.packetReferenceLabel && item.packetTitle) {
-    return `${item.packetReferenceLabel} · ${item.packetTitle}`;
-  }
-  return item.packetTitle ?? item.packetReferenceLabel ?? 'Unbound lane';
 }
 
 function repoLabel(repoPath: string) {
@@ -415,6 +409,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
             const isResolved = item.status === 'resolved';
             const transcriptPreview = expandedTranscriptById[item.id] ?? null;
             const actionNote = actionNoteById[item.id] ?? null;
+            const copy = composeSupervisorInboxCardCopy(item);
 
             return (
               <article
@@ -475,10 +470,10 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                   </span>
                 </div>
                 <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', marginBottom: 4, lineHeight: 1.25 }}>
-                  {packetLabel(item)}
+                  {copy.headline}
                 </div>
                 <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 6 }}>
-                  {item.errorExcerpt}
+                  {copy.subline}
                 </div>
                 {transcriptPreview ? (
                   <div
