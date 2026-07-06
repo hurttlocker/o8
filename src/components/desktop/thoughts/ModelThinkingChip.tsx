@@ -122,7 +122,7 @@ export function ModelThinkingChip({
   const effortTitle = isCodexBackend ? 'reasoning' : 'thinking';
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
   const decideLabel = isCodexBackend ? 'Codex decides' : 'Claude decides';
-  const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Ultracode' : 'Solo';
+  const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Swarm' : 'Solo';
 
   return (
     <>
@@ -318,14 +318,15 @@ export function ModelThinkingChip({
                 <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Mode</div>
               </div>
               {[
-                { key: 'solo', order: 1, active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator, works directly' },
-                { key: 'collide', order: 3, active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}` },
+                { key: 'solo', order: 1, active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator driving the fleet', hint: 'One orchestrator plans, dispatches, and reviews the whole worker fleet. Still many agents working — one brain directing them.' },
+                { key: 'collide', order: 3, active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}`, hint: 'Claude and Codex propose independently, then one synthesizes and does the work — a built-in second opinion for hard problems.' },
               ].map((mode) => (
                 <button
                   key={mode.key}
                   type="button"
                   role="menuitemradio"
                   aria-checked={mode.active}
+                  title={mode.hint}
                   onClick={() => {
                     onSetSwarm?.(false);
                     onSetCollide?.(mode.key === 'collide' ? !collideActive : false);
@@ -356,7 +357,7 @@ export function ModelThinkingChip({
                   <SwarmGlyph size={13} color={mode.active ? SWARM_ACCENT : 'var(--t-text-muted)'} />
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: mode.active ? SWARM_ACCENT : 'var(--t-text)' }}>{mode.label}</span>
-                    <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mode.detail}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.3, color: 'var(--t-text-faint)' }}>{mode.detail}</span>
                   </span>
                   <span style={{ width: 6, height: 6, borderRadius: 999, background: mode.active ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
                 </button>
@@ -365,6 +366,7 @@ export function ModelThinkingChip({
                 type="button"
                 role="menuitemradio"
                 aria-checked={ultraActive}
+                title="The orchestrator fans out its own parallel sub-agents alongside the Codex workers — maximum throughput for big jobs."
                 onClick={() => {
                   const next = !ultraActive;
                   onSetSwarm?.(next);
@@ -396,8 +398,8 @@ export function ModelThinkingChip({
               >
                 <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Swarm (Ultracode)</span>
-                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>sub-agents + Codex workers in parallel</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Swarm</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.3, color: 'var(--t-text-faint)' }}>sub-agents + Codex workers in parallel</span>
                 </span>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
               </button>
