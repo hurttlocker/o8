@@ -57,10 +57,7 @@ pub fn prewarm(bin: &str, model: &str, mcp_cfg: &str) {
     }
     match ClaudeSession::spawn(bin, model, mcp_cfg) {
         Ok(session) => {
-            *slot() = Some(WarmEntry {
-                session,
-                at: Instant::now(),
-            });
+            *slot() = Some(WarmEntry { session, at: Instant::now() });
             log::info!("[symon-agent] pre-warmed {model} session");
         }
         Err(e) => log::warn!("[symon-agent] prewarm spawn failed: {e}"),

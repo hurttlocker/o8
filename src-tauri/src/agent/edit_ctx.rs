@@ -245,7 +245,11 @@ fn capture_from_webview(app_handle: &tauri::AppHandle) -> Option<EditContext> {
 /// Apply (or revert) text inside o8's webview. `mode` is "selection" or
 /// "field" — the listener replaces the live selection or the whole focused
 /// editable respectively.
-fn apply_via_webview(app_handle: &tauri::AppHandle, mode: &str, text: &str) -> Result<(), String> {
+fn apply_via_webview(
+    app_handle: &tauri::AppHandle,
+    mode: &str,
+    text: &str,
+) -> Result<(), String> {
     let reply = webview_request(
         app_handle,
         "o8:edit-apply",
@@ -344,34 +348,19 @@ pub fn apply(
 
     let restore = match &ctx.field_value {
         Some(v) if ctx.via_webview => Restore::WebviewField { value: v.clone() },
-        Some(v) => Restore::FieldValue {
-            value: v.clone(),
-            settable: ctx.field_settable,
-        },
-        None => Restore::Clipboard {
-            original: ctx.original.clone(),
-        },
+        Some(v) => Restore::FieldValue { value: v.clone(), settable: ctx.field_settable },
+        None => Restore::Clipboard { original: ctx.original.clone() },
     };
     {
         let mut slot = LAST_EDIT.lock().unwrap_or_else(|p| p.into_inner());
-        *slot = Some(AppliedEdit {
-            restore,
-            app: ctx.app.clone(),
-        });
+        *slot = Some(AppliedEdit { restore, app: ctx.app.clone() });
     }
 
     let app_name = friendly_app(&ctx.app);
     let payload = json!({ "app": app_name });
-    let _ = app_handle.emit_to(
-        crate::dock_window::DOCK_LABEL,
-        "o8:edit-applied",
-        payload.clone(),
-    );
+    let _ = app_handle.emit_to(crate::dock_window::DOCK_LABEL, "o8:edit-applied", payload.clone());
     let _ = app_handle.emit("o8:edit-applied", payload);
-    log::info!(
-        "[symon-edit] applied {} chars in {app_name}",
-        new_text.len()
-    );
+    log::info!("[symon-edit] applied {} chars in {app_name}", new_text.len());
 
     Ok(json!({ "applied": true, "app": app_name }))
 }
@@ -401,8 +390,7 @@ pub fn revert(app_handle: &tauri::AppHandle) -> Result<(), String> {
             if let Err(e) = apply_via_webview(app_handle, "field", &value) {
                 let _ = crate::paste::copy_to_clipboard(&value);
                 crate::tts::playback::play_thread(
-                    "I couldn't restore it in place — the original is on your clipboard."
-                        .to_string(),
+                    "I couldn't restore it in place — the original is on your clipboard.".to_string(),
                     crate::tts::load_config(),
                 );
                 log::warn!("[symon-edit] webview revert failed ({e}); fell back to clipboard");
@@ -428,9 +416,7 @@ mod wants_edit_tests {
 
     #[test]
     fn edit_verbs_trigger() {
-        assert!(wants_edit(
-            "Can you rewrite this in a more professional way?"
-        ));
+        assert!(wants_edit("Can you rewrite this in a more professional way?"));
         assert!(wants_edit("fix the grammar here"));
         assert!(wants_edit("make this sound friendlier"));
         assert!(wants_edit("tighten this up please"));

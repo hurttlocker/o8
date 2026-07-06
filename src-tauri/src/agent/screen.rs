@@ -321,10 +321,7 @@ fn vision_model() -> String {
 /// the screenshot already captured for this task (intent-gated), else grabs one
 /// on demand. ReadOnly in `safety` — observation only; capture is permission-
 /// gated by macOS Screen Recording.
-pub async fn read_screen(
-    ctx: &super::TaskCtx,
-    args: serde_json::Value,
-) -> Result<serde_json::Value, String> {
+pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Result<serde_json::Value, String> {
     let focus = args
         .get("focus")
         .and_then(|v| v.as_str())
@@ -342,11 +339,9 @@ pub async fn read_screen(
         match captured {
             Some(s) => s.png_base64,
             None => {
-                return Err(
-                    "I couldn't capture the screen — turn on Screen Recording for o8 in \
+                return Err("I couldn't capture the screen — turn on Screen Recording for o8 in \
                             System Settings → Privacy & Security."
-                        .to_string(),
-                )
+                    .to_string())
             }
         }
     };

@@ -110,9 +110,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
             // couldn't tell if it was her key, the model, or her plan. (2026-06-22)
             let via = match &target {
                 crate::entitlement::GeminiTarget::Direct { .. } => "your Gemini API key",
-                crate::entitlement::GeminiTarget::Proxy { .. } => {
-                    "your o8 plan (managed inference)"
-                }
+                crate::entitlement::GeminiTarget::Proxy { .. } => "your o8 plan (managed inference)",
             };
             let hint = match status.as_u16() {
                 401 | 403 => format!(
@@ -125,9 +123,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                 500..=599 => "Gemini had a server error — try again shortly.".to_string(),
                 _ => format!("{via} rejected the request."),
             };
-            return Err(format!(
-                "Symon agent couldn't reach Gemini ({status}): {hint} [{snippet}]"
-            ));
+            return Err(format!("Symon agent couldn't reach Gemini ({status}): {hint} [{snippet}]"));
         }
 
         let resp_json: Value = resp
@@ -150,11 +146,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         for part in &parts {
             if let Some(fc) = part.get("functionCall") {
                 has_function_calls = true;
-                let tool_name = fc
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let tool_name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let tool_args = fc.get("args").cloned().unwrap_or(json!({}));
 
                 super::emit_agent_event(

@@ -114,10 +114,7 @@ pub fn config_replacements() -> Vec<crate::stt::commands::ReplacementRule> {
                     if trigger.is_empty() {
                         return None;
                     }
-                    Some(crate::stt::commands::ReplacementRule {
-                        trigger,
-                        replacement,
-                    })
+                    Some(crate::stt::commands::ReplacementRule { trigger, replacement })
                 })
                 .collect()
         })
@@ -160,8 +157,8 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
     obj.insert(key.to_string(), value);
-    let serialized =
-        serde_json::to_string_pretty(&serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
+    let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
+        .map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
