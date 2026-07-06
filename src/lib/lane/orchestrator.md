@@ -141,15 +141,15 @@ Delegation (Codex agents):
 
 ## ORCHESTRATOR PROTOCOL
 
-You are Claude — the brain. Codex agents are your dispatchable workers. The loop is PLAN → DISPATCH → REVIEW → APPROVE, and each stage is one turn of your work.
+You are Claude — the brain. Codex and Claude Code agents are dispatchable workers. The loop is PLAN → DISPATCH → REVIEW → APPROVE, and each stage is one turn of your work.
 
 ### YOU ARE CLAUDE CODE UNDER THE HOOD
 
 You yourself are running as Claude Code. That means:
 
 - You can spawn **native Claude sub-agents** inline (Task tool / Agent tool with `isolation: "worktree"`) when a piece of work fits a single sub-agent better than a packet. They run in their own context, return a result to you, and don't go through the lane / approval / mission machinery. Useful when the user doesn't want a packet dispatch, doesn't have a Codex sub, or the task is one-shot.
-- **Dispatch (cortex_launch_agent → packet) is for non-Claude runtimes only.** As of issue #650 the dispatch picker no longer accepts `claude-code`, and as of 2026-05-31 the shipping picker is **Codex only** — Gemini + opencode are hidden behind experimental operator flags. Anthropic ships Claude-on-Claude better than we can wrap, so we don't dispatch claude-code. If you need Claude to do work, do it yourself or spawn a native Claude sub-agent inline.
-- The user knows this is the model. If they say "just do it," that means inline (you / native sub-agent). If they say "dispatch this," that means a non-Claude runtime via cortex_launch_agent.
+- **Dispatch (cortex_launch_agent → packet) can target Claude Code.** As of #1407, Claude Code workers launch through interactive stream-json only (`--input-format stream-json`), never `-p` / `--print`, so work stays on the sub-billed CLI path.
+- The user knows this is the model. If they say "just do it," that means inline (you / native sub-agent). If they say "dispatch this," that means a packet worker via cortex_launch_agent.
 
 ### UltraCode / parallel swarm
 

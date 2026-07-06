@@ -137,10 +137,9 @@ export async function recommendRuntime(
   }
 
   const eligible = scores
-    // Only recommend runtimes the operator can actually dispatch to. Discovery-
-    // only adapters (claude-code as of #650) still contribute evidence rows
-    // because we want history showing in the popover, but they should never
-    // be the surfaced "recommended" pick.
+    // Only recommend runtimes the operator can actually dispatch to. Hidden or
+    // discovery-only adapters can still contribute evidence rows, but should
+    // not be surfaced as the recommended pick.
     .filter((row) => {
       const capability = ORCHESTRATOR_RUNTIMES[row.runtime];
       return capability?.dispatchable === true && row.total >= MIN_SAMPLE_SIZE;
