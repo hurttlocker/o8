@@ -14,19 +14,18 @@
  * icon components inside the Tauri webview).
  */
 
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   isTauri,
   accessibilityPermissionGranted,
   inputMonitoringGranted,
   fnKeyUsageType,
   openSystemSettings,
+  openVoiceSettings,
   autostartIsEnabled,
   autostartSet,
   backgroundModeIsEnabled,
   backgroundModeSet,
-  voicePrefsGet,
-  voicePrefsSet,
   agentGetEscalation,
   agentSetEscalation,
 } from '@/lib/tauri/bridge';
@@ -40,7 +39,7 @@ import {
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
-import { SettingsGroup, SettingsRow, RowDivider, ValuePill } from './grouped';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import {
   DEFAULT_DICTATION_INPUT_MODE,
   readDictationInputMode,
@@ -118,20 +117,10 @@ function DockIcon() {
   );
 }
 
-function VolumeIcon() {
+function SparkleIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    </svg>
-  );
-}
-
-function BellIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      <path d="M12 3l1.8 5.4L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.6L12 3z" />
     </svg>
   );
 }
@@ -148,25 +137,6 @@ function BrainGlyph() {
 const noopSubscribe = () => () => {};
 const dictationModeFallback = (): DictationInputMode => DEFAULT_DICTATION_INPUT_MODE;
 
-const textareaStyle: CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  fontFamily: APP_FONT_STACK,
-  fontSize: 13,
-  fontWeight: 300,
-  lineHeight: 1.5,
-  color: 'var(--t-text)',
-  background: 'var(--t-input-bg)',
-  border: '1px solid var(--t-border)',
-  borderRadius: 10,
-  paddingTop: 10,
-  paddingBottom: 10,
-  paddingLeft: 12,
-  paddingRight: 12,
-  resize: 'vertical',
-  outline: 'none',
-};
-
 export function VoiceTab() {
   const tauri = isTauri();
 
@@ -176,11 +146,6 @@ export function VoiceTab() {
   const [fnUsage, setFnUsage] = useState<number | null | undefined>(undefined);
   const [autostart, setAutostart] = useState(false);
   const [bgMode, setBgMode] = useState(false);
-  // Voice feedback + polish prefs (~/.o8/dictation.json, #1209).
-  const [ducking, setDucking] = useState(true);
-  const [sounds, setSounds] = useState(true);
-  const [dictionary, setDictionary] = useState('');
-  const [instructions, setInstructions] = useState('');
   // Two-tier brain escalation policy (~/.o8/agent_models.json via the router).
   const [escalation, setEscalation] = useState<'off' | 'auto' | 'deep'>('auto');
   const dictationMode = useSyncExternalStore(
@@ -203,21 +168,14 @@ export function VoiceTab() {
 
   const loadAll = useCallback(async () => {
     if (!tauri) return;
-    const [, auto, bg, prefs, esc] = await Promise.all([
+    const [, auto, bg, esc] = await Promise.all([
       refreshPermissions(),
       autostartIsEnabled(),
       backgroundModeIsEnabled(),
-      voicePrefsGet(),
       agentGetEscalation().catch(() => 'auto'),
     ]);
     setAutostart(auto);
     setBgMode(bg);
-    if (prefs) {
-      setDucking(prefs.ducking_enabled !== false); // default on
-      setSounds(prefs.sounds_enabled !== false);
-      setDictionary(Array.isArray(prefs.dictionary) ? (prefs.dictionary as string[]).join('\n') : '');
-      setInstructions(typeof prefs.polish_instructions === 'string' ? prefs.polish_instructions : '');
-    }
     if (esc === 'off' || esc === 'auto' || esc === 'deep') setEscalation(esc);
   }, [tauri, refreshPermissions]);
 
@@ -242,31 +200,10 @@ export function VoiceTab() {
     void backgroundModeSet(next).then(setBgMode);
   }, []);
 
-  const handleDucking = useCallback((next: boolean) => {
-    setDucking(next);
-    void voicePrefsSet('ducking_enabled', next);
-  }, []);
-
-  const handleSounds = useCallback((next: boolean) => {
-    setSounds(next);
-    void voicePrefsSet('sounds_enabled', next);
-  }, []);
-
   const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
     setEscalation(next);
     void agentSetEscalation(next);
   }, []);
-
-  // Persist on blur — the prefs file is mtime-cached so the next dictation picks
-  // it up without a relaunch.
-  const handleDictionaryBlur = useCallback(() => {
-    const arr = dictionary.split('\n').map((s) => s.trim()).filter(Boolean);
-    void voicePrefsSet('dictionary', arr);
-  }, [dictionary]);
-
-  const handleInstructionsBlur = useCallback(() => {
-    void voicePrefsSet('polish_instructions', instructions.trim());
-  }, [instructions]);
 
   // Fn hijack present when AppleFnUsageType is unset (treated as 3 = Start
   // Dictation) or set to anything other than 0 = Do Nothing.
@@ -382,7 +319,7 @@ export function VoiceTab() {
           <section style={{ marginTop: 28 }}>
             <SettingsGroup
               header="Dictation"
-              footnote="Tap: click the mic to start, click again to send. Hold: keep the mic (or Ctrl+Z) pressed while you speak. Audio dimming drops system volume to 20% while you hold Fn so the mic hears you over whatever's playing."
+              footnote="Tap: click the mic to start, click again to send. Hold: keep the mic (or Ctrl+Z) pressed while you speak."
             >
               <SettingsRow
                 icon={<MicIcon />}
@@ -398,57 +335,7 @@ export function VoiceTab() {
                     ]}
                   />
                 }
-                divider
               />
-              <SettingsRow
-                icon={<VolumeIcon />}
-                label="Dim other audio while dictating"
-                checked={ducking}
-                onToggle={handleDucking}
-                divider
-              />
-              <SettingsRow
-                icon={<BellIcon />}
-                label="Sound cues"
-                subtitle="Tones for listen start/stop, paste landed, read-aloud"
-                checked={sounds}
-                onToggle={handleSounds}
-              />
-            </SettingsGroup>
-          </section>
-
-          <section style={{ marginTop: 28 }}>
-            <SettingsGroup
-              header="Polish"
-              footnote="Both apply on the next dictation — no relaunch."
-            >
-              <div style={{ paddingTop: 12, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em', marginBottom: 6 }}>
-                  Custom dictionary
-                </div>
-                <textarea
-                  value={dictionary}
-                  onChange={(e) => setDictionary(e.target.value)}
-                  onBlur={handleDictionaryBlur}
-                  placeholder="One per line — proper nouns o8 should always spell right (Karpathy, Tauri, o8…)"
-                  rows={4}
-                  style={textareaStyle}
-                />
-              </div>
-              <RowDivider />
-              <div style={{ paddingTop: 12, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em', marginBottom: 6 }}>
-                  Polish instructions
-                </div>
-                <textarea
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  onBlur={handleInstructionsBlur}
-                  placeholder="Guidance for cleanup — e.g. 'Keep my casual tone; always capitalize iOS; expand abbreviations.'"
-                  rows={3}
-                  style={textareaStyle}
-                />
-              </div>
             </SettingsGroup>
           </section>
 
@@ -472,6 +359,18 @@ export function VoiceTab() {
                     ]}
                   />
                 }
+              />
+            </SettingsGroup>
+          </section>
+
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup>
+              <SettingsRow
+                icon={<SparkleIcon />}
+                label="Symon settings"
+                subtitle="History, polish, dictionary, voice persona — double-tap Symon, or open here"
+                onPress={() => { void openVoiceSettings(); }}
+                chevron
               />
             </SettingsGroup>
           </section>
