@@ -19,14 +19,14 @@ import {
   RAMS_INK_QUIET,
   BracketLabel,
   FieldLabel,
-  HairlineRule,
   LockIcon,
   GlobeIcon,
-  SectionLabel,
+  RamsButton,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup, SettingsRow } from './grouped';
 
 export function GitHubTab({
   accounts,
@@ -138,375 +138,315 @@ export function GitHubTab({
         </div>
       ) : null}
 
-      {/* 01 — ACCOUNTS */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="01">ACCOUNTS</SectionLabel>
-
-        {activeAccount ? (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            paddingTop: 12,
-            paddingBottom: 14,
-          }}>
-            <AccountAvatar login={activeAccount.login} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 15, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-                  {activeAccount.login}
-                </span>
-                <BracketLabel tone="quiet">active</BracketLabel>
-              </div>
-              <div style={{
-                fontSize: 12,
-                color: 'var(--t-text-muted)',
-                marginTop: 4,
-                fontFamily: APP_FONT_STACK,
-                letterSpacing: '-0.01em',
-              }}>
-                {activeAccount.protocol} · {activeAccount.scopes.length} {activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={actionBusy === 'refresh'}
-              style={quietActionStyle(actionBusy === 'refresh')}
-            >
-              {actionBusy === 'refresh' ? 'refreshing...' : 'refresh'}
-            </button>
-            <button
-              type="button"
-              onClick={() => onDisconnect?.(activeAccount.login)}
-              disabled={actionBusy === 'logout'}
-              style={quietActionStyle(actionBusy === 'logout')}
-            >
-              {actionBusy === 'logout' ? 'disconnecting...' : 'disconnect'}
-            </button>
-          </div>
-        ) : (
-          <div style={{
-            paddingTop: 8,
-            paddingBottom: 14,
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-            maxWidth: 580,
-          }}>
-            No GitHub account is connected. Use the device flow below to sign in. Terminal git push and gh commands will pick it up automatically.
-          </div>
-        )}
-
-        <HairlineRule />
-      </section>
-
-      {/* 02 — DEVICE FLOW */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="02">DEVICE FLOW</SectionLabel>
-
-        {!cliConnected && !deviceFlow ? (
-          <div style={{ paddingTop: 8 }}>
-            <button
-              type="button"
-              onClick={onStartDeviceFlow}
-              disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
-              style={primaryLinkStyle(!deviceFlowEnabled || actionBusy === 'login_device')}
-            >
-              {actionBusy === 'login_device' ? 'starting...' : 'sign in with github'}
-            </button>
+      <section>
+        <SettingsGroup header="Accounts">
+          {activeAccount ? (
             <div style={{
-              fontSize: 12,
-              color: 'var(--t-text-muted)',
-              marginTop: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 14,
+              paddingTop: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
+            }}>
+              <AccountAvatar login={activeAccount.login} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                    {activeAccount.login}
+                  </span>
+                  <BracketLabel tone="quiet">active</BracketLabel>
+                </div>
+                <div style={{
+                  fontSize: 12,
+                  color: 'var(--t-text-muted)',
+                  marginTop: 4,
+                  fontFamily: APP_FONT_STACK,
+                  letterSpacing: '-0.01em',
+                }}>
+                  {activeAccount.protocol} · {activeAccount.scopes.length} {activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}
+                </div>
+              </div>
+              <RamsButton
+                variant="ghost"
+                onClick={onRefresh}
+                disabled={actionBusy === 'refresh'}
+                busy={actionBusy === 'refresh'}
+              >
+                Refresh
+              </RamsButton>
+              <RamsButton
+                variant="ghost"
+                onClick={() => onDisconnect?.(activeAccount.login)}
+                disabled={actionBusy === 'logout'}
+                busy={actionBusy === 'logout'}
+              >
+                Disconnect
+              </RamsButton>
+            </div>
+          ) : (
+            <div style={{
+              paddingTop: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
+              fontSize: 13,
+              color: 'var(--t-text-secondary)',
               lineHeight: 1.55,
               maxWidth: 580,
             }}>
-              {deviceFlowEnabled
+              No GitHub account is connected. Use the device flow below to sign in. Terminal git push and gh commands will pick it up automatically.
+            </div>
+          )}
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Device flow">
+          {!cliConnected && !deviceFlow ? (
+            <SettingsRow
+              label="Sign in with GitHub"
+              subtitle={deviceFlowEnabled
                 ? 'Opens a GitHub device code flow. The verification code appears below, paste it into github.com/login/device.'
                 : 'Set GITHUB_OAUTH_CLIENT_ID to enable device-flow sign-in.'}
-            </div>
-          </div>
-        ) : null}
+              onPress={onStartDeviceFlow}
+              disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
+              chevron
+            />
+          ) : null}
 
-        {deviceFlow ? (
-          <div style={{
-            paddingTop: 4,
-            paddingBottom: 8,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-          }}>
-            <div>
-              <FieldLabel>enter this code</FieldLabel>
-              <div style={{
-                fontFamily: MONO_FONT_STACK,
-                fontSize: 22,
-                fontWeight: 300,
-                color: 'var(--t-text)',
-                letterSpacing: '0.18em',
-                marginTop: 8,
-              }}>
-                {deviceFlow.userCode}
-              </div>
-              <div style={{
-                marginTop: 6,
-                fontSize: 12,
-                color: 'var(--t-text-secondary)',
-                lineHeight: 1.55,
-                maxWidth: 560,
-              }}>
-                {deviceFlow.note || 'Waiting for approval in GitHub.'} Expires in about {deviceFlow.expiresInMinutes} minute{deviceFlow.expiresInMinutes === 1 ? '' : 's'}.
-              </div>
-              <div style={{
-                marginTop: 4,
-                fontSize: 12,
-                color: 'var(--t-text-muted)',
-                fontFamily: MONO_FONT_STACK,
-                wordBreak: 'break-all',
-              }}>
-                {deviceFlow.verificationUriComplete || deviceFlow.verificationUri}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button
-                type="button"
-                onClick={() => openExternalUrl(deviceFlow.verificationUriComplete || deviceFlow.verificationUri)}
-                style={quietActionStyle(false)}
-              >
-                open github
-              </button>
-              <button type="button" onClick={() => { void copyDeviceCode(); }} style={quietActionStyle(false)}>
-                {deviceCodeCopied ? 'copied' : 'copy code'}
-              </button>
-              <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={quietActionStyle(false)}>
-                poll now
-              </button>
-              <button
-                type="button"
-                onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
-                disabled={actionBusy === 'cancel_device'}
-                style={quietActionStyle(actionBusy === 'cancel_device')}
-              >
-                {actionBusy === 'cancel_device' ? 'cancelling...' : 'cancel'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {cliConnected && !deviceFlow ? (
-          <div style={{
-            paddingTop: 4,
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-            maxWidth: 580,
-          }}>
-            Signed in as {activeAccount!.login}. Terminal git push and gh commands use this session. Disconnect above to sign in with a different account.
-          </div>
-        ) : null}
-
-        <div style={{ marginTop: 24 }}>
-          <HairlineRule />
-        </div>
-      </section>
-
-      {/* 03 — REPOSITORIES */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="03">REPOSITORIES</SectionLabel>
-
-        {repos.length === 0 ? (
-          <div style={{
-            paddingTop: 4,
-            paddingBottom: 14,
-            fontSize: 13,
-            color: 'var(--t-text-muted)',
-            lineHeight: 1.55,
-            maxWidth: 580,
-          }}>
-            {appConnected
-              ? 'The GitHub App is connected but repo sync hasn\u2019t populated this list yet \u2014 it fills in shortly after install. If it stays empty, check which repos the App can access in GitHub settings.'
-              : 'No tracked repositories yet. Connect the GitHub App below to pull in issues and open PRs from your repos.'}
-          </div>
-        ) : (
-          <div>
-            <button
-              type="button"
-              onClick={() => setReposExpanded((v) => !v)}
-              style={{
-                ...quietActionStyle(false),
-                marginTop: 4,
-                marginBottom: 4,
-              }}
-            >
-              {repos.length} tracked {repos.length === 1 ? 'repo' : 'repos'} {reposExpanded ? '—' : '+'}
-            </button>
-
-            {reposExpanded ? (
-              <div style={{
-                marginTop: 8,
-                display: 'flex',
-                flexDirection: 'column',
-                maxHeight: 300,
-                overflowY: 'auto',
-                borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-              }}>
-                {repos.map((repo) => (
-                  <a
-                    key={repo.nameWithOwner}
-                    href={`https://github.com/${repo.nameWithOwner}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      minHeight: 44,
-                      paddingTop: 10,
-                      paddingBottom: 10,
-                      paddingLeft: 2,
-                      paddingRight: 8,
-                      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-                      textDecoration: 'none',
-                    }}
-                  >
-                    <span style={{
-                      color: 'var(--t-text-muted)',
-                      display: 'inline-flex',
-                    }}>
-                      {repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
-                    </span>
-                    <span style={{
-                      fontSize: 13,
-                      fontWeight: 400,
-                      color: 'var(--t-text)',
-                      flex: 1,
-                      letterSpacing: '-0.005em',
-                    }}>
-                      {repo.nameWithOwner}
-                    </span>
-                    <span style={{
-                      fontSize: 11,
-                      color: RAMS_INK_QUIET,
-                      fontFamily: MONO_FONT_STACK,
-                    }}>
-                      {repo.updatedAt}
-                    </span>
-                  </a>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        <div style={{ marginTop: 14 }}>
-          <HairlineRule />
-        </div>
-      </section>
-
-      {/* 04 — GITHUB APP */}
-      <section style={{ marginBottom: 12 }}>
-        <SectionLabel number="04">GITHUB APP</SectionLabel>
-
-        <div style={{ paddingTop: 4 }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            flexWrap: 'wrap',
-            marginBottom: 10,
-          }}>
-            <span style={{
-              fontSize: 15,
-              fontWeight: 300,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-            }}>
-              o8 github app
-            </span>
-            <BracketLabel tone={appConnected ? 'quiet' : 'accent'}>
-              {appConnected ? 'connected' : appConfigured ? 'needs attention' : 'not configured'}
-            </BracketLabel>
-          </div>
-
-          <div style={{
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-            maxWidth: 600,
-            marginBottom: 16,
-          }}>
-            {appConnected && broker
-              ? `App ${broker.appId} · installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repo' : 'repos'}.`
-              : appConfigured
-                ? broker?.note ?? 'Diagnostics below show what still needs to be configured.'
-                : 'The product needs the GitHub App to read issues, open PRs, and act on your behalf. Set GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID and drop the PEM at ~/.o8/github-app.pem.'}
-          </div>
-
-          {appConfigured ? (
+          {deviceFlow ? (
             <div style={{
+              paddingTop: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
               display: 'flex',
               flexDirection: 'column',
-              marginBottom: 16,
-              borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+              gap: 14,
             }}>
-              <DiagnosticRow
-                title="App key"
-                status={broker!.privateKeyConfigured ? 'ready' : 'missing'}
-                detail={broker!.privateKeyConfigured
-                  ? `App ${broker!.appId ?? 'unknown'} can sign installation token requests.`
-                  : 'Missing GitHub App private key at ~/.o8/github-app.pem.'}
-              />
-              <DiagnosticRow
-                title="Installation"
-                status={broker!.installationReachable ? 'ready' : 'missing'}
-                detail={broker!.installationReachable
-                  ? `Installation ${broker!.installationId ?? 'unknown'} is healthy on ${broker!.probeRepo ?? 'the probe repo'}.`
-                  : `Cannot reach installation for ${broker!.probeRepo ?? 'the configured repo'}.`}
-              />
-              {showProdDiagnostics ? (
-                <DiagnosticRow
-                  title="Webhook secret"
-                  status={broker!.webhookSecretConfigured ? 'ready' : 'missing'}
-                  detail={broker!.webhookSecretConfigured
-                    ? 'Webhook signature verification can be enforced in production.'
-                    : 'Set GITHUB_APP_WEBHOOK_SECRET before enabling production webhooks.'}
-                />
-              ) : null}
-              {showProdDiagnostics ? (
-                <DiagnosticRow
-                  title="Production URL"
-                  status={broker!.publicBaseUrlConfigured ? 'ready' : 'missing'}
-                  detail={broker!.publicBaseUrlConfigured
-                    ? `Webhook target is ${broker!.webhookUrl ?? 'configured'}.`
-                    : 'Set CORTEX_IDE_PUBLIC_BASE_URL when this installation is publicly reachable.'}
-                />
-              ) : null}
+              <div>
+                <FieldLabel>enter this code</FieldLabel>
+                <div style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 22,
+                  fontWeight: 300,
+                  color: 'var(--t-text)',
+                  letterSpacing: '0.18em',
+                  marginTop: 8,
+                }}>
+                  {deviceFlow.userCode}
+                </div>
+                <div style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  color: 'var(--t-text-secondary)',
+                  lineHeight: 1.55,
+                  maxWidth: 560,
+                }}>
+                  {deviceFlow.note || 'Waiting for approval in GitHub.'} Expires in about {deviceFlow.expiresInMinutes} minute{deviceFlow.expiresInMinutes === 1 ? '' : 's'}.
+                </div>
+                <div style={{
+                  marginTop: 4,
+                  fontSize: 12,
+                  color: 'var(--t-text-muted)',
+                  fontFamily: MONO_FONT_STACK,
+                  wordBreak: 'break-all',
+                }}>
+                  {deviceFlow.verificationUriComplete || deviceFlow.verificationUri}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => openExternalUrl(deviceFlow.verificationUriComplete || deviceFlow.verificationUri)}
+                  style={quietActionStyle(false)}
+                >
+                  open github
+                </button>
+                <button type="button" onClick={() => { void copyDeviceCode(); }} style={quietActionStyle(false)}>
+                  {deviceCodeCopied ? 'copied' : 'copy code'}
+                </button>
+                <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={quietActionStyle(false)}>
+                  poll now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
+                  disabled={actionBusy === 'cancel_device'}
+                  style={quietActionStyle(actionBusy === 'cancel_device')}
+                >
+                  {actionBusy === 'cancel_device' ? 'cancelling...' : 'cancel'}
+                </button>
+              </div>
             </div>
           ) : null}
 
-          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-            {broker?.installationId ? (
+          {cliConnected && !deviceFlow ? (
+            <div style={{
+              paddingTop: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
+              fontSize: 13,
+              color: 'var(--t-text-secondary)',
+              lineHeight: 1.55,
+              maxWidth: 580,
+            }}>
+              Signed in as {activeAccount!.login}. Terminal git push and gh commands use this session. Disconnect above to sign in with a different account.
+            </div>
+          ) : null}
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Repositories">
+          {repos.length === 0 ? (
+            <div style={{
+              paddingTop: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
+              fontSize: 13,
+              color: 'var(--t-text-muted)',
+              lineHeight: 1.55,
+              maxWidth: 580,
+            }}>
+              {appConnected
+                ? 'The GitHub App is connected but repo sync hasn’t populated this list yet — it fills in shortly after install. If it stays empty, check which repos the App can access in GitHub settings.'
+                : 'No tracked repositories yet. Connect the GitHub App below to pull in issues and open PRs from your repos.'}
+            </div>
+          ) : (
+            <div>
+              <div style={{ paddingTop: 10, paddingBottom: 6, paddingLeft: 14, paddingRight: 14 }}>
+                <RamsButton variant="ghost" onClick={() => setReposExpanded((v) => !v)}>
+                  {repos.length} tracked {repos.length === 1 ? 'repo' : 'repos'} {reposExpanded ? '—' : '+'}
+                </RamsButton>
+              </div>
+
+              {reposExpanded ? (
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {repos.map((repo, idx) => (
+                    <SettingsRow
+                      key={repo.nameWithOwner}
+                      icon={repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
+                      label={repo.nameWithOwner}
+                      value={repo.updatedAt}
+                      onPress={() => window.open(`https://github.com/${repo.nameWithOwner}`, '_blank', 'noopener,noreferrer')}
+                      chevron
+                      divider={idx < repos.length - 1}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="GitHub App">
+          <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+              marginBottom: 10,
+            }}>
+              <span style={{
+                fontSize: 15,
+                fontWeight: 300,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}>
+                o8 github app
+              </span>
+              <BracketLabel tone={appConnected ? 'quiet' : 'accent'}>
+                {appConnected ? 'connected' : appConfigured ? 'needs attention' : 'not configured'}
+              </BracketLabel>
+            </div>
+
+            <div style={{
+              fontSize: 13,
+              color: 'var(--t-text-secondary)',
+              lineHeight: 1.55,
+              maxWidth: 600,
+              marginBottom: 16,
+            }}>
+              {appConnected && broker
+                ? `App ${broker.appId} · installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repo' : 'repos'}.`
+                : appConfigured
+                  ? broker?.note ?? 'Diagnostics below show what still needs to be configured.'
+                  : 'The product needs the GitHub App to read issues, open PRs, and act on your behalf. Set GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID and drop the PEM at ~/.o8/github-app.pem.'}
+            </div>
+
+            {appConfigured ? (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                marginBottom: 16,
+                borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+              }}>
+                <DiagnosticRow
+                  title="App key"
+                  status={broker!.privateKeyConfigured ? 'ready' : 'missing'}
+                  detail={broker!.privateKeyConfigured
+                    ? `App ${broker!.appId ?? 'unknown'} can sign installation token requests.`
+                    : 'Missing GitHub App private key at ~/.o8/github-app.pem.'}
+                />
+                <DiagnosticRow
+                  title="Installation"
+                  status={broker!.installationReachable ? 'ready' : 'missing'}
+                  detail={broker!.installationReachable
+                    ? `Installation ${broker!.installationId ?? 'unknown'} is healthy on ${broker!.probeRepo ?? 'the probe repo'}.`
+                    : `Cannot reach installation for ${broker!.probeRepo ?? 'the configured repo'}.`}
+                />
+                {showProdDiagnostics ? (
+                  <DiagnosticRow
+                    title="Webhook secret"
+                    status={broker!.webhookSecretConfigured ? 'ready' : 'missing'}
+                    detail={broker!.webhookSecretConfigured
+                      ? 'Webhook signature verification can be enforced in production.'
+                      : 'Set GITHUB_APP_WEBHOOK_SECRET before enabling production webhooks.'}
+                  />
+                ) : null}
+                {showProdDiagnostics ? (
+                  <DiagnosticRow
+                    title="Production URL"
+                    status={broker!.publicBaseUrlConfigured ? 'ready' : 'missing'}
+                    detail={broker!.publicBaseUrlConfigured
+                      ? `Webhook target is ${broker!.webhookUrl ?? 'configured'}.`
+                      : 'Set CORTEX_IDE_PUBLIC_BASE_URL when this installation is publicly reachable.'}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {broker?.installationId ? (
+                <a
+                  href={`https://github.com/settings/installations/${broker.installationId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={primaryLinkStyle(false)}
+                >
+                  open installation ›
+                </a>
+              ) : null}
               <a
-                href={`https://github.com/settings/installations/${broker.installationId}`}
+                href="https://github.com/settings/apps/cortex-dev-agent"
                 target="_blank"
                 rel="noreferrer"
                 style={primaryLinkStyle(false)}
               >
-                open installation ›
+                app settings ›
               </a>
-            ) : null}
-            <a
-              href="https://github.com/settings/apps/cortex-dev-agent"
-              target="_blank"
-              rel="noreferrer"
-              style={primaryLinkStyle(false)}
-            >
-              app settings ›
-            </a>
+            </div>
           </div>
-        </div>
+        </SettingsGroup>
       </section>
     </div>
   );

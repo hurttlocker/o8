@@ -23,12 +23,11 @@ import {
   RAMS_CONTROL_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  HairlineRule,
-  SectionLabel,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup } from './grouped';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
 import { ExternalMcpServersSection } from './mcp/ExternalMcpServersSection';
 import { AccessPointDiagnostics, type AccessPointDiagnosticsData } from './mcp/AccessPointDiagnostics';
@@ -370,196 +369,186 @@ export function MCPTab() {
         </div>
       ) : null}
 
-      {/* 01 — CLAUDE DESKTOP */}
-      <section style={{ marginBottom: 28 }}>
-        <SectionLabel number="01">CLAUDE DESKTOP</SectionLabel>
-        <ClaudeTargetRow
-          target="claude-desktop"
-          status={desktopStatus}
-          installing={installing === 'claude-desktop'}
-          disabled={!ready || !setupReady}
-          note={installNote?.target === 'claude-desktop' ? installNote : null}
-          onInstall={() => { void installToClaude('claude-desktop'); }}
-          onRemove={() => { void removeFromClaude('claude-desktop'); }}
-          restartHint="Quit Claude Desktop (Cmd+Q) and reopen it."
-        />
+      <section>
+        <SettingsGroup header="Clients">
+          <ClaudeTargetRow
+            target="claude-desktop"
+            label="Claude Desktop"
+            status={desktopStatus}
+            installing={installing === 'claude-desktop'}
+            disabled={!ready || !setupReady}
+            note={installNote?.target === 'claude-desktop' ? installNote : null}
+            onInstall={() => { void installToClaude('claude-desktop'); }}
+            onRemove={() => { void removeFromClaude('claude-desktop'); }}
+            restartHint="Quit Claude Desktop (Cmd+Q) and reopen it."
+            divider
+          />
+          <ClaudeTargetRow
+            target="claude-code"
+            label="Claude Code"
+            status={codeStatus}
+            installing={installing === 'claude-code'}
+            disabled={!ready || !setupReady}
+            note={installNote?.target === 'claude-code' ? installNote : null}
+            onInstall={() => { void installToClaude('claude-code'); }}
+            onRemove={() => { void removeFromClaude('claude-code'); }}
+            restartHint="Restart Claude Code or run /mcp reload."
+            divider
+          />
+          <ExternalClientRow
+            target="hermes"
+            status={hermesStatus}
+            installing={installing === 'hermes'}
+            disabled={!ready}
+            note={installNote?.target === 'hermes' ? installNote : null}
+            onInstall={() => { void installExternal('hermes'); }}
+            onRemove={() => { void removeExternal('hermes'); }}
+            restartHint="Run /reload-mcp inside hermes to load the o8 tools."
+            divider
+          />
+          <ExternalClientRow
+            target="openclaw"
+            status={openclawStatus}
+            installing={installing === 'openclaw'}
+            disabled={!ready}
+            note={installNote?.target === 'openclaw' ? installNote : null}
+            onInstall={() => { void installExternal('openclaw'); }}
+            onRemove={() => { void removeExternal('openclaw'); }}
+            restartHint="Restart your OpenClaw gateway / agent session to pick up the new server."
+          />
+        </SettingsGroup>
       </section>
 
-      {/* 02 — CLAUDE CODE */}
-      <section style={{ marginBottom: 28 }}>
-        <SectionLabel number="02">CLAUDE CODE</SectionLabel>
-        <ClaudeTargetRow
-          target="claude-code"
-          status={codeStatus}
-          installing={installing === 'claude-code'}
-          disabled={!ready || !setupReady}
-          note={installNote?.target === 'claude-code' ? installNote : null}
-          onInstall={() => { void installToClaude('claude-code'); }}
-          onRemove={() => { void removeFromClaude('claude-code'); }}
-          restartHint="Restart Claude Code or run /mcp reload."
-        />
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="External servers">
+          <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <ExternalMcpServersSection />
+          </div>
+        </SettingsGroup>
       </section>
 
-      {/* 03 — HERMES AGENT */}
-      <section style={{ marginBottom: 28 }}>
-        <SectionLabel number="03">HERMES AGENT</SectionLabel>
-        <ExternalClientRow
-          target="hermes"
-          status={hermesStatus}
-          installing={installing === 'hermes'}
-          disabled={!ready}
-          note={installNote?.target === 'hermes' ? installNote : null}
-          onInstall={() => { void installExternal('hermes'); }}
-          onRemove={() => { void removeExternal('hermes'); }}
-          restartHint="Run /reload-mcp inside hermes to load the o8 tools."
-        />
-      </section>
-
-      {/* 04 — OPENCLAW */}
-      <section style={{ marginBottom: 28 }}>
-        <SectionLabel number="04">OPENCLAW</SectionLabel>
-        <ExternalClientRow
-          target="openclaw"
-          status={openclawStatus}
-          installing={installing === 'openclaw'}
-          disabled={!ready}
-          note={installNote?.target === 'openclaw' ? installNote : null}
-          onInstall={() => { void installExternal('openclaw'); }}
-          onRemove={() => { void removeExternal('openclaw'); }}
-          restartHint="Restart your OpenClaw gateway / agent session to pick up the new server."
-        />
-      </section>
-
-      {/* 05 — EXTERNAL SERVERS */}
-      <section style={{ marginBottom: 28 }}>
-        <SectionLabel number="05">EXTERNAL SERVERS</SectionLabel>
-        <ExternalMcpServersSection />
-      </section>
-
-      {/* 06 — DIAGNOSTICS */}
-      <section style={{ marginBottom: 24 }}>
-        <SectionLabel number="06">DIAGNOSTICS</SectionLabel>
-        <Disclosure title="System details" subtitle="Show the runtime environment o8 is using.">
-          <AccessPointDiagnostics diagnostics={d} />
-          {d.nodeInstalled && !d.codexInstalled ? (
-            <div style={{
-              marginTop: 14,
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>
-                <span style={{
-                  fontFamily: MONO_FONT_STACK,
-                  fontSize: 11,
-                  fontWeight: 300,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: '#f59e0b',
-                  marginRight: 8,
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Diagnostics">
+          <div style={{ paddingTop: 10, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <Disclosure title="System details" subtitle="Show the runtime environment o8 is using.">
+              <AccessPointDiagnostics diagnostics={d} />
+              {d.nodeInstalled && !d.codexInstalled ? (
+                <div style={{
+                  marginTop: 14,
                 }}>
-                  [warn]
-                </span>
-                Codex CLI not found
-              </div>
-              <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
-                Install with{' '}
-                <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: RAMS_ACCENT }}>
-                  npm i -g @openai/codex-cli
-                </code>
-                {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, missions still dispatch via Claude Code or Gemini — but Codex is the recommended default workhorse.
-              </div>
-            </div>
-          ) : null}
-          {d.nodeInstalled && d.codexInstalled && !d.ghInstalled ? (
-            <div style={{
-              marginTop: 14,
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>
-                <span style={{
-                  fontFamily: MONO_FONT_STACK,
-                  fontSize: 11,
-                  fontWeight: 300,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: RAMS_INK_QUIET,
-                  marginRight: 8,
+                  <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>
+                    <span style={{
+                      fontFamily: MONO_FONT_STACK,
+                      fontSize: 11,
+                      fontWeight: 300,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      color: '#f59e0b',
+                      marginRight: 8,
+                    }}>
+                      [warn]
+                    </span>
+                    Codex CLI not found
+                  </div>
+                  <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
+                    Install with{' '}
+                    <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: RAMS_ACCENT }}>
+                      npm i -g @openai/codex-cli
+                    </code>
+                    {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, missions still dispatch via Claude Code or Gemini — but Codex is the recommended default workhorse.
+                  </div>
+                </div>
+              ) : null}
+              {d.nodeInstalled && d.codexInstalled && !d.ghInstalled ? (
+                <div style={{
+                  marginTop: 14,
                 }}>
-                  [optional]
-                </span>
-                GitHub CLI not found
-              </div>
-              <div style={{ color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.55 }}>
-                Install with{' '}
-                <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: 'var(--t-text-secondary)' }}>
-                  brew install gh
-                </code>
-                {' '}to enable create_mission from GitHub issues.
-              </div>
-            </div>
-          ) : null}
-        </Disclosure>
+                  <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>
+                    <span style={{
+                      fontFamily: MONO_FONT_STACK,
+                      fontSize: 11,
+                      fontWeight: 300,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      color: RAMS_INK_QUIET,
+                      marginRight: 8,
+                    }}>
+                      [optional]
+                    </span>
+                    GitHub CLI not found
+                  </div>
+                  <div style={{ color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.55 }}>
+                    Install with{' '}
+                    <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: 'var(--t-text-secondary)' }}>
+                      brew install gh
+                    </code>
+                    {' '}to enable create_mission from GitHub issues.
+                  </div>
+                </div>
+              ) : null}
+            </Disclosure>
 
-        <div style={{ marginTop: 8 }}>
-          <Disclosure title="Manual config" subtitle={setupReady ? 'Prefer to edit the file yourself?' : 'Config appears after first launch finishes.'}>
-            <div style={{
-              position: 'relative',
-              border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-              background: 'var(--t-input-bg)',
-              overflow: 'hidden',
-              borderRadius: 4,
-            }}>
-              <button
-                type="button"
-                onClick={() => { void copyToClipboard(); }}
-                disabled={!setupReady}
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minHeight: 32,
-                  paddingLeft: 12,
-                  paddingRight: 12,
-                  borderRadius: 9,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: copied ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
-                  background: copied ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
-                  color: copied ? RAMS_ACCENT : 'var(--t-text-muted)',
-                  fontSize: 12,
-                  fontFamily: APP_FONT_STACK,
-                  fontWeight: 400,
-                  letterSpacing: '-0.01em',
-                  textTransform: 'capitalize',
-                  cursor: setupReady ? 'pointer' : 'default',
-                  opacity: setupReady ? 1 : 0.55,
-                  zIndex: 1,
-                }}
-              >
-                {copied ? 'copied' : 'copy'}
-              </button>
-              <pre style={{
-                margin: 0,
-                paddingTop: 14,
-                paddingBottom: 14,
-                paddingLeft: 14,
-                paddingRight: 14,
-                fontFamily: MONO_FONT,
-                fontSize: 12,
-                color: 'var(--t-text)',
-                overflow: 'auto',
-                maxHeight: 260,
-                lineHeight: 1.6,
-              }}>
-                {configJson}
-              </pre>
+            <div style={{ marginTop: 8 }}>
+              <Disclosure title="Manual config" subtitle={setupReady ? 'Prefer to edit the file yourself?' : 'Config appears after first launch finishes.'}>
+                <div style={{
+                  position: 'relative',
+                  border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                  background: 'var(--t-input-bg)',
+                  overflow: 'hidden',
+                  borderRadius: 4,
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => { void copyToClipboard(); }}
+                    disabled={!setupReady}
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minHeight: 32,
+                      paddingLeft: 12,
+                      paddingRight: 12,
+                      borderRadius: 9,
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: copied ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+                      background: copied ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
+                      color: copied ? RAMS_ACCENT : 'var(--t-text-muted)',
+                      fontSize: 12,
+                      fontFamily: APP_FONT_STACK,
+                      fontWeight: 400,
+                      letterSpacing: '-0.01em',
+                      textTransform: 'capitalize',
+                      cursor: setupReady ? 'pointer' : 'default',
+                      opacity: setupReady ? 1 : 0.55,
+                      zIndex: 1,
+                    }}
+                  >
+                    {copied ? 'copied' : 'copy'}
+                  </button>
+                  <pre style={{
+                    margin: 0,
+                    paddingTop: 14,
+                    paddingBottom: 14,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    fontFamily: MONO_FONT,
+                    fontSize: 12,
+                    color: 'var(--t-text)',
+                    overflow: 'auto',
+                    maxHeight: 260,
+                    lineHeight: 1.6,
+                  }}>
+                    {configJson}
+                  </pre>
+                </div>
+              </Disclosure>
             </div>
-          </Disclosure>
-        </div>
-
-        <div style={{ marginTop: 20 }}>
-          <HairlineRule />
-        </div>
+          </div>
+        </SettingsGroup>
       </section>
     </div>
   );
