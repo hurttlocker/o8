@@ -5,9 +5,7 @@ use serde_json::{json, Value};
 
 pub async fn list(_args: Value) -> Result<Value, String> {
     let output = tokio::task::spawn_blocking(|| {
-        std::process::Command::new("shortcuts")
-            .args(["list"])
-            .output()
+        std::process::Command::new("shortcuts").args(["list"]).output()
     })
     .await
     .map_err(|e| format!("spawn_blocking error: {e}"))?
@@ -29,20 +27,11 @@ pub async fn list(_args: Value) -> Result<Value, String> {
 }
 
 pub async fn run(args: Value) -> Result<Value, String> {
-    let name = args
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if name.is_empty() {
         return Err("name is required".into());
     }
-    let input = args
-        .get("input")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let input = args.get("input").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     let name_c = name.clone();
     let output = tokio::task::spawn_blocking(move || {

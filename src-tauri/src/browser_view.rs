@@ -35,7 +35,8 @@ pub const BROWSER_VIEW_LABEL: &str = "browser-view";
 /// viewport): `(x, y, w, h)`. Stored so `show()` and monitor/scale changes can
 /// re-apply the position without the panel re-reporting it.
 #[cfg(target_os = "macos")]
-static LAST_RECT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+static LAST_RECT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> =
+    std::sync::Mutex::new(None);
 
 #[cfg(target_os = "macos")]
 fn store_rect(x: f64, y: f64, w: f64, h: f64) {
@@ -86,20 +87,19 @@ pub fn open(
 
     // Build hidden at the target size, position it, THEN show — so it never
     // flashes at the default center before snapping over the panel rect.
-    let mut builder =
-        WebviewWindowBuilder::new(app, BROWSER_VIEW_LABEL, WebviewUrl::External(parsed))
-            .title("o8 browser")
-            .inner_size(w.max(1.0), h.max(1.0))
-            .decorations(false)
-            .shadow(false)
-            // Don't yank focus from the app shell when the pane mounts; the user
-            // clicking into the page makes it key naturally (unlike the dock, we do
-            // NOT pin a nonactivating posture — the page needs to accept keyboard).
-            .focused(false)
-            .visible(false)
-            // OS drag-drop bridge is main-only; avoid the transparent+hardened
-            // DragDrop crash trap (see `dragdropenabled_macos_trap` memory).
-            .disable_drag_drop_handler();
+    let mut builder = WebviewWindowBuilder::new(app, BROWSER_VIEW_LABEL, WebviewUrl::External(parsed))
+        .title("o8 browser")
+        .inner_size(w.max(1.0), h.max(1.0))
+        .decorations(false)
+        .shadow(false)
+        // Don't yank focus from the app shell when the pane mounts; the user
+        // clicking into the page makes it key naturally (unlike the dock, we do
+        // NOT pin a nonactivating posture — the page needs to accept keyboard).
+        .focused(false)
+        .visible(false)
+        // OS drag-drop bridge is main-only; avoid the transparent+hardened
+        // DragDrop crash trap (see `dragdropenabled_macos_trap` memory).
+        .disable_drag_drop_handler();
     if let Some(script) = init_script {
         builder = builder.initialization_script(script);
     }
@@ -162,11 +162,7 @@ pub fn eval(app: &tauri::AppHandle, js: &str) -> bool {
 /// value; the completion result is NSJSON-encoded to a string (null → empty). Errs
 /// if the window is gone or the completion never fires within `timeout_ms`.
 #[cfg(target_os = "macos")]
-pub async fn eval_result(
-    app: &tauri::AppHandle,
-    js: String,
-    timeout_ms: u64,
-) -> Result<String, String> {
+pub async fn eval_result(app: &tauri::AppHandle, js: String, timeout_ms: u64) -> Result<String, String> {
     use tauri::Manager;
     let win = app
         .get_webview_window(BROWSER_VIEW_LABEL)
@@ -197,9 +193,7 @@ pub async fn eval_result(
                         NSJSONWritingOptions::FragmentsAllowed,
                     ) {
                         let s = NSString::alloc();
-                        if let Some(s) =
-                            NSString::initWithData_encoding(s, &data, NSUTF8StringEncoding)
-                        {
+                        if let Some(s) = NSString::initWithData_encoding(s, &data, NSUTF8StringEncoding) {
                             result = s.to_string();
                         }
                     }
@@ -356,11 +350,7 @@ pub fn eval(_app: &tauri::AppHandle, _js: &str) -> bool {
     false
 }
 #[cfg(not(target_os = "macos"))]
-pub async fn eval_result(
-    _app: &tauri::AppHandle,
-    _js: String,
-    _timeout_ms: u64,
-) -> Result<String, String> {
+pub async fn eval_result(_app: &tauri::AppHandle, _js: String, _timeout_ms: u64) -> Result<String, String> {
     Err("native browser-view is macOS-only".to_string())
 }
 #[cfg(not(target_os = "macos"))]

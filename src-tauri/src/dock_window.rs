@@ -87,10 +87,7 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
     // show. The dock capability's remote.urls already covers `http://localhost:*`.
     let base = match crate::dev_frontend::from_env() {
         Ok(Some(dev)) => {
-            log::info!(
-                "[dock-window] dev-bridge: loading dock from {}",
-                dev.origin()
-            );
+            log::info!("[dock-window] dev-bridge: loading dock from {}", dev.origin());
             dev.origin().to_string()
         }
         _ => format!("http://127.0.0.1:{}", api_port),
@@ -183,11 +180,7 @@ pub fn set_expanded(app: &tauri::AppHandle, expanded: bool) {
     let Some(window) = app.get_webview_window(DOCK_LABEL) else {
         return;
     };
-    let height = if expanded {
-        DOCK_EXPANDED_HEIGHT
-    } else {
-        DOCK_HEIGHT
-    };
+    let height = if expanded { DOCK_EXPANDED_HEIGHT } else { DOCK_HEIGHT };
     let _ = window.set_size(tauri::LogicalSize::new(DOCK_WIDTH, height));
     reposition(&window);
     order_front_nonactivating(&window);

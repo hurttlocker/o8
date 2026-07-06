@@ -28,56 +28,16 @@ struct Fixture {
 /// free, so the harness is safe to run as often as we like.
 fn fixtures() -> Vec<Fixture> {
     vec![
-        Fixture {
-            label: "whats-shipping",
-            intent: "What's shipping right now?",
-            expected_tool: Some("o8_status"),
-        },
-        Fixture {
-            label: "agents-in-repo",
-            intent: "What are my agents working on in o8?",
-            expected_tool: Some("o8_status"),
-        },
-        Fixture {
-            label: "ask-brain",
-            intent: "What did Codex do today?",
-            expected_tool: Some("o8_ask"),
-        },
-        Fixture {
-            label: "open-prs",
-            intent: "Any open pull requests on o8?",
-            expected_tool: Some("gh_pr_list"),
-        },
-        Fixture {
-            label: "open-issues",
-            intent: "What issues are open on o8?",
-            expected_tool: Some("gh_issue_list"),
-        },
-        Fixture {
-            label: "git-status",
-            intent: "What's the git status of o8?",
-            expected_tool: Some("git_status"),
-        },
-        Fixture {
-            label: "recent-commits",
-            intent: "What are the recent commits on o8?",
-            expected_tool: Some("git_log"),
-        },
-        Fixture {
-            label: "list-reminders",
-            intent: "What's on my reminders list?",
-            expected_tool: Some("mac_reminders_list"),
-        },
-        Fixture {
-            label: "calendar",
-            intent: "What's on my calendar this week?",
-            expected_tool: Some("mac_calendar_list_events"),
-        },
-        Fixture {
-            label: "chat-time",
-            intent: "What time is it right now?",
-            expected_tool: None,
-        },
+        Fixture { label: "whats-shipping", intent: "What's shipping right now?", expected_tool: Some("o8_status") },
+        Fixture { label: "agents-in-repo", intent: "What are my agents working on in o8?", expected_tool: Some("o8_status") },
+        Fixture { label: "ask-brain", intent: "What did Codex do today?", expected_tool: Some("o8_ask") },
+        Fixture { label: "open-prs", intent: "Any open pull requests on o8?", expected_tool: Some("gh_pr_list") },
+        Fixture { label: "open-issues", intent: "What issues are open on o8?", expected_tool: Some("gh_issue_list") },
+        Fixture { label: "git-status", intent: "What's the git status of o8?", expected_tool: Some("git_status") },
+        Fixture { label: "recent-commits", intent: "What are the recent commits on o8?", expected_tool: Some("git_log") },
+        Fixture { label: "list-reminders", intent: "What's on my reminders list?", expected_tool: Some("mac_reminders_list") },
+        Fixture { label: "calendar", intent: "What's on my calendar this week?", expected_tool: Some("mac_calendar_list_events") },
+        Fixture { label: "chat-time", intent: "What time is it right now?", expected_tool: None },
     ]
 }
 

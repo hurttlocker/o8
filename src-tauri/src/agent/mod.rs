@@ -86,9 +86,7 @@ pub struct LoopResult {
 /// Shared system prompt: the agent persona + current-time grounding. Spoken
 /// aloud, so it asks for short, markdown-free replies.
 pub(crate) fn system_prompt() -> String {
-    let when = chrono::Local::now()
-        .format("%A, %B %-d %Y, %-I:%M %p")
-        .to_string();
+    let when = chrono::Local::now().format("%A, %B %-d %Y, %-I:%M %p").to_string();
     format!(
         "You are Symon, a fast, helpful macOS voice assistant for o8. You control \
          the user's Mac through native tools (Reminders, Calendar, Notes, opening \
@@ -344,8 +342,9 @@ fn take_staged_block() -> Option<String> {
     if at.elapsed().as_secs() > STAGED_TTL_SECS || files.is_empty() {
         return None;
     }
-    let mut block =
-        String::from("[Files the user just dropped onto the dock as context for this request]");
+    let mut block = String::from(
+        "[Files the user just dropped onto the dock as context for this request]",
+    );
     for f in &files {
         let kb = (f.size as f64 / 1024.0).max(0.1);
         match f.content.as_deref().filter(|c| !c.trim().is_empty()) {
@@ -472,10 +471,7 @@ pub async fn confirm_if_needed_opts(
     // card remains the binding gate — this just lets the user hear what's about
     // to happen (esp. the repo on an o8_dispatch) and catch a mishear by ear.
     if speak {
-        crate::tts::playback::play_thread(
-            confirm_spoken(tool_name, args),
-            crate::tts::load_config(),
-        );
+        crate::tts::playback::play_thread(confirm_spoken(tool_name, args), crate::tts::load_config());
     }
 
     emit_confirm(
@@ -524,10 +520,7 @@ pub fn resolve_confirm(task_id: &str, allow: bool) {
 pub fn decline_all_confirms() -> usize {
     let senders: Vec<oneshot::Sender<bool>> = {
         let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::take(&mut *chans)
-            .into_iter()
-            .map(|(_, tx)| tx)
-            .collect()
+        std::mem::take(&mut *chans).into_iter().map(|(_, tx)| tx).collect()
     };
     let n = senders.len();
     for tx in senders {
@@ -580,12 +573,7 @@ pub fn any_task_running() -> bool {
 
 /// Human phrasing for a confirm card.
 fn confirm_summary(tool_name: &str, args: &Value) -> String {
-    let s = |k: &str| {
-        args.get(k)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
+    let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     match tool_name {
         "mac_reminders_create" => {
             let title = s("title");
@@ -631,11 +619,7 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
         // The model passes the terminal's title from term_list so the card
         // names the real target window, not a bare id.
-        "term_send" => format!(
-            "Send “{}” to {}",
-            s("command"),
-            short_term_title(&s("title"))
-        ),
+        "term_send" => format!("Send “{}” to {}", s("command"), short_term_title(&s("title"))),
         "term_interrupt" => format!("Interrupt {}", short_term_title(&s("title"))),
         "term_key" => format!("Press {} in {}", s("key"), short_term_title(&s("title"))),
         "term_new" => {
@@ -654,10 +638,7 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
             if feedback.is_empty() {
                 format!("Restart the “{}” packet fresh", s("packet"))
             } else {
-                format!(
-                    "Restart the “{}” packet with feedback: {feedback}",
-                    s("packet")
-                )
+                format!("Restart the “{}” packet with feedback: {feedback}", s("packet"))
             }
         }
         "o8_stop_agent" => {
@@ -669,10 +650,7 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                     format!("Stop all agents in {repo} (kill them, no relaunch)")
                 }
             } else {
-                format!(
-                    "Stop the “{}” agent — kill it and archive it, no relaunch",
-                    s("packet")
-                )
+                format!("Stop the “{}” agent — kill it and archive it, no relaunch", s("packet"))
             }
         }
         "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),
@@ -681,10 +659,7 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
             if project.is_empty() {
                 format!("Add {} as a repo in o8", s("path"))
             } else {
-                format!(
-                    "Add {} as a repo in o8, in the {project} project",
-                    s("path")
-                )
+                format!("Add {} as a repo in o8, in the {project} project", s("path"))
             }
         }
         // The model passes the exact title it just read from o8_needs_me, so
@@ -783,11 +758,7 @@ pub fn speak_filler_now() {
 // bare `emit` can miss. Mirrors lib.rs's `emit_stt`.
 
 pub fn emit_agent_event(app: &tauri::AppHandle, payload: Value) {
-    let _ = app.emit_to(
-        crate::dock_window::DOCK_LABEL,
-        "o8:agent-task-event",
-        payload.clone(),
-    );
+    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:agent-task-event", payload.clone());
     let _ = app.emit("o8:agent-task-event", payload);
 }
 
@@ -826,11 +797,7 @@ fn glint_for(tool_calls_json: &str) -> Option<&'static str> {
 }
 
 fn emit_confirm(app: &tauri::AppHandle, payload: Value) {
-    let _ = app.emit_to(
-        crate::dock_window::DOCK_LABEL,
-        "o8:agent-confirm",
-        payload.clone(),
-    );
+    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:agent-confirm", payload.clone());
     let _ = app.emit("o8:agent-confirm", payload);
 }
 
@@ -989,8 +956,7 @@ async fn run_agent_inner(
             // Strip [POINT:...] tags BEFORE anything user-facing — the clean
             // text is what gets stored, displayed, and spoken; the tags drive
             // the Symon Points overlay (dossier #1).
-            let (clean_text, point_tags) =
-                crate::point_overlay::parse_point_tags(&result.result_text);
+            let (clean_text, point_tags) = crate::point_overlay::parse_point_tags(&result.result_text);
             #[cfg(target_os = "macos")]
             if !point_tags.is_empty() {
                 if let Some(screen) = &ctx.screen {
@@ -1004,9 +970,7 @@ async fn run_agent_inner(
                         .join(" ");
                     record_last_drawing(tag_src);
                 } else {
-                    log::warn!(
-                        "[symon-agent] model emitted POINT tags without screen context — ignored"
-                    );
+                    log::warn!("[symon-agent] model emitted POINT tags without screen context — ignored");
                 }
             }
             #[cfg(not(target_os = "macos"))]
@@ -1022,7 +986,8 @@ async fn run_agent_inner(
             // Titled Brain sources ride along when the run consulted o8_ask —
             // the dock answer panel renders them as a meta line under the
             // answer (sources-parity pass 2026-06-11).
-            let mut done_payload = json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text });
+            let mut done_payload =
+                json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text });
             if !result.brain_sources.is_empty() {
                 done_payload["sources"] = json!(result.brain_sources);
             }
@@ -1059,10 +1024,7 @@ pub fn spawn_agent(app: tauri::AppHandle, prompt: String) {
         return;
     }
     std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
+        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[symon-agent] failed to build runtime: {e}");
@@ -1088,10 +1050,7 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         return;
     }
     std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
+        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[symon-agent] failed to build claude-task runtime: {e}");
@@ -1100,13 +1059,7 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         };
         log::info!("[symon-agent] claude-task: {} chars", task.len());
         match rt.block_on(async {
-            run_agent_inner(
-                app,
-                task,
-                Some(CLAUDE_BRAIN_MODEL.to_string()),
-                Some("claude-task"),
-            )
-            .await
+            run_agent_inner(app, task, Some(CLAUDE_BRAIN_MODEL.to_string()), Some("claude-task")).await
         }) {
             Ok(text) => log::info!("[symon-agent] claude-task done: {} chars", text.len()),
             Err(e) => log::warn!("[symon-agent] claude-task failed: {e}"),
@@ -1120,12 +1073,7 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
 fn notify_done(app: &tauri::AppHandle, result: &str) {
     use tauri_plugin_notification::NotificationExt;
     let body: String = result.chars().take(160).collect();
-    let _ = app
-        .notification()
-        .builder()
-        .title("Symon")
-        .body(&body)
-        .show();
+    let _ = app.notification().builder().title("Symon").body(&body).show();
 }
 
 #[cfg(test)]
