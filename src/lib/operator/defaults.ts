@@ -12,6 +12,7 @@ import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
 } from './dispatch-runtime-default';
+import { resolveWorkerEffortDefault } from './worker-effort-default';
 
 const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode'];
 function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
@@ -140,6 +141,10 @@ export interface OperatorDefaults {
   promptCachingEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: OrchestratorRuntime;
+  /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
+  codexWorkerEffort: ThinkingEffort;
+  /** Default Claude Code worker effort. 'adaptive' preserves runtime default behavior. */
+  claudeWorkerEffort: ThinkingEffort;
   /**
    * Default model for DISPATCHED workers. Empty = let the runtime pick its own
    * default (today: Codex's configured model). Set it to a LOCAL model with the
@@ -267,6 +272,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   promptCachingEnabled: true,
   orchestratorModel: MODEL_IDS.orchestratorDefault,
   defaultDispatchRuntime: 'codex',
+  codexWorkerEffort: 'adaptive',
+  claudeWorkerEffort: 'adaptive',
   defaultDispatchModel: '',
   localInferenceBaseUrl: '',
   localEmbedModel: '',
@@ -400,6 +407,18 @@ function envDefaultDispatchRuntime(): OrchestratorRuntime | null {
   return null;
 }
 
+function envCodexWorkerEffort(): ThinkingEffort | null {
+  const raw = process.env.O8_CODEX_WORKER_EFFORT?.trim();
+  if (raw && isThinkingEffort(raw)) return raw;
+  return null;
+}
+
+function envClaudeWorkerEffort(): ThinkingEffort | null {
+  const raw = process.env.O8_CLAUDE_WORKER_EFFORT?.trim();
+  if (raw && isThinkingEffort(raw)) return raw;
+  return null;
+}
+
 function envDefaultDispatchModel(): string | null {
   const raw = process.env.O8_DISPATCH_MODEL;
   return raw?.trim() || null;
@@ -508,6 +527,8 @@ interface StoredOperatorDefaults {
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchRuntimeExplicit?: boolean;
+  codexWorkerEffort?: ThinkingEffort;
+  claudeWorkerEffort?: ThinkingEffort;
   defaultDispatchModel?: string;
   localInferenceBaseUrl?: string;
   localEmbedModel?: string;
@@ -574,6 +595,12 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
     result.defaultDispatchRuntimeExplicit = stored.defaultDispatchRuntimeExplicit !== false;
+  }
+  if (stored.codexWorkerEffort && isThinkingEffort(stored.codexWorkerEffort)) {
+    result.codexWorkerEffort = stored.codexWorkerEffort;
+  }
+  if (stored.claudeWorkerEffort && isThinkingEffort(stored.claudeWorkerEffort)) {
+    result.claudeWorkerEffort = stored.claudeWorkerEffort;
   }
   if (typeof stored.defaultDispatchModel === 'string') {
     // Empty string is meaningful here ("unset → runtime default"), so accept it.
@@ -642,6 +669,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envCache = envPromptCachingEnabled();
   const envModel = envOrchestratorModel();
   const envRuntime = envDefaultDispatchRuntime();
+  const envCodexEffort = envCodexWorkerEffort();
+  const envClaudeEffort = envClaudeWorkerEffort();
   const envDispatchModel = envDefaultDispatchModel();
   const envLocalBaseUrl = envLocalInferenceBaseUrl();
   const envLocalEmbed = envLocalEmbedModel();
@@ -681,6 +710,10 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime,
+    codexWorkerEffort:
+      envCodexEffort ?? fileValues.codexWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.codexWorkerEffort,
+    claudeWorkerEffort:
+      envClaudeEffort ?? fileValues.claudeWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.claudeWorkerEffort,
     defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
@@ -713,6 +746,10 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
+    codexWorkerEffort:
+      envCodexEffort !== null ? 'env' : fileValues.codexWorkerEffort !== undefined ? 'file' : 'default',
+    claudeWorkerEffort:
+      envClaudeEffort !== null ? 'env' : fileValues.claudeWorkerEffort !== undefined ? 'file' : 'default',
     defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
@@ -817,6 +854,18 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
     stored.defaultDispatchRuntimeExplicit = true;
+  }
+  if (update.codexWorkerEffort !== undefined) {
+    if (!isThinkingEffort(update.codexWorkerEffort)) {
+      throw new Error('codexWorkerEffort must be a valid ThinkingEffort value.');
+    }
+    stored.codexWorkerEffort = update.codexWorkerEffort;
+  }
+  if (update.claudeWorkerEffort !== undefined) {
+    if (!isThinkingEffort(update.claudeWorkerEffort)) {
+      throw new Error('claudeWorkerEffort must be a valid ThinkingEffort value.');
+    }
+    stored.claudeWorkerEffort = update.claudeWorkerEffort;
   }
   if (update.defaultDispatchModel !== undefined) {
     // Empty string clears it (back to the runtime default); any string is valid
@@ -937,6 +986,19 @@ export function resolvePromptCachingEnabledSync(): boolean {
 
 export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
   return getOperatorDefaultsSync().values.defaultDispatchRuntime;
+}
+
+export function resolveDefaultWorkerEffortSync(
+  runtime: OrchestratorRuntime,
+  explicitEffort?: ThinkingEffort | null,
+): ThinkingEffort | undefined {
+  const values = getOperatorDefaultsSync().values;
+  return resolveWorkerEffortDefault({
+    runtime,
+    explicitEffort,
+    codexWorkerEffort: values.codexWorkerEffort,
+    claudeWorkerEffort: values.claudeWorkerEffort,
+  });
 }
 
 /** Default worker model ('' = runtime's own default). Applied at the Codex

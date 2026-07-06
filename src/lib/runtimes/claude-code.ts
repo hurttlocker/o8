@@ -36,6 +36,7 @@ import {
   getOwnedClaudeCodeRuntimeTail,
   launchOwnedClaudeCodeSession,
 } from '@/lib/claude-code/owned';
+import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 
 const execFileAsync = promisify(execFile);
 
@@ -1116,7 +1117,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       cwd: opts.cwd,
       prompt: opts.prompt,
       model: opts.model,
-      effort: opts.effort,
+      effort: resolveDefaultWorkerEffortSync('claude-code', opts.effort),
     });
     return {
       ok: result.ok,

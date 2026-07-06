@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { codexLaunchArgs, codexReasoningEffortArgs } from './owned';
+import { resolveWorkerEffortDefault } from '@/lib/operator/worker-effort-default';
 
 describe('codexReasoningEffortArgs', () => {
   it('unset / adaptive ⇒ [] (no flag — parity, runtime default)', () => {
@@ -44,5 +45,27 @@ describe('codexLaunchArgs — effort', () => {
     expect(args.filter((a) => a.startsWith('model_reasoning_effort='))).toHaveLength(1);
     // prompt is still last (flag inserted before it, not after)
     expect(args[args.length - 1]).toBe('do the thing');
+  });
+
+  it('default effort lands in Codex launch args when launch did not specify effort', () => {
+    const effort = resolveWorkerEffortDefault({
+      runtime: 'codex',
+      explicitEffort: undefined,
+      codexWorkerEffort: 'xhigh',
+      claudeWorkerEffort: 'max',
+    });
+    expect(codexLaunchArgs({ ...base, model: 'gpt-5.5', effort })).toContain('model_reasoning_effort=xhigh');
+  });
+
+  it('explicit effort beats the Codex default effort', () => {
+    const effort = resolveWorkerEffortDefault({
+      runtime: 'codex',
+      explicitEffort: 'high',
+      codexWorkerEffort: 'xhigh',
+      claudeWorkerEffort: 'max',
+    });
+    const args = codexLaunchArgs({ ...base, model: 'gpt-5.5', effort });
+    expect(args).toContain('model_reasoning_effort=high');
+    expect(args).not.toContain('model_reasoning_effort=xhigh');
   });
 });

@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { MODEL_IDS } from '@/lib/models';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
@@ -19,7 +20,7 @@ import {
 } from './shared';
 
 export type OverlapGateMode = 'advisory' | 'strict';
-export type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+export type { ThinkingEffort };
 export type SettingSource = 'env' | 'file' | 'default';
 
 export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
@@ -44,6 +45,8 @@ export interface OperatorDefaults {
   promptCachingEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: DispatchRuntime;
+  codexWorkerEffort: ThinkingEffort;
+  claudeWorkerEffort: ThinkingEffort;
   defaultDispatchModel: string;
   localInferenceBaseUrl: string;
   localEmbedModel: string;
@@ -78,6 +81,22 @@ export const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: stri
   { value: 'high', label: 'High', detail: 'Deeper reasoning, more tokens.' },
   { value: 'max', label: 'Max', detail: 'Highest effort allowed.' },
   { value: 'xhigh', label: 'Extended', detail: 'Extended thinking budget.' },
+];
+
+export const CODEX_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
+  { value: 'adaptive', label: 'Runtime default', detail: 'Leave Codex at its default.' },
+  { value: 'low', label: 'Low', detail: 'Quick worker turns.' },
+  { value: 'medium', label: 'Medium', detail: 'Balanced cost and quality.' },
+  { value: 'high', label: 'High', detail: 'Deeper worker reasoning.' },
+  { value: 'xhigh', label: 'Extended', detail: 'Codex top effort.' },
+];
+
+export const CLAUDE_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
+  { value: 'adaptive', label: 'Runtime default', detail: 'Leave Claude Code at its default.' },
+  { value: 'low', label: 'Low', detail: 'Quick worker turns.' },
+  { value: 'medium', label: 'Medium', detail: 'Balanced cost and quality.' },
+  { value: 'high', label: 'High', detail: 'Deeper worker reasoning.' },
+  { value: 'max', label: 'Max', detail: 'Claude Code top effort.' },
 ];
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [

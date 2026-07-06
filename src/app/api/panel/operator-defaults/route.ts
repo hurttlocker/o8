@@ -92,6 +92,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.defaultDispatchRuntime = raw;
   }
 
+  if (body.codexWorkerEffort !== undefined) {
+    if (!isThinkingEffort(body.codexWorkerEffort)) {
+      throw new Error('codexWorkerEffort must be a valid effort level.');
+    }
+    update.codexWorkerEffort = body.codexWorkerEffort;
+  }
+
+  if (body.claudeWorkerEffort !== undefined) {
+    if (!isThinkingEffort(body.claudeWorkerEffort)) {
+      throw new Error('claudeWorkerEffort must be a valid effort level.');
+    }
+    update.claudeWorkerEffort = body.claudeWorkerEffort;
+  }
+
   if (body.defaultDispatchModel !== undefined) {
     // Any string is valid; '' clears it back to the runtime default. Use the
     // `ollama:<model>` / `lmstudio:<model>` convention to dispatch local.

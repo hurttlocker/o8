@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.hoisted(() => vi.fn());
+const resolveDefaultWorkerEffortSyncMock = vi.hoisted(() => vi.fn((runtime, explicitEffort) => explicitEffort ?? undefined));
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   ready: true,
   reason: 'http_200',
@@ -26,6 +27,14 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   return {
     ...actual,
     ensureDispatchBackendReady: ensureDispatchBackendReadyMock,
+  };
+});
+
+vi.mock('@/lib/operator/defaults', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/operator/defaults')>();
+  return {
+    ...actual,
+    resolveDefaultWorkerEffortSync: resolveDefaultWorkerEffortSyncMock,
   };
 });
 
@@ -51,10 +60,12 @@ describe('Claude Code dispatch spawn', () => {
       once: vi.fn(),
     });
     ensureDispatchBackendReadyMock.mockClear();
+    resolveDefaultWorkerEffortSyncMock.mockImplementation((runtime, explicitEffort) => explicitEffort ?? undefined);
   });
 
   afterEach(() => {
     spawnMock.mockReset();
+    resolveDefaultWorkerEffortSyncMock.mockReset();
     if (priorOwnedRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
     else process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = priorOwnedRoot;
     if (priorClaudeBin === undefined) delete process.env.O8_CLAUDE_CODE_BIN;
@@ -111,6 +122,7 @@ describe('Claude Code dispatch spawn', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(resolveDefaultWorkerEffortSyncMock).toHaveBeenCalledWith('claude-code', 'high');
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
     const [, args] = spawnMock.mock.calls[0]!;
@@ -132,6 +144,25 @@ describe('Claude Code dispatch spawn', () => {
     ]);
     expect(argv).not.toContain('-p');
     expect(argv).not.toContain('--print');
+  }, 20_000);
+
+  it('applies the default Claude worker effort when launch omits effort', async () => {
+    resolveDefaultWorkerEffortSyncMock.mockReturnValue('max');
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'implement the packet',
+      model: 'claude-opus-4-8',
+      laneId: 'lane-claude',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(resolveDefaultWorkerEffortSyncMock).toHaveBeenCalledWith('claude-code', undefined);
+
+    const [, args] = spawnMock.mock.calls[0]!;
+    const argv = process.platform === 'win32' ? args : args.slice(2);
+    expect(argv).toContain('--effort');
+    expect(argv).toContain('max');
   }, 20_000);
 
   it('omits the Claude effort flag for adaptive effort', async () => {

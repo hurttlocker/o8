@@ -31,7 +31,7 @@ import {
   getOwnedCodexReviewPacket,
   getOwnedCodexTelemetrySources,
 } from '@/lib/codex/owned';
-import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { resolveDefaultDispatchModelSync, resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -232,7 +232,8 @@ export const codexRuntime: AgentRuntime = {
     // `ollama:`/`lmstudio:` default) reaches every dispatch path, scoped to o8
     // workers. A per-mission model still wins.
     const model = opts.model ?? (resolveDefaultDispatchModelSync() || undefined);
-    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model, effort: opts.effort });
+    const effort = resolveDefaultWorkerEffortSync('codex', opts.effort);
+    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model, effort });
     if (result.ok && result.surfaceId) {
       scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, model, () =>
         waitForOwnedRunToFinish(result.surfaceId, startedAtMs));
