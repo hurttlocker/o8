@@ -252,6 +252,8 @@ export type LaneEventVerb =
   | 'steered_packet'
   // Packet steer failed before a worker turn could start. Payload: { packetId, source, message, note, stderrHead? }
   | 'steer_failed'
+  // Operator stop could not kill the live worker. Payload: { packetId?, sessionKey, note, pid?, tmuxSession?, steps }
+  | 'interrupt_failed'
   // Silent-exit detector found that the lane worktree HEAD is already an
   // ancestor of the refreshed base. Payload: { headSha, comparisonRef }
   | 'silent_exit_already_merged';
