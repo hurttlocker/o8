@@ -24,6 +24,7 @@ import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
+import { attachLiveAgentTerminalTab } from '@/components/desktop/contextual-panel/live-agent-terminal';
 
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
@@ -548,32 +549,15 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       openSurface,
       attachLiveAgentTerminal: (session: string, label?: string) => {
         setAddMenuOpen(false);
-        // Already showing this run? Just focus it.
-        const existing = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.tmuxSession === session);
-        if (existing) {
-          if (label && existing.label !== label) {
-            setTabs((prev) => prev.map((entry) => entry.id === existing.id ? { ...entry, label } : entry));
-          }
-          setActiveTabId(existing.id);
-          return;
-        }
-        tabCountRef.current += 1;
-        const now = Date.now();
-        const shortId = session.startsWith('cortex-run-')
-          ? session.slice('cortex-run-'.length, 'cortex-run-'.length + 6)
-          : session.slice(0, 6);
-        // Preset tmuxSession (non-null) → BottomXtermPanel auto-attaches on mount.
-        const nextTab: ContextualPanelTab = {
-          id: `bottom-agent-${tabCountRef.current}`,
-          label: label ?? `run·${shortId}`,
-          kind: 'terminal',
-          tmuxSession: session,
-          readOnly: true,
-          createdAt: now,
-          lastActivity: now,
-        };
-        setTabs((prev) => [...prev, nextTab]);
-        setActiveTabId(nextTab.id);
+        const result = attachLiveAgentTerminalTab(tabsRef.current, {
+          session,
+          label,
+          tabCount: tabCountRef.current,
+        });
+        tabCountRef.current = result.nextTabCount;
+        tabsRef.current = result.tabs;
+        setTabs(result.tabs);
+        setActiveTabId(result.activeTabId);
       },
     }), [activeTabId, createBottomTab, openSurface, sendTerminalInput]);
 

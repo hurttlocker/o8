@@ -13,8 +13,8 @@ function compact(value: string, max = MAX_LABEL_LENGTH): string {
 
 function stripShellWrapper(command: string): string {
   const trimmed = command.trim();
-  const match = trimmed.match(/^sh\s+-c\s+(['"])([\s\S]*)\1$/);
-  return match?.[2]?.trim() || trimmed;
+  const match = trimmed.match(/^(?:\/bin\/)?(?:sh|bash|zsh)\s+-l?c\s+(?:(['"])([\s\S]*)\1|([\s\S]+))$/);
+  return (match?.[2] ?? match?.[3])?.trim() || trimmed;
 }
 
 function detectPort(command: string): string | null {
