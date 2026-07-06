@@ -20,6 +20,7 @@ import {
   CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
   CANVAS_GLASS_TONES,
+  canvasFreeLook,
   defaultTextShadeForTone,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
@@ -68,6 +69,7 @@ export function TunerPanel({
   loupeSizeRange,
   onLoupeSizeChange,
   onSaveDefault,
+  full = true,
 }: {
   settings: CanvasGlassSettings;
   onChange: (patch: Partial<CanvasGlassSettings>) => void;
@@ -77,6 +79,9 @@ export function TunerPanel({
   loupeSizeRange: { min: number; max: number; step: number };
   onLoupeSizeChange: (value: number) => void;
   onSaveDefault: () => void;
+  /** Founders get the whole panel; free gets Paper in light/dark only (the
+   *  look where text reads right) — no other looks, dials, depth, or advanced. */
+  full?: boolean;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -117,15 +122,25 @@ export function TunerPanel({
             label={tone.label}
             grow
             active={settings.tone === tone.id}
-            onClick={() => onChange({
-              tone: tone.id,
-              textShade: defaultTextShadeForTone(tone.id),
-              veil: tone.id === 'light' ? 1 : 0.3,
-            })}
+            onClick={() => onChange(full
+              ? {
+                tone: tone.id,
+                textShade: defaultTextShadeForTone(tone.id),
+                veil: tone.id === 'light' ? 1 : 0.3,
+              }
+              // Free tier: tone flips move between the two Paper looks wholesale.
+              : { ...canvasFreeLook(tone.id) })}
           />
         ))}
       </div>
 
+      {!full ? (
+        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5, fontFamily: FONT }}>
+          Looks, depth, and the dials unlock with a founding license.
+        </span>
+      ) : null}
+
+      {full ? (<>
       {/* Looks — curated full-combo presets, plus the operator's saved Custom. */}
       <span style={SECTION_LABEL}>Looks</span>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
@@ -263,6 +278,7 @@ export function TunerPanel({
           Reset
         </button>
       </div>
+      </>) : null}
       {inTauri ? null : (
         <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5, fontFamily: FONT }}>
           Open in the o8 app to see your desktop through the glass.
