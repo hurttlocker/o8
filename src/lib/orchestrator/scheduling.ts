@@ -237,15 +237,17 @@ async function dispatchOrRecoverPacket(
     }
   }
 
-  const launchPacket = recoveryContext?.runtime
+  const launchPacket: OrchestratorPacket = recoveryContext?.runtime
     ? {
         ...packet,
         runtime: recoveryContext.runtime,
-        workerRouting: {
-          ...packet.workerRouting,
-          requestedRuntime: recoveryContext.runtime,
-          selectedRuntime: recoveryContext.runtime,
-        },
+        workerRouting: packet.workerRouting
+          ? {
+              ...packet.workerRouting,
+              requestedRuntime: recoveryContext.runtime,
+              selectedRuntime: recoveryContext.runtime,
+            }
+          : packet.workerRouting,
       }
     : packet;
   const launchResult = await dispatchPacket(launchPacket, allPackets);
