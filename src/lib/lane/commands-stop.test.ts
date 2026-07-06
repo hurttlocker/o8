@@ -27,7 +27,7 @@ describe('lane stop command', () => {
     });
     await dispatch({ verb: 'attach_session', laneId: lane.id, sessionKey: 'codex-owned:stubborn' });
 
-    const result = await dispatch({ verb: 'stop', laneId: lane.id, actor: 'operator' });
+    const result = await dispatch({ verb: 'stop', laneId: lane.id, actor: 'user' });
 
     expect(result.ok).toBe(false);
     expect(result.lane?.status).toBe('running');
