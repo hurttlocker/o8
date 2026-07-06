@@ -6,6 +6,15 @@ export interface NormalizeRuntimeStatusOptions {
   fallbackStatus?: OrchestratorPacketStatus | null;
 }
 
+export function isTerminalRuntimeStatus(status: string | null | undefined): boolean {
+  const normalized = status?.trim().toLowerCase() ?? '';
+  return normalized === 'reviewing'
+    || normalized === 'failed'
+    || normalized === 'released'
+    || normalized === 'archived'
+    || normalized.startsWith('silent_exit_');
+}
+
 // ── Lane lifecycle ring buffer ──
 //
 // #619 — An MCP-agent driver needs to long-poll for lane-lifecycle events
