@@ -266,6 +266,7 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         status: run.status ?? '',
         conclusion: run.conclusion ?? '',
         branch: run.headBranch ?? '',
+        headSha: run.headSha ?? '',
         workflow: run.workflowName ?? '',
         age: run.createdAt ? relativeAge(run.createdAt) : '',
         ts,
@@ -289,7 +290,7 @@ export function itemKey(item: ActivityItem): string {
 }
 
 export function itemTitle(item: ActivityItem): string {
-  if (item.kind === 'commit') return item.message;
+  if (item.kind === 'commit') return item.hash ? `${item.message} · ${item.hash.slice(0, 7)}` : item.message;
   if (item.kind === 'event') return item.data.title;
   if (item.kind === 'issue') return `#${item.number} ${item.title}`;
   if (item.kind === 'pr') return `#${item.number} ${item.title}`;
@@ -304,6 +305,46 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
         <span style={{ color: 'var(--t-text-secondary)' }}>{item.hash}</span>
         <span style={{ color: 'var(--t-text-faint)' }}>·</span>
         <span>{item.age}</span>
+        {item.groupedPushEvent ? (
+          <span style={{
+            paddingTop: 0,
+            paddingRight: 4,
+            paddingBottom: 0,
+            paddingLeft: 4,
+            borderRadius: 4,
+            background: ACTIVITY_COLORS.accentBg,
+            color: ACTIVITY_COLORS.accent,
+            fontSize: 9.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+          }}>
+            pushed
+          </span>
+        ) : null}
+        {item.groupedCiRun ? (
+          <span style={{
+            paddingTop: 0,
+            paddingRight: 4,
+            paddingBottom: 0,
+            paddingLeft: 4,
+            borderRadius: 4,
+            background: item.groupedCiRun.conclusion === 'success'
+              ? ACTIVITY_COLORS.successBg
+              : item.groupedCiRun.conclusion === 'failure'
+                ? ACTIVITY_COLORS.dangerBg
+                : ACTIVITY_COLORS.attentionBg,
+            color: item.groupedCiRun.conclusion === 'success'
+              ? ACTIVITY_COLORS.success
+              : item.groupedCiRun.conclusion === 'failure'
+                ? ACTIVITY_COLORS.danger
+                : ACTIVITY_COLORS.attention,
+            fontSize: 9.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+          }}>
+            {item.groupedCiRun.conclusion || item.groupedCiRun.status || 'ci'}
+          </span>
+        ) : null}
       </>
     );
   }
