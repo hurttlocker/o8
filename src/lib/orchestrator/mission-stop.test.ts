@@ -177,14 +177,14 @@ describe('stopMission', () => {
         status: 'awaiting_review',
         queueState: 'held',
         operatorStopped: undefined,
-        lastEventLabel: undefined,
+        lastEventLabel: null,
       },
       {
         id: 'failed-stop',
         status: 'running',
         queueState: 'queued',
         operatorStopped: undefined,
-        lastEventLabel: undefined,
+        lastEventLabel: null,
       },
     ]);
   });
