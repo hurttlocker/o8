@@ -36,7 +36,7 @@ function itemPacketLabel(item: SupervisorInboxItem): string | null {
   return item.packetTitle ?? item.packetReferenceLabel;
 }
 
-function supervisorMetadata(item: SupervisorInboxItem, extras: string[] = []): string {
+function supervisorMetadata(item: SupervisorInboxItem, extras: Array<string | null | undefined> = []): string {
   return joinMetadata([
     itemPacketLabel(item),
     ...extras,
@@ -130,7 +130,7 @@ function fileSizeViolation(approval: ApprovalRecord): { file: string; lines: str
   return { file: violation.file, lines: lineMatch?.[1] ?? null };
 }
 
-function approvalMetadata(approval: ApprovalRecord, extras: string[] = []): string {
+function approvalMetadata(approval: ApprovalRecord, extras: Array<string | null | undefined> = []): string {
   const files = approvalFiles(approval);
   return joinMetadata([
     approval.metadata?.Packet ? `Packet ${approval.metadata.Packet}` : null,
