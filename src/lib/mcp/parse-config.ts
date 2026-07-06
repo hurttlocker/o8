@@ -195,3 +195,90 @@ export function parsedServerToFormValues(server: ParsedMcpServer): {
     envJson,
   };
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Smart single-box input (operator, 2026-07-06 — "typing JSON args is
+ * 2024"). One paste box accepts ANY of: the JSON shapes above, a bare
+ * server URL, or a raw command line ("npx -y @modelcontextprotocol/
+ * server-filesystem /tmp", optionally with leading ENV=VAL pairs). The
+ * parser figures out which and returns normalized servers.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/** Shell-ish tokenizer: splits on whitespace, honors single/double quotes. */
+function tokenizeCommandLine(line: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (const ch of line) {
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch as '"' | "'"; continue; }
+    if (/\s/.test(ch)) {
+      if (current) { tokens.push(current); current = ''; }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/** Infer a human server name from a command line's package/path argument. */
+function inferNameFromTokens(command: string, args: string[]): string {
+  const pkg = args.find((a) => a.startsWith('@') || /^[a-z0-9-]+\/[a-z0-9-]/i.test(a))
+    ?? args.find((a) => !a.startsWith('-'));
+  const base = (pkg ?? command).split('/').pop() ?? command;
+  return base
+    .replace(/^(server|mcp)[-_]/i, '')
+    .replace(/[-_](server|mcp)$/i, '')
+    .replace(/@.*$/, '')
+    .trim() || command;
+}
+
+/**
+ * Parse anything the operator throws at the box: JSON config, bare URL, or a
+ * command line. Throws with a human message when nothing sensible parses.
+ */
+export function parseMcpAnyInput(raw: string): ParsedMcpConfig {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error('Paste a config, a command, or a URL first.');
+
+  // JSON shapes (existing parser).
+  if (trimmed.startsWith('{')) return parseMcpConfigInput(trimmed);
+
+  // Bare URL → HTTP transport, name from the hostname.
+  if (/^https?:\/\/\S+$/i.test(trimmed)) {
+    let name = 'remote';
+    try {
+      const u = new URL(trimmed);
+      name = u.hostname.replace(/^www\./, '').split('.')[0] || 'remote';
+    } catch { /* keep fallback name */ }
+    return { servers: [{ name, transport: 'http', command: '', args: [], env: {}, url: trimmed }] };
+  }
+
+  // Command line — pull leading ENV=VAL pairs, then command + args.
+  const firstLine = trimmed.split('\n')[0].trim();
+  const tokens = tokenizeCommandLine(firstLine);
+  if (tokens.length === 0) throw new Error('Could not read that as a command.');
+  const env: Record<string, string> = {};
+  while (tokens.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) {
+    const [key, ...rest] = tokens.shift()!.split('=');
+    env[key] = rest.join('=');
+  }
+  if (tokens.length === 0) throw new Error('That looks like env vars with no command after them.');
+  const command = tokens.shift()!;
+  if (/[{}[\]]/.test(command)) throw new Error('Could not parse — for JSON, start with "{".');
+  const args = tokens;
+  return {
+    servers: [{
+      name: inferNameFromTokens(command, args),
+      transport: 'stdio',
+      command,
+      args,
+      env,
+    }],
+  };
+}

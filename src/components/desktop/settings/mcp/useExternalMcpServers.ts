@@ -29,6 +29,13 @@ export interface UseExternalMcpServersResult {
   form: ExternalMcpFormState;
   setForm: Dispatch<SetStateAction<ExternalMcpFormState>>;
   create: () => Promise<void>;
+  createServer: (payload: {
+    name: string;
+    transport: 'stdio' | 'http';
+    command: string;
+    args: string[];
+    env: Record<string, string> | null;
+  }) => Promise<boolean>;
   toggle: (server: ExternalMcpServer) => Promise<void>;
   remove: (server: ExternalMcpServer) => Promise<void>;
   testingId: string | null;
@@ -67,6 +74,36 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  /** Direct add from an already-parsed server (the smart paste box) — no
+   *  round-trip through the manual form fields. */
+  const createServer = useCallback(async (payload: {
+    name: string;
+    transport: 'stdio' | 'http';
+    command: string;
+    args: string[];
+    env: Record<string, string> | null;
+  }) => {
+    setCreating(true);
+    setNote(null);
+    try {
+      const res = await fetch('/api/setup/mcp-servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, enabled: true }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(body.error || 'Failed to add MCP server');
+      setNote({ message: `${payload.name} added.`, ok: true });
+      await load();
+      return true;
+    } catch (e) {
+      setNote({ message: e instanceof Error ? e.message : 'Failed to add MCP server.', ok: false });
+      return false;
+    } finally {
+      setCreating(false);
+    }
+  }, [load]);
 
   const create = useCallback(async () => {
     setCreating(true);
@@ -202,6 +239,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     form,
     setForm,
     create,
+    createServer,
     toggle,
     remove,
     testingId,
