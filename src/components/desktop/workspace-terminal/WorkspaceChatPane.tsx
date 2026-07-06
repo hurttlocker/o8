@@ -406,7 +406,7 @@ function WorkspaceChatPaneBase({
                         width: 40,
                         height: 40,
                         borderRadius: 12,
-                        background: awaitingReview ? 'rgba(245, 158, 11, 0.10)' : 'rgba(37, 99, 235, 0.08)',
+                        background: awaitingReview ? 'var(--t-warning-soft)' : 'var(--t-accent-soft)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -421,7 +421,7 @@ function WorkspaceChatPaneBase({
                       )}
                     </div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-                      {awaitingReview ? 'Ready for review' : 'Agent working…'}
+                      {awaitingReview ? 'Ready for review' : `${chat.runtimeLabel} working…`}
                     </div>
                     <div
                       style={{

@@ -103,6 +103,7 @@ function fullPacketFixture() {
       confidence: 'high',
       source: 'orchestrator-state',
     }),
+    dispatchRuntimePin: 'codex',
     orchestratorThreadId: 'thoughts-123',
     prompt: 'Implement the thing',
     allowedFiles: ['src/a.ts'],
@@ -151,10 +152,12 @@ describe('packet fields survive normalize', () => {
     const normalized = normalizeOrchestratorMissionState(stateWithPacket({
       ...fullPacketFixture(),
       operatorStopped: undefined,
+      dispatchRuntimePin: undefined,
       orchestratorThreadId: undefined,
     }));
 
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
+    expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
     expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
   });
 });

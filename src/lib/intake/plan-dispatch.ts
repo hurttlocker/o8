@@ -43,6 +43,7 @@ function buildPacketFromTask(
     archivedAt: null,
     review: null,
     lane: null,
+    dispatchRuntimePin: runtime,
   };
 }
 
