@@ -11,16 +11,10 @@ import {
   FieldLabel,
   HairlineRule,
   SectionLabel,
-  SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
-import {
-  readAdaptiveThinkingEnabled,
-  subscribeOrchestratorThinkingPreferences,
-  writeAdaptiveThinkingEnabled,
-} from '@/lib/orchestrator/thinking-preferences';
 
 // ── Types ──
 
@@ -43,7 +37,6 @@ export function APIKeysTab() {
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
-  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(() => readAdaptiveThinkingEnabled());
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -84,10 +77,6 @@ export function APIKeysTab() {
       active = false;
     };
   }, []);
-
-  useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
-    setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
-  }), []);
 
   const handleSave = useCallback(async (providerId: string) => {
     if (!keyInput.trim()) return;
@@ -406,47 +395,12 @@ export function APIKeysTab() {
         </div>
       </section>
 
-      {/* 02 — BEHAVIOR */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="02">BEHAVIOR</SectionLabel>
+      {/* Adaptive-thinking toggle moved to Dispatch → Founders → Model tiers
+          (#1450 IA pass) — it was unreachable here behind the BYOK env gate. */}
 
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 20,
-          paddingTop: 4,
-          paddingBottom: 16,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-        }}>
-          <div style={{ flex: 1, minWidth: 0, maxWidth: 560 }}>
-            <div style={{
-              fontSize: 14,
-              fontWeight: 300,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-              marginBottom: 6,
-            }}>
-              Adaptive orchestrator thinking
-            </div>
-            <div style={{
-              fontSize: 13,
-              color: 'var(--t-text-secondary)',
-              lineHeight: 1.55,
-            }}>
-              When enabled, new orchestrator turns default to adaptive thinking and can stream summarized reasoning above the reply. Turn it off to fall back to the fixed manual effort path.
-            </div>
-          </div>
-          <ToggleLink
-            checked={adaptiveThinkingEnabled}
-            onChange={(next) => writeAdaptiveThinkingEnabled(next)}
-          />
-        </div>
-      </section>
-
-      {/* 03 — STORAGE */}
+      {/* 02 — STORAGE */}
       <section>
-        <SectionLabel number="03">STORAGE</SectionLabel>
+        <SectionLabel number="02">STORAGE</SectionLabel>
         <div style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',
@@ -473,17 +427,6 @@ export function APIKeysTab() {
 }
 
 // ── Support primitives ──
-
-function ToggleLink({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <SettingsToggleButton
-      checked={checked}
-      onChange={onChange}
-      activeLabel="Enabled"
-      inactiveLabel="Disabled"
-    />
-  );
-}
 
 function accentLinkStyle(disabled: boolean): React.CSSProperties {
   return {
