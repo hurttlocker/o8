@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from 'react';
 import type { ApprovalRecord, ApprovalRisk } from '@/lib/approvals/types';
+import { isGateApprovalRow } from '@/lib/approvals/gating';
 
 type ApprovalAction = 'approve' | 'reject';
 
@@ -281,6 +282,9 @@ export function O8ApprovalCards({
 }: O8ApprovalCardsProps) {
   if (approvals.length === 0) return null;
 
+  const gateRows = approvals.filter(isGateApprovalRow);
+  const infoRows = approvals.filter((approval) => !isGateApprovalRow(approval));
+
   return (
     <section style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, paddingLeft: 2, paddingRight: 2 }}>
@@ -289,10 +293,33 @@ export function O8ApprovalCards({
         </span>
         <span style={{ height: 1, flex: 1, background: 'var(--t-divider-subtle)' }} />
         <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', color: 'var(--t-brand-orange, #FF5A1F)' }}>
-          {approvals.length}
+          {gateRows.length}
         </span>
+        {infoRows.length > 0 ? (
+          <span
+            title={infoRows.map((approval) => approval.title).join('\n')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              minHeight: 20,
+              paddingLeft: 7,
+              paddingRight: 7,
+              borderRadius: 6,
+              border: '1px solid var(--t-divider-subtle)',
+              background: 'var(--t-input-bg)',
+              color: 'var(--t-text-muted)',
+              fontSize: 9.5,
+              fontWeight: 300,
+              letterSpacing: '-0.2px',
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            +{infoRows.length} info
+          </span>
+        ) : null}
       </div>
-      {approvals.map((approval) => (
+      {gateRows.map((approval) => (
         <ApprovalRequestCard
           key={approval.id}
           approval={approval}
