@@ -24,6 +24,7 @@ import {
   type WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { isDispatchHalted } from './dispatch-halt';
 
 import { buildPacketPrompt } from './packet-prompt';
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
@@ -408,6 +409,9 @@ export async function runDispatchTick(
   options: { launchBudget?: DispatchLaunchBudget; enforceBootRecoveryGuard?: boolean; missionArchived?: boolean } = {},
 ): Promise<OrchestratorMissionState> {
   let nextState = normalizeOrchestratorMissionState(state);
+  if (isDispatchHalted()) {
+    return nextState;
+  }
   nextState = fanOutComparisonPackets(nextState);
   const recoveryContextByPacketId = new Map(
     nextState.packets.flatMap((packet) => {
