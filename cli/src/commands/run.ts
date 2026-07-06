@@ -11,6 +11,7 @@
  * Default (stream): the CLI mirrors the pane to its OWN stdout and blocks until
  * the command exits, so the agent sees output exactly as if it ran the command
  * directly. `--detach` fire-and-registers and returns immediately (servers).
+ * `o8 run stop <runId>` kills a registered managed run.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -87,9 +88,33 @@ interface ManagedRunRow {
   id: string;
   session: string;
   command: string;
-  status: 'running' | 'finished' | 'gone';
+  status: 'running' | 'finished' | 'gone' | 'killed';
   exitCode?: number | null;
   mode?: string;
+}
+
+export function parseRunStopArgs(command: string[]): { runId: string } {
+  if (command[0] !== 'stop') {
+    throw new CliError('invalid_args', 'Expected run stop command.', EXIT.INVALID_ARGS);
+  }
+  const runId = command[1]?.trim();
+  if (!runId) {
+    throw new CliError(
+      'invalid_args',
+      'o8 run stop requires a run id.',
+      EXIT.INVALID_ARGS,
+      'Use `o8 run --list`, then run `o8 run stop <id>`.',
+    );
+  }
+  if (command.length > 2) {
+    throw new CliError(
+      'invalid_args',
+      `Unexpected run stop arguments: ${command.slice(2).join(' ')}`,
+      EXIT.INVALID_ARGS,
+      'usage: o8 run stop <runId>',
+    );
+  }
+  return { runId };
 }
 
 /** `o8 run --list` — show managed runs (running + recent finished w/ exit codes). */
@@ -113,11 +138,54 @@ async function runRunList(mode: OutputMode): Promise<number> {
   return 0;
 }
 
+async function runRunStop(mode: OutputMode, command: string[]): Promise<number> {
+  const { runId } = parseRunStopArgs(command);
+  const cfg = resolveConfig();
+  const listRes = await apiFetch<{ runs?: ManagedRunRow[] }>(cfg, '/api/panel/managed-runs');
+  const run = (listRes.data?.runs ?? []).find((candidate) => (
+    candidate.id === runId || candidate.session === runId
+  ));
+  if (!run) {
+    throw new CliError(
+      'run_not_found',
+      `No managed run found for ${runId}.`,
+      EXIT.NOT_FOUND,
+      'Run `o8 run --list` to see current managed runs.',
+    );
+  }
+  const stopRes = await apiFetch<{ ok?: boolean; run?: ManagedRunRow; error?: string }>(cfg, '/api/panel/managed-runs', {
+    method: 'POST',
+    body: { action: 'kill', session: run.session },
+  });
+  if (!stopRes.data?.ok) {
+    throw new CliError('run_stop_failed', stopRes.data?.error || `Run ${runId} could not be stopped.`, EXIT.CONFLICT);
+  }
+
+  const payload = {
+    schema: 'o8/cli/run.stop/v1',
+    run: stopRes.data.run ?? run,
+  };
+  if (mode.human) {
+    const stopped = stopRes.data.run ?? run;
+    printHumanHeading('run stop');
+    printHumanKv([
+      ['id', stopped.id],
+      ['session', stopped.session],
+      ['status', stopped.status],
+      ['command', stopped.command],
+    ]);
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
 export async function runRun(mode: OutputMode, _rest: string[]): Promise<number> {
   void _rest; // the command comes from raw argv, not the dispatcher's parse
   const { detach, list, command } = extractRunCommand();
 
   if (list) return runRunList(mode);
+  if (command[0] === 'stop') return runRunStop(mode, command);
 
   if (command.length === 0) {
     throw new CliError(
