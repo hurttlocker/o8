@@ -1,6 +1,7 @@
 'use client';
 
 import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { isPacketFailed, isPacketReleased } from '@/lib/orchestrator/packet-state';
 import type { RepoFocusPacketState, RepoFocusRepo } from './types';
 
 export const REPO_FOCUS_FONT = 'var(--font-sans-system)';
@@ -21,8 +22,8 @@ export function packetBelongsToRepo(packet: OrchestratorPacket, repoPath: string
 }
 
 export function packetVisualState(packet: OrchestratorPacket): RepoFocusPacketState {
-  if (packet.releaseState === 'released' || packet.status === 'released') return 'merged';
-  if (packet.status === 'failed' || packet.status === 'blocked') return 'failed';
+  if (isPacketReleased(packet)) return 'merged';
+  if (isPacketFailed(packet)) return 'failed';
   if (packet.status === 'awaiting_review') return 'awaiting_review';
   if (packet.status === 'running' || packet.status === 'launching' || packet.status === 'idle' || packet.status === 'recovering') {
     return 'running';
@@ -38,7 +39,7 @@ export function packetStatusLabel(packet: OrchestratorPacket): string {
 export function packetStatusColor(packet: OrchestratorPacket): string {
   switch (packetVisualState(packet)) {
     case 'merged':
-      return '#16a34a';
+      return 'var(--t-success)';
     case 'failed':
       return '#ef4444';
     case 'awaiting_review':

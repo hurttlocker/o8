@@ -9,6 +9,7 @@
  */
 import type { Lane } from '@/lib/lane/types';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
+import { isPacketReleased } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export type PacketReviewState =
@@ -84,7 +85,7 @@ export function derivePacketReviewState(input: DeriveReviewStateInput): DeriveRe
   const now = new Date().toISOString();
 
   // 1. merged
-  if (packet.releaseState === 'released' || packet.status === 'released') {
+  if (isPacketReleased(packet)) {
     const ts = pickLatestTimestamp([
       orchestratorReview?.ts,
       mergeGate?.ts,
