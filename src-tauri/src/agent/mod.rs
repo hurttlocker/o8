@@ -42,7 +42,7 @@ const CONFIRM_TIMEOUT_SECS: u64 = 120;
 /// Opus 4.8 (adaptive reasoning): strongest model, and it SEES the screenshot
 /// directly via the CLI's stream-json image block (#1252), sub-billed on the
 /// user's Claude subscription. Slower than Gemini — masked by spoken fillers.
-const CLAUDE_BRAIN_MODEL: &str = "claude-opus-4-8";
+const CLAUDE_BRAIN_MODEL: &str = crate::models::CLAUDE_BRAIN_MODEL;
 
 /// Per-task context threaded into the loop + tool dispatch.
 #[derive(Clone)]

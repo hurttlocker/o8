@@ -10,6 +10,7 @@ import {
   type ClaudeCodeStreamJsonParserEvent,
 } from '@/lib/claude-code/stream-json-parser';
 import { createOwnedSessionStore } from '@/lib/runtimes/shared/owned-session';
+import { MODEL_IDS } from '@/lib/models';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   OwnedRuntimeAdapter,
@@ -82,7 +83,7 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   humanLabel: 'Owned Claude Code',
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
-  defaultModel: 'claude-sonnet-5',
+  defaultModel: MODEL_IDS.claudeWorkerDefault,
   launchArgs: ({ model, effort }) => buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
   launchStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
   resumeArgs: () => null,

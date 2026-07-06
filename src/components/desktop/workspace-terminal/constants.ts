@@ -1,4 +1,5 @@
 import type { WorkspaceCliModelOption } from '@/components/desktop/workspace-terminal/types';
+import { MODEL_IDS } from '@/lib/models';
 
 export const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[^[]/g;
 export const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b[^\s)"]*/g;
@@ -39,14 +40,14 @@ export const GEMINI_FALLBACK_CASCADE: ReadonlyArray<string> = [
 ];
 
 export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
-  { id: 'claude-opus-4-8', label: 'Opus 4.8 (1M)', color: '#8b5cf6' },
-  { id: 'claude-opus-4-7', label: 'Opus 4.7 (1M)', color: '#8b5cf6' },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5', color: '#8b5cf6' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8 (1M)', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7 (1M)', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeHaiku45, label: 'Haiku 4.5', color: '#8b5cf6' },
 ];
 
 export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
-  { id: 'gpt-5.5', label: 'GPT-5.5', color: '#10b981' },
+  { id: MODEL_IDS.codexCliDefault, label: 'GPT-5.5', color: '#10b981' },
   { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
 ];
 

@@ -39,6 +39,7 @@ export interface ProviderConfig {
   parseStream: (line: string) => StreamEvent | null;
 }
 
+// Justified exception: pricing and capability allowlists are external provider wire ids, not dispatch defaults.
 const PRICING: Record<string, { input: number; output: number }> = {
   'gemini-3.1-pro-preview': { input: 1.25, output: 10 },
   'gemini-3-pro-preview': { input: 1.25, output: 10 },
@@ -60,6 +61,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
 };
 
 /** Models that support thinking/reasoning output */
+// Justified exception: capability allowlists must match external provider wire ids exactly.
 const THINKING_MODELS = new Set([
   // Anthropic — opus and sonnet 4+ support extended thinking
   'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5',

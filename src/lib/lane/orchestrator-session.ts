@@ -45,6 +45,7 @@ import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
+import { MODEL_IDS } from '@/lib/models';
 import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import {
@@ -546,7 +547,7 @@ export function ensureOrchestratorSession(repoPath: string, threadId?: string | 
  *   chip is toggled to "Read-only" — the safe-mode orchestrator.
  */
 export type OrchestratorPermissionMode = 'full' | 'plan';
-export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-8';
+export const DEFAULT_ORCHESTRATOR_MODEL = MODEL_IDS.orchestratorDefault;
 
 export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;

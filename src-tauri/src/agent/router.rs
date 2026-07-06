@@ -9,6 +9,11 @@
 //! routes to OpenRouter — the one-flip A/B.
 
 use serde::{Deserialize, Serialize};
+use crate::models::{
+    AGENT_INTENT_CLASSIFICATION_DEFAULT,
+    AGENT_MAC_NATIVE_ACTION_DEFAULT,
+    AGENT_RESULT_SUMMARIZATION_DEFAULT,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -31,10 +36,10 @@ pub struct AgentModelConfig {
 impl Default for AgentModelConfig {
     fn default() -> Self {
         Self {
-            mac_native_action: "claude-opus-4-8".to_string(),
+            mac_native_action: AGENT_MAC_NATIVE_ACTION_DEFAULT.to_string(),
             voice_escalation: "auto".to_string(),
-            intent_classification: "gemini-3-flash-preview".to_string(),
-            result_summarization: "gemini-3-flash-preview".to_string(),
+            intent_classification: AGENT_INTENT_CLASSIFICATION_DEFAULT.to_string(),
+            result_summarization: AGENT_RESULT_SUMMARIZATION_DEFAULT.to_string(),
         }
     }
 }

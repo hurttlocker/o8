@@ -35,6 +35,7 @@ import {
 } from '@/lib/mobile/orchestrator-thread-history';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { handleCodexJsonLine } from './codex-orchestrator-events';
@@ -86,7 +87,7 @@ export interface SendToCodexOrchestratorOptions {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+const DEFAULT_CODEX_MODEL = MODEL_IDS.codexDefault;
 /** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (4 hr — hang watchdog, not a work budget). */
 const PROCESS_TIMEOUT_MS = 14_400_000;
 /** Mirror of orchestrator-session.ts PREEMPT_SETTLE_MS — see that file for why. */
