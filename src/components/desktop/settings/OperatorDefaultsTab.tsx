@@ -32,6 +32,8 @@ import {
   PickerMenu,
   ORCHESTRATOR_MODEL_OPTIONS,
   DISPATCH_RUNTIME_OPTIONS,
+  CODEX_WORKER_EFFORT_OPTIONS,
+  CLAUDE_WORKER_EFFORT_OPTIONS,
   ENV_LOCKED_REASON,
   type AutoApplyUpdates,
   type DispatchRuntime,
@@ -425,6 +427,38 @@ export function OperatorDefaultsTab() {
               />
             }
             disabled={envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Codex worker effort"
+            subtitle={lockedSub('codexWorkerEffort', 'Fallback effort for spawned Codex workers')}
+            accessory={
+              <PickerMenu
+                value={values.codexWorkerEffort}
+                options={CODEX_WORKER_EFFORT_OPTIONS}
+                onChange={(next) => { updateField('codexWorkerEffort', next); }}
+                disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
+                minWidth={150}
+              />
+            }
+            disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Claude worker effort"
+            subtitle={lockedSub('claudeWorkerEffort', 'Fallback effort for spawned Claude Code workers')}
+            accessory={
+              <PickerMenu
+                value={values.claudeWorkerEffort}
+                options={CLAUDE_WORKER_EFFORT_OPTIONS}
+                onChange={(next) => { updateField('claudeWorkerEffort', next); }}
+                disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
+                minWidth={150}
+              />
+            }
+            disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
           />
         </SettingsGroup>
       </section>
