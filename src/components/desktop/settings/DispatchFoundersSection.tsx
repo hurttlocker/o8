@@ -15,6 +15,8 @@ import {
   MONO_FONT_STACK,
   SettingsSegmented,
 } from './shared';
+import { useEntitlement } from '@/lib/entitlement/context';
+import { ValuePill } from './grouped';
 import {
   readAdaptiveThinkingEnabled,
   writeAdaptiveThinkingEnabled,
@@ -124,6 +126,10 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
   // Client-side pref (localStorage via thinking-preferences.ts) — moved here
   // from the env-gated API Keys tab where it was unreachable (#1450 IA pass).
   const [adaptiveThinking, setAdaptiveThinking] = useState(() => readAdaptiveThinkingEnabled());
+  // Managed-plan status mirrors inference-route.ts rule #1: a founder/pro/team
+  // plan token routes Brain calls through the managed proxy first (the perk).
+  const { plan } = useEntitlement();
+  const managedBrain = plan === 'founder' || plan === 'pro' || plan === 'team';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(sources, field) ? ENV_LOCKED_REASON : normal;
 
@@ -162,15 +168,9 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
             }}
             divider
           />
-          <SettingsRow
-            icon={<ChatIcon />}
-            label="Casual chat tab"
-            subtitle={lockedSub('experimentalChat', 'Show the o8 Default Chat tab in the new-tab drawer')}
-            checked={values.experimentalChat}
-            disabled={envLocked(sources, 'experimentalChat') || busyField === 'experimentalChat'}
-            onToggle={(next) => { updateField('experimentalChat', next); }}
-            divider
-          />
+          {/* Casual-chat tab toggle intentionally NOT surfaced for the beta
+              (operator, 2026-07-06) — the flag still exists (experimentalChat /
+              env) but the orchestrator is the only conversational surface. */}
           <SettingsRow
             icon={<CanvasIcon />}
             label="Canvas mode"
@@ -290,6 +290,17 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
           header="Brain routing"
           footnote="The Q&A composer answers /ask questions (Haiku CLI is free via the warm REPL pool). The legacy orchestrator toggle is what backend Auto follows — Codex when off, Claude when on. Workers-use-Brain Auto gives the oracle to non-frontier models only; Codex stays lean."
         >
+          <SettingsRow
+            icon={<ZapIcon />}
+            label="Founders fast path"
+            subtitle={managedBrain
+              ? 'Brain answers ride the managed inference route first — your founding perk'
+              : 'Founding license routes Brain answers through managed inference first'}
+            accessory={managedBrain
+              ? <ValuePill tone="success">Active</ValuePill>
+              : <ValuePill>Not active</ValuePill>}
+            divider
+          />
           <SettingsRow
             icon={<BrainRowIcon />}
             label="Q&A composer"
