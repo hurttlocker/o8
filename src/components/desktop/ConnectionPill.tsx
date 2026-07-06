@@ -16,9 +16,10 @@
  * the old ConnectionBanner).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useWsConnectionState } from './hooks/DesktopWebSocketContext';
+import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
+import { useSharedDesktopWs, useWsConnectionState } from './hooks/DesktopWebSocketContext';
 
 const SHOW_AFTER_MS = 2_000;
 
@@ -26,21 +27,35 @@ export function ConnectionPill() {
   const connectionState = useWsConnectionState();
   const everConnectedRef = useRef(false);
   const [visible, setVisible] = useState(false);
+  const [bridgeDown, setBridgeDown] = useState(false);
   const downSinceRef = useRef<number | null>(null);
+
+  useSharedDesktopWs(undefined, useMemo(() => ({
+    onRealtimeEvent: (event: RealtimeEventEnvelope) => {
+      if (event.channel !== 'mutation' || event.event !== 'mutation.record') return;
+      const mutation = (event.data as { mutation?: RealtimeMutationRecord }).mutation;
+      if (mutation?.action !== 'realtime-bridge-connection') return;
+      setBridgeDown(mutation.status === 'failed');
+    },
+  }), []));
 
   /* eslint-disable react-hooks/set-state-in-effect -- canonical pattern
      for "synchronize internal UI state to an external prop". */
   useEffect(() => {
-    if (connectionState === 'connected') {
+    if (connectionState === 'connected' && !bridgeDown) {
       everConnectedRef.current = true;
       downSinceRef.current = null;
       setVisible(false);
     }
-  }, [connectionState]);
+  }, [bridgeDown, connectionState]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!everConnectedRef.current) return undefined;
+    if (bridgeDown && connectionState === 'connected') {
+      const showTimer = window.setTimeout(() => setVisible(true), 0);
+      return () => window.clearTimeout(showTimer);
+    }
     if (connectionState !== 'reconnecting' && connectionState !== 'disconnected') {
       return undefined;
     }
@@ -49,7 +64,7 @@ export function ConnectionPill() {
     }
     const showTimer = window.setTimeout(() => setVisible(true), SHOW_AFTER_MS);
     return () => window.clearTimeout(showTimer);
-  }, [connectionState]);
+  }, [bridgeDown, connectionState]);
 
   const handleReload = () => {
     if (typeof window !== 'undefined') {
@@ -59,9 +74,11 @@ export function ConnectionPill() {
 
   if (!visible) return null;
 
+  const isBridgeOnly = bridgeDown && connectionState === 'connected';
   const isOffline = connectionState === 'disconnected';
   const accent = isOffline ? '#ef4444' : '#f97316';
-  const label = isOffline ? 'Backend offline' : 'Reconnecting…';
+  const label = isBridgeOnly ? 'Realtime bridge reconnecting…' : isOffline ? 'Backend offline' : 'Reconnecting…';
+  const detail = isBridgeOnly ? 'updates paused · backing off' : 'tabs preserved · retrying';
 
   const cardStyle: CSSProperties = {
     flexShrink: 0,
@@ -120,7 +137,7 @@ export function ConnectionPill() {
             textOverflow: 'ellipsis',
           }}
         >
-          tabs preserved · retrying
+          {detail}
         </span>
       </div>
       <button

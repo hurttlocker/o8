@@ -6,6 +6,7 @@ import { ChevronRight, Copy, Send } from '../lucide-shims';
 import { Internet, Terminal as TerminalIcon, Database } from 'iconoir-react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
+import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
 
 type PortCategory = 'agent' | 'browser' | 'noise';
 
@@ -21,7 +22,8 @@ interface ManagedRun {
   id: string;
   session: string;
   command: string;
-  status: 'running' | 'finished' | 'gone';
+  title?: string | null;
+  status: 'running' | 'finished' | 'gone' | 'killed';
 }
 
 const WELL_KNOWN_PORTS: Record<number, string> = {
@@ -324,7 +326,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           if (longPressFiredRef.current) { longPressFiredRef.current = false; return; }
           setOpen(false);
           if (isAgent && p.agentSession) {
-            window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session: p.agentSession } }));
+            window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session: p.agentSession, label: `Agent · ${portLabel(p.port)}` } }));
             return;
           }
           if (onPortPreview) onPortPreview(p.port, url, repo || undefined);
@@ -345,14 +347,14 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
   };
 
   const renderRunButton = (run: ManagedRun) => {
-    const label = run.command.length > 30 ? `${run.command.slice(0, 29)}…` : run.command;
+    const label = deriveManagedRunLabel(run);
     return (
       <button
         key={`run-${run.session}`}
         type="button"
         onClick={() => {
           setOpen(false);
-          window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session: run.session } }));
+          window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session: run.session, label, command: run.command } }));
         }}
         style={PORT_ROW_STYLE}
         title={`Watch the live terminal: ${run.command}`}

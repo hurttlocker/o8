@@ -143,6 +143,13 @@ import type {
   RealtimeStreamKey,
   RealtimeSubscription,
 } from './lib/realtime/types';
+import {
+  canAttemptRealtimeBridge,
+  createRealtimeBridgeBackoffState,
+  getRealtimeBridgeRetryDelay,
+  recordRealtimeBridgeFailure,
+  recordRealtimeBridgeSuccess,
+} from './lib/realtime/bridge-backoff';
 
 const execFileAsync = promisify(execFile);
 
@@ -1993,6 +2000,9 @@ let runtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let runtimeRefreshFreshRequested = false;
 let mobileRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileRefreshFreshRequested = false;
+const mobileInboxBridgeBackoff = createRealtimeBridgeBackoffState();
+const headlessTickBridgeBackoff = createRealtimeBridgeBackoffState();
+let headlessTickBridgeInFlight = false;
 // Single-flight guards. The snapshot/inbox fetches take 3-5s in dev; the debounce
 // schedulers null their timer the instant they fire (BEFORE the fetch resolves),
 // so overlapping callers (client mutation/refresh POSTs) used to launch concurrent
@@ -2020,6 +2030,38 @@ const lastRealtimeFingerprint = {
 
 function currentIsoTime() {
   return new Date().toISOString();
+}
+
+let realtimeBridgeMutationSeq = 0;
+
+function publishRealtimeBridgeConnectionState(
+  bridge: 'mobile-inbox' | 'headless-tick',
+  state: 'down' | 'up',
+  reason?: string,
+) {
+  const mutation: RealtimeMutationRecord = {
+    mutationId: `realtime-bridge-${bridge}-${Date.now()}-${realtimeBridgeMutationSeq += 1}`,
+    source: 'server',
+    action: 'realtime-bridge-connection',
+    status: state === 'down' ? 'failed' : 'completed',
+    runtime: bridge,
+    note: state === 'down' ? 'Realtime bridge reconnecting…' : 'Realtime bridge reconnected.',
+    reason,
+    createdAt: currentIsoTime(),
+    settledAt: state === 'up' ? currentIsoTime() : undefined,
+  };
+  broadcastRealtimeEvents([
+    buildRealtimeEnvelope(
+      'global',
+      'mutation',
+      'mutation.record',
+      { mutation },
+      {
+        entityId: `realtime-bridge:${bridge}`,
+        health: state === 'down' ? { state: 'degraded', reason } : { state: 'live' },
+      },
+    ),
+  ]);
 }
 
 function mutationToLaneLifecyclePayload(
@@ -2521,6 +2563,10 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
 }
 
 async function publishMobileInboxRealtimeSnapshot(fresh = false) {
+  if (!canAttemptRealtimeBridge(mobileInboxBridgeBackoff)) {
+    scheduleRealtimeMobileInboxRefresh(getRealtimeBridgeRetryDelay(mobileInboxBridgeBackoff), fresh);
+    return;
+  }
   // Single-flight: fold an overlapping call into one trailing re-fire (see above).
   if (mobileSnapshotInFlight) {
     mobileSnapshotRerequest = {
@@ -2531,6 +2577,11 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
   mobileSnapshotInFlight = true;
   try {
     const inbox = await getMobileInboxSnapshot({ fresh });
+    const success = recordRealtimeBridgeSuccess(mobileInboxBridgeBackoff);
+    if (success.transition === 'up') {
+      console.log('[ws-server] realtime mobile inbox snapshot recovered');
+      publishRealtimeBridgeConnectionState('mobile-inbox', 'up');
+    }
     void import('@/lib/mobile/live-activity-push')
       .then(({ syncMobileLiveActivities }) => syncMobileLiveActivities(inbox))
       .catch((error) => {
@@ -2554,13 +2605,18 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
       ),
     ]);
   } catch (error) {
-    console.error('[ws-server] realtime mobile inbox snapshot failed:', error instanceof Error ? error.message : 'unknown');
+    const reason = error instanceof Error ? error.message : 'unknown';
+    const failure = recordRealtimeBridgeFailure(mobileInboxBridgeBackoff);
+    if (failure.transition === 'down') {
+      console.error('[ws-server] realtime mobile inbox snapshot unavailable:', reason);
+      publishRealtimeBridgeConnectionState('mobile-inbox', 'down', reason);
+    }
   } finally {
     mobileSnapshotInFlight = false;
     if (mobileSnapshotRerequest) {
       const next = mobileSnapshotRerequest;
       mobileSnapshotRerequest = null;
-      void publishMobileInboxRealtimeSnapshot(next.fresh);
+      scheduleRealtimeMobileInboxRefresh(250, next.fresh);
     }
   }
 }
@@ -2606,6 +2662,7 @@ function scheduleRealtimeRuntimeRefresh(options: { fresh?: boolean; reason?: str
 }
 
 function scheduleRealtimeMobileInboxRefresh(delayMs = 250, fresh = false) {
+  const resolvedDelayMs = Math.max(delayMs, getRealtimeBridgeRetryDelay(mobileInboxBridgeBackoff));
   if (mobileRefreshTimer) {
     mobileRefreshFreshRequested = mobileRefreshFreshRequested || fresh;
     return;
@@ -2616,7 +2673,7 @@ function scheduleRealtimeMobileInboxRefresh(delayMs = 250, fresh = false) {
     mobileRefreshFreshRequested = false;
     mobileRefreshTimer = null;
     void publishMobileInboxRealtimeSnapshot(nextFresh);
-  }, delayMs);
+  }, resolvedDelayMs);
 }
 
 // Urgent debounce for chat.done paths — must beat the 350ms inbox cadence so
@@ -2642,18 +2699,39 @@ function scheduleRealtimeSessionHistoryRefresh(
 }
 
 function startHeadlessTickBridge(intervalMs: number) {
+  const tick = () => {
+    if (headlessTickBridgeInFlight) return;
+    if (!canAttemptRealtimeBridge(headlessTickBridgeBackoff)) return;
+    headlessTickBridgeInFlight = true;
+    void triggerHeadlessSprintTick()
+      .then(() => {
+        const success = recordRealtimeBridgeSuccess(headlessTickBridgeBackoff);
+        if (success.transition === 'up') {
+          console.log('[headless] Tick bridge recovered');
+          publishRealtimeBridgeConnectionState('headless-tick', 'up');
+        }
+      })
+      .catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        const failure = recordRealtimeBridgeFailure(headlessTickBridgeBackoff);
+        if (failure.transition === 'down') {
+          console.error('[headless] Tick bridge unavailable:', reason);
+          publishRealtimeBridgeConnectionState('headless-tick', 'down', reason);
+        }
+      })
+      .finally(() => {
+        headlessTickBridgeInFlight = false;
+      });
+  };
+
   const timer = setInterval(() => {
-    void triggerHeadlessSprintTick().catch((error) => {
-      console.error('[headless] Tick bridge failed:', error instanceof Error ? error.message : String(error));
-    });
+    tick();
   }, intervalMs);
 
   if (timer.unref) timer.unref();
 
   console.log(`[headless] Started sprint loop (${intervalMs}ms interval)`);
-  void triggerHeadlessSprintTick().catch((error) => {
-    console.error('[headless] Tick bridge failed:', error instanceof Error ? error.message : String(error));
-  });
+  tick();
 
   return () => {
     clearInterval(timer);

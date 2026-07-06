@@ -33,6 +33,7 @@ type RegisterBody = {
   id?: string;
   session?: string;
   command?: string;
+  title?: string | null;
   cwd?: string;
   repo?: string | null;
   packetId?: string | null;
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
   if (!RUN_SESSION_RE.test(body.session) || body.session !== `cortex-run-${body.id}`) {
     return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
   }
-  if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD) {
+  if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
   }
 
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
     id: body.id,
     session: body.session,
     command: body.command,
+    title: body.title?.trim() || null,
     cwd: body.cwd,
     repo: body.repo ?? null,
     packetId: body.packetId ?? null,

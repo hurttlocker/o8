@@ -13,17 +13,14 @@
 
 import { useEffect, useState } from 'react';
 import { Terminal as TerminalIcon } from 'iconoir-react';
+import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
 
 interface ManagedRun {
   id: string;
   session: string;
   command: string;
+  title?: string | null;
   status: 'running' | 'finished' | 'gone';
-}
-
-function shortLabel(command: string): string {
-  const trimmed = command.trim();
-  return trimmed.length > 40 ? `${trimmed.slice(0, 39)}…` : trimmed;
 }
 
 export function OrchestratorRunStrip({ active }: { active: boolean }) {
@@ -54,8 +51,10 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
 
   if (runs.length === 0) return null;
 
-  const watch = (session: string) => {
-    window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session } }));
+  const watch = (run: ManagedRun) => {
+    window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', {
+      detail: { session: run.session, label: deriveManagedRunLabel(run), command: run.command },
+    }));
   };
 
   const stop = (session: string) => {
@@ -118,7 +117,7 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
         >
           <button
             type="button"
-            onClick={() => watch(run.session)}
+            onClick={() => watch(run)}
             title={`Watch the live terminal: ${run.command}`}
             style={{
               display: 'inline-flex',
@@ -142,7 +141,7 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
           >
             <TerminalIcon width={12} height={12} color="var(--t-accent)" strokeWidth={2} style={{ flexShrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {shortLabel(run.command)}
+              {deriveManagedRunLabel(run)}
             </span>
           </button>
           <button
