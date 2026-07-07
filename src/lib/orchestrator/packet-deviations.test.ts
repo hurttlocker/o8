@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEVIATIONS_CLAUSE,
   IMPLEMENTATION_NOTES_FILENAME,
+  MAX_NOTES_BYTES,
   parseDeviations,
   readPacketDeviations,
 } from './packet-deviations';
@@ -77,6 +78,18 @@ describe('readPacketDeviations', () => {
     expect(result?.entries).toEqual(['swapped approach']);
     expect(typeof result?.capturedAt).toBe('string');
     expect(Number.isNaN(Date.parse(result!.capturedAt))).toBe(false);
+  });
+
+  it('caps the read so a runaway notes file cannot bloat the review/packet', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dev-'));
+    dirs.push(dir);
+    const huge = `## Deviations\n- ${'x'.repeat(MAX_NOTES_BYTES * 2)}\n`;
+    writeFileSync(join(dir, IMPLEMENTATION_NOTES_FILENAME), huge);
+    const result = readPacketDeviations(dir);
+    expect(result).not.toBeNull();
+    // The parsed raw body is bounded by the read cap (never the full 2x file).
+    expect(result!.raw.length).toBeLessThanOrEqual(MAX_NOTES_BYTES);
+    expect(result!.raw.length).toBeLessThan(huge.length);
   });
 });
 

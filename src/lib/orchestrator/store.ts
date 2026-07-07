@@ -411,6 +411,12 @@ function normalizePacketBuyinDoc(value: unknown): OrchestratorPacket['buyinDoc']
   };
 }
 
+/** Cap on the persisted/round-tripped deviations `raw` body — defense in depth
+ *  against an oversized value arriving from persisted state, independent of the
+ *  read cap in packet-deviations.ts. */
+const MAX_DEVIATIONS_RAW = 64 * 1024;
+const DEVIATIONS_TRUNCATION_MARKER = '\n\n[…deviations truncated]';
+
 function normalizePacketDeviations(value: unknown): OrchestratorPacket['deviations'] {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as { raw?: unknown; entries?: unknown; capturedAt?: unknown };
@@ -418,7 +424,10 @@ function normalizePacketDeviations(value: unknown): OrchestratorPacket['deviatio
   const entries = Array.isArray(raw.entries)
     ? raw.entries.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 64)
     : [];
-  return { raw: raw.raw, entries, capturedAt: raw.capturedAt };
+  const rawBody = raw.raw.length > MAX_DEVIATIONS_RAW
+    ? raw.raw.slice(0, MAX_DEVIATIONS_RAW) + DEVIATIONS_TRUNCATION_MARKER
+    : raw.raw;
+  return { raw: rawBody, entries, capturedAt: raw.capturedAt };
 }
 
 function normalizePacketExplainer(value: unknown): OrchestratorPacket['explainer'] {
