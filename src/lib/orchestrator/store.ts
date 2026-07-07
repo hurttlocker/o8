@@ -392,7 +392,23 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // stripped silently when malformed so existing callers never break.
     deviations: normalizePacketDeviations(packet.deviations),
     explainer: normalizePacketExplainer(packet.explainer),
+    // #1492 — buy-in doc: preserved verbatim when valid, stripped when malformed.
+    buyinDoc: normalizePacketBuyinDoc(packet.buyinDoc),
   } satisfies OrchestratorPacket;
+}
+
+function normalizePacketBuyinDoc(value: unknown): OrchestratorPacket['buyinDoc'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as { status?: unknown; artifactId?: unknown; generatedAt?: unknown; error?: unknown };
+  if (raw.status !== 'generating' && raw.status !== 'ready' && raw.status !== 'failed') {
+    return undefined;
+  }
+  return {
+    status: raw.status,
+    artifactId: typeof raw.artifactId === 'string' && raw.artifactId.trim() ? raw.artifactId.trim() : null,
+    generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : null,
+    error: typeof raw.error === 'string' ? raw.error : null,
+  };
 }
 
 function normalizePacketDeviations(value: unknown): OrchestratorPacket['deviations'] {

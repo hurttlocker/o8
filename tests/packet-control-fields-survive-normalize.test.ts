@@ -123,6 +123,25 @@ function fullPacketFixture() {
       description: 'Conditional branch',
       kind: 'conditional',
     }],
+    deviations: {
+      raw: '## Deviations\n- Used a map instead of a set',
+      entries: ['Used a map instead of a set'],
+      capturedAt: '2026-01-01T00:08:00.000Z',
+    },
+    explainer: {
+      status: 'ready',
+      artifactId: 'art-explainer-1',
+      quiz: null,
+      changedFileCount: 3,
+      generatedAt: '2026-01-01T00:09:00.000Z',
+      error: null,
+    },
+    buyinDoc: {
+      status: 'ready',
+      artifactId: 'art-buyin-1',
+      generatedAt: '2026-01-01T00:10:00.000Z',
+      error: null,
+    },
   } satisfies Required<OrchestratorPacket>;
 
   return packet;
