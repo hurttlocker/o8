@@ -56,7 +56,7 @@ export interface OrchestratorDataValue {
    * Recent Work click-routing so a NEEDS YOU click lands the operator on
    * the workspace tab AND auto-pops the diff view for that worktree.
    */
-  onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' | 'compare' }) => void;
+  onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' | 'review' | 'compare'; reviewLaneId?: string | null }) => void;
   /**
    * Whether the wide O8 right panel is currently visible. Surfaced so the
    * OrchestratorTab can render a Codex-style Branch details launcher in the

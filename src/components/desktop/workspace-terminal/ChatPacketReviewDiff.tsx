@@ -6,12 +6,13 @@
  * says nothing about WHAT to review; this surfaces the change set inline without
  * bouncing to the Activity panel.
  *
- * Reuses the SAME `/api/worktrees/diff` endpoint + `DiffPane` component the
- * PacketReviewCard uses — no new diff primitives.
+ * Reuses the SAME lane diff endpoint + `DiffPane` component the
+ * PacketReviewCard uses so review surfaces stay branch-vs-base aligned.
  */
 
 import { useEffect, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { summarizeLaneReviewDiff } from '@/lib/review/lane-diff';
 import { DiffPane } from '@/components/desktop/thoughts/mission-panel/review-card/DiffPane';
 import type { DiffPayload } from '@/components/desktop/thoughts/mission-panel/review-card/shared';
 
@@ -21,30 +22,35 @@ export function ChatPacketReviewDiff({ packet }: { packet: OrchestratorPacket })
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
 
-  const worktreePath = packet.lane?.worktreePath ?? null;
+  const laneId = packet.lane?.laneId ?? null;
   const baseBranchHint = packet.branchTarget && packet.branchTarget.trim() ? packet.branchTarget : null;
 
   // Load the diff lazily — only once the operator expands it (cheap "Ready for
   // review" until asked). Mirrors PacketReviewCard's diff effect.
   useEffect(() => {
-    if (!open || !worktreePath) return undefined;
+    if (!open || !laneId) return undefined;
     let cancelled = false;
     setDiffLoading(true);
     setDiffError(null);
     (async () => {
       try {
-        const params = new URLSearchParams({ worktreePath });
-        if (baseBranchHint) params.set('baseBranch', baseBranchHint);
-        const response = await fetch(`/api/worktrees/diff?${params.toString()}`, { cache: 'no-store' });
+        const response = await fetch(`/api/lanes/${encodeURIComponent(laneId)}/diff?maxBytes=524288`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json() as DiffPayload & { error?: string };
+        const payload = await response.json() as { ok?: boolean; note?: string; diff?: string; base?: string | null };
         if (cancelled) return;
-        if (payload.error) {
-          setDiffError(payload.error);
-          setDiff(null);
-        } else {
-          setDiff(payload);
+        if (!payload.ok) {
+          throw new Error(payload.note ?? 'Unable to load lane diff.');
         }
+        const diffText = payload.diff ?? '';
+        const summary = summarizeLaneReviewDiff(diffText);
+        setDiff({
+          diff: diffText,
+          additions: summary.additions,
+          deletions: summary.deletions,
+          fileCount: summary.files.length,
+          baseBranch: payload.base ?? baseBranchHint,
+          sourceLabel: payload.base ? `Branch diff vs ${payload.base}` : 'Branch diff vs base',
+        });
       } catch (error) {
         if (cancelled) return;
         setDiffError(error instanceof Error ? error.message : 'Unable to load diff.');
@@ -53,9 +59,9 @@ export function ChatPacketReviewDiff({ packet }: { packet: OrchestratorPacket })
       }
     })();
     return () => { cancelled = true; };
-  }, [open, worktreePath, baseBranchHint, packet.id]);
+  }, [open, laneId, baseBranchHint, packet.id]);
 
-  if (!worktreePath) return null;
+  if (!laneId) return null;
 
   return (
     <div style={{ width: '100%', maxWidth: 440, marginLeft: 'auto', marginRight: 'auto' }}>

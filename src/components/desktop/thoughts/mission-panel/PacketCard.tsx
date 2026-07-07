@@ -44,6 +44,7 @@ interface PacketCardProps {
   onResume: () => void;
   /** Operator hard-stop for a live agent. Optional — surfaces only where wired. */
   onStop?: () => void;
+  onOpenReviewDiff?: () => void;
 }
 
 // #517 — Packets that belong to a best-of-n comparison group render via
@@ -69,6 +70,7 @@ export function PacketCard({
   onToggleShowAllFiles,
   onResume,
   onStop,
+  onOpenReviewDiff,
 }: PacketCardProps) {
   const statusMeta = orchestratorStatusTone(packet.status);
   const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
@@ -290,7 +292,7 @@ export function PacketCard({
           ) : null}
 
           {activeTab === 'changes' ? (
-            <ChangesTabHint />
+            <ChangesTabHint onOpenReviewDiff={onOpenReviewDiff} />
           ) : null}
 
           {activeTab === 'files' ? (
@@ -688,7 +690,7 @@ export function PacketCard({
   );
 }
 
-function ChangesTabHint() {
+function ChangesTabHint({ onOpenReviewDiff }: { onOpenReviewDiff?: () => void }) {
   return (
     <div
       style={{
@@ -702,8 +704,33 @@ function ChangesTabHint() {
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      Changes for this packet are shown in the workspace panel on the right.
-      Spec / Agent Overview / Changes tabs over there mirror the packet context (#895).
+      <div>Reviewable changes for this packet are the branch diff against the refreshed base.</div>
+      {onOpenReviewDiff ? (
+        <button
+          type="button"
+          onClick={onOpenReviewDiff}
+          style={{
+            marginTop: 10,
+            minHeight: 30,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-input-border)',
+            borderRadius: 8,
+            background: 'var(--t-input-bg)',
+            color: 'var(--t-text)',
+            paddingTop: 5,
+            paddingRight: 10,
+            paddingBottom: 5,
+            paddingLeft: 10,
+            fontSize: 11,
+            fontWeight: 650,
+            fontFamily: 'var(--font-sans-system)',
+            cursor: 'pointer',
+          }}
+        >
+          Open branch diff
+        </button>
+      ) : null}
     </div>
   );
 }

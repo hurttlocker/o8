@@ -21,6 +21,7 @@ export interface DiffPayload {
   deletions: number;
   fileCount: number;
   baseBranch: string | null;
+  sourceLabel?: string | null;
 }
 
 export interface ParsedFileDiff {
