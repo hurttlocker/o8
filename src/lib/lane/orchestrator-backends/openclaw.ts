@@ -358,7 +358,7 @@ async function ensureOpenclawGateway(port: number): Promise<void> {
   console.log(`[openclaw-gateway] Starting o8-profile gateway on port ${port}`);
   const proc = spawn(
     openclawBin,
-    ['--profile', OPENCLAW_PROFILE, 'gateway', '--port', String(port)],
+    ['--profile', OPENCLAW_PROFILE, 'gateway', 'run', '--port', String(port)],
     {
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
