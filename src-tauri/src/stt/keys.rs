@@ -183,6 +183,17 @@ pub fn get_gemini_key() -> Option<String> {
         .or_else(|| config_string("gemini_api_key"))
 }
 
+/// Resolve the Groq API key (fast Whisper transcription — the latency A/B vs
+/// OpenRouter). Env-first (`GROQ_API_KEY`), then the o8 config file
+/// (`groq_api_key`). UN-GATED — works in release.
+pub fn get_groq_key() -> Option<String> {
+    std::env::var("GROQ_API_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| config_string("groq_api_key"))
+}
+
 /// Resolve the OpenRouter API key. Env-first (`OPENROUTER_API_KEY`), then the
 /// o8 config file. UN-GATED — works in release.
 pub fn get_openrouter_key() -> Option<String> {
