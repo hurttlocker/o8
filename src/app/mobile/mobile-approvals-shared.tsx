@@ -1,6 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
+import { relativeTimeLabel } from '@/lib/format/relative-time';
 
 /* ── Inline Phosphor SVG path data (regular weight, 256x256 viewBox) ─────── */
 /* Extracted from @phosphor-icons/react/dist/defs/*.es.js to avoid Turbopack  */
@@ -539,14 +540,7 @@ export function isGovernanceApproval(approval: ApprovalItem): boolean {
 }
 
 export function timeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return relativeTimeLabel(timestamp, { subMinute: 'just-now-lower' });
 }
 
 export function truncateText(value: string, maxLength: number): string {

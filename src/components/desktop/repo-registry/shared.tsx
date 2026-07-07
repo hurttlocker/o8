@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertCircle, FolderOpen, GitBranch, GitPullRequest, Plus, Settings2, Trash2, X } from '../lucide-shims';
+import { relativeTimeLabel } from '@/lib/format/relative-time';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from '@/components/desktop/BlueGlassHoverCard';
 import type {
   RepoReadinessState,
@@ -155,19 +156,10 @@ export function formatRelativeTime(value: string | null) {
   const timestamp = new Date(value).getTime();
   if (Number.isNaN(timestamp)) return 'Unknown';
 
-  const delta = Math.max(0, Date.now() - timestamp);
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  if (delta < minute) return 'Just now';
-  if (delta < hour) return `${Math.max(1, Math.round(delta / minute))}m ago`;
-  if (delta < day) return `${Math.max(1, Math.round(delta / hour))}h ago`;
-  if (delta < 7 * day) return `${Math.max(1, Math.round(delta / day))}d ago`;
-
-  return new Date(value).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
+  return relativeTimeLabel(timestamp, {
+    subMinute: 'just-now-upper',
+    rounding: 'round-min-1',
+    overflow: 'date',
   });
 }
 

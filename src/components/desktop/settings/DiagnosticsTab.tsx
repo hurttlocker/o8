@@ -16,6 +16,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { formatDuration } from '@/lib/format/duration';
 import { RecallHealthSection } from './RecallHealthSection';
 import { LoopStatusSection } from './LoopStatusSection';
 import { DemoRunSection } from './DemoRunSection';
@@ -54,13 +55,6 @@ interface CodexSessionsPruneResult {
 }
 
 const HIDDEN_DIAGNOSTIC_TOOL_IDS = new Set(['ollama']);
-
-function formatDuration(durationMs: number) {
-  if (durationMs < 1000) {
-    return `${durationMs}ms`;
-  }
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
 
 function formatToolLabel(id: string): string {
   if (id === 'opencode') return 'opencode';
