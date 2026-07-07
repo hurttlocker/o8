@@ -28,6 +28,13 @@ describe('agentDisplayLabel', () => {
     expect(agentDisplayLabel({ name: 'Real name', title: 'ignored' })).toBe('Real name');
   });
 
+  it('uses a human packet title instead of a packet-shaped session id', () => {
+    expect(agentDisplayLabel({
+      title: 'Packet cards outcome-first UX',
+      sessionKey: 'codex-owned:pkt-a3f99b36-5e4f-4acd-b006-e264389ae527',
+    })).toBe('Packet cards outcome-first UX');
+  });
+
   it('falls back to the runtime human label derived from an owned sessionKey — NEVER the raw prefix', () => {
     expect(agentDisplayLabel({ sessionKey: 'codex-owned:codex-owned-1782-abc' })).toBe('Codex');
     expect(agentDisplayLabel({ sessionKey: 'gemini-owned:gemini-owned-9-z' })).toBe('Gemini');
