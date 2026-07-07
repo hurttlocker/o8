@@ -33,6 +33,10 @@ export interface WorkspaceChangesState {
   dirtyFileSet: Set<string>;
   branch: string | null;
   repoSlug: string | null;
+  repoPath?: string | null;
+  source?: 'local' | 'lane';
+  sourceLabel?: string | null;
+  patchByPath?: Map<string, string>;
   refresh: () => Promise<void>;
 }
 
@@ -155,6 +159,10 @@ export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesS
     dirtyFileSet,
     branch: sourceRepoPath === currentRepoPath ? branch : null,
     repoSlug: sourceRepoPath === currentRepoPath ? repoSlug : null,
+    repoPath: sourceRepoPath === currentRepoPath ? currentRepoPath : null,
+    source: 'local',
+    sourceLabel: 'Local changes',
+    patchByPath: new Map(),
     refresh,
   };
 }

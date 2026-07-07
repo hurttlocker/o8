@@ -1,9 +1,9 @@
 'use client';
-/* eslint-disable react-hooks/set-state-in-effect -- the async per-file diff fetch intentionally toggles loading/error/diff state */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from '../lucide-shims';
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
+import { useLaneReviewChanges } from './useLaneReviewChanges';
 import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewGitActions } from './ReviewGitActions';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -50,8 +50,10 @@ function lastTurnPathMatches(reviewPath: string, lastTurnPaths: Set<string>) {
   ));
 }
 
-export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos = [], onRepoPathChange, selectedFile = null }: { repoPath?: string | null; registeredRepos?: RepoRegistryEntry[]; onRepoPathChange?: (repoPath: string) => void; selectedFile?: string | null }) {
-  const changes = useWorkspaceChanges(repoPath);
+export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos = [], onRepoPathChange, selectedFile = null, reviewLaneId = null }: { repoPath?: string | null; registeredRepos?: RepoRegistryEntry[]; onRepoPathChange?: (repoPath: string) => void; selectedFile?: string | null; reviewLaneId?: string | null }) {
+  const localChanges = useWorkspaceChanges(reviewLaneId ? null : repoPath);
+  const laneChanges = useLaneReviewChanges(reviewLaneId);
+  const changes = reviewLaneId ? laneChanges : localChanges;
   const [fileQuery, setFileQuery] = useState('');
   const [mode, setMode] = useState<DiffMode>('unified');
   const [wrap, setWrap] = useState(true);
@@ -141,6 +143,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const currentRepo = registeredRepos.find((repo) => repo.localPath === repoPath);
   const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
   const changedFilesKey = useMemo(() => changes.files.map((file) => file.path).join('\n'), [changes.files]);
+  const diffRepoPath = changes.repoPath ?? repoPath ?? null;
 
   useEffect(() => {
     if (!repoPath) {
@@ -309,6 +312,11 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             ) : null}
           </div>
           <DiffStatBadge additions={visibleStats.additions} deletions={visibleStats.deletions} />
+          {changes.sourceLabel ? (
+            <span style={{ flexShrink: 0, fontSize: 10, color: 'var(--t-text-faint)', fontFamily: UI_FONT, whiteSpace: 'nowrap' }}>
+              {changes.sourceLabel}
+            </span>
+          ) : null}
           <div style={{ flex: 1, minWidth: 8 }} />
           <O8ScratchChat
             surfaceLabel="review"
@@ -360,18 +368,20 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               </div>
             ) : null}
           </div>
-          <ReviewGitActions repoPath={repoPath} branch={changes.branch} repoSlug={changes.repoSlug} onChanged={changes.refresh} />
+          {!reviewLaneId ? (
+            <ReviewGitActions repoPath={repoPath} branch={changes.branch} repoSlug={changes.repoSlug} onChanged={changes.refresh} />
+          ) : null}
         </div>
       ) : null}
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-        {!repoPath ? (
+        {!diffRepoPath ? (
           <PanelMessage text="Select a repo to review changes." />
         ) : changes.loading && !hasFiles ? (
           <ReviewSkeleton />
         ) : changes.error ? (
           <PanelMessage text={changes.error} tone="error" />
         ) : !hasFiles ? (
-          <PanelMessage text="Working tree clean — nothing to review." />
+          <PanelMessage text={reviewLaneId ? 'No branch diff to review.' : 'Working tree clean — nothing to review.'} />
         ) : visible.length === 0 ? (
           <PanelMessage
             text={
@@ -389,7 +399,8 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             <ReviewFileRow
               key={file.path}
               file={file}
-              repoPath={repoPath}
+              repoPath={diffRepoPath}
+              preloadedDiff={changes.patchByPath?.get(file.path)}
               mode={mode}
               wrap={wrap}
               wordDiff={wordDiff}
