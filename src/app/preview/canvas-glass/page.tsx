@@ -86,7 +86,7 @@ import { useCanvasOrchestrator, type OrcaThreadEvent } from './use-canvas-orches
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
 import { DispatchDock, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
-import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
+import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -171,6 +171,8 @@ type CanvasCardLite = {
   items?: unknown[]; tabs?: Array<{ id: number; url?: string; title?: string }>; activeTabId?: number;
   title?: string; repoPath?: string | null; initialQuestion?: string; codename?: string; number?: number; aspect?: number;
 };
+type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number };
+type SpawnReservation = { id: number; x: number; y: number; w: number; h: number };
 
 // Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
 // Manage account / Sign out / Sign in, matching the operator's reference.
@@ -393,6 +395,9 @@ export default function CanvasGlassPreviewPage() {
   const cardedLaneIdsRef = useRef<Set<string>>(new Set());
   const lanesSeededRef = useRef(false);
   const agentNumberRef = useRef(1);
+  const mountedCardIdsRef = useRef<Set<number>>(new Set());
+  const spawnChoreographyRef = useRef<SpawnChoreography[]>([]);
+  const spawnReservationsRef = useRef<SpawnReservation[]>([]);
 
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
@@ -1150,6 +1155,47 @@ export default function CanvasGlassPreviewPage() {
   // A ref mirror keeps the finder stable (no per-mutation callback churn).
   const cardRectsRef = useRef<Array<{ x: number; y: number; w: number; h: number }>>([]);
   useEffect(() => {
+    const ids = [
+      ...cards.map((card) => card.id),
+      ...termCards.map((card) => card.id),
+      ...fileCards.map((card) => card.id),
+      ...imageCards.map((card) => card.id),
+      ...videoCards.map((card) => card.id),
+      ...browserCards.map((card) => card.id),
+      ...chatCards.map((card) => card.id),
+      ...diffCards.map((card) => card.id),
+      ...specCards.map((card) => card.id),
+      ...brainCards.map((card) => card.id),
+      ...markdownCards.map((card) => card.id),
+      ...agentCards.map((card) => card.id),
+    ];
+    const reduce = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    for (const id of ids) {
+      if (mountedCardIdsRef.current.has(id)) continue;
+      mountedCardIdsRef.current.add(id);
+      window.requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-card-id="${id}"]`) as HTMLElement | null;
+        if (!el) return;
+        const animation = reduce
+          ? `cnv-card-fade-in ${CARD_ENTRANCE.reducedMs}ms ease both`
+          : `cnv-card-enter ${CARD_ENTRANCE.enterMs}ms ${CARD_ENTRANCE.ease} both, cnv-card-border-draw ${CARD_ENTRANCE.borderMs}ms ease-out both`;
+        const token = `${id}:${Date.now()}`;
+        el.setAttribute('data-cnv-entrance', token);
+        el.style.animation = animation;
+        el.style.transformOrigin = 'center center';
+        window.setTimeout(() => {
+          if (el.getAttribute('data-cnv-entrance') !== token) return;
+          el.style.animation = '';
+          el.style.transformOrigin = '';
+          el.removeAttribute('data-cnv-entrance');
+        }, reduce ? CARD_ENTRANCE.reducedMs + 20 : CARD_ENTRANCE.borderMs + 20);
+      });
+    }
+  }, [agentCards, brainCards, browserCards, cards, chatCards, diffCards, fileCards, imageCards, markdownCards, specCards, termCards, videoCards]);
+
+  useEffect(() => {
     cardRectsRef.current = [
       ...termCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
       ...fileCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
@@ -1167,7 +1213,7 @@ export default function CanvasGlassPreviewPage() {
   /** First clear spot scanning reading-order; least-covered cell when the
    *  canvas is genuinely full. */
   const findFreeSpot = useCallback((w: number, h: number): { x: number; y: number } => {
-    const taken = cardRectsRef.current;
+    const taken = [...cardRectsRef.current, ...spawnReservationsRef.current];
     const pad = 18;
     // Layout-space viewport — zooming out widens the field spawns can use.
     const z = canvasZoom();
@@ -1792,23 +1838,53 @@ export default function CanvasGlassPreviewPage() {
   const focusMarkdownCard = useCallback((id: number) => focusCard('markdown', id), [focusCard]);
   const focusAgentCard = useCallback((id: number) => focusCard('agent', id), [focusCard]);
 
+  const reducedMotion = useCallback(() => (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ), []);
+
+  const viewportSpawnOrigin = useCallback(() => {
+    const z = canvasZoom();
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1600;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
+    return {
+      x: (vw / 2 - pan.x) / z - 140,
+      y: (vh / 2 - pan.y) / z - 64,
+    };
+  }, [pan.x, pan.y]);
+
+  const takeSpawnChoreography = useCallback((repoPath: string | null | undefined): SpawnChoreography | null => {
+    const index = spawnChoreographyRef.current.findIndex((entry) => entry.repoPath === repoPath);
+    if (index < 0) return null;
+    const [entry] = spawnChoreographyRef.current.splice(index, 1);
+    return entry ?? null;
+  }, []);
+
   /** Bloom an agent card for a freshly-live lane — the spawn → card-appears
    *  moment. Deduped by laneId so a lane is only ever carded once; the card then
    *  tracks that lane's phase live from activeLanes. */
   const bloomAgentCard = useCallback((lane: LaneRow) => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    const target = findFreeSpot(280, 128);
+    const choreography = reducedMotion() ? null : takeSpawnChoreography(lane.repoPath);
+    const start = choreography?.origin ?? target;
+    const reservation = { id, x: target.x, y: target.y, w: 280, h: 128 };
+    if (choreography) spawnReservationsRef.current.push(reservation);
     setAgentCards((previous) => {
-      if (previous.some((card) => card.laneId === lane.id)) return previous;
-      const id = nextIdRef.current;
-      nextIdRef.current += 1;
+      if (previous.some((card) => card.laneId === lane.id)) {
+        spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
+        return previous;
+      }
       zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
       const number = agentNumberRef.current;
       agentNumberRef.current += 1;
-      const spot = findFreeSpot(280, 128);
       const repoTail = lane.repoPath?.split('/').filter(Boolean).pop() ?? null;
       return [...previous, {
         id,
-        x: spot.x,
-        y: spot.y,
+        x: start.x,
+        y: start.y,
         z: zPeakRef.current,
         w: 280,
         h: 92,
@@ -1819,7 +1895,23 @@ export default function CanvasGlassPreviewPage() {
         runtime: lane.runtime ?? null,
       }];
     });
-  }, [findFreeSpot]);
+    if (choreography) {
+      timersRef.current.push(setTimeout(() => {
+        animate(0, 1, {
+          duration: CARD_ENTRANCE.sweepMs / 1000,
+          ease: [0.22, 0.61, 0.36, 1],
+          onUpdate: (t) => {
+            setAgentCards((cards) => cards.map((card) => (
+              card.id === id ? { ...card, x: start.x + (target.x - start.x) * t, y: start.y + (target.y - start.y) * t } : card
+            )));
+          },
+          onComplete: () => {
+            spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
+          },
+        });
+      }, choreography.delayMs));
+    }
+  }, [findFreeSpot, reducedMotion, takeSpawnChoreography]);
 
   /** Watch live lanes: seed the carded-set on first read (no bloom over an
    *  already-running fleet), then bloom a card for every NEW lane — i.e. exactly
@@ -1848,6 +1940,14 @@ export default function CanvasGlassPreviewPage() {
     if (!task.trim()) return 'spawn-agents needs args.task';
     if (!repoPath) return 'no repo scoped — pick a repo first';
     const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
+    if (n > 1 && !reducedMotion()) {
+      const origin = viewportSpawnOrigin();
+      spawnChoreographyRef.current.push(...Array.from({ length: n }, (_, index) => ({
+        repoPath,
+        origin,
+        delayMs: index * CARD_ENTRANCE.staggerMs,
+      })));
+    }
     fetch('/api/orchestrator/spawn-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1863,7 +1963,7 @@ export default function CanvasGlassPreviewPage() {
       })
       .catch(() => {});
     return null;
-  }, [activeRepoPath, refreshLanes]);
+  }, [activeRepoPath, reducedMotion, refreshLanes, viewportSpawnOrigin]);
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
@@ -3089,6 +3189,7 @@ export default function CanvasGlassPreviewPage() {
       onDrop={dropImages}
       style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}
     >
+      <style>{CARD_ENTRANCE.keyframes}</style>
       {/* Realtime voice host — also mounted here (not just the dashboard) so the
           full-page nav into the canvas auto-resumes the session via the handoff
           instead of going silent. Renders only its own fixed pill. */}
