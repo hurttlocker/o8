@@ -22,7 +22,8 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
 import { listRepos } from '@/lib/repos/registry';
@@ -228,73 +229,111 @@ async function searchAgents(query: string): Promise<SearchResult[]> {
 
 // ── Chat history (#984) ────────────────────────────────────────────────────
 
+const CHAT_HISTORY_SCAN_CONCURRENCY = 16;
+
+/** Map with a bounded number of in-flight async tasks, preserving input order. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const runner = async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) break;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(limit, items.length); i += 1) workers.push(runner());
+  await Promise.all(workers);
+  return results;
+}
+
 /** Scan the on-disk chat-history dir for threads whose title or
  *  most-recent-message body contains the query. Keeps the read scope tight
- *  (mtime-sorted, capped, only the first user message + last message). */
-function searchChatHistory(query: string): SearchResult[] {
+ *  (mtime-sorted, capped, only the first user message + last message).
+ *  Async + bounded-concurrency so a slow disk never blocks the request handler;
+ *  results/ordering are identical to the former sync scan. */
+async function searchChatHistory(query: string): Promise<SearchResult[]> {
   let files: string[];
   try {
-    files = readdirSync(CHAT_HISTORY_DIR).filter((f) => f.endsWith('.json'));
+    files = (await readdir(CHAT_HISTORY_DIR)).filter((f) => f.endsWith('.json'));
   } catch {
     return [];
   }
 
   const lowered = query.toLowerCase();
-  const out: SearchResult[] = [];
 
-  // Read mtime upfront so we can prefer recent threads when ranking.
-  const ranked = files
-    .map((file) => {
-      const filePath = join(CHAT_HISTORY_DIR, file);
-      try {
-        const stat = statSync(filePath);
-        return { file, filePath, mtimeMs: stat.mtimeMs };
-      } catch {
-        return null;
-      }
-    })
+  // Read mtime upfront so we can prefer recent threads when ranking. Order of
+  // the stat calls is irrelevant — the results are sorted by mtime after.
+  const statted = await mapWithConcurrency(files, CHAT_HISTORY_SCAN_CONCURRENCY, async (file) => {
+    const filePath = join(CHAT_HISTORY_DIR, file);
+    try {
+      const s = await stat(filePath);
+      return { file, filePath, mtimeMs: s.mtimeMs };
+    } catch {
+      return null;
+    }
+  });
+  const ranked = statted
     .filter((entry): entry is { file: string; filePath: string; mtimeMs: number } => entry !== null)
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
     .slice(0, 250);
 
-  for (const entry of ranked) {
-    try {
-      const raw = readFileSync(entry.filePath, 'utf-8');
-      const data = JSON.parse(raw) as {
-        title?: string;
-        messages?: Array<{ role?: string; content?: string }>;
-        repoName?: string | null;
-        archivedAt?: string | null;
-      };
-      const tabId = basename(entry.file, '.json');
-      // Skip placeholder / empty threads — those are typed-into-once-then-discarded.
-      if (!data.messages || data.messages.length === 0) continue;
+  // Parse candidates in ranked (mtime-desc) windows, keeping order; a null means
+  // the entry was skipped (empty thread, no match, or unreadable JSON). Stop
+  // scheduling once 8 matches are collected — same tight read scope as before.
+  const out: SearchResult[] = [];
+  for (let i = 0; i < ranked.length && out.length < 8; i += CHAT_HISTORY_SCAN_CONCURRENCY) {
+    const window = ranked.slice(i, i + CHAT_HISTORY_SCAN_CONCURRENCY);
+    const parsed = await Promise.all(window.map(async (entry): Promise<SearchResult | null> => {
+      try {
+        const raw = await readFile(entry.filePath, 'utf-8');
+        const data = JSON.parse(raw) as {
+          title?: string;
+          messages?: Array<{ role?: string; content?: string }>;
+          repoName?: string | null;
+          archivedAt?: string | null;
+        };
+        const tabId = basename(entry.file, '.json');
+        // Skip placeholder / empty threads — those are typed-into-once-then-discarded.
+        if (!data.messages || data.messages.length === 0) return null;
 
-      const firstUser = data.messages.find((m) => m.role === 'user');
-      const lastMsg = data.messages[data.messages.length - 1];
-      const title = data.title
-        || (firstUser?.content ? firstUser.content.slice(0, 60).replace(/\n/g, ' ') : 'Untitled');
-      const preview = (lastMsg?.content ?? '').slice(0, 120).replace(/\n/g, ' ');
+        const firstUser = data.messages.find((m) => m.role === 'user');
+        const lastMsg = data.messages[data.messages.length - 1];
+        const title = data.title
+          || (firstUser?.content ? firstUser.content.slice(0, 60).replace(/\n/g, ' ') : 'Untitled');
+        const preview = (lastMsg?.content ?? '').slice(0, 120).replace(/\n/g, ' ');
 
-      const haystack = `${title}\n${preview}\n${data.repoName ?? ''}`.toLowerCase();
-      if (!haystack.includes(lowered)) continue;
+        const haystack = `${title}\n${preview}\n${data.repoName ?? ''}`.toLowerCase();
+        if (!haystack.includes(lowered)) return null;
 
-      const titleMatch = title.toLowerCase().includes(lowered) ? 30 : 0;
-      const startsWith = title.toLowerCase().startsWith(lowered) ? 25 : 0;
-      const archivedPenalty = data.archivedAt ? -15 : 0;
-      const repoTag = data.repoName ? `${data.repoName} · ` : '';
+        const titleMatch = title.toLowerCase().includes(lowered) ? 30 : 0;
+        const startsWith = title.toLowerCase().startsWith(lowered) ? 25 : 0;
+        const archivedPenalty = data.archivedAt ? -15 : 0;
+        const repoTag = data.repoName ? `${data.repoName} · ` : '';
 
-      out.push({
-        kind: 'chat',
-        id: `chat:${tabId}`,
-        title,
-        detail: `${repoTag}${preview}`.trim().slice(0, 140),
-        target: { chatTabId: tabId },
-        score: 45 + titleMatch + startsWith + archivedPenalty,
-      });
+        return {
+          kind: 'chat',
+          id: `chat:${tabId}`,
+          title,
+          detail: `${repoTag}${preview}`.trim().slice(0, 140),
+          target: { chatTabId: tabId },
+          score: 45 + titleMatch + startsWith + archivedPenalty,
+        };
+      } catch {
+        // skip unreadable JSON files
+        return null;
+      }
+    }));
+
+    for (const result of parsed) {
+      if (!result) continue;
+      out.push(result);
       if (out.length >= 8) break;
-    } catch {
-      // skip unreadable JSON files
     }
   }
   return out;
@@ -379,7 +418,7 @@ export async function GET(request: Request): Promise<NextResponse<SearchResponse
       searchIssues(query, repoParam),
       Promise.resolve(searchFiles(query, workspace)),
       searchAgents(query),
-      Promise.resolve(searchChatHistory(query)),
+      searchChatHistory(query),
       Promise.resolve(searchDirectives(query)),
     ]);
 
