@@ -63,6 +63,7 @@ import {
   parseModeRoutingPrefix,
   stashPendingComposerDraft,
 } from '@/lib/composer-mode-routing';
+import { prependClarifyDirective } from '@/lib/lane/clarify-first';
 import { getChatModelOption, loadChatModelChoice } from '@/components/desktop/orchestrator/chat-models';
 import {
   createChatAssistantEntry,
@@ -356,6 +357,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
   );
   const [orchestratorModel, setOrchestratorModel] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorModel);
+  // Clarify-first (#1489) — per-send toggle. When on, the next orchestrator
+  // message carries the clarify-first directive (interview before dispatch) and
+  // resets to off after it fires. Off → the outgoing message is unchanged.
+  const [clarifyFirst, setClarifyFirst] = useState(false);
   const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
   const [waitingForReply, setWaitingForReply] = useState(false);
@@ -1753,6 +1758,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const attachments = attachedImages.length > 0
         ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
         : undefined;
+      // Clarify-first (#1489): when on, the orchestrator receives the directive
+      // block ahead of the operator's text, but the transcript bubble still shows
+      // only the operator's text (displayMessage). Off → byte-identical to before.
+      const outgoing = clarifyFirst ? prependClarifyDirective(msg) : msg;
       const orchOptions = {
         permissionMode,
         backend: composerBackendTurnOverride(orchestratorBackend),
@@ -1761,17 +1770,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         swarm: swarmEnabled && !soloOrchestrator,
       solo: soloOrchestrator,
         collide: collideEnabled,
+        ...(clarifyFirst ? { displayMessage: msg } : {}),
         ...(attachments ? { attachments } : {}),
       };
       if (!resolvedRepoPath) {
         // No workspace — orchStream.send() appends a guiding "add a repo" notice.
         // KEEP the composer text so the user's message isn't lost to the void
-        // (the fresh-user "I typed and nothing happened" trap).
-        orchStream.send(msg, orchOptions);
+        // (the fresh-user "I typed and nothing happened" trap). Leave the toggle
+        // armed — nothing dispatched, so the clarify intent still stands.
+        orchStream.send(outgoing, orchOptions);
         return;
       }
       setInput('');
-      orchStream.send(msg, orchOptions);
+      orchStream.send(outgoing, orchOptions);
+      setClarifyFirst(false);
       clearAttachments();
       return;
     }
@@ -1823,7 +1835,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, clarifyFirst, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -2266,6 +2278,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSetSwarm={onSetSwarm}
         collideEnabled={collideEnabled}
         onSetCollide={onSetCollide}
+        clarifyFirst={clarifyFirst}
+        onToggleClarifyFirst={() => setClarifyFirst((prev) => !prev)}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
         // Session rules (#1329) — orchestrator threads only. null (not yet

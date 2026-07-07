@@ -47,6 +47,9 @@ interface ComposerAreaProps {
   /** Collide / MoA tier — icon chip sibling to the permission toggle. */
   collideEnabled?: boolean;
   onSetCollide?: (enabled: boolean) => void;
+  /** Clarify-first (#1489) — per-send interview-before-dispatch toggle. */
+  clarifyFirst?: boolean;
+  onToggleClarifyFirst?: () => void;
   permissionMode: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
   /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
@@ -111,6 +114,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSetSwarm,
   collideEnabled,
   onSetCollide,
+  clarifyFirst,
+  onToggleClarifyFirst,
   permissionMode,
   onTogglePermission,
   sessionRulesThreadId,
@@ -687,6 +692,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSetSwarm={isOrchestratorMode ? onSetSwarm : undefined}
             collideEnabled={isOrchestratorMode ? collideEnabled : false}
             onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
+            clarifyFirst={isOrchestratorMode ? clarifyFirst : false}
+            onToggleClarifyFirst={isOrchestratorMode ? onToggleClarifyFirst : undefined}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
             sessionRulesThreadId={sessionRulesThreadId}

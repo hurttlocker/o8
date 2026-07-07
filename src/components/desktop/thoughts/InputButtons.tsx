@@ -415,6 +415,8 @@ export function InputButtons({
   onSetSwarm,
   collideEnabled = false,
   onSetCollide,
+  clarifyFirst = false,
+  onToggleClarifyFirst,
   permissionMode,
   onTogglePermission,
   sessionRulesThreadId,
@@ -455,6 +457,13 @@ export function InputButtons({
   /** Collide / MoA tier — Claude + Codex propose independently, Claude synthesizes. */
   collideEnabled?: boolean;
   onSetCollide?: (enabled: boolean) => void;
+  /**
+   * Clarify-first (#1489) — per-send interview-before-dispatch toggle. When
+   * `onToggleClarifyFirst` is undefined the chip is hidden (non-orchestrator
+   * surfaces). `clarifyFirst` is the armed state.
+   */
+  clarifyFirst?: boolean;
+  onToggleClarifyFirst?: () => void;
   permissionMode?: 'full' | 'plan';
   onTogglePermission?: () => void;
   /**
@@ -557,6 +566,44 @@ export function InputButtons({
             {inlineLeadingExtras}
           </span>
         </>
+      ) : null}
+
+      {/* Clarify-first (#1489) — icon-only, orchestrator surfaces only. Armed =
+          accent; the orchestrator interviews the operator before dispatch. */}
+      {onToggleClarifyFirst ? (
+        <button
+          type="button"
+          onClick={onToggleClarifyFirst}
+          aria-pressed={clarifyFirst}
+          title={clarifyFirst
+            ? 'Clarify first: on — the orchestrator will interview you before dispatching'
+            : 'Clarify first: off — click to have the orchestrator resolve unknowns before dispatch'}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            borderWidth: 0,
+            background: clarifyFirst ? 'var(--t-accent-soft)' : 'transparent',
+            color: clarifyFirst ? 'var(--t-accent)' : 'var(--t-text-faint)',
+            cursor: 'pointer',
+            transition: 'color 120ms, background 120ms',
+          }}
+          onMouseEnter={(event) => {
+            if (!clarifyFirst) event.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(event) => {
+            if (!clarifyFirst) event.currentTarget.style.color = 'var(--t-text-faint)';
+          }}
+        >
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+            <path d="M12 17h.01" />
+          </svg>
+        </button>
       ) : null}
 
       {/* Permission toggle — always rendered, icon-only */}
