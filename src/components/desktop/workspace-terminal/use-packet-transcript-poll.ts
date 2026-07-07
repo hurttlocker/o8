@@ -58,6 +58,36 @@ export interface PacketTranscriptPollResult {
  * the sessionKey-keyed transcript uses. Type-only import of `TranscriptEvent`
  * keeps this client-safe (the normalization runs in the API route).
  */
+/**
+ * TranscriptEvent.args is a display string: the raw string args verbatim, or
+ * JSON.stringify of the original args object (clipped server-side at 600
+ * chars). Recover the structure best-effort so tool chips label with the real
+ * command / file path instead of the generic "terminal command" fallback —
+ * six identical beige chips in a row tell the operator nothing.
+ */
+function parseToolCallArgs(raw: string | undefined): Record<string, unknown> | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      // Codex exec sends {"command":["bash","-lc","<cmd>"]} — flatten to the
+      // human command string the chip renderers key on.
+      if (Array.isArray(parsed.command)) {
+        const parts = parsed.command.filter((part): part is string => typeof part === 'string');
+        const cmdIndex = parts[0] === 'bash' || parts[0] === 'sh' || parts[0] === 'zsh'
+          ? (parts[1] === '-lc' || parts[1] === '-c' ? 2 : 1)
+          : 0;
+        return { ...parsed, command: parts.slice(cmdIndex).join(' ') };
+      }
+      return parsed;
+    } catch {
+      return undefined; // clipped JSON — unrecoverable, chip falls back to preview
+    }
+  }
+  return { command: trimmed };
+}
+
 export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTranscriptEntry[] {
   const entries: MobileTranscriptEntry[] = [];
   let pendingTools: MobileTranscriptToolCall[] = [];
@@ -89,7 +119,12 @@ export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTra
       case 'tool_call':
         pendingTools = [
           ...pendingTools,
-          { name: event.tool, status: 'running', preview: event.summary || undefined },
+          {
+            name: event.tool,
+            status: 'running',
+            preview: event.summary || undefined,
+            args: parseToolCallArgs(event.args),
+          },
         ];
         break;
       case 'tool_result': {
