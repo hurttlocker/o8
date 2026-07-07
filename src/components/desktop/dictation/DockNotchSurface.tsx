@@ -516,6 +516,8 @@ interface DockNotchSurfaceProps {
   /** Tap the voice-live capsule to end the session (mirrors the in-window pill
    * + the double-tap right ⌘ toggle). */
   onStopRealtime?: () => void;
+  /** Tap the listening capsule to finish the active system dictation. */
+  onFinishDictation?: () => void;
 }
 
 /**
@@ -553,6 +555,7 @@ export function DockNotchSurface({
   onSpeechSpeed,
   realtimeVoice = 'off',
   onStopRealtime,
+  onFinishDictation,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -574,6 +577,7 @@ export function DockNotchSurface({
   const askListening = isAsking && askMode === 'listening' && askThread.length === 0;
   const mode = dictationMode;
   const isError = state === 'error';
+  const canFinishDictation = mode === 'listening' || mode === 'thinking';
   // Symon voice agent surfaces. A pending confirm wins over everything except a
   // real dictation (you can Option-talk over it). The working indicator
   // shows while the loop runs and nothing else owns the dock.
@@ -1445,8 +1449,24 @@ export function DockNotchSurface({
   // the morph: idle sliver ⇄ capsule ⇄ wide done, in place. Symon's spring.
   return (
     <div
-      role="status"
+      role={canFinishDictation ? 'button' : 'status'}
       aria-live="polite"
+      aria-label={canFinishDictation ? 'Finish listening' : undefined}
+      tabIndex={canFinishDictation ? 0 : undefined}
+      title={canFinishDictation ? 'Finish listening' : undefined}
+      onClick={(event) => {
+        if (canFinishDictation) {
+          event.stopPropagation();
+          onFinishDictation?.();
+        }
+      }}
+      onKeyDown={(event) => {
+        if (canFinishDictation && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          event.stopPropagation();
+          onFinishDictation?.();
+        }
+      }}
       style={{
         pointerEvents: 'auto',
         overflow: 'hidden',
