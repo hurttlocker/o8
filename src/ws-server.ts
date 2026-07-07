@@ -68,6 +68,7 @@ import {
   appendMobileOrchestratorUserMessage,
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
+  markMobileOrchestratorThreadFailed,
   mobileOrchestratorThreadHistoryStatToken,
   upsertMobileOrchestratorAssistantMessage,
   writeOrchestratorBackendSessionId,
@@ -3155,6 +3156,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         messageId: assistantMessageId,
         content: assistantTextAccum,
         backend: backendId,
+        agent: activeAgentTag,
         sessionId,
         model: model ?? null,
         timestampMs: assistantStartedAtMs,
@@ -3184,6 +3186,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       repoPath,
       message,
       backend: activeBackend.id,
+      agent: activeAgentTag,
       timestampMs: turnStartedAtMs,
     });
     if (updatedThread) {
@@ -3407,6 +3410,24 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
             }
             sawTerminal = true;
             persistAssistantText(null, turnBackend.id);
+            try {
+              const failedThread = markMobileOrchestratorThreadFailed({
+                tabId: threadId,
+                repoPath,
+                error: event.error,
+                backend: turnBackend.id,
+                agent: turnAgentTag,
+              });
+              if (failedThread) {
+                broadcast({
+                  channel: 'orchestrator-threads',
+                  event: 'upsert',
+                  data: { thread: failedThread },
+                });
+              }
+            } catch (markErr) {
+              console.warn('[ws-server][orchestrator] failed to mark thread failed', markErr);
+            }
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'error',
@@ -3525,6 +3546,24 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // Save any partial assistant text accumulated before the failure so
     // mobile listings still show what arrived rather than a blank turn.
     persistAssistantText(null);
+    try {
+      const failedThread = markMobileOrchestratorThreadFailed({
+        tabId: threadId,
+        repoPath,
+        error: err instanceof Error ? err.message : 'Failed to send message',
+        backend: activeBackend.id,
+        agent: activeAgentTag,
+      });
+      if (failedThread) {
+        broadcast({
+          channel: 'orchestrator-threads',
+          event: 'upsert',
+          data: { thread: failedThread },
+        });
+      }
+    } catch (markErr) {
+      console.warn('[ws-server][orchestrator] failed to mark thread failed', markErr);
+    }
     // Broadcast the error to EVERY subscriber on this thread, not just the
     // origin client — a phone-started turn that throws must also release the
     // desktop watching the same thread (it was latching forever). Fall back to

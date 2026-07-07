@@ -13,6 +13,7 @@ import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
+import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
 // after this window — gives the operator time to come back to a fresh tab
@@ -39,6 +40,8 @@ interface ChatHistoryEntry {
   repoPath?: string | null;
   repoBranch?: string | null;
   remoteUrl?: string | null;
+  backend?: OrchestratorBackendId | null;
+  agent?: string | null;
   archivedAt?: string | null;
 }
 
@@ -64,6 +67,7 @@ function inferOrchestratorModel(tabId: string, data: Record<string, unknown>): s
   if (backend === 'claude') return 'claude-code';
   if (backend === 'codex') return 'codex';
   if (backend === 'openclaw') return 'openclaw';
+  if (backend === 'hermes') return 'hermes';
   const sessionIds = normalizeSessionIds(data.orchestratorSessionIds);
   if (sessionIds.claude) return 'claude-code';
   if (sessionIds.codex) return 'codex';
@@ -189,6 +193,8 @@ export async function GET(request: NextRequest) {
           repoPath: data.repoPath || null,
           repoBranch: data.repoBranch || null,
           remoteUrl: data.remoteUrl || null,
+          backend: isOrchestratorBackendId(data.backend) ? data.backend : null,
+          agent: typeof data.agent === 'string' && data.agent.trim() ? data.agent.trim() : null,
           archivedAt,
         });
       } catch { /* skip bad files */ }
