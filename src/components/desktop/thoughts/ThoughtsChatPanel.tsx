@@ -40,6 +40,7 @@ import {
   generateSuggestions,
   isRenderableThoughtEntry,
   isRunnableCliSession,
+  mergeSameThreadHistoryLoad,
   mergeTranscriptEntries,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
@@ -1210,14 +1211,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         planText?: string | null;
       };
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? []);
-      setChatMessages(msgs);
+      const isSameOpenThread = threadIdRef.current === tabId;
+      const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+      const mergedLoad = isSameOpenThread
+        ? mergeSameThreadHistoryLoad(liveTranscript, msgs)
+        : { entries: msgs, preservedLiveEntries: false };
+      setChatMessages(mergedLoad.entries);
       setPlanText(data.planText ?? null);
       threadIdRef.current = tabId;
       setThreadId(tabId);
       setWaitingForReply(false);
       clearPolling();
-      orchStream.reset();
-      orchStream.replaceTranscript(msgs);
+      if (!mergedLoad.preservedLiveEntries) {
+        orchStream.reset();
+      }
+      orchStream.replaceTranscript(mergedLoad.entries);
       // A thread reload replaces the transcript wholesale, which would drop a
       // live-appended Mission-complete card. Re-assert any recorded card for
       // this repo so the reload can't clobber it (idempotent by id).
@@ -1240,7 +1248,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath]);
+  }, [chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath]);
 
   const suggestions = useMemo(
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),
