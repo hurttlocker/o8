@@ -3,6 +3,7 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useState } from 'react';
 import { useTheme } from './ThemeContext';
 import { MobileIssuesPRCard, repoShortLabel, type IssuesPagePR } from './MobileIssuesPRCard';
+import { relativeTimeLabel } from '@/lib/format/relative-time';
 import { PullToRefresh } from './PullToRefresh';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
@@ -79,13 +80,7 @@ function saveRegisteredRepos(repos: string[]) {
 }
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  return relativeTimeLabel(new Date(iso).getTime(), { subMinute: 'just-now-lower' });
 }
 
 const repoShort = repoShortLabel;
