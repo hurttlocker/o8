@@ -5,7 +5,7 @@ import { listIdeLlmChatSessions } from '@/lib/runtime/ide-llm-chat-registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
-import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
+import type { MobileControlAction, MobileFleetAction, MobileFleetRuntime, MobileFleetSession, MobileFleetStatus, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 import { getMobileSessionTranscript } from '@/lib/mobile/history';
 import { buildMobileReviewUnits, shouldExposeWorkspaceReviewSnapshot, summarizeMobileReviewUnits } from '@/lib/mobile/review-units';
@@ -145,16 +145,71 @@ async function stripDeadTerminalSessions(sessions: AgentSummary[]): Promise<Agen
   }));
 }
 
-function mobileSessionIdentity(agent: AgentSummary) {
-  if (agent.runtime === 'chat') {
-    return agent.sessionKey;
+export function mobileSessionIdentity(agent: AgentSummary) {
+  return agent.runtimeSurface?.id?.trim() || agent.sessionKey;
+}
+
+function mobileFleetRuntime(runtime: string): MobileFleetRuntime {
+  if (runtime === 'codex' || runtime === 'claude-code' || runtime === 'openclaw' || runtime === 'hermes') {
+    return runtime;
   }
-  if (agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned') {
-    const repoSlug = agent.runtimeSurface.reviewContext?.repoSlug ?? agent.workspace;
-    const branch = agent.runtimeSurface.reviewContext?.branch ?? agent.branch;
-    return `codex-owned:${repoSlug}:${branch}`;
-  }
-  return agent.sessionKey;
+  return 'unknown';
+}
+
+function mobileFleetStatus(agent: AgentSummary, approval?: ApprovalRecord): MobileFleetStatus {
+  if (approval || agent.approvalStatus === 'pending') return 'awaiting_review';
+  if (agent.status === 'running') return 'running';
+  if (agent.status === 'huddling') return 'huddling';
+  if (agent.status === 'blocked') return 'blocked';
+  if (agent.status === 'failed') return 'failed';
+  if (agent.status === 'waiting') return 'queued';
+  if (agent.status === 'reviewing') return 'awaiting_review';
+  if (agent.status === 'completed') return 'merged';
+
+  const lifecycle = agent.runtimeSurface?.lifecycle;
+  if (lifecycle?.availability === 'running') return 'running';
+  if (lifecycle?.lastOutcome === 'failed') return 'failed';
+  if (lifecycle?.lastOutcome === 'interrupted') return 'paused';
+  if (lifecycle?.availability === 'ready-for-resume') return 'stopped';
+  return 'idle';
+}
+
+function mobileFleetActions(agent: AgentSummary, approval?: ApprovalRecord): MobileFleetAction[] {
+  const actions: MobileFleetAction[] = ['inspect'];
+  const surface = agent.runtimeSurface;
+  const previewUrl = agent.browserSurface?.url ?? surface?.browserSurface?.url;
+  if (agent.tmuxSession || surface?.capabilities.attach) actions.push('open_terminal');
+  if (previewUrl) actions.push('open_preview');
+  if (surface?.capabilities.sendInput) actions.push('resume');
+  if (surface?.capabilities.interrupt) actions.push('stop');
+  if (approval) actions.push('approve', 'request_changes');
+  return Array.from(new Set(actions));
+}
+
+export function toMobileFleetSession(agent: AgentSummary, approval?: ApprovalRecord): MobileFleetSession {
+  const surface = agent.runtimeSurface;
+  const repoPath = surface?.cwd ?? agent.workspace;
+  const branch = surface?.reviewContext?.branch ?? surface?.branch ?? agent.branch;
+  const previewUrl = agent.browserSurface?.url ?? surface?.browserSurface?.url ?? null;
+  return {
+    id: mobileSessionIdentity(agent),
+    sessionKey: agent.sessionKey,
+    runtime: mobileFleetRuntime(agent.runtime),
+    status: mobileFleetStatus(agent, approval),
+    title: agent.surfaceLabel ?? surface?.title ?? agent.name,
+    repo: surface?.reviewContext?.repoSlug ?? agent.workspace,
+    repoPath,
+    branch,
+    worktreePath: surface?.cwd ?? null,
+    terminalSessionName: agent.tmuxSession ?? null,
+    terminalAvailable: Boolean(agent.tmuxSession || surface?.capabilities.attach),
+    previewUrl,
+    approvalId: approval?.id,
+    reviewAuthority: approval ? 'approval_gate' : surface?.capabilities.reviewContext ? 'inspect_only' : null,
+    actions: mobileFleetActions(agent, approval),
+    lastEventAt: agent.lastEventAt,
+    lastActivityAt: agent.lastActivityAt ?? null,
+  };
 }
 
 function summarizeTranscript(text: string) {
@@ -189,9 +244,11 @@ function limitMobileInboxSessions(snapshot: MobileInboxSnapshot, limit?: number)
   if (snapshot.sessions.length <= limit) {
     return snapshot;
   }
+  const visibleSessionKeys = new Set(snapshot.sessions.slice(0, limit).map((session) => session.sessionKey));
   return {
     ...snapshot,
     sessions: snapshot.sessions.slice(0, limit),
+    fleetSessions: (snapshot.fleetSessions ?? []).filter((session) => visibleSessionKeys.has(session.sessionKey)),
   };
 }
 
@@ -332,6 +389,10 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
       return priorityDiff !== 0 ? priorityDiff : left.index - right.index;
     })
     .map(({ session }) => session);
+
+  const fleetSessions = orderedSessions
+    .filter((session) => session.runtime !== 'chat')
+    .map((session) => toMobileFleetSession(session, approvalsBySession.get(session.sessionKey)?.[0]));
 
   const primarySession = orderedSessions.find((session) => session.isCurrentSession)
     ?? orderedSessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
@@ -513,6 +574,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
       ? 'Mobile now reflects the local Codex and Claude Code runtime inventory, plus IDE chat and review state.'
       : fleet.meta.note,
     sessions: orderedSessions,
+    fleetSessions,
     approvals,
     reviewUnits,
     items,

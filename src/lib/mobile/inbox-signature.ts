@@ -16,6 +16,10 @@ function reviewUnitSignature(unit: MobileInboxSnapshot['reviewUnits'][number]) {
   return `${unit.id}:${unit.sessionKey}:${unit.approvalId ?? ''}:${unit.authority}:${unit.status}:${unit.title}:${unit.agent}:${unit.runtime}:${unit.repo}:${unit.repoSlug ?? ''}:${unit.repoPath}:${unit.branch}:${unit.baseBranch ?? ''}:${unit.baseSha ?? ''}:${unit.headSha ?? ''}:${unit.worktreePath ?? ''}:${unit.fileCount}:${unit.additions}:${unit.deletions}:${unit.diffAvailable ? 1 : 0}:${unit.previewUrl ?? ''}:${unit.terminalSessionName ?? ''}:${unit.actions.join(',')}:${unit.staleReason ?? ''}:${unit.changedFiles.map((file) => `${file.path}:${file.status}:${file.additions ?? ''}:${file.deletions ?? ''}`).join('|')}`;
 }
 
+function fleetSessionSignature(session: MobileInboxSnapshot['fleetSessions'][number]) {
+  return `${session.id}:${session.sessionKey}:${session.runtime}:${session.status}:${session.title}:${session.repo}:${session.repoPath}:${session.branch}:${session.worktreePath ?? ''}:${session.terminalSessionName ?? ''}:${session.terminalAvailable ? 1 : 0}:${session.previewUrl ?? ''}:${session.approvalId ?? ''}:${session.reviewAuthority ?? ''}:${session.actions.join(',')}:${session.lastEventAt ?? ''}:${session.lastActivityAt ?? ''}`;
+}
+
 function reviewSignature(review: MobileInboxSnapshot['review']) {
   if (!review) return 'no-review';
   const pullRequestSig = review.pullRequest
@@ -32,6 +36,7 @@ export function mobileInboxSignature(snapshot: MobileInboxSnapshot) {
     snapshot.primarySessionKey ?? '',
     snapshot.note ?? '',
     snapshot.sessions.map(sessionSignature).join('|'),
+    (snapshot.fleetSessions ?? []).map(fleetSessionSignature).join('|'),
     (snapshot.approvals ?? []).map(approvalSignature).join('|'),
     (snapshot.reviewUnits ?? []).map(reviewUnitSignature).join('|'),
     snapshot.items.map(itemSignature).join('|'),

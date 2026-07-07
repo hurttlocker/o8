@@ -258,6 +258,9 @@ export async function refreshInboxSnapshot({
     ? {
         ...nextSnapshot,
         sessions: nextSnapshot.sessions.slice(0, limit),
+        fleetSessions: (nextSnapshot.fleetSessions ?? []).filter((session) => (
+          nextSnapshot.sessions.slice(0, limit).some((visibleSession) => visibleSession.sessionKey === session.sessionKey)
+        )),
       }
     : nextSnapshot;
   setSnapshot((prev) => {
