@@ -488,6 +488,26 @@ fn morph_dock_idle() {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn resolve_system_dictation_session_id(recorded: u64, active: u64, system_origin: bool) -> u64 {
+    if !system_origin || active == 0 {
+        return 0;
+    }
+    if recorded == active {
+        return recorded;
+    }
+    active
+}
+
+#[cfg(target_os = "macos")]
+fn current_system_dictation_session_id() -> u64 {
+    resolve_system_dictation_session_id(
+        CURRENT_PTT_SESSION_ID.load(Ordering::SeqCst),
+        crate::stt_engine::active_session_id(),
+        is_system_origin(),
+    )
+}
+
 /// End a system-origin dictation. The finalize chain (Whisper → polish → paste)
 /// fires off the daemon's final/audio_file stdout events; the origin branch in
 /// `run_finalize` routes the polished text to `paste::paste_text`.
@@ -499,7 +519,7 @@ fn end_system_dictation() {
     // Fence on the push-to-talk session so a release that raced a newer session
     // (e.g. a double-tap that already promoted to long-form) can't stop the
     // wrong one. For a normal hold this is just the active session.
-    let sid = CURRENT_PTT_SESSION_ID.load(Ordering::SeqCst);
+    let sid = current_system_dictation_session_id();
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] stop failed: {e}");
     }
@@ -586,6 +606,29 @@ fn finish_long_form_dictation() {
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] long-form finish stop failed: {e}");
     }
+}
+
+/// Finish whichever system-origin dictation is active. This is the shared
+/// manual escape hatch for UI surfaces outside the raw Fn event tap.
+#[cfg(target_os = "macos")]
+pub fn finish_active_system_dictation() -> Result<(), String> {
+    if LONG_FORM_ACTIVE.load(Ordering::SeqCst) && LONG_FORM_SESSION_ID.load(Ordering::SeqCst) != 0 {
+        LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+        finish_long_form_dictation();
+        return Ok(());
+    }
+
+    let sid = current_system_dictation_session_id();
+    if sid == 0 || !is_system_origin() {
+        return Err("No system dictation is currently listening.".to_string());
+    }
+    end_system_dictation();
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn finish_active_system_dictation() -> Result<(), String> {
+    Err("System dictation is only available on macOS.".to_string())
 }
 
 /// Cancel an active long-form dictation (Escape) WITHOUT pasting. Clear the
@@ -1262,3 +1305,25 @@ pub fn start(app: tauri::AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn start(_app: tauri::AppHandle) {}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::resolve_system_dictation_session_id;
+
+    #[test]
+    fn system_finish_uses_recorded_session_when_it_matches_active() {
+        assert_eq!(resolve_system_dictation_session_id(12, 12, true), 12);
+    }
+
+    #[test]
+    fn system_finish_falls_back_to_active_session_when_ptt_bookkeeping_is_stale() {
+        assert_eq!(resolve_system_dictation_session_id(0, 44, true), 44);
+        assert_eq!(resolve_system_dictation_session_id(12, 44, true), 44);
+    }
+
+    #[test]
+    fn system_finish_refuses_when_origin_or_active_session_is_missing() {
+        assert_eq!(resolve_system_dictation_session_id(12, 12, false), 0);
+        assert_eq!(resolve_system_dictation_session_id(12, 0, true), 0);
+    }
+}
