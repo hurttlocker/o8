@@ -5595,6 +5595,18 @@ async function bootstrapWsServer() {
   }
 
   try {
+    const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
+    const result = await sweepPacketsMergedByAncestry();
+    if (result.merged > 0) {
+      console.log(`[merged-by-ancestry] Startup sweep released ${result.merged} externally merged packet(s)`);
+    }
+  } catch (error) {
+    console.warn(
+      `[merged-by-ancestry] Startup sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
     await rehydrateOrchestratorSessions({ onReboundEvent: handleReboundOrchestratorEvent });
     const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });
     if (codexRebound > 0) {
@@ -5622,14 +5634,24 @@ async function bootstrapWsServer() {
   // checks on a small set of non-terminal lanes.
   setInterval(async () => {
     try {
-      const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
+      const [
+        { reconcileOrphanedWorktrees },
+        { sweepPacketsMergedByAncestry },
+      ] = await Promise.all([
+        import('@/lib/lane/reconcile'),
+        import('@/lib/orchestrator/merged-by-ancestry'),
+      ]);
       const healed = reconcileOrphanedWorktrees();
+      const merged = await sweepPacketsMergedByAncestry();
       if (healed > 0) {
         console.log(`[reconcile] Periodic sweep healed ${healed} orphaned lane(s)`);
       }
+      if (merged.merged > 0) {
+        console.log(`[merged-by-ancestry] Periodic sweep released ${merged.merged} externally merged packet(s)`);
+      }
     } catch (error) {
       console.warn(
-        `[reconcile] Periodic orphan sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[reconcile] Periodic orphan/merged-by-ancestry sweep failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }, 30_000).unref();

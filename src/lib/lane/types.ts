@@ -224,6 +224,7 @@ export type LaneEventVerb =
   | 'review_invalidated'
   | 'runtime_drift'
   | 'pr_merged_reconciled'
+  | 'merged_by_ancestry_reconciled'
   // Post-rebase typecheck escalation (#1108):
   // typecheck_auto_retry — layer 1 fired a programmatic rerun_with_feedback
   // typecheck_escalation — layer 2 promoted the lane to awaiting_orchestrator
