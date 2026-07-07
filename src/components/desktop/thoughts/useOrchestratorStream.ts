@@ -530,16 +530,20 @@ export function useOrchestratorStream(
           timestamp: next[idx].timestamp ?? Date.now(),
           timestampLabel: next[idx].timestampLabel ?? formatTimestampLabel(Date.now()),
         };
+        messagesRef.current = next;
         return next;
       }
-      return [...prev, {
+      const assistantEntry: MobileTranscriptEntry = {
         id: current.id,
         role: 'assistant',
         text: text || (thinking ? '' : ''),
         thinking,
         timestamp: Date.now(),
         timestampLabel: formatTimestampLabel(Date.now()),
-      }];
+      };
+      const next = [...prev, assistantEntry];
+      messagesRef.current = next;
+      return next;
     });
   }, []);
 

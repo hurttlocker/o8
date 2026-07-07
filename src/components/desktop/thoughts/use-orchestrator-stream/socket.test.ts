@@ -57,6 +57,7 @@ function makeHarness(initial: {
     fire,
     statusRef,
     currentAssistantRef,
+    messagesRef,
     lastSeqRef,
     lastBackendRef,
     setStatus,
@@ -112,6 +113,19 @@ describe('orchestrator socket — first-turn streaming race', () => {
     h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash' } });
     expect(h.statusRef.current).toBe('busy');
     expect(h.currentAssistantRef.current).not.toBeNull();
+  });
+
+  it('keeps messagesRef in lockstep with socket transcript mutations', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash' } });
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      [userMsg],
+    );
+
+    expect(h.messagesRef.current).toEqual(messages);
+    expect(h.messagesRef.current[h.messagesRef.current.length - 1]?.toolCalls?.[0]?.name).toBe('Bash');
   });
 
   it('a LIVE (non-snapshot) "ready" still finalizes the streamed turn', () => {

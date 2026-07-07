@@ -68,6 +68,16 @@ function createAssistantState(
 export function createOrchestratorMessageHandler(
   options: CreateOrchestratorMessageHandlerOptions,
 ) {
+  const setTranscriptMessages = (update: SetStateAction<MobileTranscriptEntry[]>) => {
+    options.setMessages((prev) => {
+      const next = typeof update === 'function'
+        ? (update as (prev: MobileTranscriptEntry[]) => MobileTranscriptEntry[])(prev)
+        : update;
+      options.messagesRef.current = next;
+      return next;
+    });
+  };
+
   return (event: MessageEvent) => {
     if (options.currentWs !== options.wsRef.current) return;
 
@@ -225,7 +235,7 @@ export function createOrchestratorMessageHandler(
             options.finalizeFirstTurnPlanCapture();
             options.flushCurrentAssistant();
             const finalId = options.currentAssistantRef.current.id;
-            options.setMessages((prev) => prev.map((message) =>
+            setTranscriptMessages((prev) => prev.map((message) =>
               message.id === finalId && message.toolCalls?.some((tool) => tool.status === 'running')
                 ? { ...message, toolCalls: message.toolCalls!.map((tool) => (tool.status === 'running' ? { ...tool, status: 'done' } : tool)) }
                 : message,
@@ -267,7 +277,7 @@ export function createOrchestratorMessageHandler(
             : undefined;
         const toolUseId = typeof msg.data?.toolUseId === 'string' ? msg.data.toolUseId : null;
         const toolCall = { id: toolUseId, name: toolName, status: 'running' as const, args: toolArgs };
-        options.setMessages((prev) => {
+        setTranscriptMessages((prev) => {
           const idx = prev.findIndex((message) => message.id === current.id);
           if (idx >= 0) {
             const next = [...prev];
@@ -309,7 +319,7 @@ export function createOrchestratorMessageHandler(
         const backend = typeof msg.data?.backend === 'string' ? msg.data.backend : undefined;
         const current = options.currentAssistantRef.current;
         if (!current) break;
-        options.setMessages((prev) => {
+        setTranscriptMessages((prev) => {
           const idx = prev.findIndex((message) => message.id === current.id);
           if (idx < 0) return prev;
           const tools = prev[idx].toolCalls ?? [];
@@ -350,7 +360,7 @@ export function createOrchestratorMessageHandler(
           options.setStatus('busy');
         }
         if (phase === 'proposing') {
-          options.setMessages((prev) => [...prev, {
+          setTranscriptMessages((prev) => [...prev, {
             id: `collide-${Date.now()}`,
             role: 'system' as const,
             text: '',
@@ -360,7 +370,7 @@ export function createOrchestratorMessageHandler(
           }]);
         } else {
           // synthesizing — collapse the most recent active collide card.
-          options.setMessages((prev) => {
+          setTranscriptMessages((prev) => {
             const idx = [...prev].reverse().findIndex((m) => m.collide && m.collide.phase === 'proposing');
             if (idx < 0) return prev;
             const realIdx = prev.length - 1 - idx;
@@ -376,7 +386,7 @@ export function createOrchestratorMessageHandler(
         const proposer = typeof msg.data?.proposer === 'string' ? msg.data.proposer : 'proposer';
         const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
         const breach = msg.data?.breach === true;
-        options.setMessages((prev) => {
+        setTranscriptMessages((prev) => {
           const idx = [...prev].reverse().findIndex((m) => m.collide && m.collide.phase === 'proposing');
           if (idx < 0) return prev;
           const realIdx = prev.length - 1 - idx;
@@ -397,7 +407,7 @@ export function createOrchestratorMessageHandler(
         console.error('[orchestrator-stream] Error:', error);
         options.finalizeFirstTurnPlanCapture();
         options.setStatus('error');
-        options.setMessages((prev) => [...prev, {
+        setTranscriptMessages((prev) => [...prev, {
           id: `orch-error-${Date.now()}`,
           role: 'system',
           text: `Orchestrator error: ${error}`,
