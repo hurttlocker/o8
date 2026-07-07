@@ -1299,7 +1299,9 @@ pub(crate) fn grab_selection() -> Option<String> {
     let saved = capture_clipboard_snapshot();
     simulate_cmd_c();
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(180);
+    // 400ms: Chrome/Electron under load can beat the old 180ms window, which
+    // read as "no selection" on a copy that was still in flight.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
     let mut copied_change_count = None;
     while std::time::Instant::now() < deadline {
         let current = clipboard_change_count();
@@ -1326,16 +1328,15 @@ pub(crate) fn grab_selection() -> Option<String> {
         }
     }
 
-    match (&new_clipboard, &saved.text) {
-        (Some(new), Some(old)) if new != old && !new.trim().is_empty() => {
+    // `new_clipboard` is only Some when the pasteboard changeCount MOVED — a
+    // fresh Cmd+C write provably landed. The selection may legitimately EQUAL
+    // the prior clipboard text (selecting text you just copied or dictated,
+    // or pressing the chord twice on one selection); the old `new != old`
+    // guard read exactly those as "no selection" and made speak-selection
+    // feel dead whenever the operator re-read their own text (2026-07-07).
+    match &new_clipboard {
+        Some(new) if !new.trim().is_empty() => {
             log::info!("[tts] grab_selection: Cmd+C got {} chars", new.len());
-            new_clipboard
-        }
-        (Some(new), None) if !new.trim().is_empty() => {
-            log::info!(
-                "[tts] grab_selection: Cmd+C got {} chars (no prior clipboard)",
-                new.len()
-            );
             new_clipboard
         }
         _ => {
