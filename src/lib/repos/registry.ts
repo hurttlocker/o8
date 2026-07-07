@@ -2,10 +2,11 @@ import 'server-only';
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { readJsonFile, writeJsonFile } from '@/lib/fs/json';
 import type {
   RepoRegistryEntry,
   RepoRegistryStore,
@@ -63,15 +64,6 @@ async function ensureRegistryDir() {
   await mkdir(REGISTRY_DIR, { recursive: true });
 }
 
-async function readJsonFile<T>(filePath: string) {
-  const raw = await readFile(filePath, 'utf8');
-  return JSON.parse(raw) as T;
-}
-
-async function writeJsonFile(filePath: string, value: unknown) {
-  await ensureRegistryDir();
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-}
 
 async function gitValue(repoRoot: string, args: string[]) {
   try {
@@ -333,6 +325,7 @@ async function readStore(): Promise<RepoRegistryStore> {
 }
 
 async function writeStore(store: RepoRegistryStore) {
+  await ensureRegistryDir();
   await writeJsonFile(REGISTRY_PATH, {
     version: 1,
     repos: sortRepos(store.repos),
