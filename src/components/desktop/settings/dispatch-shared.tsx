@@ -116,6 +116,8 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: st
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
 ];
 
+export const PICKER_MENU_POPOVER_BG = 'var(--t-chat-surface-bg, var(--t-bg-card, var(--t-panel)))';
+
 export function PickerMenu<T extends string>({ value, options, onChange, disabled, minWidth }: {
   value: T;
   options: Array<{ value: T; label: string; detail?: string }>;
@@ -183,7 +185,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
             minWidth: minWidth ?? 220,
             border: `1px solid ${RAMS_CONTROL_BORDER}`,
             borderRadius: 9,
-            background: 'var(--t-panel-solid, var(--t-panel))',
+            background: PICKER_MENU_POPOVER_BG,
             zIndex: 20,
             paddingTop: 4,
             paddingBottom: 4,
