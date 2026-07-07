@@ -57,6 +57,7 @@ interface O8PanelProps {
   activeTab?: O8Tab | null;
   onActiveTabChange?: (tab: O8Tab) => void;
   selectedFile?: string | null;
+  reviewLaneId?: string | null;
   browserUrl?: string | null;
   browserStateKey?: string;
   // Bubbles the browser pane's active URL up so the TitleBar Browser
@@ -77,14 +78,6 @@ interface O8PanelProps {
   sendAgentKill?: ContextualPanelProps['sendAgentKill'];
   termWsConnected?: boolean;
 }
-
-// Locked icon picks per hurttlocker.md — Iconoir for chrome that needs
-// distinct semantic glyphs, Tabler for Terminal (tighter geometry at
-// small sizes). FilesIcon uses Iconoir Folder; ChatIcon stays on
-// CircleSpark (already locked for scratch chat); BrowserIcon uses
-// Iconoir Internet (globe + cursor, matches the ports-popover web row);
-// ReviewIcon uses Iconoir DoubleCheck (two checks reads as "AI-validated");
-// TerminalIcon delegates to the Tabler shim.
 
 function FilesIcon({ size = 18 }: { size?: number }) {
   return <Folder width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
@@ -433,6 +426,7 @@ export function O8Panel({
   activeTab: externalTab,
   onActiveTabChange,
   selectedFile,
+  reviewLaneId,
   browserUrl,
   browserStateKey = 'right-panel',
   onBrowserActiveUrlChange,
@@ -626,6 +620,7 @@ export function O8Panel({
           registeredRepos={reviewRepos}
           onRepoPathChange={onRepoPathChange}
           selectedFile={selectedUtilityFile}
+          reviewLaneId={reviewLaneId}
         />
       );
     }
@@ -745,7 +740,7 @@ export function O8Panel({
         {allRepos ? (
           <ProjectChangesOverview repos={registeredRepos} onPickRepo={(path) => onRepoPathChange?.(path)} />
         ) : (
-          <ReviewPanel repoPath={repoPath} registeredRepos={reviewRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedFile ?? null} />
+          <ReviewPanel repoPath={repoPath} registeredRepos={reviewRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedFile ?? null} reviewLaneId={reviewLaneId} />
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' && !utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>

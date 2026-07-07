@@ -139,6 +139,7 @@ export function DiffPane({ packet, reviewState, diff, diffLoading, diffError }: 
             <span style={{ color: '#dc2626' }}>-{diff.deletions}</span>
             {' '}
             <span>· {diff.fileCount} files</span>
+            {diff.sourceLabel ? <span> · {diff.sourceLabel}</span> : null}
           </div>
         ) : null}
       </div>

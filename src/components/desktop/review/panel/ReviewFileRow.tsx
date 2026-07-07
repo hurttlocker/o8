@@ -36,6 +36,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
   file,
   repoPath,
   diffBase,
+  preloadedDiff,
   mode,
   wrap,
   wordDiff,
@@ -52,6 +53,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
   /** #1293 — when set, fetch the COMMITTED diff (`<base>...HEAD`) instead of the
    *  working-tree diff vs HEAD. Used by the best-of-N compare matrix. */
   diffBase?: string;
+  preloadedDiff?: string;
   mode: DiffMode;
   wrap: boolean;
   wordDiff: boolean;
@@ -100,6 +102,12 @@ const ReviewFileRow = memo(function ReviewFileRow({
 
   useEffect(() => {
     if (!open || previewActive) return;
+    if (preloadedDiff !== undefined) {
+      setLoading(false);
+      setError(null);
+      setDiff(preloadedDiff);
+      return;
+    }
     let cancelled = false;
     const controller = new AbortController();
     setLoading(true);
@@ -133,7 +141,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
     };
     // file.additions/deletions are deps so the row re-fetches when
     // useWorkspaceChanges reports the file's diff stats changed (#1084).
-  }, [open, previewActive, file.path, repoPath, diffBase, hideWhitespace, file.additions, file.deletions]);
+  }, [open, previewActive, preloadedDiff, file.path, repoPath, diffBase, hideWhitespace, file.additions, file.deletions]);
 
   // #1088: rich-preview fetch. Renders the new version of the file as
   // rendered content (markdown / image) instead of the unified diff.

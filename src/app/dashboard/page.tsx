@@ -1112,6 +1112,7 @@ function DashboardInner() {
     try { window.localStorage.setItem('o8:right-panel:width-o8', String(o8Width)); } catch { /* ignore */ }
   }, [o8Width]);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
+  const [o8ReviewLaneId, setO8ReviewLaneId] = useState<string | null>(null);
   const o8SpecAutoWidenedRef = useRef(false);
   const o8CompareAutoWidenedRef = useRef(false);
   const handleO8TabChange = useCallback((tab: O8Tab) => {
@@ -1131,6 +1132,7 @@ function DashboardInner() {
           : current
       ));
     }
+    if (tab !== 'review') setO8ReviewLaneId(null);
     setO8ActiveTab(tab);
   }, []);
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
@@ -1879,6 +1881,7 @@ function DashboardInner() {
       }
       const requestedTab = normalizeO8ActiveTab(request.tab);
       if (requestedTab) {
+        if (requestedTab !== 'review') setO8ReviewLaneId(null);
         if (requestedTab === 'workspace' && request.artifactId) {
           setO8SelectedFile(request.artifactId);
           setO8SelectedFileRepoPath(currentO8RepoPath);
@@ -2317,9 +2320,10 @@ function DashboardInner() {
   // Open the wide O8 panel pinned to a specific repo path + tab. Callers
   // that need review mode pass `workspace`; otherwise the panel lands on
   // the operator briefing pulse.
-  const handleOpenO8Panel = useCallback((options: { repoPath?: string | null; tab?: O8Tab }) => {
+  const handleOpenO8Panel = useCallback((options: { repoPath?: string | null; tab?: O8Tab; reviewLaneId?: string | null }) => {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
     const nextTab = normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB;
+    setO8ReviewLaneId(nextTab === 'review' ? options.reviewLaneId ?? null : null);
     if (nextTab === 'compare' && !o8CompareAutoWidenedRef.current) {
       o8CompareAutoWidenedRef.current = true;
       setO8Width((current) => (current < O8_COMPARE_PANEL_TARGET_WIDTH ? O8_COMPARE_PANEL_TARGET_WIDTH : current));
@@ -3493,7 +3497,9 @@ function DashboardInner() {
       setO8SelectedFile(null);
       setO8SelectedFileRepoPath(null);
     }
-    setRightPanelKind('review');
+    setO8ReviewLaneId(lane.laneId);
+    setO8ActiveTab('review');
+    setRightPanelKind('o8');
     openRightPanelFromUser();
   }, [openRightPanelFromUser]);
 
@@ -4791,8 +4797,9 @@ function DashboardInner() {
                           onSelectAllRepos={handleSelectO8AllRepos}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
-                          onActiveTabChange={setO8ActiveTab}
+                          onActiveTabChange={handleO8TabChange}
                           selectedFile={scopedO8SelectedFile}
+                          reviewLaneId={o8ReviewLaneId}
                           onSelectedFileChange={handleO8SelectedFileChange}
                           prNumber={o8PrNumber}
                           prRepo={o8PrRepo}
@@ -4847,7 +4854,7 @@ function DashboardInner() {
                         onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
                       >
-                        <ReviewPanel repoPath={currentO8RepoPath} selectedFile={scopedO8SelectedFile} />
+                        <ReviewPanel repoPath={currentO8RepoPath} selectedFile={scopedO8SelectedFile} reviewLaneId={o8ReviewLaneId} />
                       </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>

@@ -120,6 +120,12 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
     data?.onSelectedPacketChange?.(packet.id);
   }, [data, packet]);
 
+  const handleOpenReviewDiff = useCallback(() => {
+    const laneId = packet.lane?.laneId;
+    if (!laneId) return;
+    data?.onOpenO8Panel?.({ repoPath: packet.workspaceTargetPath, tab: 'review', reviewLaneId: laneId });
+  }, [data, packet.lane?.laneId, packet.workspaceTargetPath]);
+
   const handleResume = useCallback(() => {
     const laneId = packet.lane?.laneId;
     if (!laneId) return;
@@ -471,6 +477,7 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
             onToggleShowAllFiles={handleToggleShowAllFiles}
             onResume={handleResume}
             onStop={handleStop}
+            onOpenReviewDiff={handleOpenReviewDiff}
           />
         </div>
       ) : null}

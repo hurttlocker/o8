@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { summarizeLaneReviewDiff } from '@/lib/review/lane-diff';
 import { DiffPane } from './review-card/DiffPane';
 import { ReviewPane } from './review-card/ReviewPane';
 import { SpecPane } from './review-card/SpecPane';
@@ -45,7 +46,7 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
   // after a merge appends a trailer.
   const [directiveRefreshTick, setDirectiveRefreshTick] = useState(0);
 
-  const worktreePath = reviewState?.worktreePath ?? packet.lane?.worktreePath ?? null;
+  const laneId = packet.lane?.laneId ?? null;
   const baseBranchHint = packet.branchTarget && packet.branchTarget.trim() ? packet.branchTarget : null;
   const repoPath = packet.workspaceTargetPath ?? null;
 
@@ -93,9 +94,10 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
     return () => window.removeEventListener('o8:cortex-changes', handler);
   }, []);
 
-  // Load diff when worktreePath becomes known.
+  // Load the same lane diff the merge gate / o8_packet_diff path uses: branch
+  // work vs refreshed base. Do not show the unrelated local working tree here.
   useEffect(() => {
-    if (!worktreePath) {
+    if (!laneId) {
       setDiff(null);
       setDiffLoading(false);
       return;
@@ -105,20 +107,30 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
     setDiffError(null);
     (async () => {
       try {
-        const params = new URLSearchParams({ worktreePath });
-        if (baseBranchHint) params.set('baseBranch', baseBranchHint);
-        const response = await fetch(`/api/worktrees/diff?${params.toString()}`, { cache: 'no-store' });
+        const response = await fetch(`/api/lanes/${encodeURIComponent(laneId)}/diff?maxBytes=524288`, { cache: 'no-store' });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
-        const payload = await response.json() as DiffPayload & { error?: string };
+        const payload = await response.json() as {
+          ok?: boolean;
+          note?: string;
+          diff?: string;
+          base?: string | null;
+        };
         if (cancelled) return;
-        if (payload.error) {
-          setDiffError(payload.error);
-          setDiff(null);
-        } else {
-          setDiff(payload);
+        if (!payload.ok) {
+          throw new Error(payload.note ?? 'Unable to load lane diff.');
         }
+        const diffText = payload.diff ?? '';
+        const summary = summarizeLaneReviewDiff(diffText);
+        setDiff({
+          diff: diffText,
+          additions: summary.additions,
+          deletions: summary.deletions,
+          fileCount: summary.files.length,
+          baseBranch: payload.base ?? baseBranchHint,
+          sourceLabel: payload.base ? `Branch diff vs ${payload.base}` : 'Branch diff vs base',
+        });
       } catch (error) {
         if (cancelled) return;
         setDiffError(error instanceof Error ? error.message : 'Unable to load diff.');
@@ -127,7 +139,7 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
       }
     })();
     return () => { cancelled = true; };
-  }, [worktreePath, baseBranchHint, packet.id]);
+  }, [laneId, baseBranchHint, packet.id]);
 
   return (
     <div style={{
