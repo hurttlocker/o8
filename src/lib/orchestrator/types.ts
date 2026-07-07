@@ -312,6 +312,50 @@ export interface OrchestratorPacket {
     /** Optional category for grouping in the prompt. */
     kind?: 'conditional' | 'error-handler' | 'reconciliation' | 'archive' | 'loop-exit' | 'other';
   }>;
+  /**
+   * Worker deviations log (#1490). Captured when the packet reaches review by
+   * reading `implementation-notes.md` from the lane worktree and extracting its
+   * `## Deviations` section. Rendered ABOVE the diff in the human review
+   * surfaces and fed into the auto-review context. Null/undefined → the surface
+   * renders the asserted "No deviations reported" empty state.
+   */
+  deviations?: {
+    raw: string;
+    entries: string[];
+    capturedAt: string;
+  } | null;
+  /**
+   * HTML packet explainer + quiz (#1491). Generated fire-and-forget when the
+   * packet reaches review — a self-contained explainer artifact plus a
+   * structured quiz the human-UI approve gate reads. `status` drives the review
+   * surface: 'generating' shows a pending note, 'ready' renders the explainer,
+   * 'failed' degrades to the raw diff. Undefined on legacy packets and whenever
+   * explainer generation is disabled.
+   */
+  explainer?: {
+    status: 'generating' | 'ready' | 'failed';
+    /** Artifact id of the stored HTML report (kind: 'report'). */
+    artifactId?: string | null;
+    /** Structured quiz parsed out of the explainer; drives the approve gate. */
+    quiz?: PacketExplainerQuiz | null;
+    /** Files changed in the reviewed diff — the quiz-gate threshold input. */
+    changedFileCount?: number | null;
+    generatedAt?: string | null;
+    error?: string | null;
+  } | null;
+}
+
+/** A single multiple-choice quiz question in a packet explainer (#1491). */
+export interface PacketExplainerQuizQuestion {
+  id: string;
+  prompt: string;
+  options: string[];
+  /** Index into `options` of the correct answer. */
+  answerIndex: number;
+}
+
+export interface PacketExplainerQuiz {
+  questions: PacketExplainerQuizQuestion[];
 }
 
 export interface OrchestratorMissionState {

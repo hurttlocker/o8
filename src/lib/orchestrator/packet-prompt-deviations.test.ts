@@ -1,0 +1,41 @@
+/**
+ * The standing deviations clause (#1490) rides in every worker prompt.
+ *
+ * buildPacketPrompt is the single documented injection chokepoint, so pinning
+ * the clause here proves every dispatch path carries it.
+ */
+import { describe, it, expect } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
+import type { OrchestratorPacket } from './types';
+
+process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-pkt-dev-'));
+
+const { buildPacketPrompt } = await import('./packet-prompt');
+const { DEVIATIONS_CLAUSE } = await import('./packet-deviations');
+
+function minimalPacket(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
+  return {
+    id: `pkt-dev-${Math.random().toString(36).slice(2)}`,
+    referenceLabel: 'PKT-1',
+    title: 'feat: test packet',
+    summary: 'Test packet summary',
+    workspaceTargetPath: null,
+    branchTarget: 'main',
+    runtime: 'codex',
+    dependencyLabels: [],
+    dependencyPacketIds: [],
+    queueState: 'queued',
+    releaseState: 'pending',
+    status: 'queued',
+    ...overrides,
+  };
+}
+
+describe('buildPacketPrompt deviations clause', () => {
+  it('always includes the standing deviations clause', async () => {
+    const prompt = await buildPacketPrompt(minimalPacket(), []);
+    expect(prompt).toContain(DEVIATIONS_CLAUSE);
+  });
+});
