@@ -16,6 +16,7 @@ import type {
   OrchestratorPacket,
   OrchestratorPacketReview,
   OrchestratorPacketReviewFinding,
+  PacketExplainerQuiz,
   OrchestratorQueueState,
   OrchestratorRuntime,
   OrchestratorRuntimeTruth,
@@ -387,7 +388,74 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // stripped silently when malformed so existing callers never break.
     readBudget: normalizePacketReadBudget(packet.readBudget),
     edgeCaseSites: normalizePacketEdgeCaseSites(packet.edgeCaseSites),
+    // #1490 — deviations + #1491 — explainer: preserved verbatim when valid,
+    // stripped silently when malformed so existing callers never break.
+    deviations: normalizePacketDeviations(packet.deviations),
+    explainer: normalizePacketExplainer(packet.explainer),
   } satisfies OrchestratorPacket;
+}
+
+function normalizePacketDeviations(value: unknown): OrchestratorPacket['deviations'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as { raw?: unknown; entries?: unknown; capturedAt?: unknown };
+  if (typeof raw.raw !== 'string' || typeof raw.capturedAt !== 'string') return undefined;
+  const entries = Array.isArray(raw.entries)
+    ? raw.entries.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 64)
+    : [];
+  return { raw: raw.raw, entries, capturedAt: raw.capturedAt };
+}
+
+function normalizePacketExplainer(value: unknown): OrchestratorPacket['explainer'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as {
+    status?: unknown;
+    artifactId?: unknown;
+    quiz?: unknown;
+    generatedAt?: unknown;
+    error?: unknown;
+  };
+  if (raw.status !== 'generating' && raw.status !== 'ready' && raw.status !== 'failed') {
+    return undefined;
+  }
+  return {
+    status: raw.status,
+    artifactId: typeof raw.artifactId === 'string' && raw.artifactId.trim() ? raw.artifactId.trim() : null,
+    quiz: normalizePacketExplainerQuiz(raw.quiz),
+    changedFileCount: typeof (raw as { changedFileCount?: unknown }).changedFileCount === 'number'
+      && Number.isFinite((raw as { changedFileCount: number }).changedFileCount)
+      ? Math.max(0, Math.floor((raw as { changedFileCount: number }).changedFileCount))
+      : null,
+    generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : null,
+    error: typeof raw.error === 'string' ? raw.error : null,
+  };
+}
+
+function normalizePacketExplainerQuiz(value: unknown): PacketExplainerQuiz | null {
+  if (!value || typeof value !== 'object') return null;
+  const questions = Array.isArray((value as { questions?: unknown }).questions)
+    ? (value as { questions: unknown[] }).questions
+    : [];
+  const normalized = questions
+    .map((question, index) => {
+      if (!question || typeof question !== 'object') return null;
+      const q = question as { id?: unknown; prompt?: unknown; options?: unknown; answerIndex?: unknown };
+      const prompt = typeof q.prompt === 'string' ? q.prompt.trim() : '';
+      const options = Array.isArray(q.options)
+        ? q.options.map((option) => String(option).trim()).filter(Boolean).slice(0, 8)
+        : [];
+      const answerIndex = typeof q.answerIndex === 'number' && Number.isInteger(q.answerIndex) ? q.answerIndex : -1;
+      if (!prompt || options.length < 2 || answerIndex < 0 || answerIndex >= options.length) return null;
+      return {
+        id: typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `q${index + 1}`,
+        prompt,
+        options,
+        answerIndex,
+      };
+    })
+    .filter((question): question is NonNullable<typeof question> => question !== null)
+    .slice(0, 8);
+  if (normalized.length === 0) return null;
+  return { questions: normalized };
 }
 
 function normalizePacketReadBudget(value: unknown): OrchestratorPacket['readBudget'] {
