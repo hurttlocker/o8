@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { packetStatusFromLaneStatus } from '@/lib/orchestrator/packet-state';
 import { recordLaneEvent } from '@/lib/orchestrator/runtime-status';
 import { notifyReviewReady } from '@/lib/push/notify';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -19,6 +20,7 @@ function buildLaneLifecyclePayload(
     laneId: lane.id,
     packetId: lane.packetId,
     status: lane.status,
+    packetStatus: packetStatusFromLaneStatus(lane.status) ?? undefined,
     previousStatus,
     sessionKey: lane.sessionKey,
     branch: lane.branch,

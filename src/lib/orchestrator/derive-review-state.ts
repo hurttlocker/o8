@@ -121,7 +121,6 @@ export function derivePacketReviewState(input: DeriveReviewStateInput): DeriveRe
   if (orchestratorReview?.verdict === 'approved' && mergeGate?.verdict === 'passing') {
     const ts = pickLatestTimestamp([
       orchestratorReview.ts,
-      mergeGate.ts,
     ]) ?? now;
     return { state: 'ready-to-merge', stateChangedAt: ts };
   }
