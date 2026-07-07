@@ -55,6 +55,7 @@ import { track } from '@/lib/analytics/track';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
+import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { ModeChip } from '@/components/desktop/orchestrator/ModeChip';
 import {
@@ -1145,7 +1146,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // applying the restore now would eat the user's message and re-route
         // the in-flight turn. The user acted first — they win; History still
         // offers the old thread explicitly.
-        if (transcriptTouchedRef.current || threadIdRef.current) {
+        if (!shouldApplyAutoRestoreAfterFetch({
+          transcriptTouched: transcriptTouchedRef.current,
+          threadId: threadIdRef.current,
+        })) {
           console.log('[orchestrator] Skipping auto-restore — user activity landed while restore was in flight (#1459)');
           return;
         }
