@@ -111,7 +111,7 @@ function makeThreadRows(threads: MobileOrchestratorThread[], onOpenThread: (id: 
     meta: `${relativeLabel(thread.lastMessageAt)} / ${thread.repoBranch ?? 'main'}`,
     branch: thread.repoBranch ?? 'main',
     model: runtimeLabel(thread.runtime),
-    icon: thread.status === 'busy' ? 'loader' : 'branch',
+    icon: thread.status === 'busy' ? 'loader' : thread.status === 'failed' ? 'alert' : 'branch',
     muted: thread.status === 'idle',
     onClick: () => onOpenThread(thread.id),
   }));

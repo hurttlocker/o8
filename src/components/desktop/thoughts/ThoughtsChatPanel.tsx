@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { formatModelLabel } from '@/lib/format';
-import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
@@ -387,6 +387,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
+  const [activeThreadBackend, setActiveThreadBackend] = useState<OrchestratorBackendId | null>(null);
+  const [activeThreadAgent, setActiveThreadAgent] = useState<string | null>(null);
   // Sidebar trampoline guard: history load, restoreLastThread, and initialThreadId
   // can race. Block re-entry for the same tab while loading and briefly after.
   const inFlightLoadKeyRef = useRef<string | null>(null);
@@ -988,6 +990,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     responseSeenRef.current = false;
     idlePollsRef.current = 0;
     orchStream.reset();
+    setActiveThreadBackend(composerBackendTurnOverride(orchestratorBackend) ?? null);
+    setActiveThreadAgent(null);
     // #597 — immediately mint a fresh threadId and persist an empty
     // placeholder row so History shows the slot even before the first
     // message. The title becomes `New thread · HH:MM` server-side until
@@ -1006,7 +1010,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       void persistThreadNow([], placeholderId, null);
     }
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, persistThreadNow]);
+  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, orchestratorBackend, persistThreadNow]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -1110,7 +1114,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       try {
         const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
         if (!res.ok) return;
-        const data = await res.json() as { conversations?: Array<{ tabId: string; modifiedAt?: string }> };
+        const data = await res.json() as {
+          conversations?: Array<{
+            tabId: string;
+            modifiedAt?: string;
+            backend?: OrchestratorBackendId | null;
+            agent?: string | null;
+          }>;
+        };
         const thoughtsThreads = (data.conversations ?? [])
           .filter((t) => t.tabId.startsWith('thoughts-'))
           .sort((a, b) => new Date(b.modifiedAt ?? 0).getTime() - new Date(a.modifiedAt ?? 0).getTime());
@@ -1132,6 +1143,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const histData = await histRes.json() as {
           messages?: ThoughtsHistoryMessage[];
           planText?: string | null;
+          backend?: OrchestratorBackendId | null;
+          agent?: string | null;
         };
         const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
         // Hard cap: never auto-restore a thread above 100 messages — the user
@@ -1154,6 +1167,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           return;
         }
         setPlanText(histData.planText ?? null);
+        setActiveThreadBackend(histData.backend ?? latest.backend ?? null);
+        setActiveThreadAgent(histData.agent ?? latest.agent ?? null);
         if (msgs.length > 0) {
           setChatMessages(msgs);
           orchStream.replaceTranscript(msgs);
@@ -1214,6 +1229,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const data = await res.json() as {
         messages?: ThoughtsHistoryMessage[];
         planText?: string | null;
+        backend?: OrchestratorBackendId | null;
+        agent?: string | null;
       };
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? []);
       const isSameOpenThread = threadIdRef.current === tabId;
@@ -1223,6 +1240,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         : { entries: msgs, preservedLiveEntries: false };
       setChatMessages(mergedLoad.entries);
       setPlanText(data.planText ?? null);
+      setActiveThreadBackend(data.backend ?? null);
+      setActiveThreadAgent(data.agent ?? null);
       threadIdRef.current = tabId;
       setThreadId(tabId);
       setWaitingForReply(false);
@@ -1273,12 +1292,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   });
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
+  const activeBackendIdentity = isOrchestratorMode
+    ? (activeThreadBackend ?? composerBackendTurnOverride(orchestratorBackend) ?? null)
+    : null;
+  const activeBackendLabel = activeBackendIdentity
+    ? orchestratorBackendDisplayLabel({ backend: activeBackendIdentity, agent: activeThreadAgent })
+    : null;
   const activeTargetLabel = isChatMode
     ? selectedChatModel.label
     : isSingleMode
       ? orchestratorRuntimeTone(singleRuntime).label
       : isOrchestratorMode
-        ? 'Claude Code'
+        ? activeBackendLabel ?? 'Claude Code'
         : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isSingleMode
     ? orchestratorRuntimeTone(singleRuntime).color
@@ -1997,6 +2022,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const handleBackendChange = useCallback((next: OrchestratorBackendSetting) => {
     setOrchestratorBackend(next);
+    setActiveThreadBackend(composerBackendTurnOverride(next) ?? null);
+    setActiveThreadAgent(null);
     void fetch('/api/panel/operator-defaults', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2224,7 +2251,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onEditSteer={handleEditSteer}
         onEditingSteerChange={setEditingSteerId}
         onSlashCommand={handleSlashCommand}
-        modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
+        modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? (model) => {
           setOrchestratorModel(model);

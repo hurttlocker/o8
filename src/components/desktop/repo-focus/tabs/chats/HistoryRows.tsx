@@ -14,6 +14,7 @@ import {
 } from './helpers';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
+import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
 
@@ -204,6 +205,7 @@ export function HistoryChatRow({
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
   const metaParts = compact ? [] : [
+    item.backend ? { text: orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent }) ?? null, status: false } : null,
     rowTone.label ? { text: rowTone.label, status: true } : null,
     { text: formatElapsedAgo(item.modifiedAt), status: false },
   ].filter((part): part is { text: string; status: boolean } => Boolean(part?.text));

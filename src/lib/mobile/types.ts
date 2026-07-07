@@ -410,7 +410,7 @@ export type MobileOrchestratorRuntime = 'claude-code' | 'codex' | 'gemini' | 'op
  *  Derived from the single backend-id source so it tracks new backends (hermes/acp). */
 export type MobileOrchestratorBackend = OrchestratorBackendId;
 
-export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy';
+export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy' | 'failed';
 
 export interface MobileOrchestratorThread {
   id: string;

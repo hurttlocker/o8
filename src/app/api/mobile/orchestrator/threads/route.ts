@@ -65,6 +65,8 @@ export async function POST(request: NextRequest) {
         title?: string | null;
         repoName?: string | null;
         repoBranch?: string | null;
+        backend?: string | null;
+        agent?: string | null;
         reveal?: boolean;
       }
     | null;
@@ -73,12 +75,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'repoPath is required' }, { status: 400, headers: NO_STORE });
   }
 
+  const backend = body.backend === undefined || body.backend === null || body.backend === ''
+    ? null
+    : isOrchestratorBackendId(body.backend) ? body.backend : null;
+  if (body.backend && !backend) {
+    return NextResponse.json({ error: 'Invalid backend' }, { status: 400, headers: NO_STORE });
+  }
+
   try {
     const thread = createMobileOrchestratorThread({
       repoPath: body.repoPath,
       title: body.title,
       repoName: body.repoName,
       repoBranch: body.repoBranch,
+      backend,
+      agent: body.agent,
       reveal: body.reveal,
     });
     return NextResponse.json({ thread }, { headers: NO_STORE });
