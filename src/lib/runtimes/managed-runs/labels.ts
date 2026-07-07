@@ -1,6 +1,7 @@
 export interface ManagedRunLabelInput {
   command: string;
   title?: string | null;
+  startedAt?: string | null;
 }
 
 const MAX_LABEL_LENGTH = 42;
@@ -35,6 +36,13 @@ function detectScriptLabel(command: string): string | null {
   return null;
 }
 
+function timeSuffix(startedAt?: string | null): string {
+  if (!startedAt) return '';
+  const date = new Date(startedAt);
+  if (Number.isNaN(date.getTime())) return '';
+  return ` ${date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+}
+
 export function deriveManagedRunLabel(input: ManagedRunLabelInput): string {
   const declaredTitle = input.title?.trim();
   if (declaredTitle) return compact(declaredTitle);
@@ -43,7 +51,7 @@ export function deriveManagedRunLabel(input: ManagedRunLabelInput): string {
   const scriptLabel = detectScriptLabel(normalized);
   if (scriptLabel) {
     const port = detectPort(normalized);
-    return port ? `${scriptLabel} ${port}` : scriptLabel;
+    return port ? `${scriptLabel} ${port}` : `${scriptLabel}${timeSuffix(input.startedAt)}`;
   }
 
   return compact(normalized);

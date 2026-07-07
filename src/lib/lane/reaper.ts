@@ -331,7 +331,7 @@ export async function reapZombieLane(
       const { autoCommitCompletionWorktree, hasReviewableCompletionDiff } =
         await import('@/lib/supervisor/completion-verification');
       const baseRef = before.baseBranch?.trim() || 'main';
-      const autoCommitted = preservedWork?.autoCommitted ?? await autoCommitCompletionWorktree(before.worktreePath);
+      const autoCommitted = preservedWork?.autoCommitted ?? await autoCommitCompletionWorktree(before.worktreePath, before.label);
       const reviewable =
         autoCommitted || (await hasReviewableCompletionDiff(before.worktreePath, baseRef));
       if (reviewable) {

@@ -35,6 +35,7 @@ import type {
   WorkspaceIsolationPreference,
 } from './types';
 import { getApfsCowCapability } from './apfs';
+import { resetTrackedWorkspaceChanges } from './clean';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
@@ -433,6 +434,7 @@ export class WorktreeManager {
       await this.updateMetaStatus(taskId, 'setup');
       await this.runSetup(worktreePath);
     }
+    await resetTrackedWorkspaceChanges(worktreePath);
 
     // Pre-launch typecheck gate (#1107). The agent's diff is ALWAYS measured
     // against the worktree's tsc, so a non-atomic commit on main HEAD (consumer
@@ -567,10 +569,7 @@ export class WorktreeManager {
       // Ignored files (.env, node_modules) are intentionally preserved —
       // hydration / bootstrap fills those next.
       try {
-        await execFileAsync('git', ['reset', '--hard', 'HEAD'], {
-          cwd: worktreePath,
-          timeout: 15_000,
-        });
+        await resetTrackedWorkspaceChanges(worktreePath);
         await execFileAsync('git', ['clean', '-fd'], {
           cwd: worktreePath,
           timeout: 15_000,
@@ -608,6 +607,7 @@ export class WorktreeManager {
         await this.updateMetaStatus(taskId, 'setup');
         await this.runSetup(worktreePath);
       }
+      await resetTrackedWorkspaceChanges(worktreePath);
 
       info.status = 'ready';
       await this.updateMetaStatus(taskId, 'ready');

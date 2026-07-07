@@ -40,6 +40,7 @@ type RegisterBody = {
   laneId?: string | null;
   panePid?: number;
   mode?: string;
+  startedAt?: string;
   exitCode?: number;
 };
 
@@ -88,7 +89,7 @@ export async function POST(req: Request) {
   if (!RUN_SESSION_RE.test(body.session) || body.session !== `cortex-run-${body.id}`) {
     return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
   }
-  if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD) {
+  if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD || (body.startedAt?.length ?? 0) > MAX_FIELD) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
   }
 
@@ -103,7 +104,9 @@ export async function POST(req: Request) {
     laneId: body.laneId ?? null,
     panePid: typeof body.panePid === 'number' ? body.panePid : null,
     mode: body.mode === 'detach' ? 'detach' : 'stream',
-    startedAt: new Date().toISOString(),
+    startedAt: typeof body.startedAt === 'string' && body.startedAt.trim()
+      ? body.startedAt.trim()
+      : new Date().toISOString(),
     finishedAt: null,
     exitCode: null,
     status: 'running',

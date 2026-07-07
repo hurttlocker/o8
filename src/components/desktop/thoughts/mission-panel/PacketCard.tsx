@@ -76,7 +76,9 @@ export function PacketCard({
   const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
   const dependencyBlocker = packetReleaseBlockedBy(packet, allPackets);
   const hasBranchTarget = hasPacketBranchTarget(packet.branchTarget);
-  const canShowLaunchAction = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
+  const terminalPacket = packet.releaseState === 'released' || packet.status === 'released' || packet.status === 'archived' || packet.status === 'awaiting_review';
+  const visibleBlocker = terminalPacket ? null : (packet.blockedReason ?? (dependencyBlocker ? `Waiting on ${dependencyBlocker.referenceLabel}` : null));
+  const canShowLaunchAction = !terminalPacket && !packet.archivedAt && packet.queueState !== 'held' && !dependencyBlocker;
   const canLaunch = canShowLaunchAction && hasBranchTarget;
   const hasInteractiveLane = Boolean(packet.lane?.tileId && packet.lane?.tabId);
   const matchedTarget = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath) ?? null;
@@ -413,7 +415,7 @@ export function PacketCard({
             </div>
           </div>
 
-          {(packet.blockedReason || dependencyBlocker) ? (
+          {visibleBlocker ? (
             <div
               style={{
                 marginTop: 0,
@@ -430,7 +432,7 @@ export function PacketCard({
                 borderTopColor: 'rgba(239, 68, 68, 0.14)',
               }}
             >
-              {packet.blockedReason ?? `Waiting on ${dependencyBlocker?.referenceLabel}`}
+              {visibleBlocker}
             </div>
           ) : null}
 
@@ -536,7 +538,7 @@ export function PacketCard({
               Delete
             </button>
             <div style={{ flex: 1 }} />
-            {!packet.lane ? (
+            {canShowLaunchAction && !packet.lane ? (
               <button
                 type="button"
                 onClick={onLaunch}
