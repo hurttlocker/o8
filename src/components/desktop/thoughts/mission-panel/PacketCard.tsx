@@ -80,7 +80,7 @@ export function PacketCard({
   const visibleBlocker = terminalPacket ? null : (packet.blockedReason ?? (dependencyBlocker ? `Waiting on ${dependencyBlocker.referenceLabel}` : null));
   const canShowLaunchAction = !terminalPacket && !packet.archivedAt && packet.queueState !== 'held' && !dependencyBlocker;
   const canLaunch = canShowLaunchAction && hasBranchTarget;
-  const hasInteractiveLane = Boolean(packet.lane?.tileId && packet.lane?.tabId);
+  const hasInteractiveLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey || (packet.lane?.tileId && packet.lane?.tabId));
   const matchedTarget = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath) ?? null;
   const targetLabel = matchedTarget?.label ?? null;
   const targetRepoName = matchedTarget?.repoName ?? null;

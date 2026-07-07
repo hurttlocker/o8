@@ -120,6 +120,7 @@ import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
+import { resolveFocusableLaneBinding } from './hooks/focusOrchestrationPacketLane';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import type { GrabbedElement } from '@/lib/browser/grab';
 import { createTileRegistry } from './tileRegistry';
@@ -2397,6 +2398,45 @@ function DashboardInner() {
 
     })();
   }, [ideWorkspaceSessionsForSidebar, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+
+  useEffect(() => {
+    const handleFocusSpawnedAgentLane = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        packetId?: string | null;
+        sessionKey?: string | null;
+        laneId?: string | null;
+        title?: string | null;
+      }>).detail;
+      const packetId = detail?.packetId?.trim() ?? '';
+      const sessionKey = detail?.sessionKey?.trim() ?? '';
+      const laneId = detail?.laneId?.trim() ?? '';
+      const packet = thoughtsMissionStateRef.current.packets.find((candidate) => (
+        (packetId && candidate.id === packetId)
+        || (laneId && candidate.lane?.laneId === laneId)
+        || (sessionKey && candidate.lane?.sessionKey === sessionKey)
+        || (sessionKey && candidate.lane?.tabId === sessionKey)
+      )) ?? null;
+      if (packet) {
+        focusOrchestrationPacketLane(packet);
+        return;
+      }
+      if (sessionKey) handleSelectSession(sessionKey, detail?.title ? { title: detail.title } : undefined);
+      if (!sessionKey && (laneId || packetId)) {
+        void (async () => {
+          const resolvedLane = await resolveFocusableLaneBinding({
+            laneId,
+            packetId,
+            runtime: 'codex',
+          });
+          const resolvedSessionKey = resolvedLane?.sessionKey?.trim();
+          if (!resolvedSessionKey) return;
+          handleSelectSession(resolvedSessionKey, detail?.title ? { title: detail.title } : undefined);
+        })();
+      }
+    };
+    window.addEventListener('o8:focus-spawned-agent-lane', handleFocusSpawnedAgentLane);
+    return () => window.removeEventListener('o8:focus-spawned-agent-lane', handleFocusSpawnedAgentLane);
+  }, [focusOrchestrationPacketLane, handleSelectSession]);
 
   const flashWorkspaceTab = useCallback((tabId: string) => {
     if (!tabId) return;

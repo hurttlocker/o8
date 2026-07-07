@@ -52,6 +52,7 @@ import {
   packetStatusFromLaneStatus,
   pathBelongsToRepoScope,
 } from '../utils';
+import { focusOrchestrationPacketLaneInWorkspace } from './focusOrchestrationPacketLane';
 import { useLaneArchivedView, isRetiredLaneStatus } from './useLaneArchivedSet';
 
 interface UseWorkspaceTerminalArgs {
@@ -850,12 +851,13 @@ export function useWorkspaceTerminal({
   }, [tileLayout.root]);
 
   const focusOrchestrationPacketLane = useCallback((packet: OrchestratorPacket) => {
-    if (!packet.lane) return;
-    const handle = workspaceTerminalHandlesRef.current.get(packet.lane.tileId);
-    if (!handle) return;
-    setActiveTileId(packet.lane.tileId);
-    handle.focusTab(packet.lane.tabId);
-  }, [setActiveTileId]);
+    focusOrchestrationPacketLaneInWorkspace({
+      packet,
+      setActiveTileId,
+      waitForWorkspaceTerminalTarget,
+      workspaceTerminalHandlesRef,
+    });
+  }, [setActiveTileId, waitForWorkspaceTerminalTarget]);
 
   // Rebind packet badges to workspace tabs whenever mission state changes.
   //

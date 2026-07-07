@@ -19,6 +19,7 @@ export interface ExtraAgentRow {
   sessionKey: string | null;
   repoPath: string | null;
   packetId: string | null;
+  laneId: string | null;
   laneStatus: LaneStatus | null;
   lastEventLabel: string | null;
 }
@@ -93,6 +94,7 @@ export function ExtraAgentRowView({
   row,
   active,
   onSelectSession,
+  onFocusRow,
   onOpenMenu,
   busy,
   onRetryPacket,
@@ -100,19 +102,24 @@ export function ExtraAgentRowView({
   row: ExtraAgentRow;
   active: boolean;
   onSelectSession?: (sessionKey: string) => void;
+  onFocusRow?: (row: ExtraAgentRow) => void;
   onOpenMenu?: (event: ReactMouseEvent, row: ExtraAgentRow) => void;
   busy: boolean;
   onRetryPacket?: (row: ExtraAgentRow) => void;
 }) {
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
-  const canFocus = Boolean(row.sessionKey && onSelectSession);
+  const canFocus = Boolean((row.packetId || row.sessionKey || row.laneId) && (onFocusRow || onSelectSession));
   const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
   const canInteract = canFocus || canRetry;
   const [hovered, setHovered] = useState(false);
   const handleClick = useCallback(() => {
+    if (onFocusRow) {
+      onFocusRow(row);
+      return;
+    }
     if (row.sessionKey) onSelectSession?.(row.sessionKey);
-  }, [row.sessionKey, onSelectSession]);
+  }, [onFocusRow, onSelectSession, row]);
 
   return (
     <button
