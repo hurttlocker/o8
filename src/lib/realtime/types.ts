@@ -2,6 +2,7 @@ import type { BrowserAttachmentSummary, BrowserInventorySnapshot } from '@/lib/b
 import type { FleetSnapshot, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import type { LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 
 export const REALTIME_PROTOCOL_VERSION = 1 as const;
 
@@ -24,6 +25,7 @@ export interface LaneLifecycleEventPayload {
   laneId: string;
   packetId: string | null;
   status: LaneStatus;
+  packetStatus?: OrchestratorPacketStatus;
   previousStatus: LaneStatus | null;
   sessionKey: string | null;
   branch: string;

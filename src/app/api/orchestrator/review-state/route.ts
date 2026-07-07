@@ -13,7 +13,10 @@
  *     a lane with a worktree)
  */
 import { NextResponse, type NextRequest } from 'next/server';
+import { listApprovalsForContext } from '@/lib/approvals/store';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import type { Lane } from '@/lib/lane/types';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import {
   derivePacketReviewState,
@@ -44,6 +47,32 @@ function toOrchestratorReview(review: {
     verdict: review.approved ? 'approved' : 'rejected',
     ts: review.recordedAt,
     summary: review.summary,
+  };
+}
+
+function approvalReviewedAt(approval: ApprovalRecord): string {
+  const ts = approval.resolvedAt ?? approval.updatedAt ?? approval.createdAt;
+  return new Date(ts).toISOString();
+}
+
+function toDurableOrchestratorReview(packetId: string, lane: Lane | null): DeriveReviewStateOrchestratorReview | null {
+  const approval = listApprovalsForContext({
+    packetId,
+    laneId: lane?.id,
+    sessionKey: lane?.sessionKey ?? undefined,
+  }).find((candidate) =>
+    candidate.toolName === 'orchestrator_review'
+    && (candidate.status === 'approved' || candidate.status === 'rejected')
+  );
+
+  if (!approval) return null;
+  const approved = typeof approval.args?.approved === 'boolean'
+    ? approval.args.approved
+    : approval.status === 'approved';
+  return {
+    verdict: approved ? 'approved' : 'rejected',
+    ts: approvalReviewedAt(approval),
+    summary: approval.description || approval.summary || '',
   };
 }
 
@@ -99,7 +128,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const orchestratorReview = toOrchestratorReview(packet.review ?? null);
+    const orchestratorReview = toOrchestratorReview(packet.review ?? null)
+      ?? toDurableOrchestratorReview(packetId, lane);
     const mergeGate = toMergeGate(mergePreview);
 
     const { state, stateChangedAt } = derivePacketReviewState({

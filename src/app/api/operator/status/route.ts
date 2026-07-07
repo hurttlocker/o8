@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { listApprovals } from '@/lib/approvals/store';
+import { listLanes } from '@/lib/lane/registry';
+import { buildOperatorStatusAgents, summarizeOperatorStatus } from '@/lib/orchestrator/operator-status-model';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,20 +18,7 @@ export async function GET(request: NextRequest) {
 
     // ── Agents ──
     const sessions = snapshot.agents ?? [];
-    const filteredSessions = sessionKeyFilter
-      ? sessions.filter((s) => s.sessionKey === sessionKeyFilter)
-      : sessions;
-
-    const agents = filteredSessions.map((s) => ({
-      name: s.name || s.sessionKey,
-      repo: s.workspace?.split('/').pop() || 'unknown',
-      runtime: s.runtime || 'unknown',
-      status: s.status || 'idle',
-      branch: s.branch || 'main',
-      elapsed: s.lastEventAt || '',
-      sessionKey: s.sessionKey,
-      task: s.currentTask || null,
-    }));
+    const agents = buildOperatorStatusAgents(sessions, listLanes(), sessionKeyFilter);
 
     // ── Approvals ──
     const pending = sessionKeyFilter
@@ -58,12 +47,11 @@ export async function GET(request: NextRequest) {
     }));
 
     // ── Summary ──
-    const runningCount = agents.filter((a) => a.status === 'running').length;
-    const latestEvent = recentActivity[0];
-    const lastDesc = latestEvent
-      ? `Last: ${latestEvent.action}${latestEvent.target ? ` ${latestEvent.target}` : ''}`
-      : 'No recent activity';
-    const summary = `${runningCount} agent${runningCount === 1 ? '' : 's'} running. ${approvals.count} approval${approvals.count === 1 ? '' : 's'} pending. ${lastDesc}`;
+    const summary = summarizeOperatorStatus({
+      agents,
+      approvalCount: approvals.count,
+      recentActivity,
+    });
 
     return NextResponse.json(
       { summary, agents, approvals, recentActivity },

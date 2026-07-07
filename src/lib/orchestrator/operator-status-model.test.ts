@@ -1,0 +1,93 @@
+import { describe, expect, it } from 'vitest';
+
+import { buildOperatorStatusAgents, summarizeOperatorStatus } from './operator-status-model';
+import type { AgentSummary } from '@/lib/fleet/types';
+import type { Lane } from '@/lib/lane/types';
+
+function agent(overrides: Partial<AgentSummary>): AgentSummary {
+  return {
+    id: 'codex-owned:1',
+    name: 'packet worker',
+    squadId: 'squad-codex',
+    runtime: 'codex',
+    model: 'codex',
+    primaryModel: 'codex',
+    status: 'failed',
+    currentTask: 'running tests',
+    workspace: '/repo/worktree',
+    branch: 'issue/test',
+    sessionKey: 'codex-owned:1',
+    approvalStatus: 'none',
+    lastEventAt: '2m ago',
+    lastActivityAt: Date.now(),
+    context: { usedPercent: 0, trend: 'stable' },
+    alerts: 0,
+    sessionId: '1',
+    sessionKind: 'owned',
+    surfaceLabel: 'Codex',
+    runtimeSurface: {
+      id: 'codex-owned:1',
+      runtime: 'codex',
+      kind: 'terminal-session',
+      ownership: 'owned',
+      title: 'packet worker',
+      cwd: '/repo/worktree',
+      branch: 'issue/test',
+      sourceLabel: 'test',
+      capabilities: { attach: true, readTail: true, sendInput: true, interrupt: true },
+    },
+    ...overrides,
+  } as AgentSummary;
+}
+
+function lane(overrides: Partial<Lane>): Lane {
+  return {
+    id: 'lane-1',
+    repoPath: '/repo',
+    branch: 'issue/test',
+    baseBranch: 'main',
+    status: 'running',
+    runtime: 'codex',
+    label: 'packet worker',
+    sessionKey: 'codex-owned:1',
+    packetId: 'pkt-1',
+    worktreePath: '/repo/worktree',
+    writerToken: null,
+    ownership: 'owned',
+    createdAt: '2026-07-07T00:00:00.000Z',
+    updatedAt: '2026-07-07T00:01:00.000Z',
+    lastEventAt: '2026-07-07T00:01:00.000Z',
+    lastEventLabel: 'session_running',
+    mergeMode: 'direct',
+    mergeModeNote: null,
+    ...overrides,
+  } as Lane;
+}
+
+describe('operator status model', () => {
+  it('uses lane truth to mask transient failed runtime status for active packets', () => {
+    const agents = buildOperatorStatusAgents([agent({ status: 'failed' })], [lane({ status: 'running' })]);
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0].status).toBe('running');
+    expect(summarizeOperatorStatus({ agents, approvalCount: 0 })).toContain('1 agent running');
+  });
+
+  it('keeps summary honest when the returned agents include a real terminal failure', () => {
+    const agents = buildOperatorStatusAgents([agent({ status: 'failed' })], []);
+    const summary = summarizeOperatorStatus({ agents, approvalCount: 0 });
+
+    expect(agents[0].status).toBe('failed');
+    expect(summary).toContain('0 agents running');
+    expect(summary).toContain('1 needs attention');
+    expect(summary).toContain('Last: packet worker failed');
+  });
+
+  it('surfaces reviewable lane status in the same array the summary counts', () => {
+    const agents = buildOperatorStatusAgents([agent({ status: 'running' })], [lane({ status: 'reviewing' })]);
+    const summary = summarizeOperatorStatus({ agents, approvalCount: 0 });
+
+    expect(agents[0].status).toBe('awaiting_review');
+    expect(summary).toContain('1 awaiting review');
+  });
+});
