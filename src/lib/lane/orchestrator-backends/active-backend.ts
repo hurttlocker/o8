@@ -6,7 +6,7 @@
  * every backend implementation. Both re-export from here / billing.
  */
 
-import { resolveInAppOrchestratorEnabledSync, resolveOrchestratorBackendSync } from '@/lib/operator/defaults';
+import { resolveInAppOrchestratorEnabledSync, resolveOrchestratorBackendSync, resolveReviewerBackendSync } from '@/lib/operator/defaults';
 import type { OrchestratorBackendId } from './types';
 
 /**
@@ -25,4 +25,16 @@ export function resolveOrchestratorBackendId(): OrchestratorBackendId {
   const setting = resolveOrchestratorBackendSync();
   if (setting !== 'auto') return setting;
   return resolveInAppOrchestratorEnabledSync() ? 'claude' : 'codex';
+}
+
+/**
+ * Resolve the backend for lane auto-reviews. 'follow' (default) rides the
+ * orchestrator backend; 'claude' / 'codex' pin reviews to that house so the
+ * bulk orchestrator and the accuracy-critical reviewer can run on different
+ * subscriptions (opposite-frontier pairing — Q ruling 2026-07-07).
+ */
+export function resolveReviewerBackendId(): OrchestratorBackendId {
+  const setting = resolveReviewerBackendSync();
+  if (setting !== 'follow') return setting;
+  return resolveOrchestratorBackendId();
 }

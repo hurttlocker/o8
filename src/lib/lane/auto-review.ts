@@ -559,8 +559,11 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   // not by backend capability asymmetry.
   // Backend selected via the orchestrator-backend registry (#1075). Behavior
   // is byte-identical to the prior dual-path branch — see registry.ts.
-  const { getActiveOrchestratorBackend } = await import('./orchestrator-backends/registry');
-  const backend = getActiveOrchestratorBackend();
+  // #reviewer-split (2026-07-07): reviews resolve their OWN backend so the
+  // accuracy-critical review can run on Claude while the bulk orchestrator
+  // stays on Codex. 'follow' (default) = pre-split behavior.
+  const { getActiveReviewerBackend } = await import('./orchestrator-backends/registry');
+  const backend = getActiveReviewerBackend();
   if (backend.id === 'codex') {
     reviewPrompt = appendCodexAutoReviewVerdictInstructions(reviewPrompt);
   }

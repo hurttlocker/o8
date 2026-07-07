@@ -27,6 +27,7 @@ export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
 export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
+export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
 export type AutoApplyUpdates = 'off' | 'when-idle';
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
 
@@ -61,6 +62,7 @@ export interface OperatorDefaults {
   brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
   orchestratorBackend: OrchestratorBackendSetting;
+  reviewerBackend: ReviewerBackendSetting;
   targetingTriage: TargetingTierUI;
   targetingAction: TargetingTierUI;
   autoApplyUpdates: AutoApplyUpdates;
