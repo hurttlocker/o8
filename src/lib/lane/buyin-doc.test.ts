@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BUYIN_DOC_FILENAME,
+  buyinDocFilename,
   buildBuyinDocPrompt,
   shouldGenerateBuyinDoc,
   type GenerateBuyinDocParams,
@@ -27,10 +27,23 @@ describe('shouldGenerateBuyinDoc', () => {
   });
 });
 
+describe('buyinDocFilename', () => {
+  it('is per-packet so concurrent same-repo generations never share a path', () => {
+    expect(buyinDocFilename('pkt-1')).not.toBe(buyinDocFilename('pkt-2'));
+    expect(buyinDocFilename('pkt-1')).toBe('.o8-buyin-doc-pkt-1.html');
+  });
+
+  it('sanitizes packet ids that contain path separators', () => {
+    const name = buyinDocFilename('repo/pkt:1');
+    expect(name).toBe('.o8-buyin-doc-repo_pkt_1.html');
+    expect(name).not.toMatch(/[/:]/);
+  });
+});
+
 describe('buildBuyinDocPrompt', () => {
   it('orders the doc demo-first with objections pre-answered', () => {
     const prompt = buildBuyinDocPrompt(baseParams);
-    expect(prompt).toContain(BUYIN_DOC_FILENAME);
+    expect(prompt).toContain(buyinDocFilename(baseParams.packetId));
     expect(prompt).toMatch(/DEMO \/ PROOF FIRST/);
     expect(prompt).toMatch(/Objections pre-answered/i);
     expect(prompt).toMatch(/plain language/i);

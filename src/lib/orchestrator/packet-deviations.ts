@@ -18,6 +18,13 @@ import { join } from 'node:path';
 export const IMPLEMENTATION_NOTES_FILENAME = 'implementation-notes.md';
 
 /**
+ * Cap on how much of implementation-notes.md we read. A bloated notes file would
+ * otherwise flow verbatim into the reviewer LLM prompt and persist on the packet;
+ * the Deviations section lives at the top, so a leading slice is sufficient.
+ */
+export const MAX_NOTES_BYTES = 64 * 1024;
+
+/**
  * The standing brief clause. Rendered as its own section in every packet prompt
  * (see `buildPacketPrompt`). Kept as a single string so the wording is asserted
  * by a unit test and never drifts silently.
@@ -86,6 +93,10 @@ export function readPacketDeviations(worktreePath: string | null | undefined): P
     content = readFileSync(join(dir, IMPLEMENTATION_NOTES_FILENAME), 'utf8');
   } catch {
     return null;
+  }
+  // Cap the read so a runaway notes file can't bloat the review prompt / packet.
+  if (content.length > MAX_NOTES_BYTES) {
+    content = content.slice(0, MAX_NOTES_BYTES);
   }
   const parsed = parseDeviations(content);
   if (!parsed) {

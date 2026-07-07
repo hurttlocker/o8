@@ -36,13 +36,20 @@ import {
 } from '@/lib/artifacts/store';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
-/** The file the backend agent is told to write at the repo root. */
-export const BUYIN_DOC_FILENAME = '.o8-buyin-doc.html';
+/**
+ * The file the backend agent is told to write at the repo root. PER-PACKET so
+ * concurrent same-repo buy-in generations in one merge wave never race on a
+ * single fixed path (one's `finally` unlink deleting another's file mid-write).
+ */
+export function buyinDocFilename(packetId: string): string {
+  const safe = packetId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) || 'packet';
+  return `.o8-buyin-doc-${safe}.html`;
+}
 
 interface ReviewerBackend {
   id: string;
   label: string;
-  ensureSession: (repoPath: string) => { status: string };
+  ensureSession: (repoPath: string, agent?: string, threadId?: string | null) => { status: string };
   sendTurn: (
     repoPath: string,
     prompt: string,
@@ -108,7 +115,7 @@ export function buildBuyinDocPrompt(params: GenerateBuyinDocParams): string {
     ``,
     params.deviationsRaw ? `Deviations the worker logged from the plan (surface these honestly under "What changed vs. the plan"):\n${params.deviationsRaw}` : `The worker reported no deviations from the plan.`,
     ``,
-    `Produce a SINGLE self-contained .html file at the repo root named exactly \`${BUYIN_DOC_FILENAME}\`.`,
+    `Produce a SINGLE self-contained .html file at the repo root named exactly \`${buyinDocFilename(params.packetId)}\`.`,
     `Document requirements, in this order:`,
     `1. DEMO / PROOF FIRST — the visual proof (or the plain "what shipped" line if none) is the very first thing the reader sees.`,
     `2. What & why — plain language, no jargon, no diff-speak. What can a user/stakeholder now do that they couldn't before, and why it matters.`,
@@ -141,17 +148,17 @@ export async function generateBuyinDoc(params: GenerateBuyinDocParams): Promise<
 
   stamp({ status: 'generating', generatedAt: null });
 
-  const docPath = join(params.repoPath, BUYIN_DOC_FILENAME);
+  const docPath = join(params.repoPath, buyinDocFilename(params.packetId));
+  const threadId = `buyin-${params.laneId}`;
   try {
     const { getActiveReviewerBackend } = await import('./orchestrator-backends/registry');
     const backend = getActiveReviewerBackend() as unknown as ReviewerBackend;
-    const session = backend.ensureSession(params.repoPath);
+    const session = backend.ensureSession(params.repoPath, undefined, threadId);
     if (session.status === 'busy' || session.status === 'dead') {
       throw new Error(`${backend.label} session ${session.status}`);
     }
 
     const prompt = buildBuyinDocPrompt(params);
-    const threadId = `buyin-${params.laneId}`;
     await backend.sendTurn(params.repoPath, prompt, (event) => {
       if (event.type === 'error' && event.error) {
         console.warn(`[buyin-doc] ${backend.label} error: ${event.error}`);

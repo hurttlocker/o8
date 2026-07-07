@@ -179,4 +179,22 @@ describe('packet fields survive normalize', () => {
     expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
     expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
   });
+
+  it('truncates an oversized deviations raw body with an explicit marker', () => {
+    const oversized = 'y'.repeat(200 * 1024);
+    const normalized = normalizeOrchestratorMissionState(stateWithPacket({
+      ...fullPacketFixture(),
+      deviations: {
+        raw: oversized,
+        entries: ['one entry'],
+        capturedAt: '2026-01-01T00:08:00.000Z',
+      },
+    }));
+
+    const raw = normalized.packets[0].deviations?.raw ?? '';
+    expect(raw.length).toBeLessThan(oversized.length);
+    expect(raw).toMatch(/truncated/);
+    // Entries + capturedAt still survive the round-trip untouched.
+    expect(normalized.packets[0].deviations?.entries).toEqual(['one entry']);
+  });
 });
