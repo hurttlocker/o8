@@ -126,6 +126,19 @@ export function isOrchestratorBackendSetting(value: unknown): value is Orchestra
     || value === 'hermes' || value === 'collide' || value === 'fable';
 }
 
+/**
+ * Which backend runs lane auto-reviews. 'follow' (default) rides the active
+ * orchestrator backend — byte-identical to pre-setting behavior. Splitting the
+ * roles lets the bulk orchestrator run on the Codex sub while reviews — short,
+ * bounded, accuracy-critical — run on Claude (opposite-frontier pairing:
+ * Codex writes, Claude reviews). Q ruling 2026-07-07. Env: `O8_REVIEWER_BACKEND`.
+ */
+export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
+
+export function isReviewerBackendSetting(value: unknown): value is ReviewerBackendSetting {
+  return value === 'follow' || value === 'codex' || value === 'claude';
+}
+
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
 
 export function isCollideAggregator(value: unknown): value is CollideAggregator {
@@ -243,6 +256,8 @@ export interface OperatorDefaults {
    * per-request `msg.backend` still overrides this. Env: `O8_ORCHESTRATOR_BACKEND`.
    */
   orchestratorBackend: OrchestratorBackendSetting;
+  /** Which backend runs lane auto-reviews. 'follow' rides orchestratorBackend. */
+  reviewerBackend: ReviewerBackendSetting;
   /** Targeting Machine — the cheap triage/rationale tier (default low effort). */
   targetingTriage: TargetingTier;
   /** Targeting Machine — the premium "point a real agent here" tier (default high). */
@@ -294,6 +309,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // 'auto' → defer to inAppOrchestratorEnabled (legacy claude/codex derivation),
   // so the default is byte-identical to pre-setting behavior.
   orchestratorBackend: 'auto',
+  // 'follow' → reviews ride the orchestrator backend (pre-split behavior).
+  reviewerBackend: 'follow',
   // Targeting Machine tiers. Both default to Codex (the shipping dispatch worker),
   // differentiated by effort — cheap triage at low, premium action at high. The
   // operator can point triage at a cheaper runtime/model (gemini, a local model).
@@ -503,6 +520,12 @@ function envOrchestratorBackend(): OrchestratorBackendSetting | null {
   return null;
 }
 
+function envReviewerBackend(): ReviewerBackendSetting | null {
+  const raw = process.env.O8_REVIEWER_BACKEND?.trim();
+  if (raw && isReviewerBackendSetting(raw)) return raw;
+  return null;
+}
+
 function envCollideAggregator(): CollideAggregator | null {
   const raw = process.env.O8_COLLIDE_AGGREGATOR_DEFAULT?.trim();
   if (raw && isCollideAggregator(raw)) return raw;
@@ -543,6 +566,7 @@ interface StoredOperatorDefaults {
   brainUseClaudeCli?: boolean;
   workersUseBrain?: WorkersUseBrain;
   orchestratorBackend?: OrchestratorBackendSetting;
+  reviewerBackend?: ReviewerBackendSetting;
   targetingTriage?: TargetingTier;
   targetingAction?: TargetingTier;
   autoApplyUpdates?: AutoApplyUpdates;
@@ -645,6 +669,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isOrchestratorBackendSetting(stored.orchestratorBackend)) {
     result.orchestratorBackend = stored.orchestratorBackend;
   }
+  if (isReviewerBackendSetting(stored.reviewerBackend)) {
+    result.reviewerBackend = stored.reviewerBackend;
+  }
   if (stored.autoApplyUpdates === 'off' || stored.autoApplyUpdates === 'when-idle') {
     result.autoApplyUpdates = stored.autoApplyUpdates;
   }
@@ -685,6 +712,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
   const envOrchBackend = envOrchestratorBackend();
+  const envRevBackend = envReviewerBackend();
   const envApplyUpdates = envAutoApplyUpdates();
   const envCollideAgg = envCollideAggregator();
   const envTriage = envTargetingTier('TRIAGE');
@@ -729,6 +757,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
     orchestratorBackend,
+    reviewerBackend: envRevBackend ?? fileValues.reviewerBackend ?? OPERATOR_DEFAULTS_FALLBACK.reviewerBackend,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
@@ -766,6 +795,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
     orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
+    reviewerBackend: envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
@@ -1054,6 +1084,11 @@ export function resolveWorkersUseBrainSync(): WorkersUseBrain {
  */
 export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
   return getOperatorDefaultsSync().values.orchestratorBackend;
+}
+
+/** Which backend runs lane auto-reviews ('follow' → ride the orchestrator). */
+export function resolveReviewerBackendSync(): ReviewerBackendSetting {
+  return getOperatorDefaultsSync().values.reviewerBackend;
 }
 
 export function resolveCollideAggregatorSync(): CollideAggregator {

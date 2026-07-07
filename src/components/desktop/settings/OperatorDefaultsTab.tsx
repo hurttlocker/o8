@@ -40,6 +40,7 @@ import {
   type OperatorDefaults,
   type OperatorDefaultsResponse,
   type OrchestratorBackendSetting,
+  type ReviewerBackendSetting,
   type OverlapGateMode,
 } from './dispatch-shared';
 
@@ -388,6 +389,24 @@ export function OperatorDefaultsTab() {
               />
             }
             disabled={envLocked('orchestratorBackend') || busyField === 'orchestratorBackend'}
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Reviewer"
+            subtitle={lockedSub('reviewerBackend', 'Who reviews finished lanes before merge — Follow rides the Backend above')}
+            accessory={
+              <SettingsSegmented
+                value={values.reviewerBackend}
+                onChange={(next) => { updateField('reviewerBackend', next as ReviewerBackendSetting); }}
+                options={[
+                  { value: 'follow', label: 'Follow' },
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'codex', label: 'Codex' },
+                ]}
+              />
+            }
+            disabled={envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
             divider
           />
           <SettingsRow

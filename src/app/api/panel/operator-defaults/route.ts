@@ -4,6 +4,7 @@ import {
   getOperatorDefaults,
   isCollideAggregator,
   isOrchestratorBackendSetting,
+  isReviewerBackendSetting,
   updateOperatorDefaults,
   type OperatorDefaults,
   type OverlapGateMode,
@@ -201,6 +202,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
     }
     update.orchestratorBackend = raw;
+  }
+
+  if (body.reviewerBackend !== undefined) {
+    const raw = body.reviewerBackend;
+    if (!isReviewerBackendSetting(raw)) {
+      throw new Error('reviewerBackend must be one of "follow", "codex", "claude".');
+    }
+    update.reviewerBackend = raw;
   }
 
   if (body.autoApplyUpdates !== undefined) {

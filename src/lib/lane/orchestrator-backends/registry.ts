@@ -13,7 +13,7 @@
  * single chokepoint that knows which backend is active.
  */
 
-import { resolveOrchestratorBackendId } from './active-backend';
+import { resolveOrchestratorBackendId, resolveReviewerBackendId } from './active-backend';
 import { claudeBackend } from './claude';
 import { codexBackend } from './codex';
 import { openclawBackend } from './openclaw';
@@ -53,10 +53,15 @@ export function getOrchestratorBackend(id: OrchestratorBackendId): OrchestratorB
 // code must import these from './billing' / './active-backend' DIRECTLY —
 // importing via this registry pulls every backend implementation (and their
 // session modules) into the bundle.
-export { resolveOrchestratorBackendId } from './active-backend';
+export { resolveOrchestratorBackendId, resolveReviewerBackendId } from './active-backend';
 export { isMeteredOrchestratorBackend } from './billing';
 
 /** The active backend, resolved from operator settings. */
 export function getActiveOrchestratorBackend(): OrchestratorBackend {
   return getOrchestratorBackend(resolveOrchestratorBackendId());
+}
+
+/** The backend that runs lane auto-reviews ('follow' rides the orchestrator). */
+export function getActiveReviewerBackend(): OrchestratorBackend {
+  return getOrchestratorBackend(resolveReviewerBackendId());
 }
