@@ -46,6 +46,7 @@ export function shouldRetainCurrentCommandCenterSnapshot(
 function hasMeaningfulMobileTruth(snapshot: MobileInboxSnapshot) {
   return snapshot.mode === 'live'
     || snapshot.sessions.length > 0
+    || (snapshot.fleetSessions ?? []).length > 0
     || snapshot.items.length > 0
     || Boolean(snapshot.review)
     || Boolean(snapshot.primarySessionKey);
@@ -63,6 +64,7 @@ export function shouldRetainCurrentMobileSnapshot(
   if (current.primarySessionKey && !incoming.snapshot.primarySessionKey && incoming.source !== 'hot-broker') return true;
   if (current.items.length > 0 && incoming.snapshot.items.length === 0 && incoming.source !== 'hot-broker') return true;
   if (current.sessions.length > 0 && incoming.snapshot.sessions.length === 0 && incoming.source !== 'hot-broker') return true;
+  if ((current.fleetSessions ?? []).length > 0 && (incoming.snapshot.fleetSessions ?? []).length === 0 && incoming.source !== 'hot-broker') return true;
 
   return false;
 }

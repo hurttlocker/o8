@@ -6,10 +6,14 @@ export { getMobileInboxSnapshot, invalidateInboxCache } from './inbox';
 export { getMobileSessionTranscript } from './history';
 
 export type {
-  MobileInboxSnapshot,
-  MobileInboxItem,
-  MobileInboxSummary,
-  MobileTranscriptEntry,
+	  MobileInboxSnapshot,
+	  MobileInboxItem,
+	  MobileInboxSummary,
+	  MobileFleetSession,
+	  MobileFleetStatus,
+	  MobileFleetRuntime,
+	  MobileFleetAction,
+	  MobileTranscriptEntry,
   MobileTranscriptMedia,
   MobileRuntimeTailGroup,
   MobileHistoryResponse,
