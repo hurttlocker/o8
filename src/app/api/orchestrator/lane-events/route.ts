@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_TIMEOUT_MS = 5_000;
-const MAX_TIMEOUT_MS = 25_000;
+const MAX_TIMEOUT_MS = 12_000;
 
 function parseSince(raw: string | null): number {
   if (!raw) return 0;

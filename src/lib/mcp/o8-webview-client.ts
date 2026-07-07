@@ -6,6 +6,7 @@ import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
 
 const DEFAULT_WINDOW_LABEL = 'main';
 const REQUEST_TIMEOUT_MS = 30_000;
+const MUTATION_ACK_TIMEOUT_RE = /(?:timeout waiting for .* response|request timed out|timed out after)/i;
 
 /**
  * Commands safe to re-fire after a reconnect: pure reads with no side
@@ -77,6 +78,11 @@ function getErrorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
     ? error.code
     : undefined;
+}
+
+function isMutationAckTimeout(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return MUTATION_ACK_TIMEOUT_RE.test(message);
 }
 
 function extractDataUrlPayload(value: unknown): { base64: string; mimeType: string } {
@@ -359,6 +365,7 @@ export class O8WebviewClient {
   private buffer = '';
   private authToken?: string;
   private readonly pending = new Map<string, PendingRequest>();
+  private typeQueue: Promise<unknown> = Promise.resolve();
 
   constructor() {
     const username = os.userInfo().username;
@@ -386,12 +393,20 @@ export class O8WebviewClient {
   }
 
   async snapshot(): Promise<{ tree: string }> {
-    const pageMap = coercePageMap(await this.sendCommand('get_page_map', {
+    const payload = {
       window_label: DEFAULT_WINDOW_LABEL,
       include_content: false,
       interactive_only: false,
       include_metadata: false,
-    }));
+    };
+    let raw: unknown;
+    try {
+      raw = await this.sendCommand('get_page_map', payload);
+    } catch (error) {
+      if (!isMutationAckTimeout(error)) throw error;
+      raw = await this.sendCommand('get_page_map', payload);
+    }
+    const pageMap = coercePageMap(raw);
     return { tree: formatSnapshotTree(pageMap) };
   }
 
@@ -435,9 +450,14 @@ export class O8WebviewClient {
     return JSON.stringify({ ok: false, err: 'target not HTMLElement', tag: target.tagName });
   }
   try { target.focus({ preventScroll: true }); } catch (_) {}
-  target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y} }));
-  target.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y} }));
-  target.click();
+  const mouse = { bubbles: true, cancelable: true, composed: true, view: window, clientX: ${x}, clientY: ${y}, button: 0 };
+  const pointer = Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, mouse);
+  const PointerCtor = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+  target.dispatchEvent(new PointerCtor('pointerdown', Object.assign({ buttons: 1 }, pointer)));
+  target.dispatchEvent(new MouseEvent('mousedown', Object.assign({ buttons: 1 }, mouse)));
+  target.dispatchEvent(new PointerCtor('pointerup', Object.assign({ buttons: 0 }, pointer)));
+  target.dispatchEvent(new MouseEvent('mouseup', Object.assign({ buttons: 0 }, mouse)));
+  target.dispatchEvent(new MouseEvent('click', Object.assign({ buttons: 0, detail: 1 }, mouse)));
   const cls = (target.className || '').toString().slice(0, 80);
   return JSON.stringify({ ok: true, tag: target.tagName, id: target.id || null, cls, title: target.title || null });
 })()`;
@@ -455,12 +475,27 @@ export class O8WebviewClient {
     return { ok: true, element: parsed.tag };
   }
 
-  async type(text: string): Promise<{ ok: boolean }> {
-    await this.sendCommand('type_into_focused', {
-      window_label: DEFAULT_WINDOW_LABEL,
-      text,
-    });
-    return { ok: true };
+  async type(text: string): Promise<{ ok: boolean; warning?: string }> {
+    const run = async (): Promise<{ ok: boolean; warning?: string }> => {
+      try {
+        await this.sendCommand('type_into_focused', {
+          window_label: DEFAULT_WINDOW_LABEL,
+          text,
+        });
+        return { ok: true };
+      } catch (error) {
+        if (!isMutationAckTimeout(error)) throw error;
+        const verified = await this.focusedValueEndsWith(text).catch(() => false);
+        if (!verified) throw error;
+        return {
+          ok: true,
+          warning: `type ack timed out after the text landed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    };
+    const queued = this.typeQueue.then(run, run);
+    this.typeQueue = queued.catch(() => undefined);
+    return queued;
   }
 
   async scroll(opts: {
@@ -469,16 +504,24 @@ export class O8WebviewClient {
     toRef?: number;
     toTop?: boolean;
     toBottom?: boolean;
-  }): Promise<{ ok: boolean }> {
-    await this.sendCommand('scroll_page', {
-      window_label: DEFAULT_WINDOW_LABEL,
-      direction: opts.direction,
-      amount: opts.amount,
-      to_ref: opts.toRef,
-      to_top: opts.toTop,
-      to_bottom: opts.toBottom,
-    });
-    return { ok: true };
+  }): Promise<{ ok: boolean; warning?: string }> {
+    try {
+      await this.sendCommand('scroll_page', {
+        window_label: DEFAULT_WINDOW_LABEL,
+        direction: opts.direction,
+        amount: opts.amount,
+        to_ref: opts.toRef,
+        to_top: opts.toTop,
+        to_bottom: opts.toBottom,
+      });
+      return { ok: true };
+    } catch (error) {
+      if (!isMutationAckTimeout(error)) throw error;
+      return {
+        ok: true,
+        warning: `scroll ack timed out after dispatch; treating as delivered to avoid duplicate scrolling: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   async pressKey(opts: {
@@ -525,6 +568,17 @@ export class O8WebviewClient {
       code,
     });
     return { result: normalizeTextResult(result) };
+  }
+
+  private async focusedValueEndsWith(text: string): Promise<boolean> {
+    const suffix = JSON.stringify(text);
+    const raw = await this.evalJs(`(() => {
+      const el = document.activeElement;
+      if (!el) return 'false';
+      const value = typeof el.value === 'string' ? el.value : (el.textContent || '');
+      return value.endsWith(${suffix}) ? 'true' : 'false';
+    })()`);
+    return raw.result === 'true';
   }
 
   async waitFor(opts: { selector: string; text?: string; timeoutMs?: number }): Promise<{
