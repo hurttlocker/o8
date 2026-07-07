@@ -61,6 +61,53 @@ export interface MobileInboxSummary {
   activeRuns: number;
 }
 
+export type MobileFleetRuntime = 'codex' | 'claude-code' | 'openclaw' | 'hermes' | 'unknown';
+export type MobileFleetStatus =
+  | 'queued'
+  | 'running'
+  | 'huddling'
+  | 'paused'
+  | 'stopped'
+  | 'blocked'
+  | 'awaiting_review'
+  | 'needs_merge'
+  | 'merged'
+  | 'failed'
+  | 'idle';
+export type MobileFleetAction =
+  | 'inspect'
+  | 'open_terminal'
+  | 'open_preview'
+  | 'pause'
+  | 'resume'
+  | 'stop'
+  | 'approve'
+  | 'request_changes'
+  | 'merge';
+
+export interface MobileFleetSession {
+  id: string;
+  sessionKey: string;
+  runtime: MobileFleetRuntime;
+  status: MobileFleetStatus;
+  title: string;
+  repo: string;
+  repoPath: string;
+  branch: string;
+  worktreePath?: string | null;
+  terminalSessionName?: string | null;
+  terminalAvailable?: boolean;
+  previewUrl?: string | null;
+  filesChanged?: number;
+  additions?: number;
+  deletions?: number;
+  approvalId?: string;
+  reviewAuthority?: 'approval_gate' | 'inspect_only' | null;
+  actions: MobileFleetAction[];
+  lastEventAt?: string | null;
+  lastActivityAt?: number | null;
+}
+
 export interface MobileReviewFocus {
   repoSlug: string;
   branch: string;
@@ -123,6 +170,7 @@ export interface MobileInboxSnapshot {
   primarySessionKey?: string;
   note?: string;
   sessions: AgentSummary[];
+  fleetSessions: MobileFleetSession[];
   approvals: MobileApprovalCard[];
   reviewUnits: MobileReviewUnit[];
   items: MobileInboxItem[];

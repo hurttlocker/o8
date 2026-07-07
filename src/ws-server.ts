@@ -2473,6 +2473,9 @@ function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInbo
   for (const s of inbox.sessions) {
     fp += `\x02${s.id}\x01${s.sessionKey}\x01${s.status}\x01${s.currentTask}\x01${s.approvalStatus}\x01${s.lastEventAt}\x01${s.branch}\x01${s.alerts}`;
   }
+  for (const s of inbox.fleetSessions ?? []) {
+    fp += `\x05${s.id}\x01${s.sessionKey}\x01${s.runtime}\x01${s.status}\x01${s.title}\x01${s.repoPath}\x01${s.branch}\x01${s.terminalSessionName ?? ''}\x01${s.previewUrl ?? ''}\x01${s.approvalId ?? ''}\x01${s.reviewAuthority ?? ''}\x01${s.actions.join(',')}\x01${s.lastEventAt ?? ''}\x01${s.lastActivityAt ?? ''}`;
+  }
   for (const item of inbox.items) {
     fp += `\x03${item.id}\x01${item.kind}\x01${item.severity}\x01${item.detail}\x01${item.title}\x01${item.sessionKey}`;
   }
