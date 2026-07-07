@@ -35,12 +35,14 @@ export function MissionCompleteGroupCard({
   const [hover, setHover] = useState(false);
 
   const totalMerged = entries.reduce(
-    (sum, e) => sum + (e.event.kind === 'mission-complete' ? (e.event.mergedCount ?? 0) : 0),
+    (sum, e) => sum + (e.event.kind === 'mission-complete' ? (e.event.mergedCount ?? 0) : e.event.kind === 'merge' ? 1 : 0),
     0,
   );
   const latestTs = entries[entries.length - 1]?.timestampLabel;
   const headline = `${totalMerged} ${totalMerged === 1 ? 'packet' : 'packets'} merged & archived`;
-  const sub = `${entries.length} missions`;
+  const sub = entries.every((entry) => entry.event.kind === 'mission-complete')
+    ? `${entries.length} missions`
+    : `${entries.length} packet updates`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', marginBottom: isLast ? 32 : undefined }}>
