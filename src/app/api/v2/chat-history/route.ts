@@ -16,6 +16,7 @@ import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
+import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -74,6 +75,10 @@ function normalizeModel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, 128) : undefined;
+}
+
+function normalizeTitle(value: unknown): string | undefined {
+  return normalizePersistedChatTitle(value);
 }
 
 function isThoughtsThread(tabId: unknown): tabId is string {
@@ -189,7 +194,7 @@ export async function POST(request: NextRequest) {
     starred = existing.starred || false;
     pinned = existing.pinned === true;
     model = normalizeModel(existing.model);
-    title = existing.title;
+    title = normalizeTitle(existing.title);
     planText = normalizePlanText(existing.planText);
     repoName = existing.repoName;
     repoPath = existing.repoPath;
@@ -250,7 +255,11 @@ export async function POST(request: NextRequest) {
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
     pinned: body.pinned ?? pinned,
-    title: body.title ?? title,
+    title: resolvePersistedChatHistoryTitle({
+      tabId: body.tabId,
+      existingTitle: title,
+      incomingTitle: body.title,
+    }),
     planText: normalizePlanText(body.planText) ?? planText ?? extractedPlanText,
     repoName: repoMetadata.repoName,
     repoPath: repoMetadata.repoPath,

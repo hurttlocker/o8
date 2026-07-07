@@ -57,10 +57,9 @@ export function useOrchestratorStatusFeed({
     repoRef.current = repoPath;
   });
 
-  // Surface Mission-complete cards recorded by the detector. The detector keeps
-  // them (non-consuming), so we re-assert on becoming active and whenever a new
-  // card is recorded; appendLocalEntries dedups by id, so this is a no-op once
-  // the card is present and survives a thread reload (which re-asserts again).
+  // Surface Mission-complete cards recorded by the detector. The detector
+  // consumes cards on read, so a completed mission is delivered to one owning
+  // transcript and cannot later re-emit into a fresh thread for the same repo.
   useEffect(() => {
     if (!active) return undefined;
     const assert = () => {

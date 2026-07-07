@@ -47,6 +47,10 @@ function timestampLabelFrom(timestamp: unknown): string {
     : '';
 }
 
+function fallbackTimestampFor(message: StoredTranscriptMessage): number {
+  return message.statusEvent?.kind === 'mission-complete' ? 0 : Date.now();
+}
+
 function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscriptEntry | null {
   const message = isStoredTranscriptMessage(value) ? value : null;
   if (!message || message.isPartial) return null;
@@ -54,7 +58,7 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
 
   const timestamp = dropInvalid
     ? (typeof message.timestamp === 'number' ? message.timestamp : undefined)
-    : (message.timestamp ?? Date.now());
+    : (message.timestamp ?? fallbackTimestampFor(message));
   const text = dropInvalid
     ? (typeof message.text === 'string'
         ? message.text

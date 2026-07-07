@@ -17,6 +17,7 @@ async function loadHistoryModule() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.doUnmock('node:os');
   vi.resetModules();
   for (const home of tempHomes.splice(0)) {
@@ -67,5 +68,37 @@ describe('orchestrator thread history persistence', () => {
     writeFileSync(filePath, raw.replace('"Alpha"', '"Charlie"'));
 
     expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Charlie');
+  });
+
+  it('does not derive missing orchestrator titles from prompt text', async () => {
+    const history = await loadHistoryModule();
+    const tabId = 'thoughts-1783108800000';
+
+    history.appendMobileOrchestratorUserMessage({
+      tabId,
+      repoPath: '/tmp/repo',
+      message: 'The hygiene packet is awaiting review. Review the diff properly.',
+      backend: 'codex',
+      timestampMs: new Date('2026-07-07T21:29:00.000Z').getTime(),
+    });
+
+    const listed = history.listMobileOrchestratorThreads()[0];
+    expect(listed?.title).toContain('2026-07-03');
+    expect(listed?.title).not.toContain('hygiene packet');
+  });
+
+  it('does not turn a normal message append into a fresh reveal request', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', reveal: false });
+
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: 'keep this thread quiet',
+      backend: 'codex',
+      timestampMs: new Date('2026-07-07T21:29:00.000Z').getTime(),
+    });
+
+    expect(history.listMobileOrchestratorRevealRequests('2026-07-07T00:00:00.000Z')).toEqual([]);
   });
 });

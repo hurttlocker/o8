@@ -912,7 +912,7 @@ function DashboardInner() {
     // and the thread id (for chat-history-keyed surfaces) so both
     // listeners can fire correctly.
     window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
-      detail: { tabId: workspaceTabId, threadId, title: trimmed },
+      detail: { tabId: workspaceTabId, threadId, title: trimmed, source: 'user' },
     }));
   }, [workspaceHeaderActive.tabId]);
 
