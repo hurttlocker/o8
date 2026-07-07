@@ -150,6 +150,7 @@ export const ThreadCard = memo(function ThreadCard({
   const dotColor =
     thread.status === 'busy' ? colors.amber
       : thread.status === 'ready' ? colors.success
+        : thread.status === 'failed' ? colors.danger
         : colors.textTertiary;
 
   const cardStyle: CSSProperties = {
