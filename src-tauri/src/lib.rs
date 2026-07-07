@@ -3033,9 +3033,24 @@ mod stt_engine {
             let is_agent = crate::fn_hotkey::take_agent_mode();
 
             // Whisper re-transcribes the recorded WAV BEFORE polish; on
-            // failure/empty it falls back to Apple's transcript.
+            // failure/empty it falls back to Apple's transcript. SHORT
+            // utterances skip the pass entirely — Apple's live transcript is
+            // reliable at command length, and the re-transcription round-trip
+            // was most of the release-to-paste lag on quick dictations
+            // (operator-approved 2026-07-07). Polish still runs and still
+            // hears the audio, so a rare short mishear gets corrected there.
+            let apple_word_count = apple_text.split_whitespace().count();
+            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12;
+            if skip_whisper_short {
+                log::info!(
+                    "[stt] whisper skipped: short utterance ({apple_word_count} words) — using Apple transcript"
+                );
+            }
             let (raw_text, whisper_used) =
-                match (crate::stt::whisper::enabled(), audio_file.as_str()) {
+                match (
+                    crate::stt::whisper::enabled() && !skip_whisper_short,
+                    audio_file.as_str(),
+                ) {
                     (true, path) if !path.is_empty() => {
                         match crate::stt::whisper::transcribe_file(path) {
                             Some(result) => {
