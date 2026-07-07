@@ -8,6 +8,7 @@ import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 import { getMobileSessionTranscript } from '@/lib/mobile/history';
+import { buildMobileReviewUnits, shouldExposeWorkspaceReviewSnapshot, summarizeMobileReviewUnits } from '@/lib/mobile/review-units';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const runtimeSurface = agent.runtimeSurface;
@@ -347,7 +348,33 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     : '';
 
   const items: MobileInboxItem[] = [];
-  const approvals = pendingApprovals.map(toMobileApprovalCard);
+  const reviewUnits = await buildMobileReviewUnits({
+    sessions: orderedSessions,
+    pendingApprovals,
+    reviewSnapshot,
+  });
+  const reviewUnitsByApprovalId = new Map(reviewUnits
+    .filter((unit) => unit.approvalId)
+    .map((unit) => [unit.approvalId as string, unit]));
+  const approvals = pendingApprovals.map((approval) => {
+    const card = toMobileApprovalCard(approval);
+    const unit = reviewUnitsByApprovalId.get(approval.id);
+    if (!unit) return card;
+    return {
+      ...card,
+      repo: unit.repo,
+      repoPath: unit.repoPath,
+      repoSlug: unit.repoSlug,
+      branch: unit.branch,
+      changedFilePaths: unit.changedFiles.map((file) => file.path),
+      filesChanged: unit.fileCount,
+      additions: unit.additions,
+      deletions: unit.deletions,
+      previewUrl: unit.previewUrl,
+      terminalSessionName: unit.terminalSessionName,
+      approvalId: unit.approvalId,
+    };
+  });
 
   if (primarySession) {
     items.push({
@@ -426,23 +453,24 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
   }
 
   let review: MobileReviewFocus | undefined;
-  if (reviewSnapshot) {
-    const leadPr = reviewSnapshot.pullRequests[0];
-    const changedCount = reviewSnapshot.changedFiles.length;
-    const issueStackLabel = reviewSnapshot.activeIssues.length
-      ? ` • ${reviewSnapshot.activeIssues.map((issue) => `#${issue.number}`).join(' • ')}`
+  const exposedReviewSnapshot = shouldExposeWorkspaceReviewSnapshot(reviewSnapshot) ? reviewSnapshot : null;
+  if (exposedReviewSnapshot) {
+    const leadPr = exposedReviewSnapshot.pullRequests[0];
+    const changedCount = exposedReviewSnapshot.changedFiles.length;
+    const issueStackLabel = exposedReviewSnapshot.activeIssues.length
+      ? ` • ${exposedReviewSnapshot.activeIssues.map((issue) => `#${issue.number}`).join(' • ')}`
       : '';
 
     items.push({
-      id: `review:${reviewSnapshot.branch}`,
+      id: `review:${exposedReviewSnapshot.branch}`,
       kind: 'review',
-      severity: reviewSnapshot.dirty ? 'warning' : 'info',
+      severity: exposedReviewSnapshot.dirty ? 'warning' : 'info',
       title: leadPr
         ? `Review ready • PR #${leadPr.number}`
-        : `Review surface • ${reviewSnapshot.branch}`,
+        : `Review surface • ${exposedReviewSnapshot.branch}`,
       detail: leadPr
         ? `${leadPr.title} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}${issueStackLabel}`
-        : `${reviewSnapshot.branch} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}${issueStackLabel}`,
+        : `${exposedReviewSnapshot.branch} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}${issueStackLabel}`,
       timestampLabel: 'desktop review',
       actions: [
         {
@@ -461,19 +489,19 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     });
 
     review = {
-      repoSlug: reviewSnapshot.repoSlug,
-      branch: reviewSnapshot.branch,
+      repoSlug: exposedReviewSnapshot.repoSlug,
+      branch: exposedReviewSnapshot.branch,
       desktopHref: '/#workflow-review-panel',
       pullRequest: leadPr,
-      issues: reviewSnapshot.activeIssues,
-      changedFiles: reviewSnapshot.changedFiles,
-      diffStat: reviewSnapshot.diffStat,
+      issues: exposedReviewSnapshot.activeIssues,
+      changedFiles: exposedReviewSnapshot.changedFiles,
+      diffStat: exposedReviewSnapshot.diffStat,
     };
   }
 
   const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
   const approvalCount = pendingApprovals.length;
-  const reviewItems = items.filter((item) => item.kind === 'review').length;
+  const { reviewItems, inspectOnlyReviews } = summarizeMobileReviewUnits(reviewUnits);
   const activeRuns = orderedSessions.filter((agent) => ['running', 'huddling', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
 
   return {
@@ -486,11 +514,13 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
       : fleet.meta.note,
     sessions: orderedSessions,
     approvals,
+    reviewUnits,
     items,
     summary: {
       alerts,
       approvals: approvalCount,
       reviewItems,
+      inspectOnlyReviews,
       activeRuns,
     },
     review,
