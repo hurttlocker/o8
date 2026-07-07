@@ -220,6 +220,7 @@ function modelForBackend(backend: MobileOrchestratorBackend | null): string | nu
   if (backend === 'claude') return 'claude-code';
   if (backend === 'codex') return 'codex';
   if (backend === 'openclaw') return 'openclaw';
+  if (backend === 'hermes') return 'hermes';
   return null;
 }
 
@@ -430,6 +431,8 @@ export function createMobileOrchestratorThread(input: {
   title?: string | null;
   repoName?: string | null;
   repoBranch?: string | null;
+  backend?: MobileOrchestratorBackend | null;
+  agent?: string | null;
   reveal?: boolean;
 }): MobileOrchestratorThread {
   const repoPath = input.repoPath.trim();
@@ -439,9 +442,10 @@ export function createMobileOrchestratorThread(input: {
 
   const now = new Date().toISOString();
   const tabId = nextThreadId();
+  const backend = input.backend ?? DEFAULT_BACKEND;
   const record: OrchestratorHistoryRecord = {
     messages: [],
-    model: DEFAULT_MODEL,
+    model: modelForBackend(backend) ?? DEFAULT_MODEL,
     savedAt: now,
     starred: false,
     pinned: false,
@@ -450,8 +454,8 @@ export function createMobileOrchestratorThread(input: {
     repoName: trimTitle(input.repoName, repoNameFromPath(repoPath) ?? 'Project'),
     repoBranch: typeof input.repoBranch === 'string' && input.repoBranch.trim() ? input.repoBranch.trim() : null,
     remoteUrl: null,
-    backend: DEFAULT_BACKEND,
-    agent: null,
+    backend,
+    agent: normalizeAgent(input.agent),
     archivedAt: null,
     orchestratorVisible: true,
     mobileCreatedAt: now,
@@ -469,6 +473,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   repoPath: string;
   message: string;
   backend?: MobileOrchestratorBackend | null;
+  agent?: string | null;
   timestampMs?: number;
 }): MobileOrchestratorThread | null {
   const tabId = input.tabId;
@@ -492,7 +497,7 @@ export function appendMobileOrchestratorUserMessage(input: {
     repoPath: input.repoPath,
     repoName: repoNameFromPath(input.repoPath),
     backend: input.backend ?? DEFAULT_BACKEND,
-    agent: null,
+    agent: normalizeAgent(input.agent),
     archivedAt: null,
     orchestratorVisible: true,
     orchestratorSessionIds: {},
@@ -526,6 +531,7 @@ export function appendMobileOrchestratorUserMessage(input: {
       ? existing.repoName
       : repoNameFromPath(input.repoPath),
     backend: normalizeBackend(existing.backend) ?? input.backend ?? DEFAULT_BACKEND,
+    agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
     mobileRevealRequestedAt: existing.mobileRevealRequestedAt ?? null,
     orchestratorVisible: true,
   });
@@ -539,6 +545,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
   messageId: string;
   content: string;
   backend?: MobileOrchestratorBackend | null;
+  agent?: string | null;
   sessionId?: string | null;
   model?: string | null;
   timestampMs?: number;
@@ -629,6 +636,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
     messages: nextMessages,
     model: nextModel,
     backend: nextBackend,
+    agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
     savedAt: nowIso,
     repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
       ? existing.repoPath
