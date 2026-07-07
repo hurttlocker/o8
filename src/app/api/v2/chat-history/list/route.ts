@@ -12,6 +12,7 @@ import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
+import { stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
 // after this window — gives the operator time to come back to a fresh tab
@@ -146,16 +147,16 @@ export async function GET(request: NextRequest) {
 
         // Placeholder title for empty threads (created via + New but not typed into yet).
         // Gets replaced by the first user message once the operator types.
-        const placeholderTitle = (() => {
-          const saved = data.savedAt ? new Date(data.savedAt) : stat.birthtime ?? stat.mtime;
-          const hh = String(saved.getHours()).padStart(2, '0');
-          const mm = String(saved.getMinutes()).padStart(2, '0');
-          return `New thread · ${hh}:${mm}`;
-        })();
+        const saved = data.savedAt ? new Date(data.savedAt) : stat.birthtime ?? stat.mtime;
+        const placeholderTitle = tabId.startsWith('thoughts-')
+          ? stableOrchestratorThreadTitleForId(tabId, saved)
+          : stableNewThreadTitle(saved);
 
-        const title = data.title || (firstUserMsg
-          ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
-          : isEmpty ? placeholderTitle : 'Untitled conversation');
+        const title = data.title || (tabId.startsWith('thoughts-')
+          ? placeholderTitle
+          : firstUserMsg
+            ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
+            : isEmpty ? placeholderTitle : 'Untitled conversation');
 
         // Preview from last message (empty threads show nothing).
         const preview = lastMsg

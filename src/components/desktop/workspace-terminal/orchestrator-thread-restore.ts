@@ -11,6 +11,7 @@
 
 const THREAD_ID_KEY = 'o8:last-orchestrator-thread-id';
 const THREAD_TITLE_KEY = 'o8:last-orchestrator-thread-title';
+const THREAD_TITLE_ID_KEY = 'o8:last-orchestrator-thread-title-id';
 
 export function readLastOrchestratorThreadId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -24,6 +25,9 @@ export function readLastOrchestratorThreadId(): string | null {
 export function readLastOrchestratorThreadTitle(): string | null {
   if (typeof window === 'undefined') return null;
   try {
+    const threadId = window.localStorage.getItem(THREAD_ID_KEY);
+    const titleThreadId = window.localStorage.getItem(THREAD_TITLE_ID_KEY);
+    if (!threadId || titleThreadId !== threadId) return null;
     return window.localStorage.getItem(THREAD_TITLE_KEY);
   } catch {
     return null;
@@ -43,8 +47,10 @@ export function writeLastOrchestratorThread(threadId: string | null, title?: str
     if (title !== undefined) {
       if (title && title.trim()) {
         window.localStorage.setItem(THREAD_TITLE_KEY, title.trim());
+        if (threadId) window.localStorage.setItem(THREAD_TITLE_ID_KEY, threadId);
       } else {
         window.localStorage.removeItem(THREAD_TITLE_KEY);
+        window.localStorage.removeItem(THREAD_TITLE_ID_KEY);
       }
     }
   } catch {

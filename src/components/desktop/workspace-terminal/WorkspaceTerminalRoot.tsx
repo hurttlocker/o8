@@ -177,9 +177,17 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     useEffect(() => {
       if (typeof window === 'undefined') return;
       const onRename = (event: Event) => {
-        const detail = (event as CustomEvent<{ tabId?: string; title?: string }>).detail;
+        const detail = (event as CustomEvent<{
+          tabId?: string;
+          threadId?: string | null;
+          title?: string;
+          source?: 'auto' | 'user';
+        }>).detail;
         if (!detail?.tabId || typeof detail.title !== 'string') return;
-        handleUpdateTabLabel(detail.tabId, detail.title);
+        handleUpdateTabLabel(detail.tabId, detail.title, {
+          threadId: detail.threadId ?? null,
+          source: detail.source,
+        });
       };
       window.addEventListener('o8:chat-history-updated', onRename as EventListener);
       return () => window.removeEventListener('o8:chat-history-updated', onRename as EventListener);
