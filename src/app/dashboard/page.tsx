@@ -1005,8 +1005,22 @@ function DashboardInner() {
       setViewportWidth(next);
     };
     update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    // rAF-throttle: coalesce a burst of resize events into one state update per
+    // frame. The frame reads the latest window.innerWidth, so the settled width
+    // is identical to updating on every event.
+    let frame = 0;
+    const onResize = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, []);
   const compactShell = viewportWidth !== null && viewportWidth < RESPONSIVE_COMPACT_SHELL_WIDTH;
   const getResponsiveViewportWidth = useCallback(() => (
