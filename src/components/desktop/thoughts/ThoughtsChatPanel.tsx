@@ -247,6 +247,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onModePersist,
   onSpawnSingleTab,
   onSpawnChatTab,
+  onLaunchPacket,
   onChromeChange,
   onChatSummary,
 }, ref) {
@@ -2128,7 +2129,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           emptyStateOverride={emptyStateOverride}
           emptyStateFallback={fallbackEmptyState}
           topContent={transcriptTopContent}
-          bottomContent={isOrchestratorMode && displayMessages.length > 0 ? <SwarmStatusCard packets={missionState?.packets ?? []} scouts={orchestratorScouts} /> : null}
+          bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
+            <SwarmStatusCard
+              packets={missionState?.packets ?? []}
+              scouts={orchestratorScouts}
+              onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
+            />
+          ) : null}
           isOrchestratorMode={isOrchestratorMode}
           suggestedReplyMessageId={suggestedReplyMessageId}
           suggestedReplies={chipsForLastAssistant}
