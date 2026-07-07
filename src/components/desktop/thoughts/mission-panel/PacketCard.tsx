@@ -12,6 +12,7 @@ import { PacketDetailsPopover } from '@/components/desktop/thoughts/PacketDetail
 import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewCard } from './PacketReviewCard';
+import { PacketBuyinDocPane } from './review-card/PacketBuyinDocPane';
 import { PacketReviewPanel } from './PacketReviewPanel';
 import { ArtifactStrip } from '@/components/desktop/artifacts/ArtifactStrip';
 import { useArtifacts } from '@/components/desktop/artifacts/useArtifacts';
@@ -269,6 +270,10 @@ export function PacketCard({
             onEditingFieldChange={onEditingFieldChange}
             onPatch={onPatch}
           />
+
+          {/* #1492 — buy-in doc affordance on the released/merged card. Renders
+              nothing unless a doc is ready (no placeholder when absent). */}
+          <PacketBuyinDocPane packet={packet} />
 
           {/* #888/#893 — packet view tabs. Each tab pivots the body content
               while DETAILS / Actions / Hold-Archive-Delete / review and

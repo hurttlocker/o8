@@ -226,6 +226,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.quizGateEnabled = body.quizGateEnabled;
   }
 
+  if (body.buyinDocEnabled !== undefined) {
+    if (typeof body.buyinDocEnabled !== 'boolean') {
+      throw new Error('buyinDocEnabled must be boolean.');
+    }
+    update.buyinDocEnabled = body.buyinDocEnabled;
+  }
+
   if (body.autoApplyUpdates !== undefined) {
     const raw = body.autoApplyUpdates;
     if (raw !== 'off' && raw !== 'when-idle') {
