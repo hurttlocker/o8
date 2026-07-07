@@ -3,6 +3,7 @@
 import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import type { MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
+import { relativeTimeLabel } from '@/lib/format/relative-time';
 import { FONTS, usePretextTruncation } from '@/lib/pretext';
 import { useTheme } from './ThemeContext';
 import { PullToRefresh } from './PullToRefresh';
@@ -68,13 +69,7 @@ function renderInlineCodeText(text: string, codeBg: string): ReactNode {
 }
 
 function formatRelativeTime(isoDate: string): string {
-  const diff = Date.now() - new Date(isoDate).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  return relativeTimeLabel(new Date(isoDate).getTime(), { subMinute: 'just-now-lower' });
 }
 
 function buildPalette(colors: ThemeColors): ActivityPalette {

@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { SessionSummary } from './types';
+import { relativeTimeLabel } from '@/lib/format/relative-time';
 import { useTheme } from './ThemeContext';
 
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif';
@@ -119,15 +120,7 @@ function formatRelativeTime(value?: string): string {
   if (timestamp <= 0) {
     return 'Unknown';
   }
-
-  const diff = Math.max(0, Date.now() - timestamp);
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return relativeTimeLabel(timestamp, { subMinute: 'just-now-upper' });
 }
 
 function RuntimeBadgeIcon({ runtime, size = 16 }: { runtime?: string; size?: number }) {
