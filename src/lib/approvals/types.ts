@@ -214,12 +214,23 @@ export interface CreateApprovalInput {
 
 export interface MobileApprovalCard {
   id: string;
+  approvalId?: string;
   sessionKey: string;
   agent: string;
   severity: EventSeverity;
   title: string;
   description: string;
   metadata?: Record<string, string>;
+  repo?: string;
+  repoPath?: string;
+  repoSlug?: string;
+  branch?: string;
+  changedFilePaths?: string[];
+  filesChanged?: number;
+  additions?: number;
+  deletions?: number;
+  previewUrl?: string | null;
+  terminalSessionName?: string | null;
   gateResult?: ApprovalGateResult;
   conflictReport?: ApprovalConflictReport;
   actions: {

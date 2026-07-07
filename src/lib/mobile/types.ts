@@ -18,6 +18,7 @@ export type MobileControlActionKind =
   | 'steer'
   | 'send'
   | 'approve'
+  | 'request_changes'
   | 'deny'
   | 'pause'
   | 'resume'
@@ -56,6 +57,7 @@ export interface MobileInboxSummary {
   alerts: number;
   approvals: number;
   reviewItems: number;
+  inspectOnlyReviews?: number;
   activeRuns: number;
 }
 
@@ -67,6 +69,34 @@ export interface MobileReviewFocus {
   issues: ReviewIssueSummary[];
   changedFiles: ReviewChangedFile[];
   diffStat?: string;
+}
+
+export interface MobileReviewUnit {
+  id: string;
+  sessionKey: string;
+  approvalId?: string;
+  authority: 'approval_gate' | 'inspect_only';
+  status: 'awaiting_review' | 'running' | 'blocked' | 'failed' | 'merged' | 'stale';
+  title: string;
+  agent: string;
+  runtime: string;
+  repo: string;
+  repoSlug?: string;
+  repoPath: string;
+  branch: string;
+  baseBranch?: string;
+  baseSha?: string;
+  headSha?: string;
+  worktreePath?: string;
+  changedFiles: ReviewChangedFile[];
+  fileCount: number;
+  additions: number;
+  deletions: number;
+  diffAvailable: boolean;
+  previewUrl?: string | null;
+  terminalSessionName?: string | null;
+  actions: Array<'inspect' | 'comment' | 'approve' | 'request_changes' | 'deny' | 'steer' | 'stop'>;
+  staleReason?: string;
 }
 
 export interface MobileReviewFileDetail {
@@ -94,6 +124,7 @@ export interface MobileInboxSnapshot {
   note?: string;
   sessions: AgentSummary[];
   approvals: MobileApprovalCard[];
+  reviewUnits: MobileReviewUnit[];
   items: MobileInboxItem[];
   summary: MobileInboxSummary;
   review?: MobileReviewFocus;
@@ -296,7 +327,7 @@ export interface MobileActionAttachment {
 }
 
 export interface MobileActionRequest {
-  action: Extract<MobileControlActionKind, 'send' | 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve' | 'launch'>;
+  action: Extract<MobileControlActionKind, 'send' | 'steer' | 'stop' | 'approve' | 'request_changes' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve' | 'launch'>;
   sessionKey: string;
   clientMutationId?: string;
   approvalId?: string;
