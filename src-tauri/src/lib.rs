@@ -2740,6 +2740,8 @@ mod stt_engine {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
 
+    const FINAL_AUDIO_FILE_GRACE_MS: u64 = 1200;
+
     /// The single long-lived recognizer daemon. `start`/`stop`/`set_locale`
     /// take `&mut self`, so the global is a Mutex (mirrors `tray_handle`).
     fn recognizer() -> &'static Mutex<crate::stt::LiveRecognizer> {
@@ -2861,7 +2863,10 @@ mod stt_engine {
             TE::Final { session_id, text } => {
                 // Stash Apple's transcript; the polished result is emitted once
                 // the AudioFile event lands (so polish can ground on the WAV).
+                // If the helper never emits audio_file/complete, fall back to
+                // Apple's final transcript so the dock cannot stay stuck forever.
                 stash_final(session_id, text.clone());
+                schedule_final_fallback(app.clone(), session_id);
                 emit_stt(
                     app,
                     origin,
@@ -2874,7 +2879,13 @@ mod stt_engine {
                     origin,
                     serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }),
                 );
-                run_finalize(app.clone(), session_id, path);
+                if let Some(apple_text) = take_final(session_id) {
+                    run_finalize(app.clone(), session_id, path, apple_text);
+                } else {
+                    log::warn!(
+                        "[stt] audio_file for session {session_id} had no pending final transcript; skipping duplicate finalize"
+                    );
+                }
             }
             TE::Status { session_id, text } => {
                 emit_stt(
@@ -2884,6 +2895,11 @@ mod stt_engine {
                 );
             }
             TE::Error { session_id, text } => {
+                if origin == "system" {
+                    crate::fn_hotkey::set_system_origin(false);
+                    #[cfg(target_os = "macos")]
+                    crate::audio_ducker::restore();
+                }
                 emit_stt(
                     app,
                     origin,
@@ -2891,6 +2907,12 @@ mod stt_engine {
                 );
             }
             TE::Complete { session_id } => {
+                if let Some(apple_text) = take_final(session_id) {
+                    log::warn!(
+                        "[stt] finalize fallback: session {session_id} completed without audio_file; using Apple transcript"
+                    );
+                    run_finalize(app.clone(), session_id, String::new(), apple_text);
+                }
                 emit_stt(
                     app,
                     origin,
@@ -2933,11 +2955,23 @@ mod stt_engine {
         }
     }
 
+    fn schedule_final_fallback(app: AppHandle, session_id: u64) {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(FINAL_AUDIO_FILE_GRACE_MS));
+            if let Some(apple_text) = take_final(session_id) {
+                log::warn!(
+                    "[stt] finalize fallback: session {session_id} timed out waiting for audio_file; using Apple transcript"
+                );
+                run_finalize(app, session_id, String::new(), apple_text);
+            }
+        });
+    }
+
     /// Run the finalize chain on a background thread: Whisper re-transcribe
     /// (default-on, OpenRouter) → Gemini polish (audio-grounded). The polished
     /// result is emitted as `o8:stt-event` type `polished`. On any failure we
     /// fall back to Apple's transcript so the user always gets text.
-    fn run_finalize(app: AppHandle, session_id: u64, audio_file: String) {
+    fn run_finalize(app: AppHandle, session_id: u64, audio_file: String, apple_text: String) {
         std::thread::spawn(move || {
             // Long-form Escape-cancel: drop THIS session's finalize entirely — no
             // Whisper, no polish, no paste, no composer emit. Matched by session id
@@ -2959,8 +2993,6 @@ mod stt_engine {
             // Same for the Right-Option agent flag — routed at the bottom to the
             // Symon voice agent. Always false off the macOS agent path.
             let is_agent = crate::fn_hotkey::take_agent_mode();
-
-            let apple_text = take_final(session_id).unwrap_or_default();
 
             // Whisper re-transcribes the recorded WAV BEFORE polish; on
             // failure/empty it falls back to Apple's transcript.
@@ -3151,7 +3183,14 @@ mod stt_engine {
                         app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
-                    let did_paste = crate::paste::paste_text(&polished);
+                    let paste_outcome = crate::paste::paste_text_with_status(&polished);
+                    let paste_error = match &paste_outcome {
+                        crate::paste::PasteOutcome::Failed(message) => Some(message.clone()),
+                        crate::paste::PasteOutcome::ClipboardOnly => Some(
+                            "Dictation copied. Press Command-V to paste, then grant Accessibility to o8.".to_string(),
+                        ),
+                        _ => None,
+                    };
                     // Persist to dictation history so the operator can retrieve
                     // what they said if the paste landed in the wrong place.
                     crate::dictation_history::record(
@@ -3171,26 +3210,41 @@ mod stt_engine {
                     // SUCCESS_FLASH_MS. Emit DIRECTLY to the dock (emit_to
                     // DOCK_LABEL) so the flash always lands, plus the broadcast.
                     let char_count = polished.chars().count();
-                    let pasted = serde_json::json!({
-                        "type": "system-pasted",
-                        "origin": "system",
-                        "sessionId": session_id,
-                        "text": polished,
-                        "chars": char_count,
-                        // Accessibility ungranted (e.g. a translocated build): the
-                        // text is on the clipboard but Cmd+V couldn't be posted.
-                        // Flag it so the surface can say "copied — press ⌘V" rather
-                        // than a false "pasted".
-                        "clipboardOnly": !did_paste,
-                    });
-                    let _ = app.emit_to(
-                        crate::dock_window::DOCK_LABEL,
-                        "o8:stt-event",
-                        pasted.clone(),
-                    );
-                    let _ = app.emit("o8:stt-event", pasted);
-                    // Cue: paste landed (#1208).
-                    crate::sound::play_sound("Done");
+                    if let Some(message) = paste_error {
+                        let error = serde_json::json!({
+                            "type": "error",
+                            "origin": "system",
+                            "sessionId": session_id,
+                            "text": message,
+                        });
+                        let _ = app.emit_to(
+                            crate::dock_window::DOCK_LABEL,
+                            "o8:stt-event",
+                            error.clone(),
+                        );
+                        let _ = app.emit("o8:stt-event", error);
+                    } else {
+                        let pasted = serde_json::json!({
+                            "type": "system-pasted",
+                            "origin": "system",
+                            "sessionId": session_id,
+                            "text": polished,
+                            "chars": char_count,
+                            // Accessibility ungranted (e.g. a translocated build): the
+                            // text is on the clipboard but Cmd+V couldn't be posted.
+                            // Flag it so the surface can say "copied — press ⌘V" rather
+                            // than a false "pasted".
+                            "clipboardOnly": !paste_outcome.did_paste(),
+                        });
+                        let _ = app.emit_to(
+                            crate::dock_window::DOCK_LABEL,
+                            "o8:stt-event",
+                            pasted.clone(),
+                        );
+                        let _ = app.emit("o8:stt-event", pasted);
+                        // Cue: paste landed (#1208).
+                        crate::sound::play_sound("Done");
+                    }
                 }
             } else {
                 let _ = app.emit(
@@ -3321,6 +3375,34 @@ mod stt_engine {
         }
         Ok(Vec::new())
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn test_lock() -> &'static Mutex<()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+        }
+
+        #[test]
+        fn final_store_hands_transcript_to_first_finalize_path_only() {
+            let _guard = test_lock().lock().unwrap();
+            stash_final(4242, "hello from apple".to_string());
+
+            assert_eq!(take_final(4242), Some("hello from apple".to_string()));
+            assert_eq!(take_final(4242), None);
+        }
+
+        #[test]
+        fn final_store_preserves_mismatched_session_for_later_audio_file() {
+            let _guard = test_lock().lock().unwrap();
+            stash_final(7, "saved final".to_string());
+
+            assert_eq!(take_final(8), None);
+            assert_eq!(take_final(7), Some("saved final".to_string()));
+        }
+    }
 }
 
 /// Begin a dictation via the native Apple-Speech sidecar. Returns the session
@@ -3336,6 +3418,13 @@ fn o8_stt_start() -> Result<u64, String> {
 #[tauri::command]
 fn o8_stt_stop() -> Result<(), String> {
     stt_engine::stop()
+}
+
+/// Finish the active system-wide dictation from a UI surface. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_system_dictation_finish() -> Result<(), String> {
+    fn_hotkey::finish_active_system_dictation()
 }
 
 /// Set the native recognizer locale (e.g. "en-US"). macOS only.
@@ -4271,6 +4360,8 @@ pub fn run() {
             o8_stt_start,
             #[cfg(target_os = "macos")]
             o8_stt_stop,
+            #[cfg(target_os = "macos")]
+            o8_system_dictation_finish,
             #[cfg(target_os = "macos")]
             o8_stt_locale,
             #[cfg(target_os = "macos")]

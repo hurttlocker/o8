@@ -37,6 +37,7 @@ interface SttEventPayload {
   type:
     | 'ready'
     | 'system-start'
+    | 'system-idle'
     | 'partial'
     | 'final'
     | 'level'
@@ -76,6 +77,7 @@ export function useNativeDictation() {
   const stateRef = useRef<DictationState>('idle');
   const optionsRef = useRef<DictationStartOptions | null>(null);
   const sessionIdRef = useRef<number>(0);
+  const systemActiveRef = useRef(false);
   const startTimeRef = useRef<number>(0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -102,12 +104,70 @@ export function useNativeDictation() {
   }, [returnToIdleAfter]);
 
   const handleEvent = useCallback((payload: SttEventPayload) => {
+    const systemEvent = payload.origin === 'system' || payload.type === 'system-pasted' || payload.type === 'system-start' || payload.type === 'system-idle';
+    if (systemEvent) {
+      if (payload.sessionId !== undefined) sessionIdRef.current = payload.sessionId;
+      switch (payload.type) {
+        case 'system-start':
+          systemActiveRef.current = true;
+          sessionIdRef.current = payload.sessionId ?? 0;
+          startTimeRef.current = Date.now();
+          setState('recording', { audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
+          break;
+        case 'system-idle':
+          if (systemActiveRef.current) {
+            systemActiveRef.current = false;
+            sessionIdRef.current = 0;
+            setSnapshot({ state: 'idle', audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
+            stateRef.current = 'idle';
+          }
+          break;
+        case 'level':
+          if (systemActiveRef.current && stateRef.current === 'recording' && typeof payload.level === 'number') {
+            const level = Math.min(1, payload.level);
+            const duration = Date.now() - startTimeRef.current;
+            setSnapshot((prev) => (prev.state === 'recording'
+              ? { ...prev, audioLevel: level, durationMs: duration }
+              : prev));
+          }
+          break;
+        case 'partial':
+          if (systemActiveRef.current && stateRef.current === 'recording' && typeof payload.text === 'string') {
+            setSnapshot((prev) => (prev.state === 'recording' && prev.partialTranscript !== payload.text
+              ? { ...prev, partialTranscript: payload.text ?? '' }
+              : prev));
+          }
+          break;
+        case 'final':
+          if (systemActiveRef.current && stateRef.current === 'recording') setState('transcribing');
+          break;
+        case 'audio_file':
+          if (systemActiveRef.current && stateRef.current === 'transcribing') setState('polishing');
+          break;
+        case 'system-pasted':
+          if (systemActiveRef.current) {
+            systemActiveRef.current = false;
+            sessionIdRef.current = 0;
+            setState('success', { audioLevel: 0 });
+            returnToIdleAfter(SUCCESS_FLASH_MS);
+          }
+          break;
+        case 'error':
+          if (systemActiveRef.current) {
+            systemActiveRef.current = false;
+            sessionIdRef.current = 0;
+            goError(payload.text ?? 'Dictation failed');
+          }
+          break;
+        default:
+          break;
+      }
+      return;
+    }
     // Origin discriminator: the in-window pill never reacts to system (global-Fn)
     // dictation — that surface is owned by the screen dock window. `system-pasted`
     // is system by construction. See SttEventPayload.origin.
-    if (payload.origin === 'system' || payload.type === 'system-pasted' || payload.type === 'system-start') {
-      return;
-    }
+    if (payload.origin === 'system') return;
     // Only react to events for the active session (rapid-tap safety).
     if (
       payload.sessionId !== undefined
@@ -225,7 +285,7 @@ export function useNativeDictation() {
     // the rest of the state machine.
     setState('transcribing');
     try {
-      await sttInvoke('o8_stt_stop');
+      await sttInvoke(systemActiveRef.current ? 'o8_system_dictation_finish' : 'o8_stt_stop');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn('[native-dictation] o8_stt_stop failed', err);

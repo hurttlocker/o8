@@ -518,6 +518,20 @@ export default function DictationPillPage() {
       .catch((err) => dockLog(`realtime toggle emit failed: ${err instanceof Error ? err.message : String(err)}`));
   }, []);
 
+  const finishSystemDictation = useCallback(() => {
+    if (!isTauri() || stateRef.current === 'idle' || stateRef.current === 'success' || stateRef.current === 'error') return;
+    setState('transcribing');
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('o8_system_dictation_finish'))
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        dockLog(`finish system dictation failed: ${message}`);
+        stateRef.current = 'error';
+        setSnapshot({ state: 'error', audioLevel: 0, durationMs: 0, error: message || 'Could not finish dictation', partialTranscript: '' });
+        returnToIdleAfter(ERROR_FLASH_MS);
+      });
+  }, [returnToIdleAfter, setState]);
+
   const handleTogglePause = useCallback(() => { invokeCmd('tts_toggle_pause'); }, []);
   const handleStop = useCallback(() => { invokeCmd('tts_stop'); }, []);
   // Tap-to-stop on the working capsule: cancel the running task(s) + any speech.
@@ -990,6 +1004,7 @@ export default function DictationPillPage() {
             panelPending={panelPending}
             realtimeVoice={realtimeVoice}
             onStopRealtime={stopRealtimeVoice}
+            onFinishDictation={finishSystemDictation}
           />
           {editApplied ? (
             <button

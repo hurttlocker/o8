@@ -960,7 +960,10 @@ mod tests {
     #[test]
     fn speech_text_speaks_byte_unit_abbreviation() {
         let input = "Saved 142 KB to disk";
-        assert_eq!(prepare_text_for_speech(input), "Saved 142 kilobytes to disk");
+        assert_eq!(
+            prepare_text_for_speech(input),
+            "Saved 142 kilobytes to disk"
+        );
     }
 
     #[test]

@@ -328,8 +328,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
 
             for i in 0..chunk_specs.len() {
                 // Stop / supersede check between chunks.
-                if !is_active.load(Ordering::SeqCst)
-                    || generation.load(Ordering::SeqCst) != my_gen
+                if !is_active.load(Ordering::SeqCst) || generation.load(Ordering::SeqCst) != my_gen
                 {
                     break;
                 }
@@ -482,7 +481,11 @@ fn run_say_fallback(
 }
 
 /// Synthesize one chunk → MP3 bytes, with a timeout + one retry before giving up.
-async fn synthesize_chunk(chunk: &str, config: &TtsConfig, index: usize) -> Result<Vec<u8>, String> {
+async fn synthesize_chunk(
+    chunk: &str,
+    config: &TtsConfig,
+    index: usize,
+) -> Result<Vec<u8>, String> {
     let mut last_error = String::new();
     for attempt in 0..=CHUNK_RETRIES {
         match timeout(
@@ -532,7 +535,11 @@ fn emit_tts_state(state: &str) {
     use tauri::Emitter;
     if let Some(app) = super::app_handle() {
         let payload = serde_json::json!({ "state": state });
-        let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:tts-state", payload.clone());
+        let _ = app.emit_to(
+            crate::dock_window::DOCK_LABEL,
+            "o8:tts-state",
+            payload.clone(),
+        );
         let _ = app.emit("o8:tts-state", payload);
     }
 }
@@ -637,7 +644,13 @@ fn build_chunks_with_spans(raw: &str) -> Vec<SpokenChunk> {
         let at_end = idx >= len;
         let is_sep = !at_end && bytes[idx] == b'\n' && idx + 1 < len && bytes[idx + 1] == b'\n';
         if at_end || is_sep {
-            append_block(&raw[block_start..idx], block_start, idx, &mut lead_pending, &mut chunks);
+            append_block(
+                &raw[block_start..idx],
+                block_start,
+                idx,
+                &mut lead_pending,
+                &mut chunks,
+            );
             if at_end {
                 break;
             }
@@ -675,7 +688,11 @@ fn append_block(
         *lead_pending = false;
         let (lead, remainder) = carve_lead_chunk(spoken, LEAD_CHUNK_CHARS);
         if !lead.is_empty() {
-            out.push(SpokenChunk { text: lead, src_start, src_end });
+            out.push(SpokenChunk {
+                text: lead,
+                src_start,
+                src_end,
+            });
             remainder
         } else {
             spoken
@@ -689,10 +706,18 @@ fn append_block(
         return;
     }
     if body.len() <= MAX_CHUNK_CHARS {
-        out.push(SpokenChunk { text: body.to_string(), src_start, src_end });
+        out.push(SpokenChunk {
+            text: body.to_string(),
+            src_start,
+            src_end,
+        });
     } else {
         for piece in split_long_paragraph(body) {
-            out.push(SpokenChunk { text: piece, src_start, src_end });
+            out.push(SpokenChunk {
+                text: piece,
+                src_start,
+                src_end,
+            });
         }
     }
 }
