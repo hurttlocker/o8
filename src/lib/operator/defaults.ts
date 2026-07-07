@@ -26,8 +26,10 @@ function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
  *
  * Resolution order (every knob): env var > persisted file > hardcoded fallback.
  *
- * Persisted file: `~/.cortex-ide/operator-defaults.json`
- * (override root with CORTEX_IDE_DATA_DIR).
+ * Persisted file: `~/.o8/operator-defaults.json`
+ * (override root with CORTEX_IDE_DATA_DIR). NOTE: `~/.cortex-ide/` is NOT
+ * read — a stale copy of this file there silently does nothing (bit the
+ * operator flow 2026-07-07; always verify against getOperatorDefaultsPath()).
  */
 
 export type OverlapGateMode = 'advisory' | 'strict';
@@ -1027,6 +1029,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
       throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
     }
     stored.orchestratorBackend = update.orchestratorBackend;
+  }
+  if (update.reviewerBackend !== undefined) {
+    if (!isReviewerBackendSetting(update.reviewerBackend)) {
+      throw new Error('reviewerBackend must be one of "follow", "claude", "codex".');
+    }
+    stored.reviewerBackend = update.reviewerBackend;
   }
   if (update.packetExplainerEnabled !== undefined) {
     stored.packetExplainerEnabled = Boolean(update.packetExplainerEnabled);
