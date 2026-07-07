@@ -51,7 +51,6 @@ import {
   footerKbdStyle,
   footerSpacerStyle,
   footerStyle,
-  groupBadgeStyle,
   iconWrapStyle,
   inputRowStyle,
   inputStyle,
@@ -339,12 +338,15 @@ export const CommandPalette = memo(function CommandPalette({
 
   // Filter client-side action items by the current query so the palette
   // surfaces "Switch to Marketing" when the operator types "marketing", but
-  // keeps them out of the way at rest.
+  // keeps them out of the way at rest. At rest, consequential actions
+  // (project:move: — changes repo↔project membership) are hidden entirely:
+  // they must be summoned by typing, never sit one arrow-slip from an empty
+  // palette.
   const filteredActionItems = useMemo<PaletteItem[]>(() => {
     if (!actionItems?.length) return [];
     const trimmed = query.trim().toLowerCase();
     const source = trimmed.length === 0
-      ? actionItems
+      ? actionItems.filter((entry) => !entry.id.startsWith('project:move:'))
       : actionItems.filter((entry) => (
         entry.title.toLowerCase().includes(trimmed)
         || (entry.detail ?? '').toLowerCase().includes(trimmed)
@@ -383,7 +385,9 @@ export const CommandPalette = memo(function CommandPalette({
           score: 0,
         },
       }));
-      return [...filteredActionItems, ...recentItems];
+      // Recents lead at rest — what the operator touched last is the likeliest
+      // next jump; project actions follow.
+      return [...recentItems, ...filteredActionItems];
     }
 
     const ordered: PaletteItem[] = [];
@@ -680,9 +684,6 @@ const PaletteList = memo(function PaletteList({
                   {item.detail ? (
                     <span style={detailTextStyle}>{item.detail}</span>
                   ) : null}
-                </span>
-                <span style={groupBadgeStyle(item.groupKey)}>
-                  {GROUP_LABEL[item.groupKey]}
                 </span>
               </button>
             );
