@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 import { appendEvent, archiveLane, getLane, listLanes } from '@/lib/lane/registry';
@@ -15,7 +16,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_BASE_BRANCH = 'main';
 const MERGED_BY_ANCESTRY_SOURCE = 'merged_by_ancestry_reconcile';
 
-type MergeEvidenceKind = 'ancestor' | 'patch-id';
+type MergeEvidenceKind = 'ancestor' | 'patch-id' | 'branch-missing';
 
 interface MergeEvidence {
   kind: MergeEvidenceKind;
@@ -29,13 +30,32 @@ interface MergeEvidence {
 }
 
 interface Candidate {
-  packet: OrchestratorPacket;
+  // null = lane-only candidate: a non-archived lane whose packet no longer
+  // exists in live mission state (mission rotated/reset). These are exactly
+  // the rows that sat in the rail forever — the sweep previously iterated
+  // live packets only, so a lane orphaned from its mission was never healed.
+  packet: OrchestratorPacket | null;
   lane: Lane | null;
   repoPath: string;
   branch: string;
   baseBranch: string;
   laneId: string | null;
 }
+
+// Lane statuses eligible for lane-only sweeping: settled states where no
+// agent is actively working and no human prompt is pending. Active/attention
+// states (running, merging, awaiting_*) are never touched. 'released' is not
+// a LaneStatus enum value but exists in stored rows (packet vocabulary that
+// leaked into lane status) — matched as a string on purpose.
+const LANE_ONLY_SWEEPABLE_STATUSES = new Set<string>([
+  'idle',
+  'paused',
+  'reviewing',
+  'recovering',
+  'failed',
+  'completed',
+  'released',
+]);
 
 export interface MergedByAncestrySweepResult {
   scanned: number;
@@ -104,6 +124,15 @@ function gitWithInput(
 async function refExists(repoPath: string, ref: string): Promise<boolean> {
   try {
     await git(repoPath, ['rev-parse', '--verify', '--quiet', ref], { timeout: 3_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isGitRepo(repoPath: string): Promise<boolean> {
+  try {
+    await git(repoPath, ['rev-parse', '--git-dir'], { timeout: 3_000 });
     return true;
   } catch {
     return false;
@@ -215,6 +244,28 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
 
   const branchRef = await resolveBranchRef(repoPath, branch);
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
+  if (!branchRef && baseRef && candidate.packet === null) {
+    // Lane-only candidate whose branch resolves NOWHERE (not local, not on
+    // origin) while the repo itself is healthy: the branch was deleted after
+    // an external merge, or its worktree clone was pruned. Either way no
+    // review or merge can ever act on this lane again — leaving it in the
+    // rail with live-looking status is a lie. Archive-only evidence; never
+    // claims "merged".
+    if (await isGitRepo(repoPath)) {
+      const baseSha = await revParse(repoPath, baseRef);
+      if (baseSha) {
+        return {
+          kind: 'branch-missing',
+          repoPath,
+          branchRef: branch,
+          baseRef,
+          headSha: '',
+          baseSha,
+        };
+      }
+    }
+    return null;
+  }
   if (!branchRef || !baseRef) return null;
 
   const [headSha, baseSha] = await Promise.all([
@@ -254,7 +305,7 @@ function buildCandidates(): Candidate[] {
   const laneById = new Map(lanes.map((lane) => [lane.id, lane]));
   const laneByPacket = new Map(lanes.filter((lane) => lane.packetId).map((lane) => [lane.packetId!, lane]));
 
-  return readOrchestratorControlPlaneState().packets
+  const packetCandidates = readOrchestratorControlPlaneState().packets
     .filter((packet) => {
       const terminal = packetTerminalState(packet);
       return terminal !== 'released' && terminal !== 'archived';
@@ -280,39 +331,69 @@ function buildCandidates(): Candidate[] {
       };
     })
     .filter((candidate) => Boolean(candidate.repoPath && candidate.branch));
+
+  // Lane-only pass: non-archived settled lanes with no packet in live mission
+  // state. Prefer the worktree clone as the git cwd — dispatched branches
+  // usually exist only there — falling back to the lane's canonical repo.
+  const coveredLaneIds = new Set(packetCandidates.map((c) => c.laneId).filter(Boolean));
+  const laneOnlyCandidates: Candidate[] = lanes
+    .filter((lane) => (
+      !coveredLaneIds.has(lane.id)
+      && LANE_ONLY_SWEEPABLE_STATUSES.has(lane.status)
+      && Boolean(lane.branch)
+      && lane.branch !== lane.baseBranch
+    ))
+    .map((lane) => {
+      const worktree = lane.worktreePath && existsSync(lane.worktreePath) ? lane.worktreePath : null;
+      const repoPath = worktree || lane.repoPath || '';
+      return {
+        packet: null,
+        lane,
+        repoPath,
+        branch: lane.branch,
+        baseBranch: lane.baseBranch || DEFAULT_BASE_BRANCH,
+        laneId: lane.id,
+      };
+    })
+    .filter((candidate) => Boolean(candidate.repoPath && existsSync(candidate.repoPath)));
+
+  return [...packetCandidates, ...laneOnlyCandidates];
 }
 
 async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Promise<void> {
   const releasedAt = new Date().toISOString();
-  await withLockedState((state) => {
-    const packet = state.packets.find((item) => item.id === candidate.packet.id);
-    if (!packet) return;
-    const terminal = packetTerminalState(packet);
-    if (terminal === 'released' || terminal === 'archived') return;
+  if (candidate.packet) {
+    const packetId = candidate.packet.id;
+    await withLockedState((state) => {
+      const packet = state.packets.find((item) => item.id === packetId);
+      if (!packet) return;
+      const terminal = packetTerminalState(packet);
+      if (terminal === 'released' || terminal === 'archived') return;
 
-    packet.status = 'released';
-    packet.queueState = 'held';
-    packet.releaseState = 'released';
-    packet.releaseStatePayload = {
-      ...(packet.releaseStatePayload ?? {}),
-      mergeCommit: evidence.baseSha,
-      releasedAt,
-      source: MERGED_BY_ANCESTRY_SOURCE,
-    };
-    packet.blockedReason = null;
-    packet.lastEventAt = releasedAt;
-    packet.lastEventLabel = evidence.kind === 'ancestor'
-      ? 'merged_by_ancestry'
-      : 'merged_by_patch_id';
-    if (packet.lane) {
-      packet.lane.lastEventAt = releasedAt;
-      packet.lane.lastEventLabel = packet.lastEventLabel;
-    }
-  });
+      packet.status = 'released';
+      packet.queueState = 'held';
+      packet.releaseState = 'released';
+      packet.releaseStatePayload = {
+        ...(packet.releaseStatePayload ?? {}),
+        mergeCommit: evidence.baseSha,
+        releasedAt,
+        source: MERGED_BY_ANCESTRY_SOURCE,
+      };
+      packet.blockedReason = null;
+      packet.lastEventAt = releasedAt;
+      packet.lastEventLabel = evidence.kind === 'ancestor'
+        ? 'merged_by_ancestry'
+        : 'merged_by_patch_id';
+      if (packet.lane) {
+        packet.lane.lastEventAt = releasedAt;
+        packet.lane.lastEventLabel = packet.lastEventLabel;
+      }
+    });
+  }
 
   if (candidate.laneId) {
     appendEvent(candidate.laneId, 'merged_by_ancestry_reconciled', 'system', {
-      packetId: candidate.packet.id,
+      packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
       evidenceKind: evidence.kind,
       branchRef: evidence.branchRef,
       baseRef: evidence.baseRef,
@@ -324,11 +405,29 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
     archiveLane(candidate.laneId, 'system');
   }
 
-  autoResolveMergedPacketVerificationIncidents({
-    packetId: candidate.packet.id,
-    laneId: candidate.laneId,
-    event: MERGED_BY_ANCESTRY_SOURCE,
+  const incidentPacketId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;
+  if (incidentPacketId) {
+    autoResolveMergedPacketVerificationIncidents({
+      packetId: incidentPacketId,
+      laneId: candidate.laneId,
+      event: MERGED_BY_ANCESTRY_SOURCE,
+    });
+  }
+}
+
+// A branch that no longer exists anywhere cannot be reviewed or merged —
+// archive the lane (honest "set aside") WITHOUT claiming it merged. Applies
+// to lane-only candidates exclusively (see detectMergedByAncestry).
+function archiveBranchMissingLane(candidate: Candidate, evidence: MergeEvidence): void {
+  if (!candidate.laneId) return;
+  appendEvent(candidate.laneId, 'status_change', 'system', {
+    reason: 'branch_missing_reconciled',
+    branch: evidence.branchRef,
+    baseRef: evidence.baseRef,
+    baseSha: evidence.baseSha,
+    repoPath: evidence.repoPath,
   });
+  archiveLane(candidate.laneId, 'system');
 }
 
 export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySweepResult> {
@@ -343,12 +442,16 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
         skipped += 1;
         continue;
       }
-      await releasePacket(candidate, evidence);
+      if (evidence.kind === 'branch-missing') {
+        archiveBranchMissingLane(candidate, evidence);
+      } else {
+        await releasePacket(candidate, evidence);
+      }
       merged += 1;
     } catch (error) {
       skipped += 1;
       console.warn(
-        `[merged-by-ancestry] skipped packet ${candidate.packet.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `[merged-by-ancestry] skipped ${candidate.packet ? `packet ${candidate.packet.id}` : `lane ${candidate.laneId}`}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
