@@ -108,6 +108,7 @@ function defaultModelForBackend(
   if (backend === 'claude') return 'claude-code';
   if (backend === 'codex') return 'codex';
   if (backend === 'openclaw') return 'openclaw';
+  if (backend === 'hermes') return 'hermes';
   return undefined;
 }
 

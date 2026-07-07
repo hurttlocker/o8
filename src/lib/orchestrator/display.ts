@@ -3,6 +3,7 @@ import type {
   OrchestratorRuntime,
   WorkspaceOrchestrationPacketBadge,
 } from './types';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { ORCHESTRATOR_RUNTIMES } from './runtime-capabilities';
 
 export { normalizeRuntimeStatusToOrchestratorStatus } from './runtime-status';
@@ -236,4 +237,37 @@ export function agentDisplayLabel(input: {
   const runtime = input.runtime
     ?? (input.sessionKey ? resolveDisplayRuntime({ lane: { sessionKey: input.sessionKey } }) : null);
   return runtimeDisplayLabel(runtime);
+}
+
+function openClawAgentName(agent?: string | null): string {
+  const normalized = agent?.trim();
+  if (!normalized) return 'Mister';
+  if (normalized === 'main' || normalized === 'main-public' || normalized === 'mister-scribe') return 'Mister';
+  return normalized;
+}
+
+export function orchestratorBackendDisplayLabel(input: {
+  backend?: OrchestratorBackendId | string | null;
+  agent?: string | null;
+}): string | null {
+  switch (input.backend) {
+    case 'hermes':
+      return 'Hermes';
+    case 'openclaw': {
+      const agentId = input.agent?.trim() || 'main';
+      return `OpenClaw · ${openClawAgentName(agentId)} · ${agentId}`;
+    }
+    case 'fable':
+      return 'Fable';
+    case 'collide':
+      return 'Collide';
+    case 'codex':
+      return 'Codex';
+    case 'claude':
+      return 'Claude Code';
+    case 'acp':
+      return 'ACP';
+    default:
+      return null;
+  }
 }

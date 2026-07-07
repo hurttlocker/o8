@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runtimeDisplayLabel, agentDisplayLabel } from './display';
+import { runtimeDisplayLabel, agentDisplayLabel, orchestratorBackendDisplayLabel } from './display';
 
 // Regression guard for the recurring "raw session id leaks into a label" bug.
 // The canonical helpers MUST never emit a raw id or an owned-key prefix
@@ -56,5 +56,17 @@ describe('agentDisplayLabel', () => {
   it('falls back to "Agent" when nothing identifying is available', () => {
     expect(agentDisplayLabel({})).toBe('Agent');
     expect(agentDisplayLabel({ name: '', title: '  ' })).toBe('Agent');
+  });
+});
+
+describe('orchestratorBackendDisplayLabel', () => {
+  it('surfaces Hermes as a single runtime identity', () => {
+    expect(orchestratorBackendDisplayLabel({ backend: 'hermes' })).toBe('Hermes');
+  });
+
+  it('disambiguates OpenClaw Mister agents with the agent id', () => {
+    expect(orchestratorBackendDisplayLabel({ backend: 'openclaw', agent: 'main' })).toBe('OpenClaw · Mister · main');
+    expect(orchestratorBackendDisplayLabel({ backend: 'openclaw', agent: 'main-public' })).toBe('OpenClaw · Mister · main-public');
+    expect(orchestratorBackendDisplayLabel({ backend: 'openclaw', agent: 'mister-scribe' })).toBe('OpenClaw · Mister · mister-scribe');
   });
 });

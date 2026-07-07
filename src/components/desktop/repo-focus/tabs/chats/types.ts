@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession, RepoFocusRepo } from '../../types';
 
@@ -19,6 +20,8 @@ export interface ChatHistoryItem {
   repoPath?: string | null;
   repoBranch?: string | null;
   remoteUrl?: string | null;
+  backend?: OrchestratorBackendId | null;
+  agent?: string | null;
   archivedAt?: string | null;
 }
 
