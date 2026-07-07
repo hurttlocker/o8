@@ -19,12 +19,14 @@ export interface ReloadBannerProps {
   message: string;
   /** Optional sub-line. */
   detail?: string;
+  /** Whether the banner should dismiss itself after the standard timeout. */
+  autoDismiss?: boolean;
   /** Fired when the elapsed timer dismisses the banner. */
   onDismiss?: () => void;
 }
 
 export function ReloadBanner(props: ReloadBannerProps) {
-  const { noticeId, message, detail, onDismiss } = props;
+  const { noticeId, message, detail, autoDismiss = true, onDismiss } = props;
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -32,14 +34,16 @@ export function ReloadBanner(props: ReloadBannerProps) {
     const tick = window.setInterval(() => {
       setElapsed(Math.floor((Date.now() - start) / 1000));
     }, 1000);
-    const dismiss = window.setTimeout(() => {
-      onDismiss?.();
-    }, RELOAD_BANNER_AUTO_DISMISS_MS);
+    const dismiss = autoDismiss
+      ? window.setTimeout(() => {
+          onDismiss?.();
+        }, RELOAD_BANNER_AUTO_DISMISS_MS)
+      : null;
     return () => {
       window.clearInterval(tick);
-      window.clearTimeout(dismiss);
+      if (dismiss) window.clearTimeout(dismiss);
     };
-  }, [noticeId, onDismiss]);
+  }, [autoDismiss, noticeId, onDismiss]);
 
   return (
     <div
@@ -77,7 +81,26 @@ export function ReloadBanner(props: ReloadBannerProps) {
       </span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
         {detail ? <span style={{ opacity: 0.7 }}>{detail}</span> : null}
-        <span style={{ opacity: 0.7 }}>{elapsed}s</span>
+        <button
+          type="button"
+          aria-label="Dismiss notice"
+          onClick={onDismiss}
+          style={{
+            border: 0,
+            background: 'transparent',
+            color: 'inherit',
+            opacity: 0.7,
+            fontSize: 11,
+            fontFamily: 'inherit',
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            cursor: 'pointer',
+          }}
+        >
+          {autoDismiss ? `${elapsed}s` : 'Dismiss'}
+        </button>
       </span>
     </div>
   );

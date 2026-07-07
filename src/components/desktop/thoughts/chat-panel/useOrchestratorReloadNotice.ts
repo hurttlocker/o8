@@ -1,5 +1,5 @@
 /**
- * Listens for orchestrator `notice` events (currently only kind="mcp-reload")
+ * Listens for orchestrator `notice` events (for example kind="mcp-reload")
  * dispatched by useOrchestratorStream / socket.ts and exposes banner props
  * the chat panel can render without leaking this concern into
  * ThoughtsChatPanel (which is already over the 800-line file ceiling).
@@ -18,9 +18,11 @@ import { RELOAD_BANNER_AUTO_DISMISS_MS } from './ReloadBanner';
 
 export interface OrchestratorReloadNotice {
   noticeId: string;
+  kind: 'mcp-reload' | 'cross-house-orchestrator-handoff';
   message: string;
   registered: string[];
   repoPath: string | null;
+  autoDismiss: boolean;
   receivedAt: number;
 }
 
@@ -33,17 +35,27 @@ interface NoticeDetail {
 }
 
 function normalize(detail: NoticeDetail): OrchestratorReloadNotice | null {
-  if (detail.kind !== 'mcp-reload') return null;
+  if (detail.kind !== 'mcp-reload' && detail.kind !== 'cross-house-orchestrator-handoff') return null;
   const noticeId = typeof detail.noticeId === 'string' ? detail.noticeId.trim() : '';
   if (!noticeId) return null;
   const message = typeof detail.message === 'string' && detail.message.trim()
     ? detail.message.trim()
-    : 'Reloading with new MCP tools…';
+    : detail.kind === 'cross-house-orchestrator-handoff'
+      ? 'Claude subscription exhausted — Codex is acting orchestrator.'
+      : 'Reloading with new MCP tools…';
   const registered = Array.isArray(detail.registered)
     ? detail.registered.filter((entry): entry is string => typeof entry === 'string')
     : [];
   const repoPath = typeof detail.repoPath === 'string' ? detail.repoPath : null;
-  return { noticeId, message, registered, repoPath, receivedAt: Date.now() };
+  return {
+    noticeId,
+    kind: detail.kind,
+    message,
+    registered,
+    repoPath,
+    autoDismiss: detail.kind === 'mcp-reload',
+    receivedAt: Date.now(),
+  };
 }
 
 export interface UseOrchestratorReloadNoticeResult {
@@ -79,10 +91,10 @@ export function useOrchestratorReloadNotice(
     };
   }, [repoPath]);
 
-  // Safety net — clear the banner if something goes wrong and the downstream
-  // ReloadBanner auto-dismiss never fires (e.g. component unmounted).
+  // Safety net for transient reload notices. Cross-house handoffs are durable:
+  // the operator must see and dismiss that stand-in card explicitly.
   useEffect(() => {
-    if (!notice) return undefined;
+    if (!notice?.autoDismiss) return undefined;
     const timer = window.setTimeout(() => {
       setNotice((current) => (current && current.noticeId === notice.noticeId ? null : current));
     }, RELOAD_BANNER_AUTO_DISMISS_MS + 500);

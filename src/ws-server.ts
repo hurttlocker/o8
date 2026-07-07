@@ -86,7 +86,12 @@ import {
   resolveOrchestratorBackendId,
 } from './lib/lane/orchestrator-backends/registry';
 import { isMeteredOrchestratorBackend } from './lib/lane/orchestrator-backends/billing';
-import { isOrchestratorBackendId, type OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
+import {
+  buildCrossHouseHandoffMessage,
+  isRuntimeQuotaLimitError,
+  resolveCrossHouseOrchestratorFallback,
+} from './lib/lane/orchestrator-backends/quota-fallback';
+import { isOrchestratorBackendId, type OrchestratorBackend, type OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
 import type { OrchestratorTurnRecord } from './lib/lane/orchestrator-crash-survival';
 import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
 import {
@@ -965,6 +970,30 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
   }
   if (sessionName.includes('openclaw')) {
     console.log(`[openclaw-diag] broadcast session=${sessionName} matchedSubs=${matched} delivered=${delivered} totalSubs=${orchestratorSubscriptions.size} msg=${outMsg.slice(0, 110)}`);
+  }
+}
+
+function promoteOrchestratorFallbackSubscribers(input: {
+  repoPath: string;
+  threadId: string | null;
+  fromBackend: OrchestratorBackendId;
+  toBackend: OrchestratorBackendId;
+  toSessionName: string;
+}): void {
+  const toPromote = Array.from(orchestratorSubscriptions.values()).filter((sub) =>
+    sub.repoPath === input.repoPath
+    && sub.threadId === input.threadId
+    && sub.backend === input.fromBackend);
+
+  for (const sub of toPromote) {
+    orchestratorSubscriptions.set(orchestratorSubKey(sub.clientId, input.toBackend, ''), {
+      clientId: sub.clientId,
+      repoPath: sub.repoPath,
+      sessionName: input.toSessionName,
+      threadId: sub.threadId,
+      backend: input.toBackend,
+      agent: '',
+    });
   }
 }
 
@@ -3066,15 +3095,18 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         .map((att) => ({ dataUri: att.dataUri, ...(typeof att.name === 'string' ? { name: att.name } : {}) }))
     : undefined;
 
-  const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
-  const collideBaseBackend = backend.id === 'collide' && isOrchestratorBackendId(msg.collideBaseBackend)
+  const requestedBackend = getOrchestratorBackend(resolveMsgBackendId(msg));
+  let activeBackend = requestedBackend;
+  const collideBaseBackend = requestedBackend.id === 'collide' && isOrchestratorBackendId(msg.collideBaseBackend)
     ? msg.collideBaseBackend
     : undefined;
-  const agentId = resolveMsgAgentId(msg, backend.id);
-  const agentTag = agentId || undefined;
+  const requestedAgentId = resolveMsgAgentId(msg, requestedBackend.id);
+  let activeAgentId = requestedAgentId;
+  let activeAgentTag = activeAgentId || undefined;
   const threadId = resolveMsgThreadId(msg);
   const clientMessageId = typeof msg.clientMessageId === 'string' ? msg.clientMessageId : undefined;
-  const abortKey = orchestratorAbortKey(repoPath, backend.id, agentId, threadId);
+  let abortKey = orchestratorAbortKey(repoPath, activeBackend.id, activeAgentId, threadId);
+  const turnAbortKeys = new Set<string>([abortKey]);
 
   send(client, {
     channel: 'orchestrator',
@@ -3110,7 +3142,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   let lastIncrementalPersistAt = 0;
   const INCREMENTAL_PERSIST_MS = 1_500;
 
-  const persistAssistantText = (sessionId: string | null) => {
+  const persistAssistantText = (sessionId: string | null, backendId: OrchestratorBackendId = activeBackend.id) => {
     if (!isThreadBacked || !assistantMessageId) return;
     if (!assistantTextAccum || assistantTextAccum === lastPersistedAssistantText) return;
     try {
@@ -3119,7 +3151,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         repoPath,
         messageId: assistantMessageId,
         content: assistantTextAccum,
-        backend: backend.id,
+        backend: backendId,
         sessionId,
         model: model ?? null,
         timestampMs: assistantStartedAtMs,
@@ -3138,17 +3170,17 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   };
 
   try {
-    console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}${agentId ? ` (agent ${agentId})` : ''}`);
+    console.log(`[ws-server][orchestrator] Routing chat via ${activeBackend.label}${activeAgentId ? ` (agent ${activeAgentId})` : ''}`);
 
     sessionName = orchestratorRouteSessionName(
-      backend.ensureSession(repoPath, agentTag, threadId).sessionName,
+      activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
       threadId,
     );
     const updatedThread = appendMobileOrchestratorUserMessage({
       tabId: threadId,
       repoPath,
       message,
-      backend: backend.id,
+      backend: activeBackend.id,
       timestampMs: turnStartedAtMs,
     });
     if (updatedThread) {
@@ -3179,13 +3211,13 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // mid-mission is the client's call) — it warns loudly and raises the UI
     // notice banner each time the persisted thread crosses another 60K-token
     // step past the metered target.
-    if (threadId && isMeteredOrchestratorBackend(backend.id)) {
+    if (threadId && isMeteredOrchestratorBackend(activeBackend.id)) {
       const approxThreadTokens = estimateThreadTokens(threadId);
       const step = Math.floor(approxThreadTokens / METERED_WINDOW_VALVE_STEP_TOKENS);
       if (step >= 1 && (meteredWindowValveWarnedStep.get(threadId) ?? 0) < step) {
         meteredWindowValveWarnedStep.set(threadId, step);
         const valveMessage = `Metered window over budget: this thread is ~${Math.round(approxThreadTokens / 1000)}K tokens against a ${Math.round(ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD / 1000)}K target — open the workspace to compact, or start a fresh thread.`;
-        console.warn(`[metered-valve] ${valveMessage} (thread=${threadId}, backend=${backend.id})`);
+        console.warn(`[metered-valve] ${valveMessage} (thread=${threadId}, backend=${activeBackend.id})`);
         broadcastToOrchestratorSession(sessionName, JSON.stringify({
           channel: 'orchestrator',
           event: 'notice',
@@ -3194,46 +3226,48 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       }
     }
     const sendTurn = (
+      turnBackend: OrchestratorBackend,
+      turnAgentTag: string | undefined,
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, turnMessage, onEvent, {
+    ): Promise<void> => turnBackend.sendTurn(repoPath, turnMessage, onEvent, {
       permissionMode,
       thinkingEffort,
-      model,
-      collideBaseBackend,
-      agent: agentTag,
+      model: turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model,
+      collideBaseBackend: turnBackend.id === 'collide' ? collideBaseBackend : undefined,
+      agent: turnAgentTag,
       threadId,
       signal,
-      ...((backend.id === 'claude' || backend.id === 'codex') ? {
+      ...((turnBackend.id === 'claude' || turnBackend.id === 'codex') ? {
         crashSurvival: {
-          backend: backend.id,
+          backend: turnBackend.id,
           threadId,
           assistantMessageId,
           assistantStartedAtMs,
-          model: model ?? null,
+          model: turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? null : model ?? null,
         },
       } : {}),
       ...(attachments?.length ? { attachments } : {}),
     });
 
     // Ensure a subscription exists for the selected backend + agent.
-    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
+    orchestratorSubscriptions.set(orchestratorSubKey(client.id, activeBackend.id, activeAgentId), {
       clientId: client.id,
       repoPath,
       sessionName,
       threadId,
-      backend: backend.id,
-      agent: agentId,
+      backend: activeBackend.id,
+      agent: activeAgentId,
     });
-    if (backend.id === 'openclaw') {
-      console.log(`[openclaw-diag] send key=${orchestratorSubKey(client.id, backend.id, agentId)} sessionName=${sessionName} clientId=${client.id}`);
+    if (activeBackend.id === 'openclaw') {
+      console.log(`[openclaw-diag] send key=${orchestratorSubKey(client.id, activeBackend.id, activeAgentId)} sessionName=${sessionName} clientId=${client.id}`);
     }
 
     // Emit busy status.
     broadcastToOrchestratorSession(sessionName, JSON.stringify({
       channel: 'orchestrator',
       event: 'status',
-      data: { status: 'busy', repoPath, threadId, backend: backend.id, agent: agentTag },
+      data: { status: 'busy', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
     }));
 
     // #624 — Attach an AbortController for this turn. Defensively abort any
@@ -3253,116 +3287,206 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // client watchdog. (2026-06-22 latch audit)
     let sawTerminal = false;
 
-    // Spawn the selected orchestrator and stream structured JSON events to
-    // subscribers. Every event is tagged with `backend` (and `agent`, for
-    // openclaw) so a client watching multiple surfaces renders each correctly.
-    await sendTurn((event) => {
-      if (backend.id === 'openclaw') {
-        const detail = event.type === 'text'
-          ? ` textLen=${event.text.length}`
-          : event.type === 'error'
-            ? ` err=${String(event.error).slice(0, 120)}`
-            : '';
-        console.log(`[openclaw-diag] ws recv event=${event.type}${detail}`);
-      }
-      let wsMsg: string | null = null;
-
-      switch (event.type) {
-        case 'text':
-          if (isThreadBacked) {
-            assistantTextAccum += event.text;
-            // Throttled mid-stream persist so a wedged turn's reply survives a
-            // reload instead of dropping to user-only on disk.
-            if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
-              lastIncrementalPersistAt = Date.now();
-              persistAssistantText(null);
-            }
-          }
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'output',
-            data: { text: event.text, repoPath, threadId, thinking: false, backend: backend.id, agent: agentTag, assistantMessageId },
-          });
-          break;
-
-        case 'thinking':
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'output',
-            data: { text: event.text, repoPath, threadId, thinking: true, backend: backend.id, agent: agentTag, assistantMessageId },
-          });
-          break;
-
-        case 'tool_use':
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'tool-use',
-            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: backend.id, agent: agentTag, assistantMessageId },
-          });
-          break;
-
-        case 'tool_result':
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'tool-result',
-            data: {
-              name: event.name,
-              args: event.input,
-              output: event.output,
-              toolUseId: event.id ?? null,
-              repoPath,
-              threadId,
-              backend: backend.id,
-              agent: agentTag,
-            },
-          });
-          break;
-
-        // ── Collide (MoA) — proposer pre-roll. Forwarded to the faint card; NEVER
-        //    accumulated into assistantTextAccum so only the aggregator's reply is
-        //    the persisted, visible answer.
-        case 'collide_phase':
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'collide-phase',
-            data: { phase: event.phase, proposers: event.proposers ?? [], repoPath, threadId, backend: backend.id, agent: agentTag },
-          });
-          break;
-
-        case 'collide_proposal':
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'collide-proposal',
-            data: { proposer: event.proposer, text: event.text, breach: event.breach ?? false, repoPath, threadId, backend: backend.id, agent: agentTag },
-          });
-          break;
-
-        case 'done':
-          sawTerminal = true;
-          if (threadId && event.sessionId && (backend.id === 'claude' || backend.id === 'codex')) {
-            writeOrchestratorBackendSessionId(threadId, backend.id, event.sessionId);
-          }
-          persistAssistantText(event.sessionId ?? null);
-          wsMsg = JSON.stringify({
+    let quotaFallbackError: string | null = null;
+    const runBackendTurn = async (
+      turnBackend: OrchestratorBackend,
+      turnAgentTag: string | undefined,
+      suppressQuotaError: boolean,
+    ) => {
+      let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
+      const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
+        sawTerminal = true;
+        if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
+          writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
+        }
+        persistAssistantText(event.sessionId ?? null, turnBackend.id);
+        if (sessionName) {
+          broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, backend: backend.id, agent: agentTag },
-          });
-          break;
+            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, backend: turnBackend.id, agent: turnAgentTag },
+          }));
+        }
+      };
+      await sendTurn(turnBackend, turnAgentTag, (event) => {
+        if (turnBackend.id === 'openclaw') {
+          const detail = event.type === 'text'
+            ? ` textLen=${event.text.length}`
+            : event.type === 'error'
+              ? ` err=${String(event.error).slice(0, 120)}`
+              : '';
+          console.log(`[openclaw-diag] ws recv event=${event.type}${detail}`);
+        }
+        let wsMsg: string | null = null;
 
-        case 'error':
-          sawTerminal = true;
-          persistAssistantText(null);
-          wsMsg = JSON.stringify({
-            channel: 'orchestrator',
-            event: 'error',
-            data: { error: event.error, repoPath, threadId, backend: backend.id, agent: agentTag },
-          });
-          break;
-      }
+        switch (event.type) {
+          case 'text':
+            if (isThreadBacked) {
+              assistantTextAccum += event.text;
+              // Throttled mid-stream persist so a wedged turn's reply survives a
+              // reload instead of dropping to user-only on disk.
+              if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
+                lastIncrementalPersistAt = Date.now();
+                persistAssistantText(null, turnBackend.id);
+              }
+            }
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'output',
+              data: { text: event.text, repoPath, threadId, thinking: false, backend: turnBackend.id, agent: turnAgentTag, assistantMessageId },
+            });
+            break;
 
-      if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
-    }, turnController.signal);
+          case 'thinking':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'output',
+              data: { text: event.text, repoPath, threadId, thinking: true, backend: turnBackend.id, agent: turnAgentTag, assistantMessageId },
+            });
+            break;
+
+          case 'tool_use':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'tool-use',
+              data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag, assistantMessageId },
+            });
+            break;
+
+          case 'tool_result':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'tool-result',
+              data: {
+                name: event.name,
+                args: event.input,
+                output: event.output,
+                toolUseId: event.id ?? null,
+                repoPath,
+                threadId,
+                backend: turnBackend.id,
+                agent: turnAgentTag,
+              },
+            });
+            break;
+
+          // ── Collide (MoA) — proposer pre-roll. Forwarded to the faint card; NEVER
+          //    accumulated into assistantTextAccum so only the aggregator's reply is
+          //    the persisted, visible answer.
+          case 'collide_phase':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'collide-phase',
+              data: { phase: event.phase, proposers: event.proposers ?? [], repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+            });
+            break;
+
+          case 'collide_proposal':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'collide-proposal',
+              data: { proposer: event.proposer, text: event.text, breach: event.breach ?? false, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+            });
+            break;
+
+          case 'done':
+            if (suppressQuotaError) {
+              pendingDone = event;
+              break;
+            }
+            emitDone(event);
+            break;
+
+          case 'error':
+            if (suppressQuotaError && isRuntimeQuotaLimitError(event.error)) {
+              quotaFallbackError = event.error;
+              break;
+            }
+            sawTerminal = true;
+            persistAssistantText(null, turnBackend.id);
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'error',
+              data: { error: event.error, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+            });
+            break;
+        }
+
+        if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
+      }, turnController!.signal);
+      if (pendingDone && !quotaFallbackError) emitDone(pendingDone);
+    };
+
+    // Spawn the selected orchestrator and stream structured JSON events to
+    // subscribers. Every event is tagged with its actual backend (and `agent`,
+    // for openclaw) so fallback handoffs do not cross-contaminate transcripts.
+    try {
+      await runBackendTurn(activeBackend, activeAgentTag, !!resolveCrossHouseOrchestratorFallback(activeBackend.id));
+    } catch (err) {
+      if (!resolveCrossHouseOrchestratorFallback(activeBackend.id) || !isRuntimeQuotaLimitError(err)) throw err;
+      quotaFallbackError = err instanceof Error ? err.message : String(err);
+    }
+
+    const fallback = quotaFallbackError ? resolveCrossHouseOrchestratorFallback(activeBackend.id) : null;
+    if (fallback && sessionName && turnController && !turnController.signal.aborted) {
+      const handoffNoticeId = `cross-house-handoff-${threadId ?? 'repo'}-${Date.now()}`;
+      const handoffMessage = buildCrossHouseHandoffMessage(fallback);
+      const handoffNoticePayload = {
+        repoPath,
+        threadId,
+        kind: fallback.noticeKind,
+        noticeId: handoffNoticeId,
+        message: handoffMessage,
+        registered: [`${fallback.fromModel} -> ${fallback.toModel}`],
+      };
+      broadcastToOrchestratorSession(sessionName, JSON.stringify({
+        channel: 'orchestrator',
+        event: 'notice',
+        data: {
+          ...handoffNoticePayload,
+          backend: activeBackend.id,
+        },
+      }));
+      activeBackend = getOrchestratorBackend(fallback.toBackend);
+      activeAgentId = '';
+      activeAgentTag = undefined;
+      abortKey = orchestratorAbortKey(repoPath, activeBackend.id, activeAgentId, threadId);
+      turnAbortKeys.add(abortKey);
+      sessionName = orchestratorRouteSessionName(
+        activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
+        threadId,
+      );
+      orchestratorSubscriptions.set(orchestratorSubKey(client.id, activeBackend.id, activeAgentId), {
+        clientId: client.id,
+        repoPath,
+        sessionName,
+        threadId,
+        backend: activeBackend.id,
+        agent: activeAgentId,
+      });
+      promoteOrchestratorFallbackSubscribers({
+        repoPath,
+        threadId,
+        fromBackend: fallback.fromBackend,
+        toBackend: activeBackend.id,
+        toSessionName: sessionName,
+      });
+      orchestratorInflightAborts.set(abortKey, turnController);
+      broadcastToOrchestratorSession(sessionName, JSON.stringify({
+        channel: 'orchestrator',
+        event: 'notice',
+        data: {
+          ...handoffNoticePayload,
+          backend: activeBackend.id,
+        },
+      }));
+      broadcastToOrchestratorSession(sessionName, JSON.stringify({
+        channel: 'orchestrator',
+        event: 'status',
+        data: { status: 'busy', repoPath, threadId, backend: activeBackend.id },
+      }));
+      await runBackendTurn(activeBackend, activeAgentTag, false);
+    }
 
     // The stream resolved without ever emitting 'done'/'error' (hung child that
     // produced nothing, then exited). Synthesize the terminal 'ready' so the
@@ -3373,21 +3497,27 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       broadcastToOrchestratorSession(sessionName, JSON.stringify({
         channel: 'orchestrator',
         event: 'status',
-        data: { status: 'ready', repoPath, threadId, backend: backend.id, agent: agentTag },
+        data: { status: 'ready', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
       }));
     }
 
     // #624 — Release the in-flight controller. Keyed compare guards against a
     // newer turn having already replaced this entry.
-    if (orchestratorInflightAborts.get(abortKey) === turnController) {
-      orchestratorInflightAborts.delete(abortKey);
+    for (const key of turnAbortKeys) {
+      if (orchestratorInflightAborts.get(key) === turnController) {
+        orchestratorInflightAborts.delete(key);
+      }
     }
 
     // After the user message completes, drain any queued supervisor escalations.
     void drainOrchestratorAutoQueue();
   } catch (err) {
-    if (turnController && orchestratorInflightAborts.get(abortKey) === turnController) {
-      orchestratorInflightAborts.delete(abortKey);
+    if (turnController) {
+      for (const key of turnAbortKeys) {
+        if (orchestratorInflightAborts.get(key) === turnController) {
+          orchestratorInflightAborts.delete(key);
+        }
+      }
     }
     // Save any partial assistant text accumulated before the failure so
     // mobile listings still show what arrived rather than a blank turn.
@@ -3399,7 +3529,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     const errorMsg = {
       channel: 'orchestrator' as const,
       event: 'error' as const,
-      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, threadId, backend: backend.id, agent: agentTag },
+      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
     };
     if (sessionName) {
       broadcastToOrchestratorSession(sessionName, JSON.stringify(errorMsg));
