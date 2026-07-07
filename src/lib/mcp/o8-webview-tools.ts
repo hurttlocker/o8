@@ -714,9 +714,9 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
       ['mousedown', MouseEvent, Object.assign({ buttons: 1 }, mo)],
       ['pointerup', typeof PointerEvent === 'function' ? PointerEvent : MouseEvent, Object.assign({ buttons: 0 }, po)],
       ['mouseup', MouseEvent, Object.assign({ buttons: 0 }, mo)],
+      ['click', MouseEvent, Object.assign({ buttons: 0, detail: 1 }, mo)],
     ];
     for (const [type, Ctor, init] of seq) { try { el.dispatchEvent(new Ctor(type, init)); } catch (e) {} }
-    try { el.click(); } catch (e) {}
     return { clicked: true, matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(cx), y: Math.round(cy) };
   })()`;
 }
