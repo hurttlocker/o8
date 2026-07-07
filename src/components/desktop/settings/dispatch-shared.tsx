@@ -132,6 +132,8 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
       <button
         type="button"
         disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => { if (!disabled) setOpen((o) => !o); }}
         onBlur={() => { window.setTimeout(() => setOpen(false), 120); }}
         style={{
@@ -177,6 +179,8 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
       </button>
       {open && !disabled ? (
         <div
+          role="listbox"
+          aria-label="Settings picker options"
           onMouseDown={(event) => event.preventDefault()}
           style={{
             position: 'absolute',
@@ -203,6 +207,8 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
               <button
                 key={opt.value}
                 type="button"
+                role="option"
+                aria-selected={isActive}
                 onClick={() => { onChange(opt.value); setOpen(false); }}
                 style={{
                   minHeight: 36,
