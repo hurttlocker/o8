@@ -165,6 +165,32 @@ export function glassPop(): CSSProperties {
   } as CSSProperties;
 }
 
+/** Mount-only card entrance vocabulary. Applied inline from page.tsx so the
+ *  canvas keeps the no-class styling contract while still sharing keyframes. */
+export const CARD_ENTRANCE = {
+  enterMs: 200,
+  borderMs: 350,
+  reducedMs: 90,
+  staggerMs: 60,
+  sweepMs: 220,
+  ease: 'cubic-bezier(0.34, 1.3, 0.64, 1)',
+  keyframes: `
+@keyframes cnv-card-enter {
+  0% { opacity: 0; transform: scale(0.96); }
+  72% { opacity: 1; transform: scale(1.012); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes cnv-card-border-draw {
+  0% { box-shadow: 0 0 0 1.5px var(--cnv-ink-muted), 0 0 18px -4px var(--cnv-ink); }
+  100% { box-shadow: 0 0 0 0 var(--cnv-edge), 0 0 0 0 var(--cnv-edge); }
+}
+@keyframes cnv-card-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+`,
+} as const;
+
 export type CardKind = 'packet' | 'browser' | 'terminal' | 'review' | 'image';
 
 export interface MockCard {
