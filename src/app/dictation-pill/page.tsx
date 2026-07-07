@@ -76,6 +76,9 @@ const ASK_MAX_TURNS = 16; // 8 exchanges before trimming the oldest
 
 const SUCCESS_FLASH_MS = 900;
 const ERROR_FLASH_MS = 2500;
+// Polish (Whisper/LLM cleanup + paste) normally lands in 1–4s; past this the
+// session is considered hung and the pill frees itself.
+const POLISH_WATCHDOG_MS = 20_000;
 
 const IDLE_SNAPSHOT: DictationSnapshot = {
   state: 'idle',
@@ -261,6 +264,7 @@ export default function DictationPillPage() {
   const stateRef = useRef<DictationState>('idle');
   const startTimeRef = useRef<number>(0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const polishWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   const setState = useCallback((next: DictationState, patch?: Partial<DictationSnapshot>) => {
@@ -281,6 +285,10 @@ export default function DictationPillPage() {
     if (flashTimerRef.current) {
       clearTimeout(flashTimerRef.current);
       flashTimerRef.current = null;
+    }
+    if (polishWatchdogRef.current) {
+      clearTimeout(polishWatchdogRef.current);
+      polishWatchdogRef.current = null;
     }
     startTimeRef.current = Date.now();
     stateRef.current = 'recording';
@@ -349,23 +357,29 @@ export default function DictationPillPage() {
           clearTimeout(flashTimerRef.current);
           flashTimerRef.current = null;
         }
+        if (polishWatchdogRef.current) {
+          clearTimeout(polishWatchdogRef.current);
+          polishWatchdogRef.current = null;
+        }
         stateRef.current = 'idle';
         setSnapshot(IDLE_SNAPSHOT);
         break;
       case 'ready':
       case 'complete':
-        // Terminal recognizer lifecycle signals always win. A live MacBook
-        // trace showed audio_file/complete/ready reaching this route while the
-        // pill stayed recording because these events were treated as no-ops.
+        // Recognizer teardown signals heal the STUCK states only. The v1 fix
+        // reset to idle unconditionally, which killed the polishing pill the
+        // instant fn was released (audio_file → polishing, then complete/ready
+        // wiped it) and a trailing `ready` clobbered the pasted-confirmation
+        // flash mid-play (operator regression, 0.1.561). `polishing` has its
+        // own terminals — system-pasted / error / the watchdog below — and an
+        // active success/error flash must play out.
         if (panelPendingRef.current?.phase === 'listening') {
           updatePanelPending({ ...panelPendingRef.current, phase: 'handoff' });
         }
-        if (flashTimerRef.current) {
-          clearTimeout(flashTimerRef.current);
-          flashTimerRef.current = null;
+        if (stateRef.current === 'recording' || stateRef.current === 'transcribing') {
+          stateRef.current = 'idle';
+          setSnapshot(IDLE_SNAPSHOT);
         }
-        stateRef.current = 'idle';
-        setSnapshot(IDLE_SNAPSHOT);
         break;
       case 'level':
         if (stateRef.current === 'recording' && typeof payload.level === 'number') {
@@ -393,18 +407,40 @@ export default function DictationPillPage() {
         if (stateRef.current === 'recording') setState('transcribing');
         break;
       case 'audio_file':
-        if (stateRef.current === 'recording' || stateRef.current === 'transcribing') setState('polishing');
+        if (stateRef.current === 'recording' || stateRef.current === 'transcribing') {
+          setState('polishing');
+          // Anti-stuck watchdog: `polishing` is no longer reset by the
+          // recognizer's complete/ready teardown (see above), so if the polish
+          // path hangs with no system-pasted/error the pill must still free
+          // itself — the works-once-then-stuck bug this route was healing.
+          if (polishWatchdogRef.current) clearTimeout(polishWatchdogRef.current);
+          polishWatchdogRef.current = setTimeout(() => {
+            polishWatchdogRef.current = null;
+            if (stateRef.current === 'polishing') {
+              stateRef.current = 'idle';
+              setSnapshot(IDLE_SNAPSHOT);
+            }
+          }, POLISH_WATCHDOG_MS);
+        }
         break;
       case 'system-pasted':
         // Paste landed in the focused app — flash the ACTUAL pasted words in
         // the dock (Symon parity: the notch shows the text, not just "Pasted"),
         // then collapse back to the idle capsule.
+        if (polishWatchdogRef.current) {
+          clearTimeout(polishWatchdogRef.current);
+          polishWatchdogRef.current = null;
+        }
         setState('success', { audioLevel: 0, pastedText: payload.text ?? null });
         returnToIdleAfter(SUCCESS_FLASH_MS);
         break;
       case 'error':
         // A failed dictation clears any pending in-panel turn — the existing
         // error capsule takes the dock (worth the morph for a real failure).
+        if (polishWatchdogRef.current) {
+          clearTimeout(polishWatchdogRef.current);
+          polishWatchdogRef.current = null;
+        }
         if (panelPendingRef.current) updatePanelPending(null);
         stateRef.current = 'error';
         setSnapshot({ state: 'error', audioLevel: 0, durationMs: 0, error: payload.text ?? 'Dictation failed', partialTranscript: '' });
