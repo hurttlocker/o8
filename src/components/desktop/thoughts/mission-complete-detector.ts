@@ -30,6 +30,7 @@ interface MissionTracker {
   missionId: string;
   summary: string;
   repoPath: string | null;
+  completedAt: number | null;
   packetIds: Set<string>;
   done: Set<string>;
   meta: Map<string, TrackedPacketMeta>;
@@ -44,12 +45,24 @@ const trackers = new Map<string, MissionTracker>();
 // the live transcript. Capped; superseded per repo by newer missions.
 const pendingCards: MobileTranscriptEntry[] = [];
 const MAX_PENDING_CARDS = 12;
+const STALE_TERMINAL_SNAPSHOT_MS = 5 * 60 * 1000;
 // Skip redundant capture work when the mission snapshot is unchanged (the
 // capture effect re-runs on every render because missionState is a fresh ref).
 const lastCaptureSig = new Map<string, string>();
 
 function packetIsTerminal(packet: OrchestratorPacket): boolean {
   return packet.releaseState === 'released' || Boolean(packet.archivedAt);
+}
+
+function packetTerminalTime(packet: OrchestratorPacket): number | null {
+  const raw = packet.releaseStatePayload?.releasedAt
+    ?? packet.archivedAt
+    ?? packet.lastEventAt
+    ?? packet.review?.recordedAt
+    ?? null;
+  if (!raw) return null;
+  const timestamp = new Date(raw).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function recordPendingMissionCard(tracker: MissionTracker) {
@@ -72,12 +85,13 @@ function recordPendingMissionCard(tracker: MissionTracker) {
   };
   const cardId = `orch-mission-complete-${tracker.missionId}`;
   if (!pendingCards.some((card) => card.id === cardId)) {
+    const timestamp = tracker.completedAt ?? Date.now();
     pendingCards.push({
       id: cardId,
       role: 'system',
       text: statusEventToText(statusEvent),
-      timestamp: Date.now(),
-      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp,
+      timestampLabel: new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       statusEvent,
     });
     while (pendingCards.length > MAX_PENDING_CARDS) pendingCards.shift();
@@ -146,6 +160,14 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
     const id = missionState?.missionId?.trim();
     if (!id || !missionState || missionState.packets.length === 0) return;
     if (hasMissionBeenCarded(id)) return;
+    const terminalTimes = missionState.packets.map(packetTerminalTime).filter((time): time is number => time != null);
+    if (
+      terminalTimes.length === missionState.packets.length
+      && Date.now() - Math.max(...terminalTimes) > STALE_TERMINAL_SNAPSHOT_MS
+    ) {
+      markMissionCarded(id);
+      return;
+    }
     // Skip when this mission's packet/release snapshot is unchanged — the effect
     // re-runs on every render (missionState is a fresh ref each time).
     const sig = missionState.packets.map((p) => `${p.id}:${p.releaseState}:${p.archivedAt ? 1 : 0}`).join('|');
@@ -156,12 +178,16 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
       missionId: id,
       summary: missionState.summary,
       repoPath: missionState.repoPath ?? null,
+      completedAt: null,
       packetIds: new Set<string>(),
       done: new Set<string>(),
       meta: new Map<string, TrackedPacketMeta>(),
     };
     tracker.summary = missionState.summary || tracker.summary;
     tracker.repoPath = missionState.repoPath ?? tracker.repoPath;
+    if (terminalTimes.length > 0) {
+      tracker.completedAt = Math.max(tracker.completedAt ?? 0, ...terminalTimes);
+    }
     for (const packet of missionState.packets) {
       tracker.packetIds.add(packet.id);
       tracker.meta.set(packet.id, {

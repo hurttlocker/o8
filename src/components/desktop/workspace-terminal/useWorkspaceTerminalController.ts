@@ -998,10 +998,34 @@ export function useWorkspaceTerminalController(
   // Operator-initiated rename — keeps the workspace tab's label in
   // sync with a chat-history PATCH so the header strip reflects the
   // new title without waiting for a remount.
-  const handleUpdateTabLabel = useCallback((tabId: string, label: string) => {
-    setTabs((previous) => previous.map((tab) => (
-      tab.id === tabId ? { ...tab, label } : tab
-    )));
+  const handleUpdateTabLabel = useCallback((
+    tabId: string,
+    label: string,
+    options?: { threadId?: string | null; source?: 'auto' | 'user' },
+  ) => {
+    const nextLabel = label.trim();
+    if (!nextLabel) return;
+    setTabs((previous) => {
+      let changed = false;
+      const next = previous.map((tab) => {
+        if (tab.id !== tabId) return tab;
+        if (
+          options?.threadId
+          && tab.kind === 'orchestrator'
+          && tab.orchestratorThreadId
+          && tab.orchestratorThreadId !== options.threadId
+        ) {
+          return tab;
+        }
+        if (options?.source !== 'user' && tab.labelSource === 'user') return tab;
+        const labelSource = options?.source === 'user' ? 'user' as const : tab.labelSource;
+        if (tab.label === nextLabel && tab.labelSource === labelSource) return tab;
+        changed = true;
+        return { ...tab, label: nextLabel, labelSource };
+      });
+      if (changed) tabsRef.current = next;
+      return changed ? next : previous;
+    });
   }, []);
 
   const handleSaveCheckpoint = useCallback((tabId: string) => {

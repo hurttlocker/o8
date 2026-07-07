@@ -21,6 +21,7 @@ import {
   subscribeOrchestratorRuntimePreference,
 } from '@/lib/orchestrator/preferences';
 import { loadOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import type { OrchestrationMode, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 import { ChatOpenRouterPicker } from '@/components/desktop/orchestrator/ChatOpenRouterPicker';
@@ -388,20 +389,12 @@ function OrchestratorTabInner({
         const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
         if (cancelled) return;
         const data = res.ok ? await res.json() : null;
-        // Match the /list endpoint's title resolution: data.title wins,
-        // but fall back to the first user-message snippet so a saved
-        // conversation without an explicit `title` field still surfaces
-        // a meaningful tab label (without this, an orchestrator thread
-        // with real content but no title field flashes back to
-        // 'Orchestrator' on every reload — that's what the operator
-        // saw in dogfood after clicking a named thread).
+        // Match the /list endpoint's title resolution: data.title wins.
+        // Untitled orchestrator threads use a stable generated label, never
+        // the latest/raw operator message text; session identity must not flap
+        // while the operator is inside it.
         const explicitTitle = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
-        const firstUserMsg = Array.isArray(data?.messages)
-          ? data.messages.find((m: { role?: string; content?: string }) => m?.role === 'user' && typeof m?.content === 'string' && m.content.trim())
-          : null;
-        const fallbackTitle = firstUserMsg?.content
-          ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
-          : null;
+        const fallbackTitle = lockedMode === 'chat' ? null : stableOrchestratorThreadTitleForId(threadId, data?.savedAt);
         const title = explicitTitle ?? fallbackTitle;
         if (cancelled) return;
         if (title) {

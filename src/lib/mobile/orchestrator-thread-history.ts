@@ -3,6 +3,7 @@ import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 
 export const ORCHESTRATOR_HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
@@ -252,11 +253,8 @@ function projectThread(
   modifiedAt: string,
 ): MobileOrchestratorThread {
   const messages = Array.isArray(record.messages) ? record.messages : [];
-  const firstUserMessage = messages.find((message) => message.role === 'user');
   const lastMessage = messages[messages.length - 1];
-  const fallbackTitle = firstUserMessage?.content
-    ? firstUserMessage.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMessage.content.length > 60 ? '...' : '')
-    : 'New chat';
+  const fallbackTitle = stableOrchestratorThreadTitleForId(tabId, record.savedAt || modifiedAt);
   const repoPath = typeof record.repoPath === 'string' ? record.repoPath : null;
   const githubIdentity = resolveRepoGithubIdentity(repoPath, record.remoteUrl);
 
@@ -490,7 +488,7 @@ export function appendMobileOrchestratorUserMessage(input: {
     model: modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
     starred: false,
     pinned: false,
-    title: content.slice(0, 60).replace(/\n/g, ' ') + (content.length > 60 ? '...' : ''),
+    title: null,
     repoPath: input.repoPath,
     repoName: repoNameFromPath(input.repoPath),
     backend: input.backend ?? DEFAULT_BACKEND,
@@ -520,7 +518,7 @@ export function appendMobileOrchestratorUserMessage(input: {
     messages: nextMessages,
     model: existing.model ?? modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
     savedAt: nowIso,
-    title: trimTitle(existing.title, content),
+    title: typeof existing.title === 'string' && existing.title.trim() ? existing.title.trim() : null,
     repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
       ? existing.repoPath
       : input.repoPath,
@@ -528,7 +526,7 @@ export function appendMobileOrchestratorUserMessage(input: {
       ? existing.repoName
       : repoNameFromPath(input.repoPath),
     backend: normalizeBackend(existing.backend) ?? input.backend ?? DEFAULT_BACKEND,
-    mobileRevealRequestedAt: nowIso,
+    mobileRevealRequestedAt: existing.mobileRevealRequestedAt ?? null,
     orchestratorVisible: true,
   });
 

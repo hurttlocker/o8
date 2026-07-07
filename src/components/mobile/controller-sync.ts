@@ -306,6 +306,9 @@ export async function loadSessionHistory({
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
     });
     const payload = await readJson<MobileHistoryResponse>(response);
+    if (payload.sessionKey !== sessionKey) {
+      return historyBySession[sessionKey] ?? [];
+    }
     setHistoryBySession((current) => {
       const prev = current[sessionKey] ?? [];
       const next = payload.transcript;
