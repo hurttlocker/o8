@@ -40,6 +40,9 @@ type OrchestratorHistoryRecord = {
   orchestratorVisible?: boolean;
   mobileCreatedAt?: string | null;
   mobileRevealRequestedAt?: string | null;
+  orchestratorTerminalStatus?: 'failed' | null;
+  orchestratorTerminalError?: string | null;
+  orchestratorTerminalAt?: string | null;
   orchestratorSessionIds?: Record<string, string | null>;
   orchestratorSessionUpdatedAt?: string | null;
 };
@@ -199,6 +202,12 @@ function normalizeAgent(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 128) : null;
 }
 
+function normalizeErrorMessage(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 500) : null;
+}
+
 function inferRuntime(model: string | undefined | null): MobileOrchestratorThread['runtime'] {
   if (!model) return 'unknown';
   const lower = model.toLowerCase();
@@ -264,7 +273,9 @@ function projectThread(
     title: trimTitle(record.title, fallbackTitle),
     lastMessageAt: record.savedAt || modifiedAt,
     runtime: inferRuntime(effectiveModel(tabId, record)),
-    status: messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
+    status: record.orchestratorTerminalStatus === 'failed'
+      ? 'failed'
+      : messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
     messageCount: messages.length,
     repoPath,
     repoName: typeof record.repoName === 'string' && record.repoName.trim()
@@ -460,6 +471,9 @@ export function createMobileOrchestratorThread(input: {
     orchestratorVisible: true,
     mobileCreatedAt: now,
     mobileRevealRequestedAt: input.reveal === false ? null : now,
+    orchestratorTerminalStatus: null,
+    orchestratorTerminalError: null,
+    orchestratorTerminalAt: null,
     orchestratorSessionIds: {},
     orchestratorSessionUpdatedAt: null,
   };
@@ -532,6 +546,9 @@ export function appendMobileOrchestratorUserMessage(input: {
       : repoNameFromPath(input.repoPath),
     backend: normalizeBackend(existing.backend) ?? input.backend ?? DEFAULT_BACKEND,
     agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
+    orchestratorTerminalStatus: null,
+    orchestratorTerminalError: null,
+    orchestratorTerminalAt: null,
     mobileRevealRequestedAt: existing.mobileRevealRequestedAt ?? null,
     orchestratorVisible: true,
   });
@@ -637,6 +654,9 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
     model: nextModel,
     backend: nextBackend,
     agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
+    orchestratorTerminalStatus: null,
+    orchestratorTerminalError: null,
+    orchestratorTerminalAt: null,
     savedAt: nowIso,
     repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
       ? existing.repoPath
@@ -647,6 +667,60 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
     orchestratorSessionIds: nextSessionIds,
     orchestratorSessionUpdatedAt: sessionIdsTouched ? nowIso : existing.orchestratorSessionUpdatedAt ?? null,
     orchestratorVisible: existing.orchestratorVisible === false ? false : true,
+  });
+
+  return readProjectedThread(tabId);
+}
+
+export function markMobileOrchestratorThreadFailed(input: {
+  tabId: string | null | undefined;
+  repoPath: string;
+  error: string;
+  backend?: MobileOrchestratorBackend | null;
+  agent?: string | null;
+  timestampMs?: number;
+}): MobileOrchestratorThread | null {
+  const tabId = input.tabId;
+  if (!tabId?.startsWith('thoughts-')) return null;
+  const now = new Date(
+    typeof input.timestampMs === 'number' && Number.isFinite(input.timestampMs)
+      ? input.timestampMs
+      : Date.now(),
+  ).toISOString();
+  const existing = readHistoryRecord(tabId) ?? {
+    messages: [],
+    savedAt: now,
+    model: modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
+    starred: false,
+    pinned: false,
+    title: null,
+    repoPath: input.repoPath,
+    repoName: repoNameFromPath(input.repoPath),
+    backend: input.backend ?? DEFAULT_BACKEND,
+    agent: normalizeAgent(input.agent),
+    archivedAt: null,
+    orchestratorVisible: true,
+    orchestratorSessionIds: {},
+    orchestratorSessionUpdatedAt: null,
+  };
+
+  writeHistoryRecord(tabId, {
+    ...existing,
+    messages: Array.isArray(existing.messages) ? existing.messages : [],
+    model: existing.model ?? modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
+    savedAt: now,
+    repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
+      ? existing.repoPath
+      : input.repoPath,
+    repoName: typeof existing.repoName === 'string' && existing.repoName.trim()
+      ? existing.repoName
+      : repoNameFromPath(input.repoPath),
+    backend: normalizeBackend(existing.backend) ?? input.backend ?? DEFAULT_BACKEND,
+    agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
+    orchestratorTerminalStatus: 'failed',
+    orchestratorTerminalError: normalizeErrorMessage(input.error) ?? 'Orchestrator failed.',
+    orchestratorTerminalAt: now,
+    orchestratorVisible: true,
   });
 
   return readProjectedThread(tabId);

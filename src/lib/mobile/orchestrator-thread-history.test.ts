@@ -123,4 +123,36 @@ describe('orchestrator thread history persistence', () => {
     expect(listed?.backend).toBe('openclaw');
     expect(listed?.agent).toBe('main');
   });
+
+  it('projects terminal OpenClaw failures as failed instead of permanently busy', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({
+      repoPath: '/tmp/repo',
+      backend: 'openclaw',
+      agent: 'main',
+    });
+
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: 'trigger gateway failure',
+      backend: 'openclaw',
+      agent: 'main',
+      timestampMs: new Date('2026-07-07T21:29:00.000Z').getTime(),
+    });
+    expect(history.listMobileOrchestratorThreads({ backend: 'openclaw' })[0]?.status).toBe('busy');
+
+    history.markMobileOrchestratorThreadFailed({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      error: 'openclaw gateway exited or failed to spawn before becoming ready',
+      backend: 'openclaw',
+      agent: 'main',
+      timestampMs: new Date('2026-07-07T21:29:01.000Z').getTime(),
+    });
+
+    const listed = history.listMobileOrchestratorThreads({ backend: 'openclaw' })[0];
+    expect(listed?.status).toBe('failed');
+    expect(listed?.agent).toBe('main');
+  });
 });
