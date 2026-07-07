@@ -100,6 +100,7 @@ export interface AgentPanelExtraAgentsProps {
 // ── Constants ──
 
 const FONT = 'var(--font-sans-system)';
+const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
 
 // ── Helpers ──
 
@@ -183,6 +184,7 @@ function buildRows(
       sessionKey: lane.sessionKey,
       repoPath: normalizePath(lane.repoPath),
       packetId: lane.packetId,
+      laneId: lane.id,
       laneStatus: lane.status,
       lastEventLabel: lane.lastEventLabel,
     });
@@ -204,6 +206,7 @@ function buildRows(
       sessionKey: agent.sessionKey,
       repoPath: normalizePath(agent.workspace),
       packetId: null,
+      laneId: null,
       laneStatus: null,
       lastEventLabel: null,
     });
@@ -476,6 +479,21 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
     }
   }, [fetchData]);
 
+  const handleFocusRow = useCallback((row: ExtraAgentRow) => {
+    if (typeof window !== 'undefined' && (row.packetId || row.sessionKey || row.laneId)) {
+      window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, {
+        detail: {
+          packetId: row.packetId,
+          sessionKey: row.sessionKey,
+          laneId: row.laneId,
+          title: row.name,
+        },
+      }));
+      return;
+    }
+    if (row.sessionKey) onSelectSession?.(row.sessionKey);
+  }, [onSelectSession]);
+
   useEffect(() => {
     void fetchData();
     const onLifecycle = () => { void fetchData(); };
@@ -527,6 +545,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
               active={Boolean(activeSessionKey && row.sessionKey === activeSessionKey)}
               busy={busy}
               onSelectSession={onSelectSession}
+              onFocusRow={handleFocusRow}
               onRetryPacket={handleRetry}
               onOpenMenu={(event, targetRow) => {
                 setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
@@ -539,10 +558,10 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
         <ExtraAgentActionMenu
           state={actionMenu}
           busy={busy}
-          canFocus={Boolean(actionMenu.row.sessionKey && onSelectSession)}
+          canFocus={Boolean(actionMenu.row.packetId || actionMenu.row.sessionKey || actionMenu.row.laneId)}
           onClose={() => setActionMenu(null)}
           onFocus={() => {
-            if (actionMenu.row.sessionKey) onSelectSession?.(actionMenu.row.sessionKey);
+            handleFocusRow(actionMenu.row);
             setActionMenu(null);
           }}
           onArchive={() => {

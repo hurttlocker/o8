@@ -19,6 +19,7 @@ import { resolveDisplayRuntime, orchestratorRuntimeTone } from '@/lib/orchestrat
 import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 const SWARM_ACCENT = '#FF5A1F';
+const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
 
 /** A native Claude sub-agent (Task-tool scout) surfaced in the live crew. */
 export interface SwarmScoutView {
@@ -96,6 +97,7 @@ function CrewRow({
   sub,
   status,
   showTopBorder,
+  onClick,
 }: {
   dotColor: string;
   dotGlow?: string;
@@ -103,23 +105,31 @@ function CrewRow({
   sub: string;
   status: StatusTone;
   showTopBorder: boolean;
+  onClick?: () => void;
 }) {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-        alignItems: 'center',
-        gap: 10,
-        paddingTop: 7,
-        paddingRight: 12,
-        paddingBottom: 7,
-        paddingLeft: 12,
-        borderTopWidth: showTopBorder ? 1 : 0,
-        borderTopStyle: 'solid',
-        borderTopColor: 'var(--t-divider-subtle)',
-      }}
-    >
+  const rowStyle = {
+    width: '100%',
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 7,
+    paddingRight: 12,
+    paddingBottom: 7,
+    paddingLeft: 12,
+    borderTopWidth: showTopBorder ? 1 : 0,
+    borderTopStyle: 'solid',
+    borderTopColor: 'var(--t-divider-subtle)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+    background: 'transparent',
+    textAlign: 'left',
+    cursor: onClick ? 'pointer' : 'default',
+    fontFamily: 'var(--font-sans-system)',
+  } as const;
+  const content = (
+    <>
       {/* Role dot */}
       <span
         aria-hidden="true"
@@ -153,11 +163,50 @@ function CrewRow({
           {status.label}
         </span>
       </span>
-    </div>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={`Open ${title}`}
+        style={rowStyle}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div style={rowStyle}>{content}</div>;
 }
 
-export function SwarmStatusCard({ packets, scouts = [] }: { packets: OrchestratorPacket[]; scouts?: SwarmScoutView[] }) {
+interface SwarmStatusCardProps {
+  packets: OrchestratorPacket[];
+  scouts?: SwarmScoutView[];
+  onFocusPacket?: (packet: OrchestratorPacket) => void;
+}
+
+export function focusSwarmPacket(packet: OrchestratorPacket, onFocusPacket?: (packet: OrchestratorPacket) => void) {
+  if (onFocusPacket) {
+    onFocusPacket(packet);
+    return;
+  }
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, {
+    detail: {
+      packetId: packet.id,
+      laneId: packet.lane?.laneId ?? null,
+      sessionKey: packet.lane?.sessionKey ?? packet.lane?.tabId ?? null,
+      title: packet.title,
+    },
+  }));
+}
+
+export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmStatusCardProps) {
   const active = packets.filter((packet) => {
     if (!ACTIVE_STATUSES.has(packet.status)) return false;
     if (packet.archivedAt) return false;
@@ -266,6 +315,7 @@ export function SwarmStatusCard({ packets, scouts = [] }: { packets: Orchestrato
               sub={`${tone.label}${eventLabel ? ` · ${eventLabel}` : ''}`}
               status={statusTone(packet.status)}
               showTopBorder={index > 0 || scouts.length > 0}
+              onClick={() => focusSwarmPacket(packet, onFocusPacket)}
             />
           );
         })}

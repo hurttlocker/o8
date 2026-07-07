@@ -47,6 +47,8 @@ const EMPTY_REVIEW_STATE: ReviewPanelState = {
   showAllFiles: false,
 };
 
+const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
+
 function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8ActivityPacketRowProps) {
   const data = useOrchestratorData();
   const statusMeta = orchestratorStatusTone(packet.status);
@@ -112,8 +114,20 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
   }, [data, packet, patchPacket]);
 
   const handleFocus = useCallback(() => {
-    if (packet.lane?.sessionKey) {
-      data?.onSelectSession?.(packet.lane.sessionKey);
+    if (typeof window !== 'undefined' && (packet.lane?.laneId || packet.lane?.sessionKey || packet.id)) {
+      window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, {
+        detail: {
+          packetId: packet.id,
+          laneId: packet.lane?.laneId ?? null,
+          sessionKey: packet.lane?.sessionKey ?? packet.lane?.tabId ?? null,
+          title: packet.title,
+        },
+      }));
+      return;
+    }
+    const sessionKey = packet.lane?.sessionKey ?? packet.lane?.tabId ?? null;
+    if (sessionKey) {
+      data?.onSelectSession?.(sessionKey);
       return;
     }
     // Fall back to the workspace pane pivot when no live session is bound.
