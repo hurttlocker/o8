@@ -155,4 +155,28 @@ describe('orchestrator thread history persistence', () => {
     expect(listed?.status).toBe('failed');
     expect(listed?.agent).toBe('main');
   });
+
+  it('async stat token matches the sync token across states', async () => {
+    const history = await loadHistoryModule();
+
+    // Empty history dir: both tokens agree.
+    expect(await history.mobileOrchestratorThreadHistoryStatTokenAsync()).toBe(
+      history.mobileOrchestratorThreadHistoryStatToken(),
+    );
+
+    const first = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Alpha' });
+    history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Bravo' });
+    expect(await history.mobileOrchestratorThreadHistoryStatTokenAsync()).toBe(
+      history.mobileOrchestratorThreadHistoryStatToken(),
+    );
+
+    // A file mutation must move both tokens in lockstep.
+    const before = history.mobileOrchestratorThreadHistoryStatToken();
+    const filePath = history.safeOrchestratorHistoryPath(first.id);
+    const raw = readFileSync(filePath, 'utf-8');
+    writeFileSync(filePath, raw.replace('"Alpha"', '"Charlie"'));
+    const afterSync = history.mobileOrchestratorThreadHistoryStatToken();
+    expect(afterSync).not.toBe(before);
+    expect(await history.mobileOrchestratorThreadHistoryStatTokenAsync()).toBe(afterSync);
+  });
 });

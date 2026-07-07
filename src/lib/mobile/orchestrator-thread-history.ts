@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -355,6 +356,58 @@ function readCachedHistoryRecord(fileStat: OrchestratorHistoryFileStat): Orchest
 
 export function mobileOrchestratorThreadHistoryStatToken(): string {
   const fileToken = listThoughtHistoryFileStats()
+    .map((fileStat) => `${fileStat.file}:${fileStat.mtimeMs}:${fileStat.size}`)
+    .join('|');
+  return `${historyWriteVersion}:${fileToken}`;
+}
+
+// Async mirror of listThoughtHistoryFileStats for the ws-server's 1Hz poll,
+// which runs on the event loop that streams agent output — the sync version's
+// readdirSync + per-file statSync blocked that loop every second. Same
+// filtering, sorting, and parse-cache eviction; only the fs calls are async.
+async function listThoughtHistoryFileStatsAsync(): Promise<OrchestratorHistoryFileStat[]> {
+  let entries: string[];
+  try {
+    entries = await readdirAsync(ORCHESTRATOR_HISTORY_DIR);
+  } catch {
+    // Dir absent/unreadable — mirror the sync path's !existsSync branch.
+    historyParseCache.clear();
+    return [];
+  }
+
+  const stats: OrchestratorHistoryFileStat[] = [];
+  const livePaths = new Set<string>();
+  const files = entries.filter((file) => file.endsWith('.json')).sort();
+  for (const file of files) {
+    const tabId = basename(file, '.json');
+    if (!tabId.startsWith('thoughts-')) continue;
+    try {
+      const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
+      const stat = await statAsync(filePath);
+      livePaths.add(filePath);
+      stats.push({
+        file,
+        filePath,
+        tabId,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        modifiedAt: stat.mtime.toISOString(),
+      });
+    } catch {
+      // skip files that moved during the scan
+    }
+  }
+
+  for (const filePath of historyParseCache.keys()) {
+    if (!livePaths.has(filePath)) historyParseCache.delete(filePath);
+  }
+  return stats;
+}
+
+// Async form of mobileOrchestratorThreadHistoryStatToken — identical token
+// value, no sync fs. Used by the 1Hz ws-server poll.
+export async function mobileOrchestratorThreadHistoryStatTokenAsync(): Promise<string> {
+  const fileToken = (await listThoughtHistoryFileStatsAsync())
     .map((fileStat) => `${fileStat.file}:${fileStat.mtimeMs}:${fileStat.size}`)
     .join('|');
   return `${historyWriteVersion}:${fileToken}`;

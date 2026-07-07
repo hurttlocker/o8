@@ -69,7 +69,7 @@ import {
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
   markMobileOrchestratorThreadFailed,
-  mobileOrchestratorThreadHistoryStatToken,
+  mobileOrchestratorThreadHistoryStatTokenAsync,
   upsertMobileOrchestratorAssistantMessage,
   writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
@@ -1923,10 +1923,10 @@ let lastOrchestratorThreadFingerprints = new Map<string, string>();
 let lastOrchestratorRevealCursor = new Date(Date.now() - 3000).toISOString();
 let lastOrchestratorThreadHistoryStatToken: string | null = null;
 
-function pushOrchestratorThreadChanges() {
+async function pushOrchestratorThreadChanges() {
   if (clients.size === 0) return;
   try {
-    const statToken = mobileOrchestratorThreadHistoryStatToken();
+    const statToken = await mobileOrchestratorThreadHistoryStatTokenAsync();
     if (lastOrchestratorThreadHistoryStatToken === statToken) return;
 
     const threads = listMobileOrchestratorThreads({ backend: null });
@@ -3748,8 +3748,15 @@ function startPollingLoops() {
   // Built-in o8/Claude orchestrator thread sync. The Next API process owns
   // chat-history writes; this WS bridge watches the durable records and pushes
   // thread create/update/reveal events to desktop + mobile clients.
+  let orchestratorThreadSyncInFlight = false;
   setInterval(() => {
-    pushOrchestratorThreadChanges();
+    // Overlap guard: the sync is now async (fs.promises); skip a tick rather
+    // than let a slow scan stack up on the event loop.
+    if (orchestratorThreadSyncInFlight) return;
+    orchestratorThreadSyncInFlight = true;
+    void pushOrchestratorThreadChanges().finally(() => {
+      orchestratorThreadSyncInFlight = false;
+    });
   }, 1_000);
 
   // Conflict scan — poll every 5s, push updates to all clients when conflicts change
