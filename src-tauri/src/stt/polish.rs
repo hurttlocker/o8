@@ -27,8 +27,11 @@ use flac::{
 };
 use prompt::{app_category, build_prompt, AppCategory};
 
-/// Use the full Flash model (supports audio + vision + text).
-pub const GEMINI_MODEL: &str = crate::models::GEMINI_3_FLASH_PREVIEW;
+/// Polish default. Flash-Lite (still audio + vision + text capable) won the
+/// 2026-07-07 A/B decisively: 426–467ms vs 5.8–6.6s for 3-flash-preview /
+/// 2.5-flash on the correction task, with the cleanest output of the three.
+/// Escape hatch: set `polish_model` in the dictation config.
+pub const GEMINI_MODEL: &str = crate::models::GEMINI_2_5_FLASH_LITE;
 
 /// Timeout — audio upload + inference takes longer than text-only.
 /// A 30-second dictation is ~960KB raw WAV, but we transcode to FLAC
