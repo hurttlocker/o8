@@ -7,6 +7,7 @@ import path from 'node:path';
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founder';
+import { tokenIssuedAt } from '@/lib/entitlement/identity-guards';
 import { clearCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
 
@@ -50,18 +51,6 @@ function readSignedOutAt(): number | null {
   try {
     const parsed = Number(readFileSync(signOutMarkerPath(), 'utf8').trim());
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function tokenIssuedAt(token: string): number | null {
-  try {
-    const payload = token.split('.')[1];
-    if (!payload) return null;
-    const json = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-    const parsed = JSON.parse(json) as { iat?: unknown };
-    return typeof parsed.iat === 'number' && Number.isFinite(parsed.iat) ? parsed.iat : null;
   } catch {
     return null;
   }
