@@ -147,10 +147,14 @@ function visibleDomHelpers(): string {
       el.scrollIntoView({ block: 'center', inline: 'center' });
       try { el.focus({ preventScroll: true }); } catch (_) {}
       const rect = el.getBoundingClientRect();
-      const init = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-      el.dispatchEvent(new MouseEvent('mousedown', init));
-      el.dispatchEvent(new MouseEvent('mouseup', init));
-      el.click();
+      const mouse = { bubbles: true, cancelable: true, composed: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
+      const pointer = Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, mouse);
+      const PointerCtor = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new PointerCtor('pointerdown', Object.assign({ buttons: 1 }, pointer)));
+      el.dispatchEvent(new MouseEvent('mousedown', Object.assign({ buttons: 1 }, mouse)));
+      el.dispatchEvent(new PointerCtor('pointerup', Object.assign({ buttons: 0 }, pointer)));
+      el.dispatchEvent(new MouseEvent('mouseup', Object.assign({ buttons: 0 }, mouse)));
+      el.dispatchEvent(new MouseEvent('click', Object.assign({ buttons: 0, detail: 1 }, mouse)));
     };
   `;
 }
@@ -220,7 +224,16 @@ export function buildPickMenuTriggerScript(menuLabel: string): string {
   return buildJsonEval(`
     ${visibleDomHelpers()}
     const needle = ${JSON.stringify(menuLabel.toLowerCase())};
-    const candidates = Array.from(document.querySelectorAll('button, [role="button"], [aria-haspopup], a[href]')).filter(isVisible);
+    const isMenuTrigger = (el) => {
+      if (el.getAttribute('aria-pressed') !== null) return false;
+      if (el.getAttribute('role') === 'tab') return false;
+      if (el.getAttribute('aria-haspopup')) return true;
+      const expanded = el.getAttribute('aria-expanded');
+      return expanded === 'true' || expanded === 'false';
+    };
+    const candidates = Array.from(document.querySelectorAll('button, [role="button"], [aria-haspopup], a[href]'))
+      .filter(isVisible)
+      .filter(isMenuTrigger);
     const trigger = candidates.find((el) => lower(labelFor(el)) === needle)
       || candidates.find((el) => lower(labelFor(el)).includes(needle));
     if (!trigger) return JSON.stringify({ ok: false, error: 'menu trigger not found', menuLabel: ${JSON.stringify(menuLabel)} });

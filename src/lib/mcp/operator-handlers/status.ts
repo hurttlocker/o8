@@ -6,6 +6,9 @@ import {
   requiredString,
   textResult,
 } from './shared';
+
+const LANE_EVENTS_MAX_LONG_POLL_MS = 12_000;
+const LANE_EVENTS_FETCH_MARGIN_MS = 2_500;
 async function steerSession(sessionKey: string, message: string): Promise<Record<string, unknown>> {
   const result = await apiFetch('/api/runtime/action', {
     method: 'POST',
@@ -97,7 +100,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_lane_events',
     description:
-      'Stream lane lifecycle events. Pass `since` cursor from the previous response to long-poll for new events. Returns events in chronological order. Blocks up to `timeoutMs` (default 5000) waiting for new events when the buffer is empty. Example: o8_lane_events() returns the current buffer. o8_lane_events({since: 47, timeoutMs: 8000}) long-polls for events newer than seq 47.',
+      'Stream lane lifecycle events. Pass `since` cursor from the previous response to long-poll for new events. Returns events in chronological order. Blocks up to `timeoutMs` (default 5000, max 12000) waiting for new events when the buffer is empty. Example: o8_lane_events() returns the current buffer. o8_lane_events({since: 47, timeoutMs: 8000}) long-polls for events newer than seq 47.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,7 +110,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         timeoutMs: {
           type: 'number',
-          description: 'Max ms to wait for new events. Default 5000, max 25000.',
+          description: 'Max ms to wait for new events. Default 5000, max 12000.',
         },
         lanes: {
           type: 'array',
@@ -388,9 +391,10 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
       : 0;
 
     const timeoutRaw = args.timeoutMs;
-    const timeoutMs = typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw) && timeoutRaw >= 0
+    const requestedTimeoutMs = typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw) && timeoutRaw >= 0
       ? Math.floor(timeoutRaw)
       : 5_000;
+    const timeoutMs = Math.min(requestedTimeoutMs, LANE_EVENTS_MAX_LONG_POLL_MS);
 
     const laneFilterRaw = args.lanes;
     const laneFilter = Array.isArray(laneFilterRaw)
@@ -404,7 +408,9 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
     qs.set('timeoutMs', String(timeoutMs));
     if (laneFilter.length > 0) qs.set('lanes', laneFilter.join(','));
 
-    const data = await apiFetch(`/api/orchestrator/lane-events?${qs.toString()}`) as Record<string, unknown>;
+    const data = await apiFetch(`/api/orchestrator/lane-events?${qs.toString()}`, {
+      timeoutMs: timeoutMs + LANE_EVENTS_FETCH_MARGIN_MS,
+    }) as Record<string, unknown>;
     const events = Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : [];
     const nextSinceRaw = data.nextSince;
     const nextSince = typeof nextSinceRaw === 'number' && Number.isFinite(nextSinceRaw)
@@ -417,7 +423,12 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
 
     return jsonResult({
       summary,
-      data: { events, nextSince },
+      data: {
+        events,
+        nextSince,
+        timeoutMs,
+        ...(requestedTimeoutMs > timeoutMs ? { requestedTimeoutMs } : {}),
+      },
     });
   } catch (err) {
     console.error(`[o8-operator] o8_lane_events failed: ${err}`);
