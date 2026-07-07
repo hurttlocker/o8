@@ -343,6 +343,21 @@ export interface OrchestratorPacket {
     generatedAt?: string | null;
     error?: string | null;
   } | null;
+  /**
+   * Auto buy-in doc (#1492). Generated fire-and-forget on a successful merge —
+   * a single self-contained, shareable HTML doc (demo-first, plain-language
+   * what/why, deviations, verification, objections pre-answered) stored as a
+   * report artifact. `status` drives the released-card affordance: 'ready'
+   * surfaces a "Buy-in doc" link, other states surface nothing. Undefined on
+   * legacy packets and whenever buy-in generation is disabled.
+   */
+  buyinDoc?: {
+    status: 'generating' | 'ready' | 'failed';
+    /** Artifact id of the stored HTML report (kind: 'report'). */
+    artifactId?: string | null;
+    generatedAt?: string | null;
+    error?: string | null;
+  } | null;
 }
 
 /** A single multiple-choice quiz question in a packet explainer (#1491). */

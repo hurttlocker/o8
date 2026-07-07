@@ -272,6 +272,14 @@ export interface OperatorDefaults {
    * path stays ungated. Env: `O8_QUIZ_GATE`.
    */
   quizGateEnabled: boolean;
+  /**
+   * Auto buy-in doc on merge (#1492). **Off by default.** When on, a successful
+   * packet merge generates a single self-contained, shareable HTML "buy-in doc"
+   * (demo-first, plain-language what/why, deviations, verification, objections
+   * pre-answered) fire-and-forget and stores it as a report artifact. Non-
+   * blocking; a generation failure never touches the merge. Env: `O8_BUYIN_DOC`.
+   */
+  buyinDocEnabled: boolean;
   /** Targeting Machine — the cheap triage/rationale tier (default low effort). */
   targetingTriage: TargetingTier;
   /** Targeting Machine — the premium "point a real agent here" tier (default high). */
@@ -328,6 +336,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Explainer generation ON (non-blocking); quiz gate OFF (opt-in speed bump).
   packetExplainerEnabled: true,
   quizGateEnabled: false,
+  // Buy-in doc generation OFF by default — opt-in narrative for external sharing.
+  buyinDocEnabled: false,
   // Targeting Machine tiers. Both default to Codex (the shipping dispatch worker),
   // differentiated by effort — cheap triage at low, premium action at high. The
   // operator can point triage at a cheaper runtime/model (gemini, a local model).
@@ -557,6 +567,13 @@ function envQuizGateEnabled(): boolean | null {
   return null;
 }
 
+function envBuyinDocEnabled(): boolean | null {
+  const raw = process.env.O8_BUYIN_DOC;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envCollideAggregator(): CollideAggregator | null {
   const raw = process.env.O8_COLLIDE_AGGREGATOR_DEFAULT?.trim();
   if (raw && isCollideAggregator(raw)) return raw;
@@ -600,6 +617,7 @@ interface StoredOperatorDefaults {
   reviewerBackend?: ReviewerBackendSetting;
   packetExplainerEnabled?: boolean;
   quizGateEnabled?: boolean;
+  buyinDocEnabled?: boolean;
   targetingTriage?: TargetingTier;
   targetingAction?: TargetingTier;
   autoApplyUpdates?: AutoApplyUpdates;
@@ -711,6 +729,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.quizGateEnabled === 'boolean') {
     result.quizGateEnabled = stored.quizGateEnabled;
   }
+  if (typeof stored.buyinDocEnabled === 'boolean') {
+    result.buyinDocEnabled = stored.buyinDocEnabled;
+  }
   if (stored.autoApplyUpdates === 'off' || stored.autoApplyUpdates === 'when-idle') {
     result.autoApplyUpdates = stored.autoApplyUpdates;
   }
@@ -754,6 +775,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envRevBackend = envReviewerBackend();
   const envExplainer = envPacketExplainerEnabled();
   const envQuizGate = envQuizGateEnabled();
+  const envBuyinDoc = envBuyinDocEnabled();
   const envApplyUpdates = envAutoApplyUpdates();
   const envCollideAgg = envCollideAggregator();
   const envTriage = envTargetingTier('TRIAGE');
@@ -801,6 +823,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     reviewerBackend: envRevBackend ?? fileValues.reviewerBackend ?? OPERATOR_DEFAULTS_FALLBACK.reviewerBackend,
     packetExplainerEnabled: envExplainer ?? fileValues.packetExplainerEnabled ?? OPERATOR_DEFAULTS_FALLBACK.packetExplainerEnabled,
     quizGateEnabled: envQuizGate ?? fileValues.quizGateEnabled ?? OPERATOR_DEFAULTS_FALLBACK.quizGateEnabled,
+    buyinDocEnabled: envBuyinDoc ?? fileValues.buyinDocEnabled ?? OPERATOR_DEFAULTS_FALLBACK.buyinDocEnabled,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
@@ -841,6 +864,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     reviewerBackend: envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
     packetExplainerEnabled: envExplainer !== null ? 'env' : fileValues.packetExplainerEnabled !== undefined ? 'file' : 'default',
     quizGateEnabled: envQuizGate !== null ? 'env' : fileValues.quizGateEnabled !== undefined ? 'file' : 'default',
+    buyinDocEnabled: envBuyinDoc !== null ? 'env' : fileValues.buyinDocEnabled !== undefined ? 'file' : 'default',
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
@@ -1010,6 +1034,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   if (update.quizGateEnabled !== undefined) {
     stored.quizGateEnabled = Boolean(update.quizGateEnabled);
   }
+  if (update.buyinDocEnabled !== undefined) {
+    stored.buyinDocEnabled = Boolean(update.buyinDocEnabled);
+  }
   if (update.autoApplyUpdates !== undefined) {
     if (update.autoApplyUpdates !== 'off' && update.autoApplyUpdates !== 'when-idle') {
       throw new Error('autoApplyUpdates must be "off" or "when-idle".');
@@ -1150,6 +1177,11 @@ export function resolvePacketExplainerEnabledSync(): boolean {
 /** Whether the quiz-gated human merge is enabled (#1491, default off). */
 export function resolveQuizGateEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.quizGateEnabled;
+}
+
+/** Whether the auto buy-in doc on merge is enabled (#1492, default off). */
+export function resolveBuyinDocEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.buyinDocEnabled;
 }
 
 export function resolveCollideAggregatorSync(): CollideAggregator {

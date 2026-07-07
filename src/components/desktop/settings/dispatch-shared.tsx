@@ -65,6 +65,7 @@ export interface OperatorDefaults {
   reviewerBackend: ReviewerBackendSetting;
   packetExplainerEnabled: boolean;
   quizGateEnabled: boolean;
+  buyinDocEnabled: boolean;
   targetingTriage: TargetingTierUI;
   targetingAction: TargetingTierUI;
   autoApplyUpdates: AutoApplyUpdates;
