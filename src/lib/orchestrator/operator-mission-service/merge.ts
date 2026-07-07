@@ -2,11 +2,8 @@ import type { MergePreviewResult } from '@/lib/lane/preview-merge';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
 import type { WorktreeInfo } from '@/lib/worktree/types';
-import type {
-  ApproveAndMergeInput,
-  MergePacketResult,
-  PickComparisonWinnerInput,
-} from './types';
+import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput } from './types';
+import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
 type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLatestLaneByPacket']>>;
@@ -538,6 +535,7 @@ async function dispatchPacketMerge(
 
   const afterDispatch = await runDispatchTick(synced);
   writeOrchestratorControlPlaneState(afterDispatch);
+  if (result.ok) autoResolveMergedPacketVerificationIncidents({ packetId: packet.id, laneId: lane.id, event: 'approve_and_merge' });
 
   log(`Merge command finished for packet ${packet.id}.`, {
     ok: result.ok,
@@ -758,6 +756,9 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
       }
     }
   });
+  for (const packetId of archivedPacketIds) {
+    autoResolveMergedPacketVerificationIncidents({ packetId, event: 'comparison_loser_archived' });
+  }
 
   // Gap A (governance): record the operator's pick as an APPROVING review BEFORE
   // the merge, so the gate sees a HEAD-matched review instead of falling through to
