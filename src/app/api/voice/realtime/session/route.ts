@@ -21,9 +21,11 @@ export const dynamic = 'force-dynamic';
  * Gated in middleware (/api/voice/ loopback+token) AND requirePanelAuth here.
  */
 
-// gpt-realtime-2 = the GA flagship (GPT-5-class reasoning, configurable effort).
-// `gpt-realtime` is the leaner/pinnable-snapshot alternative if latency matters.
-const REALTIME_MODEL = 'gpt-realtime-2';
+// Q trial 2026-07-07: gpt-realtime-2.1-mini (announced 07-06) — mini reasoning
+// realtime model, text in/out 85%/90% cheaper than gpt-realtime-2. Testing
+// whether the quality holds for Symon S2S before adding managed tokens.
+// Revert to the flagship by setting 'gpt-realtime-2.1' (or 'gpt-realtime-2').
+const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 const DEFAULT_VOICE = 'marin';
 const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
 const TOKEN_TTL_SECONDS = 600;
