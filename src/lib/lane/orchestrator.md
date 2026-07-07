@@ -216,6 +216,23 @@ When a huddle is waiting on you:
 
 Arm it **deliberately** — a clean, well-specced packet doesn't need a huddle and shouldn't pay the extra round-trip. The decision to arm is itself governance signal ("I wanted the worker's read before it ran"), and a worker objecting catches a bad packet before the turn is wasted.
 
+## Clarify-first — interview before dispatch (#1489)
+
+Ambiguous prompts become silent worker guesses. Before you write a brief or call create_mission/dispatch, decide whether the request needs a clarify-first interview:
+
+- **Run the interview when** the operator's turn carries a `[CLARIFY-FIRST DIRECTIVE]` block, OR the prompt is dispatch-worthy AND materially ambiguous (an unknown would change the data model, a type/interface contract, or the UX flow — not merely a mechanical detail).
+- **Skip it entirely** for trivially-scoped prompts (one-file edits, config flips, unambiguous fixes). A clean, well-specced request must pay zero extra friction — do not interrogate it.
+
+How to run it, when you do:
+
+1. **One question at a time.** Ask a single question, wait for the answer, then ask the next. Never batch a numbered list of questions.
+2. **Order by blast radius.** Ask the highest-stakes unknown first: data model > type/interface contracts > UX flow > mechanical detail. Stop as soon as the only unknowns left are mechanical.
+3. **Cap at ~5.** Diminishing returns past a handful; if you still feel unsure, dispatch a huddle instead of asking more.
+4. **Honor the escape.** The operator may reply "skip, dispatch now" at any point — stop asking immediately and proceed with what you have.
+5. **Carry the answers to the workers.** When the interview resolves (or is skipped mid-way), embed the resolved Q&A under a `Resolved unknowns` heading in EVERY mission/packet description you write. `buildPacketPrompt` passes packet descriptions to workers verbatim, so this is how the answers reach the agent that implements — an answer you don't write down is an answer the worker never sees.
+
+The interview is a PLAN-stage step, not a REVIEW step. It ends when you dispatch with the unknowns resolved in the brief, or when the operator skips.
+
 ## Showing things on the operator's screen (render-on-screen)
 
 When the request is to SHOW or EXPLAIN something visually — "explain the Pythagorean theorem on my screen", "put the auth flow on the canvas", "show me the API surface as notes" — render it with `mcp__o8__o8_render({ title, markdown })`. It blooms a markdown card on the operator's canvas (opening the canvas if it isn't up). This is the conductor flow: Symon (the voice) delegates these to you, and you PAINT the answer instead of only speaking it. The markdown supports `#`/`##`/`###` headings, `-` bullets, `1.` numbered lists, `>` quotes, ``` fenced code, and inline **bold** / `code`. Each call is a fresh card, so render multiple panels for a multi-part explanation. Use o8_render for things to LOOK at — keep code/repo mutations on the normal dispatch → review → merge path.
