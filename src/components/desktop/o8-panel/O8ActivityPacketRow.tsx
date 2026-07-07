@@ -19,7 +19,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
+import { orchestratorStatusTone } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { useOrchestratorData } from '../orchestrator-data-context';
 import { relativeAge } from '../agent-panel/shared';
@@ -52,7 +52,6 @@ const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
 function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8ActivityPacketRowProps) {
   const data = useOrchestratorData();
   const statusMeta = orchestratorStatusTone(packet.status);
-  const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
   const targetLabel = data?.workspaceTargets?.find((t) => t.localPath === packet.workspaceTargetPath)?.label
     ?? packet.workspaceTargetPath?.split('/').pop()
     ?? null;
@@ -60,11 +59,15 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
 
   const ageSource = packet.lane?.lastEventAt ?? packet.lastEventAt ?? null;
   const ageLabel = ageSource ? relativeAge(ageSource) : '';
+  const repoBranchLabel = [targetLabel, packet.branchTarget?.trim()].filter(Boolean).join('·');
 
   // ── Per-row state for PacketCard's expanded body ──────────────────────
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [reviewState, setReviewState] = useState<ReviewPanelState>(EMPTY_REVIEW_STATE);
   const reviewLoadedKeyRef = useRef<string | null>(null);
+  const changedFiles = reviewState.snapshot?.changedFiles ?? [];
+  const additions = changedFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0);
+  const deletions = changedFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
 
   // Derive a remote-url map so PacketCard can resolve issue URLs the same
   // way ThoughtsMissionPanel did. Workspace targets carry remoteUrl on
@@ -133,6 +136,11 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
     // Fall back to the workspace pane pivot when no live session is bound.
     data?.onSelectedPacketChange?.(packet.id);
   }, [data, packet]);
+
+  const handleRowClick = useCallback(() => {
+    handleFocus();
+    onToggleExpanded();
+  }, [handleFocus, onToggleExpanded]);
 
   const handleOpenReviewDiff = useCallback(() => {
     const laneId = packet.lane?.laneId;
@@ -336,7 +344,7 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
     <div>
       <button
         type="button"
-        onClick={onToggleExpanded}
+        onClick={handleRowClick}
         style={{
           display: 'flex',
           alignItems: 'flex-start',
@@ -402,8 +410,9 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
               fontSize: 13.5,
               color: 'var(--t-text)',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 2,
               lineHeight: 1.25,
               fontWeight: 300,
               letterSpacing: '-0.1px',
@@ -415,8 +424,9 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
             style={{
               display: 'flex',
               alignItems: 'center',
+              flexWrap: 'wrap',
               gap: 6,
-              marginTop: 3,
+              marginTop: 4,
               fontSize: 9.5,
               fontWeight: 260,
               letterSpacing: '-0.4px',
@@ -425,11 +435,18 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
               lineHeight: 1.25,
             }}
           >
-            <span>{runtimeMeta.label}</span>
-            {targetLabel ? (
+            <span style={{ color: 'var(--t-terminal-ansi-bright-green, #16a34a)' }}>
+              +{additions}
+            </span>
+            <span style={{ color: 'var(--t-terminal-ansi-bright-red, #dc2626)' }}>
+              -{deletions}
+            </span>
+            <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+            <span>{changedFiles.length} files</span>
+            {repoBranchLabel ? (
               <>
                 <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-                <span>{targetLabel}</span>
+                <span>{repoBranchLabel}</span>
               </>
             ) : null}
             {ageLabel ? (

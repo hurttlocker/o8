@@ -16,17 +16,17 @@ type MissionRenderItem =
   | { kind: 'msg'; msg: MobileTranscriptEntry; index: number }
   | { kind: 'mission-group'; entries: MobileTranscriptEntry[]; lastIndex: number };
 
-function isMissionCompleteEntry(m: MobileTranscriptEntry): boolean {
-  return m.statusEvent?.kind === 'mission-complete';
+function isPacketTerminalEntry(m: MobileTranscriptEntry): boolean {
+  return m.statusEvent?.kind === 'mission-complete' || m.statusEvent?.kind === 'merge';
 }
 
-function buildMissionRenderItems(messages: MobileTranscriptEntry[]): MissionRenderItem[] {
+export function buildMissionRenderItems(messages: MobileTranscriptEntry[]): MissionRenderItem[] {
   const items: MissionRenderItem[] = [];
   let i = 0;
   while (i < messages.length) {
-    if (isMissionCompleteEntry(messages[i])) {
+    if (isPacketTerminalEntry(messages[i])) {
       let j = i;
-      while (j < messages.length && isMissionCompleteEntry(messages[j])) j += 1;
+      while (j < messages.length && isPacketTerminalEntry(messages[j])) j += 1;
       if (j - i >= 2) {
         items.push({ kind: 'mission-group', entries: messages.slice(i, j), lastIndex: j - 1 });
       } else {
