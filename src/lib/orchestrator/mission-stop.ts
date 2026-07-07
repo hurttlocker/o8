@@ -3,7 +3,7 @@ import 'server-only';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import { isTerminalLaneStatus } from '@/lib/lane/types';
-import { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { readOrchestratorControlPlaneState, withControlPlaneLock, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listActiveMissionRegistryEntries, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -139,11 +139,18 @@ export async function stopMission(missionId: string): Promise<StopMissionResult>
   const normalizedId = missionId.trim();
   if (!normalizedId) throw new Error('missionId is required.');
 
-  const current = readOrchestratorControlPlaneState();
-  if ((current.missionId ?? '').trim() === normalizedId) {
-    const { state, result } = await stopMissionState(current);
-    writeOrchestratorControlPlaneState(state);
-    return result;
+  // #1488 — read AND write under the cross-process lock: the old unlocked
+  // read → async kill sequence → whole-state write could erase packets other
+  // processes created/updated mid-stop. Lock-only (no reconcile) so the stop's
+  // honest per-packet statuses persist exactly as computed.
+  const currentMissionId = (readOrchestratorControlPlaneState().missionId ?? '').trim();
+  if (currentMissionId === normalizedId) {
+    return withControlPlaneLock(async () => {
+      const fresh = readOrchestratorControlPlaneState();
+      const { state, result } = await stopMissionState(fresh);
+      writeOrchestratorControlPlaneState(state);
+      return result;
+    });
   }
 
   const { result } = await withMissionRegistryState(normalizedId, stopMissionState);
