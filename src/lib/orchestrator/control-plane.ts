@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
@@ -16,24 +16,86 @@ const ORCHESTRATOR_DIR = getDataDir();
 const ORCHESTRATOR_PATH = join(ORCHESTRATOR_DIR, 'orchestrator-state.json');
 const ORCHESTRATOR_TMP_PATH = `${ORCHESTRATOR_PATH}.tmp`;
 
-// #460 — In-process mutex to serialize read-modify-write on orchestrator-state.json.
-// Prevents race between headless loop ticks and manual API operations (reset_packet, etc.)
-let lockPromise: Promise<void> | null = null;
-let lockResolve: (() => void) | null = null;
+// #460/#1488 — In-process mutex to serialize read-modify-write on
+// orchestrator-state.json. FIFO chain: each acquirer waits on the previous
+// holder's promise and enqueues its own resolver. (The previous single
+// module-level resolver was clobbered by concurrent waiters — the second
+// waiter's promise got resolved in the first's place and the chain deadlocked.)
+let lockTail: Promise<void> = Promise.resolve();
+const lockReleases: Array<() => void> = [];
 
-function acquireLock(): Promise<void> {
-  const waitForPrevious = lockPromise ?? Promise.resolve();
-  lockPromise = new Promise<void>((resolve) => {
-    lockResolve = resolve;
+// #1488 — Cross-process lock. The in-process chain above only serializes writers
+// inside ONE Node process, but next-server and ws-server both read-modify-write
+// this file: a packet created via the API could be erased seconds later when the
+// other process persisted a snapshot read before the create (queued tasks
+// "evaporating" between o8_task_create and o8_task_dispatch). mkdir is atomic on
+// POSIX, so the lock dir is the mutex; a holder writes its pid+timestamp inside,
+// and a lock older than LOCK_STALE_MS is broken (crashed holder).
+const LOCK_DIR = `${ORCHESTRATOR_PATH}.lock`;
+const LOCK_META = join(LOCK_DIR, 'holder.json');
+const LOCK_STALE_MS = 10_000;
+const LOCK_RETRY_MS = 25;
+const LOCK_WAIT_BUDGET_MS = 8_000;
+
+function lockIsStale(): boolean {
+  try {
+    const meta = JSON.parse(readFileSync(LOCK_META, 'utf8')) as { at?: number };
+    return typeof meta.at !== 'number' || Date.now() - meta.at > LOCK_STALE_MS;
+  } catch {
+    // Unreadable/missing metadata: judge by the dir's own age via a fresh stat-less
+    // heuristic — treat as stale so a crashed holder can't wedge both processes.
+    return true;
+  }
+}
+
+async function acquireFsLock(): Promise<void> {
+  const deadline = Date.now() + LOCK_WAIT_BUDGET_MS;
+  for (;;) {
+    try {
+      mkdirSync(LOCK_DIR);
+      writeFileSync(LOCK_META, JSON.stringify({ pid: process.pid, at: Date.now() }), 'utf8');
+      return;
+    } catch {
+      if (lockIsStale()) {
+        try {
+          rmSync(LOCK_DIR, { recursive: true, force: true });
+        } catch { /* another process may have broken it first */ }
+        continue;
+      }
+      if (Date.now() > deadline) {
+        // Fail open with a loud log rather than deadlocking state writes: a lost
+        // update is recoverable by the ancestry reconciler; a wedged control
+        // plane is not.
+        console.error('[control-plane] cross-process lock wait exceeded budget — proceeding without lock');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+    }
+  }
+}
+
+function releaseFsLock(): void {
+  try {
+    rmSync(LOCK_DIR, { recursive: true, force: true });
+  } catch (error) {
+    console.error('[control-plane] failed to release cross-process lock:', error);
+  }
+}
+
+async function acquireLock(): Promise<void> {
+  const waitForPrevious = lockTail;
+  let release!: () => void;
+  lockTail = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  return waitForPrevious;
+  lockReleases.push(release);
+  await waitForPrevious;
+  await acquireFsLock();
 }
 
 function releaseLock(): void {
-  const resolve = lockResolve;
-  lockResolve = null;
-  lockPromise = null;
-  resolve?.();
+  releaseFsLock();
+  lockReleases.shift()?.();
 }
 
 interface OrchestratorControlPlaneFile {
@@ -148,6 +210,22 @@ export async function syncOrchestratorControlPlaneState(state?: OrchestratorMiss
  * callers that run a sub-operation (e.g. runDispatchTick) producing a new state
  * to persist that result without a second write that would clobber it.
  */
+/**
+ * #1488 — Lock-only variant: exclusive access (in-process + cross-process)
+ * WITHOUT the end-of-lock reconcile+write that withLockedState performs. For
+ * callers that must persist exact statuses (e.g. mission stop's honest
+ * per-packet results) and do their own writeOrchestratorControlPlaneState —
+ * a reconcile against not-yet-caught-up lane snapshots would rewrite them.
+ */
+export async function withControlPlaneLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  await acquireLock();
+  try {
+    return await fn();
+  } finally {
+    releaseLock();
+  }
+}
+
 export async function withLockedState<T>(
   fn: (state: OrchestratorMissionState) => T | Promise<T>,
 ): Promise<{ result: T; state: OrchestratorMissionState }> {
