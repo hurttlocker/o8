@@ -9,8 +9,16 @@ const FONT = 'var(--font-sans-system)';
 const TEXT = 'var(--t-text, #0f172a)';
 const MUTED = 'var(--t-text-muted, #64748b)';
 
-export function SignInErrorCard({ authError }: { authError: DesktopAuthError }) {
+export function SignInErrorCard({ authError, onRetry }: { authError: DesktopAuthError; onRetry?: () => void }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const handlePrimaryClick = () => {
+    if (onRetry) {
+      clearDesktopAuthError();
+      onRetry();
+      return;
+    }
+    setDetailsOpen((value) => !value);
+  };
 
   return (
     <div
@@ -29,7 +37,7 @@ export function SignInErrorCard({ authError }: { authError: DesktopAuthError }) 
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
         <button
           type="button"
-          onClick={() => setDetailsOpen((value) => !value)}
+          onClick={handlePrimaryClick}
           aria-expanded={detailsOpen}
           style={{
             flex: 1,
@@ -49,7 +57,7 @@ export function SignInErrorCard({ authError }: { authError: DesktopAuthError }) 
             Sign-in didn&apos;t complete — try again
           </span>
           <span style={{ color: MUTED, fontSize: 10.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: 0 }}>
-            {detailsOpen ? 'Hide reason' : 'Show reason'}
+            {onRetry ? authError.message : detailsOpen ? 'Hide reason' : 'Show reason'}
           </span>
         </button>
         <button

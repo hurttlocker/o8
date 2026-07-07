@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { importSPKI, jwtVerify, errors as joseErrors } from 'jose';
@@ -46,6 +46,7 @@ export interface VerifyLicenseResult {
   valid: boolean;
   plan: Plan | null;
   expiresAt: number | null;
+  subject: string | null;
   reason?: string;
 }
 
@@ -111,6 +112,7 @@ export async function verifyLicense(
     valid: false,
     plan: null,
     expiresAt: null,
+    subject: null,
     reason,
   });
 
@@ -159,7 +161,13 @@ export async function verifyLicense(
       }
     }
 
-    return { valid: true, plan, expiresAt: exp, reason: undefined };
+    return {
+      valid: true,
+      plan,
+      expiresAt: exp,
+      subject: typeof payload.sub === 'string' ? payload.sub : null,
+      reason: undefined,
+    };
   } catch (err) {
     if (err instanceof joseErrors.JWTExpired) return fail('expired');
     if (err instanceof joseErrors.JWSSignatureVerificationFailed) {
@@ -244,5 +252,13 @@ export function writeCachedEntitlement(input: {
   } catch (error) {
     console.error('[entitlement] Failed to write entitlement cache:', error);
     return false;
+  }
+}
+
+export function clearCachedEntitlement(): void {
+  try {
+    rmSync(getEntitlementPath(), { force: true });
+  } catch (error) {
+    console.error('[entitlement] Failed to clear entitlement cache:', error);
   }
 }

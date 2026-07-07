@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
@@ -67,13 +67,30 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, user } = useUser();
   const clerk = useClerk();
   const provisionedRef = useRef<string | null>(null);
+  const syncAbortRef = useRef<AbortController | null>(null);
+
+  const clearSignedOutEntitlement = useCallback(async () => {
+    syncAbortRef.current?.abort();
+    await fetch('/api/panel/entitlement/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedOut: true }),
+    }).catch(() => {});
+    window.dispatchEvent(new Event('o8:entitlement-refresh'));
+  }, []);
 
   // Mirror the active Clerk user into the local users table, once per user.
   // The route re-derives the authoritative id from the verified session.
   useEffect(() => {
-    if (!isSignedIn || !user) return;
+    if (!isSignedIn || !user) {
+      provisionedRef.current = null;
+      return;
+    }
     if (provisionedRef.current === user.id) return;
     provisionedRef.current = user.id;
+    const controller = new AbortController();
+    syncAbortRef.current?.abort();
+    syncAbortRef.current = controller;
     const githubId = user.externalAccounts?.find((a) => String(a.provider).includes('github'))?.providerUserId;
     const avatarUrl = highResolutionAvatarUrl(user.imageUrl);
     void fetch('/api/panel/auth/clerk-provision', {
@@ -102,7 +119,12 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
       .catch(() => null)
       .then((sessionToken) => fetch('/api/panel/entitlement/sync', {
         method: 'POST',
-        headers: sessionToken ? { 'x-clerk-session-token': sessionToken } : {},
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { 'x-clerk-session-token': sessionToken } : {}),
+        },
+        body: JSON.stringify({ clerkUserId: user.id }),
+        signal: controller.signal,
       }))
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { ok?: boolean; plan?: string } | null) => {
@@ -113,7 +135,10 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
       .catch(() => {
         /* sync is best-effort; entitlement re-reads on next mount */
       });
-  }, [isSignedIn, user]);
+    return () => {
+      controller.abort();
+    };
+  }, [isSignedIn, user, clerk]);
 
   const value = useMemo<O8AuthState>(
     () => ({
@@ -133,10 +158,12 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         clerk.openUserProfile();
       },
       signOut: async () => {
+        await clearSignedOutEntitlement();
         await clerk.signOut();
+        await clearSignedOutEntitlement();
       },
     }),
-    [isLoaded, isSignedIn, user, clerk],
+    [isLoaded, isSignedIn, user, clerk, clearSignedOutEntitlement],
   );
 
   return (
