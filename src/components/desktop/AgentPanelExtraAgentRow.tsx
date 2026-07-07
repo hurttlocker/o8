@@ -96,6 +96,8 @@ export function ExtraAgentRowView({
   onSelectSession,
   onFocusRow,
   onOpenMenu,
+  onOpenHoverCard,
+  onCloseHoverCard,
   busy,
   onRetryPacket,
 }: {
@@ -104,6 +106,8 @@ export function ExtraAgentRowView({
   onSelectSession?: (sessionKey: string) => void;
   onFocusRow?: (row: ExtraAgentRow) => void;
   onOpenMenu?: (event: ReactMouseEvent, row: ExtraAgentRow) => void;
+  onOpenHoverCard?: (row: ExtraAgentRow, rect: DOMRect) => void;
+  onCloseHoverCard?: () => void;
   busy: boolean;
   onRetryPacket?: (row: ExtraAgentRow) => void;
 }) {
@@ -151,10 +155,12 @@ export function ExtraAgentRowView({
       }}
       onMouseEnter={(event) => {
         setHovered(true);
+        onOpenHoverCard?.(row, event.currentTarget.getBoundingClientRect());
         if (canInteract && !active) event.currentTarget.style.background = 'var(--t-panel-hover)';
       }}
       onMouseLeave={(event) => {
         setHovered(false);
+        onCloseHoverCard?.();
         event.currentTarget.style.background = active ? 'var(--t-input-bg)' : 'transparent';
       }}
     >
