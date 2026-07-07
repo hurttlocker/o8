@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { summarizeLaneReviewDiff } from '@/lib/review/lane-diff';
 import { DiffPane } from './review-card/DiffPane';
+import { PacketExplainerPane } from './review-card/PacketExplainerPane';
 import { ReviewPane } from './review-card/ReviewPane';
 import { SpecPane } from './review-card/SpecPane';
 import {
@@ -49,6 +50,14 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
   const laneId = packet.lane?.laneId ?? null;
   const baseBranchHint = packet.branchTarget && packet.branchTarget.trim() ? packet.branchTarget : null;
   const repoPath = packet.workspaceTargetPath ?? null;
+
+  // #1491 — Explainer/Diff switcher for the middle pane. Default to the
+  // explainer when it's ready; the raw diff stays one click away. When no
+  // explainer exists the middle pane is just the diff (prior behavior).
+  const hasExplainer = Boolean(packet.explainer);
+  const [middleView, setMiddleView] = useState<'explainer' | 'diff'>(
+    packet.explainer?.status === 'ready' ? 'explainer' : 'diff',
+  );
 
   // Load directives once on mount, and again whenever the cortex-changes
   // bus signals a directive write.
@@ -158,8 +167,40 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
       <div style={{ flex: 1, minWidth: 0, borderRightWidth: 1, borderRightStyle: 'solid', borderRightColor: PANE_BORDER_COLOR }}>
         <SpecPane packet={packet} directives={directives} directivesError={directivesError} />
       </div>
-      <div style={{ flex: 1, minWidth: 0, borderRightWidth: 1, borderRightStyle: 'solid', borderRightColor: PANE_BORDER_COLOR }}>
-        <DiffPane packet={packet} reviewState={reviewState} diff={diff} diffLoading={diffLoading} diffError={diffError} />
+      <div style={{ flex: 1, minWidth: 0, borderRightWidth: 1, borderRightStyle: 'solid', borderRightColor: PANE_BORDER_COLOR, display: 'flex', flexDirection: 'column' }}>
+        {hasExplainer ? (
+          <div style={{ display: 'flex', gap: 4, padding: 8, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: PANE_BORDER_COLOR }}>
+            {(['explainer', 'diff'] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => setMiddleView(view)}
+                style={{
+                  paddingTop: 3,
+                  paddingBottom: 3,
+                  paddingLeft: 10,
+                  paddingRight: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: middleView === view ? 'var(--t-accent)' : 'var(--t-divider)',
+                  background: middleView === view ? 'var(--t-input-bg, var(--t-panel))' : 'transparent',
+                  color: middleView === view ? 'var(--t-text)' : 'var(--t-text-muted)',
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {view === 'explainer' ? 'Explainer' : 'Diff'}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {hasExplainer && middleView === 'explainer' ? (
+          <PacketExplainerPane packet={packet} />
+        ) : (
+          <DiffPane packet={packet} reviewState={reviewState} diff={diff} diffLoading={diffLoading} diffError={diffError} />
+        )}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <ReviewPane packet={packet} onActionComplete={onActionComplete} />

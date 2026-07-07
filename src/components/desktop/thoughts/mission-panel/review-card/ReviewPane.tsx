@@ -1,7 +1,13 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import {
+  DEFAULT_QUIZ_FILE_THRESHOLD,
+  isQuizGateBlocking,
+  quizPassed,
+  type QuizAnswers,
+} from '@/lib/orchestrator/quiz-gate';
 import {
   buildConcerns,
   Concern,
@@ -69,6 +75,34 @@ export function ReviewPane({ packet, onActionComplete }: {
   const [feedback, setFeedback] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
+
+  // #1491 — quiz-gated human merge. Fetch the per-operator gate setting; the
+  // gate only blocks when ON, the packet is over the file threshold, and a quiz
+  // exists (explainer generation off/failed degrades to ungated).
+  const [quizGateEnabled, setQuizGateEnabled] = useState(false);
+  const [answers, setAnswers] = useState<QuizAnswers>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+        if (!response.ok) return;
+        const payload = await response.json() as { values?: { quizGateEnabled?: boolean } };
+        if (!cancelled) setQuizGateEnabled(Boolean(payload.values?.quizGateEnabled));
+      } catch {
+        // Leave the gate off on a fetch failure — never block on our own error.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const quiz = packet.explainer?.status === 'ready' ? packet.explainer.quiz ?? null : null;
+  const changedFileCount = packet.explainer?.changedFileCount ?? 0;
+  const quizGateEngaged = quizGateEnabled
+    && changedFileCount > DEFAULT_QUIZ_FILE_THRESHOLD
+    && Boolean(quiz && quiz.questions.length > 0);
+  const gateBlocking = isQuizGateBlocking({ enabled: quizGateEnabled, changedFileCount, quiz, answers });
+  const quizIsPassed = quizGateEngaged && quizPassed(quiz, answers);
 
   const reviewSummary = packet.review?.summary?.trim() ?? '';
   const directivesApplied = packet.review?.directivesApplied ?? [];
@@ -336,6 +370,64 @@ export function ReviewPane({ packet, onActionComplete }: {
         </div>
       ) : null}
 
+      {quizGateEngaged ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          paddingTop: 8,
+          paddingRight: 8,
+          paddingBottom: 8,
+          paddingLeft: 8,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: quizIsPassed ? 'var(--t-tone-success-border)' : 'rgba(245, 158, 11, 0.28)',
+          background: quizIsPassed ? 'var(--t-tone-success-bg)' : 'rgba(245, 158, 11, 0.06)',
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: quizIsPassed ? 'var(--t-tone-success)' : '#b45309', fontFamily: FONT_FAMILY }}>
+            {quizIsPassed ? 'Quiz passed — merge unlocked' : `Answer to unlock merge (${changedFileCount} files changed)`}
+          </div>
+          {(quiz?.questions ?? []).map((question) => (
+            <div key={question.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--t-text)', fontFamily: FONT_FAMILY, lineHeight: 1.4 }}>
+                {question.prompt}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {question.options.map((option, optionIndex) => {
+                  const selected = answers[question.id] === optionIndex;
+                  return (
+                    <button
+                      key={optionIndex}
+                      type="button"
+                      onClick={() => setAnswers((current) => ({ ...current, [question.id]: optionIndex }))}
+                      style={{
+                        paddingTop: 4,
+                        paddingRight: 8,
+                        paddingBottom: 4,
+                        paddingLeft: 8,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderStyle: 'solid',
+                        borderColor: selected ? 'var(--t-accent)' : 'var(--t-divider)',
+                        background: selected ? 'var(--t-input-bg, var(--t-panel))' : 'transparent',
+                        color: 'var(--t-text-secondary)',
+                        fontSize: 10.5,
+                        fontFamily: FONT_FAMILY,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {feedbackOpen ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <textarea
@@ -430,7 +522,8 @@ export function ReviewPane({ packet, onActionComplete }: {
             <button
               type="button"
               onClick={onCreatePr}
-              disabled={busy !== null || !laneId}
+              disabled={busy !== null || !laneId || gateBlocking}
+              title={gateBlocking ? 'Pass the explainer quiz to unlock.' : undefined}
               style={{
                 paddingTop: 6,
                 paddingRight: 12,
@@ -442,8 +535,8 @@ export function ReviewPane({ packet, onActionComplete }: {
                 color: '#fff',
                 fontSize: 11,
                 fontWeight: 700,
-                cursor: busy !== null || !laneId ? 'not-allowed' : 'pointer',
-                opacity: busy !== null || !laneId ? 0.5 : 1,
+                cursor: busy !== null || !laneId || gateBlocking ? 'not-allowed' : 'pointer',
+                opacity: busy !== null || !laneId || gateBlocking ? 0.5 : 1,
                 fontFamily: FONT_FAMILY,
               }}
             >
@@ -453,7 +546,8 @@ export function ReviewPane({ packet, onActionComplete }: {
             <button
               type="button"
               onClick={onMerge}
-              disabled={busy !== null}
+              disabled={busy !== null || gateBlocking}
+              title={gateBlocking ? 'Pass the explainer quiz to unlock.' : undefined}
               style={{
                 paddingTop: 6,
                 paddingRight: 12,
@@ -467,8 +561,8 @@ export function ReviewPane({ packet, onActionComplete }: {
                 color: '#15803d',
                 fontSize: 11,
                 fontWeight: 700,
-                cursor: busy !== null ? 'not-allowed' : 'pointer',
-                opacity: busy !== null ? 0.5 : 1,
+                cursor: busy !== null || gateBlocking ? 'not-allowed' : 'pointer',
+                opacity: busy !== null || gateBlocking ? 0.5 : 1,
                 fontFamily: FONT_FAMILY,
               }}
             >

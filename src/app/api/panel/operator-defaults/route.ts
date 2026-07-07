@@ -212,6 +212,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.reviewerBackend = raw;
   }
 
+  if (body.packetExplainerEnabled !== undefined) {
+    if (typeof body.packetExplainerEnabled !== 'boolean') {
+      throw new Error('packetExplainerEnabled must be boolean.');
+    }
+    update.packetExplainerEnabled = body.packetExplainerEnabled;
+  }
+
+  if (body.quizGateEnabled !== undefined) {
+    if (typeof body.quizGateEnabled !== 'boolean') {
+      throw new Error('quizGateEnabled must be boolean.');
+    }
+    update.quizGateEnabled = body.quizGateEnabled;
+  }
+
   if (body.autoApplyUpdates !== undefined) {
     const raw = body.autoApplyUpdates;
     if (raw !== 'off' && raw !== 'when-idle') {

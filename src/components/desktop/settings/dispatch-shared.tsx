@@ -63,6 +63,8 @@ export interface OperatorDefaults {
   workersUseBrain: WorkersUseBrain;
   orchestratorBackend: OrchestratorBackendSetting;
   reviewerBackend: ReviewerBackendSetting;
+  packetExplainerEnabled: boolean;
+  quizGateEnabled: boolean;
   targetingTriage: TargetingTierUI;
   targetingAction: TargetingTierUI;
   autoApplyUpdates: AutoApplyUpdates;
