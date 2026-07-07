@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useSignIn, useClerk } from '@clerk/nextjs';
 
-import { O8_AUTH_STATE_KEY } from '@/lib/auth/start-desktop-sign-in';
+import { O8_AUTH_STATE_KEY, startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { consumeDesktopAuthCallback } from '@/lib/auth/desktop-auth-callback';
 
 /**
@@ -57,6 +57,7 @@ export function DesktopAuthCallbackHandler() {
               /* ignore */
             }
           },
+          retrySignIn: startDesktopSignIn,
         });
       } finally {
         processingRef.current = false;
