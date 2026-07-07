@@ -51,6 +51,12 @@ mockups/
 assets/mockups/
 branding/
 
+# o8 transient review/merge report scratch files (#1491/#1492). Written to a
+# repo/worktree root during generation and unlinked after read; ignored so a
+# crash mid-generation can't leave one committable by a later `git add -A`.
+.o8-packet-explainer*.html
+.o8-buyin-doc*.html
+
 # Local settings
 .claude/settings.local.json
 .claude/settings.json

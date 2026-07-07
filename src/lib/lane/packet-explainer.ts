@@ -29,13 +29,20 @@ import {
 import type { PacketExplainerQuiz } from '@/lib/orchestrator/types';
 import type { Lane } from './types';
 
-/** The file the backend agent is told to write in the worktree root. */
-const EXPLAINER_FILENAME = '.o8-packet-explainer.html';
+/**
+ * The file the backend agent is told to write in the worktree root. PER-PACKET
+ * so two lanes reviewing in the same repo (worktreePath falling back to
+ * repoPath) never race on a single fixed path.
+ */
+function explainerFilename(packetId: string): string {
+  const safe = packetId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) || 'packet';
+  return `.o8-packet-explainer-${safe}.html`;
+}
 
 interface ReviewerBackend {
   id: string;
   label: string;
-  ensureSession: (repoPath: string) => { status: string };
+  ensureSession: (repoPath: string, agent?: string, threadId?: string | null) => { status: string };
   sendTurn: (
     repoPath: string,
     prompt: string,
@@ -114,7 +121,7 @@ function buildExplainerPrompt(params: GenerateExplainerParams): string {
     `Reviewer context (findings so far):`,
     params.reviewContext || '(none yet)',
     ``,
-    `Produce a SINGLE self-contained .html file at the worktree root named exactly \`${EXPLAINER_FILENAME}\`.`,
+    `Produce a SINGLE self-contained .html file at the worktree root named exactly \`${explainerFilename(params.packetId)}\`.`,
     `Requirements for the file:`,
     `- Inline all CSS; no external assets, no network requests.`,
     `- Sections: what & why (plain language), annotated key hunks (the 2-4 most important changes), data flow touched, deviations from brief, risk notes.`,
@@ -147,13 +154,13 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
   try {
     const { getActiveReviewerBackend } = await import('./orchestrator-backends/registry');
     const backend = getActiveReviewerBackend() as unknown as ReviewerBackend;
-    const session = backend.ensureSession(params.lane.repoPath);
+    const threadId = `explainer-${params.lane.id}`;
+    const session = backend.ensureSession(params.lane.repoPath, undefined, threadId);
     if (session.status === 'busy' || session.status === 'dead') {
       throw new Error(`${backend.label} session ${session.status}`);
     }
 
     const prompt = buildExplainerPrompt(params);
-    const threadId = `explainer-${params.lane.id}`;
     await backend.sendTurn(params.lane.repoPath, prompt, (event) => {
       if (event.type === 'error' && event.error) {
         console.warn(`[explainer] ${backend.label} error: ${event.error}`);
@@ -161,7 +168,7 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
     }, { threadId });
 
     const worktree = params.lane.worktreePath || params.lane.repoPath;
-    const html = await readFile(join(worktree, EXPLAINER_FILENAME), 'utf8');
+    const html = await readFile(join(worktree, explainerFilename(params.packetId)), 'utf8');
     if (!html.trim()) {
       throw new Error('explainer file was empty');
     }
