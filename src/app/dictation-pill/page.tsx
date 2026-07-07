@@ -353,12 +353,19 @@ export default function DictationPillPage() {
         setSnapshot(IDLE_SNAPSHOT);
         break;
       case 'ready':
-        // Recognizer lifecycle signal only. It must NOT re-enter recording:
-        // the engine emits `ready` after every session teardown, including a
-        // cancelled one — treating it as a start signal left the dock stuck
-        // on "listening" after a say-shortcut cancel (operator-reported). The
-        // lost-broadcast race the old defensive start covered was fixed by
-        // emit_to(DOCK_LABEL) — system-start is the only start signal now.
+      case 'complete':
+        // Terminal recognizer lifecycle signals always win. A live MacBook
+        // trace showed audio_file/complete/ready reaching this route while the
+        // pill stayed recording because these events were treated as no-ops.
+        if (panelPendingRef.current?.phase === 'listening') {
+          updatePanelPending({ ...panelPendingRef.current, phase: 'handoff' });
+        }
+        if (flashTimerRef.current) {
+          clearTimeout(flashTimerRef.current);
+          flashTimerRef.current = null;
+        }
+        stateRef.current = 'idle';
+        setSnapshot(IDLE_SNAPSHOT);
         break;
       case 'level':
         if (stateRef.current === 'recording' && typeof payload.level === 'number') {
@@ -386,7 +393,7 @@ export default function DictationPillPage() {
         if (stateRef.current === 'recording') setState('transcribing');
         break;
       case 'audio_file':
-        if (stateRef.current === 'transcribing') setState('polishing');
+        if (stateRef.current === 'recording' || stateRef.current === 'transcribing') setState('polishing');
         break;
       case 'system-pasted':
         // Paste landed in the focused app — flash the ACTUAL pasted words in
@@ -399,15 +406,9 @@ export default function DictationPillPage() {
         // A failed dictation clears any pending in-panel turn — the existing
         // error capsule takes the dock (worth the morph for a real failure).
         if (panelPendingRef.current) updatePanelPending(null);
-        if (
-          stateRef.current === 'recording'
-          || stateRef.current === 'transcribing'
-          || stateRef.current === 'polishing'
-        ) {
-          stateRef.current = 'error';
-          setSnapshot({ state: 'error', audioLevel: 0, durationMs: 0, error: payload.text ?? 'Dictation failed', partialTranscript: '' });
-          returnToIdleAfter(ERROR_FLASH_MS);
-        }
+        stateRef.current = 'error';
+        setSnapshot({ state: 'error', audioLevel: 0, durationMs: 0, error: payload.text ?? 'Dictation failed', partialTranscript: '' });
+        returnToIdleAfter(ERROR_FLASH_MS);
         break;
       default:
         break;

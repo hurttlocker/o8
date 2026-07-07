@@ -2737,6 +2737,7 @@ fn ensure_cli_on_path(_cli_source: &Path) {
 #[cfg(target_os = "macos")]
 mod stt_engine {
     use super::*;
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
 
@@ -2880,10 +2881,21 @@ mod stt_engine {
                     serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }),
                 );
                 if let Some(apple_text) = take_final(session_id) {
-                    run_finalize(app.clone(), session_id, path, apple_text);
+                    if mark_finalizing(session_id) {
+                        run_finalize(app.clone(), session_id, path, apple_text);
+                    } else {
+                        log::warn!(
+                            "[stt] audio_file for session {session_id} arrived after finalize already started; skipping duplicate finalize"
+                        );
+                    }
+                } else if mark_finalizing(session_id) {
+                    log::warn!(
+                        "[stt] audio_file for session {session_id} had no pending final transcript; finalizing from audio file only"
+                    );
+                    run_finalize(app.clone(), session_id, path, String::new());
                 } else {
                     log::warn!(
-                        "[stt] audio_file for session {session_id} had no pending final transcript; skipping duplicate finalize"
+                        "[stt] audio_file for session {session_id} had no pending final transcript and was already finalized; skipping duplicate finalize"
                     );
                 }
             }
@@ -2908,10 +2920,12 @@ mod stt_engine {
             }
             TE::Complete { session_id } => {
                 if let Some(apple_text) = take_final(session_id) {
-                    log::warn!(
-                        "[stt] finalize fallback: session {session_id} completed without audio_file; using Apple transcript"
-                    );
-                    run_finalize(app.clone(), session_id, String::new(), apple_text);
+                    if mark_finalizing(session_id) {
+                        log::warn!(
+                            "[stt] finalize fallback: session {session_id} completed without audio_file; using Apple transcript"
+                        );
+                        run_finalize(app.clone(), session_id, String::new(), apple_text);
+                    }
                 }
                 emit_stt(
                     app,
@@ -2927,6 +2941,28 @@ mod stt_engine {
                 );
             }
         }
+    }
+
+    /// Sessions whose finalize chain has already started. This is separate from
+    /// the pending Apple final transcript: `audio_file` can be the only terminal
+    /// artifact, and that still must finalize once.
+    fn finalizing_store() -> &'static Mutex<VecDeque<u64>> {
+        static STORE: OnceLock<Mutex<VecDeque<u64>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
+    fn mark_finalizing(session_id: u64) -> bool {
+        let Ok(mut guard) = finalizing_store().lock() else {
+            return true;
+        };
+        if guard.iter().any(|sid| *sid == session_id) {
+            return false;
+        }
+        guard.push_back(session_id);
+        while guard.len() > 64 {
+            let _ = guard.pop_front();
+        }
+        true
     }
 
     /// The most recent Apple-Speech final transcript keyed by session id, held
@@ -2962,7 +2998,9 @@ mod stt_engine {
                 log::warn!(
                     "[stt] finalize fallback: session {session_id} timed out waiting for audio_file; using Apple transcript"
                 );
-                run_finalize(app, session_id, String::new(), apple_text);
+                if mark_finalizing(session_id) {
+                    run_finalize(app, session_id, String::new(), apple_text);
+                }
             }
         });
     }
@@ -3388,6 +3426,7 @@ mod stt_engine {
         #[test]
         fn final_store_hands_transcript_to_first_finalize_path_only() {
             let _guard = test_lock().lock().unwrap();
+            finalizing_store().lock().unwrap().clear();
             stash_final(4242, "hello from apple".to_string());
 
             assert_eq!(take_final(4242), Some("hello from apple".to_string()));
@@ -3397,10 +3436,32 @@ mod stt_engine {
         #[test]
         fn final_store_preserves_mismatched_session_for_later_audio_file() {
             let _guard = test_lock().lock().unwrap();
+            finalizing_store().lock().unwrap().clear();
             stash_final(7, "saved final".to_string());
 
             assert_eq!(take_final(8), None);
             assert_eq!(take_final(7), Some("saved final".to_string()));
+        }
+
+        #[test]
+        fn finalizing_guard_distinguishes_missing_transcript_from_duplicate_finalize() {
+            let _guard = test_lock().lock().unwrap();
+            finalizing_store().lock().unwrap().clear();
+
+            assert_eq!(take_final(91), None);
+            assert!(mark_finalizing(91));
+            assert!(!mark_finalizing(91));
+        }
+
+        #[test]
+        fn finalizing_guard_resets_per_session_for_consecutive_system_dictations() {
+            let _guard = test_lock().lock().unwrap();
+            finalizing_store().lock().unwrap().clear();
+
+            assert!(mark_finalizing(100));
+            assert!(mark_finalizing(101));
+            assert!(!mark_finalizing(100));
+            assert!(!mark_finalizing(101));
         }
     }
 }
@@ -3928,6 +3989,37 @@ fn o8_debug_paste(text: String) {
 /// system-start/system-idle/system-pasted/final/error). High-frequency
 /// partial/level events are intentionally NOT logged from the route. macOS only
 /// (the dock window is macOS-only).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DockRouteState {
+    Idle,
+    Recording,
+    Transcribing,
+    Polishing,
+    Success,
+    Error,
+}
+
+#[cfg(test)]
+fn reduce_dock_route_state(state: DockRouteState, event_type: &str) -> DockRouteState {
+    match event_type {
+        "system-start" | "status" => DockRouteState::Recording,
+        "final" if matches!(state, DockRouteState::Recording) => DockRouteState::Transcribing,
+        "audio_file"
+            if matches!(
+                state,
+                DockRouteState::Recording | DockRouteState::Transcribing
+            ) =>
+        {
+            DockRouteState::Polishing
+        }
+        "system-pasted" => DockRouteState::Success,
+        "error" => DockRouteState::Error,
+        "complete" | "ready" | "system-idle" => DockRouteState::Idle,
+        _ => state,
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn o8_dock_log(msg: String) {
@@ -3936,6 +4028,45 @@ fn o8_dock_log(msg: String) {
     // earlier `tracing::info!` here never surfaced in o8.log (false-negative that
     // masked the dock-morph capability bug). `log::info!` is what reaches the file.
     log::info!("[dock-route] {msg}");
+}
+
+#[cfg(test)]
+mod dock_route_tests {
+    use super::{reduce_dock_route_state, DockRouteState};
+
+    #[test]
+    fn terminal_events_clear_recording_state() {
+        for event_type in ["complete", "ready", "system-idle"] {
+            assert_eq!(
+                reduce_dock_route_state(DockRouteState::Recording, event_type),
+                DockRouteState::Idle
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_events_win_from_in_flight_states() {
+        for state in [
+            DockRouteState::Recording,
+            DockRouteState::Transcribing,
+            DockRouteState::Polishing,
+            DockRouteState::Success,
+            DockRouteState::Error,
+        ] {
+            assert_eq!(
+                reduce_dock_route_state(state, "ready"),
+                DockRouteState::Idle
+            );
+        }
+    }
+
+    #[test]
+    fn audio_file_advances_recording_without_final_event() {
+        assert_eq!(
+            reduce_dock_route_state(DockRouteState::Recording, "audio_file"),
+            DockRouteState::Polishing
+        );
+    }
 }
 
 /// Capture the o8 window as a base64 PNG for the in-app feedback / error report
