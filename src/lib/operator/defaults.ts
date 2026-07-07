@@ -258,6 +258,20 @@ export interface OperatorDefaults {
   orchestratorBackend: OrchestratorBackendSetting;
   /** Which backend runs lane auto-reviews. 'follow' rides orchestratorBackend. */
   reviewerBackend: ReviewerBackendSetting;
+  /**
+   * HTML packet explainer generation (#1491). **On by default** — when a packet
+   * reaches review, a self-contained explainer + quiz is generated
+   * fire-and-forget and stored as a report artifact. Non-blocking; failure
+   * degrades the review surface to the raw diff. Env: `O8_EXPLAINER`.
+   */
+  packetExplainerEnabled: boolean;
+  /**
+   * Quiz-gated human merge (#1491). **Off by default.** When on AND the packet
+   * exceeds the changed-file threshold, the human Merge button is blocked until
+   * the explainer quiz is passed. Human-UI only — the MCP/orchestrator approve
+   * path stays ungated. Env: `O8_QUIZ_GATE`.
+   */
+  quizGateEnabled: boolean;
   /** Targeting Machine — the cheap triage/rationale tier (default low effort). */
   targetingTriage: TargetingTier;
   /** Targeting Machine — the premium "point a real agent here" tier (default high). */
@@ -311,6 +325,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   orchestratorBackend: 'auto',
   // 'follow' → reviews ride the orchestrator backend (pre-split behavior).
   reviewerBackend: 'follow',
+  // Explainer generation ON (non-blocking); quiz gate OFF (opt-in speed bump).
+  packetExplainerEnabled: true,
+  quizGateEnabled: false,
   // Targeting Machine tiers. Both default to Codex (the shipping dispatch worker),
   // differentiated by effort — cheap triage at low, premium action at high. The
   // operator can point triage at a cheaper runtime/model (gemini, a local model).
@@ -526,6 +543,20 @@ function envReviewerBackend(): ReviewerBackendSetting | null {
   return null;
 }
 
+function envPacketExplainerEnabled(): boolean | null {
+  const raw = process.env.O8_EXPLAINER;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
+function envQuizGateEnabled(): boolean | null {
+  const raw = process.env.O8_QUIZ_GATE;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envCollideAggregator(): CollideAggregator | null {
   const raw = process.env.O8_COLLIDE_AGGREGATOR_DEFAULT?.trim();
   if (raw && isCollideAggregator(raw)) return raw;
@@ -567,6 +598,8 @@ interface StoredOperatorDefaults {
   workersUseBrain?: WorkersUseBrain;
   orchestratorBackend?: OrchestratorBackendSetting;
   reviewerBackend?: ReviewerBackendSetting;
+  packetExplainerEnabled?: boolean;
+  quizGateEnabled?: boolean;
   targetingTriage?: TargetingTier;
   targetingAction?: TargetingTier;
   autoApplyUpdates?: AutoApplyUpdates;
@@ -672,6 +705,12 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isReviewerBackendSetting(stored.reviewerBackend)) {
     result.reviewerBackend = stored.reviewerBackend;
   }
+  if (typeof stored.packetExplainerEnabled === 'boolean') {
+    result.packetExplainerEnabled = stored.packetExplainerEnabled;
+  }
+  if (typeof stored.quizGateEnabled === 'boolean') {
+    result.quizGateEnabled = stored.quizGateEnabled;
+  }
   if (stored.autoApplyUpdates === 'off' || stored.autoApplyUpdates === 'when-idle') {
     result.autoApplyUpdates = stored.autoApplyUpdates;
   }
@@ -713,6 +752,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envBrain = envWorkersUseBrain();
   const envOrchBackend = envOrchestratorBackend();
   const envRevBackend = envReviewerBackend();
+  const envExplainer = envPacketExplainerEnabled();
+  const envQuizGate = envQuizGateEnabled();
   const envApplyUpdates = envAutoApplyUpdates();
   const envCollideAgg = envCollideAggregator();
   const envTriage = envTargetingTier('TRIAGE');
@@ -758,6 +799,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
     orchestratorBackend,
     reviewerBackend: envRevBackend ?? fileValues.reviewerBackend ?? OPERATOR_DEFAULTS_FALLBACK.reviewerBackend,
+    packetExplainerEnabled: envExplainer ?? fileValues.packetExplainerEnabled ?? OPERATOR_DEFAULTS_FALLBACK.packetExplainerEnabled,
+    quizGateEnabled: envQuizGate ?? fileValues.quizGateEnabled ?? OPERATOR_DEFAULTS_FALLBACK.quizGateEnabled,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
@@ -796,6 +839,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
     orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
     reviewerBackend: envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
+    packetExplainerEnabled: envExplainer !== null ? 'env' : fileValues.packetExplainerEnabled !== undefined ? 'file' : 'default',
+    quizGateEnabled: envQuizGate !== null ? 'env' : fileValues.quizGateEnabled !== undefined ? 'file' : 'default',
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
@@ -959,6 +1004,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.orchestratorBackend = update.orchestratorBackend;
   }
+  if (update.packetExplainerEnabled !== undefined) {
+    stored.packetExplainerEnabled = Boolean(update.packetExplainerEnabled);
+  }
+  if (update.quizGateEnabled !== undefined) {
+    stored.quizGateEnabled = Boolean(update.quizGateEnabled);
+  }
   if (update.autoApplyUpdates !== undefined) {
     if (update.autoApplyUpdates !== 'off' && update.autoApplyUpdates !== 'when-idle') {
       throw new Error('autoApplyUpdates must be "off" or "when-idle".');
@@ -1089,6 +1140,16 @@ export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
 /** Which backend runs lane auto-reviews ('follow' → ride the orchestrator). */
 export function resolveReviewerBackendSync(): ReviewerBackendSetting {
   return getOperatorDefaultsSync().values.reviewerBackend;
+}
+
+/** Whether packet explainer generation is enabled (#1491, default on). */
+export function resolvePacketExplainerEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.packetExplainerEnabled;
+}
+
+/** Whether the quiz-gated human merge is enabled (#1491, default off). */
+export function resolveQuizGateEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.quizGateEnabled;
 }
 
 export function resolveCollideAggregatorSync(): CollideAggregator {

@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb, artifacts } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 
-export type ArtifactKind = 'screenshot' | 'video';
+export type ArtifactKind = 'screenshot' | 'video' | 'report';
 export type ArtifactSource = 'agent-capture' | 'review-boundary' | 'manual';
 export type ArtifactPhase = 'before' | 'after' | null;
 
@@ -72,6 +72,7 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/gif': 'gif',
   'video/mp4': 'mp4',
   'video/webm': 'webm',
+  'text/html': 'html',
 };
 
 /** Filesystem-safe slug for a path segment (packet ids can contain `/` or `:`). */
@@ -151,6 +152,19 @@ export function recordArtifact(input: NewArtifactInput): ArtifactRecord | null {
     return null;
   }
   return row as ArtifactRecord;
+}
+
+/** Fetch a single artifact row by id. Null when absent or the DB is down. */
+export function getArtifact(id: string): ArtifactRecord | null {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const row = db.select().from(artifacts).where(eq(artifacts.id, id)).get();
+    return (row as ArtifactRecord | undefined) ?? null;
+  } catch (err) {
+    console.warn('[artifacts] getArtifact query failed', err);
+    return null;
+  }
 }
 
 export interface ListArtifactsFilter {

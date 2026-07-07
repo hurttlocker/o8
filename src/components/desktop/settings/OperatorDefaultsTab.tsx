@@ -410,6 +410,24 @@ export function OperatorDefaultsTab() {
             divider
           />
           <SettingsRow
+            icon={<InboxIcon />}
+            label="Packet explainer"
+            subtitle={lockedSub('packetExplainerEnabled', 'Generate an HTML explainer + quiz for each reviewed packet (non-blocking)')}
+            checked={values.packetExplainerEnabled}
+            disabled={envLocked('packetExplainerEnabled') || busyField === 'packetExplainerEnabled'}
+            onToggle={(next) => { updateField('packetExplainerEnabled', next); }}
+            divider
+          />
+          <SettingsRow
+            icon={<MergeIcon />}
+            label="Quiz-gated merge"
+            subtitle={lockedSub('quizGateEnabled', 'Block the human Merge button on large packets until the explainer quiz is passed')}
+            checked={values.quizGateEnabled}
+            disabled={envLocked('quizGateEnabled') || busyField === 'quizGateEnabled'}
+            onToggle={(next) => { updateField('quizGateEnabled', next); }}
+            divider
+          />
+          <SettingsRow
             icon={<CpuIcon />}
             label="Claude model"
             subtitle={lockedSub('orchestratorModel', 'Powers the Orchestrator tab — applies to new turns')}
