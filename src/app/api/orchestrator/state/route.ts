@@ -7,6 +7,7 @@ import {
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { findLaneByPacket } from '@/lib/lane/registry';
+import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import type {
   OrchestratorMissionState,
   OrchestratorPacket,
@@ -227,6 +228,9 @@ export async function PATCH(req: NextRequest) {
     });
 
     if (!result.found) return buildErrorResponse(`Packet ${packetId} not found.`, 404);
+    if ((typeof updates.archivedAt === 'string' && updates.archivedAt.trim()) || updates.status === 'archived') {
+      autoResolveMergedPacketVerificationIncidents({ packetId, event: 'packet_archived' });
+    }
 
     return NextResponse.json(buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
