@@ -9,6 +9,7 @@ import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
 import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
+import { DEVIATIONS_CLAUSE } from '@/lib/orchestrator/packet-deviations';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
@@ -397,6 +398,10 @@ export async function buildPacketPrompt(
     ...readBudgetSections,
     ...edgeCaseSections,
     ...sandboxVerificationSections,
+    // #1490 — standing deviations clause. Every worker keeps an
+    // implementation-notes.md and logs forced departures from the plan under a
+    // '## Deviations' heading; review reads it back and surfaces it.
+    DEVIATIONS_CLAUSE,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     'If a task step needs a long-running or long-output process — a test suite, build, backtest, data job, or a server the task itself requires — start it with `o8 run -- <cmd>` (e.g. `o8 run -- pytest -q`) rather than a bare shell exec, so the operator can watch its live output. This is about genuinely long jobs; still follow any sandbox UI-verification guidance above (do not start dev servers just to smoke-test).',
     captureProofSection,

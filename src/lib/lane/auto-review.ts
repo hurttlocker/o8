@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
+import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/packet-deviations';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
 import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-facts';
@@ -409,12 +410,22 @@ function buildReviewPrompt(
   mergeGateResult?: MergeGateResult,
   reviewScreenshot?: LaneReviewScreenshotReference | null,
   reviewWorktreePath?: string,
+  deviations?: PacketDeviations | null,
 ): string {
   const depthGuidance = depth === 'deep-dive'
     ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
     : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
 
   const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
+  // #1490 — surface the worker's self-reported deviations to the reviewer.
+  const deviationsSection = deviations && deviations.entries.length > 0
+    ? [
+        '## Worker deviations from brief',
+        '',
+        'The worker logged these departures from the plan (implementation-notes.md → ## Deviations). Verify each is the conservative call the brief asked for, and factor them into your verdict:',
+        ...deviations.entries.map((entry) => `- ${entry}`),
+      ].join('\n')
+    : '## Worker deviations from brief\n\nNo deviations reported by the worker.';
   const reviewRisk = classifyReviewRisk(changedFiles, addedLines);
   const adversarialReviewProtocol = buildAdversarialReviewProtocol(reviewRisk.tier);
   const worktreePath = reviewWorktreePath || lane.worktreePath || lane.repoPath;
@@ -466,6 +477,8 @@ function buildReviewPrompt(
     mechanicalChecksSummary ? mechanicalChecksSummary : null,
     mechanicalChecksSummary ? `` : null,
     formatSelfReview(selfReview, depth),
+    ``,
+    deviationsSection,
     ``,
     reviewScreenshot ? '## Attached review screenshot' : null,
     reviewScreenshot ? 'A screenshot was auto-captured when this lane entered review. Inspect the image file directly at native resolution instead of asking for a reduced copy.' : null,
@@ -519,6 +532,21 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     completionContext = await readPacketCompletionContext(lane.packetId);
   }
 
+  // #1490 — capture worker deviations from the worktree notes file and stamp
+  // them onto the packet so the review surfaces + the auto-reviewer both see
+  // where the worker went off-plan. Null (no notes file / no heading) persists
+  // as null so the surfaces render the asserted "No deviations reported" line.
+  let deviations: PacketDeviations | null = null;
+  if (lane.packetId) {
+    try {
+      deviations = readPacketDeviations(lane.worktreePath || lane.repoPath);
+      const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
+      patchMissionPacket(lane.packetId, { deviations: deviations ?? null });
+    } catch (error) {
+      console.warn(`[auto-review] Failed to capture deviations for lane ${lane.id}:`, error);
+    }
+  }
+
   const depth = deriveReviewDepth(completionContext?.selfReview);
   const mechanicalChecks = runMechanicalChecks(lane);
   const mergeGateResult = await runMergeGate(lane, completionContext?.selfReview);
@@ -546,6 +574,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     mergeGateResult,
     reviewScreenshot,
     diffSummary.cwd,
+    deviations,
   );
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
@@ -600,6 +629,33 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     });
     if (recorded?.verdict.parseWarning) {
       console.warn(`[auto-review] Codex verdict for lane ${lane.id} needed parser fallback: ${recorded.verdict.parseWarning}`);
+    }
+  }
+
+  // #1491 — HTML packet explainer + quiz. Fire-and-forget so it never blocks
+  // the review transition or the second-pass path below; the packet carries a
+  // generating→ready|failed status and the surface degrades to the diff on
+  // failure. Off when the operator disabled it.
+  if (lane.packetId) {
+    try {
+      const { resolvePacketExplainerEnabledSync } = await import('@/lib/operator/defaults');
+      if (resolvePacketExplainerEnabledSync()) {
+        const { generatePacketExplainer } = await import('./packet-explainer');
+        void generatePacketExplainer({
+          lane,
+          packetId: lane.packetId,
+          packetTitle: lane.label || lane.branch,
+          packetSummary: completionContext?.summary ?? '',
+          diffSummary: diffSummary.summary,
+          changedFileCount: diffSummary.changedFiles.length,
+          deviationsRaw: deviations?.raw ?? null,
+          reviewContext: mechanicalChecks.summary || '',
+        }).catch((error) => {
+          console.warn(`[auto-review] Explainer generation threw for lane ${lane.id}:`, error);
+        });
+      }
+    } catch (error) {
+      console.warn(`[auto-review] Failed to launch explainer for lane ${lane.id}:`, error);
     }
   }
 

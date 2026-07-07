@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { parseGitDiff } from '@/lib/worktree/diff-parser';
+import { DeviationsBanner } from './DeviationsBanner';
 import type { ReviewPanelState } from '../types';
 import {
   DiffPayload,
@@ -126,6 +127,7 @@ export function DiffPane({ packet, reviewState, diff, diffLoading, diffError }: 
 
   return (
     <div style={paneStyle()}>
+      <DeviationsBanner packet={packet} />
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <div style={paneLabelStyle()}>DIFF</div>
         {diff ? (
