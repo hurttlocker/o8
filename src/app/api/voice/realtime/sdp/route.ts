@@ -20,7 +20,8 @@ export const dynamic = 'force-dynamic';
  * in middleware (/api/voice/) + requirePanelAuth.
  */
 
-const REALTIME_MODEL = 'gpt-realtime-2';
+// Keep in lockstep with session/route.ts REALTIME_MODEL (Q trial: 2.1-mini).
+const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 const DEFAULT_VOICE = 'marin';
 const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
 const CALLS_URL = 'https://api.openai.com/v1/realtime/calls';

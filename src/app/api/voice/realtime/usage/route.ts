@@ -18,20 +18,23 @@ export const dynamic = 'force-dynamic';
  * (middleware) + requirePanelAuth.
  */
 
-// gpt-realtime-2 pricing — USD per 1M tokens. BEST-EFFORT (post-cutoff): the
-// TOKEN BREAKDOWN logged below is ground truth, cost is derived — verify these
-// six rates against the OpenAI dashboard during the $5 dogfood and adjust here.
-// Audio dominates; cached input is an order of magnitude cheaper (the caching win).
+// gpt-realtime-2.1-mini pricing (Q trial 2026-07-07) — USD per 1M tokens.
+// textIn 0.60 and audioIn 10.00 are from the OpenAI announcement; textOut 1.60
+// matches the "90% cheaper output" claim; audioOut + cached rates are
+// BEST-EFFORT (2× audio-in / 10% of input, the flagship's ratios) — the TOKEN
+// BREAKDOWN logged below is ground truth, cost is derived — verify all six
+// against the OpenAI dashboard during the trial and adjust here.
+// Flagship (gpt-realtime-2) rates for revert: 4.0 / 0.4 / 16.0 / 32.0 / 0.4 / 64.0.
 const RATE_PER_1M = {
-  textIn: 4.0,
-  textCachedIn: 0.4,
-  textOut: 16.0,
-  audioIn: 32.0,
-  audioCachedIn: 0.4,
-  audioOut: 64.0,
+  textIn: 0.6,
+  textCachedIn: 0.06,
+  textOut: 1.6,
+  audioIn: 10.0,
+  audioCachedIn: 1.0,
+  audioOut: 20.0,
 } as const;
 const PER = 1_000_000;
-const DEFAULT_MODEL = 'gpt-realtime-2';
+const DEFAULT_MODEL = 'gpt-realtime-2.1-mini';
 
 interface RealtimeUsage {
   total_tokens?: number;
