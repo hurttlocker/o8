@@ -12,6 +12,7 @@ import {
 } from '@/lib/llm/mobile-chat-session';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
+import { selectMobileReviewApprovalId } from '@/lib/mobile/action-approval';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchCodexFromMobile, launchRuntimeSurface, performRuntimeAction } from '@/lib/runtime/actions';
@@ -359,12 +360,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (action === 'approve' || action === 'deny') {
+    if (action === 'approve' || action === 'request_changes' || action === 'deny') {
       const explicitApprovalId = payload.approvalId?.trim();
       const pendingForSession = explicitApprovalId
         ? []
         : listApprovals({ status: 'pending', sessionKey });
-      const approvalId = explicitApprovalId || (pendingForSession.length === 1 ? pendingForSession[0]?.id : '');
+      const approvalId = selectMobileReviewApprovalId(explicitApprovalId, pendingForSession);
       if (!approvalId) {
         return actionErrorResponse('No pending approval found for this mobile session.', 404);
       }
@@ -391,7 +392,7 @@ export async function POST(request: NextRequest) {
         return actionErrorResponse('Approval not found.', 404);
       }
 
-      let decisionNote = action === 'approve' ? 'Approved.' : 'Denied.';
+      let decisionNote = action === 'approve' ? 'Approved.' : action === 'request_changes' ? 'Changes requested.' : 'Denied.';
       const continuation = approval.continuation;
 
       if (continuation?.kind === 'llm-chat') {

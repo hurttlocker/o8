@@ -117,6 +117,7 @@ function createShellMobileSnapshot(): MobileInboxSnapshot {
     note: 'Shell rendered immediately. Live inbox, transcript, and review truth are still warming in the background.',
     sessions: [],
     approvals: [],
+    reviewUnits: [],
     items: [],
     summary: {
       alerts: 0,

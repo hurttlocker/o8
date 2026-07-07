@@ -9,7 +9,11 @@ function itemSignature(item: MobileInboxSnapshot['items'][number]) {
 }
 
 function approvalSignature(approval: MobileInboxSnapshot['approvals'][number]) {
-  return `${approval.id}:${approval.sessionKey}:${approval.agent}:${approval.severity}:${approval.title}:${approval.description}:${approval.createdAt}:${Object.entries(approval.metadata ?? {}).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}:${value}`).join('|')}`;
+  return `${approval.id}:${approval.approvalId ?? ''}:${approval.sessionKey}:${approval.agent}:${approval.severity}:${approval.title}:${approval.description}:${approval.createdAt}:${approval.repo ?? ''}:${approval.repoPath ?? ''}:${approval.repoSlug ?? ''}:${approval.branch ?? ''}:${(approval.changedFilePaths ?? []).join(',')}:${approval.filesChanged ?? ''}:${approval.additions ?? ''}:${approval.deletions ?? ''}:${approval.previewUrl ?? ''}:${approval.terminalSessionName ?? ''}:${Object.entries(approval.metadata ?? {}).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}:${value}`).join('|')}`;
+}
+
+function reviewUnitSignature(unit: MobileInboxSnapshot['reviewUnits'][number]) {
+  return `${unit.id}:${unit.sessionKey}:${unit.approvalId ?? ''}:${unit.authority}:${unit.status}:${unit.title}:${unit.agent}:${unit.runtime}:${unit.repo}:${unit.repoSlug ?? ''}:${unit.repoPath}:${unit.branch}:${unit.baseBranch ?? ''}:${unit.baseSha ?? ''}:${unit.headSha ?? ''}:${unit.worktreePath ?? ''}:${unit.fileCount}:${unit.additions}:${unit.deletions}:${unit.diffAvailable ? 1 : 0}:${unit.previewUrl ?? ''}:${unit.terminalSessionName ?? ''}:${unit.actions.join(',')}:${unit.staleReason ?? ''}:${unit.changedFiles.map((file) => `${file.path}:${file.status}:${file.additions ?? ''}:${file.deletions ?? ''}`).join('|')}`;
 }
 
 function reviewSignature(review: MobileInboxSnapshot['review']) {
@@ -29,8 +33,9 @@ export function mobileInboxSignature(snapshot: MobileInboxSnapshot) {
     snapshot.note ?? '',
     snapshot.sessions.map(sessionSignature).join('|'),
     (snapshot.approvals ?? []).map(approvalSignature).join('|'),
+    (snapshot.reviewUnits ?? []).map(reviewUnitSignature).join('|'),
     snapshot.items.map(itemSignature).join('|'),
-    `${snapshot.summary.alerts}:${snapshot.summary.activeRuns}:${snapshot.summary.approvals}:${snapshot.summary.reviewItems}`,
+    `${snapshot.summary.alerts}:${snapshot.summary.activeRuns}:${snapshot.summary.approvals}:${snapshot.summary.reviewItems}:${snapshot.summary.inspectOnlyReviews ?? ''}`,
     reviewSignature(snapshot.review),
   ].join('||');
 }
