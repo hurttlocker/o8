@@ -192,4 +192,74 @@ describe('merged-by-ancestry reconciliation', () => {
     expect(packet?.releaseState).toBe('pending');
     expect(getLane(lane.id)?.status).toBe('reviewing');
   }, 20_000);
+
+  // ── Lane-only candidates (lane orphaned from live mission state) ──
+
+  function seedLaneOnly(repoPath: string, branch = 'packet') {
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'reviewing', 'system', 'ready_for_review');
+    // Live mission state has NO packets — the lane is orphaned.
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    return lane;
+  }
+
+  it('archives an orphaned lane whose branch was squash-merged (no live packet)', async () => {
+    const { clone, seed } = makeRepo('o8-lane-only-squash');
+    writeFileSync(join(clone, 'a.txt'), 'a\n');
+    commitAll(clone, 'lane work a');
+    git(clone, ['push', 'origin', 'packet']);
+    git(seed, ['fetch', 'origin', 'packet', '--quiet']);
+    git(seed, ['merge', '--squash', 'origin/packet']);
+    commitAll(seed, 'squash lane work');
+    git(seed, ['push', 'origin', 'main']);
+
+    const lane = seedLaneOnly(clone);
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
+    expect(getLane(lane.id)?.status).toBe('archived');
+  }, 20_000);
+
+  it('archives an orphaned lane whose branch no longer exists anywhere', async () => {
+    const { clone } = makeRepo('o8-lane-only-branch-gone');
+    // Lane records a branch that resolves nowhere — the worktree that held
+    // it was pruned after a manual squash-merge. Repo itself is healthy.
+    const lane = seedLaneOnly(clone, 'agent/deleted-after-manual-merge');
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
+    expect(getLane(lane.id)?.status).toBe('archived');
+  }, 20_000);
+
+  it('never touches an orphaned lane with unmerged branch content', async () => {
+    const { clone } = makeRepo('o8-lane-only-unmerged');
+    writeFileSync(join(clone, 'wip.txt'), 'wip\n');
+    commitAll(clone, 'unmerged lane work');
+    const lane = seedLaneOnly(clone);
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 0 });
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+  }, 20_000);
+
+  it('never touches an active (running) orphaned lane even with branch gone', async () => {
+    const { clone } = makeRepo('o8-lane-only-running');
+    const lane = createLane({
+      repoPath: clone,
+      worktreePath: clone,
+      branch: 'agent/still-being-created',
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'running', 'system', 'agent_working');
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 0 });
+    expect(getLane(lane.id)?.status).toBe('running');
+  }, 20_000);
 });
