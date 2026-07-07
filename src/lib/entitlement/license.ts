@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { importSPKI, jwtVerify, errors as joseErrors } from 'jose';
 
+import { clearFounderRecord } from './founder';
+import { readJwtIdentityClaims, shouldDropCachedLicenseForSubject } from './identity-guards';
 import { getEntitlementPath } from './store';
 import type { Plan } from './types';
 
@@ -209,14 +211,27 @@ interface EntitlementCacheFile {
   expiresAt?: string;
 }
 
+interface ReadCachedEntitlementOptions {
+  activeSubject?: string | null;
+}
+
 /**
  * Read the cached entitlement file. Returns null when the file is missing or
  * unreadable (the common free case). Never throws.
  */
-export function readCachedEntitlement(): EntitlementCacheFile | null {
+export function readCachedEntitlement(options: ReadCachedEntitlementOptions = {}): EntitlementCacheFile | null {
   try {
     const raw = readFileSync(getEntitlementPath(), 'utf8');
-    return JSON.parse(raw) as EntitlementCacheFile;
+    const cached = JSON.parse(raw) as EntitlementCacheFile;
+    const licenseKey = typeof cached.licenseKey === 'string' ? cached.licenseKey.trim() : '';
+    if (licenseKey) {
+      const { subject } = readJwtIdentityClaims(licenseKey);
+      if (shouldDropCachedLicenseForSubject({ licenseSubject: subject, activeSubject: options.activeSubject })) {
+        clearCachedEntitlement();
+        return null;
+      }
+    }
+    return cached;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.error('[entitlement] Failed to read entitlement cache:', error);
@@ -258,6 +273,7 @@ export function writeCachedEntitlement(input: {
 export function clearCachedEntitlement(): void {
   try {
     rmSync(getEntitlementPath(), { force: true });
+    clearFounderRecord();
   } catch (error) {
     console.error('[entitlement] Failed to clear entitlement cache:', error);
   }
