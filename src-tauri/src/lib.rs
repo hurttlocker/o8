@@ -4775,20 +4775,24 @@ pub fn run() {
                         }
                     }
 
-                    // Ctrl+Shift+S → speak the current text selection aloud
-                    // (voice P4 "say" / speak-selection). Avoid Option entirely:
-                    // the old Option-based chord latched the modifier when
-                    // combined with the agent hold-gesture guard. grab_selection
-                    // does clipboard polling with sleeps, so run the whole thing
-                    // off the event-loop thread; play_thread then spawns its own
-                    // audio thread. Falls back to `say` inside play_thread.
-                    if let Ok(sc) = "Control+Shift+S".parse::<Shortcut>() {
+                    // Ctrl+Shift+R → speak the current text selection aloud
+                    // (voice P4 "say" / speak-selection). Moved off Ctrl+Shift+S
+                    // 2026-07-07 (operator: "S is a bad command") — S collides
+                    // with save-adjacent muscle memory and app chords; R = Read,
+                    // no default collision in Chrome/OBS/Terminal on macOS.
+                    // Avoid Option entirely: the old Option-based chord latched
+                    // the modifier when combined with the agent hold-gesture
+                    // guard. grab_selection does clipboard polling with sleeps,
+                    // so run the whole thing off the event-loop thread;
+                    // play_thread then spawns its own audio thread. Falls back
+                    // to `say` inside play_thread.
+                    if let Ok(sc) = "Control+Shift+R".parse::<Shortcut>() {
                         let h_speak = app.handle().clone();
                         if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            // Ctrl+Shift+S says the current selection — ALWAYS. If a read is
+                            // Ctrl+Shift+R says the current selection — ALWAYS. If a read is
                             // already playing (commonly Symon's OWN voice, or a
                             // transient/stale is_active right after it finishes),
                             // stop it first but DON'T return — fall through and say
@@ -4799,7 +4803,7 @@ pub fn run() {
                             // re-trigger-stacking this once guarded against is now
                             // prevented by play_thread's single-flight (a new speak
                             // supersedes the old), so the gate is obsolete. A bare
-                            // Ctrl+Shift+S with nothing selected still just stops, because
+                            // Ctrl+Shift+R with nothing selected still just stops, because
                             // grab_selection returns None below; Escape also stops.
                             if crate::tts::playback::is_active() {
                                 std::thread::spawn(crate::tts::playback::stop);
@@ -4823,11 +4827,11 @@ pub fn run() {
                                     Some(text) => {
                                         crate::tts::playback::play_thread(text, crate::tts::load_config());
                                     }
-                                    None => log::info!("[tts] CtrlShiftS: no selection to speak"),
+                                    None => log::info!("[tts] CtrlShiftR: no selection to speak"),
                                 }
                             });
                         }) {
-                            log::warn!("[hotkey] failed to register CtrlShiftS (speak-selection): {e}");
+                            log::warn!("[hotkey] failed to register CtrlShiftR (speak-selection): {e}");
                         }
                     }
                 }
