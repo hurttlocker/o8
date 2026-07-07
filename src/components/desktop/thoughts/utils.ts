@@ -210,6 +210,23 @@ export function mergeTranscriptEntries(
   return next;
 }
 
+export function mergeSameThreadHistoryLoad(
+  liveEntries: MobileTranscriptEntry[],
+  fetchedEntries: MobileTranscriptEntry[],
+) {
+  if (liveEntries.length === 0) return { entries: fetchedEntries, preservedLiveEntries: false };
+  if (fetchedEntries.length === 0) return { entries: liveEntries, preservedLiveEntries: true };
+
+  const fetchedIds = new Set(fetchedEntries.map((entry) => entry.id));
+  const hasLiveOnlyEntry = liveEntries.some((entry) => !fetchedIds.has(entry.id));
+  if (!hasLiveOnlyEntry) return { entries: fetchedEntries, preservedLiveEntries: false };
+
+  return {
+    entries: mergeTranscriptEntries(fetchedEntries, liveEntries),
+    preservedLiveEntries: true,
+  };
+}
+
 export function generateSuggestions(agents: FleetAgent[], targets: AgentTarget[]): ContextSuggestion[] {
   const suggestions: ContextSuggestion[] = [];
   const targetBySessionKey = new Map(targets.map((target) => [target.key, target]));
