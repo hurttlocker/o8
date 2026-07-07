@@ -135,8 +135,15 @@ pub struct PolishRunResult {
     pub usage_metadata_json: Option<String>,
 }
 
+/// Polish model is config-overridable for latency A/Bs without a rebuild:
+/// set `polish_model` in the dictation config (e.g. a flash-lite id). The
+/// provider stays Gemini — the id just swaps within the same API.
 pub fn load_model_config() -> PolishModelConfig {
-    PolishModelConfig::default()
+    let mut config = PolishModelConfig::default();
+    if let Some(model) = crate::stt::keys::config_string("polish_model") {
+        config.model = model;
+    }
+    config
 }
 
 /// Warm the shared client and TLS handshake to `generativelanguage.googleapis.com`.
