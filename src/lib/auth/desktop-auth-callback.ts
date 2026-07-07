@@ -17,6 +17,7 @@ export interface ConsumeDesktopAuthCallbackOptions {
   clerk: DesktopAuthClerk;
   getExpectedState: () => string | null;
   clearExpectedState: () => void;
+  retrySignIn?: () => void;
 }
 
 // Module-level so remounts cannot reset the one-time-ticket guard.
@@ -58,6 +59,7 @@ export async function consumeDesktopAuthCallback(
   if (!ticket) return;
   if (consumedTickets.has(ticket)) {
     reportDesktopAuthError('This sign-in link was already used. Try signing in again.');
+    options.retrySignIn?.();
     return;
   }
 
@@ -75,6 +77,7 @@ export async function consumeDesktopAuthCallback(
       const reason = reasonFromUnknown(error, 'The sign-in ticket could not be exchanged.');
       console.error('[auth] ticket sign-in failed:', error);
       reportDesktopAuthError(reason);
+      options.retrySignIn?.();
       return;
     }
 

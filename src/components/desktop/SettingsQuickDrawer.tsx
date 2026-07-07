@@ -21,6 +21,7 @@ import {
 } from './lucide-shims';
 import { useO8Auth, type O8AuthState } from '@/components/auth/O8AuthProvider';
 import {
+  clearDesktopAuthError,
   getDesktopAuthError,
   subscribeDesktopAuthError,
   type DesktopAuthError,
@@ -324,6 +325,10 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (auth.signedIn && authError) clearDesktopAuthError();
+  }, [auth.signedIn, authError]);
+
   if (!auth.clerkEnabled) {
     return (
       <>
@@ -350,7 +355,7 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
           <IconFrame><Github size={13} /></IconFrame>
           <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in with GitHub</span>
         </RowButton>
-        {authError ? <SignInErrorCard key={authError.id} authError={authError} /> : null}
+        {authError ? <SignInErrorCard key={authError.id} authError={authError} onRetry={auth.signIn} /> : null}
         <div style={separatorStyle()} />
       </>
     );

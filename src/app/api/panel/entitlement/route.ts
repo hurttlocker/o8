@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { rm } from 'node:fs/promises';
 
 import { resolveFlags } from '@/lib/entitlement/flags';
-import { readFounderRecord } from '@/lib/entitlement/founder';
+import { clearFounderRecord, readFounderRecord } from '@/lib/entitlement/founder';
 import { verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement, getEntitlementPath } from '@/lib/entitlement/store';
 
@@ -55,6 +55,7 @@ export async function POST(request: Request) {
   if (body.clear === true) {
     try {
       await rm(getEntitlementPath(), { force: true });
+      clearFounderRecord();
       const entitlement = await getEntitlement();
       return NextResponse.json(entitlement);
     } catch (error) {

@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founder';
-import { verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
+import { clearCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +21,57 @@ interface AccountLicenseResponse {
   plan?: unknown;
   source?: unknown;
   founder?: { operatorNumber?: unknown; tier?: unknown };
+}
+
+interface SyncBody {
+  signedOut?: unknown;
+  clerkUserId?: unknown;
+}
+
+function dataDir(): string {
+  return process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+}
+
+function signOutMarkerPath(): string {
+  return path.join(dataDir(), 'auth-signed-out-at');
+}
+
+function markSignedOut(): void {
+  try {
+    const filePath = signOutMarkerPath();
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${Math.floor(Date.now() / 1000)}\n`, { mode: 0o600 });
+  } catch (error) {
+    console.error('[entitlement] failed to mark sign-out:', error);
+  }
+}
+
+function readSignedOutAt(): number | null {
+  try {
+    const parsed = Number(readFileSync(signOutMarkerPath(), 'utf8').trim());
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function tokenIssuedAt(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const json = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const parsed = JSON.parse(json) as { iat?: unknown };
+    return typeof parsed.iat === 'number' && Number.isFinite(parsed.iat) ? parsed.iat : null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearSignedOutEntitlement(reason: string, status = 200) {
+  clearCachedEntitlement();
+  clearFounderRecord();
+  const entitlement = await getEntitlement();
+  return NextResponse.json({ ok: false, reason, plan: entitlement.plan, source: 'none' }, { status });
 }
 
 /**
@@ -37,6 +91,18 @@ export async function POST(request: Request) {
   if (!CLERK_ENABLED) return NextResponse.json({ ok: false, reason: 'clerk_disabled' });
 
   try {
+    let body: SyncBody | null = null;
+    try {
+      body = (await request.json()) as SyncBody;
+    } catch {
+      body = null;
+    }
+    if (body?.signedOut === true) {
+      markSignedOut();
+      return clearSignedOutEntitlement('signed_out');
+    }
+    const activeClerkUserId = typeof body?.clerkUserId === 'string' ? body.clerkUserId.trim() : '';
+
     // Two session transports (live-hit 2026-07-05): web/cookie mode surfaces the
     // session to server-side auth(); the desktop NATIVE mode keeps it in the
     // Tauri store, so the client forwards its short-lived token in a header.
@@ -52,7 +118,13 @@ export async function POST(request: Request) {
     if (!sessionToken) {
       sessionToken = request.headers.get('x-clerk-session-token')?.trim() || null;
     }
-    if (!sessionToken) return NextResponse.json({ ok: false, reason: 'no_session' }, { status: 401 });
+    if (!sessionToken) return clearSignedOutEntitlement('no_session', 401);
+
+    const signedOutAt = readSignedOutAt();
+    const iat = tokenIssuedAt(sessionToken);
+    if (signedOutAt !== null && iat !== null && iat < signedOutAt) {
+      return clearSignedOutEntitlement('stale_session', 401);
+    }
 
     // Best-effort: link this install to the signed-in account so a person's
     // devices + pre-sign-in usage roll into their ONE profile (beta analytics).
@@ -76,6 +148,7 @@ export async function POST(request: Request) {
     // Signed in but no paid entitlement on this account — fine; the free-token
     // path covers them. Clear any stale founder badge and report success.
     if (res.status === 404) {
+      clearCachedEntitlement();
       clearFounderRecord();
       const entitlement = await getEntitlement();
       return NextResponse.json({ ok: true, plan: entitlement.plan, source: 'none' });
@@ -93,6 +166,15 @@ export async function POST(request: Request) {
     const verified = await verifyLicense(license);
     if (!verified.valid || !verified.plan) {
       return NextResponse.json({ ok: false, reason: verified.reason ?? 'invalid_license' });
+    }
+    if (!activeClerkUserId || verified.subject !== activeClerkUserId) {
+      return clearSignedOutEntitlement('license_subject_mismatch', 409);
+    }
+
+    const postFetchSignedOutAt = readSignedOutAt();
+    const postFetchIat = tokenIssuedAt(sessionToken);
+    if (postFetchSignedOutAt !== null && postFetchIat !== null && postFetchIat < postFetchSignedOutAt) {
+      return clearSignedOutEntitlement('stale_session', 401);
     }
 
     const wrote = writeCachedEntitlement({

@@ -53,6 +53,7 @@ describe('consumeDesktopAuthCallback', () => {
   });
 
   it('reports Clerk ticket exchange longMessage', async () => {
+    const retrySignIn = vi.fn();
     const signIn = makeSignIn({
       ticket: vi.fn(async () => ({ error: { longMessage: 'sign in token has already been used' } })),
     });
@@ -61,9 +62,11 @@ describe('consumeDesktopAuthCallback', () => {
       clerk: makeClerk(),
       getExpectedState: () => 'state_123',
       clearExpectedState: vi.fn(),
+      retrySignIn,
     });
 
     expect(getDesktopAuthError()?.message).toBe('sign in token has already been used');
+    expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
   it('reports finalize failures', async () => {
@@ -123,16 +126,19 @@ describe('consumeDesktopAuthCallback', () => {
 
   it('surfaces a used-link reason for duplicate tickets', async () => {
     const signIn = makeSignIn();
+    const retrySignIn = vi.fn();
     const options = {
       signIn,
       clerk: makeClerk(),
       getExpectedState: () => 'state_123',
       clearExpectedState: vi.fn(),
+      retrySignIn,
     };
     await consumeDesktopAuthCallback(callbackUrl('ticket_once'), options);
     await consumeDesktopAuthCallback(callbackUrl('ticket_once'), options);
 
     expect(signIn.ticket).toHaveBeenCalledOnce();
     expect(getDesktopAuthError()?.message).toContain('already used');
+    expect(retrySignIn).toHaveBeenCalledOnce();
   });
 });
