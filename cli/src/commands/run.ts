@@ -89,6 +89,7 @@ interface ManagedRunRow {
   session: string;
   command: string;
   status: 'running' | 'finished' | 'gone' | 'killed';
+  startedAt?: string;
   exitCode?: number | null;
   mode?: string;
 }
@@ -200,6 +201,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   const session = `cortex-run-${id}`;
   const cwd = process.cwd();
   const cmd = command.join(' ');
+  const startedAt = new Date().toISOString();
 
   const base = join(tmpdir(), `o8-run-${id}`);
   const logFile = `${base}.log`;
@@ -234,6 +236,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     `cd ${sq(cwd)} || exit 1`,
     `[ -e ${sq(envFile)} ] && . ${sq(envFile)}`,
     `rm -f ${sq(envFile)}`,
+    `printf '$ %s\\nstarted-at %s\\n\\n' "$*" ${sq(startedAt)}`,
     `while [ ! -e ${sq(goFile)} ]; do sleep 0.02; done`,
     `"$@"`,
     `__o8_ec=$?`,
@@ -299,7 +302,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   try {
     const res = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
       method: 'POST',
-      body: { action: 'register', id, session, command: cmd, cwd, packetId, laneId, panePid, mode: detach ? 'detach' : 'stream' },
+      body: { action: 'register', id, session, command: cmd, cwd, packetId, laneId, panePid, mode: detach ? 'detach' : 'stream', startedAt },
     });
     registered = Boolean(res.data?.ok);
   } catch { /* server unreachable — degrade to run-without-visibility */ }
