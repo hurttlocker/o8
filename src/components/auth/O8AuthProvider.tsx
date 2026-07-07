@@ -6,6 +6,7 @@ import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
+import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
 
 // The Clerk publishable key is app-wide and public, baked into the build at ship
 // time. When it's absent (fresh build with no Clerk app yet), Clerk is disabled
@@ -49,6 +50,12 @@ const DISABLED_STATE: O8AuthState = {
 };
 
 const O8AuthContext = createContext<O8AuthState>(DISABLED_STATE);
+
+interface EntitlementSyncResult {
+  ok?: boolean;
+  plan?: string;
+  reason?: string;
+}
 
 /**
  * The single shared auth hook for BOTH the default dashboard and the canvas
@@ -126,8 +133,13 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         body: JSON.stringify({ clerkUserId: user.id }),
         signal: controller.signal,
       }))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { ok?: boolean; plan?: string } | null) => {
+      .then((r) => r.json().catch(() => null))
+      .then((d: EntitlementSyncResult | null) => {
+        if (shouldPurgeClerkStoreForEntitlementSync(d?.reason)) {
+          void purgeTauriClerkStore();
+          void clearSignedOutEntitlement();
+          return;
+        }
         if (d?.ok && d.plan && d.plan !== 'free') {
           window.dispatchEvent(new Event('o8:entitlement-refresh'));
         }
@@ -138,7 +150,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     return () => {
       controller.abort();
     };
-  }, [isSignedIn, user, clerk]);
+  }, [isSignedIn, user, clerk, clearSignedOutEntitlement]);
 
   const value = useMemo<O8AuthState>(
     () => ({
@@ -158,8 +170,10 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         clerk.openUserProfile();
       },
       signOut: async () => {
+        await purgeTauriClerkStore();
         await clearSignedOutEntitlement();
         await clerk.signOut();
+        await purgeTauriClerkStore();
         await clearSignedOutEntitlement();
       },
     }),
