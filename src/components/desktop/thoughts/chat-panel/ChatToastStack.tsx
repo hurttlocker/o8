@@ -51,6 +51,7 @@ export function ChatToastStack(props: ChatToastStackProps) {
             noticeId={reloadNotice.noticeId}
             message={reloadNotice.message}
             detail={reloadNotice.registered.length > 0 ? reloadNotice.registered.join(', ') : undefined}
+            autoDismiss={reloadNotice.autoDismiss}
             onDismiss={onDismissReloadNotice}
           />
         </div>

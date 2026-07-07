@@ -38,4 +38,19 @@ export const MODEL_IDS = {
   raw: RAW_MODEL_IDS,
 } as const;
 
+export const CROSS_HOUSE_MODEL_TIERS = {
+  frontierOrchestrator: {
+    anthropic: RAW_MODEL_IDS.anthropicClaudeOpus48,
+    openai: RAW_MODEL_IDS.openAiGpt55,
+  },
+  reviewMechanical: {
+    anthropic: RAW_MODEL_IDS.anthropicClaudeSonnet5,
+    openai: RAW_MODEL_IDS.openAiGpt55,
+  },
+  scout: {
+    anthropic: RAW_MODEL_IDS.anthropicClaudeHaiku45Dated,
+    openai: RAW_MODEL_IDS.opencodeGpt5Nano,
+  },
+} as const;
+
 export type ModelId = typeof RAW_MODEL_IDS[keyof typeof RAW_MODEL_IDS];
