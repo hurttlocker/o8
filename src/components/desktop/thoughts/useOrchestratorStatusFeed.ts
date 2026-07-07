@@ -82,16 +82,26 @@ export function useOrchestratorStatusFeed({
       const myRepo = normalizeRepoPath(repoRef.current);
       if (evtRepo && myRepo && evtRepo !== myRepo) return;
 
-      const resolveTitle = (payload: LaneLifecyclePayload): string | null => {
+      const resolvePacket = (payload: LaneLifecyclePayload) => {
         const match = packetsRef.current.find((packet) => (
           (payload.packetId && packet.id === payload.packetId)
           || (payload.laneId && packet.lane?.laneId === payload.laneId)
           || (payload.sessionKey && packet.lane?.sessionKey === payload.sessionKey)
         ));
-        return match?.title ?? null;
+        if (!match) return null;
+        return {
+          title: match.title,
+          repoLabel: match.workspaceTargetPath?.split('/').filter(Boolean).pop() ?? null,
+          diff: null,
+          focus: {
+            packetId: match.id,
+            laneId: match.lane?.laneId ?? payload.laneId ?? null,
+            sessionKey: match.lane?.sessionKey ?? match.lane?.tabId ?? payload.sessionKey ?? null,
+          },
+        };
       };
 
-      const statusEvent = deriveLaneStatusEvent(data, resolveTitle);
+      const statusEvent = deriveLaneStatusEvent(data, resolvePacket);
       if (!statusEvent) return;
       const key = statusEventDedupeKey(data, statusEvent);
       if (seenRef.current.has(key)) return;

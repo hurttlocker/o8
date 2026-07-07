@@ -23,6 +23,18 @@ export interface MissionStatusPacket {
   referenceLabel?: string;
 }
 
+export interface PacketDiffEvidence {
+  additions?: number | null;
+  deletions?: number | null;
+  fileCount?: number | null;
+}
+
+export interface PacketFocusTarget {
+  packetId?: string | null;
+  laneId?: string | null;
+  sessionKey?: string | null;
+}
+
 export type OrchestratorStatusEventData =
   | {
       kind: 'mission-complete';
@@ -32,7 +44,15 @@ export type OrchestratorStatusEventData =
       repoPath?: string | null;
       packets?: MissionStatusPacket[];
     }
-  | { kind: 'merge'; packetTitle: string; branch?: string | null; runtime?: string | null }
+  | {
+      kind: 'merge';
+      packetTitle: string;
+      branch?: string | null;
+      runtime?: string | null;
+      repoLabel?: string | null;
+      diff?: PacketDiffEvidence | null;
+      focus?: PacketFocusTarget | null;
+    }
   | { kind: 'heal'; outcome: 'recovered' | 'needs-human'; packetTitle?: string | null; previousStatus?: string | null };
 
 export type OrchestratorStatusDetection = OrchestratorStatusEventData | { kind: 'suppress' };
@@ -99,18 +119,31 @@ export function laneStatusOf(data: LaneLifecyclePayload): string {
 
 export function deriveLaneStatusEvent(
   data: LaneLifecyclePayload,
-  resolvePacketTitle: (data: LaneLifecyclePayload) => string | null,
+  resolvePacket: (data: LaneLifecyclePayload) => {
+    title: string | null;
+    repoLabel?: string | null;
+    diff?: PacketDiffEvidence | null;
+    focus?: PacketFocusTarget | null;
+  } | null,
 ): OrchestratorStatusEventData | null {
   const status = laneStatusOf(data);
   const previous = data.previousStatus ?? '';
+  const packet = resolvePacket(data);
 
   // A packet merged: its lane settled to `completed`.
   if (status === 'completed') {
     return {
       kind: 'merge',
-      packetTitle: resolvePacketTitle(data) ?? 'A packet',
+      packetTitle: packet?.title ?? 'A packet',
       branch: data.branch ?? null,
       runtime: data.runtime ?? null,
+      repoLabel: packet?.repoLabel ?? null,
+      diff: packet?.diff ?? null,
+      focus: packet?.focus ?? {
+        packetId: data.packetId ?? null,
+        laneId: data.laneId ?? null,
+        sessionKey: data.sessionKey ?? null,
+      },
     };
   }
   // Self-heal recovered: lane returned to `reviewing` from a failure state.
@@ -118,7 +151,7 @@ export function deriveLaneStatusEvent(
     return {
       kind: 'heal',
       outcome: 'recovered',
-      packetTitle: resolvePacketTitle(data),
+      packetTitle: packet?.title ?? null,
       previousStatus: previous,
     };
   }
@@ -127,7 +160,7 @@ export function deriveLaneStatusEvent(
     return {
       kind: 'heal',
       outcome: 'needs-human',
-      packetTitle: resolvePacketTitle(data),
+      packetTitle: packet?.title ?? null,
       previousStatus: previous,
     };
   }
@@ -166,8 +199,8 @@ export function statusEventSummary(event: OrchestratorStatusEventData): { title:
       };
     case 'merge':
       return {
-        title: 'Packet merged',
-        detail: `${event.packetTitle} landed on ${event.branch || 'the base branch'}`,
+        title: event.packetTitle,
+        detail: mergeEvidenceLine(event),
         tone: 'success',
       };
     case 'heal':
@@ -183,6 +216,26 @@ export function statusEventSummary(event: OrchestratorStatusEventData): { title:
             tone: 'attention',
           };
   }
+}
+
+export function formatPacketDiffEvidence(diff?: PacketDiffEvidence | null): string | null {
+  const additions = typeof diff?.additions === 'number' ? diff.additions : null;
+  const deletions = typeof diff?.deletions === 'number' ? diff.deletions : null;
+  const files = typeof diff?.fileCount === 'number' ? diff.fileCount : null;
+  if (additions === null && deletions === null && files === null) return null;
+  return [
+    additions !== null ? `+${additions}` : null,
+    deletions !== null ? `-${deletions}` : null,
+    files !== null ? `${files} ${files === 1 ? 'file' : 'files'}` : null,
+  ].filter(Boolean).join(' ');
+}
+
+export function mergeEvidenceLine(event: Extract<OrchestratorStatusEventData, { kind: 'merge' }>): string {
+  const parts = [
+    formatPacketDiffEvidence(event.diff),
+    [event.repoLabel, event.branch].filter(Boolean).join(' · '),
+  ].filter((part): part is string => Boolean(part && part.trim()));
+  return parts.length > 0 ? parts.join(' · ') : `Landed on ${event.branch || 'the base branch'}`;
 }
 
 // Plain-text fallback stored in the entry's `text` (so search / mobile / copy
