@@ -69,7 +69,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 #   - sha2:    SHA-256 verification against the pinned upstream checksum
 #   - hex:     hex-encode the digest for comparison against the constant
 # rustls (not native-tls) keeps us off OpenSSL link issues on signed builds.
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "json", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "json", "http2", "multipart"] }
 sha2 = "0.10"
 hex = "0.4"
 

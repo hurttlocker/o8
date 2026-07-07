@@ -87,13 +87,91 @@ pub fn enabled() -> bool {
 }
 
 pub fn is_available() -> bool {
-    crate::stt::keys::get_openrouter_key().is_some()
+    crate::stt::keys::get_groq_key().is_some()
+        || crate::stt::keys::get_openrouter_key().is_some()
 }
 
 fn language_hint() -> Option<String> {
     crate::stt::keys::config_string("dictation_locale")
         .filter(|locale| locale.len() >= 2)
         .map(|locale| locale[..2].to_ascii_lowercase())
+}
+
+/// Groq-hosted Whisper — same model family, served far faster than the
+/// OpenRouter route (the transcription leg was the bulk of the operator's
+/// 4–6s release-to-paste lag). Tried FIRST when a Groq key is configured;
+/// any failure falls through to the OpenRouter/managed path so the pass is
+/// never worse than before.
+const GROQ_TRANSCRIPTION_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+const GROQ_WHISPER_MODEL: &str = "whisper-large-v3-turbo";
+
+#[derive(Debug, Deserialize)]
+struct GroqTranscriptionResponse {
+    text: Option<String>,
+}
+
+fn transcribe_via_groq(path: &str, audio: Vec<u8>, key: &str) -> Option<WhisperTranscription> {
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("audio.wav")
+        .to_string();
+    let mut form = reqwest::blocking::multipart::Form::new()
+        .part(
+            "file",
+            reqwest::blocking::multipart::Part::bytes(audio).file_name(file_name),
+        )
+        .text("model", GROQ_WHISPER_MODEL)
+        .text("temperature", "0")
+        .text("response_format", "json");
+    if let Some(language) = language_hint() {
+        form = form.text("language", language);
+    }
+
+    let start = Instant::now();
+    let response = client()
+        .post(GROQ_TRANSCRIPTION_URL)
+        .header("Authorization", format!("Bearer {key}"))
+        .multipart(form)
+        .send();
+
+    match response {
+        Ok(response) if response.status().is_success() => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            match response.json::<GroqTranscriptionResponse>() {
+                Ok(parsed) => {
+                    let text = parsed.text.unwrap_or_default().trim().to_string();
+                    if text.is_empty() {
+                        tracing::warn!("Groq Whisper returned an empty transcript");
+                        return None;
+                    }
+                    tracing::info!(
+                        "[stt] groq whisper ok: {} chars in {latency_ms}ms",
+                        text.len()
+                    );
+                    Some(WhisperTranscription {
+                        text,
+                        model: format!("groq/{GROQ_WHISPER_MODEL}"),
+                        latency_ms,
+                        seconds: None,
+                        estimated_cost_usd: None,
+                    })
+                }
+                Err(e) => {
+                    tracing::warn!("Groq Whisper parse error: {e}");
+                    None
+                }
+            }
+        }
+        Ok(response) => {
+            tracing::warn!("Groq Whisper HTTP {}", response.status());
+            None
+        }
+        Err(e) => {
+            tracing::warn!("Groq Whisper request failed: {e}");
+            None
+        }
+    }
 }
 
 fn audio_format(path: &str) -> String {
@@ -106,19 +184,30 @@ fn audio_format(path: &str) -> String {
 }
 
 pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
+    let audio = match std::fs::read(path) {
+        Ok(audio) => audio,
+        Err(e) => {
+            tracing::warn!("Whisper Turbo STT skipped: failed to read audio file {path}: {e}");
+            return None;
+        }
+    };
+
+    // Groq first — fastest whisper serving available; falls through on any
+    // failure so a bad Groq key never breaks the pass.
+    if let Some(groq_key) = crate::stt::keys::get_groq_key() {
+        if !audio.is_empty() {
+            if let Some(result) = transcribe_via_groq(path, audio.clone(), &groq_key) {
+                return Some(result);
+            }
+            tracing::warn!("Groq Whisper failed — falling back to OpenRouter/managed route");
+        }
+    }
+
     // local OpenRouter key → direct; else an active o8 plan → managed proxy.
     let target = match crate::entitlement::resolve_transcribe() {
         Some(t) => t,
         None => {
             tracing::warn!("Whisper Turbo STT skipped: no OpenRouter key and no active o8 plan");
-            return None;
-        }
-    };
-
-    let audio = match std::fs::read(path) {
-        Ok(audio) => audio,
-        Err(e) => {
-            tracing::warn!("Whisper Turbo STT skipped: failed to read audio file {path}: {e}");
             return None;
         }
     };
