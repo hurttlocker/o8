@@ -183,5 +183,10 @@ export function missionAgentKeys(packetIds: Set<string>) {
   return listLanes()
     .filter((lane) => lane.packetId && packetIds.has(lane.packetId))
     .filter((lane) => lane.status !== 'completed' && lane.status !== 'archived')
-    .map((lane) => lane.sessionKey || lane.id);
+    .map((lane) => ({
+      label: lane.label || lane.branch,
+      status: lane.status,
+      laneId: lane.id,
+      packetId: lane.packetId,
+    }));
 }

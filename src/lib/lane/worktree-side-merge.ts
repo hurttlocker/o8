@@ -106,13 +106,13 @@ async function currentBranch(cwd: string): Promise<string> {
   const { stdout } = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 });
   return stdout.trim();
 }
-
-async function amendViaO8Suffix(worktreePath: string): Promise<void> {
+async function amendViaO8Suffix(worktreePath: string, fallbackSubject?: string): Promise<void> {
   try {
     const { stdout: tipSubject } = await git(worktreePath, ['log', '-1', '--pretty=%s'], { timeout: 5000 });
     const subject = tipSubject.trim();
     if (subject && !subject.includes('[via-o8]')) {
-      await git(worktreePath, ['commit', '--amend', '-m', `${subject} [via-o8]`, '--allow-empty']);
+      const nextSubject = subject === 'auto-commit: agent work before review' && fallbackSubject?.trim() ? fallbackSubject.trim() : subject;
+      await git(worktreePath, ['commit', '--amend', '-m', `${nextSubject} [via-o8]`, '--allow-empty']);
     }
   } catch {
     // Best-effort tag for changelog rendering. Never block a valid merge.
@@ -719,7 +719,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return handlePostRebaseTypecheckFailure(input, typecheck.output);
     }
 
-    if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(worktreePath);
+    if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(worktreePath, lane.label);
     await pushWorkerBranchBestEffort(worktreePath, actualBranch);
 
     const integrationRef = mergeRefForLane(command.laneId);

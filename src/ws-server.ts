@@ -653,7 +653,7 @@ async function forceCodexSelfReviewToReview(
 
   let committed = false;
   try {
-    committed = await autoCommitCompletionWorktree(cwd);
+    committed = await autoCommitCompletionWorktree(cwd, lane.label);
   } catch (error) {
     console.warn(`[supervisor] Self-review stall auto-commit failed for ${cwd}:`, error);
     broadcast({
@@ -5644,11 +5644,11 @@ async function bootstrapWsServer() {
               // the exec/poll window. (Any commit later than this is recovered
               // by the silent-exit detector, not lost.)
               const { autoCommitCompletionWorktree } = await import('@/lib/supervisor/completion-verification');
-              try { await autoCommitCompletionWorktree(completionCwd); } catch { /* non-fatal — fall through to probe */ }
+              try { await autoCommitCompletionWorktree(completionCwd, lane.label); } catch { /* non-fatal — fall through to probe */ }
               let probe = await probeNoChangesProduced(completionCwd, lane.baseBranch);
               if (probe.noChangesProduced) {
                 await new Promise((resolve) => setTimeout(resolve, 2000));
-                try { await autoCommitCompletionWorktree(completionCwd); } catch { /* non-fatal */ }
+                try { await autoCommitCompletionWorktree(completionCwd, lane.label); } catch { /* non-fatal */ }
                 probe = await probeNoChangesProduced(completionCwd, lane.baseBranch);
               }
               if (probe.noChangesProduced) {
@@ -5789,7 +5789,7 @@ async function bootstrapWsServer() {
                     attemptNumber,
                     buildAttemptLearningFromFailure(verification.output, completionContext.selfReview),
                   );
-                  await autoCommitCompletionWorktree(completionCwd);
+                  await autoCommitCompletionWorktree(completionCwd, lane.label);
                   updateLane(
                     lane.id,
                     {
@@ -5875,7 +5875,7 @@ async function bootstrapWsServer() {
             }
 
             try {
-              const committed = await autoCommitCompletionWorktree(completionCwd);
+              const committed = await autoCommitCompletionWorktree(completionCwd, lane.label);
               if (committed) {
                 console.log(`[supervisor] Agent ${surfaceId} left dirty worktree, auto-committing in ${completionCwd}`);
               }

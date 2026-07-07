@@ -113,7 +113,13 @@ export function buildVerificationFailureSteerMessage(result: CompletionVerificat
   return buildTypecheckFailureSteerMessage(result.output);
 }
 
-export async function autoCommitCompletionWorktree(cwd: string): Promise<boolean> {
+function normalizeAutoCommitMessage(message?: string | null): string {
+  const subject = message?.trim().replace(/\s+/g, ' ');
+  if (!subject) return 'auto-commit: agent work before review';
+  return subject.includes('[via-o8]') ? subject : `${subject} [via-o8]`;
+}
+
+export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: string | null): Promise<boolean> {
   const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
@@ -146,7 +152,7 @@ export async function autoCommitCompletionWorktree(cwd: string): Promise<boolean
   } catch {
     // non-zero exit => staged changes exist, proceed to commit
   }
-  await execFileAsync('git', ['commit', '--no-verify', '-m', 'auto-commit: agent work before review'], {
+  await execFileAsync('git', ['commit', '--no-verify', '-m', normalizeAutoCommitMessage(commitMessage)], {
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });

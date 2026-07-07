@@ -23,6 +23,7 @@ interface ManagedRun {
   session: string;
   command: string;
   title?: string | null;
+  startedAt?: string | null;
   status: 'running' | 'finished' | 'gone' | 'killed';
 }
 

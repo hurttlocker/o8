@@ -23,6 +23,14 @@ describe('deriveManagedRunLabel', () => {
     expect(deriveManagedRunLabel({ command: 'npx tsc --noEmit' })).toBe('typecheck');
   });
 
+  it('adds a time suffix for timestamped known checks', () => {
+    const label = deriveManagedRunLabel({
+      command: 'npx tsc --noEmit',
+      startedAt: '2026-07-06T18:04:00.000Z',
+    });
+    expect(label).toMatch(/^typecheck \d{2}:\d{2}$/);
+  });
+
   it('falls back to a compact raw command for unknown commands', () => {
     expect(deriveManagedRunLabel({
       command: 'node scripts/really-long-command-name-with-many-flags --alpha --beta --gamma',
