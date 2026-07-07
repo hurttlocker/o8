@@ -5411,6 +5411,18 @@ async function bootstrapWsServer() {
   }
 
   try {
+    const { sweepMergedPacketVerificationIncidents } = await import('@/lib/supervisor/merged-incident-resolution');
+    const resolved = sweepMergedPacketVerificationIncidents({ event: 'startup_sweep' });
+    if (resolved > 0) {
+      console.log(`[supervisor-inbox] Startup sweep auto-resolved ${resolved} stale verification incident(s) for merged/archived packet(s)`);
+    }
+  } catch (error) {
+    console.warn(
+      `[supervisor-inbox] Startup merged/archived incident sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
     await rehydrateOrchestratorSessions({ onReboundEvent: handleReboundOrchestratorEvent });
     const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });
     if (codexRebound > 0) {

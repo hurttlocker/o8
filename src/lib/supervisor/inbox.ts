@@ -87,6 +87,15 @@ export interface SupervisorInboxItem {
   errorExcerpt: string;
 }
 
+export interface SupervisorInboxResolutionNote {
+  note: string;
+  packetId: string | null;
+  laneId: string | null;
+  event: string;
+  terminalState: 'released' | 'archived';
+  resolvedAt: string;
+}
+
 let supervisorInboxReady = false;
 
 const HOUR_MS = 60 * 60_000;
@@ -464,14 +473,39 @@ export function escalateInboxItem(id: string) {
  * Auto-close: the fault's packet finally merged. Stamps the resolving lane id
  * for the audit trail. Called by heal-bot's escalated-resolve sweep.
  */
-export function resolveInboxItem(id: string, resolutionLaneId: string | null) {
+export function resolveInboxItem(
+  id: string,
+  resolutionLaneId: string | null,
+  resolution?: SupervisorInboxResolutionNote,
+) {
   ensureSupervisorInboxTable();
+  const resolvedAt = resolution?.resolvedAt ?? new Date().toISOString();
+  const row = resolution
+    ? getSqlite().prepare('SELECT payload FROM supervisor_inbox WHERE id = ?').get(id) as { payload?: string } | undefined
+    : undefined;
+  const payload = row?.payload ? parsePayload(row.payload) : null;
+  const nextPayload = payload && resolution
+    ? {
+      ...payload,
+      autoResolution: resolution,
+      autoResolutionNote: resolution.note,
+    }
+    : null;
+
+  if (nextPayload) {
+    getSqlite().prepare(`
+      UPDATE supervisor_inbox
+      SET status = 'resolved', resolved_at = ?, resolution_lane_id = ?, payload = ?
+      WHERE id = ?
+    `).run(resolvedAt, resolutionLaneId, JSON.stringify(nextPayload), id);
+    return;
+  }
 
   getSqlite().prepare(`
     UPDATE supervisor_inbox
     SET status = 'resolved', resolved_at = ?, resolution_lane_id = ?
     WHERE id = ?
-  `).run(new Date().toISOString(), resolutionLaneId, id);
+  `).run(resolvedAt, resolutionLaneId, id);
 }
 
 export function bulkDismissInboxItems(): number {
