@@ -42,6 +42,7 @@ import {
   type LaneStatus,
   type VisualStatus,
 } from './AgentPanelExtraAgentRow';
+import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 
 // ── Types ──
@@ -384,12 +385,33 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const [actionMenu, setActionMenu] = useState<ExtraAgentActionMenuState | null>(null);
   const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set());
+  const [hoverCard, setHoverCard] = useState<{ row: ExtraAgentRow; rect: DOMRect } | null>(null);
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(COLLAPSED_KEY) === '1';
   });
   const abortRef = useRef<AbortController | null>(null);
+  const hoverCloseTimerRef = useRef<number | null>(null);
+
+  const cancelHoverClose = useCallback(() => {
+    if (hoverCloseTimerRef.current == null) return;
+    window.clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = null;
+  }, []);
+
+  const scheduleHoverClose = useCallback(() => {
+    cancelHoverClose();
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      setHoverCard(null);
+      hoverCloseTimerRef.current = null;
+    }, 120);
+  }, [cancelHoverClose]);
+
+  const openHoverCard = useCallback((row: ExtraAgentRow, rect: DOMRect) => {
+    cancelHoverClose();
+    setHoverCard({ row, rect });
+  }, [cancelHoverClose]);
 
   const handleArchive = useCallback(async (row: ExtraAgentRow) => {
     if (!row.sessionKey) return;
@@ -505,8 +527,9 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
       window.removeEventListener('o8:agent-lifecycle', onLifecycle);
       window.clearInterval(fallbackId);
       abortRef.current?.abort();
+      cancelHoverClose();
     };
-  }, [fetchData]);
+  }, [cancelHoverClose, fetchData]);
 
   const rows = useMemo(() => buildRows(lanes, agents), [lanes, agents]);
   const visibleRows = useMemo(
@@ -547,6 +570,8 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
               onSelectSession={onSelectSession}
               onFocusRow={handleFocusRow}
               onRetryPacket={handleRetry}
+              onOpenHoverCard={openHoverCard}
+              onCloseHoverCard={scheduleHoverClose}
               onOpenMenu={(event, targetRow) => {
                 setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
               }}
@@ -568,6 +593,14 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
             void handleArchive(actionMenu.row);
             setActionMenu(null);
           }}
+        />
+      ) : null}
+      {hoverCard ? (
+        <SpawnedAgentHoverCard
+          row={hoverCard.row}
+          anchorRect={hoverCard.rect}
+          onMouseEnter={cancelHoverClose}
+          onMouseLeave={scheduleHoverClose}
         />
       ) : null}
     </section>
