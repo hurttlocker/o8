@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
+    "dotenv": "^16.4.7",
     "hono": "^4.6.14",
     "jose": "^6.2.2",
     "ws": "^8.19.0"
