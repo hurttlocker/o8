@@ -14,6 +14,7 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
 // ── Lane Status ──
 
@@ -52,15 +53,15 @@ const LANE_STATUS_RECORD = {
 
 export const LANE_STATUSES = Object.keys(LANE_STATUS_RECORD) as LaneStatus[];
 
-const TERMINAL_LANE_STATUS_VALUES = new Set<LaneStatus>([
-  'reviewing',
-  'failed',
-  'completed',
-  'archived',
-]);
-
+/**
+ * @deprecated Thin delegate kept for back-compat. The unified terminal-state
+ * truth now lives in `lane/terminal-states.ts`. This predicate is the
+ * WORKER-terminal notion (includes `reviewing`); call `isWorkerTerminal`
+ * directly at new call sites, or `isLaneTerminal` when you mean the
+ * lifecycle-over set.
+ */
 export function isTerminalLaneStatus(status: LaneStatus | null | undefined): boolean {
-  return Boolean(status && TERMINAL_LANE_STATUS_VALUES.has(status));
+  return isWorkerTerminal(status);
 }
 
 /**
