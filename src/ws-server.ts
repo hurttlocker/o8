@@ -56,7 +56,7 @@ migrateDataDirOnce();
 
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
-import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import {
   startAgentSession,
   updateAgentStatus,
@@ -170,6 +170,26 @@ import {
   recordRealtimeBridgeSuccess,
 } from './lib/realtime/bridge-backoff';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
+import {
+  sanitizePtyEnv,
+  resolvePreferredShell,
+  resolveTmuxBinary,
+  tmuxSessionExists,
+  isDashTerminalSession,
+} from './lib/ws-server/pty-support';
+import { parseGitWorktreeList, shortHome } from './lib/ws-server/git-worktrees';
+import {
+  BACKPRESSURE_LIMIT,
+  BACKPRESSURE_QUEUE_LIMIT,
+  BACKPRESSURE_FLUSH_MS,
+  isLossyMessage,
+} from './lib/ws-server/channels';
+import {
+  FETCH_TIMEOUT_MS,
+  buildNextUrl,
+  fetchWithRetry,
+  fetchNextJson,
+} from './lib/ws-server/next-fetch';
 
 const execFileAsync = promisify(execFile);
 
@@ -212,26 +232,11 @@ void import('node-pty')
 
 const { wsPort: WS_PORT } = resolvePortInfo();
 const PING_INTERVAL_MS = 25_000;
-const FETCH_TIMEOUT_MS = 8_000;
-const NEXT_FETCH_MAX_ATTEMPTS = 5;
-const NEXT_FETCH_INITIAL_BACKOFF_MS = 100;
-const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if client buffer exceeds this
-const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
-const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
-
 // Event-loop lag watchdog (#1498 structural follow-up). ws-server pumps every
 // mobile client, PTY, and orchestrator stream on this one loop; a sync wedge
 // freezes them all. Sample loop lag; log + count sustained wedges. Cheap when
 // healthy, queryable via /health.
 const wsWatchdog = new WsWatchdog();
-
-const RETRYABLE_NEXT_FETCH_CODES = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'EHOSTUNREACH',
-  'ENOTFOUND',
-  'UND_ERR_SOCKET',
-]);
 
 interface RuntimeTranscriptApiEntry {
   id: string;
@@ -242,88 +247,6 @@ interface RuntimeTranscriptApiEntry {
   timestampLabel: string;
   toolName?: string;
   filePath?: string;
-}
-
-function getNextOrigin() {
-  return process.env.NEXT_ORIGIN ?? getApiBase();
-}
-
-function buildNextUrl(pathname: string, searchParams?: URLSearchParams) {
-  const query = searchParams && searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-  return `${getNextOrigin()}${pathname}${query}`;
-}
-
-function getNextFetchErrorCode(error: Error): string | null {
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (!cause || typeof cause !== 'object') return null;
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' ? code : null;
-}
-
-function isRetryableNextFetchError(error: unknown) {
-  if (!(error instanceof Error)) return false;
-  if (error.name === 'AbortError' || error.name === 'TimeoutError') return false;
-  const code = getNextFetchErrorCode(error);
-  return error.message === 'fetch failed' || (code !== null && RETRYABLE_NEXT_FETCH_CODES.has(code));
-}
-
-function delayNextFetchRetry(delayMs: number) {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-}
-
-async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {
-  let backoffMs = NEXT_FETCH_INITIAL_BACKOFF_MS;
-
-  for (let attempt = 1; attempt <= NEXT_FETCH_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return await fetch(input, init);
-    } catch (error) {
-      if (attempt === NEXT_FETCH_MAX_ATTEMPTS || !isRetryableNextFetchError(error)) {
-        throw error;
-      }
-
-      await delayNextFetchRetry(backoffMs);
-      backoffMs *= 2;
-    }
-  }
-
-  throw new Error('[ws-server] internal fetch retry loop exited unexpectedly');
-}
-
-async function fetchNextJson<T>(
-  pathname: string,
-  options: {
-    method?: 'GET' | 'POST';
-    searchParams?: URLSearchParams;
-    body?: unknown;
-    timeoutMs?: number;
-  } = {},
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${WS_TOKEN}`,
-  };
-  if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams), {
-    method: options.method ?? 'GET',
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS),
-  });
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = payload && typeof payload === 'object' && 'error' in payload
-      ? String((payload as { error?: string }).error ?? '')
-      : '';
-    throw new Error(error || `${pathname} failed (${response.status})`);
-  }
-
-  return payload as T;
 }
 
 // ── Boot readiness probe ──
@@ -1255,79 +1178,6 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
 // handleTerminalImage, getReviewWatchTargets/listRepoPaths — ARE async now.
 // Remaining sync FS is startup/module-init only (git-watcher setup, port
 // reclaim, bootstrap worktree prune) or the deferred terminal chain above.
-function sanitizePtyEnv() {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') {
-      env[key] = value;
-    }
-  }
-  env.TERM = 'xterm-256color';
-  env.LANG = env.LANG || 'en_US.UTF-8';
-  env.LC_ALL = env.LC_ALL || 'en_US.UTF-8';
-  env.PATH = env.PATH || '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-  return env;
-}
-
-function resolvePreferredShell() {
-  const candidates = [
-    process.env.SHELL,
-    '/bin/zsh',
-    '/bin/bash',
-    '/bin/sh',
-  ].filter((value): value is string => Boolean(value));
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-
-  return '/bin/sh';
-}
-
-function resolveTmuxBinary() {
-  const candidates = [
-    process.env.TMUX_BIN,
-    '/opt/homebrew/bin/tmux',
-    '/usr/local/bin/tmux',
-    '/usr/bin/tmux',
-    '/bin/tmux',
-  ].filter((value): value is string => Boolean(value));
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-
-  try {
-    return execSync('command -v tmux', {
-      encoding: 'utf-8',
-      timeout: 3000,
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    }).trim() || 'tmux';
-  } catch {
-    return 'tmux';
-  }
-}
-
-function tmuxSessionExists(sessionName: string) {
-  const target = sessionName.trim();
-  if (!target) return false;
-
-  try {
-    execFileSync(resolveTmuxBinary(), ['has-session', '-t', target], {
-      timeout: 2000,
-      stdio: 'ignore',
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isDashTerminalSession(sessionName: string) {
-  return sessionName.startsWith('cortex-dash-');
-}
-
 function spawnDashShellPty(
   sessionName: string,
   cols: number,
@@ -1724,38 +1574,6 @@ function extractText(delta: ChatDelta): string {
     .join('');
 }
 
-/**
- * Determine whether a message is "lossy" (safe to drop under backpressure)
- * or "durable" (must be queued and flushed later).
- *
- * Lossy channels: chat deltas, terminal data, pong — all are either
- * inherently lossy or recovered by higher-level mechanisms.
- */
-function isLossyMessage(json: string): boolean {
-  // Fast path: avoid parsing — check for known lossy patterns
-  const maybeLossy =
-    json.includes('"channel":"pong"') ||
-    // Chat deltas (not done/error) are lossy
-    (json.includes('"channel":"chat"') && json.includes('"event":"delta"')) ||
-    // Terminal data frames are lossy (PTY output is best-effort)
-    (json.includes('"channel":"terminal"') && json.includes('"event":"data"')) ||
-    // Orchestrator output chunks are lossy (intermediate deltas can be dropped)
-    (json.includes('"channel":"orchestrator"') && json.includes('"event":"output"'));
-  if (!maybeLossy) return false;
-  // Confirm with a real parse: payload text that merely *contains* one of the
-  // marker substrings (e.g. an agent quoting protocol frames) must not cause
-  // a durable message to be silently dropped. Only runs under backpressure.
-  try {
-    const msg = JSON.parse(json) as { channel?: unknown; event?: unknown };
-    if (msg.channel === 'pong') return true;
-    if (msg.channel === 'chat' && msg.event === 'delta') return true;
-    if (msg.channel === 'terminal' && msg.event === 'data') return true;
-    if (msg.channel === 'orchestrator' && msg.event === 'output') return true;
-    return false;
-  } catch {
-    return false; // unparseable → treat as durable (safer)
-  }
-}
 
 /** Flush any queued durable messages once backpressure clears. */
 function flushBackpressureQueue(client: ClientState) {
@@ -5539,35 +5357,6 @@ const REVIEW_POLL_INTERVAL_MS = 10_000;
 const REVIEW_SCAN_CONCURRENCY = 3;
 let reviewRefreshInFlight = false;
 let reviewRefreshRerequest = false;
-
-type GitWorktreeRecord = {
-  path: string;
-  branch: string | null;
-};
-
-function shortHome(filePath: string) {
-  const home = process.env.HOME ?? homedir();
-  return filePath.startsWith(`${home}/`) ? filePath.replace(`${home}/`, '~/') : filePath;
-}
-
-function parseGitWorktreeList(raw: string): GitWorktreeRecord[] {
-  const worktrees: GitWorktreeRecord[] = [];
-  let current: GitWorktreeRecord | null = null;
-
-  for (const line of raw.split('\n')) {
-    if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), branch: null };
-      worktrees.push(current);
-      continue;
-    }
-    if (!current) continue;
-    if (line.startsWith('branch refs/heads/')) {
-      current.branch = line.slice('branch refs/heads/'.length);
-    }
-  }
-
-  return worktrees;
-}
 
 async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<number> {
   // `git worktree prune` only removes admin entries for deleted git-worktree
