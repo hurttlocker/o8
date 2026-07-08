@@ -58,8 +58,8 @@ async function probeDispatch(client: O8WebviewClient, verb: string, args: Record
     return JSON.parse(result.result) as DispatchProbe;
   } catch {
     // evalJs can throw transiently while the webview is mid-navigation (the
-    // full reload below tears down the JS context for a beat) — treat that as
-    // "not ready yet" so the poll loop keeps waiting instead of aborting.
+    // full reload below tears down the JS context for a beat) or busy. Unknown
+    // route is deliberately "retry probe", never evidence to navigate.
     return { ready: false };
   }
 }
