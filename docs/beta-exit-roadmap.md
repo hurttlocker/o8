@@ -33,14 +33,17 @@ real use. Beta exit = five rocks (four engineering, one proof) + three explicit 
   24h), #1510→#1485 (flaky steering test).
 
 ### Rock 2 — Telemetry + updater safety, one program (M-L) — THIS PR
-- [ ] Process-level crash capture (uncaughtException/unhandledRejection) in Next server + ws-server,
+- [x] Process-level crash capture (uncaughtException/unhandledRejection) in Next server + ws-server,
       persisted locally under `~/.o8/telemetry/` (ring-buffered)
-- [ ] Renderer error capture routed to the same store
-- [ ] Opt-in (default OFF) batched upload, ingest URL env-configured (`O8_TELEMETRY_INGEST_URL`);
+- [x] Renderer error capture routed to the same store
+- [x] Opt-in (default OFF) batched upload, ingest URL env-configured (`O8_TELEMETRY_INGEST_URL`);
       Settings toggle with plain-language "what's collected"
-- [ ] Updater kill-switch: release-health manifest checked before applying an update; a pulled
+- [x] Updater kill-switch: release-health manifest checked before applying an update; a pulled
       version is skipped (fail-open on network errors)
-- [ ] Rollback path: operator can reinstall the previous signed release
+- [x] Rollback path: operator can reinstall the previous signed release (`scripts/rollback-release.mjs`,
+      minisign-verified; dry-run proven against v0.1.565)
+- Follow-ups: in-app text field for the ingest URL; an ingest endpoint (license-server) before
+  public launch; telemetry console UI (#1454).
 - Evidence: zero crash reporting in the codebase; local `npm run ship` bypasses CI; no rollback,
   no staged rollout. A bad release currently hits the whole fleet invisibly and irrecoverably.
 - Related: #1454 (opt-in fleet telemetry console — the console UI is follow-up, not this PR).
@@ -51,11 +54,15 @@ Desktop half (phone-hosted realtime voice, Mac-executed tools) landed on main 20
 phone-initiated tool-call approval path.
 
 ### Rock 4 — ws-server decomposition (L) — THIS PR
-- [ ] Event-loop lag watchdog with `[ws-health]` logging + health surface
-- [ ] Eliminate the 41 sync FS calls from the WS event loop's hot paths
-- [ ] PTY/terminal handling isolated off the main WS event loop (child-process terminal host)
-- [ ] Decompose the 6,307-line `ws-server.ts` into modules without changing channel semantics
-      (LOSSY vs DURABLE preserved)
+- [x] Event-loop lag watchdog with `[ws-health]` logging + counters on `/health` (caught real
+      2.8s/6s boot spikes during verification)
+- [x] Hot-path sync FS calls converted to async (startup-only sync probes documented inline)
+- [x] PTY/terminal-host seam built + real-fork tested; ships OPT-IN (`O8_TERMINAL_HOST=child`,
+      default `inline`) — flip the default only after a packaged-build dogfood
+- [x] Helper clusters decomposed into `src/lib/ws-server/` (channels/backpressure moved
+      byte-for-byte; LOSSY vs DURABLE semantics unchanged); entry stays the waived multiplexer
+- Follow-ups: packaged dogfood of child mode, then default flip; deeper split of the singleton
+  core if wedges recur despite the watchdog data.
 - Evidence: #1498 (event loop wedged minutes on a sync FS walk; every mobile client shares that
   one thread). The specific walk was fixed; the structural exposure was not.
 
