@@ -2809,6 +2809,10 @@ mod stt_engine {
         // Warm the Gemini TLS handshake in the background so the first polish
         // call doesn't pay the cold-start cost.
         std::thread::spawn(crate::stt::polish::warmup);
+        // Apple Silicon: pre-download/load the on-device transcription models
+        // (speech-local sidecar) so the first dictation never pays the fetch.
+        // No-op on Intel and once the readiness marker exists.
+        std::thread::spawn(crate::stt::whisper::warmup_local);
     }
 
     /// Origin discriminator for the active dictation (system-wide Symon fold

@@ -97,6 +97,153 @@ fn language_hint() -> Option<String> {
         .map(|locale| locale[..2].to_ascii_lowercase())
 }
 
+// ── On-device transcription (Apple Silicon / ANE) ──────────────────────────
+//
+// The `speech-local` sidecar (FluidAudio/Parakeet, Apache-2.0) transcribes
+// fully on-device. Gated three ways: aarch64 only (benchmarked unusable on
+// Intel), config `local_stt_enabled` (default ON), and a readiness marker the
+// startup warmup writes AFTER the ~600MB model download completes — a
+// dictation must never block on a model download.
+
+const LOCAL_READY_MARKER: &str = "local-stt-ready";
+const LOCAL_TRANSCRIBE_TIMEOUT_MS: u64 = 15_000;
+
+fn local_marker_path() -> std::path::PathBuf {
+    crate::agent::agent_data_dir().join(LOCAL_READY_MARKER)
+}
+
+pub fn local_stt_supported() -> bool {
+    std::env::consts::ARCH == "aarch64"
+}
+
+fn local_enabled() -> bool {
+    local_stt_supported()
+        && !matches!(
+            crate::stt::keys::config_string("local_stt_enabled").as_deref(),
+            Some("false" | "0")
+        )
+}
+
+/// Resolve the bundled `speech-local` sidecar (same lookup shape as
+/// LiveRecognizer::helper_path — triple-suffixed next to the app binary in a
+/// bundle, `src-tauri/helpers/` in dev).
+fn local_sidecar_path() -> Option<std::path::PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let target = if cfg!(target_arch = "x86_64") {
+                "x86_64-apple-darwin"
+            } else {
+                "aarch64-apple-darwin"
+            };
+            let suffixed = dir.join(format!("speech-local-{target}"));
+            if suffixed.exists() {
+                return Some(suffixed);
+            }
+            let plain = dir.join("speech-local");
+            if plain.exists() {
+                return Some(plain);
+            }
+        }
+    }
+    let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("helpers")
+        .join("speech-local");
+    dev.exists().then_some(dev)
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalTranscriptionOut {
+    ok: bool,
+    text: Option<String>,
+    latency_ms: Option<u64>,
+    model: Option<String>,
+    error: Option<String>,
+}
+
+/// Run the sidecar with a hard timeout (std Command has none; poll try_wait).
+fn run_sidecar(path: &std::path::Path, args: &[&str], timeout_ms: u64) -> Option<String> {
+    let mut child = std::process::Command::new(path)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    tracing::warn!("[stt] speech-local timed out after {timeout_ms}ms");
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(_) => return None,
+        }
+    }
+    let mut stdout = String::new();
+    use std::io::Read;
+    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
+    Some(stdout)
+}
+
+fn transcribe_via_local(path: &str) -> Option<WhisperTranscription> {
+    if !local_enabled() || !local_marker_path().exists() {
+        return None;
+    }
+    let sidecar = local_sidecar_path()?;
+    let stdout = run_sidecar(&sidecar, &["transcribe", path], LOCAL_TRANSCRIBE_TIMEOUT_MS)?;
+    let parsed: LocalTranscriptionOut = serde_json::from_str(stdout.trim()).ok()?;
+    if !parsed.ok {
+        tracing::warn!(
+            "[stt] speech-local failed: {}",
+            parsed.error.unwrap_or_else(|| "unknown".to_string())
+        );
+        return None;
+    }
+    let text = parsed.text.unwrap_or_default().trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    let latency_ms = parsed.latency_ms.unwrap_or(0);
+    tracing::info!("[stt] local (ANE) transcription ok: {} chars in {latency_ms}ms", text.len());
+    Some(WhisperTranscription {
+        text,
+        model: parsed.model.unwrap_or_else(|| "parakeet-local".to_string()),
+        latency_ms,
+        seconds: None,
+        estimated_cost_usd: Some(0.0),
+    })
+}
+
+/// Background model warmup: download/load the local models once, then write
+/// the readiness marker. Call from app startup on a worker thread (arm64
+/// only). Idempotent and cheap when the marker already exists.
+pub fn warmup_local() {
+    if !local_enabled() || local_marker_path().exists() {
+        return;
+    }
+    let Some(sidecar) = local_sidecar_path() else {
+        return;
+    };
+    tracing::info!("[stt] speech-local warmup starting (first-run model download)");
+    // Generous timeout — this is a one-time ~600MB fetch on a background thread.
+    match run_sidecar(&sidecar, &["warmup"], 30 * 60_000) {
+        Some(out) if out.contains("\"ok\":true") => {
+            let _ = std::fs::write(local_marker_path(), b"ok");
+            tracing::info!("[stt] speech-local warmup complete — local transcription enabled");
+        }
+        other => {
+            tracing::warn!(
+                "[stt] speech-local warmup failed: {}",
+                other.unwrap_or_else(|| "no output".to_string()).trim()
+            );
+        }
+    }
+}
+
 /// Groq-hosted Whisper — same model family, served far faster than the
 /// OpenRouter route (the transcription leg was the bulk of the operator's
 /// 4–6s release-to-paste lag). Tried FIRST when a Groq key is configured;
@@ -184,6 +331,13 @@ fn audio_format(path: &str) -> String {
 }
 
 pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
+    // Local first — on-device (ANE) beats any network call, costs nothing,
+    // and never leaves the machine. Only fires post-warmup on Apple Silicon;
+    // any failure falls straight through to the cloud ladder.
+    if let Some(result) = transcribe_via_local(path) {
+        return Some(result);
+    }
+
     let audio = match std::fs::read(path) {
         Ok(audio) => audio,
         Err(e) => {
@@ -192,7 +346,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
         }
     };
 
-    // Groq first — fastest whisper serving available; falls through on any
+    // Groq next — fastest whisper serving available; falls through on any
     // failure so a bad Groq key never breaks the pass.
     if let Some(groq_key) = crate::stt::keys::get_groq_key() {
         if !audio.is_empty() {
