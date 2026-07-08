@@ -84,6 +84,41 @@ export async function handleTelemetry(c: Context): Promise<Response> {
   return c.json({ ok: true, recorded: rows.length });
 }
 
+// ── Site-event ingest ─────────────────────────────────────────────────────────
+
+/** Coarse events from o8.run itself (server-to-server, analytics-token guard in
+ *  index.ts). Strictly whitelisted: this path can only append the counters
+ *  below under the synthetic sub `site:web` — it can never touch licenses or
+ *  write arbitrary event names, which keeps the analytics token effectively
+ *  read-only. `site:%` subs are excluded from every identity/account metric. */
+const SITE_EVENTS = new Set(['site.download_click']);
+
+export async function handleSiteEvent(c: Context): Promise<Response> {
+  let body: { event?: unknown; props?: unknown };
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+  const event = typeof body.event === 'string' ? body.event.trim() : '';
+  if (!SITE_EVENTS.has(event)) {
+    return c.json({ error: 'event not allowed' }, 400);
+  }
+  try {
+    await db.insert(productEvents).values({
+      id: randomUUID(),
+      sub: 'site:web',
+      plan: 'site',
+      event,
+      props: sanitizeProps(body.props),
+    });
+  } catch (err) {
+    console.error('[analytics] failed to record site event:', err);
+    return c.json({ ok: false, error: 'record failed' });
+  }
+  return c.json({ ok: true });
+}
+
 // ── Aggregate read ────────────────────────────────────────────────────────────
 
 /** drizzle/postgres-js returns a RowList (array); node-postgres returns {rows}.
@@ -144,6 +179,9 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       from resolved group by ident
     )
     select
+      -- people = everyone who actually used o8: signed-in accounts + anonymous
+      -- (unlinked) installs. The headline the dashboard leads with.
+      count(*) filter (where ident like 'user_%' or ident like 'install:%')                      as people,
       count(*) filter (where ident like 'user_%')                                                as total,
       count(*) filter (where ident like 'user_%' and last_seen  >= now() - interval '1 day')     as active_1d,
       count(*) filter (where ident like 'user_%' and last_seen  >= now() - interval '7 days')    as active_7d,
@@ -215,15 +253,21 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       group by 1
     ),
     e as (
-      select date_trunc('day', created_at)::date as day, count(*) as events
+      select date_trunc('day', created_at)::date as day,
+             count(*) as events,
+             count(*) filter (where event = 'site.download_click') as downloads
       from product_events
       where ${notDev} and created_at >= date_trunc('day', now()) - interval '29 days'
       group by 1
     ),
     a as (
+      -- actives = PEOPLE who used o8 that day: signed-in accounts plus
+      -- anonymous (unlinked) installs; linked installs collapse onto their
+      -- owner, and synthetic site:% subs never count as people.
       select date_trunc('day', s.created_at)::date as day,
              count(distinct coalesce(l.clerk_user_id, s.sub))
-               filter (where coalesce(l.clerk_user_id, s.sub) like 'user_%') as actives
+               filter (where coalesce(l.clerk_user_id, s.sub) like 'user_%'
+                    or coalesce(l.clerk_user_id, s.sub) like 'install:%') as actives
       from (
         select sub, created_at from proxy_usage
         union all
@@ -234,10 +278,11 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       group by 1
     )
     select to_char(d.day, 'YYYY-MM-DD') as day,
-           coalesce(p.calls, 0)   as calls,
-           coalesce(p.micro, 0)   as micro,
-           coalesce(e.events, 0)  as events,
-           coalesce(a.actives, 0) as actives
+           coalesce(p.calls, 0)     as calls,
+           coalesce(p.micro, 0)     as micro,
+           coalesce(e.events, 0)    as events,
+           coalesce(e.downloads, 0) as downloads,
+           coalesce(a.actives, 0)   as actives
     from days d
     left join p on p.day = d.day
     left join e on e.day = d.day
@@ -248,6 +293,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
     calls: num(r.calls),
     spendMicroUsd: num(r.micro),
     events: num(r.events),
+    downloads: num(r.downloads),
     activeUsers: num(r.actives),
   }));
 
@@ -258,7 +304,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
     with raw as (
       select sub, created_at, 'p' as src, cost_micro_usd as cost from proxy_usage where ${notDev}
       union all
-      select sub, created_at, 'e' as src, 0 as cost from product_events where ${notDev}
+      select sub, created_at, 'e' as src, 0 as cost from product_events where ${notDev} and sub not like 'site:%'
     ),
     res as (
       select coalesce(l.clerk_user_id, r.sub) as ident, r.sub as raw_sub, r.created_at, r.src, r.cost
@@ -297,6 +343,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
   return c.json({
     generatedAt: new Date().toISOString(),
     users: {
+      people: num(userRow?.people),
       total: num(userRow?.total),
       activeToday: num(userRow?.active_1d),
       active7d: num(userRow?.active_7d),

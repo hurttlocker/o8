@@ -12,7 +12,7 @@ import { constructEvent, handleStripeEvent } from './stripe-webhook.js';
 import { validateEntitlement } from './validate.js';
 import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
 import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
-import { handleAnalytics, handleTelemetry } from './analytics.js';
+import { handleAnalytics, handleSiteEvent, handleTelemetry } from './analytics.js';
 import { handleIssueFree } from './free-issue.js';
 import { handleAccountLicense } from './account-license.js';
 import { handleLinkInstall } from './account-link.js';
@@ -229,6 +229,16 @@ app.get('/admin/analytics', async (c) => {
     return c.json({ error: 'unauthorized' }, 401);
   }
   return handleAnalytics(c);
+});
+
+// Site-event ingest (o8.run server-to-server, e.g. download clicks). Same
+// analytics-token guard: the handler whitelists event names, so this token
+// still can't write anything beyond coarse site counters.
+app.post('/admin/site-event', async (c) => {
+  if (!isAnalyticsReader(c.req.header('authorization'))) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  return handleSiteEvent(c);
 });
 
 // ── Beta invites (#beta-referral) ─────────────────────────────────────────────
