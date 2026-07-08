@@ -92,85 +92,87 @@ export const KIND_ASPECT: Record<string, number> = {
 };
 export const DEFAULT_ASPECT = 1.4;
 
-/** Row-height band (canvas px). The packer aims for a card-shaped row height
- *  given the count + area, then clamps here so a couple of cards don't balloon
- *  and a wall of them doesn't sliver. */
+/** Row-height floor (canvas px). The packer fills the area's HEIGHT (rows split
+ *  it evenly), so there is no fixed max — a light load in a big area gets tall
+ *  rows on purpose ("see the most stuff"). The floor keeps a dense wall of cards
+ *  from slivering below a readable height; if honoring it would overflow, the
+ *  block scales back down to fit (see computeGrid). The old fixed GRID_MAX_ROW_H
+ *  (300) was the bug: it capped row height so a light load never closed a row →
+ *  one short band centered in a huge area, dead space above and below. */
 export const GRID_MIN_ROW_H = 160;
-export const GRID_MAX_ROW_H = 300;
 
 const aspectOf = (kind: string): number => KIND_ASPECT[kind] ?? DEFAULT_ASPECT;
 
-/** Grid slots (TOTAL rects) for items in their given order, packed as JUSTIFIED
- *  ROWS that fill `area` width and CENTER in `area` height. Each tile takes its
- *  kind's aspect, so a row mixes widths (wide terminal, narrow agent) on a shared
- *  row height — one `gap` gutter everywhere, aligned row bands, no ragged
- *  near-misses. A short final row keeps the target height (never stretches a lone
- *  tile giant) and centers. Pure + deterministic: same items + area + gap → same
- *  slots. */
+/** Cap on how far a SHORT row's tiles stretch past their natural width before we
+ *  stop justifying and center them instead — so a 2-tile final row doesn't
+ *  balloon to fill a wide area. Mirrors the old final-row height cap. */
+const FINAL_ROW_STRETCH_CAP = 1.12;
+
+/** Grid slots (TOTAL rects) for items in their given order, packed to FILL both
+ *  axes of `area`. The optimal ROW COUNT is derived from the area's aspect first
+ *  (r ≈ √(N·A·H / W) for N tiles of average aspect A), items split into that many
+ *  balanced rows in reading order (6 → 3+3, 7 → 4+3, never 5+1), each row given an
+ *  equal share of the height and its tiles justified across the width by kind
+ *  aspect (a wide terminal beside a narrow agent on a shared row height). Because
+ *  row height comes from the AREA (not a fixed cap), a light load in a big area
+ *  gets tall rows that fill the viewport instead of one short centered band; a
+ *  taller area yields taller rows. Pure + deterministic: same items + area + gap →
+ *  same slots. */
 export function computeGrid(items: GridItem[], area: Slot, gap = DEFAULT_GAP): Map<number, Slot> {
   const slots = new Map<number, Slot>();
   const n = items.length;
   if (n === 0 || area.w <= 0 || area.h <= 0) return slots;
 
-  // Target row height: N tiles of average aspect A tiling W×H → h ≈ √(W·H / (N·A)).
+  // Optimal row count: r rows of N/r tiles at average aspect A tiling W×H solves
+  // to r ≈ √(N·A·H / W). Clamp to [1, n]. Deriving the COUNT from the area's
+  // aspect (rather than capping row height at a fixed 300) is the fill fix.
   const avgAspect = items.reduce((s, it) => s + aspectOf(it.kind), 0) / n;
-  const ideal = Math.sqrt((area.w * area.h) / (n * avgAspect));
-  const targetRowH = Math.max(GRID_MIN_ROW_H, Math.min(GRID_MAX_ROW_H, ideal));
+  const r = Math.min(n, Math.max(1, Math.round(Math.sqrt((n * avgAspect * area.h) / area.w))));
 
-  // Greedy justified rows: grow a row until its natural width (tiles at
-  // targetRowH + gutters) reaches the area width, then close it.
+  // Balanced distribution into r rows, reading order preserved: the first `rem`
+  // rows carry one extra tile, so rows never differ by more than one — no lone
+  // card stranded under a full row.
+  const base = Math.floor(n / r);
+  const rem = n % r;
   const rows: GridItem[][] = [];
-  let row: GridItem[] = [];
-  let sumAspect = 0;
-  for (let i = 0; i < n; i += 1) {
-    row.push(items[i]);
-    sumAspect += aspectOf(items[i].kind);
-    if (sumAspect * targetRowH + gap * (row.length - 1) >= area.w) {
-      rows.push(row);
-      row = [];
-      sumAspect = 0;
-    }
+  let idx = 0;
+  for (let ri = 0; ri < r; ri += 1) {
+    const len = base + (ri < rem ? 1 : 0);
+    rows.push(items.slice(idx, idx + len));
+    idx += len;
   }
-  if (row.length) rows.push(row);
 
-  // Height per row: justify so its tiles fill the width. A short FINAL row keeps
-  // the target height (a lone last tile never blows up) and centers instead.
-  const rowHeights = rows.map((r, ri) => {
-    const sa = r.reduce((s, it) => s + aspectOf(it.kind), 0);
-    const justified = (area.w - gap * (r.length - 1)) / sa;
-    const isLast = ri === rows.length - 1;
-    if (isLast && justified > targetRowH * 1.12) return targetRowH;
-    return Math.max(GRID_MIN_ROW_H, Math.min(GRID_MAX_ROW_H, justified));
-  });
-
-  // Center the packed block vertically; scale ROW HEIGHTS (not the fixed gutters)
-  // to fit if it would overflow, so the block lands exactly inside the height.
-  const rowsTotal = rowHeights.reduce((s, h) => s + h, 0);
-  const gapsTotal = gap * (rows.length - 1);
+  // Row height fills the area height (floor at GRID_MIN_ROW_H); if honoring the
+  // floor would overflow, scale the block back down so it still fits exactly.
+  const gapsTotal = gap * (r - 1);
+  const rowHClamped = Math.max(GRID_MIN_ROW_H, Math.min(area.h, (area.h - gapsTotal) / r));
+  const rowsTotal = rowHClamped * r;
   const avail = Math.max(0, area.h - gapsTotal);
   const vScale = rowsTotal > avail && rowsTotal > 0 ? avail / rowsTotal : 1;
-  const blockH = rowsTotal * vScale + gapsTotal;
+  const rowH = rowHClamped * vScale;
+
+  // Center the packed block vertically — a full grid lands flush at the top
+  // (blockH === area.h); the clamp only leaves a margin for a sparse tall stack.
+  const blockH = rowH * r + gapsTotal;
   let y = area.y + Math.max(0, (area.h - blockH) / 2);
 
-  rows.forEach((r, ri) => {
-    let h = rowHeights[ri] * vScale;
-    let widths = r.map((it) => aspectOf(it.kind) * h);
-    let rowW = widths.reduce((s, w) => s + w, 0) + gap * (r.length - 1);
-    // Never let a row exceed the width — re-justify its height down if it would.
-    if (rowW > area.w) {
-      const inner = area.w - gap * (r.length - 1);
-      const fit = inner / (rowW - gap * (r.length - 1));
-      h *= fit;
-      widths = widths.map((w) => w * fit);
-      rowW = area.w;
-    }
-    // Full rows fill the width (start flush); a capped/narrower row centers.
+  rows.forEach((row) => {
+    const sa = row.reduce((s, it) => s + aspectOf(it.kind), 0);
+    const innerW = area.w - gap * (row.length - 1);
+    const naturalW = sa * rowH;
+    // Justify tile widths to fill the row (shared row height, kind-aspect widths).
+    // Shrink freely if the row is naturally too wide; cap the STRETCH of a short
+    // row so it centers at ~natural width instead of ballooning across the area.
+    const scale = Math.min(FINAL_ROW_STRETCH_CAP, innerW / naturalW);
+    const widths = row.map((it) => aspectOf(it.kind) * rowH * scale);
+    const rowW = widths.reduce((s, w) => s + w, 0) + gap * (row.length - 1);
+    // Full rows fill the width (flush); a capped/narrower row centers.
     let x = area.x + Math.max(0, (area.w - rowW) / 2);
-    r.forEach((it, ci) => {
-      slots.set(it.id, { x, y, w: widths[ci], h });
+    row.forEach((it, ci) => {
+      slots.set(it.id, { x, y, w: widths[ci], h: rowH });
       x += widths[ci] + gap;
     });
-    y += h + gap;
+    y += rowH + gap;
   });
 
   return slots;
