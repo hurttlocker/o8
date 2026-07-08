@@ -1167,6 +1167,9 @@ const CANVAS_VERBS: &[&str] = &[
     "grid",
     // Card sight + lifecycle (parity with external Claude's o8_canvas).
     "list",
+    "center-on-card",
+    "pan",
+    "read-card",
     "move-card",
     "resize-card",
     "focus-card",
@@ -1210,6 +1213,22 @@ pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
             carry("repo");
         }
         "grid" => carry("on"),
+        "center-on-card" => {
+            carry("kind");
+            carry("id");
+            carry("zoom");
+        }
+        "pan" => {
+            carry("dx");
+            carry("dy");
+            carry("x");
+            carry("y");
+        }
+        "read-card" => {
+            carry("kind");
+            carry("id");
+            carry("lines");
+        }
         "render" => {
             carry("title");
             carry("markdown");
@@ -1290,6 +1309,8 @@ pub async fn canvas_intent(verb: &str, args: Value) -> Result<Value, String> {
         "ok": true,
         "verb": verb,
         "navigated": resp.get("navigated").and_then(|v| v.as_bool()).unwrap_or(false),
+        "note": resp.get("note").cloned().unwrap_or(Value::Null),
+        "data": resp.get("data").cloned().unwrap_or(Value::Null),
     }))
 }
 
@@ -1669,6 +1690,19 @@ mod canvas_tests {
         assert_eq!(toggle["args"], json!({}), "no `on` → empty args, page toggles");
 
         assert!(CANVAS_VERBS.contains(&"grid"));
+    }
+
+    #[test]
+    fn camera_and_read_verbs_are_known_and_carry_flat_args() {
+        let center = canvas_intent_body("center-on-card", &json!({ "kind": "agent", "id": 7, "zoom": 0.7, "x": 999 }));
+        assert_eq!(center["args"], json!({ "kind": "agent", "id": 7, "zoom": 0.7 }));
+        let pan = canvas_intent_body("pan", &json!({ "dx": 20, "dy": -8, "x": 4, "y": 5, "kind": "ignored" }));
+        assert_eq!(pan["args"], json!({ "dx": 20, "dy": -8, "x": 4, "y": 5 }));
+        let read = canvas_intent_body("read-card", &json!({ "kind": "term", "id": 2, "lines": 12, "text": "ignored" }));
+        assert_eq!(read["args"], json!({ "kind": "term", "id": 2, "lines": 12 }));
+        assert!(CANVAS_VERBS.contains(&"center-on-card"));
+        assert!(CANVAS_VERBS.contains(&"pan"));
+        assert!(CANVAS_VERBS.contains(&"read-card"));
     }
 
     #[test]
