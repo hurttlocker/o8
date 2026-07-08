@@ -26,9 +26,10 @@ If one is running: do not start a second. Wait for it or surface to Q. (Vault: `
 ## Ship sequence
 
 1. Collision gate (above) must print "clear to ship".
-2. Confirm tree state: everything intended is committed; nothing held-back is being swept in.
-3. `npm run ship` — signs, notarizes, builds the installer, bumps version. Deep spec + hazards: repo CLAUDE.md "Shipping".
-4. **Post-ship verify:** version actually bumped, notarization tail shows success, installer artifact exists. Report the verification tail, not just "shipped".
+2. Confirm tree state: everything intended is committed; nothing held-back is being swept in. Discard post-build `src-tauri/Cargo.lock` noise (`git checkout -- src-tauri/Cargo.lock`) — a dirty tree fails the bump.
+3. **Bump first — `npm run ship` does NOT bump.** `npm version patch` (commits manifests + tags via sync-version.mjs), then `git push origin main --tags`. Skipping this makes release.mjs silently REPLACE the previous already-published release's assets under the same version (2026-07-08 incident, #1499) — updaters then never see the new build.
+4. `npm run ship` — signs, notarizes, builds the installer, publishes the release. Deep spec + hazards: repo CLAUDE.md "Shipping".
+5. **Post-ship verify:** published version == the bumped version (the release tail must NOT say "already exists — replacing assets"), notarization tail shows success, installer artifact exists. Report the verification tail, not just "shipped".
 
 ## Report format
 
