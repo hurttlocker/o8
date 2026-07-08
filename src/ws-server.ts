@@ -42,7 +42,8 @@
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
-import { readFileSync, statSync, watch, existsSync } from 'node:fs';
+import { watch, existsSync } from 'node:fs';
+import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { execSync, execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -55,7 +56,7 @@ migrateDataDirOnce();
 
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
-import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import {
   startAgentSession,
   updateAgentStatus,
@@ -168,14 +169,52 @@ import {
   recordRealtimeBridgeFailure,
   recordRealtimeBridgeSuccess,
 } from './lib/realtime/bridge-backoff';
+import { WsWatchdog } from './lib/ws-server/health-watchdog';
+import {
+  sanitizePtyEnv,
+  resolvePreferredShell,
+  resolveTmuxBinary,
+  tmuxSessionExists,
+  isDashTerminalSession,
+} from './lib/ws-server/pty-support';
+import { parseGitWorktreeList, shortHome } from './lib/ws-server/git-worktrees';
+import {
+  BACKPRESSURE_LIMIT,
+  BACKPRESSURE_QUEUE_LIMIT,
+  BACKPRESSURE_FLUSH_MS,
+  isLossyMessage,
+} from './lib/ws-server/channels';
+import {
+  FETCH_TIMEOUT_MS,
+  buildNextUrl,
+  fetchWithRetry,
+  fetchNextJson,
+} from './lib/ws-server/next-fetch';
+import {
+  createInlineTerminalHost,
+  createChildTerminalHost,
+  type TerminalHost,
+} from './lib/ws-server/terminal-host-client';
 
 const execFileAsync = promisify(execFile);
 
+// Async existence check — never blocks the shared event loop for FS calls on
+// per-message / per-poll hot paths (the #1498 exposure class). Startup-only
+// probes may still use existsSync.
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
-function listRepoPathsSync(): string[] {
+async function listRepoPaths(): Promise<string[]> {
   try {
     const registryPath = join(homedir(), '.o8', 'repos.json');
-    const raw = readFileSync(registryPath, 'utf-8');
+    const raw = await readFile(registryPath, 'utf-8');
     const store = JSON.parse(raw) as { repos?: Array<{ localPath?: string }> };
     return (store.repos ?? []).map(r => r.localPath).filter(Boolean) as string[];
   } catch {
@@ -183,11 +222,33 @@ function listRepoPathsSync(): string[] {
   }
 }
 
-// ── node-pty (optional — terminal feature) ──
-let pty: typeof import('node-pty') | null = null;
+// ── node-pty + terminal-host (#1498 follow-up) ──
+// PTYs are spawned through a TerminalHost seam. Default 'inline' (node-pty in
+// this process — historical behavior). O8_TERMINAL_HOST=child forks a separate
+// terminal-host process so a PTY wedge or runaway data pump in either process
+// can't freeze the other's event loop. WS protocol is byte-identical either
+// way. Default is inline: the child path is built + fork-tested in dev but not
+// yet proven in a packaged build, so it's opt-in.
+let terminalHost: TerminalHost | null = null;
+const TERMINAL_HOST_MODE: 'inline' | 'child' =
+  (process.env.O8_TERMINAL_HOST ?? '').trim().toLowerCase() === 'child' ? 'child' : 'inline';
+
+if (TERMINAL_HOST_MODE === 'child') {
+  try {
+    terminalHost = createChildTerminalHost({ log: (m) => console.log(`[terminal-host] ${m}`) });
+    console.log('[ws-server] terminal-host: child mode (forked terminal-host process)');
+  } catch (err) {
+    console.warn(`[ws-server] terminal-host child failed to start — falling back to inline: ${err instanceof Error ? err.message : String(err)}`);
+    terminalHost = null; // inline path below picks up when node-pty loads
+  }
+}
+
 void import('node-pty')
   .then((mod) => {
-    pty = mod;
+    // Inline mode (or child fallback): back the host with in-process node-pty.
+    if (!terminalHost) {
+      terminalHost = createInlineTerminalHost(mod);
+    }
     console.log('[ws-server] node-pty loaded — terminal feature available');
   })
   .catch(() => {
@@ -198,20 +259,11 @@ void import('node-pty')
 
 const { wsPort: WS_PORT } = resolvePortInfo();
 const PING_INTERVAL_MS = 25_000;
-const FETCH_TIMEOUT_MS = 8_000;
-const NEXT_FETCH_MAX_ATTEMPTS = 5;
-const NEXT_FETCH_INITIAL_BACKOFF_MS = 100;
-const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if client buffer exceeds this
-const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
-const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
-
-const RETRYABLE_NEXT_FETCH_CODES = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'EHOSTUNREACH',
-  'ENOTFOUND',
-  'UND_ERR_SOCKET',
-]);
+// Event-loop lag watchdog (#1498 structural follow-up). ws-server pumps every
+// mobile client, PTY, and orchestrator stream on this one loop; a sync wedge
+// freezes them all. Sample loop lag; log + count sustained wedges. Cheap when
+// healthy, queryable via /health.
+const wsWatchdog = new WsWatchdog();
 
 interface RuntimeTranscriptApiEntry {
   id: string;
@@ -222,88 +274,6 @@ interface RuntimeTranscriptApiEntry {
   timestampLabel: string;
   toolName?: string;
   filePath?: string;
-}
-
-function getNextOrigin() {
-  return process.env.NEXT_ORIGIN ?? getApiBase();
-}
-
-function buildNextUrl(pathname: string, searchParams?: URLSearchParams) {
-  const query = searchParams && searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-  return `${getNextOrigin()}${pathname}${query}`;
-}
-
-function getNextFetchErrorCode(error: Error): string | null {
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (!cause || typeof cause !== 'object') return null;
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' ? code : null;
-}
-
-function isRetryableNextFetchError(error: unknown) {
-  if (!(error instanceof Error)) return false;
-  if (error.name === 'AbortError' || error.name === 'TimeoutError') return false;
-  const code = getNextFetchErrorCode(error);
-  return error.message === 'fetch failed' || (code !== null && RETRYABLE_NEXT_FETCH_CODES.has(code));
-}
-
-function delayNextFetchRetry(delayMs: number) {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-}
-
-async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {
-  let backoffMs = NEXT_FETCH_INITIAL_BACKOFF_MS;
-
-  for (let attempt = 1; attempt <= NEXT_FETCH_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return await fetch(input, init);
-    } catch (error) {
-      if (attempt === NEXT_FETCH_MAX_ATTEMPTS || !isRetryableNextFetchError(error)) {
-        throw error;
-      }
-
-      await delayNextFetchRetry(backoffMs);
-      backoffMs *= 2;
-    }
-  }
-
-  throw new Error('[ws-server] internal fetch retry loop exited unexpectedly');
-}
-
-async function fetchNextJson<T>(
-  pathname: string,
-  options: {
-    method?: 'GET' | 'POST';
-    searchParams?: URLSearchParams;
-    body?: unknown;
-    timeoutMs?: number;
-  } = {},
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${WS_TOKEN}`,
-  };
-  if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams), {
-    method: options.method ?? 'GET',
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS),
-  });
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = payload && typeof payload === 'object' && 'error' in payload
-      ? String((payload as { error?: string }).error ?? '')
-      : '';
-    throw new Error(error || `${pathname} failed (${response.status})`);
-  }
-
-  return payload as T;
 }
 
 // ── Boot readiness probe ──
@@ -894,9 +864,9 @@ const METERED_WINDOW_VALVE_STEP_TOKENS = 60_000;
 const meteredWindowValveWarnedStep = new Map<string, number>();
 
 /** Approximate persisted-thread tokens from the chat-history file (chars/4). */
-function estimateThreadTokens(threadId: string): number {
+async function estimateThreadTokens(threadId: string): Promise<number> {
   try {
-    const raw = readFileSync(join(homedir(), '.o8', 'chat-history', `${threadId}.json`), 'utf-8');
+    const raw = await readFile(join(homedir(), '.o8', 'chat-history', `${threadId}.json`), 'utf-8');
     const payload = JSON.parse(raw) as { messages?: Array<{ text?: string; content?: string }> };
     const chars = (payload.messages ?? []).reduce((sum, m) => sum + (m.text ?? m.content ?? '').length, 0);
     return Math.ceil(chars / 4);
@@ -1222,86 +1192,26 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
 // Orchestrator now uses structured JSON output (stream-json) instead of PTY.
 // See orchestrator-session.ts for the new approach.
 
-function sanitizePtyEnv() {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') {
-      env[key] = value;
-    }
-  }
-  env.TERM = 'xterm-256color';
-  env.LANG = env.LANG || 'en_US.UTF-8';
-  env.LC_ALL = env.LC_ALL || 'en_US.UTF-8';
-  env.PATH = env.PATH || '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-  return env;
-}
-
-function resolvePreferredShell() {
-  const candidates = [
-    process.env.SHELL,
-    '/bin/zsh',
-    '/bin/bash',
-    '/bin/sh',
-  ].filter((value): value is string => Boolean(value));
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-
-  return '/bin/sh';
-}
-
-function resolveTmuxBinary() {
-  const candidates = [
-    process.env.TMUX_BIN,
-    '/opt/homebrew/bin/tmux',
-    '/usr/local/bin/tmux',
-    '/usr/bin/tmux',
-    '/bin/tmux',
-  ].filter((value): value is string => Boolean(value));
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-
-  try {
-    return execSync('command -v tmux', {
-      encoding: 'utf-8',
-      timeout: 3000,
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    }).trim() || 'tmux';
-  } catch {
-    return 'tmux';
-  }
-}
-
-function tmuxSessionExists(sessionName: string) {
-  const target = sessionName.trim();
-  if (!target) return false;
-
-  try {
-    execFileSync(resolveTmuxBinary(), ['has-session', '-t', target], {
-      timeout: 2000,
-      stdio: 'ignore',
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isDashTerminalSession(sessionName: string) {
-  return sessionName.startsWith('cortex-dash-');
-}
-
+// ── Sync-FS note (#1498 sweep) ──────────────────────────────────────────────
+// The tmux helpers below still use execFileSync (has-session / new-session /
+// capture-pane / kill-session) and a couple of existsSync probes. These are
+// intentionally NOT converted to async in this sweep: they are wired into a
+// synchronous terminal create/attach call chain (materializePendingDashSession
+// → createDashTmuxSessionSync → spawn*Pty → registerTerminalAttachment) and
+// threading async through it piecemeal would (a) be invasive and (b) be redone
+// by the terminal-host extraction, which moves ALL PTY/tmux work off this event
+// loop into a forked child process (the real structural fix). The pure-FS hot
+// paths that touch the loop per-message/per-poll — estimateThreadTokens,
+// handleTerminalImage, getReviewWatchTargets/listRepoPaths — ARE async now.
+// Remaining sync FS is startup/module-init only (git-watcher setup, port
+// reclaim, bootstrap worktree prune) or the deferred terminal chain above.
 function spawnDashShellPty(
   sessionName: string,
   cols: number,
   rows: number,
   requestedCwd?: string,
 ) {
-  if (!pty) {
+  if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
@@ -1312,7 +1222,9 @@ function spawnDashShellPty(
     ?? process.env.HOME ?? homedir() ?? '/tmp';
 
   console.log(`[ws-server] Spawning dashboard PTY shell: ${shell} -l (${sessionName})`);
-  return pty.spawn(shell, ['-l'], {
+  return terminalHost.spawn({
+    file: shell,
+    args: ['-l'],
     name: 'xterm-256color',
     cols,
     rows,
@@ -1507,7 +1419,7 @@ function spawnManagedCommandPty(
   rows: number,
   envOverrides?: Record<string, string>,
 ) {
-  if (!pty) {
+  if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
@@ -1519,7 +1431,9 @@ function spawnManagedCommandPty(
   };
 
   console.log(`[ws-server] Spawning managed PTY session: ${shell} -lc <command> (${sessionName})`);
-  return pty.spawn(shell, ['-l', '-c', shellCommand], {
+  return terminalHost.spawn({
+    file: shell,
+    args: ['-l', '-c', shellCommand],
     name: 'xterm-256color',
     cols,
     rows,
@@ -1632,7 +1546,7 @@ function spawnTmuxAttachPty(
   cols: number,
   rows: number,
 ) {
-  if (!pty) {
+  if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
@@ -1642,7 +1556,9 @@ function spawnTmuxAttachPty(
 
   try {
     console.log(`[ws-server] Spawning terminal directly: ${tmuxBin} attach-session -t ${sessionName}`);
-    return pty.spawn(tmuxBin, ['attach-session', '-t', sessionName], {
+    return terminalHost.spawn({
+      file: tmuxBin,
+      args: ['attach-session', '-t', sessionName],
       name: 'xterm-256color',
       cols,
       rows,
@@ -1654,7 +1570,9 @@ function spawnTmuxAttachPty(
     const shellCmd = `exec "${tmuxBin}" attach-session -t ${sessionName}`;
     console.warn(`[ws-server] Direct tmux PTY spawn failed, falling back to shell wrapper: ${directError instanceof Error ? directError.message : String(directError)}`);
     console.log(`[ws-server] Spawning terminal via shell: ${shellCmd}`);
-    return pty.spawn(shell, ['-l', '-c', shellCmd], {
+    return terminalHost.spawn({
+      file: shell,
+      args: ['-l', '-c', shellCmd],
       name: 'xterm-256color',
       cols,
       rows,
@@ -1691,38 +1609,6 @@ function extractText(delta: ChatDelta): string {
     .join('');
 }
 
-/**
- * Determine whether a message is "lossy" (safe to drop under backpressure)
- * or "durable" (must be queued and flushed later).
- *
- * Lossy channels: chat deltas, terminal data, pong — all are either
- * inherently lossy or recovered by higher-level mechanisms.
- */
-function isLossyMessage(json: string): boolean {
-  // Fast path: avoid parsing — check for known lossy patterns
-  const maybeLossy =
-    json.includes('"channel":"pong"') ||
-    // Chat deltas (not done/error) are lossy
-    (json.includes('"channel":"chat"') && json.includes('"event":"delta"')) ||
-    // Terminal data frames are lossy (PTY output is best-effort)
-    (json.includes('"channel":"terminal"') && json.includes('"event":"data"')) ||
-    // Orchestrator output chunks are lossy (intermediate deltas can be dropped)
-    (json.includes('"channel":"orchestrator"') && json.includes('"event":"output"'));
-  if (!maybeLossy) return false;
-  // Confirm with a real parse: payload text that merely *contains* one of the
-  // marker substrings (e.g. an agent quoting protocol frames) must not cause
-  // a durable message to be silently dropped. Only runs under backpressure.
-  try {
-    const msg = JSON.parse(json) as { channel?: unknown; event?: unknown };
-    if (msg.channel === 'pong') return true;
-    if (msg.channel === 'chat' && msg.event === 'delta') return true;
-    if (msg.channel === 'terminal' && msg.event === 'data') return true;
-    if (msg.channel === 'orchestrator' && msg.event === 'output') return true;
-    return false;
-  } catch {
-    return false; // unparseable → treat as durable (safer)
-  }
-}
 
 /** Flush any queued durable messages once backpressure clears. */
 function flushBackpressureQueue(client: ClientState) {
@@ -2954,7 +2840,7 @@ function handleClientMessage(client: ClientState, raw: string) {
       handleTerminalDetach(client, msg);
       break;
     case 'terminal-image':
-      handleTerminalImage(client, msg);
+      void handleTerminalImage(client, msg);
       break;
     case 'agent-kill':
       handleAgentKill(client, msg);
@@ -3454,7 +3340,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // notice banner each time the persisted thread crosses another 60K-token
     // step past the metered target.
     if (threadId && isMeteredOrchestratorBackend(activeBackend.id)) {
-      const approxThreadTokens = estimateThreadTokens(threadId);
+      const approxThreadTokens = await estimateThreadTokens(threadId);
       const step = Math.floor(approxThreadTokens / METERED_WINDOW_VALVE_STEP_TOKENS);
       if (step >= 1 && (meteredWindowValveWarnedStep.get(threadId) ?? 0) < step) {
         meteredWindowValveWarnedStep.set(threadId, step);
@@ -4160,7 +4046,7 @@ function materializePendingDashSession(
 }
 
 function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>) {
-  if (!pty) {
+  if (!terminalHost) {
     sendTerminal(client, 'error', { sessionName: '', error: 'Terminal not available (node-pty not installed)' });
     return;
   }
@@ -4197,7 +4083,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     return;
   }
 
-  if (!pty) {
+  if (!terminalHost) {
     sendTerminal(client, 'error', { sessionName, error: 'Terminal not available (node-pty not installed)' });
     return;
   }
@@ -4385,7 +4271,7 @@ const TERMINAL_IMAGE_EXTENSIONS = new Set([
 ]);
 const TERMINAL_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>) {
+async function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>) {
   const sessionName = typeof msg.sessionName === 'string' ? msg.sessionName : '';
   const filePath = typeof msg.filePath === 'string' ? msg.filePath : '';
   if (!sessionName || !filePath) return;
@@ -4400,12 +4286,12 @@ function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>)
       console.log(`[ws-server] terminal-image: refused non-image path ${resolved}`);
       return;
     }
-    const stat = statSync(resolved);
-    if (!stat.isFile() || stat.size > TERMINAL_IMAGE_MAX_BYTES) {
+    const fileStat = await stat(resolved);
+    if (!fileStat.isFile() || fileStat.size > TERMINAL_IMAGE_MAX_BYTES) {
       console.log(`[ws-server] terminal-image: refused ${resolved} (not a regular file or too large)`);
       return;
     }
-    const data = readFileSync(resolved);
+    const data = await readFile(resolved);
     const b64 = data.toString('base64');
     const filename = basename(resolved);
     // Send raw components — client builds the IIP escape sequence
@@ -4707,7 +4593,7 @@ const httpServer = createServer((req, res) => {
         res.end('invalid session name');
         return;
       }
-      if (!pty) {
+      if (!terminalHost) {
         res.writeHead(503);
         res.end('node-pty unavailable');
         return;
@@ -5323,6 +5209,7 @@ const httpServer = createServer((req, res) => {
       status: 'ok',
       clients: clients.size,
       gateway: 'disabled',
+      eventLoop: wsWatchdog.getStats(),
     }));
     return;
   }
@@ -5506,35 +5393,6 @@ const REVIEW_SCAN_CONCURRENCY = 3;
 let reviewRefreshInFlight = false;
 let reviewRefreshRerequest = false;
 
-type GitWorktreeRecord = {
-  path: string;
-  branch: string | null;
-};
-
-function shortHome(filePath: string) {
-  const home = process.env.HOME ?? homedir();
-  return filePath.startsWith(`${home}/`) ? filePath.replace(`${home}/`, '~/') : filePath;
-}
-
-function parseGitWorktreeList(raw: string): GitWorktreeRecord[] {
-  const worktrees: GitWorktreeRecord[] = [];
-  let current: GitWorktreeRecord | null = null;
-
-  for (const line of raw.split('\n')) {
-    if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), branch: null };
-      worktrees.push(current);
-      continue;
-    }
-    if (!current) continue;
-    if (line.startsWith('branch refs/heads/')) {
-      current.branch = line.slice('branch refs/heads/'.length);
-    }
-  }
-
-  return worktrees;
-}
-
 async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<number> {
   // `git worktree prune` only removes admin entries for deleted git-worktree
   // dirs. APFS clones in .cortex-worktrees/ aren't git worktrees of repoPath
@@ -5611,7 +5469,7 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
 
 async function getReviewWatchTargets() {
   const repoPaths = new Set<string>([REPO_ROOT]);
-  for (const p of listRepoPathsSync()) {
+  for (const p of await listRepoPaths()) {
     repoPaths.add(resolve(p));
   }
 
@@ -5622,8 +5480,8 @@ async function getReviewWatchTargets() {
 
     try {
       const metaPath = resolve(repoPath, '.cortex-worktrees', '.meta.json');
-      if (!existsSync(metaPath)) continue;
-      const raw = readFileSync(metaPath, 'utf-8');
+      if (!(await pathExists(metaPath))) continue;
+      const raw = await readFile(metaPath, 'utf-8');
       const meta = JSON.parse(raw) as {
         worktrees?: Record<string, { id: string; sessionKey?: string; claudeManaged?: boolean }>;
       };
@@ -5631,7 +5489,7 @@ async function getReviewWatchTargets() {
         const workspacePath = worktree.claudeManaged
           ? resolve(repoPath, '.claude', 'worktrees', worktree.id)
           : resolve(repoPath, '.cortex-worktrees', worktree.id);
-        if (!existsSync(workspacePath)) continue;
+        if (!(await pathExists(workspacePath))) continue;
         targets.push({
           repoPath,
           workspacePath,
@@ -5834,6 +5692,7 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
       setTimeout(() => {
         httpServer.listen(WS_PORT, '0.0.0.0', () => {
           console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+          wsWatchdog.start(); // idempotent — covers the port-reclaim retry path
         });
       }, 500);
     } catch {
@@ -5980,6 +5839,9 @@ async function bootstrapWsServer() {
 
   httpServer.listen(WS_PORT, '0.0.0.0', () => {
     console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+
+    // Begin event-loop lag sampling (#1498 follow-up).
+    wsWatchdog.start();
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
@@ -6504,6 +6366,7 @@ function shutdown(signal: string) {
   stopWorktreeReaper();
   stopLaneZombieReaper();
   stopDashSessionGc();
+  wsWatchdog.stop();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
@@ -6520,6 +6383,8 @@ function shutdown(signal: string) {
     try { att.ptyProcess.kill(); } catch { /* already gone */ }
   }
   terminalAttachments.clear();
+  // Tear down the forked terminal-host (child mode); no-op inline.
+  try { terminalHost?.dispose(); } catch { /* already gone */ }
 
   // Send close frame to every client so they reconnect cleanly
   for (const client of clients.values()) {
