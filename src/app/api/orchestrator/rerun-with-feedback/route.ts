@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { rerunWithFeedback } from '@/lib/orchestrator/operator-mission-service';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,9 +44,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // #1497 — persisted idempotency. THE live incident: a rerun timed out
+  // client-side (15s × 3) but landed server-side TWICE, forking two parallel
+  // clones. A dispatch takes minutes, so the retry arrives while the original
+  // is still running — the reserve→finalize protocol returns "in progress, not
+  // re-executed" instead of dispatching a second worker.
+  const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
+    ? record.idempotencyKey.trim()
+    : null;
+  const key = deriveIdempotencyKey({ verb: 'rerun_with_feedback', scopeId: packetId, clientKey, body: feedback });
+
   try {
-    const result = await rerunWithFeedback({ packetId, feedback });
-    return operatorSuccess(result);
+    const outcome = await withIdempotency(
+      { key, verb: 'rerun_with_feedback', scopeId: packetId },
+      () => rerunWithFeedback({ packetId, feedback }),
+    );
+    return operatorSuccess(replayShape(outcome));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to rerun packet with feedback.';
     return operatorError('rerun_failed', message, 500, error);

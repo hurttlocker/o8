@@ -743,3 +743,28 @@ export const artifacts = sqliteTable('artifacts', {
   laneIdx: index('idx_artifacts_lane').on(table.laneId, table.capturedAt),
   threadIdx: index('idx_artifacts_thread').on(table.threadId, table.capturedAt),
 }));
+
+/**
+ * Schema v32 (#1497) — persisted idempotency keys for orchestrator control
+ * verbs (steer / rerun / retry / dispatch). Replaces the in-memory-only guard
+ * that (a) only covered merge and (b) evaporated on restart — a timed-out
+ * rerun retry double-dispatched into two parallel clones. A row is RESERVED
+ * (result_json NULL) the instant a verb starts and FINALIZED with the JSON
+ * result on success; a concurrent duplicate that finds a reserved row is told
+ * "in progress, not re-executed" instead of forking a second worker. Rows
+ * self-expire via `expires_at` (~10-min TTL) and are pruned on access.
+ */
+export const idempotencyKeys = sqliteTable('idempotency_keys', {
+  /** Derived key: explicit client key, else hash(verb + scopeId + body). PK. */
+  key: text('key').primaryKey(),
+  verb: text('verb').notNull(),
+  /** packetId for packet-scoped verbs; missionId (or '') for dispatch. */
+  packetId: text('packet_id'),
+  /** JSON-serialized original result. NULL while the verb is still in flight. */
+  resultJson: text('result_json'),
+  /** ms-epoch stamps (integers, not ISO — this table is machine-only). */
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+}, (table) => ({
+  expiresIdx: index('idx_idempotency_expires').on(table.expiresAt),
+}));
