@@ -195,6 +195,9 @@ import {
   createChildTerminalHost,
   type TerminalHost,
 } from './lib/ws-server/terminal-host-client';
+import { installProcessCrashCapture } from './lib/telemetry/crash-capture';
+
+installProcessCrashCapture('ws-server');
 
 const execFileAsync = promisify(execFile);
 
@@ -5266,6 +5269,13 @@ const wss = new WebSocketServer({
     }
     done(false, 401, 'Unauthorized');
   },
+});
+
+// The httpServer has its own 'error' handler (stale-port recovery below), but the
+// WebSocketServer can emit 'error' independently (e.g. during upgrade handling).
+// Without a listener that's an uncaughtException that kills every connected client.
+wss.on('error', (err) => {
+  console.error('[ws-server] WebSocketServer error (non-fatal):', err);
 });
 
 wss.on('connection', (ws, req) => {
