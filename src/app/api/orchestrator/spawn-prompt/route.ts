@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   const defaults = getOperatorDefaultsSync().values;
   const profileRouting = resolveSubscriptionProfileRouting({
     profile: defaults.subscriptionProfile,
-    requestedRuntime: explicitRuntimeRequested ? requestedRuntime : null,
+    requestedRuntime: explicitRuntimeRequested || defaults.subscriptionProfile === 'both' ? requestedRuntime : null,
     requestedModel: typeof requestedModel === 'string' ? requestedModel : null,
     defaultDispatchModel: defaults.defaultDispatchModel,
   });
