@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { dispatchMission } from '@/lib/orchestrator/operator-mission-service';
 import { DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,8 +28,34 @@ export async function POST(request: NextRequest) {
   // server and returns once it's initiated; callers track progress via
   // `/api/orchestrator/status`. `wait` defaults to true so the MCP dispatch_mission
   // tool keeps its synchronous dispatched-count contract.
+  // #1497 — persisted idempotency. Dispatch is naturally REPEATABLE (dispatch
+  // again after queuing more work), so unlike steer/rerun we engage the guard
+  // ONLY when a client supplies an explicit idempotencyKey (its retry-dedup
+  // intent). Absent a key, behaviour is unchanged — no derived-hash guard that
+  // would wrongly block a legitimate re-dispatch within the TTL window.
+  const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
+    ? record.idempotencyKey.trim()
+    : null;
+  const idemKey = clientKey
+    ? deriveIdempotencyKey({ verb: 'dispatch_mission', scopeId: missionId ?? '', clientKey })
+    : null;
+
   const wait = record.wait !== false;
   if (!wait) {
+    // Reserve synchronously so a duplicate async dispatch doesn't fire twice;
+    // finalize immediately since the launch itself is fire-and-forget.
+    if (idemKey) {
+      const outcome = await withIdempotency(
+        { key: idemKey, verb: 'dispatch_mission', scopeId: missionId ?? '' },
+        async () => {
+          void dispatchMission({ missionId }).catch((error) => {
+            console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
+          });
+          return { initiated: true, async: true, missionId: missionId ?? null };
+        },
+      );
+      return operatorSuccess(replayShape(outcome));
+    }
     void dispatchMission({ missionId }).catch((error) => {
       console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
     });
@@ -36,6 +63,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    if (idemKey) {
+      const outcome = await withIdempotency(
+        { key: idemKey, verb: 'dispatch_mission', scopeId: missionId ?? '' },
+        () => dispatchMission({ missionId }),
+      );
+      return operatorSuccess(replayShape(outcome));
+    }
     const result = await dispatchMission({ missionId });
     return operatorSuccess(result);
   } catch (error) {
