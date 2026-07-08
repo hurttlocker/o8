@@ -29,6 +29,22 @@ export interface RerunWithFeedbackInput {
   feedback: string;
 }
 
+export interface RerunEscalationSuggestion {
+  targetRuntime: 'claude-code';
+  targetModel: string;
+  reason: string;
+}
+
+export interface RerunWithFeedbackResult {
+  packetId: string;
+  referenceLabel: string;
+  dispatched: boolean;
+  worktreePruned: boolean;
+  /** Present when a single-sub cheap-tier packet crossed the rerun threshold (P3 ladder). */
+  escalationSuggestion?: RerunEscalationSuggestion;
+  note: string;
+}
+
 const FEEDBACK_HEADING = '## Operator feedback';
 // Match an existing feedback section (preceded by 1+ blank lines) and
 // everything after it, so repeat reruns replace the prior feedback rather
@@ -43,7 +59,7 @@ function appendFeedback(base: string, feedback: string) {
   return `${stripped}\n\n${FEEDBACK_HEADING}\n${trimmedFeedback}`;
 }
 
-function buildEscalationSuggestion(packet: OrchestratorPacket, nextAttemptCount: number) {
+function buildEscalationSuggestion(packet: OrchestratorPacket, nextAttemptCount: number): RerunEscalationSuggestion | null {
   if (nextAttemptCount < 2 || packet.tierEscalated === true) return null;
   const targetModel = frontierEscalationModelForCheapTier({
     profile: getOperatorDefaultsSync().values.subscriptionProfile,
@@ -149,10 +165,10 @@ async function rerunRegistryPacketWithFeedback(
   missionId: string,
   packetId: string,
   feedback: string,
-) {
+): Promise<RerunWithFeedbackResult> {
   let worktreePruned = false;
   let referenceLabel = packetId;
-  let escalationSuggestion: ReturnType<typeof buildEscalationSuggestion> = null;
+  let escalationSuggestion: RerunEscalationSuggestion | null = null;
 
   const { state: finalState } = await withMissionRegistryState(missionId, async (current) => {
     const packet = current.packets.find((candidate) => candidate.id === packetId);
@@ -192,14 +208,14 @@ async function rerunRegistryPacketWithFeedback(
     referenceLabel,
     dispatched,
     worktreePruned,
-    ...(escalationSuggestion ? { escalationSuggestion } : {}),
+    escalationSuggestion: escalationSuggestion ?? undefined,
     note: dispatched
       ? `Packet ${referenceLabel} relaunched with operator feedback.`
       : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,
   };
 }
 
-export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
+export async function rerunWithFeedback(input: RerunWithFeedbackInput): Promise<RerunWithFeedbackResult> {
   const packetId = input.packetId.trim();
   if (!packetId) {
     throw new Error('packetId is required.');
@@ -223,7 +239,7 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
 
   let worktreePruned = false;
   let referenceLabel = packetId;
-  let escalationSuggestion: ReturnType<typeof buildEscalationSuggestion> = null;
+  let escalationSuggestion: RerunEscalationSuggestion | null = null;
 
   const { state: finalState } = await withLockedState(async (current) => {
     const packet = current.packets.find((candidate) => candidate.id === packetId);
@@ -274,7 +290,7 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
     referenceLabel,
     dispatched,
     worktreePruned,
-    ...(escalationSuggestion ? { escalationSuggestion } : {}),
+    escalationSuggestion: escalationSuggestion ?? undefined,
     note: dispatched
       ? `Packet ${referenceLabel} relaunched with operator feedback.`
       : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,
