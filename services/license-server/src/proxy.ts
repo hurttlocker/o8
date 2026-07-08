@@ -472,19 +472,110 @@ export async function handleGeminiGenerate(c: Context): Promise<Response> {
   return c.json(json);
 }
 
+// ── Deepgram primary transcribe arm ─────────────────────────────────────────
+// Harness verdict 2026-07-07 (#1494): Deepgram Nova-3 p50 361–441ms with 147ms
+// mins; verbatim quality matches whisper once smart_format is OFF and numerals
+// ON ("ship 0.1563 tonight" survives). Pricing ~$0.0043/min billed per second —
+// a heavy founder is under $1/month, and the $200 signup credit funds the tier
+// until subscriptions launch. OpenRouter whisper remains the fallback arm; any
+// Deepgram failure falls straight through, never a user-visible error.
+
+const DEEPGRAM_LISTEN_URL =
+  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=false&punctuate=true&numerals=true';
+const DEEPGRAM_PRICE_PER_MIN_USD = envUsd('PROXY_DEEPGRAM_PRICE_PER_MIN_USD', 0.0043);
+
+interface DeepgramListenResponse {
+  metadata?: { duration?: number };
+  results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> };
+}
+
+/** Decode the OpenRouter-shaped body's input_audio into raw bytes + format. */
+function decodeInputAudio(body: Record<string, unknown>): { bytes: Buffer; format: string } | null {
+  const ia = body.input_audio;
+  const data = typeof ia === 'string'
+    ? ia
+    : ia && typeof ia === 'object' && typeof (ia as { data?: unknown }).data === 'string'
+      ? (ia as { data: string }).data
+      : '';
+  if (!data) return null;
+  const format = ia && typeof ia === 'object' && typeof (ia as { format?: unknown }).format === 'string'
+    ? (ia as { format: string }).format
+    : 'wav';
+  try {
+    return { bytes: Buffer.from(data, 'base64'), format };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * POST /v1/transcribe — OpenRouter audio/transcriptions passthrough (our key).
- * The desktop sends the same JSON body it would send to OpenRouter directly
- * ({ model, input_audio, language, temperature }), so this forwards verbatim.
- * OpenRouter does not report a cost for transcription, so it is logged at 0
- * (Whisper Turbo is the cheapest path) — refine in the Step-5 telemetry pass.
+ * Try Deepgram; null on ANY failure so the caller falls through to OpenRouter.
+ * Returns a whisper-shaped response ({ text }) — the desktop client parses the
+ * same shape regardless of which arm answered.
+ */
+async function transcribeViaDeepgram(
+  body: Record<string, unknown>,
+): Promise<{ json: Record<string, unknown>; costMicroUsd: number } | null> {
+  const audio = decodeInputAudio(body);
+  if (!audio || audio.bytes.length === 0) return null;
+
+  let url = DEEPGRAM_LISTEN_URL;
+  if (typeof body.language === 'string' && /^[a-z]{2}(-[A-Z]{2})?$/.test(body.language)) {
+    url += `&language=${body.language}`;
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${env.DEEPGRAM_API_KEY}`,
+        'Content-Type': `audio/${audio.format}`,
+      },
+      body: audio.bytes,
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return null;
+  }
+  if (!upstream.ok) return null;
+
+  let parsed: DeepgramListenResponse;
+  try {
+    parsed = (await upstream.json()) as DeepgramListenResponse;
+  } catch {
+    return null;
+  }
+  const text = parsed.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? '';
+  const seconds = typeof parsed.metadata?.duration === 'number' ? parsed.metadata.duration : 0;
+  // Empty transcript on real decoded audio = SILENCE, and that's a successful
+  // answer — do NOT fall through to whisper, which hallucinates filler text on
+  // silent clips ("Thank you.") that would paste as garbage. Only a decode
+  // failure (duration 0) falls through. (Break-test 2026-07-07.)
+  if (!text && seconds <= 0) return null;
+  const costMicroUsd = usdToMicro((seconds / 60) * DEEPGRAM_PRICE_PER_MIN_USD);
+  return {
+    json: {
+      text,
+      model: 'deepgram/nova-3',
+      usage: { seconds },
+    },
+    costMicroUsd,
+  };
+}
+
+/**
+ * POST /v1/transcribe — Deepgram Nova-3 primary (our key, verbatim params),
+ * OpenRouter audio/transcriptions fallback (our key). The desktop sends the
+ * same JSON body it would send to OpenRouter directly ({ model, input_audio,
+ * language, temperature }); both arms answer whisper-shaped ({ text, ... }).
  */
 export async function handleTranscribe(c: Context): Promise<Response> {
   const auth = await authPlan(c);
   if (!auth.ok) return c.json({ error: auth.error }, auth.status);
   const { plan, sub } = auth;
 
-  if (!env.OPENROUTER_API_KEY) {
+  if (!env.DEEPGRAM_API_KEY && !env.OPENROUTER_API_KEY) {
     return c.json({ error: 'transcribe upstream not configured' }, 503);
   }
 
@@ -497,6 +588,24 @@ export async function handleTranscribe(c: Context): Promise<Response> {
     body = (await c.req.json()) as Record<string, unknown>;
   } catch {
     return c.json({ error: 'invalid JSON body' }, 400);
+  }
+
+  // Primary arm: Deepgram (fast, per-second billed). Fall through on failure.
+  if (env.DEEPGRAM_API_KEY) {
+    const result = await transcribeViaDeepgram(body);
+    if (result) {
+      await recordUsage({
+        sub,
+        plan,
+        kind: 'transcribe',
+        model: 'deepgram/nova-3',
+        costMicroUsd: result.costMicroUsd,
+      });
+      return c.json(result.json);
+    }
+    if (!env.OPENROUTER_API_KEY) {
+      return c.json({ error: 'transcribe upstream failed' }, 502);
+    }
   }
 
   // Ask OpenRouter to report the call's usage.cost so we meter the EXACT charge.
