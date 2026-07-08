@@ -1,4 +1,5 @@
 import { CROSS_HOUSE_MODEL_TIERS } from '@/lib/models';
+import { resolveSingleSubscriptionOrchestratorFallback, type SingleSubscriptionQuotaFallbackOptions } from './quota-fallback-single-sub';
 import type { OrchestratorBackendId } from './types';
 
 export type RuntimeHouse = 'anthropic' | 'openai';
@@ -11,6 +12,7 @@ export interface CrossHouseFallback {
   fromModel: string;
   toModel: string;
   tier: keyof typeof CROSS_HOUSE_MODEL_TIERS;
+  action?: 'handoff' | 'downgrade' | 'hold';
   noticeKind: 'cross-house-orchestrator-handoff';
 }
 
@@ -34,7 +36,10 @@ export function isRuntimeQuotaLimitError(error: unknown): boolean {
 
 export function resolveCrossHouseOrchestratorFallback(
   backend: OrchestratorBackendId,
+  options: SingleSubscriptionQuotaFallbackOptions = {},
 ): CrossHouseFallback | null {
+  const singleSubFallback = resolveSingleSubscriptionOrchestratorFallback(backend, options);
+  if (singleSubFallback) return singleSubFallback;
   if (backend !== 'claude' && backend !== 'fable') return null;
   return {
     fromBackend: backend,
@@ -49,6 +54,8 @@ export function resolveCrossHouseOrchestratorFallback(
 }
 
 export function buildCrossHouseHandoffMessage(fallback: CrossHouseFallback): string {
+  if (fallback.action === 'hold') return 'quota exhausted — paused until reset';
+  if (fallback.action === 'downgrade') return `Claude quota hit — orchestrator degraded to Sonnet 5 until reset.`;
   const source = fallback.fromBackend === 'fable' ? 'Claude Fable' : 'Claude';
   return `${source} subscription exhausted — Codex ${fallback.toModel} is acting orchestrator on this mission thread.`;
 }
