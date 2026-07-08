@@ -66,6 +66,11 @@ interface SttPayload {
   origin?: string;
   lane?: string;
   text?: string;
+  // Plain Fn dictation carries no lane, but when the operator has opted into the
+  // Fn partials HUD (`fn_hud_partials`), the Rust side tags its `system-start`
+  // with `hud: true` so this page latches for the Fn path too. Default OFF —
+  // absent means the HUD stays invisible during Fn dictation, as before.
+  hud?: boolean;
 }
 
 interface HudState {
@@ -140,10 +145,12 @@ export default function AgentPartialsPage() {
       // the origin field is absent on some emit paths).
       if (p.origin !== 'system' && type !== 'system-pasted') return;
 
-      // Activate ONLY on an agent-lane system-start. A plain Fn system-start
-      // (no lane) is ignored → Fn dictation can NEVER show this HUD.
+      // Activate on an AGENT-lane system-start (Right-Option Symon agent) OR a
+      // plain Fn system-start explicitly tagged `hud: true` (the opt-in Fn
+      // partials HUD, `fn_hud_partials`). A plain Fn system-start with neither
+      // is ignored → Fn dictation stays invisible unless the operator opted in.
       if (type === 'system-start') {
-        if (p.lane === 'agent') activate();
+        if (p.lane === 'agent' || p.hud === true) activate();
         return;
       }
 

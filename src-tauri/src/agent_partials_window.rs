@@ -44,8 +44,14 @@ const PARTIALS_WIDTH: f64 = 820.0;
 #[cfg(target_os = "macos")]
 const PARTIALS_HEIGHT: f64 = 220.0;
 /// Bottom inset above the screen edge — clears the macOS Dock in most setups.
+/// Used by the SCREEN anchor (operator is NOT working in o8).
 #[cfg(target_os = "macos")]
 const BOTTOM_MARGIN: f64 = 48.0;
+/// Gap above the MAIN window's bottom edge for the WINDOW anchor (operator IS
+/// working in o8). ~190 logical px clears o8's own bottom chrome — the composer
+/// plus the collapsed agents tray — so the HUD never lands on card content.
+#[cfg(target_os = "macos")]
+const WINDOW_BOTTOM_GAP: f64 = 190.0;
 
 /// Create the partials window and navigate it to `/agent-partials` on the
 /// bundled Next server, then apply the macOS transparency + level + anchor
@@ -194,20 +200,35 @@ fn order_front_nonactivating(window: &tauri::WebviewWindow) {
     });
 }
 
-/// Bottom-center anchor on the monitor the MAIN o8 window sits on (falls back to
-/// this window's current monitor, then the primary). Logical coordinates. Runs
-/// on the main thread (NSScreen reads touch AppKit).
+/// Anchor the HUD. Two modes, chosen per call so the bar follows the operator:
+///
+///   - WINDOW anchor — the MAIN o8 window exists, is visible, is NOT minimized,
+///     and is FOCUSED (the operator is working inside o8). The bar centers on
+///     the window frame with its bottom edge `WINDOW_BOTTOM_GAP` above the
+///     window's bottom, so it sits over the workspace and clears o8's own bottom
+///     chrome (composer + collapsed agents tray) instead of landing on it.
+///     Clamped inside the monitor so a window shoved to a screen edge can't push
+///     the HUD off-screen.
+///   - SCREEN anchor — main is unfocused / minimized / missing (the operator is
+///     in Chrome, a terminal, etc.). Falls back to today's behavior:
+///     bottom-center of the monitor the main window sits on, `BOTTOM_MARGIN`
+///     above the screen edge.
+///
+/// Logical coordinates throughout. Runs on the main thread (NSScreen + window
+/// geometry reads touch AppKit).
 #[cfg(target_os = "macos")]
 fn reposition(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
     use tauri::Manager;
     let win = window.clone();
     let app = app.clone();
     let _ = window.run_on_main_thread(move || {
+        let main = app.get_webview_window("main");
+
         // Prefer the monitor the MAIN window is on so the bar shows on the screen
         // the operator is actually working on; degrade to this window's monitor,
         // then the primary.
-        let monitor = app
-            .get_webview_window("main")
+        let monitor = main
+            .as_ref()
             .and_then(|m| m.current_monitor().ok().flatten())
             .or_else(|| win.current_monitor().ok().flatten())
             .or_else(|| win.primary_monitor().ok().flatten());
@@ -215,12 +236,48 @@ fn reposition(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
             return;
         };
         let scale = monitor.scale_factor();
-        let origin_x = monitor.position().x as f64 / scale;
-        let origin_y = monitor.position().y as f64 / scale;
-        let logical_w = monitor.size().width as f64 / scale;
-        let logical_h = monitor.size().height as f64 / scale;
-        let x = origin_x + (logical_w - PARTIALS_WIDTH) / 2.0;
-        let y = origin_y + logical_h - PARTIALS_HEIGHT - BOTTOM_MARGIN;
+        let mon_x = monitor.position().x as f64 / scale;
+        let mon_y = monitor.position().y as f64 / scale;
+        let mon_w = monitor.size().width as f64 / scale;
+        let mon_h = monitor.size().height as f64 / scale;
+
+        // WINDOW anchor only when the operator is actively working in o8:
+        // visible, not minimized, focused. Any read failure or false condition
+        // falls through to None → the screen anchor.
+        let window_anchor = main.as_ref().and_then(|m| {
+            let visible = m.is_visible().unwrap_or(false);
+            let minimized = m.is_minimized().unwrap_or(false);
+            let focused = m.is_focused().unwrap_or(false);
+            if !visible || minimized || !focused {
+                return None;
+            }
+            let pos = m.outer_position().ok()?;
+            let size = m.outer_size().ok()?;
+            let mscale = m.scale_factor().ok()?;
+            let win_x = pos.x as f64 / mscale;
+            let win_y = pos.y as f64 / mscale;
+            let win_w = size.width as f64 / mscale;
+            let win_h = size.height as f64 / mscale;
+            Some((win_x, win_y, win_w, win_h))
+        });
+
+        let (x, y) = if let Some((win_x, win_y, win_w, win_h)) = window_anchor {
+            // The bar paints at the BOTTOM of the transparent PARTIALS frame, so
+            // the frame's bottom edge is the bar's bottom edge. Put it
+            // WINDOW_BOTTOM_GAP above the window's bottom.
+            let raw_x = win_x + (win_w - PARTIALS_WIDTH) / 2.0;
+            let raw_y = win_y + win_h - PARTIALS_HEIGHT - WINDOW_BOTTOM_GAP;
+            // Clamp inside the monitor (never off the top/left, never past the
+            // bottom-right where the frame would spill off-screen).
+            let max_x = (mon_x + mon_w - PARTIALS_WIDTH).max(mon_x);
+            let max_y = (mon_y + mon_h - PARTIALS_HEIGHT).max(mon_y);
+            (raw_x.clamp(mon_x, max_x), raw_y.clamp(mon_y, max_y))
+        } else {
+            // Screen anchor — bottom-center of the main window's monitor.
+            let x = mon_x + (mon_w - PARTIALS_WIDTH) / 2.0;
+            let y = mon_y + mon_h - PARTIALS_HEIGHT - BOTTOM_MARGIN;
+            (x, y)
+        };
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
     });
 }
