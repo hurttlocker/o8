@@ -2838,11 +2838,17 @@ mod stt_engine {
     /// listens on the broadcast); for SYSTEM-origin events it ALSO emits
     /// directly to the screen `dock` window via `emit_to(DOCK_LABEL, …)` so the
     /// live morph (recording waveform + transcript + paste flash) reliably lands
-    /// in the second webview — `app.emit` broadcast can miss the dock.
+    /// in the second webview — `app.emit` broadcast can miss the dock. The
+    /// agent-partials HUD gets the same direct delivery for the same reason.
     fn emit_stt(app: &AppHandle, origin: &str, payload: serde_json::Value) {
         if origin == "system" {
             let _ = app.emit_to(
                 crate::dock_window::DOCK_LABEL,
+                "o8:stt-event",
+                payload.clone(),
+            );
+            let _ = app.emit_to(
+                crate::agent_partials_window::PARTIALS_LABEL,
                 "o8:stt-event",
                 payload.clone(),
             );
