@@ -2818,13 +2818,16 @@ export default function CanvasGlassPreviewPage() {
     return canvasCardsRef.current[kind].find((card) => card.id === id) ?? null;
   }, []);
 
-  const canvasViewport = useCallback((nextZoom = canvasZoomLevel) => ({
-    x: Math.round((0 - pan.x) / nextZoom),
-    y: Math.round((0 - pan.y) / nextZoom),
-    w: Math.round(winSize.w / nextZoom),
-    h: Math.round(winSize.h / nextZoom),
-    zoom: nextZoom,
-  }), [canvasZoomLevel, pan.x, pan.y, winSize.h, winSize.w]);
+  const canvasViewport = useCallback((nextZoom = canvasZoomLevel, nextPan?: { x: number; y: number }) => {
+    const p = nextPan ?? pan;
+    return {
+      x: Math.round((0 - p.x) / nextZoom),
+      y: Math.round((0 - p.y) / nextZoom),
+      w: Math.round(winSize.w / nextZoom),
+      h: Math.round(winSize.h / nextZoom),
+      zoom: nextZoom,
+    };
+  }, [canvasZoomLevel, pan, winSize.h, winSize.w]);
 
   const animatePanTo = useCallback((target: { x: number; y: number }) => {
     if (panTweenRef.current !== null) cancelAnimationFrame(panTweenRef.current);
@@ -3122,12 +3125,14 @@ export default function CanvasGlassPreviewPage() {
             const x = typeof args.x === 'number' ? args.x : null;
             const y = typeof args.y === 'number' ? args.y : null;
             if (dx !== null && dy !== null) {
-              animatePanTo({ x: pan.x + dx, y: pan.y + dy });
-              data = { ok: true, viewport: canvasViewport() };
+              const target = { x: pan.x + dx, y: pan.y + dy };
+              animatePanTo(target);
+              data = { ok: true, viewport: canvasViewport(canvasZoomLevel, target) };
               note = 'panned canvas';
             } else if (x !== null && y !== null) {
-              animatePanTo({ x, y });
-              data = { ok: true, viewport: canvasViewport() };
+              const target = { x, y };
+              animatePanTo(target);
+              data = { ok: true, viewport: canvasViewport(canvasZoomLevel, target) };
               note = 'panned canvas';
             } else {
               ok = false;
