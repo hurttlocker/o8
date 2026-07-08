@@ -1,8 +1,8 @@
 # Symon Agent Mode — phone-hosted voice, Mac-executed tools
 
-**Status: CONTRACT v1 — mobile freezes types against this document.** Any later change to an endpoint, event name, or payload shape must be flagged loudly (commit message + issue + direct note to the mobile lane), never slipped in.
+**Status: AUTHORITATIVE CONTRACT — BUILT AND LIVE END-TO-END (2026-07-08).** Mobile leg shipped at `o8-mobile@84a975c` (TestFlight); desktop half at `8edbfe16`, shipped in o8 **v0.1.566**. This is THE phone↔Symon contract of record. Any change to an endpoint, event name, or payload shape must be flagged loudly (commit message + issue + direct note to the mobile lane), never slipped in.
 
-Counterpart: `hurttlocker/o8-mobile` (Expo SDK 55 / RN 0.83). Desktop half lives in this repo. Supersedes the text-first draft in `docs/phone-symon-contract.md` for the voice path (that doc's confirm-bridge section remains the reference for the approval follow-up).
+Counterpart: `hurttlocker/o8-mobile` (Expo SDK 55 / RN 0.83). Desktop half lives in this repo. Supersedes `docs/phone-symon-contract.md` for the voice path — that doc is a historical proposal whose only still-live sections are the text-first say loop and the symon-confirm approval bridge (both PROPOSED, unbuilt; see its status header).
 
 ## What this is
 
