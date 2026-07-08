@@ -20,8 +20,24 @@ import {
   type RealtimeSessionHandle,
   type RealtimeStatus,
 } from '@/lib/voice/realtime-client';
+import { REALTIME_MODEL, DEFAULT_VOICE } from '@/lib/voice/realtime-session-config';
 
 const LOG = '[realtime-host]';
+
+/** A recent dock confirm card, for the Agent-mode tool relay's honest needs_confirmation. */
+interface SymonConfirmEntry {
+  tool: string;
+  taskId?: string;
+  at: number;
+  consumed?: boolean;
+}
+
+/** window.__o8SymonAgent — the phone-hosted Agent Mode surface (see the bridge effect). */
+interface SymonAgentBridge {
+  invokeTool: ((name: string, args: Record<string, unknown>) => Promise<unknown>) | null;
+  config: { model: string; voice: string; tools: Array<Record<string, unknown>> } | null;
+  confirms: SymonConfirmEntry[];
+}
 
 /**
  * Auto-stop after this long with no activity — token guardrail. Counts only
@@ -211,6 +227,62 @@ export function RealtimeVoiceHost() {
   useEffect(() => {
     (window as unknown as { __o8RealtimeStatus?: RealtimeStatus }).__o8RealtimeStatus = status;
   }, [status]);
+
+  // Symon Agent Mode (phone-hosted) bridge. The phone hosts the WebRTC session,
+  // but every tool STILL executes here on the Mac. This publishes the surface the
+  // gated routes reach through the webview eval bridge:
+  //   • __o8SymonAgent.invokeTool(name, args) — the SAME realtime_invoke_tool the
+  //     desk session calls (identical dispatcher + SafetyClass gate);
+  //   • __o8SymonAgent.config.tools — realtime_tools() schemas so /session bakes
+  //     Symon's whole brain into the phone's ephemeral token (config parity);
+  //   • __o8SymonAgent.confirms — recent dock confirm cards so the tool relay can
+  //     honestly tell the phone "approve on the Mac" instead of hanging.
+  // We publish here (not from a raw eval) because bare-specifier dynamic imports
+  // don't resolve inside an eval string. See docs/symon-agent-mode.md.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let alive = true;
+    const w = window as unknown as { __o8SymonAgent?: SymonAgentBridge };
+    const confirms: SymonConfirmEntry[] = [];
+    const bridge: SymonAgentBridge = { invokeTool: null, config: null, confirms };
+    w.__o8SymonAgent = bridge;
+    let unlistenConfirm: (() => void) | null = null;
+
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => {
+        if (!alive) return;
+        bridge.invokeTool = (name: string, args: Record<string, unknown>) =>
+          invoke('realtime_invoke_tool', { name, args });
+        return invoke('realtime_tools').then((raw) => {
+          if (!alive) return;
+          const tools = Array.isArray(raw)
+            ? (raw as Array<Record<string, unknown>>).map((t) => ({ type: 'function', ...t }))
+            : [];
+          let voice = DEFAULT_VOICE;
+          try { voice = localStorage.getItem('o8:realtime-voice') || DEFAULT_VOICE; } catch { /* no localStorage */ }
+          bridge.config = { model: REALTIME_MODEL, voice, tools };
+          console.log(`${LOG} agent bridge ready (${tools.length} tools)`);
+        });
+      })
+      .catch((e) => console.warn(`${LOG} agent bridge unavailable:`, e));
+
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<{ tool?: string; taskId?: string }>('o8:agent-confirm', (e) => {
+          const p = e.payload || {};
+          confirms.push({ tool: typeof p.tool === 'string' ? p.tool : '', taskId: p.taskId, at: Date.now() });
+          while (confirms.length > 20) confirms.shift();
+        }),
+      )
+      .then((un) => { if (alive) unlistenConfirm = un; else un(); })
+      .catch(() => { /* not in a Tauri webview */ });
+
+    return () => {
+      alive = false;
+      unlistenConfirm?.();
+      if (w.__o8SymonAgent === bridge) w.__o8SymonAgent = undefined;
+    };
+  }, []);
 
   // On a React-driven unmount, LIGHT teardown only — stop the session + timers
   // but do NOT clear the resume marker (this unmount may be a navigation; the

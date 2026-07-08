@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
+import {
+  REALTIME_MODEL,
+  DEFAULT_VOICE,
+  CLIENT_SECRETS_URL,
+  REALTIME_CALLS_URL,
+  REALTIME_TOKEN_TTL_SECONDS,
+  buildClientSecretsBody,
+} from '@/lib/voice/realtime-session-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,12 +28,8 @@ export const dynamic = 'force-dynamic';
  * in middleware (/api/voice/) + requirePanelAuth.
  */
 
-// Keep in lockstep with session/route.ts REALTIME_MODEL (Q trial: 2.1-mini).
-const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
-const DEFAULT_VOICE = 'marin';
-const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
-const CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
-const TOKEN_TTL_SECONDS = 600;
+// Model / voice / URLs / TTL come from the shared session-config module so this
+// relay stays in lockstep with the desk mint and the Agent-mode mint.
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -49,10 +53,7 @@ export async function POST(request: NextRequest) {
     const mint = await fetch(CLIENT_SECRETS_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${byokKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        expires_after: { anchor: 'created_at', seconds: TOKEN_TTL_SECONDS },
-        session: { type: 'realtime', model, audio: { output: { voice } } },
-      }),
+      body: JSON.stringify(buildClientSecretsBody({ model, voice }, REALTIME_TOKEN_TTL_SECONDS)),
     });
     const mintData = await mint.json().catch(() => null) as { value?: string; error?: { message?: string } } | null;
     if (!mint.ok || !mintData?.value) {
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Exchange the browser's offer SDP for OpenAI's answer SDP (raw SDP, not JSON).
-    const call = await fetch(`${CALLS_URL}?model=${encodeURIComponent(model)}`, {
+    const call = await fetch(`${REALTIME_CALLS_URL}?model=${encodeURIComponent(model)}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${mintData.value}`, 'Content-Type': 'application/sdp' },
       body: offerSdp,

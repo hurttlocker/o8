@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
+import {
+  REALTIME_MODEL,
+  DEFAULT_VOICE,
+  CLIENT_SECRETS_URL,
+  REALTIME_TOKEN_TTL_SECONDS,
+  buildClientSecretsBody,
+} from '@/lib/voice/realtime-session-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,14 +28,9 @@ export const dynamic = 'force-dynamic';
  * Gated in middleware (/api/voice/ loopback+token) AND requirePanelAuth here.
  */
 
-// Q trial 2026-07-07: gpt-realtime-2.1-mini (announced 07-06) — mini reasoning
-// realtime model, text in/out 85%/90% cheaper than gpt-realtime-2. Testing
-// whether the quality holds for Symon S2S before adding managed tokens.
-// Revert to the flagship by setting 'gpt-realtime-2.1' (or 'gpt-realtime-2').
-const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
-const DEFAULT_VOICE = 'marin';
-const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
-const TOKEN_TTL_SECONDS = 600;
+// Model / voice / TTL / client-secrets URL now live in the shared session-config
+// module (src/lib/voice/realtime-session-config.ts) so this desk mint, the /sdp
+// relay, and the phone-hosted Agent-mode mint can never drift apart.
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -58,14 +60,10 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${byokKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        expires_after: { anchor: 'created_at', seconds: TOKEN_TTL_SECONDS },
-        session: {
-          type: 'realtime',
-          model,
-          audio: { output: { voice } },
-        },
-      }),
+      // Desk mint: model + voice only. Instructions + tools + transcription are
+      // applied client-side via session.update (realtime-client.ts), so this
+      // stays the legacy minimal shape — identical bytes to before the refactor.
+      body: JSON.stringify(buildClientSecretsBody({ model, voice }, REALTIME_TOKEN_TTL_SECONDS)),
     });
 
     const data = await mint.json().catch(() => null) as { value?: string; expires_at?: number; error?: { message?: string } } | null;

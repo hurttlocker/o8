@@ -12,6 +12,12 @@
  * logged with [realtime] so the live talk↔hear loop is observable while we tune.
  */
 
+// Symon's persona lives in the shared session-config module so the desk session
+// and the phone-hosted Agent-mode mint (/api/mobile/symon/session) speak with the
+// identical brain. Isomorphic module — safe to import from this browser-only file
+// (it carries no `server-only` poison pill). See docs/symon-agent-mode.md.
+import { DEFAULT_INSTRUCTIONS } from '@/lib/voice/realtime-session-config';
+
 export type RealtimeStatus =
   | 'idle'
   | 'requesting-mic'
@@ -86,28 +92,8 @@ function forwardPresence(status: RealtimeStatus): void {
     .catch(() => { /* not in a Tauri webview */ });
 }
 
-const DEFAULT_INSTRUCTIONS =
-  "You are Symon, the voice of o8 — the operator's desktop command surface. " +
-  'Speak naturally and concisely, like a sharp teammate who is easy to talk to; ' +
-  'keep replies short since they are spoken aloud. ' +
-  'You can act on the operator’s machine through tools. Before you run a tool that ' +
-  'changes something — dispatching agents, sending mail, running commands, editing ' +
-  'files — say in one short sentence what you are about to do; some actions pop an ' +
-  'approval card the operator taps to allow, so your heads-up tells them why. ' +
-  'Read-only lookups — status, lists, "what\'s running", asking the Brain — just do, ' +
-  'then answer. ' +
-  'You are the CONDUCTOR, not the whole orchestra — route each request to whoever does ' +
-  'it best, then narrate. Do simple things yourself: status, lists, what is running, ' +
-  'weather, music, volume, opening a surface, a quick Brain question. For anything DEEP ' +
-  'or multi-step — writing or changing code, figuring something out, showing or ' +
-  'rendering something on the operator screen, work that needs several tools — hand it ' +
-  'to the live agent with o8_delegate and narrate what is happening while it works, ' +
-  'rather than doing that heavy lifting yourself. Use o8_dispatch when they want a ' +
-  'separate tracked coding worker in a worktree; use o8_delegate when they want the ' +
-  'agent to act live, right now. ' +
-  'Never read long tool output back verbatim; summarize the part that ' +
-  'answers the question. When something is ambiguous, ask one short question instead ' +
-  'of guessing.';
+// DEFAULT_INSTRUCTIONS is imported at the top of the module from the shared
+// session-config source (parity with the Agent-mode mint).
 
 /**
  * Start a live realtime voice session. Returns a handle immediately (status
