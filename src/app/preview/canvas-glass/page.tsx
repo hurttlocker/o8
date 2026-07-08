@@ -165,6 +165,7 @@ const ZOOM_STEPS = [
 type CanvasCardKind = 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent';
 const CANVAS_CARD_KINDS: CanvasCardKind[] = ['term', 'file', 'image', 'video', 'browser', 'chat', 'diff', 'spec', 'brain', 'markdown', 'agent'];
 const CANVAS_GEOM_FLOOR = 140;
+const SPAWN_CHOREOGRAPHY_TTL_MS = 20_000;
 // Broad lite shape every card satisfies — enough to list + title + resize
 // without reaching for the 11 concrete card types.
 type CanvasCardLite = {
@@ -176,7 +177,7 @@ type CanvasCardLite = {
   src?: string; mediaId?: string; poster?: string; branch?: string | null; stat?: string; packetId?: string | null;
 };
 const CANVAS_READ_CAP = 4096;
-type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number };
+type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number; expiresAt: number };
 type SpawnReservation = { id: number; x: number; y: number; w: number; h: number };
 
 // Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
@@ -1864,9 +1865,12 @@ export default function CanvasGlassPreviewPage() {
   }, [pan.x, pan.y]);
 
   const takeSpawnChoreography = useCallback((repoPath: string | null | undefined): SpawnChoreography | null => {
+    const now = Date.now();
+    spawnChoreographyRef.current = spawnChoreographyRef.current.filter((entry) => entry.expiresAt > now);
     const index = spawnChoreographyRef.current.findIndex((entry) => entry.repoPath === repoPath);
-    if (index < 0) return null;
-    const [entry] = spawnChoreographyRef.current.splice(index, 1);
+    const [entry] = index >= 0
+      ? spawnChoreographyRef.current.splice(index, 1)
+      : spawnChoreographyRef.current.splice(0, 1);
     return entry ?? null;
   }, []);
 
@@ -1958,10 +1962,12 @@ export default function CanvasGlassPreviewPage() {
     if (origin === 'symon') symonSpawnWindowUntilRef.current = Date.now() + 20_000;
     if (n > 1 && !reducedMotion()) {
       const spawnOrigin = viewportSpawnOrigin();
+      const expiresAt = Date.now() + SPAWN_CHOREOGRAPHY_TTL_MS;
       spawnChoreographyRef.current.push(...Array.from({ length: n }, (_, index) => ({
         repoPath,
         origin: spawnOrigin,
         delayMs: index * CARD_ENTRANCE.staggerMs,
+        expiresAt,
       })));
     }
     fetch('/api/orchestrator/spawn-prompt', {
