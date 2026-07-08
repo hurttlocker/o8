@@ -55,6 +55,8 @@ import {
   envReviewerBackend,
   envSubscriptionProfile,
   envSupervisorAutoEscalate,
+  envTelemetryIngestUrl,
+  envTelemetryOptIn,
   envThinkingEffort,
   envWorkersUseBrain,
   type OverlapGateMode,
@@ -285,6 +287,21 @@ export interface OperatorDefaults {
   autoApplyUpdates: AutoApplyUpdates;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
+  /**
+   * Crash-telemetry opt-in (Rock 2). **Off by default.** When on AND an ingest
+   * endpoint is configured (`O8_TELEMETRY_INGEST_URL` env or
+   * {@link telemetryIngestUrl}), the uploader batch-POSTs captured crash lines
+   * (stack traces + app version — no user content). Off = crashes are still
+   * captured locally to `~/.o8/telemetry/crashes.jsonl` but never leave the
+   * machine. Env: `O8_TELEMETRY_OPT_IN` (1/0).
+   */
+  telemetryOptIn: boolean;
+  /**
+   * Crash-telemetry ingest endpoint. Empty = no upload (local capture only).
+   * `O8_TELEMETRY_INGEST_URL` env overrides this. Only consulted when
+   * {@link telemetryOptIn} is on.
+   */
+  telemetryIngestUrl: string;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -343,6 +360,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   autoApplyUpdates: 'off',
   collideAggregator: 'auto',
+  // Crash telemetry OFF by default — local capture only, nothing uploaded.
+  telemetryOptIn: false,
+  telemetryIngestUrl: '',
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -431,6 +451,8 @@ interface StoredOperatorDefaults {
   targetingAction?: TargetingTier;
   autoApplyUpdates?: AutoApplyUpdates;
   collideAggregator?: CollideAggregator;
+  telemetryOptIn?: boolean;
+  telemetryIngestUrl?: string;
 }
 
 type FileOperatorDefaults = Partial<OperatorDefaults> & {
@@ -550,6 +572,12 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
+  if (typeof stored.telemetryOptIn === 'boolean') {
+    result.telemetryOptIn = stored.telemetryOptIn;
+  }
+  if (typeof stored.telemetryIngestUrl === 'string') {
+    result.telemetryIngestUrl = stored.telemetryIngestUrl.trim();
+  }
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -591,6 +619,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envBuyinDoc = envBuyinDocEnabled();
   const envApplyUpdates = envAutoApplyUpdates();
   const envCollideAgg = envCollideAggregator();
+  const envTelemetry = envTelemetryOptIn();
+  const envTelemetryUrl = envTelemetryIngestUrl();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
   const subscriptionProfile =
@@ -650,6 +680,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
     collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
+    telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
+    telemetryIngestUrl: envTelemetryUrl ?? fileValues.telemetryIngestUrl ?? OPERATOR_DEFAULTS_FALLBACK.telemetryIngestUrl,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -692,6 +724,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
     collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
+    telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
+    telemetryIngestUrl: envTelemetryUrl !== null ? 'env' : fileValues.telemetryIngestUrl !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -884,6 +918,15 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.collideAggregator = update.collideAggregator;
   }
+  if (update.telemetryOptIn !== undefined) {
+    stored.telemetryOptIn = Boolean(update.telemetryOptIn);
+  }
+  if (update.telemetryIngestUrl !== undefined) {
+    if (typeof update.telemetryIngestUrl !== 'string') {
+      throw new Error('telemetryIngestUrl must be a string.');
+    }
+    stored.telemetryIngestUrl = update.telemetryIngestUrl.trim();
+  }
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
@@ -1021,6 +1064,16 @@ export function resolveBuyinDocEnabledSync(): boolean {
 
 export function resolveCollideAggregatorSync(): CollideAggregator {
   return getOperatorDefaultsSync().values.collideAggregator;
+}
+
+/** Whether crash-telemetry upload is opted in (Rock 2, default off). */
+export function resolveTelemetryOptInSync(): boolean {
+  return getOperatorDefaultsSync().values.telemetryOptIn;
+}
+
+/** Crash-telemetry ingest endpoint ('' = no upload). Env overrides file. */
+export function resolveTelemetryIngestUrlSync(): string {
+  return getOperatorDefaultsSync().values.telemetryIngestUrl;
 }
 
 /** The Targeting Machine's cheap triage/rationale tier (env > file > fallback). */
