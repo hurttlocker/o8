@@ -100,6 +100,18 @@ export async function POST(request: NextRequest) {
   if (!profileRouting.ok) {
     return operatorError(profileRouting.code, profileRouting.message, 400);
   }
+  for (const issue of issues) {
+    if (!issue.runtime) continue;
+    const issueProfileRouting = resolveSubscriptionProfileRouting({
+      profile: defaults.subscriptionProfile,
+      requestedRuntime: issue.runtime,
+      requestedModel: typeof requestedModel === 'string' ? requestedModel : null,
+      defaultDispatchModel: defaults.defaultDispatchModel,
+    });
+    if (!issueProfileRouting.ok) {
+      return operatorError(issueProfileRouting.code, issueProfileRouting.message, 400);
+    }
+  }
   const workerRouting = resolveWorkerRouting({
     workerIntent: record.workerIntent,
     requestedProvider: record.requestedProvider,
