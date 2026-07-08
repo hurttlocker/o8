@@ -114,6 +114,7 @@ export function UpdateCard() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [autoApplyUpdates, setAutoApplyUpdates] = useState<AutoApplyUpdates>('off');
+  const [blockedNote, setBlockedNote] = useState<string | null>(null);
   const updateRef = useRef<UpdateInfo | null>(null);
   const installingRef = useRef(false);
   const autoApplyingRef = useRef(false);
@@ -255,7 +256,16 @@ export function UpdateCard() {
   const handleInstall = useCallback(async () => {
     try {
       setInstalling(true);
-      await installUpdateAndRestart(updateRef.current?.releaseUrl ?? RELEASE_URL);
+      setBlockedNote(null);
+      const outcome = await installUpdateAndRestart(updateRef.current?.releaseUrl ?? RELEASE_URL);
+      if (outcome.blocked) {
+        // Kill-switch: this version was pulled post-release. Surface a quiet
+        // note instead of restarting; the operator waits for the next build.
+        setBlockedNote(
+          outcome.blocked.note?.trim()
+            || `Update to v${outcome.blocked.version} was paused by the o8 team — waiting for a fixed build.`,
+        );
+      }
       setInstalling(false);
     } catch (err) {
       console.error('[update-card] install failed:', err);
@@ -487,6 +497,24 @@ export function UpdateCard() {
           ×
         </button>
       </div>
+
+      {blockedNote ? (
+        <div
+          role="note"
+          style={{
+            marginTop: 8,
+            paddingTop: 8,
+            borderTop: '1px solid var(--t-divider-subtle)',
+            fontSize: 10.5,
+            fontWeight: 320,
+            lineHeight: 1.5,
+            color: 'var(--t-text-faint)',
+            wordBreak: 'break-word',
+          }}
+        >
+          {blockedNote}
+        </div>
+      ) : null}
 
       {expanded ? (
         <div
