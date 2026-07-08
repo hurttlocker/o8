@@ -348,6 +348,30 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     expect(json.error.code).toBe('subscription_profile_runtime_unavailable');
     expect(json.error.message).toContain('subscriptionProfile "claude-only"');
   });
+
+  it('subscriptionProfile=claude-only rejects an issue-level Codex runtime pin clearly', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'claude-only' }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      issues: [{
+        number: 90_000_127,
+        title: 'dispatch incompatible issue runtime seam',
+        body: 'Runtime is pinned on the issue object.',
+        url: '',
+        runtime: 'codex',
+      }],
+    }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('subscription_profile_runtime_unavailable');
+    expect(json.error.message).toContain('subscriptionProfile "claude-only"');
+  });
 });
 
 // ── Seam D — metered orchestrator flips the Brain on through the REAL prompt ─
