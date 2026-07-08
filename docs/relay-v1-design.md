@@ -86,3 +86,73 @@ Mac connector ──outbound wss──► relay.o8.run ◄──wss── phone
 1. Relay entitlement: founders-only vs all-paid ($19) — flag mapping per plan.
 2. Confirm LAN-first pairing for v1 (remote-pair = v2).
 3. Relay hostname (`relay.o8.run` assumed).
+
+## Mobile client redline (2026-07-08 — mobile lane, pre-build review per Track-2 protocol)
+
+Reviewed against o8-mobile HEAD. The architecture (zero-knowledge relay, HTTP-over-frames,
+last-start-wins connector) is right and buildable from the phone side. Blockers and gaps
+below must be resolved in this doc before the §Wire contract freezes — R1–R3 are
+contract-blocking, R4–R8 are asks/clarifications.
+
+- **R1 (BLOCKER, D3): the `/api/mobile/*` allowlist breaks half the app off-network.**
+  The phone's real HTTP surface today (every `apiBase()` call site, grepped at HEAD) spans
+  **26 paths across 11 prefixes**, including NON-`/api/mobile/*`: `/api/dictation/transcribe`
+  + `/polish` (composer dictation), `/api/tts` (read-aloud), `/api/repo-spec` +
+  `/api/repo-spec/asset` (o8.md notes), `/api/v2/chat-history` (transcripts),
+  `/api/worktrees/diff` (diff review — an approval-flow dependency, not a nicety),
+  `/api/panel/projects` + `/api/panel/search`, `/api/runtime/inventory`,
+  `/api/setup/orchestrator-backends`. With the tunnel allowlisted to `/api/mobile/*` only,
+  off-network loses dictation, TTS, notes, transcripts, diffs, search, and the orchestrator
+  mode selector — silently. Fix: allowlist the enumerated prefix set (mobile will freeze
+  types against the final list and can own generating it), or a `x-o8-mobile-surface`
+  route-manifest the connector fetches from the local Next app at startup.
+- **R2 (BLOCKER, D2/§Wire): per-device token presentation over the relay is unspecified.**
+  On LAN the token rides the WS URL (`/ws?token=…`, client.ts:17) at upgrade time. Via the
+  relay the phone's upgrade goes to `relay.o8.run/device/{routingId}` — no token — and the
+  connector originates the local ws-server connection itself. The contract must state HOW
+  the token reaches the Mac's validator: recommend a first in-tunnel `auth {token}` frame
+  the bridged socket must send before anything else, with the ws-server holding the socket
+  unauthenticated (no channel traffic, no `http-req` processing) until it validates.
+  Related: since the connector dials `127.0.0.1` and middleware waves loopback through,
+  the in-tunnel gate IS the entire HTTP auth off-network — say that explicitly and gate
+  `http-req` handling on token-validated sockets.
+- **R3 (BLOCKER, D4): ActivityKit tokens cannot carry the "o8 needs you" push.** The tokens
+  the Mac holds from `/api/mobile/live-activity/register` are Live-Activity
+  **update** tokens — APNs will only accept `liveactivity` pushes against them (update/end
+  that one activity); they cannot deliver a generic alert. For the relay's queue-and-notify,
+  either (a) mobile adds real remote-notification registration
+  (`registerForRemoteNotifications` → device token → registered to the Mac alongside the
+  ActivityKit token — mobile can build this, needs it in the contract + Mac storage), or
+  (b) v1 pivots to ActivityKit **push-to-start** tokens (iOS 17.2+, a third token type,
+  starts a "waiting approval" Live Activity — closest to the product's existing surface).
+  Pick one in this doc; (a) is the boring reliable choice.
+- **R4 (D2, ask): relay rate limits vs the fallback prober.** Client policy will be
+  direct-first with a short smoke-test, relay on failure — flaky LAN means the phone may
+  legitimately hit the relay several times per minute. Publish the limit numbers (N pending,
+  M attempts/min) in the wire contract so the client can back off below them, and make the
+  10s handshake deadline start at socket-admit, not DNS.
+- **R5 (D2/D6, client behavior to encode in contract): E2EE policy becomes
+  transport-dependent.** Mobile's current default is E2EE OFF with a 1500ms raw-fallback
+  grace (flag `O8_MOBILE_E2EE`). Over the relay the contract requires E2EE with no raw
+  fallback — mobile will implement per-transport policy (LAN: today's behavior unchanged;
+  relay: mandatory, fail-closed 4403). Consequence to state in D6: devices paired before
+  `serverIdentityPublicKey` existed in the QR can neither derive `routingId` nor E2EE —
+  relay UX for them is honest "re-pair at your Mac to enable remote", not an error.
+- **R6 (D3, ask): size/flow limits for `http-req`/`http-res`.** `/api/worktrees/diff` and
+  `/api/repo-spec/asset` responses reach MBs; base64 inflates 4/3 and single giant WS
+  frames will fight the mux. Specify max in-tunnel response size + a chunked
+  `http-res-part {rid, i, last}` continuation (or an explicit v1 cap with a defined
+  `413`-equivalent error the client can render).
+- **R7 (D5, client note): 4408/4409 must not look like revocation.** Client's 4401/4403
+  path calls `markRevoked()` → forces re-pair (ws.ts:461). Contract should state client
+  expectations: 4408 → offline UX + retry with backoff; 4409 → stop relay attempts until
+  entitlement refresh; neither touches revocation state. Mobile will implement exactly that.
+- **R8 (D8.3, minor): don't persist `relayRoutingId`.** It's a pure derivation of the
+  pinned `serverIdentityPublicKey` already in secure storage — derive at connect time
+  (stale-copy-on-re-pair bug avoided). The config addition mobile actually needs is just
+  the relay hostname (+ optional override for self-hosters, if that's ever a thing).
+
+Mobile-side scope confirmed as buildable once R1–R3 land: transport switch in `client.ts`
+(direct `fetch` vs http-over-frames), relay leg in `ws.ts` behind the same reconnect state
+machine, per-transport E2EE policy, presence/4408/4409 UX, and `relay.offNetwork`-gated
+surfacing. — mobile lane
