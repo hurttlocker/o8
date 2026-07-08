@@ -5,6 +5,7 @@ import {
   isCollideAggregator,
   isOrchestratorBackendSetting,
   isReviewerBackendSetting,
+  isSubscriptionProfile,
   updateOperatorDefaults,
   type OperatorDefaults,
   type OverlapGateMode,
@@ -29,6 +30,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefaults> {
   const update: Partial<OperatorDefaults> = {};
+
+  if (body.subscriptionProfile !== undefined) {
+    if (!isSubscriptionProfile(body.subscriptionProfile)) {
+      throw new Error('subscriptionProfile must be one of "both", "claude-only", "codex-only".');
+    }
+    update.subscriptionProfile = body.subscriptionProfile;
+  }
 
   if (body.parallelCap !== undefined) {
     const raw = body.parallelCap;

@@ -23,6 +23,7 @@ export type OverlapGateMode = 'advisory' | 'strict';
 export type { ThinkingEffort };
 export type SettingSource = 'env' | 'file' | 'default';
 
+export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
 export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
@@ -38,6 +39,7 @@ export interface TargetingTierUI {
 }
 
 export interface OperatorDefaults {
+  subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
@@ -78,6 +80,12 @@ export interface OperatorDefaultsResponse {
 }
 
 export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it to manage from Settings.';
+
+export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
+  { value: 'both', label: 'Both houses', detail: 'Use Claude and Codex together with the existing paired defaults.' },
+  { value: 'claude-only', label: 'Claude only', detail: 'Everything runs on your Claude subscription — Opus orchestrates, Sonnet works, escalates only when needed.' },
+  { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-5.5 orchestrates, works, and reviews.' },
+];
 
 export const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
   { value: 'adaptive', label: 'Adaptive', detail: 'Let the model choose.' },
