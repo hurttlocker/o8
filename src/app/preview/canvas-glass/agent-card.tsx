@@ -298,11 +298,11 @@ export function AgentGlassCard({
               <PhaseRing phase={phase} />
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 400, letterSpacing: '-0.15px', color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : 'var(--cnv-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: CHROME.bodySize, fontWeight: 400, letterSpacing: '-0.15px', color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : 'var(--cnv-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {card.title}
               </div>
               {meta ? (
-                <div style={{ marginTop: 1, fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: FONT }}>
+                <div style={{ marginTop: 1, fontSize: CHROME.captionSize, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: FONT }}>
                   {meta}
                 </div>
               ) : null}
@@ -333,7 +333,7 @@ export function AgentGlassCard({
             style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 7, paddingRight: 4, ...scrollFadeY }}
           >
             {transcript.lines.length === 0 && sent.length === 0 ? (
-              <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', paddingTop: 6 }}>
+              <div style={{ fontSize: CHROME.bodySize, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', paddingTop: 6 }}>
                 {transcript.status === 'loading'
                   ? 'Reading transcript…'
                   : transcript.status === 'unavailable'
@@ -348,11 +348,30 @@ export function AgentGlassCard({
             )}
           </div>
 
-          {/* Composer — talk to this agent (steer-packet). */}
+          {/* Composer — talk to this agent (steer-packet). One soft-tint pill
+              wraps the field + send (the shared CardComposer vocabulary), so the
+              circular send sits INSIDE the row rather than as a naked circle
+              flush at the card's right padding, where the 22px rounded corner
+              clipped it half-off (operator 2026-07-08). */}
           <form
             onSubmit={submitSteer}
             onPointerDown={(event) => event.stopPropagation()}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, paddingTop: 2 }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              flexShrink: 0,
+              marginTop: 2,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--cnv-edge)',
+              background: 'var(--cnv-tint)',
+              borderRadius: 999,
+              paddingTop: 4,
+              paddingBottom: 4,
+              paddingLeft: 12,
+              paddingRight: 4,
+            }}
           >
             <input
               value={draft}
@@ -363,16 +382,11 @@ export function AgentGlassCard({
               style={{
                 flex: 1,
                 minWidth: 0,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'var(--cnv-edge)',
-                background: 'var(--cnv-tint)',
-                borderRadius: 999,
-                paddingTop: 5,
-                paddingBottom: 5,
-                paddingLeft: 11,
-                paddingRight: 11,
-                fontSize: 11.5,
+                borderWidth: 0,
+                background: 'transparent',
+                paddingTop: 3,
+                paddingBottom: 3,
+                fontSize: CHROME.bodySize,
                 fontWeight: 300,
                 letterSpacing: '-0.1px',
                 color: 'var(--cnv-ink)',
@@ -412,16 +426,16 @@ export function AgentGlassCard({
             <span style={{ display: 'inline-flex', width: 16, height: 16, flexShrink: 0 }}>
               <PhaseRing phase={phase} />
             </span>
-            <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '-0.15px', color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : 'var(--cnv-ink)', fontFamily: FONT }}>
+            <span style={{ fontSize: CHROME.bodySize, fontWeight: 400, letterSpacing: '-0.15px', color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : 'var(--cnv-ink)', fontFamily: FONT }}>
               {phase.label}
             </span>
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: CHROME.bodySize, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {card.title}
             </div>
             {meta ? (
-              <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: FONT }}>
+              <div style={{ marginTop: 2, fontSize: CHROME.captionSize, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: FONT }}>
                 {meta}
               </div>
             ) : null}
