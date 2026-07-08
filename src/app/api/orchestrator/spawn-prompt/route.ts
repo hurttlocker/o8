@@ -9,6 +9,7 @@ import {
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -79,6 +80,17 @@ export async function POST(request: NextRequest) {
     requestedModel: profileRouting.requestedModel,
     source: 'spawn-prompt-api',
   });
+  try {
+    await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+  } catch (error) {
+    if (error instanceof DispatchPreflightError) {
+      return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
+        runtime: error.status.runtime,
+        house: error.status.house,
+      });
+    }
+    throw error;
+  }
 
   let issues;
   try {

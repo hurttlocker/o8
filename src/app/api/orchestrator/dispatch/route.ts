@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { dispatchMission } from '@/lib/orchestrator/operator-mission-service';
+import { DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -38,6 +39,12 @@ export async function POST(request: NextRequest) {
     const result = await dispatchMission({ missionId });
     return operatorSuccess(result);
   } catch (error) {
+    if (error instanceof DispatchPreflightError) {
+      return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
+        runtime: error.status.runtime,
+        house: error.status.house,
+      });
+    }
     const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
     return operatorError('dispatch_failed', message, 500, error);
   }

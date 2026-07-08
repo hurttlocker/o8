@@ -6,6 +6,7 @@ import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/li
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -120,6 +121,20 @@ export async function POST(request: NextRequest) {
     requestedEffort,
     source: 'create-mission-api',
   });
+  try {
+    await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+    for (const issue of issues) {
+      if (issue.runtime) await assertRuntimeDispatchable(issue.runtime);
+    }
+  } catch (error) {
+    if (error instanceof DispatchPreflightError) {
+      return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
+        runtime: error.status.runtime,
+        house: error.status.house,
+      });
+    }
+    throw error;
+  }
   const existingBranchPolicy = normalizeExistingBranchPolicy(record.existingBranchPolicy);
   if (record.existingBranchPolicy !== undefined && !existingBranchPolicy) {
     return operatorError('invalid_request', 'existingBranchPolicy must be one of: "auto", "reset", "continue", "error".', 400);
