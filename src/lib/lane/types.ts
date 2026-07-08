@@ -14,6 +14,7 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
 // ── Lane Status ──
 
@@ -52,15 +53,15 @@ const LANE_STATUS_RECORD = {
 
 export const LANE_STATUSES = Object.keys(LANE_STATUS_RECORD) as LaneStatus[];
 
-const TERMINAL_LANE_STATUS_VALUES = new Set<LaneStatus>([
-  'reviewing',
-  'failed',
-  'completed',
-  'archived',
-]);
-
+/**
+ * @deprecated Thin delegate kept for back-compat. The unified terminal-state
+ * truth now lives in `lane/terminal-states.ts`. This predicate is the
+ * WORKER-terminal notion (includes `reviewing`); call `isWorkerTerminal`
+ * directly at new call sites, or `isLaneTerminal` when you mean the
+ * lifecycle-over set.
+ */
 export function isTerminalLaneStatus(status: LaneStatus | null | undefined): boolean {
-  return Boolean(status && TERMINAL_LANE_STATUS_VALUES.has(status));
+  return isWorkerTerminal(status);
 }
 
 /**
@@ -257,7 +258,19 @@ export type LaneEventVerb =
   | 'interrupt_failed'
   // Silent-exit detector found that the lane worktree HEAD is already an
   // ancestor of the refreshed base. Payload: { headSha, comparisonRef }
-  | 'silent_exit_already_merged';
+  | 'silent_exit_already_merged'
+  // Reaper wedge-timeout enforcement (Rock 1 item 2): a parked lane sat past
+  // its conservative timeout so the reaper escalated it — the invariant is
+  // "nothing parks silently". Payload:
+  // { from, to, elapsedMs, thresholdMs, blockedReason, action }
+  | 'wedge_timeout'
+  // Prune gate (Rock 1 item 3): a worktree/clone deletion was refused because
+  // the tree had uncommitted work / recent activity / a non-terminal lane.
+  // Payload: { worktreePath, reason, forced:false }
+  | 'prune_refused'
+  // Prune gate: an operator/recovery override deleted a tree the gate would
+  // otherwise have refused. Payload: { worktreePath, reason, forced:true }
+  | 'prune_forced';
 
 export type AgentReportReason =
   | 'needs_clarification'

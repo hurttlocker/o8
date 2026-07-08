@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -487,19 +487,28 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(event).toBeUndefined();
   });
 
-  it('startup sweep removes terminal and unknown clone dirs while keeping active and context dirs', async () => {
+  it('startup sweep removes terminal and abandoned orphan clones while protecting recent orphans + active/context dirs', async () => {
     const repoPath = makeRepo();
     const worktreeRoot = join(repoPath, '.cortex-worktrees');
     const activePath = join(worktreeRoot, 'packet-pkt-active-sweep');
     const terminalPath = join(worktreeRoot, 'packet-pkt-terminal-sweep');
-    const unknownPath = join(worktreeRoot, 'packet-pkt-unknown-sweep');
+    const oldOrphanPath = join(worktreeRoot, 'packet-pkt-old-orphan-sweep');
+    const recentOrphanPath = join(worktreeRoot, 'packet-pkt-recent-orphan-sweep');
     const contextPath = join(worktreeRoot, 'context');
     const scratchPath = join(worktreeRoot, 'scratch-sweep');
     mkdirSync(activePath, { recursive: true });
     mkdirSync(terminalPath, { recursive: true });
-    mkdirSync(unknownPath, { recursive: true });
+    mkdirSync(oldOrphanPath, { recursive: true });
+    mkdirSync(recentOrphanPath, { recursive: true });
     mkdirSync(contextPath, { recursive: true });
     mkdirSync(scratchPath, { recursive: true });
+
+    // The prune gate (Rock 1 item 3) protects an orphan clone that was touched
+    // recently — a crash mid-write can leave uncommitted work in it (#1497). An
+    // abandoned orphan (old mtime) is safe to sweep; backdate it so it reads as
+    // genuinely stale rather than a live-agent tree.
+    const stale = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(oldOrphanPath, stale, stale);
 
     createLane({
       repoPath,
@@ -524,7 +533,8 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(result.removed).toBe(2);
     expect(existsSync(activePath)).toBe(true);
     expect(existsSync(terminalPath)).toBe(false);
-    expect(existsSync(unknownPath)).toBe(false);
+    expect(existsSync(oldOrphanPath)).toBe(false); // abandoned orphan → swept
+    expect(existsSync(recentOrphanPath)).toBe(true); // recent orphan → protected (#1497)
     expect(existsSync(contextPath)).toBe(true);
     expect(existsSync(scratchPath)).toBe(true);
   });

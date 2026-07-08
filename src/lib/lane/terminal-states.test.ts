@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { createLane, getLane, setLaneStatus } from './registry';
-import { TERMINAL_LANE_STATUSES, isRefusedTerminalTransition } from './terminal-states';
+import {
+  LANE_TERMINAL_STATUSES,
+  TERMINAL_LANE_STATUSES,
+  WORKER_TERMINAL_STATUSES,
+  isLaneTerminal,
+  isRefusedTerminalTransition,
+  isWorkerTerminal,
+} from './terminal-states';
+import { isTerminalLaneStatus } from './types';
 import { dispatch } from './commands';
 
 function laneFixture(branch: string) {
@@ -40,6 +48,49 @@ describe('isRefusedTerminalTransition', () => {
 
   it('terminal set stays exactly failed/completed/archived', () => {
     expect([...TERMINAL_LANE_STATUSES].sort()).toEqual(['archived', 'completed', 'failed']);
+  });
+});
+
+describe('unified terminal-state truth (lane vs worker)', () => {
+  it('LANE_TERMINAL excludes reviewing; WORKER_TERMINAL includes it', () => {
+    expect([...LANE_TERMINAL_STATUSES].sort()).toEqual(['archived', 'completed', 'failed']);
+    expect([...WORKER_TERMINAL_STATUSES].sort()).toEqual([
+      'archived',
+      'completed',
+      'failed',
+      'reviewing',
+    ]);
+    // The alias must point at the lane-terminal set, not the worker set.
+    expect(TERMINAL_LANE_STATUSES).toBe(LANE_TERMINAL_STATUSES);
+  });
+
+  it('isLaneTerminal treats reviewing as NOT terminal (merge still ahead)', () => {
+    expect(isLaneTerminal('reviewing')).toBe(false);
+    expect(isLaneTerminal('completed')).toBe(true);
+    expect(isLaneTerminal('failed')).toBe(true);
+    expect(isLaneTerminal('archived')).toBe(true);
+    expect(isLaneTerminal('running')).toBe(false);
+    expect(isLaneTerminal('awaiting_orchestrator')).toBe(false);
+    expect(isLaneTerminal(null)).toBe(false);
+    expect(isLaneTerminal(undefined)).toBe(false);
+  });
+
+  it('isWorkerTerminal treats reviewing as terminal (worker done, awaiting merge)', () => {
+    expect(isWorkerTerminal('reviewing')).toBe(true);
+    expect(isWorkerTerminal('completed')).toBe(true);
+    expect(isWorkerTerminal('failed')).toBe(true);
+    expect(isWorkerTerminal('archived')).toBe(true);
+    expect(isWorkerTerminal('running')).toBe(false);
+    expect(isWorkerTerminal('merging')).toBe(false);
+    expect(isWorkerTerminal('recovering')).toBe(false);
+    expect(isWorkerTerminal(null)).toBe(false);
+    expect(isWorkerTerminal(undefined)).toBe(false);
+  });
+
+  it('the types.ts delegate is exactly the worker-terminal notion', () => {
+    for (const status of ['reviewing', 'failed', 'completed', 'archived', 'running', 'merging', 'awaiting_orchestrator'] as const) {
+      expect(isTerminalLaneStatus(status)).toBe(isWorkerTerminal(status));
+    }
   });
 });
 
