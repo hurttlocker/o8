@@ -146,6 +146,7 @@ import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
 import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
 import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
+import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import { getServerIdentity } from './lib/mobile/e2ee-identity';
 import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
@@ -5703,6 +5704,7 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
         httpServer.listen(WS_PORT, '0.0.0.0', () => {
           console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
           wsWatchdog.start(); // idempotent — covers the port-reclaim retry path
+          startRelayConnectorIfEnabled(); // self-gating — relay must also start on this boot path
         });
       }, 500);
     } catch {
@@ -5852,6 +5854,12 @@ async function bootstrapWsServer() {
 
     // Begin event-loop lag sampling (#1498 follow-up).
     wsWatchdog.start();
+
+    // o8 Relay v1 — off-network connector (docs/relay-v1-design.md). Fully
+    // isolated + gated (entitlement + operator toggle + license token); dials OUT
+    // to the relay and bridges relayed phones into THIS ws-server. A failure here
+    // NEVER affects the LAN path — the call is self-guarded and returns null.
+    startRelayConnectorIfEnabled();
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
@@ -6373,6 +6381,7 @@ function shutdown(signal: string) {
   stopSilentExitDetectorLoop = null;
   stopDocWatcherLoop?.();
   stopDocWatcherLoop = null;
+  stopRelayConnector();
   stopWorktreeReaper();
   stopLaneZombieReaper();
   stopDashSessionGc();

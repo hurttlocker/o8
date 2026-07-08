@@ -335,7 +335,19 @@ const https = require('node:https');
 function stampClientAddr(server) {
   server.prependListener('request', (req) => {
     try {
-      req.headers['x-o8-client-addr'] = req.socket?.remoteAddress || '';
+      const peer = req.socket?.remoteAddress || '';
+      const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
+      // The o8 relay connector (a same-host loopback process) forwards a remote
+      // phone's request and sets x-o8-relay-forward so the auth gate treats it as
+      // REMOTE (Bearer required), never loopback-trusted (relay-v1 change 1).
+      // Honored ONLY from a loopback peer, and it can ONLY restrict (loopback ->
+      // remote), never escalate -- so it is not a spoof/escalation vector.
+      // See src/lib/mobile/relay-connector.ts (RELAY_FORWARD_MARKER).
+      if (loopbackPeer && req.headers['x-o8-relay-forward'] === '1') {
+        req.headers['x-o8-client-addr'] = 'o8-relay-forward';
+      } else {
+        req.headers['x-o8-client-addr'] = peer;
+      }
     } catch { /* never block a request over a stamp failure */ }
   });
   return server;
