@@ -195,6 +195,62 @@ export async function handleAnalytics(c: Context): Promise<Response> {
     select event, count(*) as count from product_events where ${notDev} group by event order by count desc limit 20
   `)).map((r) => ({ event: str(r.event), count: num(r.count) }));
 
+  // Daily activity — last 30 days, zero-filled, for the dashboard's trend
+  // chart. Active users collapse linked installs onto their owning account and
+  // count signed-in accounts only, matching the headline "users" metric.
+  const daily = (await rows(sql`
+    with days as (
+      select generate_series(
+        date_trunc('day', now()) - interval '29 days',
+        date_trunc('day', now()),
+        interval '1 day'
+      )::date as day
+    ),
+    p as (
+      select date_trunc('day', created_at)::date as day,
+             count(*) as calls,
+             coalesce(sum(cost_micro_usd), 0) as micro
+      from proxy_usage
+      where ${notDev} and created_at >= date_trunc('day', now()) - interval '29 days'
+      group by 1
+    ),
+    e as (
+      select date_trunc('day', created_at)::date as day, count(*) as events
+      from product_events
+      where ${notDev} and created_at >= date_trunc('day', now()) - interval '29 days'
+      group by 1
+    ),
+    a as (
+      select date_trunc('day', s.created_at)::date as day,
+             count(distinct coalesce(l.clerk_user_id, s.sub))
+               filter (where coalesce(l.clerk_user_id, s.sub) like 'user_%') as actives
+      from (
+        select sub, created_at from proxy_usage
+        union all
+        select sub, created_at from product_events
+      ) s
+      left join install_links l on l.install_sub = s.sub
+      where ${notDev} and s.created_at >= date_trunc('day', now()) - interval '29 days'
+      group by 1
+    )
+    select to_char(d.day, 'YYYY-MM-DD') as day,
+           coalesce(p.calls, 0)   as calls,
+           coalesce(p.micro, 0)   as micro,
+           coalesce(e.events, 0)  as events,
+           coalesce(a.actives, 0) as actives
+    from days d
+    left join p on p.day = d.day
+    left join e on e.day = d.day
+    left join a on a.day = d.day
+    order by d.day
+  `)).map((r) => ({
+    day: str(r.day),
+    calls: num(r.calls),
+    spendMicroUsd: num(r.micro),
+    events: num(r.events),
+    activeUsers: num(r.actives),
+  }));
+
   // Top accounts — ONE row per real person: linked installs roll into their
   // account (devices), and the founder's GitHub handle labels the row instead of
   // a raw id. Unlinked installs stay as their own (anonymous) rows.
@@ -269,6 +325,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       today: num(eventRow?.today),
       byName: topEvents,
     },
+    daily,
     accounts,
   });
 }
