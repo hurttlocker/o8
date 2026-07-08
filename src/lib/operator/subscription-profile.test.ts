@@ -58,4 +58,28 @@ describe('subscription profile resolver', () => {
       message: 'subscriptionProfile "claude-only" only allows runtime "claude-code". Requested runtime "codex" is unavailable under this profile.',
     });
   });
+
+  it('keeps explicit in-house models and drops cross-house defaults', () => {
+    expect(resolveSubscriptionProfileRouting({
+      profile: 'claude-only',
+      requestedRuntime: null,
+      requestedModel: 'claude-opus-4-8',
+      defaultDispatchModel: MODEL_IDS.codexDefault,
+    })).toEqual({
+      ok: true,
+      requestedRuntime: 'claude-code',
+      requestedModel: 'claude-opus-4-8',
+    });
+
+    expect(resolveSubscriptionProfileRouting({
+      profile: 'claude-only',
+      requestedRuntime: null,
+      requestedModel: null,
+      defaultDispatchModel: MODEL_IDS.codexDefault,
+    })).toEqual({
+      ok: true,
+      requestedRuntime: 'claude-code',
+      requestedModel: MODEL_IDS.claudeWorkerDefault,
+    });
+  });
 });
