@@ -70,12 +70,9 @@ class Mailbox {
 }
 
 function isHttpRes(f: Frame): boolean {
-  if (!isMuxFrame(f)) return false;
-  try {
-    return (JSON.parse(fromPayload(String(f.payload)).toString('utf8')) as { t?: string }).t === 'http-res';
-  } catch {
-    return false;
-  }
+  // The relay delivers BARE frames to the phone (it owns the mux/sid envelope, D3), so the
+  // phone reads the connector's inner frame directly.
+  return f.t === 'http-res';
 }
 
 // ── fake local Next — asserts the non-loopback marker + Bearer on every request ──
@@ -255,18 +252,17 @@ async function main(): Promise<void> {
   phoneSend(phone.ws, { t: 'auth', token: DEVICE_TOKEN });
   await delay(80);
 
-  const randomBytes = Buffer.from(crypto.getRandomValues(new Uint8Array(512)));
-  const sentPayload = toPayload(randomBytes);
-  phone.ws.send(encode({ t: 'mux', seq: 42, payload: sentPayload }));
-  const echoed = await phone.mb.waitFor((f) => isMuxFrame(f) && f.payload === sentPayload, 3000, 'echo');
-  assert(
-    fromPayload(String(echoed.payload)).equals(randomBytes),
-    'opaque payload round-trips BYTE-IDENTICAL through the relay (both directions)',
-  );
+  // A JSON frame round-trips through the relay intact, both ways (the real protocol only
+  // ever sends JSON frames — {e2ee,n,c} / {channel,event,…}). The Mac echoes the phone's
+  // frame; the relay wraps phone→Mac and delivers Mac→phone bare, so the phone reads it back.
+  const echoNonce = `e2e-${Date.now()}`;
+  phoneSend(phone.ws, { t: 'echo-probe', nonce: echoNonce });
+  const echoed = await phone.mb.waitFor((f) => f.t === 'echo-probe' && f.nonce === echoNonce, 3000, 'echo');
+  assert(echoed.nonce === echoNonce, 'a JSON frame round-trips through the relay bare, both directions');
 
   phoneSend(phone.ws, { t: 'http-req', rid: 'r1', method: 'GET', path: '/api/mobile/inbox', authorization: `Bearer ${DEVICE_TOKEN}` });
   const httpRes = await phone.mb.waitFor(isHttpRes, 3000, 'http-res');
-  const resInner = JSON.parse(fromPayload(String(httpRes.payload)).toString('utf8')) as { status: number; sawMarker: boolean };
+  const resInner = httpRes as unknown as { status: number; sawMarker: boolean };
   assert(resInner.status === 200, 'http-req is served through the tunnel (200)');
   assert(resInner.sawMarker === true, 'fake Next saw a NON-loopback x-o8-client-addr marker (change 1)');
 
