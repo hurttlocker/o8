@@ -154,3 +154,29 @@ decomposed (TestFlight = 2 stones; Apple review = external calendar).
    host child mode in the packaged build (then flip the default), UI parity eyeball.
 5. Next build effort: the rock-1 stone core (lifecycle invariant module + guarded prune gate),
    then the EAS TestFlight build stone.
+
+## Redundancy audits (2026-07-08, two architect passes) + consolidation backlog
+
+**Cleared as NOT redundant:** huddle vs Collide (orthogonal axes — worker alignment pre-edit vs
+orchestrator-turn quality; they compose) · Collide vs Best-of-N (converge-auto vs diverge-human,
+different cost class) · auto-review's blind second pass (nested escalation, not duplication) ·
+retry_packet vs reset_packet (one implementation, honest worktree-wipe flag).
+
+**Fixed in this PR (audit fold-ins, each traceable to a finding):** stuck-`launching` wedge rule
+(the unowned failure shape); reconcile restart-lost sessions → `recovering` (one state model with
+the reaper, riding the recovering wedge escalation); advisor-armed workers get the zero-diff park
+safety net (they could silent-exit where huddle-armed workers were protected); single alignment
+prompt block when both huddle and advisor arm (was double-injected).
+
+**Consolidation backlog (separate designed efforts — threshold/behavior sensitive):**
+1. Unify the two dead-lane archivers (reaper `archiveStaleDeadLanes` vs silent-exit
+   `archiveTerminallyDeadLanes` — divergent status sets, 15m vs 30m thresholds; one policy table)
+2. Merge silent-exit + reaper into one dead-owner triage tick — shared owned-session probe
+   (~80 duplicated lines), shared salvage-commit routine (coded twice), one grace-window policy
+3. Merge-verb idempotency onto the persisted store — needs a startup reservation-reaper so a
+   restart-interrupted merge doesn't report in-progress until TTL (deliberate behavior change)
+4. Wedged-but-alive liveness (heartbeat-stale, process looping) — no owner today outside codex
+   stall-guard; needs a progress-delta design
+5. Full huddle+advisor resolver unification (`resolvePacketAlignment()` — touches mission schema
+   + prompt contract)
+6. `awaiting_human` as a persistable lane status (schema + unions + UI switches)
