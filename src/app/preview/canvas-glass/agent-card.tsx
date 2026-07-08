@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { FONT, scrollFadeY } from './ui';
+import { CHROME, FONT, scrollFadeY } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
 import { runtimeColor } from '@/lib/agents/codename';
 import { PhaseRing, phaseFor, type DispatchLane } from './dispatch-dock';
@@ -136,14 +136,14 @@ function useElapsed(startedAt: string | null, live: boolean): string | null {
 function LogLine({ kind, text }: { kind: 'assistant' | 'tool' | 'error'; text: string }) {
   if (kind === 'assistant') {
     return (
-      <div style={{ fontSize: 11.5, fontWeight: 300, lineHeight: 1.45, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      <div style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.45, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {text}
       </div>
     );
   }
   const isError = kind === 'error';
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 10.5, fontWeight: 300, lineHeight: 1.4, letterSpacing: '-0.1px', color: isError ? '#f87171' : 'var(--cnv-ink-muted)' }}>
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: CHROME.captionSize, fontWeight: 300, lineHeight: 1.4, letterSpacing: '-0.1px', color: isError ? '#f87171' : 'var(--cnv-ink-muted)' }}>
       <span aria-hidden style={{ flexShrink: 0, opacity: 0.7 }}>{isError ? '!' : '›'}</span>
       <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
     </div>
@@ -161,11 +161,11 @@ function SentLine({ message }: { message: SentMessage }) {
   const noteColor = message.state === 'failed' ? '#f87171' : message.state === 'unsteerable' ? '#f59e0b' : 'var(--cnv-ink-muted)';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-      <div style={{ maxWidth: '86%', paddingTop: 4, paddingBottom: 4, paddingLeft: 9, paddingRight: 9, borderRadius: 10, background: 'var(--cnv-tint-deep)', fontSize: 11.5, fontWeight: 300, lineHeight: 1.4, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', opacity: message.state === 'sending' ? 0.7 : 1 }}>
+      <div style={{ maxWidth: '86%', paddingTop: 4, paddingBottom: 4, paddingLeft: 9, paddingRight: 9, borderRadius: 10, background: 'var(--cnv-tint-deep)', fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.4, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', opacity: message.state === 'sending' ? 0.7 : 1 }}>
         {message.text}
       </div>
       {note ? (
-        <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.1px', color: noteColor, fontFamily: FONT }}>{note}</span>
+        <span style={{ fontSize: CHROME.captionSize, fontWeight: 300, letterSpacing: '-0.1px', color: noteColor, fontFamily: FONT }}>{note}</span>
       ) : null}
     </div>
   );
