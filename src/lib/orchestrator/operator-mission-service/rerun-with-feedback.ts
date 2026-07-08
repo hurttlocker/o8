@@ -4,6 +4,8 @@ import { archiveLane, listLanes, updateLane } from '@/lib/lane/registry';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { frontierEscalationModelForCheapTier } from '@/lib/operator/subscription-profile';
 import { currentMissionState, log } from './shared';
 
 /**
@@ -39,6 +41,21 @@ function appendFeedback(base: string, feedback: string) {
   const trimmedFeedback = feedback.trim();
   if (!stripped) return `${FEEDBACK_HEADING}\n${trimmedFeedback}`;
   return `${stripped}\n\n${FEEDBACK_HEADING}\n${trimmedFeedback}`;
+}
+
+function buildEscalationSuggestion(packet: OrchestratorPacket, nextAttemptCount: number) {
+  if (nextAttemptCount < 2 || packet.tierEscalated === true) return null;
+  const targetModel = frontierEscalationModelForCheapTier({
+    profile: getOperatorDefaultsSync().values.subscriptionProfile,
+    runtime: packet.workerRouting?.selectedRuntime ?? packet.runtime,
+    model: packet.workerRouting?.selectedModel ?? packet.assignedModel ?? null,
+  });
+  if (!targetModel) return null;
+  return {
+    targetRuntime: 'claude-code' as const,
+    targetModel,
+    reason: `This single-subscription cheap-tier packet has been rerun ${nextAttemptCount} times. Consider rerunning the next attempt on ${targetModel}; o8 will not escalate automatically.`,
+  };
 }
 
 /**
@@ -135,6 +152,7 @@ async function rerunRegistryPacketWithFeedback(
 ) {
   let worktreePruned = false;
   let referenceLabel = packetId;
+  let escalationSuggestion: ReturnType<typeof buildEscalationSuggestion> = null;
 
   const { state: finalState } = await withMissionRegistryState(missionId, async (current) => {
     const packet = current.packets.find((candidate) => candidate.id === packetId);
@@ -153,6 +171,10 @@ async function rerunRegistryPacketWithFeedback(
     }
 
     resetPacketFields(packet);
+    const nextAttemptCount = (packet.attemptCount ?? 0) + 1;
+    escalationSuggestion = buildEscalationSuggestion(packet, nextAttemptCount);
+    packet.attemptCount = nextAttemptCount;
+    if (escalationSuggestion) packet.tierEscalated = true;
     packet.summary = appendFeedback(originalSummary, feedback);
     packet.prompt = appendFeedback(originalPrompt, feedback);
 
@@ -170,6 +192,7 @@ async function rerunRegistryPacketWithFeedback(
     referenceLabel,
     dispatched,
     worktreePruned,
+    ...(escalationSuggestion ? { escalationSuggestion } : {}),
     note: dispatched
       ? `Packet ${referenceLabel} relaunched with operator feedback.`
       : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,
@@ -200,6 +223,7 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
 
   let worktreePruned = false;
   let referenceLabel = packetId;
+  let escalationSuggestion: ReturnType<typeof buildEscalationSuggestion> = null;
 
   const { state: finalState } = await withLockedState(async (current) => {
     const packet = current.packets.find((candidate) => candidate.id === packetId);
@@ -222,6 +246,10 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
 
     // Step 2 — reset packet fields so the dispatch tick treats it as queued.
     resetPacketFields(packet);
+    const nextAttemptCount = (packet.attemptCount ?? 0) + 1;
+    escalationSuggestion = buildEscalationSuggestion(packet, nextAttemptCount);
+    packet.attemptCount = nextAttemptCount;
+    if (escalationSuggestion) packet.tierEscalated = true;
 
     // Step 3 — apply feedback to summary (consumed by buildPacketPrompt)
     // and prompt (surfaced in the details popover).
@@ -246,6 +274,7 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
     referenceLabel,
     dispatched,
     worktreePruned,
+    ...(escalationSuggestion ? { escalationSuggestion } : {}),
     note: dispatched
       ? `Packet ${referenceLabel} relaunched with operator feedback.`
       : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,

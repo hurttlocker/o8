@@ -9,7 +9,7 @@ import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget'
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
 import { normalizeRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
-import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -101,6 +101,13 @@ export async function POST(request: NextRequest) {
       requestedModel: profileRouting.requestedModel,
       source: 'delegate-api',
     });
+    const huddle = typeof body.huddle === 'boolean'
+      ? body.huddle
+      : isSingleSubCheapTierWorker({
+          profile: defaults.subscriptionProfile,
+          runtime: workerRouting.selectedRuntime,
+          model: workerRouting.selectedModel,
+        });
 
     // #535 — Compute a read budget at dispatch time so weaker models don't
     // start writing before reading the adjacent surface. The helper returns
@@ -163,11 +170,13 @@ export async function POST(request: NextRequest) {
       archivedAt: null,
       review: null,
       lane: null,
+      assignedModel: workerRouting.selectedModel,
       predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
       readBudget,
       edgeCaseSites,
       workerIntent: workerRouting.workerIntent,
       workerRouting,
+      ...(huddle ? { huddle } : {}),
       prompt: launchPrompt,
     };
 

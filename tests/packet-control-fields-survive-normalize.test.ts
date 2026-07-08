@@ -90,6 +90,7 @@ function fullPacketFixture() {
     comparisonGroupId: 'cmp-1',
     comparisonIndex: 1,
     assignedModel: 'gpt-5.5',
+    tierEscalated: true,
     predictedFiles: ['src/a.ts', 'src/b.ts'],
     workerIntent: 'reviewer',
     useBrain: true,
@@ -171,11 +172,13 @@ describe('packet fields survive normalize', () => {
     const normalized = normalizeOrchestratorMissionState(stateWithPacket({
       ...fullPacketFixture(),
       operatorStopped: undefined,
+      tierEscalated: undefined,
       dispatchRuntimePin: undefined,
       orchestratorThreadId: undefined,
     }));
 
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
+    expect(normalized.packets[0].tierEscalated).toBeUndefined();
     expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
     expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
   });

@@ -30,8 +30,18 @@ export interface SubscriptionProfileRoutingError {
   message: string;
 }
 
+export interface CheapTierWorkerInput {
+  profile: SubscriptionProfile;
+  runtime?: OrchestratorRuntime | null;
+  model?: string | null;
+}
+
 export function isSubscriptionProfile(value: unknown): value is SubscriptionProfile {
   return value === 'both' || value === 'claude-only' || value === 'codex-only';
+}
+
+export function isSingleSubscriptionProfile(profile: SubscriptionProfile): boolean {
+  return profile !== 'both';
 }
 
 export function resolveSubscriptionProfileHouseDefaults(profile: SubscriptionProfile): SubscriptionProfileHouseDefaults | null {
@@ -60,6 +70,28 @@ function modelHouse(model: string): 'claude' | 'codex' | null {
   if (normalized.startsWith('claude-') || normalized.includes('/claude-')) return 'claude';
   if (normalized.startsWith('gpt-') || normalized.startsWith('openai-') || normalized.includes('/gpt-')) return 'codex';
   return null;
+}
+
+function isClaudeFrontierModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return normalized.includes('opus-4-8') || normalized.includes('opus-4-7') || normalized.includes('opus[1m]');
+}
+
+function isClaudeCheapTierModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return normalized.includes('sonnet') || normalized.includes('haiku') || normalized.includes('opus-4-6');
+}
+
+export function isSingleSubCheapTierWorker(input: CheapTierWorkerInput): boolean {
+  if (!isSingleSubscriptionProfile(input.profile)) return false;
+  if (input.profile !== 'claude-only' || input.runtime !== 'claude-code') return false;
+  const model = input.model?.trim() || MODEL_IDS.claudeWorkerDefault;
+  if (isClaudeFrontierModel(model)) return false;
+  return isClaudeCheapTierModel(model);
+}
+
+export function frontierEscalationModelForCheapTier(input: CheapTierWorkerInput): string | null {
+  return isSingleSubCheapTierWorker(input) ? MODEL_IDS.raw.anthropicClaudeOpus48 : null;
 }
 
 function modelAllowedForProfile(profile: SubscriptionProfile, model: string): boolean {
