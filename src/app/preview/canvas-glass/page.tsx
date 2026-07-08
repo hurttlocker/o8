@@ -52,6 +52,7 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { usableCanvasArea } from './canvas-drag';
+import { carveChrome, chromeRectsCanvas } from './chrome-rects';
 import { computeGrid, slotToCardGeom, type GridItem, type Slot } from './form-fit';
 import { NavigatorLoupe, type MinimapCard } from './navigator-loupe';
 import { ORB_DEFAULTS, readOrbSettings, writeOrbSettings, type OrbSettings } from './orb-settings';
@@ -297,6 +298,10 @@ export default function CanvasGlassPreviewPage() {
   // Infinite-canvas pan (#1239 Phase 2) — view offset in canvas px. Free mode
   // only; grid mode resets it to origin and packs to the viewport.
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  // Live mirror of pan for the placement helpers (findFreeSpot / grid), which run
+  // off refs so their identity stays stable — reading pan directly would churn
+  // every callback that depends on them on each scroll frame.
+  const panRef = useRef(pan);
   const panningRef = useRef(false);
   const panTweenRef = useRef<number | null>(null);
   const [composerValue, setComposerValue] = useState('');
@@ -567,6 +572,11 @@ export default function CanvasGlassPreviewPage() {
       // non-critical
     }
   }, [loupeSize]);
+
+  // Keep the pan mirror fresh for the ref-based placement helpers.
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
 
   // Kill the text-selection "highlight" a drag leaves behind: dragging the
   // navigator ball / a card / panning the canvas paints a selection across the
@@ -1272,21 +1282,37 @@ export default function CanvasGlassPreviewPage() {
     ];
   }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
-  /** First clear spot scanning reading-order; least-covered cell when the
-   *  canvas is genuinely full. When `anchor` is set (a sibling's position), pick
-   *  the NEAREST free cell to it instead of the first in reading-order — so a
-   *  spawn burst / same-repo fleet clusters as a group rather than scattering. */
+  /** Nearest clear spot to an anchor (the viewport centre by default, or a caller
+   *  -supplied cluster origin) inside the VISIBLE viewport — least-covered cell
+   *  when the field is genuinely full. Reading-order first-fit used to let each
+   *  new card drift down-and-right until a session read "scattered everywhere";
+   *  gathering around the anchor keeps a working session visually together.
+   *  Existing floating chrome (composer, dispatch dock, review picker, right
+   *  dock) is treated as occupied, so a card never spawns under it. `anchor` is
+   *  optional (canvas px) — the agent-card cluster passes its own. */
   const findFreeSpot = useCallback((w: number, h: number, anchor?: { x: number; y: number } | null): { x: number; y: number } => {
-    const taken = [...cardRectsRef.current, ...spawnReservationsRef.current];
-    const pad = 18;
-    // Layout-space viewport — zooming out widens the field spawns can use.
     const z = canvasZoom();
-    const vw = (typeof window !== 'undefined' ? window.innerWidth : 1600) / z;
-    const vh = (typeof window !== 'undefined' ? window.innerHeight : 900) / z;
-    const minX = 96;
-    const minY = 84;
-    const maxX = Math.max(minX, vw - w - 24);
-    const maxY = Math.max(minY, vh - Math.min(h, 360) - 120);
+    const p = panRef.current;
+    const taken = [
+      ...cardRectsRef.current,
+      ...spawnReservationsRef.current,
+      ...chromeRectsCanvas(p, z),
+    ];
+    const pad = 18;
+    // Visible viewport in canvas px (screen 0,0,w,h → canvas via (screen − pan)/z).
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1600;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 900;
+    const viewX = -p.x / z;
+    const viewY = -p.y / z;
+    const minX = viewX + 96 / z; // clear the left spawn rail
+    const minY = viewY + 84 / z; // clear the top control pill
+    const maxX = Math.max(minX, viewX + (vw - 24) / z - w);
+    const maxY = Math.max(minY, viewY + (vh - 96) / z - Math.min(h, 360));
+    // Anchor the search: caller cluster origin, else the viewport centre.
+    const anchorX = anchor ? anchor.x : viewX + vw / z / 2;
+    const anchorY = anchor ? anchor.y : viewY + vh / z / 2;
+    let free: { x: number; y: number } | null = null;
+    let freeDist = Infinity;
     let best = { x: minX, y: minY };
     let bestOverlap = Infinity;
     let nearestFree: { x: number; y: number } | null = null;
@@ -1300,16 +1326,18 @@ export default function CanvasGlassPreviewPage() {
           overlap += ox * oy;
         }
         if (overlap === 0) {
-          if (!anchor) return { x, y };
-          const dist = (x - anchor.x) ** 2 + (y - anchor.y) ** 2;
-          if (dist < nearestDist) { nearestDist = dist; nearestFree = { x, y }; }
+          // Distance from the candidate CENTRE to the anchor — nearest wins.
+          const dx = x + w / 2 - anchorX;
+          const dy = y + h / 2 - anchorY;
+          const dist = dx * dx + dy * dy;
+          if (dist < freeDist) { freeDist = dist; free = { x, y }; }
         } else if (overlap < bestOverlap) {
           bestOverlap = overlap;
           best = { x, y };
         }
       }
     }
-    return nearestFree ?? best;
+    return free ?? best;
   }, []);
 
   const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }, at?: SnapGeometry) => {
@@ -1509,12 +1537,17 @@ export default function CanvasGlassPreviewPage() {
     const zoom = canvasZoom();
     const gap = 26 / zoom;
     const raw = usableCanvasArea();
-    // Half-gap margin (the side insets already clear the chrome) — fills the
-    // field more generously so grid cells read bigger by default.
-    const area = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
+    // Half-gap margin (the static insets already clear the rails/composer/dock) —
+    // fills the field more generously so grid cells read bigger by default.
+    const inset = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
+    // Carve any FLOATING chrome the insets don't cover (the review picker) so
+    // tiles never pack under it. Grid mode pins pan at origin, so panRef is (0,0).
+    const area = carveChrome(inset, chromeRectsCanvas(panRef.current, zoom));
     if (area.w < 120 || area.h < 120) return;
-    const slotMap = computeGrid(Array.from({ length: order.length }, (_, i) => ({ id: i, kind: 'slot' })), area, gap);
     const byId = new Map(gridItemsRef.current.map((it) => [it.id, it]));
+    // Pack with the REAL card kinds (index-keyed to `order`) so each tile takes
+    // its kind's aspect — terminals land wider than agent tiles.
+    const slotMap = computeGrid(order.map((id, i) => ({ id: i, kind: byId.get(id)?.kind ?? 'x' })), area, gap);
     const chromeOf = (id: number): number | undefined => {
       const it = byId.get(id);
       const el = typeof document !== 'undefined' ? document.querySelector(`[data-card-id="${id}"]`) : null;
@@ -1688,10 +1721,12 @@ export default function CanvasGlassPreviewPage() {
         const cy = (r.top + r.height / 2) / zoom;
         const gap = 26 / zoom;
         const raw = usableCanvasArea();
-        // Half-gap margin (the side insets already clear the chrome) — fills the
-    // field more generously so grid cells read bigger by default.
-    const area = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
-        const slotMap = computeGrid(Array.from({ length: drag.order.length }, (_, i) => ({ id: i, kind: 'slot' })), area, gap);
+        // Same packing area as layoutGrid — half-gap inset, then carve floating
+        // chrome — so the drag placeholder lands exactly where the drop will.
+        const inset = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
+        const area = carveChrome(inset, chromeRectsCanvas(panRef.current, zoom));
+        const kindOf = new Map(gridItemsRef.current.map((it) => [it.id, it.kind]));
+        const slotMap = computeGrid(drag.order.map((id, i) => ({ id: i, kind: kindOf.get(id) ?? 'x' })), area, gap);
         let targetIndex = drag.lastIndex;
         let best = Infinity;
         for (let i = 0; i < drag.order.length; i += 1) {
@@ -4540,6 +4575,7 @@ export default function CanvasGlassPreviewPage() {
           <>
             <div role="presentation" onClick={() => setTermPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
             <motion.div
+              data-canvas-chrome
               initial={{ opacity: 0, x: -16 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
@@ -4630,6 +4666,7 @@ export default function CanvasGlassPreviewPage() {
           <>
             <div role="presentation" onClick={() => setReviewPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
             <motion.div
+              data-canvas-chrome
               initial={{ opacity: 0, x: -16 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
@@ -4745,6 +4782,7 @@ export default function CanvasGlassPreviewPage() {
           <>
             <div role="presentation" onClick={() => setSessionsOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
             <motion.div
+              data-canvas-chrome
               initial={{ opacity: 0, x: -16 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
@@ -5021,7 +5059,7 @@ export default function CanvasGlassPreviewPage() {
       >
         {/* Live agents working — grows out of the composer (gabriell_lab borrow).
             Sits ABOVE the queue so the two stack and never collide. */}
-        <div style={{ width: '100%' }}>
+        <div data-canvas-chrome style={{ width: '100%' }}>
           <AnimatePresence>
             {dispatchLanes.length ? (
               <DispatchDock
@@ -5042,6 +5080,7 @@ export default function CanvasGlassPreviewPage() {
 
       {/* ── Bottom orchestrator input — first contact lives here ─── */}
       <div
+        data-canvas-chrome
         onDragOver={(event) => {
           // Claim drags over the composer — the page-level veil stays out
           // of it and the drop becomes a picture pill, not a canvas card.
