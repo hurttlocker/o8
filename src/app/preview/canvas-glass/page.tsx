@@ -84,7 +84,7 @@ import { ShareBetaModal } from './share-beta';
 import { CanvasTour } from './canvas-tour';
 import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
-import { DispatchDock, type DispatchLane } from './dispatch-dock';
+import { DispatchDock, phaseFor, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
 import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 
@@ -170,7 +170,10 @@ type CanvasCardLite = {
   sessionName?: string | null; cwd?: string | null; name?: string; path?: string;
   items?: unknown[]; tabs?: Array<{ id: number; url?: string; title?: string }>; activeTabId?: number;
   title?: string; repoPath?: string | null; initialQuestion?: string; codename?: string; number?: number; aspect?: number;
+  markdown?: string; diff?: string; truncated?: boolean; threadId?: string; entries?: DockEntry[]; laneId?: string; runtime?: string | null;
+  src?: string; mediaId?: string; poster?: string; branch?: string | null; stat?: string; packetId?: string | null;
 };
+const CANVAS_READ_CAP = 4096;
 type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number };
 type SpawnReservation = { id: number; x: number; y: number; w: number; h: number };
 
@@ -287,6 +290,7 @@ export default function CanvasGlassPreviewPage() {
   // only; grid mode resets it to origin and packs to the viewport.
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panningRef = useRef(false);
+  const panTweenRef = useRef<number | null>(null);
   const [composerValue, setComposerValue] = useState('');
   const [composerFocused, setComposerFocused] = useState(false);
   const [inTauri, setInTauri] = useState(false);
@@ -2810,6 +2814,106 @@ export default function CanvasGlassPreviewPage() {
     }
   }, []);
 
+  const findCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
+    return canvasCardsRef.current[kind].find((card) => card.id === id) ?? null;
+  }, []);
+
+  const canvasViewport = useCallback((nextZoom = canvasZoomLevel) => ({
+    x: Math.round((0 - pan.x) / nextZoom),
+    y: Math.round((0 - pan.y) / nextZoom),
+    w: Math.round(winSize.w / nextZoom),
+    h: Math.round(winSize.h / nextZoom),
+    zoom: nextZoom,
+  }), [canvasZoomLevel, pan.x, pan.y, winSize.h, winSize.w]);
+
+  const animatePanTo = useCallback((target: { x: number; y: number }) => {
+    if (panTweenRef.current !== null) cancelAnimationFrame(panTweenRef.current);
+    const start = { ...pan };
+    const started = performance.now();
+    const duration = 350;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / duration);
+      const eased = 1 - (1 - t) ** 3;
+      setPan({
+        x: start.x + (target.x - start.x) * eased,
+        y: start.y + (target.y - start.y) * eased,
+      });
+      if (t < 1) panTweenRef.current = requestAnimationFrame(tick);
+      else panTweenRef.current = null;
+    };
+    panTweenRef.current = requestAnimationFrame(tick);
+  }, [pan]);
+
+  const capReadContent = useCallback((content: string) => {
+    if (content.length <= CANVAS_READ_CAP) return { content, truncated: false };
+    const head = content.slice(0, Math.floor(CANVAS_READ_CAP / 2));
+    const tail = content.slice(content.length - Math.ceil(CANVAS_READ_CAP / 2));
+    return { content: `${head}\n...\n${tail}`.slice(0, CANVAS_READ_CAP), truncated: true };
+  }, []);
+
+  const cardDomText = useCallback((id: number) => {
+    const node = document.querySelector(`[data-card-id="${id}"]`) as HTMLElement | null;
+    if (!node) return '';
+    const textarea = node.querySelector('textarea') as HTMLTextAreaElement | null;
+    if (textarea) return textarea.value;
+    return node.innerText.trim();
+  }, []);
+
+  const readCanvasCard = useCallback((kind: CanvasCardKind, card: CanvasCardLite, lines: number) => {
+    let content = '';
+    let truncated = false;
+    if (kind === 'term') {
+      if (!card.sessionName) return { ok: false, error: 'content-unavailable' };
+      content = xtermHandlesRef.current.get(card.sessionName)?.readText(lines) ?? '';
+      if (!content) return { ok: false, error: 'content-unavailable' };
+    } else if (kind === 'chat') {
+      const entries = (card.entries ?? []).slice(-lines);
+      content = entries.map((entry) => {
+        const role = typeof entry.role === 'string' ? entry.role : 'entry';
+        const text = 'text' in entry && typeof entry.text === 'string'
+          ? entry.text
+          : 'body' in entry && typeof entry.body === 'string'
+            ? entry.body
+            : 'title' in entry && typeof entry.title === 'string'
+              ? entry.title
+              : JSON.stringify(entry);
+        return `${role}: ${text}`;
+      }).join('\n');
+    } else if (kind === 'markdown') {
+      content = card.markdown ?? '';
+    } else if (kind === 'diff') {
+      content = card.diff ?? '';
+      truncated = Boolean(card.truncated);
+    } else if (kind === 'file') {
+      content = cardDomText(card.id);
+      if (!content) return { ok: false, error: 'content-unavailable' };
+    } else if (kind === 'brain') {
+      content = cardDomText(card.id);
+      if (!content || content.startsWith('Ask the Engineering Brain')) return { ok: false, error: 'content-unavailable' };
+    } else if (kind === 'browser') {
+      const active = card.tabs?.find((tab) => tab.id === card.activeTabId) ?? card.tabs?.[0];
+      return { ok: true, content: { url: active?.url ?? null, title: active?.title ?? canvasCardTitle(kind, card) }, truncated: false };
+    } else if (kind === 'image') {
+      return { ok: true, content: { items: card.items ?? [], count: card.items?.length ?? 0 }, truncated: false };
+    } else if (kind === 'video') {
+      return { ok: true, content: { src: card.src ?? null, name: card.name ?? null, mediaId: card.mediaId ?? null, poster: Boolean(card.poster) }, truncated: false };
+    } else if (kind === 'agent') {
+      const lane = activeLanes.find((row) => row.id === card.laneId) ?? null;
+      const phase = phaseFor(lane?.status ?? 'done');
+      content = [
+        `phase: ${phase.label}`,
+        `status: ${lane?.status ?? 'done'}`,
+        `task: ${card.title ?? ''}`,
+        `repo: ${lane?.repoPath ?? ''}`,
+        `runtime: ${lane?.runtime ?? card.runtime ?? ''}`,
+      ].filter(Boolean).join('\n');
+    } else {
+      return { ok: false, error: 'unsupported-kind' };
+    }
+    const capped = capReadContent(content);
+    return { ok: true, content: capped.content, truncated: truncated || capped.truncated };
+  }, [activeLanes, canvasCardTitle, capReadContent, cardDomText]);
+
   const patchCanvasCardGeom = useCallback((kind: CanvasCardKind, id: number, patch: { x?: number; y?: number; w?: number; h?: number }) => {
     switch (kind) {
       case 'term': setTermCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
@@ -2966,8 +3070,69 @@ export default function CanvasGlassPreviewPage() {
                 cards.push({ kind: k, id: c.id, x: Math.round(c.x), y: Math.round(c.y), z: c.z, w: Math.round(c.w), h: Math.round(c.h), title: canvasCardTitle(k, c) });
               }
             }
-            data = { cards, count: cards.length, zoom: canvasZoomLevel, grid: gridMode, dock: dockOpen, activeRepo: activeRepoPath ?? null };
+            data = { cards, count: cards.length, zoom: canvasZoomLevel, grid: gridMode, dock: dockOpen, activeRepo: activeRepoPath ?? null, viewport: canvasViewport() };
             note = `${cards.length} card${cards.length === 1 ? '' : 's'} on canvas`;
+            break;
+          }
+          case 'center-on-card':
+          case 'read-card': {
+            const kind = (typeof args.kind === 'string' ? args.kind : '') as CanvasCardKind;
+            const id = typeof args.id === 'number' ? args.id : Number(args.id);
+            if (!CANVAS_CARD_KINDS.includes(kind) || !Number.isFinite(id)) {
+              ok = false;
+              note = `${detail.verb} needs args.kind (one of ${CANVAS_CARD_KINDS.join(', ')}) and a numeric args.id — call list first`;
+              break;
+            }
+            const card = findCanvasCard(kind, id);
+            if (!card) {
+              ok = false;
+              note = 'not-found';
+              data = { ok: false, error: 'not-found' };
+              break;
+            }
+            if (detail.verb === 'center-on-card') {
+              let nextZoom = canvasZoomLevel;
+              const zoomArg = typeof args.zoom === 'number' && Number.isFinite(args.zoom) ? args.zoom : null;
+              if (zoomArg !== null) {
+                nextZoom = ZOOM_STEPS.reduce((best, step) => (
+                  Math.abs(step.value - zoomArg) < Math.abs(best.value - zoomArg) ? step : best
+                ), ZOOM_STEPS[0]).value;
+                setCanvasZoomLevel(nextZoom);
+              }
+              animatePanTo({
+                x: winSize.w / 2 - (card.x + card.w / 2) * nextZoom,
+                y: winSize.h / 2 - (card.y + card.h / 2) * nextZoom,
+              });
+              data = { ok: true, centered: { kind, id } };
+              note = `centered ${kind} ${id}`;
+            } else {
+              const lines = typeof args.lines === 'number' && Number.isFinite(args.lines) ? Math.max(1, Math.floor(args.lines)) : 40;
+              const read = readCanvasCard(kind, card, lines);
+              ok = read.ok;
+              data = read.ok
+                ? { ok: true, kind, id, title: canvasCardTitle(kind, card), content: read.content, truncated: read.truncated }
+                : { ok: false, kind, id, error: read.error };
+              note = read.ok ? `read ${kind} ${id}` : (read.error ?? 'read-card failed');
+            }
+            break;
+          }
+          case 'pan': {
+            const dx = typeof args.dx === 'number' ? args.dx : null;
+            const dy = typeof args.dy === 'number' ? args.dy : null;
+            const x = typeof args.x === 'number' ? args.x : null;
+            const y = typeof args.y === 'number' ? args.y : null;
+            if (dx !== null && dy !== null) {
+              animatePanTo({ x: pan.x + dx, y: pan.y + dy });
+              data = { ok: true, viewport: canvasViewport() };
+              note = 'panned canvas';
+            } else if (x !== null && y !== null) {
+              animatePanTo({ x, y });
+              data = { ok: true, viewport: canvasViewport() };
+              note = 'panned canvas';
+            } else {
+              ok = false;
+              note = 'pan needs numeric args.dx/dy or numeric args.x/y';
+            }
             break;
           }
           case 'move-card':
@@ -3147,7 +3312,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, canvasEnabled, canvasZoomLevel, dockOpen, gridMode, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, canvasCardTitle, patchCanvasCardGeom, dismissCanvasCard, focusCard]);
+  }, [activeRepoPath, animatePanTo, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, pan.x, pan.y, readCanvasCard, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, canvasCardTitle, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w]);
 
   if (!canvasEnabled) {
     return (

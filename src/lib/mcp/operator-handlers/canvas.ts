@@ -12,7 +12,8 @@ export const CANVAS_TOOLS: McpTool[] = [
     name: 'o8_canvas',
     description:
       "Drive the operator's canvas surface the way a human can — see every card, then place, size, raise, or dismiss it. Opens the canvas if it is not already up. Pass a `verb` and its `args`.\n" +
-      'SIGHT: `list` (args: none) → returns { cards:[{kind,id,x,y,w,h,z,title}], count, zoom, grid, dock, activeRepo }. Call this first to learn card ids — every card verb addresses a card by its (kind, id).\n' +
+      'SIGHT: `list` (args: none) → returns { cards:[{kind,id,x,y,w,h,z,title}], count, zoom, grid, dock, activeRepo, viewport:{x,y,w,h,zoom} }. Call this first to learn card ids — every card verb addresses a card by its (kind, id).\n' +
+      'CAMERA + READ: `center-on-card` {kind,id,zoom?} · `pan` {dx,dy} or {x,y} (screen-px canvas translate) · `read-card` {kind,id,lines?} (4KB cap; returns unsupported-kind/content-unavailable honestly).\n' +
       'CARD LIFECYCLE: `move-card` {kind,id,x,y} · `resize-card` {kind,id,w,h} (image/video stay aspect-locked) · `focus-card` {kind,id} (raise to front) · `close-card` {kind,id} (full teardown). kind ∈ term|file|image|video|browser|chat|diff|spec|brain|markdown|agent.\n' +
       'SPAWN: `spawn-terminal` {} · `ask-brain` {question} · `open-spec` {} · `open-browser` {url} · `spawn-agents` {task,count?,repo?}. (To paint a markdown explainer card use the o8_render tool.)\n' +
       'CONTENT: `add-file` {path} (an absolute file path → editor card) · `open-diff` {repo?} (the repo working-tree diff) · `open-chat` {threadId} (reopen a past orchestrator thread) · `add-video` {src,name?,x?,y?} (place a video from a URL/served path).\n' +
@@ -23,7 +24,7 @@ export const CANVAS_TOOLS: McpTool[] = [
       properties: {
         verb: {
           type: 'string',
-          description: 'The canvas verb (e.g. list, move-card, resize-card, focus-card, close-card, spawn-terminal, ask-brain, zoom, grid, dock, send-prompt, enter).',
+          description: 'The canvas verb (e.g. list, center-on-card, pan, read-card, move-card, resize-card, focus-card, close-card, spawn-terminal, ask-brain, zoom, grid, dock, send-prompt, enter).',
         },
         args: {
           type: 'object',
