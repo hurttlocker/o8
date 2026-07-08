@@ -14,18 +14,34 @@ real use. Beta exit = five rocks (four engineering, one proof) + three explicit 
 
 ## The five rocks
 
-### Rock 1 — Dispatch/lane lifecycle contract (M-L) — IN PROGRESS (this PR)
-- [ ] Defined terminal-state contract for the packet/lane state machine (no silent wedges)
-- [ ] Real cancel/kill verb, reachable from every surface (#1471)
-- [ ] Idempotency persisted across restarts (rerun/steer double-fire class, #1497 — live-hit
-      2026-07-08: rerun double-dispatched into two parallel clones after a restart)
-- [ ] Restart sweep must never archive running packets (#1500–#1502 class)
-- [ ] Prune-safety: never delete a worktree with uncommitted work or recent mtime without
-      emitting an event (sweep pruned a worktree under an active orchestrator, 2026-07-08)
-- [ ] Durable transcript/session binding: #1502's zero-transcript headless workers and the
-      no_session_binding failures are the same hole — a packet must never lose its session
-- [ ] Steer must be reachable from every non-terminal state (structurally dead after
-      huddle-exits, #1496)
+### Rock 1 — Dispatch/lane lifecycle contract (M-L) — BUILT (this PR)
+- [x] Terminal-state contract unified — one source with two EXPLICIT notions: LANE_TERMINAL
+      {failed,completed,archived} vs WORKER_TERMINAL (+reviewing); call sites import the
+      explicit name. Wedge-timeouts in the reaper (recovering >15m → awaiting_orchestrator;
+      awaiting_orchestrator >60m → awaiting_input + card; paused/awaiting_input >24h → reminder
+      card), edge-triggered `wedge_timeout` events — nothing parks silently. TLA+ replay
+      (~/o8-formal audit): new transitions CONFORM.
+- [x] Cancel/kill (#1471): stop verb existed (#1286); now confirmed-kill
+      SIGINT→SIGTERM→SIGKILL, status flips only on kill(pid,0)→ESRCH; a SIGKILL survivor parks
+      as kill_unconfirmed with worktree intact; `kill_escalated` event per stage.
+- [x] Idempotency persisted (#1497): SQLite `idempotency_keys` (schema v32), reserve→finalize —
+      in-flight duplicates get "in progress, not re-executed", completed ones replay the stored
+      result; wired at the shared route seam for steer/rerun/reset (+dispatch on explicit key);
+      restart-durability real-path tested.
+- [x] Restart sweep safety (#1500–#1502 class): reconcile already refused to archive live
+      lanes; the sweep now also protects recent orphan clones via the prune gate.
+- [x] Prune-safety: `prune-gate.ts` — every worktree/clone deletion refuses on uncommitted
+      work, recent mtime (30m, bounded sample — never a recursive walk), or non-terminal lane;
+      `prune_refused`/`prune_forced` events; the force path that ate two worktrees is gated.
+- [x] Transcript/session binding (#1502): root cause corrected — dispatch DOES persist
+      sessionKey uniformly; the zero-transcript symptom is a readback gap. Fault detector at
+      heartbeat + progress routes: null binding → `no_session_binding` event + human_required
+      inbox card (never self-closes).
+- [x] Steer reachability (#1496): huddle zero-diff exits park steerable (session kept warm)
+      instead of failing the packet.
+- Follow-up: `awaiting_human` is referenced by UI/docs but absent from the persistable lane
+  status enum — wedge escalation uses awaiting_input + card for now; adding the real enum value
+  touches schema + status unions + UI switches, decide deliberately.
 - Evidence: 18 issues (#1463–#1502) from one dogfood session, re-confirmed live 2026-07-08 by a
   second orchestrator (co-signed with receipts); orchestrator = only churn hotspot in 6 weeks of
   history (29 fixes). Salvage-ref banking is currently a coping strategy standing in for this
