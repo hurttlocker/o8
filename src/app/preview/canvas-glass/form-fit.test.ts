@@ -19,7 +19,7 @@ describe('form-fit columnsFor', () => {
   });
 });
 
-describe('form-fit computeGrid', () => {
+describe('form-fit computeGrid (justified rows)', () => {
   it('returns a slot per item', () => {
     const items = Array.from({ length: 6 }, (_, i) => ({ id: i, kind: 'image' }));
     const slots = computeGrid(items, AREA);
@@ -37,31 +37,49 @@ describe('form-fit computeGrid', () => {
     }
   });
 
-  it('cells are uniform in size (form-fit resizes every card the same)', () => {
-    const items = Array.from({ length: 6 }, (_, i) => ({ id: i, kind: 'image' }));
+  it('respects per-kind aspect — a landscape tile is wider than a tall one at equal height', () => {
+    // Two cards land in one row → shared row height, widths by kind aspect.
+    const slots = computeGrid([{ id: 0, kind: 'term' }, { id: 1, kind: 'brain' }], AREA);
+    const term = slots.get(0)!;
+    const brain = slots.get(1)!;
+    expect(term.h).toBeCloseTo(brain.h, 3); // same row → same height
+    expect(term.w).toBeGreaterThan(brain.w); // term reads landscape, brain tall
+  });
+
+  it('uses one consistent gutter between tiles in a row', () => {
+    const slots = computeGrid([{ id: 0, kind: 'term' }, { id: 1, kind: 'brain' }], AREA, 24);
+    const a = slots.get(0)!;
+    const b = slots.get(1)!;
+    expect(b.x - (a.x + a.w)).toBeCloseTo(24, 3);
+  });
+
+  it('no two tiles overlap', () => {
+    const kinds = ['term', 'file', 'brain', 'image', 'chat', 'diff', 'agent'];
+    const items = kinds.map((kind, i) => ({ id: i, kind }));
     const slots = [...computeGrid(items, AREA).values()];
-    const w0 = slots[0].w;
-    const h0 = slots[0].h;
-    for (const s of slots) {
-      expect(s.w).toBeCloseTo(w0, 3);
-      expect(s.h).toBeCloseTo(h0, 3);
+    for (let i = 0; i < slots.length; i += 1) {
+      for (let j = i + 1; j < slots.length; j += 1) {
+        const a = slots[i];
+        const b = slots[j];
+        const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+        const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+        expect(ox * oy).toBeLessThanOrEqual(0.5);
+      }
     }
   });
 
-  it('rows do not vertically overlap', () => {
-    const items = Array.from({ length: 6 }, (_, i) => ({ id: i, kind: 'image' }));
-    const slots = [...computeGrid(items, AREA).values()].sort((a, b) => a.y - b.y || a.x - b.x);
-    // 3 cols → row 0 is the first 3, row 1 the next 3; row 1 starts below row 0's bottom.
-    expect(slots[3].y).toBeGreaterThanOrEqual(slots[0].y + slots[0].h - 0.5);
+  it('centers the packed block in the available height for a light load', () => {
+    const slots = [...computeGrid([{ id: 0, kind: 'term' }, { id: 1, kind: 'brain' }], AREA).values()];
+    const top = Math.min(...slots.map((s) => s.y));
+    // A single centered row sits below the area top, not hugging it.
+    expect(top).toBeGreaterThan(AREA.y + 1);
   });
 
-  it('centers a short last row', () => {
-    // 3 items, 2 cols → row 0 has 2, row 1 has 1 centered.
-    const items = Array.from({ length: 3 }, (_, i) => ({ id: i, kind: 'image' }));
-    const slots = computeGrid(items, { x: 0, y: 0, w: 1000, h: 800 });
-    const last = slots.get(2)!;
-    const center = last.x + last.w / 2;
-    expect(center).toBeCloseTo(500, 0); // mid of a 1000-wide area
+  it('is deterministic — same cards produce the same layout', () => {
+    const items = Array.from({ length: 5 }, (_, i) => ({ id: i, kind: i % 2 ? 'term' : 'chat' }));
+    const a = [...computeGrid(items, AREA).entries()];
+    const b = [...computeGrid(items, AREA).entries()];
+    expect(a).toEqual(b);
   });
 
   it('empty or degenerate area yields no slots', () => {
