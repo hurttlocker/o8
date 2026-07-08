@@ -1,4 +1,5 @@
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
+import { ADVISOR_PROMPT_SECTION, resolvePacketAdvisorEnabled } from '@/lib/orchestrator/advisor-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
 import { HUDDLE_PROMPT_SECTION, resolvePacketHuddleEnabled } from '@/lib/orchestrator/huddle-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
@@ -316,6 +317,7 @@ export async function buildPacketPrompt(
   // worker posts its plan + pushback and STOPS before editing, so Claude and
   // Codex align on the approach before implementation.
   const huddleSection = resolvePacketHuddleEnabled(packet) ? HUDDLE_PROMPT_SECTION : null;
+  const advisorSection = resolvePacketAdvisorEnabled(packet) ? ADVISOR_PROMPT_SECTION : null;
   // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).
@@ -387,6 +389,7 @@ export async function buildPacketPrompt(
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
     huddleSection,
+    advisorSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,

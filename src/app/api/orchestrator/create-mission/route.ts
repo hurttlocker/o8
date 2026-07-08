@@ -3,7 +3,7 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
-import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
@@ -121,6 +121,13 @@ export async function POST(request: NextRequest) {
     requestedEffort,
     source: 'create-mission-api',
   });
+  const huddle = typeof record.huddle === 'boolean'
+    ? record.huddle
+    : isSingleSubCheapTierWorker({
+        profile: defaults.subscriptionProfile,
+        runtime: workerRouting.selectedRuntime,
+        model: workerRouting.selectedModel,
+      });
   try {
     await assertRuntimeDispatchable(workerRouting.selectedRuntime);
     for (const issue of issues) {
@@ -154,7 +161,7 @@ export async function POST(request: NextRequest) {
       sequential: record.sequential === true,
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
-      ...(typeof record.huddle === 'boolean' ? { huddle: record.huddle } : {}),
+      ...(huddle ? { huddle } : {}),
       // #1329 — carry the dispatching orchestrator thread id so workers inherit
       // its session rules. Optional; thread-less callers omit it.
       ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()

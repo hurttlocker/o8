@@ -349,6 +349,13 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     expect(packet.runtime).toBe('claude-code');
     expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
     expect(packet.workerRouting.selectedModel).toBe('claude-sonnet-5');
+    expect(packet.assignedModel).toBe('claude-sonnet-5');
+    expect(packet.huddle).toBe(true);
+
+    const prompt = await buildPacketPrompt(packet, state.mission.packets);
+    expect(prompt).toContain('Huddle mode (this packet)');
+    expect(prompt).toContain('Advisor discipline (single-sub cheap-tier worker)');
+    expect(prompt).toContain('Engineering Brain available');
   });
 
   it('subscriptionProfile=both preserves today routing exactly', async () => {
@@ -373,6 +380,32 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
     expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
     expect(packet.workerRouting.selectedModel).toBeNull();
+    expect(packet.huddle).toBeUndefined();
+  });
+
+  it('subscriptionProfile=claude-only honors explicit huddle:false', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'claude-only' }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      huddle: false,
+      issues: [{
+        number: 90_000_128,
+        title: 'dispatch claude-only no huddle seam',
+        body: 'Caller explicitly opted out.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
+    expect(packet.workerRouting.selectedModel).toBe('claude-sonnet-5');
+    expect(packet.huddle).toBeUndefined();
   });
 
   it('subscriptionProfile=claude-only rejects an explicit Codex request clearly', async () => {

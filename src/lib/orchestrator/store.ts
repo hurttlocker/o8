@@ -358,6 +358,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     assignedModel: typeof packet.assignedModel === 'string' && packet.assignedModel.trim()
       ? packet.assignedModel.trim()
       : null,
+    tierEscalated: packet.tierEscalated === true ? true : undefined,
     predictedFiles: Array.isArray(packet.predictedFiles)
       ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
       : undefined,
