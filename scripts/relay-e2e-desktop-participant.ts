@@ -15,7 +15,11 @@
  * Run:  O8_RELAY_URL=ws://127.0.0.1:8787 npx tsx services/relay/scripts/e2e-desktop-participant.ts
  * Stop: Ctrl-C.  Env override O8_E2E_PLAN=founder|pro|team to test other tiers.
  */
-import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { exportJWK, exportSPKI, generateKeyPair, importJWK, SignJWT } from 'jose';
+import type { CryptoKey } from 'jose';
 import { RelayConnector } from '@/lib/mobile/relay-connector';
 import type { Plan } from '@/lib/entitlement/types';
 
@@ -52,14 +56,29 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } else {
-    const { publicKey, privateKey } = await generateKeyPair('EdDSA');
+    // Persist the throwaway keypair so the PUBLIC key the relay is configured with
+    // stays STABLE across connector restarts (4409 stands the connector down, so a
+    // restart is expected mid-drive — a fresh key each run would break the relay's
+    // configured LICENSE_PUBLIC_KEY). Delete the keyfile to rotate.
+    const keyfile = process.env.O8_E2E_KEYFILE || join(homedir(), '.o8', 'relay-e2e-testkey.json');
+    let publicKey: CryptoKey;
+    let privateKey: CryptoKey;
+    if (existsSync(keyfile)) {
+      const saved = JSON.parse(readFileSync(keyfile, 'utf8')) as { priv: JsonWebKey; pub: JsonWebKey };
+      privateKey = (await importJWK(saved.priv, 'EdDSA')) as CryptoKey;
+      publicKey = (await importJWK(saved.pub, 'EdDSA')) as CryptoKey;
+    } else {
+      ({ publicKey, privateKey } = await generateKeyPair('EdDSA', { extractable: true }));
+      writeFileSync(keyfile, JSON.stringify({ priv: await exportJWK(privateKey), pub: await exportJWK(publicKey) }));
+      console.log(`${P} generated + persisted throwaway keypair → ${keyfile}`);
+    }
     publicPem = await exportSPKI(publicKey);
     licenseToken = await new SignJWT({ plan })
       .setProtectedHeader({ alg: 'EdDSA' })
       .setIssuer(issuer)
       .setSubject('e2e-test-mac')
       .setIssuedAt()
-      .setExpirationTime('2h')
+      .setExpirationTime('12h')
       .sign(privateKey);
   }
 
