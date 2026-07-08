@@ -59,6 +59,9 @@ interface SttEventPayload {
   origin?: 'system' | 'in-window';
   /** Session lane: 'agent' = Right-Option Symon command (never painted here). */
   lane?: string;
+  /** Opt-in Fn partials HUD (`fn_hud_partials`) — when the outside-the-window
+   *  HUD owns this session's partials, this pill stands down too. */
+  hud?: boolean;
   sessionId?: number;
   text?: string;
   level?: number;
@@ -111,11 +114,12 @@ export function useNativeDictation() {
     if (systemEvent) {
       // Agent-mode (Right-Option) sessions NEVER paint the in-window pill —
       // their partials belong to the canvas presence pill / screen surfaces.
-      // Only `system-start` carries `lane`, so latch it for the session and
-      // swallow everything until the session tears down (2026-07-08: the big
-      // white pill was double-painting over the canvas partials bar).
+      // Same for Fn sessions tagged `hud: true` (the opt-in outside-the-window
+      // partials HUD owns them). Only `system-start` carries the tags, so latch
+      // for the session and swallow everything until it tears down (2026-07-08:
+      // the big white pill was double-painting over the black partials bar).
       if (payload.type === 'system-start') {
-        systemAgentRef.current = payload.lane === 'agent';
+        systemAgentRef.current = payload.lane === 'agent' || payload.hud === true;
       }
       if (systemAgentRef.current) {
         if (payload.type === 'system-idle' || payload.type === 'system-pasted' || payload.type === 'error') {
