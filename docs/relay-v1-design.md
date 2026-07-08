@@ -1,0 +1,88 @@
+# o8 Relay v1 — off-network reach for the mobile window (PROPOSAL)
+
+Status: **PROPOSAL — awaiting Q's gate.** Phase B (implementation) does not start until this doc is approved. Ruling context: `~/Obsidian/cashcoldgame-wiki/concepts/o8-remote-access-ruling-2026-07-08.md` — mobile IS the remote window; the relay closes the one real gap (off-network reach); no web surface; cloud runners stay parked; execution never leaves the user's Mac.
+
+## Hard constraints (from the ruling — violating any of these means the design is wrong)
+
+1. **The Mac dials OUT only.** No inbound ports, no port-forwarding, no Tailscale requirement. LAN/Tailscale direct connection stays working unchanged and remains the fallback of record.
+2. **Zero-knowledge relay.** The relay forwards E2EE ciphertext frames between two sockets. It never holds a session key, never reads a frame body, never terminates the E2EE handshake. Its total knowledge: routing identifiers, connection presence, entitlement verdicts, and (transiently) APNs tokens for push.
+3. **Per-device tokens + 4401/4403 revocation semantics survive the relay hop** unchanged — revocation is decided on the Mac, not the relay.
+4. **Entitlement-gated** behind `relay.offNetwork` via the license server. Runs on Railway next to license-server.
+
+## Verified ground truth this design builds on (scout 2026-07-08)
+
+- E2EE (`o8-mobile/src/o8/e2ee.ts`, `ws.ts`; `o8/docs/mobile-e2ee.md`) wraps **WS frames only** at the raw-frame seam — `{e2ee:1, n:<24B nonce>, c:<ciphertext>}`, XSalsa20-Poly1305, X25519 ephemeral + Ed25519 identity, **server(Mac)-initiated** handshake, loopback connections skip it, flag `O8_MOBILE_E2EE` (default OFF, raw fallback after 1500ms grace). **The `/api/mobile/*` HTTP surface is NOT encrypted today** — plaintext + Bearer.
+- Client config is one object (`o8-mobile/src/o8/client.ts:12-18`): `{host, apiPort, wsPort, token, serverIdentityPublicKey?}` from the pairing QR; `apiBase=http://host:apiPort`, `wsUrl=ws://host:wsPort/ws?token=…`.
+- Per-device registry (token_hash, identity_public_key, revoked_at) is **desktop-side SQLite** (`~/.o8`, `@/lib/mobile/device-registry`). The license server has **no device registry** and mints only a `plan` claim (Hono + Postgres/Drizzle + jose EdDSA, Railway/NIXPACKS, `railway.json`, `/health`).
+- Entitlement flags (`relay.offNetwork`, `cloud.runners`) are resolved **locally from `plan`** by twin `resolveFlags(plan)` maps (mobile `entitlement.ts:22-45` ≡ desktop `src/lib/entitlement/flags.ts`); both relay flags are hardcoded `false` today — the plumbing exists, only the value + server-side source are missing.
+- Push is Mac-driven APNs (ActivityKit tokens registered to the Mac via `/api/mobile/live-activity/register`; p8 key desktop-side). No hosted push exists — off-network, a blocked approval is currently invisible until the app polls.
+- WS close codes: **4401** token revoked, **4403** handshake rejected (client stops reconnecting, forces re-pair).
+
+## Design
+
+### D1. Service shape: SEPARATE Railway service (`o8-relay`), not a license-server module
+
+- The relay is a long-lived WebSocket concentrator (hundreds of persistent sockets, memory-shaped, latency-sensitive). The license server is stateless request/response tied to payments. Different scaling knobs, different blast radii: a wedged relay must never take down licensing/Stripe webhooks, and relay deploys will iterate much faster than payment code.
+- Shared code: the relay verifies the same plan-JWT (jose, same public key) and applies the same `resolveFlags(plan)` map. v1 accepts a third copy of the ~20-line flag map with a loud drift comment; the durable fix (license server embedding flags in the JWT) is noted as follow-up so all three copies collapse.
+- Stack: same as license-server (Hono + `ws`, TypeScript, NIXPACKS, `/health`) so the ops story is one story.
+
+### D2. Topology & rendezvous — the QR-pinned identity IS the address
+
+```
+Mac connector ──outbound wss──► relay.o8.run ◄──wss── phone
+        (auth: plan JWT + macRoutingId)      (routing: macRoutingId; auth: NONE at the relay)
+```
+
+- **`macRoutingId` = SHA-256(Mac's E2EE identity public key), first 16 bytes, base58.** The phone already pins this exact public key from the pairing QR (`serverIdentityPublicKey`) — so every already-paired phone can derive the routing address with **zero new pairing material**, and the id is stable across IPs/networks.
+- **Mac side:** a connector in the desktop app dials `wss://relay.o8.run/mac` with `Authorization: Bearer <plan JWT>` + `x-o8-routing-id`. The relay verifies the JWT signature, checks `resolveFlags(plan)['relay.offNetwork']`, and registers the socket in an in-memory `routingId → macSocket` map. Reconnect with backoff; one Mac = one socket; a second registration for the same routingId supersedes the first (Mac restarts self-heal).
+- **Phone side:** dials `wss://relay.o8.run/device/{macRoutingId}`. **The relay does not authenticate phones** — it cannot (the device registry is on the Mac, and that is the zero-knowledge point). It admits the socket, pipes it to the Mac connector, and the Mac's existing per-device token + E2EE handshake accept or reject end-to-end. Anti-abuse at the relay is rate limiting only: N pending unauthenticated sockets and M connection attempts/min per routingId; a socket that hasn't completed the Mac-side handshake in 10s is dropped.
+- **Mac-side ingestion:** the connector bridges each relayed phone socket into the local ws-server as a distinct connection carrying an authoritative remote marker (the WS analog of the existing `x-o8-client-addr` socket-truth header), so the desktop **never treats a relayed socket as loopback**: the E2EE handshake is REQUIRED (no raw fallback over the relay — a relayed connection that fails the handshake is closed 4403), and per-device token validation runs exactly as on LAN.
+
+### D3. Framing — everything rides the existing E2EE envelope; HTTP tunnels inside it
+
+- The relay pipes **opaque bytes** between phone socket and a per-phone virtual stream on the Mac connector socket (a thin multiplex header `{sid, seq}` around the untouched `{e2ee:1,n,c}` frames). It never parses inner frames.
+- **HTTP tunneling decision: WS multiplexing, not HTTP proxying.** Because `/api/mobile/*` is plaintext today, letting the phone POST HTTPS to the relay would make the relay a plaintext middlebox — violating constraint 2. Instead, off-network mode adds one frame pair **inside the E2EE channel**: `http-req {rid, method, path, headers(subset), bodyB64}` → Mac connector performs the request against `127.0.0.1:{apiPort}` (path allowlisted to `/api/mobile/*`) → `http-res {rid, status, headers(subset), bodyB64}`. The phone's `client.ts` gains a transport switch: direct `fetch` on LAN (unchanged), `http-over-frames` when connected via relay. Existing Bearer semantics ride inside the tunnel untouched.
+  - Rejected alternative — relay HTTP proxying: simpler client code, but the relay would read every approval payload; wrong by constraint 2. Rejected — extending frame crypto to raw HTTP: two crypto paths to maintain for the same bytes.
+- **Consequence stated plainly:** off-network traffic is *more* private than today's LAN traffic (everything E2EE'd inside TLS), and the relay learns nothing but frame sizes and timing.
+
+### D4. Presence, Mac-offline semantics, and push
+
+- The relay tracks presence trivially (it owns both socket maps). Control frames (relay↔endpoints only, the one unencrypted vocabulary, carrying zero user content): `presence {mac: up|down}` to phones; `devices {count}` to the Mac connector.
+- **Mac offline:** phone connects → relay accepts, immediately sends `presence {mac: down}` and holds the socket up to 60s for a Mac reconnect, then closes with **4408 `mac_offline`** (new relay-namespace close code; 44xx chosen to avoid 4401/4403 collision). **Mutations are never queued for replay** — no stored actions, no wake-on-LAN. The phone renders "Mac is offline" honestly.
+- **Queue-and-notify:** the notify half lives at the relay. When the Mac connector comes up, the relay sends it `devices {count: 0}`; when the Mac has a blocked approval and no live phone socket, it sends the relay `push-req {apnsToken, environment, kind}` (a control frame; the token is routing metadata the Mac already holds from ActivityKit registration). The relay holds the o8 APNs .p8 key and sends a **generic** push ("o8 needs you — approval waiting", no content). The relay stores APNs tokens **transiently per request** — nothing durable. Mac-driven Live Activity push on LAN continues unchanged.
+- Stale sweep: relayed phone sockets idle >10min with no Mac socket are closed 4408.
+
+### D5. Revocation across the hop
+
+4401/4403 are emitted by the **Mac** exactly as today; the connector forwards the close through the relay, which closes the phone socket with the same code, and the client's existing `markRevoked()` path runs unchanged. Relay-origin closes use the distinct 4408 (`mac_offline`) / 4409 (`entitlement_lapsed` — plan JWT expired or flag off at connect or on the relay's daily re-check) so a client can always tell "the Mac rejected me" from "the relay can't route me".
+
+### D6. Entitlement & pairing
+
+- Gate: the **Mac's** relay connector only dials out when `resolveFlags(plan)['relay.offNetwork']` is true locally AND the relay re-verifies the same from the presented JWT — belt and braces, and the flag flips from hardcoded `false` to plan-derived in both twin maps (+ the relay's copy). Which plans get it = **Q's call** (decision summary).
+- **Remote first-pairing: not in v1.** Pairing stays LAN-first (QR at the Mac establishes device keys, per-device token, pinned identity). The relay serves already-paired devices only. This is the accepted v1 ruling; a signed one-time remote-pair blob is sketched as v2 if founders demand it.
+
+### D7. Cost at ~40-founder scale
+
+~40 Macs + ~40 phones = ≤120 concurrent sockets, ciphertext frame relay only (KB/s-scale except diff pulls). One Railway service, 256–512MB, no database (in-memory maps + APNs key): **~$5–10/mo**, well inside the founder patronage envelope. Scale ceiling before re-architecture: ~5k sockets on one instance; sharding by routingId hash is the eventual story, not v1's.
+
+### D8. What Phase B builds (scoped)
+
+1. `services/relay/` (Hono+ws, Railway config, /health, rate limits, APNs sender, control-frame vocabulary above).
+2. Desktop connector (`src/lib/mobile/relay-connector.ts` + settings toggle): outbound dial, JWT presentation, socket bridging with the remote marker, `push-req` on blocked approvals, LAN unaffected when relay is down.
+3. Mobile leg (mobile agent, against §Wire contract): config gains `relayRoutingId` derived from the pinned key; transport switch (direct on LAN, relay+http-over-frames off-network); presence/4408/4409 UX.
+4. **approvalId punchlist (desktop half):** the handler already resolves approvalId-first (`action/route.ts:364-368`); Phase B hardens it — when `approvalId` is present it is authoritative and session fallback is skipped entirely; stale-`sessionKey`-cannot-mistarget proven by a contract test; sessionKey-only addressing kept for old clients.
+5. Contract tests (`scripts/contract-test.ts` style) + live cross-network e2e (relay round trip, mid-session revocation, Mac-disconnect → push). `railway up` is **Q-gated**.
+
+## Wire contract (v1.0 — Phase B freezes this section verbatim)
+
+- Mac: `wss://relay.o8.run/mac` — headers `Authorization: Bearer <plan JWT>`, `x-o8-routing-id: <base58>`.
+- Phone: `wss://relay.o8.run/device/{routingId}`.
+- Relay↔endpoint control frames (JSON, unencrypted, no user content): `presence`, `devices`, `push-req`, `mux {sid}` open/close. All device↔Mac frames opaque (`{sid, seq, payload:<raw bytes incl. e2ee frames>}`).
+- In-tunnel (E2EE) additions: `http-req` / `http-res` as §D3.
+- Close codes: 4401/4403 (Mac-origin, unchanged) · 4408 `mac_offline` · 4409 `entitlement_lapsed`.
+
+## Open questions routed to Q (see decision summary)
+
+1. Relay entitlement: founders-only vs all-paid ($19) — flag mapping per plan.
+2. Confirm LAN-first pairing for v1 (remote-pair = v2).
+3. Relay hostname (`relay.o8.run` assumed).
