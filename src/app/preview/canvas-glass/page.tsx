@@ -2980,6 +2980,7 @@ export default function CanvasGlassPreviewPage() {
       const args = (detail.args && typeof detail.args === 'object' ? detail.args : {}) as Record<string, unknown>;
       let ok = true;
       let note: string | null = null;
+      let error: string | null = null;
       let data: unknown = undefined;
       try {
         switch (detail.verb) {
@@ -3096,15 +3097,18 @@ export default function CanvasGlassPreviewPage() {
           case 'center-on-card':
           case 'read-card': {
             const kind = (typeof args.kind === 'string' ? args.kind : '') as CanvasCardKind;
-            const id = typeof args.id === 'number' ? args.id : Number(args.id);
+            const rawId = args.id;
+            const id = typeof rawId === 'number' ? rawId : (typeof rawId === 'string' && rawId.trim() ? Number(rawId) : NaN);
             if (!CANVAS_CARD_KINDS.includes(kind) || !Number.isFinite(id)) {
               ok = false;
+              error = 'invalid-args';
               note = `${detail.verb} needs args.kind (one of ${CANVAS_CARD_KINDS.join(', ')}) and a numeric args.id — call list first`;
               break;
             }
             const card = findCanvasCard(kind, id);
             if (!card) {
               ok = false;
+              error = 'not-found';
               note = 'not-found';
               data = { ok: false, error: 'not-found' };
               break;
@@ -3128,6 +3132,7 @@ export default function CanvasGlassPreviewPage() {
               const lines = typeof args.lines === 'number' && Number.isFinite(args.lines) ? Math.max(1, Math.floor(args.lines)) : 40;
               const read = readCanvasCard(kind, card, lines);
               ok = read.ok;
+              error = read.ok ? null : (read.error ?? 'read-card-failed');
               data = read.ok
                 ? { ok: true, kind, id, title: canvasCardTitle(kind, card), content: read.content, truncated: read.truncated }
                 : { ok: false, kind, id, error: read.error };
@@ -3152,6 +3157,7 @@ export default function CanvasGlassPreviewPage() {
               note = 'panned canvas';
             } else {
               ok = false;
+              error = 'invalid-args';
               note = 'pan needs numeric args.dx/dy or numeric args.x/y';
             }
             break;
@@ -3321,11 +3327,12 @@ export default function CanvasGlassPreviewPage() {
             ok = false;
             note = `unknown intent verb: ${String(detail.verb)}`;
         }
-      } catch (error) {
+      } catch (caught) {
         ok = false;
-        note = error instanceof Error ? error.message : String(error);
+        error = 'exception';
+        note = caught instanceof Error ? caught.message : String(caught);
       }
-      (window as unknown as Record<string, unknown>).__o8CanvasIntentLast = { verb: detail.verb ?? null, ok, note, ...(data !== undefined ? { data } : {}), at: Date.now() };
+      (window as unknown as Record<string, unknown>).__o8CanvasIntentLast = { verb: detail.verb ?? null, ok, note, ...(error ? { error } : {}), ...(data !== undefined ? { data } : {}), at: Date.now() };
     };
     window.addEventListener('o8:canvas-intent', onIntent);
     (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = true;

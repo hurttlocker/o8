@@ -29,7 +29,7 @@ interface IntentBody {
 interface DispatchProbe {
   ready: boolean;
   route?: string;
-  ack?: { verb: string | null; ok: boolean; note: string | null; data?: unknown } | null;
+  ack?: { verb: string | null; ok: boolean; note: string | null; error?: string | null; data?: unknown } | null;
 }
 
 function webviewClient(): O8WebviewClient {
@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
       ok: ack ? ack.ok : true,
       verb,
       ...(ack?.note ? { note: ack.note } : {}),
+      ...(ack?.error ? { error: ack.error } : {}),
       ...(ack?.data !== undefined ? { data: ack.data } : {}),
       ...(navigated ? { navigated: true } : {}),
     });
