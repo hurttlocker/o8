@@ -27,7 +27,7 @@ import { canvasZoom } from './ui';
 // the dock is open it replaces the right inset (real chrome, asymmetry is right).
 const INSET_SIDE = 64;
 const INSET_TOP = 70; // top control pill (top:18 + height:40, + margin)
-const INSET_BOTTOM = 88; // bottom composer (bottom:24 + ~56 tall, + margin)
+const INSET_BOTTOM = 88; // bottom composer (bottom:24 + ~56 tall, + margin) — the FLOOR
 
 /** Rubber-band stiffness past a wall — the card follows at 8% of the overdrag
  *  (drag 100px past → 8px past), so the edge reads as a soft wall, not a cliff.
@@ -48,6 +48,29 @@ function readDockReserve(): number {
   if (typeof document === 'undefined') return 0;
   const raw = Number.parseFloat(document.documentElement.style.getPropertyValue('--cnv-dock-reserve'));
   return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+/** Reserve (screen px) the bottom chrome STACK eats — the composer plus the
+ *  DispatchDock agents tray that grows above it (and taller again when the tray
+ *  is expanded). Measured live off `[data-canvas-bottom-stack]` elements (the
+ *  composer + the tray column) so the grid ends above the real rendered stack in
+ *  BOTH tray states — same spirit as layoutGrid's `chromeOf` offsetHeight probe.
+ *  Reserve = distance from the viewport bottom to the TOPMOST stack element +
+ *  a small margin, floored at INSET_BOTTOM so it never under-clears the composer
+ *  (and so a pre-hydration / unmounted stack falls back to the old constant). */
+function readBottomStackReserve(): number {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return INSET_BOTTOM;
+  let top = Infinity;
+  document.querySelectorAll('[data-canvas-bottom-stack]').forEach((el) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    // Skip collapsed nodes (the tray wrapper is mounted but zero-height while no
+    // lane is dispatching) so an empty wrapper never inflates the reserve.
+    if (r.width < 1 || r.height < 1) return;
+    if (r.top < top) top = r.top;
+  });
+  if (!Number.isFinite(top)) return INSET_BOTTOM;
+  const MARGIN = 12; // breathing room between the grid's last row and the stack
+  return Math.max(INSET_BOTTOM, window.innerHeight - top + MARGIN);
 }
 
 /** Grid mode keeps the viewport fence; free mode is the infinite canvas. */
@@ -88,11 +111,12 @@ export function usableCanvasArea(): { x: number; y: number; w: number; h: number
   const vh = typeof window === 'undefined' ? 900 : window.innerHeight;
   const dockReserve = readDockReserve();
   const right = dockReserve > 0 ? dockReserve : INSET_SIDE;
+  const bottom = readBottomStackReserve();
   return {
     x: INSET_SIDE / zoom,
     y: INSET_TOP / zoom,
     w: Math.max(0, vw - right - INSET_SIDE) / zoom,
-    h: Math.max(0, vh - INSET_BOTTOM - INSET_TOP) / zoom,
+    h: Math.max(0, vh - bottom - INSET_TOP) / zoom,
   };
 }
 
