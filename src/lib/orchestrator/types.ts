@@ -228,6 +228,8 @@ export interface OrchestratorPacket {
   comparisonIndex?: number;
   /** The model this specific packet runs on (set during fan-out). */
   assignedModel?: string | null;
+  /** Cheap-tier packet has had a same-house frontier escalation suggested. */
+  tierEscalated?: boolean;
   /** Files predicted to be touched, computed from packet scope vs skeleton cache */
   predictedFiles?: string[];
   /** Routing scaffold: what kind of worker this task wants before runtime selection. */

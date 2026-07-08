@@ -7,7 +7,7 @@ import {
   dispatchMission,
 } from '@/lib/orchestrator/operator-mission-service';
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
-import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
@@ -80,6 +80,13 @@ export async function POST(request: NextRequest) {
     requestedModel: profileRouting.requestedModel,
     source: 'spawn-prompt-api',
   });
+  const huddle = typeof record.huddle === 'boolean'
+    ? record.huddle
+    : isSingleSubCheapTierWorker({
+        profile: defaults.subscriptionProfile,
+        runtime: workerRouting.selectedRuntime,
+        model: workerRouting.selectedModel,
+      });
   try {
     await assertRuntimeDispatchable(workerRouting.selectedRuntime);
   } catch (error) {
@@ -111,6 +118,7 @@ export async function POST(request: NextRequest) {
       requestedModel: workerRouting.requestedModel,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
+      ...(huddle ? { huddle } : {}),
     });
 
     const dispatch = await dispatchMission({ missionId: mission.missionId });

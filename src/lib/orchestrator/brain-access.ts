@@ -26,13 +26,16 @@ import 'server-only';
 import { resolveOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/active-backend';
 import { isMeteredOrchestratorBackend } from '@/lib/lane/orchestrator-backends/billing';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import { resolveWorkersUseBrainSync, type WorkersUseBrain } from '@/lib/operator/defaults';
+import { getOperatorDefaultsSync, resolveWorkersUseBrainSync, type WorkersUseBrain } from '@/lib/operator/defaults';
+import { isSingleSubCheapTierWorker, type SubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, WorkerRouting } from '@/lib/orchestrator/types';
 
 export interface BrainAccessInput {
   runtime: OrchestratorRuntime;
+  assignedModel?: string | null;
   useBrain?: boolean;
+  workerRouting?: WorkerRouting;
 }
 
 /** Pure core — exported for tests; pass the mode (and backend) explicitly. */
@@ -40,11 +43,17 @@ export function resolveBrainEnabledWith(
   packet: BrainAccessInput,
   mode: WorkersUseBrain,
   orchestratorBackend?: OrchestratorBackendId,
+  subscriptionProfile: SubscriptionProfile = 'both',
 ): boolean {
   if (typeof packet.useBrain === 'boolean') return packet.useBrain;
   if (mode === 'all') return true;
   if (mode === 'off') return false;
   if (orchestratorBackend && isMeteredOrchestratorBackend(orchestratorBackend)) return true;
+  if (isSingleSubCheapTierWorker({
+    profile: subscriptionProfile,
+    runtime: packet.workerRouting?.selectedRuntime ?? packet.runtime,
+    model: packet.workerRouting?.selectedModel ?? packet.assignedModel ?? null,
+  })) return true;
   return ORCHESTRATOR_RUNTIMES[packet.runtime]?.tier !== 'frontier';
 }
 
@@ -60,7 +69,12 @@ export function resolveBrainEnabledWith(
  * dispatch chain if per-turn precision ever matters.
  */
 export function resolvePacketBrainEnabled(packet: BrainAccessInput): boolean {
-  return resolveBrainEnabledWith(packet, resolveWorkersUseBrainSync(), resolveOrchestratorBackendId());
+  return resolveBrainEnabledWith(
+    packet,
+    resolveWorkersUseBrainSync(),
+    resolveOrchestratorBackendId(),
+    getOperatorDefaultsSync().values.subscriptionProfile,
+  );
 }
 
 /**

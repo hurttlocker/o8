@@ -172,6 +172,7 @@ export async function createMission(input: CreateMissionInput) {
       archivedAt: null,
       review: null,
       lane: null,
+      assignedModel: packetRouting.selectedModel,
       workerIntent: packetRouting.workerIntent,
       workerRouting: packetRouting,
       dispatchRuntimePin: packetRouting.requestedRuntime ?? packetRouting.selectedRuntime,

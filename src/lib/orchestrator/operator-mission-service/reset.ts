@@ -163,6 +163,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.stallRetries = 0;
   packet.launchAttempts = 0;
   packet.operatorStopped = false;
+  packet.tierEscalated = undefined;
 }
 
 async function resetRegistryPacket(input: ResetPacketInput, missionId: string) {
