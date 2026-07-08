@@ -2862,6 +2862,16 @@ export default function CanvasGlassPreviewPage() {
     return node.innerText.trim();
   }, []);
 
+  const dockEntryReadLine = useCallback((entry: DockEntry) => {
+    if (entry.role === 'user') return `user: ${entry.text}`;
+    if (entry.role === 'text') return `assistant: ${entry.text}`;
+    if (entry.role === 'thinking') return `thinking: ${entry.text}`;
+    if (entry.role === 'status') return `status: ${entry.text}`;
+    if (entry.role === 'playback') return `playback: ${entry.text}`;
+    if (entry.role === 'result') return `result: ${entry.title}${entry.body ? `\n${entry.body}` : ''}`;
+    return '';
+  }, []);
+
   const readCanvasCard = useCallback((kind: CanvasCardKind, card: CanvasCardLite, lines: number) => {
     let content = '';
     let truncated = false;
@@ -2893,6 +2903,8 @@ export default function CanvasGlassPreviewPage() {
     } else if (kind === 'brain') {
       content = cardDomText(card.id);
       if (!content || content.startsWith('Ask the Engineering Brain')) return { ok: false, error: 'content-unavailable' };
+    } else if (kind === 'spec') {
+      return { ok: false, error: 'unsupported-kind' };
     } else if (kind === 'browser') {
       const active = card.tabs?.find((tab) => tab.id === card.activeTabId) ?? card.tabs?.[0];
       return { ok: true, content: { url: active?.url ?? null, title: active?.title ?? canvasCardTitle(kind, card) }, truncated: false };
@@ -2903,19 +2915,23 @@ export default function CanvasGlassPreviewPage() {
     } else if (kind === 'agent') {
       const lane = activeLanes.find((row) => row.id === card.laneId) ?? null;
       const phase = phaseFor(lane?.status ?? 'done');
+      const transcriptKey = lane?.repoPath ?? card.repoPath ?? null;
+      const transcript = (transcriptKey ? convos[transcriptKey] : undefined) ?? [];
+      const transcriptTail = transcript.slice(-lines).map(dockEntryReadLine).filter(Boolean);
       content = [
         `phase: ${phase.label}`,
         `status: ${lane?.status ?? 'done'}`,
         `task: ${card.title ?? ''}`,
         `repo: ${lane?.repoPath ?? ''}`,
         `runtime: ${lane?.runtime ?? card.runtime ?? ''}`,
+        transcriptTail.length ? `transcript:\n${transcriptTail.join('\n')}` : '',
       ].filter(Boolean).join('\n');
     } else {
       return { ok: false, error: 'unsupported-kind' };
     }
     const capped = capReadContent(content);
     return { ok: true, content: capped.content, truncated: truncated || capped.truncated };
-  }, [activeLanes, canvasCardTitle, capReadContent, cardDomText]);
+  }, [activeLanes, canvasCardTitle, capReadContent, cardDomText, convos, dockEntryReadLine]);
 
   const patchCanvasCardGeom = useCallback((kind: CanvasCardKind, id: number, patch: { x?: number; y?: number; w?: number; h?: number }) => {
     switch (kind) {
