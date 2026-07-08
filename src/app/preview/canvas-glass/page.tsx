@@ -1490,8 +1490,9 @@ export default function CanvasGlassPreviewPage() {
       ...specCards.map((c) => ({ kind: 'spec', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...brainCards.map((c) => ({ kind: 'brain', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...markdownCards.map((c) => ({ kind: 'markdown', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...agentCards.map((c) => ({ kind: 'agent', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   const gridAnimRef = useRef<{ stop: () => void } | null>(null);
   const [gridPlaceholder, setGridPlaceholder] = useState<Slot | null>(null);
