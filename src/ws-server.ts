@@ -190,6 +190,11 @@ import {
   fetchWithRetry,
   fetchNextJson,
 } from './lib/ws-server/next-fetch';
+import {
+  createInlineTerminalHost,
+  createChildTerminalHost,
+  type TerminalHost,
+} from './lib/ws-server/terminal-host-client';
 
 const execFileAsync = promisify(execFile);
 
@@ -217,11 +222,33 @@ async function listRepoPaths(): Promise<string[]> {
   }
 }
 
-// ── node-pty (optional — terminal feature) ──
-let pty: typeof import('node-pty') | null = null;
+// ── node-pty + terminal-host (#1498 follow-up) ──
+// PTYs are spawned through a TerminalHost seam. Default 'inline' (node-pty in
+// this process — historical behavior). O8_TERMINAL_HOST=child forks a separate
+// terminal-host process so a PTY wedge or runaway data pump in either process
+// can't freeze the other's event loop. WS protocol is byte-identical either
+// way. Default is inline: the child path is built + fork-tested in dev but not
+// yet proven in a packaged build, so it's opt-in.
+let terminalHost: TerminalHost | null = null;
+const TERMINAL_HOST_MODE: 'inline' | 'child' =
+  (process.env.O8_TERMINAL_HOST ?? '').trim().toLowerCase() === 'child' ? 'child' : 'inline';
+
+if (TERMINAL_HOST_MODE === 'child') {
+  try {
+    terminalHost = createChildTerminalHost({ log: (m) => console.log(`[terminal-host] ${m}`) });
+    console.log('[ws-server] terminal-host: child mode (forked terminal-host process)');
+  } catch (err) {
+    console.warn(`[ws-server] terminal-host child failed to start — falling back to inline: ${err instanceof Error ? err.message : String(err)}`);
+    terminalHost = null; // inline path below picks up when node-pty loads
+  }
+}
+
 void import('node-pty')
   .then((mod) => {
-    pty = mod;
+    // Inline mode (or child fallback): back the host with in-process node-pty.
+    if (!terminalHost) {
+      terminalHost = createInlineTerminalHost(mod);
+    }
     console.log('[ws-server] node-pty loaded — terminal feature available');
   })
   .catch(() => {
@@ -1184,7 +1211,7 @@ function spawnDashShellPty(
   rows: number,
   requestedCwd?: string,
 ) {
-  if (!pty) {
+  if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
@@ -1195,7 +1222,9 @@ function spawnDashShellPty(
     ?? process.env.HOME ?? homedir() ?? '/tmp';
 
   console.log(`[ws-server] Spawning dashboard PTY shell: ${shell} -l (${sessionName})`);
-  return pty.spawn(shell, ['-l'], {
+  return terminalHost.spawn({
+    file: shell,
+    args: ['-l'],
     name: 'xterm-256color',
     cols,
     rows,
@@ -1390,7 +1419,7 @@ function spawnManagedCommandPty(
   rows: number,
   envOverrides?: Record<string, string>,
 ) {
-  if (!pty) {
+  if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
@@ -1402,7 +1431,9 @@ function spawnManagedCommandPty(
   };
 
   console.log(`[ws-server] Spawning managed PTY session: ${shell} -lc <command> (${sessionName})`);
-  return pty.spawn(shell, ['-l', '-c', shellCommand], {
+  return terminalHost.spawn({
+    file: shell,
+    args: ['-l', '-c', shellCommand],
     name: 'xterm-256color',
     cols,
     rows,
@@ -1515,7 +1546,7 @@ function spawnTmuxAttachPty(
   cols: number,
   rows: number,
 ) {
-  if (!pty) {
+  if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
@@ -1525,7 +1556,9 @@ function spawnTmuxAttachPty(
 
   try {
     console.log(`[ws-server] Spawning terminal directly: ${tmuxBin} attach-session -t ${sessionName}`);
-    return pty.spawn(tmuxBin, ['attach-session', '-t', sessionName], {
+    return terminalHost.spawn({
+      file: tmuxBin,
+      args: ['attach-session', '-t', sessionName],
       name: 'xterm-256color',
       cols,
       rows,
@@ -1537,7 +1570,9 @@ function spawnTmuxAttachPty(
     const shellCmd = `exec "${tmuxBin}" attach-session -t ${sessionName}`;
     console.warn(`[ws-server] Direct tmux PTY spawn failed, falling back to shell wrapper: ${directError instanceof Error ? directError.message : String(directError)}`);
     console.log(`[ws-server] Spawning terminal via shell: ${shellCmd}`);
-    return pty.spawn(shell, ['-l', '-c', shellCmd], {
+    return terminalHost.spawn({
+      file: shell,
+      args: ['-l', '-c', shellCmd],
       name: 'xterm-256color',
       cols,
       rows,
@@ -4011,7 +4046,7 @@ function materializePendingDashSession(
 }
 
 function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>) {
-  if (!pty) {
+  if (!terminalHost) {
     sendTerminal(client, 'error', { sessionName: '', error: 'Terminal not available (node-pty not installed)' });
     return;
   }
@@ -4048,7 +4083,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     return;
   }
 
-  if (!pty) {
+  if (!terminalHost) {
     sendTerminal(client, 'error', { sessionName, error: 'Terminal not available (node-pty not installed)' });
     return;
   }
@@ -4558,7 +4593,7 @@ const httpServer = createServer((req, res) => {
         res.end('invalid session name');
         return;
       }
-      if (!pty) {
+      if (!terminalHost) {
         res.writeHead(503);
         res.end('node-pty unavailable');
         return;
@@ -6348,6 +6383,8 @@ function shutdown(signal: string) {
     try { att.ptyProcess.kill(); } catch { /* already gone */ }
   }
   terminalAttachments.clear();
+  // Tear down the forked terminal-host (child mode); no-op inline.
+  try { terminalHost?.dispose(); } catch { /* already gone */ }
 
   // Send close frame to every client so they reconnect cleanly
   for (const client of clients.values()) {
