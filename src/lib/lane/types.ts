@@ -258,7 +258,12 @@ export type LaneEventVerb =
   | 'interrupt_failed'
   // Silent-exit detector found that the lane worktree HEAD is already an
   // ancestor of the refreshed base. Payload: { headSha, comparisonRef }
-  | 'silent_exit_already_merged';
+  | 'silent_exit_already_merged'
+  // Reaper wedge-timeout enforcement (Rock 1 item 2): a parked lane sat past
+  // its conservative timeout so the reaper escalated it — the invariant is
+  // "nothing parks silently". Payload:
+  // { from, to, elapsedMs, thresholdMs, blockedReason, action }
+  | 'wedge_timeout';
 
 export type AgentReportReason =
   | 'needs_clarification'
