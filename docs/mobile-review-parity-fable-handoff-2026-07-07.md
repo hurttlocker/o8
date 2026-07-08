@@ -51,8 +51,20 @@ Mobile consequence before the patch:
   - `toMobileApprovalCard` is the authoritative approval-card projection.
 
 - `src/app/api/mobile/action/route.ts`
-  - `approve` / `deny` require an explicit `approvalId` or exactly one pending
-    approval for the session. This is good and should remain fail-closed.
+  - `approve` / `request_changes` / `deny` addressing is fail-closed and
+    `approvalId`-authoritative (hardened for punchlist Option B):
+    - When `approvalId` is present it is AUTHORITATIVE — the card is resolved
+      directly and the route NEVER falls back to the `sessionKey` lookup. A
+      stale/recycled/mismatched `sessionKey` sent alongside a valid `approvalId`
+      is ignored for addressing (logged `[mobile-action]`), so it can no longer
+      mis-target a different pending card's merge. A missing card returns
+      `409 {ok:false,error:'approval_not_found'}`; an already-resolved card
+      returns `410 {ok:false,error:'approval_resolved'}` (nothing mutated).
+    - When `approvalId` is absent (old clients) the legacy `sessionKey`→pending
+      lookup is kept as-is, with one guard: >1 pending card for the session
+      returns `409 {ok:false,error:'ambiguous_approval',approvalIds:[...]}`
+      instead of guessing, so a newer client can re-issue addressed to the id it
+      means. Exactly one pending still resolves; zero still 404s.
 
 - `src/app/api/worktrees/diff/route.ts`
   - Mobile can inspect live diffs by `sessionKey`.
