@@ -1864,13 +1864,10 @@ export default function CanvasGlassPreviewPage() {
     };
   }, [pan.x, pan.y]);
 
-  const takeSpawnChoreography = useCallback((repoPath: string | null | undefined): SpawnChoreography | null => {
+  const takeSpawnChoreography = useCallback((): SpawnChoreography | null => {
     const now = Date.now();
     spawnChoreographyRef.current = spawnChoreographyRef.current.filter((entry) => entry.expiresAt > now);
-    const index = spawnChoreographyRef.current.findIndex((entry) => entry.repoPath === repoPath);
-    const [entry] = index >= 0
-      ? spawnChoreographyRef.current.splice(index, 1)
-      : spawnChoreographyRef.current.splice(0, 1);
+    const [entry] = spawnChoreographyRef.current.splice(0, 1);
     return entry ?? null;
   }, []);
 
@@ -1881,7 +1878,7 @@ export default function CanvasGlassPreviewPage() {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     const target = findFreeSpot(280, 128);
-    const choreography = reducedMotion() ? null : takeSpawnChoreography(lane.repoPath);
+    const choreography = reducedMotion() ? null : takeSpawnChoreography();
     const start = choreography?.origin ?? target;
     const reservation = { id, x: target.x, y: target.y, w: 280, h: 128 };
     if (choreography) spawnReservationsRef.current.push(reservation);
