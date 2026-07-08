@@ -16,11 +16,21 @@ real use. Beta exit = five rocks (four engineering, one proof) + three explicit 
 
 ### Rock 1 — Dispatch/lane lifecycle contract (M-L) — BLOCKS EVERYTHING
 - [ ] Defined terminal-state contract for the packet/lane state machine (no silent wedges)
-- [ ] Real cancel/kill verb, reachable from every surface
-- [ ] Idempotency persisted across restarts (rerun/steer double-fire class, #1497)
+- [ ] Real cancel/kill verb, reachable from every surface (#1471)
+- [ ] Idempotency persisted across restarts (rerun/steer double-fire class, #1497 — live-hit
+      2026-07-08: rerun double-dispatched into two parallel clones after a restart)
 - [ ] Restart sweep must never archive running packets (#1500–#1502 class)
-- Evidence: 18 issues (#1463–#1502) from one dogfood session; orchestrator = only churn hotspot
-  in 6 weeks of history (29 fixes).
+- [ ] Prune-safety: never delete a worktree with uncommitted work or recent mtime without
+      emitting an event (sweep pruned a worktree under an active orchestrator, 2026-07-08)
+- [ ] Durable transcript/session binding: #1502's zero-transcript headless workers and the
+      no_session_binding failures are the same hole — a packet must never lose its session
+- [ ] Steer must be reachable from every non-terminal state (structurally dead after
+      huddle-exits, #1496)
+- Evidence: 18 issues (#1463–#1502) from one dogfood session, re-confirmed live 2026-07-08 by a
+  second orchestrator (co-signed with receipts); orchestrator = only churn hotspot in 6 weeks of
+  history (29 fixes). Salvage-ref banking is currently a coping strategy standing in for this
+  contract. Dupes folded: #1499→#1486 (ship-over-existing-release, hit independently twice in
+  24h), #1510→#1485 (flaky steering test).
 
 ### Rock 2 — Telemetry + updater safety, one program (M-L) — THIS PR
 - [ ] Process-level crash capture (uncaughtException/unhandledRejection) in Next server + ws-server,
@@ -72,6 +82,10 @@ phone-initiated tool-call approval path.
 - **Cloud sync / managed orchestrator runtime** (zero code) — recommend post-beta
 
 ## Sequence
-Weeks 1–2: rock 1 + canvas↔Symon wiring burst (#1503–#1510) with telemetry foundation (rock 2)
-in parallel. Weeks 2–5: rock 4 hardening, rock 3 verification, rock 5 submission track. Proof gate
-opens as soon as rock 1 stabilizes.
+Weeks 1–2: rock 1 with telemetry foundation (rock 2) in parallel. Weeks 2–5: rock 4 hardening,
+rock 3 verification, rock 5 submission track. Proof gate opens as soon as rock 1 stabilizes.
+
+Status update 2026-07-08 (post-cleanup): the canvas↔Symon cluster (#1503–#1510) is beaten — 5 of
+7 resolved on 0.1.566 (#1503, #1507, #1509 fixed; two closed as dupes), #1508 kept open honestly
+(landed fix is hygiene, live probe stays armed), epic #1505 in progress (1 of 7 items done). The
+lifecycle cluster (#1463–#1502) is intact and is THE beta-exit rock.
