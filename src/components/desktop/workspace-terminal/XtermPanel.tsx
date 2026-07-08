@@ -52,6 +52,7 @@ export interface XtermPanelProps {
 export interface XtermPanelHandle {
   writeData: (data: string) => void;
   writeRaw: (data: string) => void;
+  readText: (lines?: number) => string;
   showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
   setExited: () => void;
@@ -128,6 +129,18 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       } catch {
         return;
       }
+    },
+    readText: (lines = 40) => {
+      const term = termRef.current;
+      if (!term?.buffer?.active) return '';
+      const active = term.buffer.active;
+      const length = active.length ?? 0;
+      const start = Math.max(0, length - Math.max(1, Math.floor(lines)));
+      const out: string[] = [];
+      for (let index = start; index < length; index += 1) {
+        out.push(active.getLine(index)?.translateToString(true) ?? '');
+      }
+      return out.join('\n').replace(/\s+$/g, '');
     },
     setError: (nextError: string) => setError(nextError),
     setExited: () => setExited(true),
