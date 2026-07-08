@@ -308,6 +308,9 @@ export default function CanvasGlassPreviewPage() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [inTauri, setInTauri] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  // Whether the bottom-center DispatchDock agents tray is expanded (owned here so
+  // the grid can re-reserve space for the taller tray — see the re-grid effect).
+  const [dockTrayExpanded, setDockTrayExpanded] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
   const [orbSettings, setOrbSettings] = useState<OrbSettings>(ORB_DEFAULTS);
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
@@ -1648,8 +1651,15 @@ export default function CanvasGlassPreviewPage() {
     // setState must never re-enter this effect synchronously (→ "maximum update
     // depth"). One rAF after the render storm settles applies the layout once.
     const raf = requestAnimationFrame(() => applyGridLayout());
-    return () => cancelAnimationFrame(raf);
-  }, [gridMode, gridCardCount, winSize.w, winSize.h, canvasZoomLevel, dockOpen, applyGridLayout]);
+    // The bottom DispatchDock tray appears + expands/collapses with a ~220ms
+    // height animation; the rAF above would measure it mid-flight and under-
+    // reserve. Re-pack once more after it settles so the grid ends above the tray
+    // at its FINAL height. Cheap (layout is fast); harmless for the other triggers.
+    const settle = window.setTimeout(() => applyGridLayout(), 260);
+    return () => { cancelAnimationFrame(raf); window.clearTimeout(settle); };
+    // activeLanes.length = tray visibility, dockTrayExpanded = its expanded state
+    // (both change the reserved bottom stack height, same role as dockOpen).
+  }, [gridMode, gridCardCount, winSize.w, winSize.h, canvasZoomLevel, dockOpen, activeLanes.length, dockTrayExpanded, applyGridLayout]);
 
   // Grid mode packs to the viewport — snap the pan back to origin so the grid
   // lands centered, not wherever you'd roamed.
@@ -5092,13 +5102,14 @@ export default function CanvasGlassPreviewPage() {
       >
         {/* Live agents working — grows out of the composer (gabriell_lab borrow).
             Sits ABOVE the queue so the two stack and never collide. */}
-        <div data-canvas-chrome style={{ width: '100%' }}>
+        <div data-canvas-chrome data-canvas-bottom-stack style={{ width: '100%' }}>
           <AnimatePresence>
             {dispatchLanes.length ? (
               <DispatchDock
                 lanes={dispatchLanes}
                 onSelect={(lane) => { if (lane.repoPath) setActiveRepoPath(lane.repoPath); setDockOpen(true); }}
                 onReview={(lane) => { void spawnDiffCard(lane); }}
+                onExpandedChange={setDockTrayExpanded}
               />
             ) : null}
           </AnimatePresence>
@@ -5114,6 +5125,7 @@ export default function CanvasGlassPreviewPage() {
       {/* ── Bottom orchestrator input — first contact lives here ─── */}
       <div
         data-canvas-chrome
+        data-canvas-bottom-stack
         onDragOver={(event) => {
           // Claim drags over the composer — the page-level veil stays out
           // of it and the drop becomes a picture pill, not a canvas card.
