@@ -274,6 +274,80 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     expect(packet.workerRouting.requestedEffort).toBe('high');
     expect(packet.workerRouting.selectedEffort).toBe('high');
   });
+
+  it('subscriptionProfile=claude-only creates Claude Code + Sonnet worker packets', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'claude-only' }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      issues: [{
+        number: 90_000_124,
+        title: 'dispatch claude-only profile seam',
+        body: 'No runtime is specified by the caller.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
+    expect(packet.runtime).toBe('claude-code');
+    expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
+    expect(packet.workerRouting.selectedModel).toBe('claude-sonnet-5');
+  });
+
+  it('subscriptionProfile=both preserves today routing exactly', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'both', orchestratorBackend: 'codex', inAppOrchestratorEnabled: false }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      issues: [{
+        number: 90_000_125,
+        title: 'dispatch both profile seam',
+        body: 'No runtime is specified by the caller.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
+    expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
+    expect(packet.workerRouting.selectedModel).toBeNull();
+  });
+
+  it('subscriptionProfile=claude-only rejects an explicit Codex request clearly', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'claude-only' }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      requestedRuntime: 'codex',
+      issues: [{
+        number: 90_000_126,
+        title: 'dispatch incompatible profile seam',
+        body: 'Runtime is explicitly unavailable under the profile.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('subscription_profile_runtime_unavailable');
+    expect(json.error.message).toContain('subscriptionProfile "claude-only"');
+  });
 });
 
 // ── Seam D — metered orchestrator flips the Brain on through the REAL prompt ─

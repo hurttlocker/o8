@@ -7,7 +7,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { normalizeRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -81,11 +83,22 @@ export async function POST(request: NextRequest) {
     // and hides state from the UI.
     const packetId = `pkt-${randomUUID()}`;
     const now = new Date().toISOString();
+    const defaults = getOperatorDefaultsSync().values;
+    const explicitRuntime = normalizeRequestedRuntime(body.runtime);
+    const profileRouting = resolveSubscriptionProfileRouting({
+      profile: defaults.subscriptionProfile,
+      requestedRuntime: body.runtime === undefined || body.runtime === null || body.runtime === '' ? null : explicitRuntime,
+      requestedModel: typeof body.model === 'string' ? body.model : null,
+      defaultDispatchModel: defaults.defaultDispatchModel,
+    });
+    if (!profileRouting.ok) {
+      return NextResponse.json({ ok: false, error: profileRouting.message, code: profileRouting.code }, { status: 400 });
+    }
     const workerRouting = resolveWorkerRouting({
       workerIntent: body.workerIntent,
       requestedProvider: body.requestedProvider,
-      requestedRuntime: body.runtime,
-      requestedModel: body.model,
+      requestedRuntime: profileRouting.requestedRuntime,
+      requestedModel: profileRouting.requestedModel,
       source: 'delegate-api',
     });
 
