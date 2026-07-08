@@ -41,7 +41,6 @@ export interface FileCard {
 const EDITOR_FONT_SIZE = CHROME.bodySize;
 const GUTTER_FONT_SIZE = 11;
 const EDITOR_PAD_Y = 10;
-const PREVIEW_PAD_TOP = 14;
 
 function lineCount(text: string): number {
   return Math.max(1, text.split('\n').length);
@@ -134,8 +133,6 @@ export function FileGlassCard({
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const editGutterRef = useRef<HTMLDivElement | null>(null);
-  const previewScrollRef = useRef<HTMLDivElement | null>(null);
-  const previewGutterRef = useRef<HTMLDivElement | null>(null);
 
   // Markdown (o8.md, READMEs, notes) opens RENDERED and word-wrapped;
   // everything else opens straight into the mono editor.
@@ -150,12 +147,6 @@ export function FileGlassCard({
   const syncEditGutter = useCallback(() => {
     if (editGutterRef.current && editorRef.current) {
       editGutterRef.current.scrollTop = editorRef.current.scrollTop;
-    }
-  }, []);
-
-  const syncPreviewGutter = useCallback(() => {
-    if (previewGutterRef.current && previewScrollRef.current) {
-      previewGutterRef.current.scrollTop = previewScrollRef.current.scrollTop;
     }
   }, []);
 
@@ -188,8 +179,7 @@ export function FileGlassCard({
 
   useEffect(() => {
     syncEditGutter();
-    syncPreviewGutter();
-  }, [content, syncEditGutter, syncPreviewGutter]);
+  }, [content, syncEditGutter]);
 
   const save = useCallback(async () => {
     if (saving || status !== 'ready') return;
@@ -360,54 +350,20 @@ export function FileGlassCard({
       <div style={{ height: card.h, position: 'relative' }}>
         <div aria-hidden style={{ position: 'absolute', inset: 0, background: `rgba(7, 9, 13, ${termVeil.toFixed(2)})` }} />
         {status === 'ready' && mode === 'preview' ? (
-          <>
-            <div
-              ref={previewGutterRef}
-              aria-hidden
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                left: 0,
-                width: gutterW,
-                overflow: 'hidden',
-                paddingTop: PREVIEW_PAD_TOP,
-                paddingLeft: 8,
-                paddingRight: 8,
-                color: 'var(--cnv-ink-muted-tier, var(--cnv-ink-muted))',
-                opacity: 0.58,
-                fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
-                fontSize: GUTTER_FONT_SIZE,
-                lineHeight: `${editorLineHeight}px`,
-                fontVariantNumeric: 'tabular-nums',
-                textAlign: 'right',
-                userSelect: 'none',
-                borderRight: '1px solid var(--cnv-edge)',
-                pointerEvents: 'none',
-              }}
-            >
-              {Array.from({ length: lines }, (_, index) => (
-                <div key={index + 1} style={{ height: editorLineHeight }}>{index + 1}</div>
-              ))}
-            </div>
-            <div
-              ref={previewScrollRef}
-              onScroll={syncPreviewGutter}
-              onInput={syncPreviewGutter}
-              style={{
-                position: 'absolute',
-                inset: 0,
-                overflowY: 'auto',
-                paddingTop: PREVIEW_PAD_TOP,
-                paddingLeft: gutterW + 14,
-                paddingRight: 16,
-                paddingBottom: 16,
-                scrollbarWidth: 'none',
-              } as React.CSSProperties}
-            >
-              <CanvasMarkdown text={content} />
-            </div>
-          </>
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              overflowY: 'auto',
+              paddingTop: 14,
+              paddingLeft: 18,
+              paddingRight: 16,
+              paddingBottom: 16,
+              scrollbarWidth: 'none',
+            } as React.CSSProperties}
+          >
+            <CanvasMarkdown text={content} />
+          </div>
         ) : status === 'ready' ? (
           <>
             <div
