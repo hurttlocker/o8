@@ -292,7 +292,7 @@ export function ChatGlassCard({
                 <DockEntryView key={entry.id} entry={entry} />
               ))}
               {entries.length === 0 ? (
-                <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6, fontFamily: FONT }}>
+                <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6, fontFamily: FONT }}>
                   Nothing in this session yet.
                 </span>
               ) : null}

@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CanvasMarkdown } from './dock';
-import { FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
+import { CHROME, FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
@@ -261,7 +261,7 @@ export function FileGlassCard({
               background: 'transparent',
               color: 'var(--cnv-ink)',
               caretColor: '#f59e0b',
-              fontSize: 11.5,
+              fontSize: CHROME.bodySize,
               lineHeight: isMarkdown ? 1.65 : 1.5,
               fontFamily: isMarkdown ? FONT : 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
               paddingTop: 10,
@@ -288,7 +288,7 @@ export function FileGlassCard({
                 style={{ width: 14, height: 14, borderRadius: '50%', border: '1px solid transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)' }}
               />
             ) : (
-              <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, textAlign: 'center', lineHeight: 1.6 }}>
+              <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, textAlign: 'center', lineHeight: 1.6 }}>
                 {error}
               </span>
             )}
