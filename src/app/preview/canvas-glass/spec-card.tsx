@@ -14,6 +14,7 @@
 
 import { ThemeProvider } from '@/lib/theme/context';
 import { O8SpecPane } from '@/components/desktop/o8-panel/O8SpecPane';
+import { CHROME } from './ui';
 import { GlassCardShell } from './card-shell';
 
 export interface SpecCard {
@@ -29,14 +30,19 @@ export interface SpecCard {
 export const SPEC_MIN_W = 480;
 export const SPEC_MIN_H = 380;
 
-// The editor content (prose + headings) reads at the docked-orchestrator size
-// (~12px) instead of shrinking with the canvas zoom. We boost --spec-scale
-// ABOVE the card's geometry scale `s` (zoom): the footprint + chrome stay at
-// `s` so the card isn't bigger — only the text the operator writes reads
-// larger. 1.27 lands 13.5px prose at ~12px when the canvas is at 0.7 ("100%").
-// Tune here. Agent handwriting notes have their own knob (--o8ed-note-scale in
-// O8SpecPane).
-export const SPEC_TEXT_BOOST = 1.27;
+// The editor prose base in O8SpecEditor is `13.5px * var(--spec-scale)`.
+const SPEC_PANE_BASE_PX = 13.5;
+
+// The o8.md prose must read at the SAME on-screen size as every other canvas
+// card's body (the shared CHROME.bodySize, e.g. a markdown or file card). The
+// spec card renders OUT of the zoom layer (screenMap, for CodeMirror's caret) so
+// it scales its own px by --spec-scale = s × SPEC_TEXT_BOOST (s = zoom); an
+// in-layer card paints CHROME.bodySize under CSS zoom `s`. Matching on screen →
+// 13.5 × SPEC_TEXT_BOOST === CHROME.bodySize. The old 1.27 boost rendered o8.md
+// ~37% larger than every other card ("the o8.md panel text is a little bit
+// bigger" — 2026-07-08); this pins it to the shared body scale. Agent handwriting
+// notes keep their own knob (--o8ed-note-scale in O8SpecPane).
+export const SPEC_TEXT_BOOST = CHROME.bodySize / SPEC_PANE_BASE_PX;
 
 export function SpecGlassCard({
   card,
