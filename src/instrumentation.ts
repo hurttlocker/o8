@@ -16,6 +16,19 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
+  // Crash telemetry (Rock 2): observe uncaught exceptions + unhandled
+  // rejections in the Next server process and persist them to the local crash
+  // store. Never throws; runs before any of the warm-up work below. The opt-in
+  // uploader loop is a cheap no-op unless the operator enabled telemetry.
+  try {
+    const { installProcessCrashCapture } = await import('@/lib/telemetry/crash-capture');
+    installProcessCrashCapture('next-server');
+    const { startTelemetryUploadLoop } = await import('@/lib/telemetry/uploader');
+    startTelemetryUploadLoop();
+  } catch {
+    // never block boot on telemetry
+  }
+
   // Dynamic import so the warm-up module isn't pulled into Edge bundles.
   const { warmupOpenRouter } = await import('@/lib/cortex/qa/llm/openrouter-adapter');
 
