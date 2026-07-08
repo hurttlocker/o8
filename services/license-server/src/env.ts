@@ -81,6 +81,10 @@ export const env = {
   // desktop build. GEMINI_API_KEY also accepts the GOOGLE_AI_API_KEY alias.
   OPENROUTER_API_KEY: optional('OPENROUTER_API_KEY', ''),
   GEMINI_API_KEY: optional('GEMINI_API_KEY', '') || optional('GOOGLE_AI_API_KEY', ''),
+  // Deepgram Nova-3 — PRIMARY transcribe upstream (harness 2026-07-07: 361-441ms
+  // p50 with 147ms mins; verbatim params live in proxy.ts). OpenRouter whisper
+  // stays as the fallback arm; either key alone keeps /v1/transcribe alive.
+  DEEPGRAM_API_KEY: optional('DEEPGRAM_API_KEY', ''),
 
   // Scoped guard for POST /invites/register (the desktop app sends this when it
   // shares a beta invite). Optional — when unset, invite registration is
