@@ -87,12 +87,14 @@ if (process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN) {
   providers.push({
     name: 'cloudflare whisper-large-v3-turbo',
     run: async () => {
+      // whisper-large-v3-turbo on Workers AI takes JSON {audio: <base64>}
+      // (the older @cf/openai/whisper takes raw bytes — different contract).
       const res = await fetch(
         `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/openai/whisper-large-v3-turbo`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.CF_API_TOKEN}`, 'Content-Type': 'application/octet-stream' },
-          body: audio,
+          headers: { Authorization: `Bearer ${process.env.CF_API_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio: audio.toString('base64') }),
         },
       );
       const json = await res.json();
