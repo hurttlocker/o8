@@ -63,7 +63,10 @@ export async function cleanupResetPacketTargets(
 
   for (const target of targets) {
     if (target.worktreePath) {
-      worktreePruned = await cleanupLaneWorktree(target, { deleteBranch: false }) || worktreePruned;
+      // reset is an explicit operator/recovery action — force past the prune
+      // gate (records prune_forced) so a non-terminal lane's worktree can be
+      // torn down for the restart. The head is banked first (force path).
+      worktreePruned = await cleanupLaneWorktree(target, { deleteBranch: false, force: true }) || worktreePruned;
     }
     const key = `${normalizeRepoPath(target.repoPath)}\0${target.branch}`;
     groups.set(key, [...(groups.get(key) ?? []), target]);
