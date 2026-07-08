@@ -115,7 +115,7 @@ The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedA
 ## Mobile build checklist (from this contract)
 
 1. `react-native-webrtc` native rebuild via EAS (SDK 55 / RN 0.83 — routine, per mobile team).
-2. `POST /api/mobile/symon/session` → open WebRTC to `baseUrl` with `clientSecret` within its expiry; renegotiate = new session mint.
+2. `POST /api/mobile/symon/session` → open WebRTC to `baseUrl` with `clientSecret` within its expiry; renegotiate = new session mint. **SDP exchange = `POST {baseUrl}/calls?model={model}`** (OpenAI GA realtime) — NOT the bare `baseUrl` (retired beta; returns 400 "Realtime Beta API is no longer supported"). Verified live 2026-07-08 (o8-mobile e8ad9bc): bare→400, GA→201. The desk-voice proxy already uses GA.
 3. `subscribe("symon", …)`; forward every model `function_call` as `symon-tool-call` (parse arguments JSON before sending); hand every `symon-tool-result.result` back to the model verbatim; render `symon-agent-status`.
 4. Emit `symon-agent-status` on WebRTC lifecycle transitions and `symon-stop` on teardown (including app-background if the session should not survive it — mobile's call; document in the tab).
 5. Keep the existing toggle UI as secondary "Remote mode" (unchanged endpoints).

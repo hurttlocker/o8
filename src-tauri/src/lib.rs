@@ -3048,7 +3048,10 @@ mod stt_engine {
             // (operator-approved 2026-07-07). Polish still runs and still
             // hears the audio, so a rare short mishear gets corrected there.
             let apple_word_count = apple_text.split_whitespace().count();
-            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12;
+            // Skip Whisper for SHORT dictations (Apple's live transcript is fine at command
+            // length + it saves latency) — but NEVER for the agent path: a command the brain
+            // is about to EXECUTE needs Whisper's accuracy more than the paste-latency win.
+            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12 && !is_agent;
             if skip_whisper_short {
                 log::info!(
                     "[stt] whisper skipped: short utterance ({apple_word_count} words) — using Apple transcript"
