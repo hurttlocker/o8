@@ -27,19 +27,41 @@ async function main(): Promise<void> {
     console.error(`${P} set O8_RELAY_URL to the local relay, e.g. ws://127.0.0.1:8787`);
     process.exit(1);
   }
-  const plan = (process.env.O8_E2E_PLAN as Plan) || 'founder';
   const issuer = process.env.O8_E2E_ISSUER || 'o8-license';
-
-  // Throwaway plan-JWT keypair — the relay verifies the token with the PUBLIC half.
-  const { publicKey, privateKey } = await generateKeyPair('EdDSA');
-  const publicPem = await exportSPKI(publicKey);
-  const licenseToken = await new SignJWT({ plan })
-    .setProtectedHeader({ alg: 'EdDSA' })
-    .setIssuer(issuer)
-    .setSubject('e2e-test-mac')
-    .setIssuedAt()
-    .setExpirationTime('2h')
-    .sign(privateKey);
+  // TWO strategies for the founder-gated relay token:
+  //  - default (throwaway): mint a founder JWT from a fresh keypair; the relay must
+  //    verify against the PUBLIC key this prints. Tests all relay mechanics without a
+  //    real founder account. Use when the relay is pointed at a test pubkey.
+  //  - O8_E2E_USE_CACHED=1: present this Mac's REAL cached license token (readCachedEntitlement).
+  //    Only works if the app is signed into a founder account; verifies against the
+  //    PRODUCTION license pubkey. Use for a production-faithful drive.
+  let plan: Plan = (process.env.O8_E2E_PLAN as Plan) || 'founder';
+  let licenseToken: string;
+  let publicPem = '(using the Mac’s real cached token — relay must verify against the PRODUCTION license pubkey)';
+  if (process.env.O8_E2E_USE_CACHED === '1') {
+    const { readCachedEntitlement } = await import('@/lib/entitlement/license');
+    const cached = readCachedEntitlement();
+    if (!cached?.licenseKey) {
+      console.error(`${P} O8_E2E_USE_CACHED=1 but no cached license on this Mac — sign into a founder account in the app first.`);
+      process.exit(1);
+    }
+    plan = cached.plan as Plan;
+    licenseToken = cached.licenseKey;
+    if (plan !== 'founder' && plan !== 'pro' && plan !== 'team') {
+      console.error(`${P} cached plan is '${plan}' — relay is paid-tier gated, this will be refused 4409. Sign in as founder.`);
+      process.exit(1);
+    }
+  } else {
+    const { publicKey, privateKey } = await generateKeyPair('EdDSA');
+    publicPem = await exportSPKI(publicKey);
+    licenseToken = await new SignJWT({ plan })
+      .setProtectedHeader({ alg: 'EdDSA' })
+      .setIssuer(issuer)
+      .setSubject('e2e-test-mac')
+      .setIssuedAt()
+      .setExpirationTime('2h')
+      .sign(privateKey);
+  }
 
   const connector = new RelayConnector({
     plan,
