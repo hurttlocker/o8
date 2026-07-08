@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest';
+
+import { createLane, getLane, setLaneStatus } from '@/lib/lane/registry';
+import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+
+import { HUDDLE_READY_EVENT_LABEL, parkHuddleReadyZeroDiffLane } from './huddle-zero-diff';
+
+function huddlePacket(
+  id: string,
+  repoPath: string,
+  huddle: boolean,
+  runtime: OrchestratorPacket['runtime'] = 'codex',
+): OrchestratorPacket {
+  return {
+    id,
+    referenceLabel: id.toUpperCase(),
+    title: `packet ${id}`,
+    summary: `packet ${id}`,
+    status: 'running',
+    queueState: 'queued',
+    releaseState: 'pending',
+    runtime,
+    wave: 1,
+    dependencyPacketIds: [],
+    dependencyLabels: [],
+    blockedReason: null,
+    lane: null,
+    review: null,
+    workspaceTargetPath: repoPath,
+    branchTarget: `inline/${id}`,
+    huddle,
+  } as OrchestratorPacket;
+}
+
+function seedHuddleLane(packetId: string, huddle: boolean, runtime: OrchestratorPacket['runtime'] = 'codex') {
+  const repoPath = '/tmp/o8-huddle-zero-diff-test-repo';
+  const lane = createLane({
+    repoPath,
+    branch: `inline/${packetId}`,
+    baseBranch: 'main',
+    runtime: 'codex',
+    packetId,
+    sessionKey: `codex-owned:${packetId}`,
+    worktreePath: `${repoPath}/.cortex-worktrees/packet-${packetId}`,
+  });
+  // The worker was running its alignment turn.
+  setLaneStatus(lane.id, 'running', 'system', 'session_running');
+
+  const state = createEmptyOrchestratorMissionState();
+  state.packets = [huddlePacket(packetId, repoPath, huddle, runtime)];
+  writeOrchestratorControlPlaneState(state);
+
+  return getLane(lane.id)!;
+}
+
+describe('parkHuddleReadyZeroDiffLane (#1496)', () => {
+  it('parks a huddle packet on zero-diff exit WITHOUT any plan/report signal (steer stays reachable)', async () => {
+    // No agent_report huddle event and no transcript — the exact #1502/#1496
+    // conditions that used to false-fail the alignment turn.
+    const lane = seedHuddleLane('pkt-huddle-noplan', true);
+
+    const result = await parkHuddleReadyZeroDiffLane(lane);
+
+    expect(result.parked).toBe(true);
+    const after = getLane(lane.id);
+    expect(after?.status).toBe('awaiting_orchestrator');
+    expect(after?.lastEventLabel).toBe(HUDDLE_READY_EVENT_LABEL);
+    // The session key MUST survive so codex `exec resume` (steer_packet) can
+    // reach it — the whole point of parking instead of failing.
+    expect(after?.sessionKey).toBe('codex-owned:pkt-huddle-noplan');
+  });
+
+  it('does NOT park a non-huddle packet (real zero-diff failure still surfaces)', async () => {
+    const lane = seedHuddleLane('pkt-plain-nohuddle', false);
+
+    const result = await parkHuddleReadyZeroDiffLane(lane);
+
+    expect(result.parked).toBe(false);
+    // Left untouched — the caller falls through to its zero_diff_failed path.
+    expect(getLane(lane.id)?.status).toBe('running');
+  });
+
+  it('parks an ADVISOR-armed packet on zero-diff exit even with huddle:false (single-sub cheap tier)', async () => {
+    // Single-sub cheap-tier workers (claude-only profile + claude-code runtime +
+    // cheap default model) are auto-armed with the same alignment turn via the
+    // advisor prompt, so their zero-diff exit must get the same park safety net.
+    const prev = process.env.O8_SUBSCRIPTION_PROFILE;
+    process.env.O8_SUBSCRIPTION_PROFILE = 'claude-only';
+    try {
+      const lane = seedHuddleLane('pkt-advisor-nohuddle', false, 'claude-code');
+
+      const result = await parkHuddleReadyZeroDiffLane(lane);
+
+      expect(result.parked).toBe(true);
+      expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
+    } finally {
+      if (prev === undefined) delete process.env.O8_SUBSCRIPTION_PROFILE;
+      else process.env.O8_SUBSCRIPTION_PROFILE = prev;
+    }
+  });
+});

@@ -303,9 +303,17 @@ export async function reconcileStuckLanes(): Promise<void> {
     }
 
     try {
-      const updatedLane = setLaneStatus(lane.id, 'paused', 'system', 'session_lost');
+      // One state model for lost sessions: the live reaper sends a
+      // session-gone lane to `recovering`, so a session lost across an app
+      // restart lands in the SAME state (it used to diverge into `paused`).
+      // Intentional interaction: `recovering` now carries a 15-min wedge-timeout
+      // to `awaiting_orchestrator` (see wedge-timeouts.ts) — that escalation is
+      // exactly what a restart-lost, packet-bound lane wants if the operator
+      // never acts on the approval card below. The lane keeps its (stale)
+      // sessionKey, so archiveStaleDeadLanes leaves it for the wedge to own.
+      const updatedLane = setLaneStatus(lane.id, 'recovering', 'system', 'session_lost');
       if (!updatedLane) {
-        console.warn(`[reconcile] Lane ${lane.id} disappeared before it could be paused`);
+        console.warn(`[reconcile] Lane ${lane.id} disappeared before it could be recovered`);
         continue;
       }
 

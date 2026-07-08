@@ -3,7 +3,8 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { steerPacket } from '@/lib/orchestrator/operator-mission-service';
 import { SteerPacketUnavailableError } from '@/lib/orchestrator/operator-mission-service/steer';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,9 +45,19 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'message is required.', 400);
   }
 
+  // #1497 — persisted idempotency. A client timeout+retry (steer's warm-session
+  // nudge can outlast the 15s client budget) must not inject the same steer twice.
+  const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
+    ? record.idempotencyKey.trim()
+    : null;
+  const key = deriveIdempotencyKey({ verb: 'steer_packet', scopeId: packetId, clientKey, body: message });
+
   try {
-    const result = await steerPacket({ packetId, message, source });
-    return operatorSuccess(result);
+    const outcome = await withIdempotency(
+      { key, verb: 'steer_packet', scopeId: packetId },
+      () => steerPacket({ packetId, message, source }),
+    );
+    return operatorSuccess(replayShape(outcome));
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Unable to steer packet.';
     if (error instanceof SteerPacketUnavailableError) {

@@ -16,6 +16,10 @@ export type SupervisorInboxKind =
   | 'merge_blocked'
   | 'fetch_unreachable'
   | 'repo_misconfigured'
+  // #1502 — a lane reported progress/heartbeat while its sessionKey was null:
+  // the worker is running into the void (no transcript, no completion signal).
+  // FAULT queue item — never self-closes.
+  | 'no_session_binding'
   // #613 — silent-exit detector kinds. See
   // `src/lib/supervisor/silent-exit-detector.ts` for the triage flow.
   | 'silent_exit_verification_failed'
@@ -109,6 +113,7 @@ export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
   verification_failed: { defaultStatus: 'human_required' },
   merge_blocked: { defaultStatus: 'human_required' },
   fetch_unreachable: { defaultStatus: 'human_required', autoDismissAfterMs: 7 * 24 * HOUR_MS },
+  no_session_binding: { defaultStatus: 'human_required' },
 };
 
 function ensureSupervisorInboxTable() {
