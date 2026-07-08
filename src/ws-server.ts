@@ -124,6 +124,7 @@ import {
   startSilentExitDetector,
 } from './lib/supervisor/silent-exit-detector';
 import {
+  getOperatorDefaultsSync,
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
   resolveSupervisorAutoEscalateSync,
@@ -3101,6 +3102,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 
   const requestedBackend = getOrchestratorBackend(resolveMsgBackendId(msg));
   let activeBackend = requestedBackend;
+  const subscriptionProfile = getOperatorDefaultsSync().values.subscriptionProfile;
   const collideBaseBackend = requestedBackend.id === 'collide' && isOrchestratorBackendId(msg.collideBaseBackend)
     ? msg.collideBaseBackend
     : undefined;
@@ -3236,25 +3238,29 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       turnAgentTag: string | undefined,
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => turnBackend.sendTurn(repoPath, turnMessage, onEvent, {
-      permissionMode,
-      thinkingEffort,
-      model: turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model,
-      collideBaseBackend: turnBackend.id === 'collide' ? collideBaseBackend : undefined,
-      agent: turnAgentTag,
-      threadId,
-      signal,
-      ...((turnBackend.id === 'claude' || turnBackend.id === 'codex') ? {
-        crashSurvival: {
-          backend: turnBackend.id,
-          threadId,
-          assistantMessageId,
-          assistantStartedAtMs,
-          model: turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? null : model ?? null,
-        },
-      } : {}),
-      ...(attachments?.length ? { attachments } : {}),
-    });
+      overrideModel?: string,
+    ): Promise<void> => {
+      const effectiveModel = overrideModel ?? (turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model);
+      return turnBackend.sendTurn(repoPath, turnMessage, onEvent, {
+        permissionMode,
+        thinkingEffort,
+        model: effectiveModel,
+        collideBaseBackend: turnBackend.id === 'collide' ? collideBaseBackend : undefined,
+        agent: turnAgentTag,
+        threadId,
+        signal,
+        ...((turnBackend.id === 'claude' || turnBackend.id === 'codex') ? {
+          crashSurvival: {
+            backend: turnBackend.id,
+            threadId,
+            assistantMessageId,
+            assistantStartedAtMs,
+            model: effectiveModel ?? null,
+          },
+        } : {}),
+        ...(attachments?.length ? { attachments } : {}),
+      });
+    };
 
     // Ensure a subscription exists for the selected backend + agent.
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, activeBackend.id, activeAgentId), {
@@ -3298,6 +3304,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       turnBackend: OrchestratorBackend,
       turnAgentTag: string | undefined,
       suppressQuotaError: boolean,
+      overrideModel?: string,
     ) => {
       let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
       const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
@@ -3437,21 +3444,25 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         }
 
         if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
-      }, turnController!.signal);
+      }, turnController!.signal, overrideModel);
       if (pendingDone && !quotaFallbackError) emitDone(pendingDone);
     };
 
     // Spawn the selected orchestrator and stream structured JSON events to
     // subscribers. Every event is tagged with its actual backend (and `agent`,
     // for openclaw) so fallback handoffs do not cross-contaminate transcripts.
+    const resolveQuotaFallback = (currentModel: string | null = model ?? null) => resolveCrossHouseOrchestratorFallback(activeBackend.id, {
+      subscriptionProfile,
+      currentModel,
+    });
     try {
-      await runBackendTurn(activeBackend, activeAgentTag, !!resolveCrossHouseOrchestratorFallback(activeBackend.id));
+      await runBackendTurn(activeBackend, activeAgentTag, !!resolveQuotaFallback());
     } catch (err) {
-      if (!resolveCrossHouseOrchestratorFallback(activeBackend.id) || !isRuntimeQuotaLimitError(err)) throw err;
+      if (!resolveQuotaFallback() || !isRuntimeQuotaLimitError(err)) throw err;
       quotaFallbackError = err instanceof Error ? err.message : String(err);
     }
 
-    const fallback = quotaFallbackError ? resolveCrossHouseOrchestratorFallback(activeBackend.id) : null;
+    const fallback = quotaFallbackError ? resolveQuotaFallback() : null;
     if (fallback && sessionName && turnController && !turnController.signal.aborted) {
       const handoffNoticeId = `cross-house-handoff-${threadId ?? 'repo'}-${Date.now()}`;
       const handoffMessage = buildCrossHouseHandoffMessage(fallback);
@@ -3471,45 +3482,90 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           backend: activeBackend.id,
         },
       }));
-      activeBackend = getOrchestratorBackend(fallback.toBackend);
-      activeAgentId = '';
-      activeAgentTag = undefined;
-      abortKey = orchestratorAbortKey(repoPath, activeBackend.id, activeAgentId, threadId);
-      turnAbortKeys.add(abortKey);
-      sessionName = orchestratorRouteSessionName(
-        activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
-        threadId,
-      );
-      orchestratorSubscriptions.set(orchestratorSubKey(client.id, activeBackend.id, activeAgentId), {
-        clientId: client.id,
-        repoPath,
-        sessionName,
-        threadId,
-        backend: activeBackend.id,
-        agent: activeAgentId,
-      });
-      promoteOrchestratorFallbackSubscribers({
-        repoPath,
-        threadId,
-        fromBackend: fallback.fromBackend,
-        toBackend: activeBackend.id,
-        toSessionName: sessionName,
-      });
-      orchestratorInflightAborts.set(abortKey, turnController);
-      broadcastToOrchestratorSession(sessionName, JSON.stringify({
-        channel: 'orchestrator',
-        event: 'notice',
-        data: {
-          ...handoffNoticePayload,
+      if (fallback.action === 'hold') {
+        sawTerminal = true;
+        broadcastToOrchestratorSession(sessionName, JSON.stringify({
+          channel: 'orchestrator',
+          event: 'status',
+          data: { status: 'ready', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
+        }));
+      } else {
+        activeBackend = getOrchestratorBackend(fallback.toBackend);
+        activeAgentId = '';
+        activeAgentTag = undefined;
+        abortKey = orchestratorAbortKey(repoPath, activeBackend.id, activeAgentId, threadId);
+        turnAbortKeys.add(abortKey);
+        sessionName = orchestratorRouteSessionName(
+          activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
+          threadId,
+        );
+        orchestratorSubscriptions.set(orchestratorSubKey(client.id, activeBackend.id, activeAgentId), {
+          clientId: client.id,
+          repoPath,
+          sessionName,
+          threadId,
           backend: activeBackend.id,
-        },
-      }));
-      broadcastToOrchestratorSession(sessionName, JSON.stringify({
-        channel: 'orchestrator',
-        event: 'status',
-        data: { status: 'busy', repoPath, threadId, backend: activeBackend.id },
-      }));
-      await runBackendTurn(activeBackend, activeAgentTag, false);
+          agent: activeAgentId,
+        });
+        promoteOrchestratorFallbackSubscribers({
+          repoPath,
+          threadId,
+          fromBackend: fallback.fromBackend,
+          toBackend: activeBackend.id,
+          toSessionName: sessionName,
+        });
+        orchestratorInflightAborts.set(abortKey, turnController);
+        broadcastToOrchestratorSession(sessionName, JSON.stringify({
+          channel: 'orchestrator',
+          event: 'notice',
+          data: {
+            ...handoffNoticePayload,
+            backend: activeBackend.id,
+          },
+        }));
+        broadcastToOrchestratorSession(sessionName, JSON.stringify({
+          channel: 'orchestrator',
+          event: 'status',
+          data: { status: 'busy', repoPath, threadId, backend: activeBackend.id },
+        }));
+        quotaFallbackError = null;
+        try {
+          await runBackendTurn(
+            activeBackend,
+            activeAgentTag,
+            fallback.action === 'downgrade',
+            fallback.action === 'downgrade' ? fallback.toModel : undefined,
+          );
+        } catch (err) {
+          if (fallback.action !== 'downgrade' || !isRuntimeQuotaLimitError(err)) throw err;
+          quotaFallbackError = err instanceof Error ? err.message : String(err);
+        }
+        if (fallback.action === 'downgrade' && quotaFallbackError) {
+          const exhaustedFallback = resolveQuotaFallback(fallback.toModel);
+          if (exhaustedFallback) {
+            sawTerminal = true;
+            const exhaustedMessage = buildCrossHouseHandoffMessage(exhaustedFallback);
+            broadcastToOrchestratorSession(sessionName, JSON.stringify({
+              channel: 'orchestrator',
+              event: 'notice',
+              data: {
+                repoPath,
+                threadId,
+                kind: exhaustedFallback.noticeKind,
+                noticeId: `cross-house-handoff-${threadId ?? 'repo'}-${Date.now()}`,
+                message: exhaustedMessage,
+                registered: [`${exhaustedFallback.fromModel} -> ${exhaustedFallback.toModel}`],
+                backend: activeBackend.id,
+              },
+            }));
+            broadcastToOrchestratorSession(sessionName, JSON.stringify({
+              channel: 'orchestrator',
+              event: 'status',
+              data: { status: 'ready', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
+            }));
+          }
+        }
+      }
     }
 
     // The stream resolved without ever emitting 'done'/'error' (hung child that
