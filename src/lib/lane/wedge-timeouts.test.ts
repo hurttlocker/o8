@@ -83,12 +83,12 @@ describe('computeWedgeAction (pure decision matrix)', () => {
     expect(computeWedgeAction(agedLane('recovering', WEDGE_RECOVERING_MS - 1_000, { packetId: 'pkt-1' }), NOW)).toBeNull();
   });
 
-  it('awaiting_orchestrator past 60m escalates to awaiting_input with a human card', () => {
+  it('awaiting_orchestrator past 60m escalates to awaiting_human with a human card', () => {
     const action = computeWedgeAction(agedLane('awaiting_orchestrator', WEDGE_AWAITING_ORCHESTRATOR_MS + 1_000), NOW);
     expect(action).toMatchObject({
       kind: 'escalate_human',
       from: 'awaiting_orchestrator',
-      to: 'awaiting_input',
+      to: 'awaiting_human',
       transitions: true,
       raisesCard: true,
     });
@@ -98,8 +98,8 @@ describe('computeWedgeAction (pure decision matrix)', () => {
     expect(computeWedgeAction(agedLane('awaiting_orchestrator', WEDGE_AWAITING_ORCHESTRATOR_MS - 1_000), NOW)).toBeNull();
   });
 
-  it('paused/awaiting_input past 24h raises a reminder but does NOT transition', () => {
-    for (const status of ['paused', 'awaiting_input'] as const) {
+  it('paused/awaiting_input/awaiting_human past 24h raises a reminder but does NOT transition', () => {
+    for (const status of ['paused', 'awaiting_input', 'awaiting_human'] as const) {
       const action = computeWedgeAction(agedLane(status, WEDGE_PARKED_REMINDER_MS + 1_000), NOW);
       expect(action).toMatchObject({ kind: 'parked_reminder', from: status, to: status, transitions: false, raisesCard: true });
     }
@@ -170,15 +170,15 @@ describe('enforceWedgeTimeouts (real path through the registry)', () => {
     expect(getLaneEvents(lane.id, 100).filter((e) => e.verb === 'wedge_timeout')).toHaveLength(1);
   });
 
-  it('escalates a stalled awaiting_orchestrator lane to awaiting_input (human)', () => {
+  it('escalates a stalled awaiting_orchestrator lane to awaiting_human (human)', () => {
     const lane = parkLane('awaiting_orchestrator', WEDGE_AWAITING_ORCHESTRATOR_MS + 60_000);
 
     enforceWedgeTimeouts(NOW);
 
     const after = getLane(lane.id);
-    expect(after?.status).toBe('awaiting_input');
+    expect(after?.status).toBe('awaiting_human');
     const wedge = getLaneEvents(lane.id, 100).find((e) => e.verb === 'wedge_timeout');
-    expect(wedge?.payload).toMatchObject({ from: 'awaiting_orchestrator', to: 'awaiting_input', action: 'escalate_human' });
+    expect(wedge?.payload).toMatchObject({ from: 'awaiting_orchestrator', to: 'awaiting_human', action: 'escalate_human' });
   });
 
   it('reminds a 24h-parked awaiting_input lane WITHOUT changing its status, once per episode', () => {

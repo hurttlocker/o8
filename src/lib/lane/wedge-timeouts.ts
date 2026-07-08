@@ -109,13 +109,12 @@ export function computeWedgeAction(lane: Lane, now: number): WedgeAction | null 
     }
     case 'awaiting_orchestrator': {
       if (elapsedMs < WEDGE_AWAITING_ORCHESTRATOR_MS) return null;
-      // No `awaiting_human` status exists in the persisted enum, so escalate to
-      // `awaiting_input` (the existing human-facing state) and raise an operator
-      // card — realizing the layer-5 "human, your call" escalation.
+      // Layer-5 "human, your call" escalation — `awaiting_human` is a real
+      // persistable status now (#1513), distinct from a worker asking for input.
       return {
         kind: 'escalate_human',
         from: 'awaiting_orchestrator',
-        to: 'awaiting_input',
+        to: 'awaiting_human',
         elapsedMs,
         thresholdMs: WEDGE_AWAITING_ORCHESTRATOR_MS,
         blockedReason: 'orchestrator_wedge_timeout',
@@ -124,7 +123,8 @@ export function computeWedgeAction(lane: Lane, now: number): WedgeAction | null 
       };
     }
     case 'paused':
-    case 'awaiting_input': {
+    case 'awaiting_input':
+    case 'awaiting_human': {
       if (elapsedMs < WEDGE_PARKED_REMINDER_MS) return null;
       // These legitimately wait on a human — DO NOT auto-fail. Just make sure
       // the operator has a durable reminder so it isn't parked silently.
