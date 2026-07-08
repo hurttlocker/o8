@@ -63,6 +63,13 @@ interface RegisterMobileLiveActivityTokenInput {
   bundleId?: string | null;
   environment?: 'sandbox' | 'production' | null;
   deviceLabel?: string | null;
+  /**
+   * R3 (o8 Relay v1): the standard APNs remote-notification device token
+   * (alert-capable), registered alongside the ActivityKit `pushToken`. The relay
+   * sends the generic "approval waiting" ALERT push against THIS token — the
+   * ActivityKit token cannot carry a generic alert (Apple rejects it).
+   */
+  remoteNotificationToken?: string | null;
 }
 
 interface ActivityKitSendResult {
@@ -326,12 +333,22 @@ function liveActivityDb() {
         last_signature TEXT,
         last_delivered_at INTEGER,
         failure_count INTEGER NOT NULL DEFAULT 0,
+        remote_notification_token TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
       CREATE INDEX IF NOT EXISTS idx_mobile_live_activity_tokens_updated_at
         ON mobile_live_activity_tokens(updated_at);
     `);
+  }
+  // R3 (o8 Relay v1): the alert-capable remote-notification device token lives
+  // in the SAME device record as the ActivityKit token. Added by ALTER for DBs
+  // that predate the column (idempotent + cheap).
+  const cols = sqlite
+    .prepare(`PRAGMA table_info(mobile_live_activity_tokens)`)
+    .all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'remote_notification_token')) {
+    sqlite.exec(`ALTER TABLE mobile_live_activity_tokens ADD COLUMN remote_notification_token TEXT`);
   }
   return sqlite;
 }
@@ -346,14 +363,15 @@ export function upsertMobileLiveActivityToken(
 
   sqlite.prepare(`
     INSERT INTO mobile_live_activity_tokens
-      (push_token, activity_id, bundle_id, environment, device_label, last_signature, last_delivered_at, failure_count, created_at, updated_at)
+      (push_token, activity_id, bundle_id, environment, device_label, last_signature, last_delivered_at, failure_count, remote_notification_token, created_at, updated_at)
     VALUES
-      (@pushToken, @activityId, @bundleId, @environment, @deviceLabel, NULL, NULL, 0, @now, @now)
+      (@pushToken, @activityId, @bundleId, @environment, @deviceLabel, NULL, NULL, 0, @remoteNotificationToken, @now, @now)
     ON CONFLICT(push_token) DO UPDATE SET
       activity_id = COALESCE(excluded.activity_id, mobile_live_activity_tokens.activity_id),
       bundle_id = excluded.bundle_id,
       environment = excluded.environment,
       device_label = COALESCE(excluded.device_label, mobile_live_activity_tokens.device_label),
+      remote_notification_token = COALESCE(excluded.remote_notification_token, mobile_live_activity_tokens.remote_notification_token),
       failure_count = 0,
       updated_at = excluded.updated_at
   `).run({
@@ -362,6 +380,7 @@ export function upsertMobileLiveActivityToken(
     bundleId,
     environment,
     deviceLabel: input.deviceLabel ?? null,
+    remoteNotificationToken: input.remoteNotificationToken?.trim() || null,
     now,
   });
 
@@ -430,6 +449,22 @@ export function listMobileLiveActivityTokens(): StoredMobileLiveActivityToken[] 
     lastDeliveredAt: row.last_delivered_at,
     failureCount: row.failure_count,
   }));
+}
+
+/**
+ * R3 (o8 Relay v1): the registered alert-capable remote-notification tokens, for
+ * the relay connector's `push-req`. Returns only records that actually have one,
+ * newest first (the connector notifies the most-recently-seen device).
+ */
+export function listRemoteNotificationTokens(): Array<{ token: string; environment: 'sandbox' | 'production' }> {
+  const sqlite = liveActivityDb();
+  const rows = sqlite.prepare(`
+    SELECT remote_notification_token AS token, environment
+      FROM mobile_live_activity_tokens
+     WHERE remote_notification_token IS NOT NULL AND remote_notification_token != ''
+     ORDER BY updated_at DESC
+  `).all() as Array<{ token: string; environment: 'sandbox' | 'production' }>;
+  return rows;
 }
 
 export function deleteMobileLiveActivityToken(pushToken: string): boolean {
