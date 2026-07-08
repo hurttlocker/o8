@@ -32,6 +32,20 @@ real use. Beta exit = five rocks (four engineering, one proof) + three explicit 
   contract. Dupes folded: #1499→#1486 (ship-over-existing-release, hit independently twice in
   24h), #1510→#1485 (flaky steering test).
 
+**RE-AUDIT 2026-07-08 (code-level, clause by clause): DECOMPOSED — no longer one rock.**
+Scaffolding largely exists: stop verb end-to-end (#1286: `orchestrator/stop-packet.ts`, routes,
+CLI), restart reconcile refuses to archive live lanes (lost session→paused, missing
+worktree→awaiting_orchestrator + card), reaper preserves worktree HEAD, cleanup checks
+uncommitted work. Remaining core = ONE STONE (~2–3 days): a lane-lifecycle invariant module that
+(a) unifies the two divergent terminal-state definitions (`lane/terminal-states.ts` vs
+`lane/types.ts` disagree on `reviewing`) and adds wedge-timeouts for `awaiting_*`/paused/
+recovering so nothing parks forever, and (b) routes every worktree-prune path through one guarded
+gate (uncommitted OR recent-mtime → refuse + emit lane event; the force path currently has no
+dirty check). Separable follow-ups, each PEBBLE–STONE: persisted idempotency key on steer/rerun
+(#1497 — cache is in-memory and only guards merge verbs), confirmed-kill escalation
+SIGINT→SIGTERM→SIGKILL (#1471 S1), headless transcript binding (#1502), huddle-exit steer
+reclassification (#1496).
+
 ### Rock 2 — Telemetry + updater safety, one program (M-L) — THIS PR
 - [x] Process-level crash capture (uncaughtException/unhandledRejection) in Next server + ws-server,
       persisted locally under `~/.o8/telemetry/` (ring-buffered)
@@ -48,10 +62,17 @@ real use. Beta exit = five rocks (four engineering, one proof) + three explicit 
   no staged rollout. A bad release currently hits the whole fleet invisibly and irrecoverably.
 - Related: #1454 (opt-in fleet telemetry console — the console UI is follow-up, not this PR).
 
-### Rock 3 — Symon Agent Mode desktop half (L) — LANDED 0.1.565/566
+### Rock 3 — Symon Agent Mode desktop half (L) — LANDED, now a PEBBLE
 Desktop half (phone-hosted realtime voice, Mac-executed tools) landed on main 2026-07-08
-(8edbfe16) after the audit snapshot. Remaining: live verification + governance review of the
-phone-initiated tool-call approval path.
+(8edbfe16). Code-level re-audit: COMPLETE, zero stubs — symon WS channel with full handler set +
+stale/preemption sweeps, ephemeral mint with the contract's exact error table, strict
+callId-correlated execution through the same SafetyClass gate as desk, symmetric last-start-wins,
+and a real-path verifier (`scripts/verify-symon-agent-mode.ts`) that drives an actual ws-server
+over a real WS client. Phone-side approval is excluded from v1 BY CONTRACT (confirm-gated tools
+honestly return needs_confirmation; approval stays on the Mac dock).
+Remaining (PEBBLE — one dogfood session, no code): real iPhone against the installed app with a
+BYOK key — mint through the real webview bridge, one real tool round-trip, desk↔phone preemption
+both directions within ~3s, confirm-gated tool pops the Mac dock card.
 
 ### Rock 4 — ws-server decomposition (L) — THIS PR
 - [x] Event-loop lag watchdog with `[ws-health]` logging + counters on `/health` (caught real
@@ -66,14 +87,20 @@ phone-initiated tool-call approval path.
 - Evidence: #1498 (event loop wedged minutes on a sync FS walk; every mobile client shares that
   one thread). The specific walk was fixed; the structural exposure was not.
 
-### Rock 5 — Native mobile app to the App Store (L)
-- [ ] Parity audit vs web `/mobile`
-- [ ] Native-module EAS builds green
-- [ ] App Store submission
-- [ ] Retire the parallel web surface
-- Evidence: full Expo SDK 55 app exists at `~/o8-mobile` (daily commits, EAS configured) — #1074
-  reads "not started" but is stale. Phase-4 gate (resolve a real approval from the phone) is the
-  stated pre-launch bar.
+### Rock 5 — Native mobile app to the App Store (L) — DECOMPOSED
+- [x] Parity audit vs web `/mobile` — the 07-07 handoff is FULLY RESOLVED (review-units authority
+      e214e6c3, canonical fleet session identity 6a5fe067, agent-visible identity d78ba854)
+- [ ] TestFlight (2 stones + pebble): first EAS production build with the full current native set
+      (WebRTC + widgets + relay — wired but never cloud-built; quota blocked 06-27, reset 07-01,
+      nobody re-ran); relay E2E green (in flight now); rename fork-residue package name "chat"
+- [ ] App Store submission (stone + external rock): listing copy + full screenshot set + hosted
+      privacy policy; then Apple review itself (camera/mic/local-network/background-audio +
+      companion-app dependency = week+ of calendar, not engineering)
+- [ ] Retire the parallel web surface (after TestFlight proves out)
+- Evidence: `~/o8-mobile` near feature-parity native (chat/fleet/approvals/diffs/activity/
+  terminal/symon-voice/pairing), 10 commits today on Relay v1. Desktop relay connector
+  (`src/lib/mobile/relay-connector.ts`, db39127f) already wired into ws-server bootstrap;
+  standalone `services/relay/` Railway service + cross-repo E2E matrix in flight 2026-07-08.
 
 ## The proof gate (parallel, non-engineering)
 - [ ] Fresh-machine walkdown: DMG → sign-in → badge → first merge on the clean Intel MacBook
@@ -96,3 +123,18 @@ Status update 2026-07-08 (post-cleanup): the canvas↔Symon cluster (#1503–#15
 7 resolved on 0.1.566 (#1503, #1507, #1509 fixed; two closed as dupes), #1508 kept open honestly
 (landed fix is hygiene, live probe stays armed), epic #1505 in progress (1 of 7 items done). The
 lifecycle cluster (#1463–#1502) is intact and is THE beta-exit rock.
+
+## Merge-to-ship plan (2026-07-08 re-audit)
+
+Rocks-to-pebbles scoreboard: rock 2 DONE (this PR) · rock 4 DONE (this PR) · rock 3 code-complete
+(pebble: live dogfood) · rock 1 decomposed (one stone core + 4 small follow-ups) · rock 5
+decomposed (TestFlight = 2 stones; Apple review = external calendar).
+
+1. Relay E2E agent + mobile parity/connection agent finish and land on main.
+2. Merge latest main into this PR — expect a real `src/ws-server.ts` merge (relay connector
+   bootstrap wiring vs the rock-4 restructure); re-verify (tsc, targeted suites, :3999 boot).
+3. Merge this PR to main; ship next version (Q-gated).
+4. One post-ship dogfood session covers three pebbles: Symon agent mode live (iPhone), terminal
+   host child mode in the packaged build (then flip the default), UI parity eyeball.
+5. Next build effort: the rock-1 stone core (lifecycle invariant module + guarded prune gate),
+   then the EAS TestFlight build stone.
