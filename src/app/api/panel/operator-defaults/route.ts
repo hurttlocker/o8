@@ -11,6 +11,7 @@ import {
   type OverlapGateMode,
 } from '@/lib/operator/defaults';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -275,8 +276,11 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
 export async function GET() {
   try {
-    const data = await getOperatorDefaults();
-    return response(data);
+    const [data, cliAuth] = await Promise.all([
+      getOperatorDefaults(),
+      getRuntimeAuthSnapshot(),
+    ]);
+    return response({ ...data, cliAuth });
   } catch (error) {
     console.error('[panel-operator-defaults] Failed to load operator defaults:', error);
     return response({ error: 'Failed to load operator defaults.' }, 500);
@@ -295,8 +299,11 @@ export async function POST(request: Request) {
       return response({ error: 'No supported fields in request body.' }, 400);
     }
 
-    const updated = await updateOperatorDefaults(update);
-    return response(updated);
+    const [updated, cliAuth] = await Promise.all([
+      updateOperatorDefaults(update),
+      getRuntimeAuthSnapshot(),
+    ]);
+    return response({ ...updated, cliAuth });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update operator defaults.';
     console.error('[panel-operator-defaults] Failed to update operator defaults:', message);

@@ -77,6 +77,18 @@ export interface OperatorDefaults {
 export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
   sources: Record<keyof OperatorDefaults, SettingSource>;
+  cliAuth?: {
+    statuses: Record<'codex' | 'claude', {
+      installed: boolean;
+      authenticated: boolean;
+      detail: string;
+      fix: string;
+    }>;
+    suggestedSubscriptionProfile: {
+      profile: SubscriptionProfile | null;
+      detail: string | null;
+    };
+  };
 }
 
 export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it to manage from Settings.';
