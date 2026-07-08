@@ -316,8 +316,14 @@ export async function buildPacketPrompt(
   // Huddle mode (#1282) — armed per-mission by the orchestrator. When on, the
   // worker posts its plan + pushback and STOPS before editing, so Claude and
   // Codex align on the approach before implementation.
-  const huddleSection = resolvePacketHuddleEnabled(packet) ? HUDDLE_PROMPT_SECTION : null;
-  const advisorSection = resolvePacketAdvisorEnabled(packet) ? ADVISOR_PROMPT_SECTION : null;
+  const huddleArmed = resolvePacketHuddleEnabled(packet);
+  const huddleSection = huddleArmed ? HUDDLE_PROMPT_SECTION : null;
+  // De-dupe overlapping alignment blocks: HUDDLE_PROMPT_SECTION already tells the
+  // worker to do the alignment turn first, and the advisor section (single-sub
+  // cheap-tier auto-arm of the SAME turn) would otherwise stack a second,
+  // near-identical "align before you edit" block. Emit exactly one — the explicit
+  // huddle section wins; the advisor section only applies when huddle is off.
+  const advisorSection = !huddleArmed && resolvePacketAdvisorEnabled(packet) ? ADVISOR_PROMPT_SECTION : null;
   // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).

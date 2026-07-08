@@ -353,8 +353,12 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     expect(packet.huddle).toBe(true);
 
     const prompt = await buildPacketPrompt(packet, state.mission.packets);
+    // This packet is BOTH huddle-armed (create-mission auto-arms cheap tier) and
+    // advisor-armed. The two sections overlap, so the assembler emits exactly one
+    // alignment block — the explicit huddle section wins, the advisor section is
+    // de-duped out.
     expect(prompt).toContain('Huddle mode (this packet)');
-    expect(prompt).toContain('Advisor discipline (single-sub cheap-tier worker)');
+    expect(prompt).not.toContain('Advisor discipline (single-sub cheap-tier worker)');
     expect(prompt).toContain('Engineering Brain available');
   });
 
