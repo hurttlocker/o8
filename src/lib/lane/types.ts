@@ -263,7 +263,14 @@ export type LaneEventVerb =
   // its conservative timeout so the reaper escalated it — the invariant is
   // "nothing parks silently". Payload:
   // { from, to, elapsedMs, thresholdMs, blockedReason, action }
-  | 'wedge_timeout';
+  | 'wedge_timeout'
+  // Prune gate (Rock 1 item 3): a worktree/clone deletion was refused because
+  // the tree had uncommitted work / recent activity / a non-terminal lane.
+  // Payload: { worktreePath, reason, forced:false }
+  | 'prune_refused'
+  // Prune gate: an operator/recovery override deleted a tree the gate would
+  // otherwise have refused. Payload: { worktreePath, reason, forced:true }
+  | 'prune_forced';
 
 export type AgentReportReason =
   | 'needs_clarification'
