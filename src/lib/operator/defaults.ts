@@ -21,10 +21,57 @@ import { resolveWorkerEffortDefault } from './worker-effort-default';
 
 export { isSubscriptionProfile };
 
-const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode'];
-function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
-  return typeof value === 'string' && (DISPATCH_RUNTIMES as string[]).includes(value);
-}
+import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator } from './defaults-env';
+import {
+  isDispatchRuntime,
+  isClassAComposer,
+  isWorkersUseBrain,
+  envAutoApplyUpdates,
+  envBrainUseClaudeCli,
+  envBuyinDocEnabled,
+  envClassAComposer,
+  envClaudeWorkerEffort,
+  envCodexWorkerEffort,
+  envCollideAggregator,
+  envDefaultDispatchModel,
+  envDefaultDispatchRuntime,
+  envExperimentalCanvas,
+  envExperimentalChat,
+  envExperimentalGemini,
+  envExperimentalOpencode,
+  envHealBotEnabled,
+  envInAppOrchestratorEnabled,
+  envLocalChatModel,
+  envLocalEmbedModel,
+  envLocalInferenceBaseUrl,
+  envNativeBrowserView,
+  envOrchestratorBackend,
+  envOrchestratorModel,
+  envOverlapGate,
+  envPacketExplainerEnabled,
+  envParallelCap,
+  envPromptCachingEnabled,
+  envQuizGateEnabled,
+  envReviewerBackend,
+  envSubscriptionProfile,
+  envSupervisorAutoEscalate,
+  envThinkingEffort,
+  envWorkersUseBrain,
+  type OverlapGateMode,
+  type ClassAComposer,
+  type WorkersUseBrain,
+} from './defaults-env';
+
+export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator } from './defaults-env';
+export type {
+  OverlapGateMode,
+  ClassAComposer,
+  WorkersUseBrain,
+  OrchestratorBackendSetting,
+  ReviewerBackendSetting,
+  CollideAggregator,
+} from './defaults-env';
+
 
 /**
  * Operator defaults — the dispatch/supervision knobs exposed in Settings
@@ -39,23 +86,7 @@ function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
  * operator flow 2026-07-07; always verify against getOperatorDefaultsPath()).
  */
 
-export type OverlapGateMode = 'advisory' | 'strict';
 export type SettingSource = 'env' | 'file' | 'default';
-
-/**
- * Q&A Class A composer routing (#971, 'fastest' added #1124-era perf pass).
- *   - `auto` / `haiku-cli` — current chain: Haiku CLI tier 1, then Codex/OpenRouter/Flash/Sonnet CLI fallbacks.
- *   - `sonnet-cli` — lead with Sonnet CLI for higher quality. Skips Haiku + Codex tiers.
- *   - `fastest` — lead with OpenRouter flash-lite (~1-3s, pennies, daily-capped), free tiers as fallback.
- * Eval-mode (smoke gate) is unaffected — always routes through OpenRouter Sonnet 4.6.
- */
-export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
-
-function isClassAComposer(value: unknown): value is ClassAComposer {
-  // 'fastest' was missing here after #1124 added it to the type — Settings
-  // could offer it but updateOperatorDefaults rejected the write.
-  return value === 'auto' || value === 'haiku-cli' || value === 'sonnet-cli' || value === 'fastest';
-}
 
 /**
  * Targeting Machine tier — which CLI / model / effort to use for a role. The
@@ -108,50 +139,6 @@ export function mergeTier(env: Partial<TargetingTier> | null, file: TargetingTie
     model: env?.model ?? file?.model ?? fallback.model,
     effort: env?.effort ?? file?.effort ?? fallback.effort,
   };
-}
-
-/**
- * "Workers use the Brain" (2026-06-11). Whether dispatched worker agents get
- * Engineering Brain access (`o8 ask`) injected into their packet prompt.
- *   - `off`  — workers never told about the Brain.
- *   - `auto` — Brain on for NON-frontier runtimes only (tier !== 'frontier'
- *     in runtime-capabilities). Codex GPT-5.5 stays lean; weaker + future
- *     local models get repo knowledge without burning context on searches.
- *   - `all`  — every worker gets it (the dogfood / A-B setting).
- * Per-packet `useBrain` overrides this either way.
- */
-export type WorkersUseBrain = 'off' | 'auto' | 'all';
-
-function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
-  return value === 'off' || value === 'auto' || value === 'all';
-}
-
-/** Which backend drives the in-app Orchestrator. 'auto' = the legacy
- *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable';
-
-export function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
-  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
-    || value === 'hermes' || value === 'collide' || value === 'fable';
-}
-
-/**
- * Which backend runs lane auto-reviews. 'follow' (default) rides the active
- * orchestrator backend — byte-identical to pre-setting behavior. Splitting the
- * roles lets the bulk orchestrator run on the Codex sub while reviews — short,
- * bounded, accuracy-critical — run on Claude (opposite-frontier pairing:
- * Codex writes, Claude reviews). Q ruling 2026-07-07. Env: `O8_REVIEWER_BACKEND`.
- */
-export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
-
-export function isReviewerBackendSetting(value: unknown): value is ReviewerBackendSetting {
-  return value === 'follow' || value === 'codex' || value === 'claude';
-}
-
-export type CollideAggregator = 'auto' | 'claude' | 'codex';
-
-export function isCollideAggregator(value: unknown): value is CollideAggregator {
-  return value === 'auto' || value === 'claude' || value === 'codex';
 }
 
 export interface OperatorDefaults {
@@ -405,202 +392,6 @@ function getOperatorDefaultsPath() {
     process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
     OPERATOR_DEFAULTS_FILE,
   );
-}
-
-// ── Env overrides ──
-
-function envParallelCap(): number | null {
-  const raw = process.env.O8_MAX_PARALLEL_DISPATCHES;
-  if (!raw) return null;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function envSubscriptionProfile(): SubscriptionProfile | null {
-  const raw = process.env.O8_SUBSCRIPTION_PROFILE?.trim();
-  if (raw && isSubscriptionProfile(raw)) return raw;
-  return null;
-}
-
-function envOverlapGate(): OverlapGateMode | null {
-  const raw = process.env.O8_STRICT_OVERLAP_GATE;
-  if (raw === '1') return 'strict';
-  if (raw === '0') return 'advisory';
-  return null;
-}
-
-function envSupervisorAutoEscalate(): boolean | null {
-  const raw = process.env.O8_SUPERVISOR_AUTO_ESCALATE;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envHealBotEnabled(): boolean | null {
-  const raw = process.env.O8_HEAL_BOT_ENABLED;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envPromptCachingEnabled(): boolean | null {
-  const raw = process.env.O8_PROMPT_CACHING;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envThinkingEffort(): ThinkingEffort | null {
-  const raw = process.env.O8_THINKING_EFFORT;
-  if (raw && isThinkingEffort(raw)) return raw;
-  return null;
-}
-
-function envOrchestratorModel(): string | null {
-  const raw = process.env.O8_ORCHESTRATOR_MODEL;
-  return raw?.trim() || null;
-}
-
-function envDefaultDispatchRuntime(): OrchestratorRuntime | null {
-  const raw = process.env.O8_DEFAULT_DISPATCH_RUNTIME?.trim();
-  if (!raw) return null;
-  if (isDispatchRuntime(raw)) return raw;
-  return null;
-}
-
-function envCodexWorkerEffort(): ThinkingEffort | null {
-  const raw = process.env.O8_CODEX_WORKER_EFFORT?.trim();
-  if (raw && isThinkingEffort(raw)) return raw;
-  return null;
-}
-
-function envClaudeWorkerEffort(): ThinkingEffort | null {
-  const raw = process.env.O8_CLAUDE_WORKER_EFFORT?.trim();
-  if (raw && isThinkingEffort(raw)) return raw;
-  return null;
-}
-
-function envDefaultDispatchModel(): string | null {
-  const raw = process.env.O8_DISPATCH_MODEL;
-  return raw?.trim() || null;
-}
-
-function envLocalInferenceBaseUrl(): string | null {
-  return process.env.O8_LOCAL_INFERENCE_BASE_URL?.trim() || null;
-}
-
-function envLocalEmbedModel(): string | null {
-  return process.env.O8_LOCAL_EMBED_MODEL?.trim() || null;
-}
-
-function envLocalChatModel(): string | null {
-  return process.env.O8_LOCAL_CHAT_MODEL?.trim() || null;
-}
-
-function envExperimentalOpencode(): boolean | null {
-  const raw = process.env.O8_EXPERIMENTAL_OPENCODE;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envExperimentalGemini(): boolean | null {
-  const raw = process.env.O8_EXPERIMENTAL_GEMINI;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envExperimentalChat(): boolean | null {
-  const raw = process.env.O8_EXPERIMENTAL_CHAT;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envExperimentalCanvas(): boolean | null {
-  const raw = process.env.O8_EXPERIMENTAL_CANVAS;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envNativeBrowserView(): boolean | null {
-  const raw = process.env.O8_NATIVE_BROWSER_VIEW;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envClassAComposer(): ClassAComposer | null {
-  const raw = process.env.O8_CLASS_A_COMPOSER?.trim();
-  if (raw && isClassAComposer(raw)) return raw;
-  return null;
-}
-
-function envInAppOrchestratorEnabled(): boolean | null {
-  const raw = process.env.O8_IN_APP_ORCHESTRATOR_ENABLED;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envBrainUseClaudeCli(): boolean | null {
-  const raw = process.env.O8_BRAIN_USE_CLAUDE_CLI;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envWorkersUseBrain(): WorkersUseBrain | null {
-  const raw = process.env.O8_WORKERS_USE_BRAIN?.trim();
-  if (raw && isWorkersUseBrain(raw)) return raw;
-  return null;
-}
-
-function envOrchestratorBackend(): OrchestratorBackendSetting | null {
-  const raw = process.env.O8_ORCHESTRATOR_BACKEND?.trim();
-  if (raw && isOrchestratorBackendSetting(raw)) return raw;
-  return null;
-}
-
-function envReviewerBackend(): ReviewerBackendSetting | null {
-  const raw = process.env.O8_REVIEWER_BACKEND?.trim();
-  if (raw && isReviewerBackendSetting(raw)) return raw;
-  return null;
-}
-
-function envPacketExplainerEnabled(): boolean | null {
-  const raw = process.env.O8_EXPLAINER;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envQuizGateEnabled(): boolean | null {
-  const raw = process.env.O8_QUIZ_GATE;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envBuyinDocEnabled(): boolean | null {
-  const raw = process.env.O8_BUYIN_DOC;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-function envCollideAggregator(): CollideAggregator | null {
-  const raw = process.env.O8_COLLIDE_AGGREGATOR_DEFAULT?.trim();
-  if (raw && isCollideAggregator(raw)) return raw;
-  return null;
-}
-
-function envAutoApplyUpdates(): AutoApplyUpdates | null {
-  const raw = process.env.O8_AUTO_APPLY_UPDATES?.trim();
-  if (raw === 'off' || raw === 'when-idle') return raw;
-  return null;
 }
 
 // ── File helpers ──
