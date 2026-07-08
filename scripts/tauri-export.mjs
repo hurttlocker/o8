@@ -270,6 +270,45 @@ if (releaseConfig.githubOAuthClientId) {
   console.log('📦 No GITHUB_OAUTH_CLIENT_ID configured — device flow stays disabled in this build');
 }
 
+// Bake the app version so both the boot crash guard below AND the server's
+// resolveAppVersion() (src/lib/telemetry/crash-store.ts) stamp the real version
+// even when cwd's package.json is the minimal Next standalone one.
+let bakedAppVersion = 'unknown';
+try {
+  bakedAppVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version || 'unknown';
+} catch { /* keep 'unknown' */ }
+const APP_VERSION_STANZA =
+  `\nif (!process.env.O8_APP_VERSION) process.env.O8_APP_VERSION = ${JSON.stringify(bakedAppVersion)};\n`;
+
+// Early-boot crash guard (Rock 2): observe crashes that happen BEFORE Next's
+// instrumentation hook installs the full crash capture. Self-contained (no
+// imports of app code), best-effort, never throws. Appends the same JSONL shape
+// src/lib/telemetry/crash-store.ts uses, honouring the same data-dir env vars,
+// with a coarse 1MB ceiling so a boot-loop can't grow the file unbounded.
+const BOOT_CAPTURE_STANZA = `
+(function installBootCrashCapture() {
+  try {
+    const bfs = require('node:fs');
+    const bos = require('node:os');
+    const bpath = require('node:path');
+    const dir = bpath.join(process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || bpath.join(bos.homedir(), '.o8'), 'telemetry');
+    const file = bpath.join(dir, 'crashes.jsonl');
+    const write = (kind, err) => {
+      try {
+        bfs.mkdirSync(dir, { recursive: true });
+        try { if (bfs.existsSync(file) && bfs.statSync(file).size > 1000000) return; } catch (e) {}
+        const msg = err && err.message ? err.message : String(err);
+        const rec = { ts: Date.now(), source: 'boot', appVersion: process.env.O8_APP_VERSION || 'unknown', kind: kind, message: String(msg).slice(0, 2000) };
+        if (err && err.stack) rec.stack = String(err.stack).slice(0, 8000);
+        bfs.appendFileSync(file, JSON.stringify(rec) + '\\n', 'utf8');
+      } catch (e) { /* swallow */ }
+    };
+    process.on('uncaughtExceptionMonitor', (err) => write('uncaughtException', err));
+    process.on('unhandledRejection', (reason) => write('unhandledRejection', reason));
+  } catch (e) { /* telemetry must never block boot */ }
+})();
+`;
+
 // ── Server bundle ──
 // Next's stock standalone entry ships as server-impl.js; server.js becomes a
 // thin wrapper that stamps the REAL TCP peer address into x-o8-client-addr on
@@ -322,7 +361,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-${RELEASE_ENV_STANZA}
+${RELEASE_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
 process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
@@ -432,6 +471,14 @@ const NATIVE_EXTERNALS = '--external:node-pty --external:better-sqlite3 --extern
 
 compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 
+// terminal-host fork target (#1498 follow-up). ws-server forks this when
+// O8_TERMINAL_HOST=child so node-pty spawn + data pump run in a separate
+// process. Sits next to ws-server.mjs in out/server/ — the child resolver
+// (terminal-host-client.ts) finds it via import.meta.url adjacency. Bundled
+// unconditionally so flipping the env in a packaged install just works; inline
+// (default) never forks it.
+compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts', NATIVE_EXTERNALS);
+
 // ── Compile MCP servers ──
 // Ships alongside the bundled Next.js backend so the packaged Tauri app
 // can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
@@ -524,7 +571,7 @@ exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
 
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
-const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
+const REQUIRED_BUNDLES = ['ws-server.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
 for (const bundle of REQUIRED_BUNDLES) {
   const bundlePath = join(server, bundle);
   if (!existsSync(bundlePath)) {

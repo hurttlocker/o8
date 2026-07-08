@@ -274,3 +274,14 @@ export function envAutoApplyUpdates(): AutoApplyUpdates | null {
   if (raw === 'off' || raw === 'when-idle') return raw;
   return null;
 }
+
+export function envTelemetryOptIn(): boolean | null {
+  const raw = process.env.O8_TELEMETRY_OPT_IN;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
+export function envTelemetryIngestUrl(): string | null {
+  return process.env.O8_TELEMETRY_INGEST_URL?.trim() || null;
+}
