@@ -1,6 +1,6 @@
 # o8 Relay v1 — off-network reach for the mobile window (PROPOSAL)
 
-Status: **PROPOSAL — awaiting Q's gate.** Phase B (implementation) does not start until this doc is approved. Ruling context: `~/Obsidian/cashcoldgame-wiki/concepts/o8-remote-access-ruling-2026-07-08.md` — mobile IS the remote window; the relay closes the one real gap (off-network reach); no web surface; cloud runners stay parked; execution never leaves the user's Mac.
+Status: **APPROVED — Q gate passed 2026-07-08.** Rulings: (1) separate `o8-relay` Railway service per D1; (2) entitlement = all-paid in principle, which today means **founders-only** (the $19 tier isn't offered yet — flag maps founder→true, future paid→true at launch, free→false); (3) LAN-first pairing confirmed for v1; hostname `relay.o8.run`. Phase B in progress; `railway up` remains Q-gated. Ruling context: `~/Obsidian/cashcoldgame-wiki/concepts/o8-remote-access-ruling-2026-07-08.md` — mobile IS the remote window; the relay closes the one real gap (off-network reach); no web surface; cloud runners stay parked; execution never leaves the user's Mac.
 
 ## Hard constraints (from the ruling — violating any of these means the design is wrong)
 
