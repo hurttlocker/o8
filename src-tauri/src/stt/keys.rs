@@ -134,6 +134,7 @@ pub fn config_public() -> serde_json::Value {
             "openrouter_api_key",
             "elevenlabs_api_key",
             "google_tts_api_key",
+            "groq_api_key",
         ] {
             // Redacted presence flag: the settings UI shows "you have a key
             // saved" without ever receiving the value. Emit `<key>_set` BEFORE
