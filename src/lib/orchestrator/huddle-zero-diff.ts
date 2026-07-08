@@ -40,8 +40,20 @@ export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<{ parked:
   const packet = state.packets.find((candidate) => candidate.id === packetId);
   if (packet?.huddle !== true) return { parked: false };
 
+  // A huddle packet is DESIGNED to produce a zero-diff alignment turn, so a
+  // zero-diff exit is the EXPECTED outcome — park it for the orchestrator
+  // rather than classifying it `zero_diff_failed` (which structurally kills the
+  // steer path, #1496). `packet.huddle === true` is the authoritative signal.
+  //
+  // We previously ALSO required a persisted `huddle` report or a plan-like
+  // transcript, but that gate false-failed real huddle exits: the headless
+  // transcript drops (#1502) and workers sometimes report via
+  // `needs_clarification` instead of `huddle`. So the readiness probe is now
+  // only an observability annotation — never a reason to withhold parking.
   const huddleReady = hasPersistedHuddleReport(lane.id) || await transcriptEndsWithPlan(lane);
-  if (!huddleReady) return { parked: false };
+  if (!huddleReady) {
+    console.log(`[lane-lifecycle] Huddle packet ${packetId} exited zero-diff without an explicit plan signal; parking for orchestrator anyway (#1496).`);
+  }
 
   const now = new Date().toISOString();
   const parkedLane = setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', HUDDLE_READY_EVENT_LABEL) ?? lane;
