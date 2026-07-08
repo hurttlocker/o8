@@ -42,7 +42,8 @@
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
-import { readFileSync, statSync, watch, existsSync } from 'node:fs';
+import { watch, existsSync } from 'node:fs';
+import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { execSync, execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -172,11 +173,23 @@ import { WsWatchdog } from './lib/ws-server/health-watchdog';
 
 const execFileAsync = promisify(execFile);
 
+// Async existence check — never blocks the shared event loop for FS calls on
+// per-message / per-poll hot paths (the #1498 exposure class). Startup-only
+// probes may still use existsSync.
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
-function listRepoPathsSync(): string[] {
+async function listRepoPaths(): Promise<string[]> {
   try {
     const registryPath = join(homedir(), '.o8', 'repos.json');
-    const raw = readFileSync(registryPath, 'utf-8');
+    const raw = await readFile(registryPath, 'utf-8');
     const store = JSON.parse(raw) as { repos?: Array<{ localPath?: string }> };
     return (store.repos ?? []).map(r => r.localPath).filter(Boolean) as string[];
   } catch {
@@ -901,9 +914,9 @@ const METERED_WINDOW_VALVE_STEP_TOKENS = 60_000;
 const meteredWindowValveWarnedStep = new Map<string, number>();
 
 /** Approximate persisted-thread tokens from the chat-history file (chars/4). */
-function estimateThreadTokens(threadId: string): number {
+async function estimateThreadTokens(threadId: string): Promise<number> {
   try {
-    const raw = readFileSync(join(homedir(), '.o8', 'chat-history', `${threadId}.json`), 'utf-8');
+    const raw = await readFile(join(homedir(), '.o8', 'chat-history', `${threadId}.json`), 'utf-8');
     const payload = JSON.parse(raw) as { messages?: Array<{ text?: string; content?: string }> };
     const chars = (payload.messages ?? []).reduce((sum, m) => sum + (m.text ?? m.content ?? '').length, 0);
     return Math.ceil(chars / 4);
@@ -1229,6 +1242,19 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
 // Orchestrator now uses structured JSON output (stream-json) instead of PTY.
 // See orchestrator-session.ts for the new approach.
 
+// ── Sync-FS note (#1498 sweep) ──────────────────────────────────────────────
+// The tmux helpers below still use execFileSync (has-session / new-session /
+// capture-pane / kill-session) and a couple of existsSync probes. These are
+// intentionally NOT converted to async in this sweep: they are wired into a
+// synchronous terminal create/attach call chain (materializePendingDashSession
+// → createDashTmuxSessionSync → spawn*Pty → registerTerminalAttachment) and
+// threading async through it piecemeal would (a) be invasive and (b) be redone
+// by the terminal-host extraction, which moves ALL PTY/tmux work off this event
+// loop into a forked child process (the real structural fix). The pure-FS hot
+// paths that touch the loop per-message/per-poll — estimateThreadTokens,
+// handleTerminalImage, getReviewWatchTargets/listRepoPaths — ARE async now.
+// Remaining sync FS is startup/module-init only (git-watcher setup, port
+// reclaim, bootstrap worktree prune) or the deferred terminal chain above.
 function sanitizePtyEnv() {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -2961,7 +2987,7 @@ function handleClientMessage(client: ClientState, raw: string) {
       handleTerminalDetach(client, msg);
       break;
     case 'terminal-image':
-      handleTerminalImage(client, msg);
+      void handleTerminalImage(client, msg);
       break;
     case 'agent-kill':
       handleAgentKill(client, msg);
@@ -3461,7 +3487,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // notice banner each time the persisted thread crosses another 60K-token
     // step past the metered target.
     if (threadId && isMeteredOrchestratorBackend(activeBackend.id)) {
-      const approxThreadTokens = estimateThreadTokens(threadId);
+      const approxThreadTokens = await estimateThreadTokens(threadId);
       const step = Math.floor(approxThreadTokens / METERED_WINDOW_VALVE_STEP_TOKENS);
       if (step >= 1 && (meteredWindowValveWarnedStep.get(threadId) ?? 0) < step) {
         meteredWindowValveWarnedStep.set(threadId, step);
@@ -4392,7 +4418,7 @@ const TERMINAL_IMAGE_EXTENSIONS = new Set([
 ]);
 const TERMINAL_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>) {
+async function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>) {
   const sessionName = typeof msg.sessionName === 'string' ? msg.sessionName : '';
   const filePath = typeof msg.filePath === 'string' ? msg.filePath : '';
   if (!sessionName || !filePath) return;
@@ -4407,12 +4433,12 @@ function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>)
       console.log(`[ws-server] terminal-image: refused non-image path ${resolved}`);
       return;
     }
-    const stat = statSync(resolved);
-    if (!stat.isFile() || stat.size > TERMINAL_IMAGE_MAX_BYTES) {
+    const fileStat = await stat(resolved);
+    if (!fileStat.isFile() || fileStat.size > TERMINAL_IMAGE_MAX_BYTES) {
       console.log(`[ws-server] terminal-image: refused ${resolved} (not a regular file or too large)`);
       return;
     }
-    const data = readFileSync(resolved);
+    const data = await readFile(resolved);
     const b64 = data.toString('base64');
     const filename = basename(resolved);
     // Send raw components — client builds the IIP escape sequence
@@ -5619,7 +5645,7 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
 
 async function getReviewWatchTargets() {
   const repoPaths = new Set<string>([REPO_ROOT]);
-  for (const p of listRepoPathsSync()) {
+  for (const p of await listRepoPaths()) {
     repoPaths.add(resolve(p));
   }
 
@@ -5630,8 +5656,8 @@ async function getReviewWatchTargets() {
 
     try {
       const metaPath = resolve(repoPath, '.cortex-worktrees', '.meta.json');
-      if (!existsSync(metaPath)) continue;
-      const raw = readFileSync(metaPath, 'utf-8');
+      if (!(await pathExists(metaPath))) continue;
+      const raw = await readFile(metaPath, 'utf-8');
       const meta = JSON.parse(raw) as {
         worktrees?: Record<string, { id: string; sessionKey?: string; claudeManaged?: boolean }>;
       };
@@ -5639,7 +5665,7 @@ async function getReviewWatchTargets() {
         const workspacePath = worktree.claudeManaged
           ? resolve(repoPath, '.claude', 'worktrees', worktree.id)
           : resolve(repoPath, '.cortex-worktrees', worktree.id);
-        if (!existsSync(workspacePath)) continue;
+        if (!(await pathExists(workspacePath))) continue;
         targets.push({
           repoPath,
           workspacePath,
