@@ -18,6 +18,7 @@ const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   silent_exit_verification_failed: 'Silent Exit · Verification Failed',
   silent_exit_no_work: 'Silent Exit · No Work',
   silent_exit_but_work_present: 'Silent Exit · Work Salvaged',
+  no_session_binding: 'No Session Binding',
 };
 
 const STATUS_LABELS: Record<SupervisorInboxItem['status'], string> = {
