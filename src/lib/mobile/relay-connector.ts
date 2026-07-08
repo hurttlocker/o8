@@ -1,10 +1,14 @@
 import 'server-only';
 
-import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { WebSocket } from 'ws';
 
-import { resolveFlags } from '@/lib/entitlement/flags';
+import { listApprovals } from '@/lib/approvals/store';
+import { readCachedEntitlement } from '@/lib/entitlement/license';
+import { getEntitlementSync } from '@/lib/entitlement/store';
 import type { Plan } from '@/lib/entitlement/types';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 
@@ -13,6 +17,16 @@ import { encryptFrame, decryptFrame, isEncryptedFrame, type EncryptedFrame } fro
 import { getServerIdentity } from './e2ee-identity';
 import { resolveDeviceByToken, type MobileDevice } from './device-registry';
 import { listRemoteNotificationTokens } from './live-activity-push';
+import {
+  buildHttpReplay,
+  chunkBase64,
+  deriveRoutingId,
+  passthroughCloseCode,
+  relayConnectorEligible,
+  DEFAULT_MAX_TUNNEL_BYTES,
+  DEFAULT_RELAY_URL,
+  type HttpReqFrame,
+} from './relay-connector-protocol';
 
 /**
  * o8 Relay connector — the Mac-side outbound leg (docs/relay-v1-design.md §D8.2).
@@ -34,145 +48,20 @@ import { listRemoteNotificationTokens } from './live-activity-push';
  *                 other frame → bridged to a local ws-server connection (the realtime
  *                 channels). Mac-origin 4401/4403 closes pass back through the relay.
  *
- * HARD ISOLATION: the whole connector is gated behind entitlement + an operator
- * setting + O8_RELAY_URL, wrapped so a failure NEVER touches the LAN path. When the
- * relay is down the Mac simply isn't reachable off-network; LAN is unaffected.
+ * HARD ISOLATION: gated behind entitlement + an operator setting + a license token,
+ * and every entry point is wrapped so a failure NEVER touches the LAN path. When the
+ * relay is down the Mac just isn't reachable off-network; LAN is unaffected.
  *
  * NOTE: the live E2EE-channel bridge + real-phone interop is validated by the
- * Q-gated cross-network e2e (docs §D8.5) with the real mobile client — it cannot
- * be exercised in-repo. The contract-critical PURE logic below is unit-tested
- * (relay-connector.test.ts); the relay half is proven by services/relay e2e.
+ * Q-gated cross-network e2e (docs §D8.5) with the real mobile client — it cannot be
+ * exercised in-repo. The contract-critical PURE logic (relay-connector-protocol.ts)
+ * is unit-tested; the relay half is proven by services/relay's verify-relay-e2e.
  */
 
 const P = '[relay]';
-
-/** Non-loopback socket-truth marker (mirrors scripts/tauri-export.mjs wrapper). */
-export const RELAY_FORWARD_MARKER = 'o8-relay-forward';
-export const DEFAULT_RELAY_URL = 'wss://relay.o8.run';
-/** ≤256KB post-base64 chunks for large tunnel responses (docs R6). */
-const MAX_HTTP_CHUNK_CHARS = 256 * 1024;
-const DEFAULT_MAX_TUNNEL_BYTES = 32 * 1024 * 1024;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
-const STREAM_HANDSHAKE_DEADLINE_MS = 8_000; // must beat the relay's 10s
-
-// ── Pure helpers (exported for unit tests) ────────────────────────────────────
-
-const B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-
-/** Base58 (Bitcoin alphabet) — matches the mobile client's routingId derivation. */
-export function base58Encode(bytes: Uint8Array): string {
-  if (bytes.length === 0) return '';
-  const digits: number[] = [0];
-  for (const byte of bytes) {
-    let carry = byte;
-    for (let j = 0; j < digits.length; j++) {
-      carry += digits[j]! << 8;
-      digits[j] = carry % 58;
-      carry = (carry / 58) | 0;
-    }
-    while (carry > 0) {
-      digits.push(carry % 58);
-      carry = (carry / 58) | 0;
-    }
-  }
-  let out = '';
-  for (let k = 0; k < bytes.length && bytes[k] === 0; k++) out += '1';
-  for (let q = digits.length - 1; q >= 0; q--) out += B58_ALPHABET[digits[q]!];
-  return out;
-}
-
-/** routingId = base58(SHA-256(identity pubkey)[:16]). Derived at connect, never persisted. */
-export function deriveRoutingId(identityPublicKeyB64: string): string {
-  const pub = Buffer.from(identityPublicKeyB64, 'base64');
-  const hash = createHash('sha256').update(pub).digest();
-  return base58Encode(hash.subarray(0, 16));
-}
-
-/** Off-network relay eligibility: entitled (paid tier) AND the operator setting on. */
-export function relayConnectorEligible(plan: Plan, settingEnabled: boolean): boolean {
-  return settingEnabled && resolveFlags(plan)['relay.offNetwork'] === true;
-}
-
-export interface HttpReqFrame {
-  rid?: unknown;
-  method?: unknown;
-  path?: unknown;
-  headers?: unknown;
-  bodyB64?: unknown;
-  authorization?: unknown;
-}
-
-// Only forward a safe subset of client headers; the marker + Bearer are set below.
-const FORWARDABLE_HEADERS = new Set([
-  'content-type',
-  'accept',
-  'accept-language',
-  'if-none-match',
-  'if-modified-since',
-  'x-o8-mobile-surface',
-]);
-
-export type ReplayPlan =
-  | { ok: true; url: string; method: string; headers: Record<string, string>; body?: Buffer }
-  | { ok: false; status: number; error: string };
-
-/**
- * Build the local replay for an `http-req` frame. SSRF-safe (local absolute path
- * only), stamps the NON-loopback marker + the prod-wrapper trigger + the phone's
- * Bearer so src/middleware.ts gates it exactly like a LAN phone (v1.1 change 1).
- */
-export function buildHttpReplay(req: HttpReqFrame, apiBase: string): ReplayPlan {
-  const path = typeof req.path === 'string' ? req.path : '';
-  // Local absolute path only — never a full URL, protocol-relative, or traversal.
-  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\') || path.includes('..')) {
-    return { ok: false, status: 400, error: 'bad_path' };
-  }
-  const method = (typeof req.method === 'string' ? req.method : 'GET').toUpperCase();
-  const headers: Record<string, string> = {};
-  if (req.headers && typeof req.headers === 'object') {
-    for (const [k, v] of Object.entries(req.headers as Record<string, unknown>)) {
-      const lk = k.toLowerCase();
-      if (FORWARDABLE_HEADERS.has(lk) && typeof v === 'string') headers[lk] = v;
-    }
-  }
-  const auth = pickAuthorization(req);
-  if (auth) headers['authorization'] = auth;
-  // v1.1 change 1: socket-truth marker (dev) + wrapper trigger (prod). Both make
-  // the gate treat this as REMOTE — a loopback-trusted tunnel is forbidden.
-  headers['x-o8-client-addr'] = RELAY_FORWARD_MARKER;
-  headers['x-o8-relay-forward'] = '1';
-  const body =
-    typeof req.bodyB64 === 'string' && req.bodyB64 && method !== 'GET' && method !== 'HEAD'
-      ? Buffer.from(req.bodyB64, 'base64')
-      : undefined;
-  return { ok: true, url: `${apiBase}${path}`, method, headers, body };
-}
-
-function pickAuthorization(req: HttpReqFrame): string | null {
-  if (typeof req.authorization === 'string' && req.authorization) return req.authorization;
-  if (req.headers && typeof req.headers === 'object') {
-    const h = req.headers as Record<string, unknown>;
-    const a = h.authorization ?? h.Authorization;
-    if (typeof a === 'string' && a) return a;
-  }
-  return null;
-}
-
-/** Split a base64 body into ≤256KB chunks (first rides http-res, rest http-res-part). */
-export function chunkBase64(base64: string, maxChars = MAX_HTTP_CHUNK_CHARS): string[] {
-  if (base64.length <= maxChars) return [base64];
-  const out: string[] = [];
-  for (let i = 0; i < base64.length; i += maxChars) out.push(base64.slice(i, i + maxChars));
-  return out;
-}
-
-/** Mac-origin close codes pass through the relay unchanged; relay-origin do not. */
-export function passthroughCloseCode(code: number): number | null {
-  return code === 4401 || code === 4403 ? code : null;
-}
-
-// ── Connector orchestration ───────────────────────────────────────────────────
+const STREAM_HANDSHAKE_DEADLINE_MS = 8_000; // must beat the relay's 10s deadline
 
 type StreamPhase = 'await-auth' | 'handshaking' | 'ready';
 
@@ -192,7 +81,7 @@ export interface RelayConnectorConfig {
   settingEnabled: boolean;
   relayUrl?: string;
   licenseToken: string | null;
-  /** Non-empty only when a blocked approval is waiting (drives push-req). */
+  /** > 0 when a blocked approval is waiting — drives push-req when no phone is live. */
   blockedApprovalCount: () => number;
   maxTunnelBytes?: number;
 }
@@ -263,7 +152,7 @@ export class RelayConnector {
     });
     ws.on('message', (raw) => this.onRelayMessage(raw));
     ws.on('close', (code) => {
-      // 4409 = entitlement lapsed at the relay; stop retrying until re-evaluated.
+      // 4409 = entitlement lapsed at the relay; stand down until re-evaluated.
       if (code === 4409) {
         console.warn(`${P} connector closed 4409 entitlement_lapsed — standing down`);
         this.stopped = true;
@@ -288,12 +177,7 @@ export class RelayConnector {
 
   // ── relay → connector ──
   private onRelayMessage(raw: unknown): void {
-    let frame: Record<string, unknown> | null = null;
-    try {
-      frame = JSON.parse(typeof raw === 'string' ? raw : (raw as Buffer).toString('utf8')) as Record<string, unknown>;
-    } catch {
-      return;
-    }
+    const frame = safeParse(typeof raw === 'string' ? raw : (raw as Buffer).toString('utf8'));
     if (!frame) return;
     switch (frame.t) {
       case 'mux-open':
@@ -361,7 +245,7 @@ export class RelayConnector {
       state.phase = 'ready';
       if (state.deadline) clearTimeout(state.deadline);
       this.sendEncrypted(state, { channel: 'system', event: 'e2ee-ready' });
-      this.sendControl({ t: 'mux-ready', sid }); // relay clears pending + deadline
+      this.sendControl({ t: 'mux-ready', sid }); // relay clears pending + its deadline
       this.openBridge(state);
       return;
     }
@@ -406,8 +290,8 @@ export class RelayConnector {
     const { wsPort } = resolvePortInfo();
     let bridge: WebSocket;
     try {
-      // Loopback to our own ws-server. The connector already did device-auth +
-      // E2EE, so this hop is a trusted plaintext loopback channel.
+      // Loopback to our own ws-server. The connector already did device-auth + E2EE,
+      // so this hop is a trusted plaintext loopback channel.
       bridge = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(state.deviceToken)}`);
     } catch (err) {
       console.warn(`${P} bridge dial failed sid=${state.sid}: ${errMsg(err)}`);
@@ -444,12 +328,11 @@ export class RelayConnector {
         return;
       }
       const chunks = chunkBase64(buf.toString('base64'));
-      const headers = subsetResponseHeaders(resp.headers);
       this.sendEncrypted(state, {
         t: 'http-res',
         rid,
         status: resp.status,
-        headers,
+        headers: subsetResponseHeaders(resp.headers),
         bodyB64: chunks[0] ?? '',
         last: chunks.length <= 1,
       });
@@ -464,7 +347,7 @@ export class RelayConnector {
   // ── push-req (queue-and-notify) ──
   private maybePushOnDevices(): void {
     if (this.liveDeviceCount > 0) return;
-    if (safe(() => this.config.blockedApprovalCount()) ?? 0 <= 0) return;
+    if ((safe(() => this.config.blockedApprovalCount()) ?? 0) <= 0) return;
     const tokens = safe(() => listRemoteNotificationTokens()) ?? [];
     const target = tokens[0];
     if (!target) return; // no alert-capable token registered yet (mobile must add it)
@@ -507,6 +390,77 @@ export class RelayConnector {
     }
     this.streams.delete(sid);
   }
+}
+
+// ── ws-server bootstrap entry (isolated; never breaks LAN) ───────────────────
+
+/**
+ * Resolve the operator toggle. Env override wins (`O8_RELAY_CONNECTOR=on|off`),
+ * else the operator-defaults file's `relayConnectorEnabled`, else ON (default ON
+ * when entitled). Reads the defaults JSON directly for forward-compat with a UI
+ * toggle without coupling to the 800-line defaults.ts (a deliberate blast-radius
+ * choice on a critical file — the UI plumbing is a follow-up).
+ */
+export function resolveRelayConnectorEnabled(): boolean {
+  const raw = process.env.O8_RELAY_CONNECTOR?.trim().toLowerCase();
+  if (raw === 'off' || raw === 'false' || raw === '0') return false;
+  if (raw === 'on' || raw === 'true' || raw === '1') return true;
+  try {
+    const p = path.join(process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'), 'operator-defaults.json');
+    const parsed = JSON.parse(readFileSync(p, 'utf8')) as { relayConnectorEnabled?: unknown };
+    if (typeof parsed.relayConnectorEnabled === 'boolean') return parsed.relayConnectorEnabled;
+  } catch {
+    /* missing/invalid → default */
+  }
+  return true;
+}
+
+let activeConnector: RelayConnector | null = null;
+
+/**
+ * Start the off-network connector IFF entitled + toggled on + a license token is
+ * cached. Fully guarded: any failure logs and returns null — the LAN path is never
+ * affected. Called once from the ws-server bootstrap.
+ */
+export function startRelayConnectorIfEnabled(): RelayConnector | null {
+  try {
+    const enabled = resolveRelayConnectorEnabled();
+    const plan = getEntitlementSync().plan;
+    if (!relayConnectorEligible(plan, enabled)) return null; // free tier or toggled off
+    const licenseToken = readCachedEntitlement()?.licenseKey ?? null;
+    if (!licenseToken) {
+      console.warn(`${P} entitled (${plan}) but no license token cached — connector idle`);
+      return null;
+    }
+    const connector = new RelayConnector({
+      plan,
+      settingEnabled: enabled,
+      licenseToken,
+      blockedApprovalCount: () => {
+        try {
+          return listApprovals({ status: 'pending' }).length;
+        } catch {
+          return 0;
+        }
+      },
+    });
+    connector.start();
+    activeConnector = connector;
+    console.log(`${P} off-network connector started (plan=${plan}, routingId=${connector.id.slice(0, 8)}…)`);
+    return connector;
+  } catch (err) {
+    console.warn(`${P} connector bootstrap failed (LAN unaffected): ${errMsg(err)}`);
+    return null;
+  }
+}
+
+export function stopRelayConnector(): void {
+  try {
+    activeConnector?.stop();
+  } catch {
+    /* ignore */
+  }
+  activeConnector = null;
 }
 
 // ── module-level helpers ──
