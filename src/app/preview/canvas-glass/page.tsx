@@ -349,9 +349,8 @@ export default function CanvasGlassPreviewPage() {
   const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
   const [specCards, setSpecCards] = useState<SpecCard[]>([]);
   const [brainCards, setBrainCards] = useState<BrainCard[]>([]);
-  // Render-on-screen (#1270) — ephemeral markdown explainer cards the
-  // orchestrator paints via the `render` intent. Not persisted (content IS the
-  // card), so they live only for the session.
+  // Render-on-screen (#1270) — markdown explainer cards the orchestrator paints
+  // via the `render` intent. Content IS the card, so snapshot it with geometry.
   const [markdownCards, setMarkdownCards] = useState<MarkdownCard[]>([]);
   const [agentCards, setAgentCards] = useState<AgentCard[]>([]);
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
@@ -2529,6 +2528,14 @@ export default function CanvasGlassPreviewPage() {
         return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, aspect: saved.aspect, items: saved.items };
       })]);
     }
+    if (snap.markdown?.length) {
+      setMarkdownCards((previous) => [...previous, ...(snap.markdown ?? []).map((saved) => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, title: saved.title, markdown: saved.markdown };
+      })]);
+    }
     snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
     // Video cards restore async — the bytes come back from IndexedDB and get a
     // fresh object URL (the snapshot only carried the media id). A clip whose
@@ -2590,17 +2597,31 @@ export default function CanvasGlassPreviewPage() {
     chat: chatCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, threadId: card.threadId, repoPath: card.repoPath, repoName: card.repoName, title: card.title })),
     diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
+    markdown: markdownCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, title: card.title, markdown: card.markdown })),
     brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, markdownCards, brainCards]);
+  const flushCanvasSnapshot = useCallback(() => {
+    if (!restoredRef.current || Date.now() < persistArmedAtRef.current) return;
+    saveCanvasSnapshot({ v: 1, ...JSON.parse(persistSignature) });
+  }, [persistSignature]);
+
+  useEffect(() => {
+    const target = window as unknown as Record<string, unknown>;
+    target.__o8CanvasFlushSnapshot = flushCanvasSnapshot;
+    window.addEventListener('beforeunload', flushCanvasSnapshot);
+    return () => {
+      if (target.__o8CanvasFlushSnapshot === flushCanvasSnapshot) delete target.__o8CanvasFlushSnapshot;
+      window.removeEventListener('beforeunload', flushCanvasSnapshot);
+    };
+  }, [flushCanvasSnapshot]);
+
   useEffect(() => {
     // Hold fire until restore's async spawns settle — an instant save of
     // the half-restored canvas would overwrite the snapshot.
     if (!restoredRef.current || Date.now() < persistArmedAtRef.current) return;
-    const timer = setTimeout(() => {
-      saveCanvasSnapshot({ v: 1, ...JSON.parse(persistSignature) });
-    }, 700);
+    const timer = setTimeout(flushCanvasSnapshot, 700);
     return () => clearTimeout(timer);
-  }, [persistSignature]);
+  }, [flushCanvasSnapshot]);
 
   const moveFileCard = useCallback((id: number, x: number, y: number) => {
     setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));

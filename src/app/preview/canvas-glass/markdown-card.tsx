@@ -8,8 +8,8 @@
  * on my screen"), the orchestrator calls the `o8_render` MCP tool → the
  * `render` canvas intent → this card blooms with a title + rendered markdown.
  *
- * Static + ephemeral: the content IS the card (no Q&A composer, no persistence
- * across reloads — like a transient explainer). It shares the exact
+ * Static: the content IS the card (no Q&A composer; persisted as a snapshot
+ * identity so reloads keep rendered explainers). It shares the exact
  * GlassCardShell chrome every other canvas card uses; inline styles only,
  * themed via the host's --cnv-* vars.
  */

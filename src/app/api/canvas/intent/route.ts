@@ -19,6 +19,7 @@ const VERBS = new Set(['enter', 'open-browser', 'ask-brain', 'open-spec', 'spawn
 const CANVAS_ROUTE = '/preview/canvas-glass';
 const READY_POLL_MS = 300;
 const READY_TIMEOUT_MS = 10_000;
+const NAV_CONFIRM_MS = 400;
 
 interface IntentBody {
   verb?: unknown;
@@ -80,14 +81,26 @@ export async function POST(request: NextRequest) {
 
     if (!probe.ready && ensure) {
       if (probe.route && probe.route !== CANVAS_ROUTE) {
+        await new Promise((resolve) => setTimeout(resolve, NAV_CONFIRM_MS));
+        const confirm = await probeDispatch(client, verb, args, origin);
         // FULL navigation, not client.navigate() — that drives the SPA router
         // (__o8Navigate__), which does not reliably cross from /dashboard to
         // the /preview/canvas-glass route segment, so the canvas never loads
         // and the intent listener never mounts (o8_canvas then fails every
         // time). window.location.assign is exactly what o8's own "enter canvas"
         // button uses for this hop.
-        await client.evalJs(`window.location.assign(${JSON.stringify(CANVAS_ROUTE)})`);
-        navigated = true;
+        if (!confirm.ready && confirm.route && confirm.route !== CANVAS_ROUTE) {
+          await client.evalJs(`(() => {
+            const flush = window.__o8CanvasFlushSnapshot;
+            if (typeof flush === 'function') {
+              try { flush(); } catch {}
+            }
+            window.location.assign(${JSON.stringify(CANVAS_ROUTE)});
+          })()`);
+          navigated = true;
+        } else {
+          probe = confirm;
+        }
       }
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (!probe.ready && Date.now() < deadline) {

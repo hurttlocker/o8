@@ -40,6 +40,8 @@ export interface CanvasSnapshotV1 {
   chat: Array<SnapGeometry & { threadId: string; repoPath: string | null; repoName: string | null; title: string }>;
   diff: Array<SnapGeometry & { laneId: string; title: string }>;
   spec: Array<SnapGeometry & { repoPath: string | null }>;
+  /** Optional — render cards arrived after v1 snapshots existed. */
+  markdown?: Array<SnapGeometry & { title: string; markdown: string }>;
   /** Optional — Brain cards arrived after v1 snapshots existed; absent
    *  means none (older snapshots stay loadable). */
   brain?: Array<SnapGeometry & { repoPath: string | null }>;
