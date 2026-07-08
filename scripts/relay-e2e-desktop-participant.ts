@@ -1,0 +1,79 @@
+/**
+ * e2e-desktop-participant — the REAL Mac half of the joint relay cross-network e2e.
+ *
+ * Runs the production `RelayConnector` (not a fake) against a LOCAL relay, bridging
+ * to the already-running o8.app on this Mac (ports via resolvePortInfo → ~/.o8/{api,ws}-port).
+ * So the loop under test is: real phone client → local relay → THIS connector →
+ * the running desktop's ws-server + Next → back. No desktop rebuild, no port collision.
+ *
+ * It mints a throwaway founder plan-JWT from a freshly generated Ed25519 keypair and
+ * prints the PUBLIC key — paste that as the local relay's LICENSE_PUBLIC_KEY so the
+ * relay's entitlement gate accepts this connector. The E2EE identity + routingId come
+ * from the REAL ~/.o8/e2ee-identity.key (the key the phone pinned at pairing), so an
+ * already-paired phone derives the same routingId and completes the handshake.
+ *
+ * Run:  O8_RELAY_URL=ws://127.0.0.1:8787 npx tsx services/relay/scripts/e2e-desktop-participant.ts
+ * Stop: Ctrl-C.  Env override O8_E2E_PLAN=founder|pro|team to test other tiers.
+ */
+import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
+import { RelayConnector } from '@/lib/mobile/relay-connector';
+import type { Plan } from '@/lib/entitlement/types';
+
+const P = '[e2e-desktop]';
+
+async function main(): Promise<void> {
+  const relayUrl = process.env.O8_RELAY_URL;
+  if (!relayUrl) {
+    console.error(`${P} set O8_RELAY_URL to the local relay, e.g. ws://127.0.0.1:8787`);
+    process.exit(1);
+  }
+  const plan = (process.env.O8_E2E_PLAN as Plan) || 'founder';
+  const issuer = process.env.O8_E2E_ISSUER || 'o8-license';
+
+  // Throwaway plan-JWT keypair — the relay verifies the token with the PUBLIC half.
+  const { publicKey, privateKey } = await generateKeyPair('EdDSA');
+  const publicPem = await exportSPKI(publicKey);
+  const licenseToken = await new SignJWT({ plan })
+    .setProtectedHeader({ alg: 'EdDSA' })
+    .setIssuer(issuer)
+    .setSubject('e2e-test-mac')
+    .setIssuedAt()
+    .setExpirationTime('2h')
+    .sign(privateKey);
+
+  const connector = new RelayConnector({
+    plan,
+    settingEnabled: true,
+    relayUrl,
+    licenseToken,
+    blockedApprovalCount: () => 0,
+  });
+
+  console.log(`\n${P} ───────────────────────────────────────────────────────────`);
+  console.log(`${P} relay URL       : ${relayUrl}`);
+  console.log(`${P} plan            : ${plan}  (issuer ${issuer})`);
+  console.log(`${P} routingId       : ${connector.id}`);
+  console.log(`${P}   → phone dials : ${relayUrl.replace(/\/$/, '')}/device/${connector.id}`);
+  console.log(`${P} bridges to      : the running o8.app (127.0.0.1 api/ws via ~/.o8 ports)`);
+  console.log(`${P} ── paste this into the local relay's LICENSE_PUBLIC_KEY: ──`);
+  console.log(publicPem);
+  console.log(`${P} ───────────────────────────────────────────────────────────\n`);
+
+  connector.start();
+  console.log(`${P} connector started — dialing the relay. Ctrl-C to stop.`);
+
+  const shutdown = () => {
+    console.log(`\n${P} stopping.`);
+    try { (connector as unknown as { stop?: () => void }).stop?.(); } catch { /* noop */ }
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  // Keep the event loop alive.
+  setInterval(() => { /* heartbeat */ }, 1 << 30);
+}
+
+main().catch((err) => {
+  console.error(`${P} fatal:`, err);
+  process.exit(1);
+});
