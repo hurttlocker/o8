@@ -62,7 +62,7 @@ import { BrainGlassCard, type BrainCard } from './brain-card';
 import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
-import { AgentGlassCard, type AgentCard } from './agent-card';
+import { AgentGlassCard, AGENT_FULL_W, AGENT_FULL_H, AGENT_COMPACT_W, AGENT_COMPACT_H, type AgentCard } from './agent-card';
 import { codename } from '@/lib/agents/codename';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
@@ -100,10 +100,14 @@ interface InboxRow {
 interface LaneRow {
   id: string;
   packetId?: string | null;
+  /** Warm-session key — the transcript fallback when packetId can't resolve. */
+  sessionKey?: string | null;
   label?: string | null;
   repoPath?: string | null;
   status?: string | null;
   runtime?: string | null;
+  /** Lane creation (ISO) — the agent card's elapsed-timer origin. */
+  createdAt?: string | null;
 }
 interface CommitRow {
   hash: string;
@@ -403,13 +407,15 @@ export default function CanvasGlassPreviewPage() {
   // clicking ANY card brings it above every other card kind.
   const zPeakRef = useRef(9);
   // Agent-card bloom: lanes already carded (so a lane blooms exactly once), the
-  // monotonic address number ("agent two"), and a one-shot seed flag — the first
-  // lanes refresh seeds the set WITHOUT blooming, so opening the canvas over an
-  // already-running fleet doesn't explode into cards. Only lanes that go live
-  // AFTER the canvas is watching (i.e. what you just spawned) bloom.
+  // monotonic address number ("agent two"). Dedupe-by-laneId: a lane is only ever
+  // carded once. Entering the canvas cards ALL currently-running lanes (fleet
+  // dispatched from the IDE/MCP while the canvas was closed), not just lanes born
+  // after entry — the dedupe set keeps a re-card from ever double-blooming.
   const cardedLaneIdsRef = useRef<Set<string>>(new Set());
-  const lanesSeededRef = useRef(false);
   const agentNumberRef = useRef(1);
+  // Where the last agent card (overall + per-repo) landed — the preferred anchor
+  // so a fresh sibling clusters NEAR its group instead of scattering.
+  const agentAnchorsRef = useRef<{ last: { x: number; y: number } | null; byRepo: Map<string, { x: number; y: number }> }>({ last: null, byRepo: new Map() });
   const mountedCardIdsRef = useRef<Set<number>>(new Set());
   const spawnChoreographyRef = useRef<SpawnChoreography[]>([]);
   const spawnReservationsRef = useRef<SpawnReservation[]>([]);
@@ -1232,8 +1238,10 @@ export default function CanvasGlassPreviewPage() {
   }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   /** First clear spot scanning reading-order; least-covered cell when the
-   *  canvas is genuinely full. */
-  const findFreeSpot = useCallback((w: number, h: number): { x: number; y: number } => {
+   *  canvas is genuinely full. When `anchor` is set (a sibling's position), pick
+   *  the NEAREST free cell to it instead of the first in reading-order — so a
+   *  spawn burst / same-repo fleet clusters as a group rather than scattering. */
+  const findFreeSpot = useCallback((w: number, h: number, anchor?: { x: number; y: number } | null): { x: number; y: number } => {
     const taken = [...cardRectsRef.current, ...spawnReservationsRef.current];
     const pad = 18;
     // Layout-space viewport — zooming out widens the field spawns can use.
@@ -1246,6 +1254,8 @@ export default function CanvasGlassPreviewPage() {
     const maxY = Math.max(minY, vh - Math.min(h, 360) - 120);
     let best = { x: minX, y: minY };
     let bestOverlap = Infinity;
+    let nearestFree: { x: number; y: number } | null = null;
+    let nearestDist = Infinity;
     for (let y = minY; y <= maxY; y += 56) {
       for (let x = minX; x <= maxX; x += 64) {
         let overlap = 0;
@@ -1254,14 +1264,17 @@ export default function CanvasGlassPreviewPage() {
           const oy = Math.max(0, Math.min(y + h, rect.y + rect.h + pad) - Math.max(y, rect.y - pad));
           overlap += ox * oy;
         }
-        if (overlap === 0) return { x, y };
-        if (overlap < bestOverlap) {
+        if (overlap === 0) {
+          if (!anchor) return { x, y };
+          const dist = (x - anchor.x) ** 2 + (y - anchor.y) ** 2;
+          if (dist < nearestDist) { nearestDist = dist; nearestFree = { x, y }; }
+        } else if (overlap < bestOverlap) {
           bestOverlap = overlap;
           best = { x, y };
         }
       }
     }
-    return best;
+    return nearestFree ?? best;
   }, []);
 
   const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }, at?: SnapGeometry) => {
@@ -1858,6 +1871,18 @@ export default function CanvasGlassPreviewPage() {
   const focusBrainCard = useCallback((id: number) => focusCard('brain', id), [focusCard]);
   const focusMarkdownCard = useCallback((id: number) => focusCard('markdown', id), [focusCard]);
   const focusAgentCard = useCallback((id: number) => focusCard('agent', id), [focusCard]);
+  /** Toggle an agent card compact ↔ full — snaps to that mode's preset size so
+   *  the transcript+composer get room in full and the status tile stays tight in
+   *  compact. The o8_canvas resize verb still resizes either mode afterward. */
+  const toggleAgentCardExpand = useCallback((id: number) => {
+    setAgentCards((previous) => previous.map((card) => (
+      card.id === id
+        ? card.expanded
+          ? { ...card, expanded: false, w: AGENT_COMPACT_W, h: AGENT_COMPACT_H }
+          : { ...card, expanded: true, w: AGENT_FULL_W, h: AGENT_FULL_H }
+        : card
+    )));
+  }, []);
 
   const reducedMotion = useCallback(() => (
     typeof window !== 'undefined'
@@ -1888,11 +1913,21 @@ export default function CanvasGlassPreviewPage() {
   const bloomAgentCard = useCallback((lane: LaneRow) => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
-    const target = findFreeSpot(280, 128);
+    // Cluster near siblings — the last card in this repo, else the last agent
+    // card overall (same spawn burst). findFreeSpot returns the nearest FREE
+    // cell to the anchor, so a fleet reads as a group.
+    const anchor = (lane.repoPath ? agentAnchorsRef.current.byRepo.get(lane.repoPath) : null) ?? agentAnchorsRef.current.last;
+    const target = findFreeSpot(AGENT_FULL_W, AGENT_FULL_H, anchor);
+    agentAnchorsRef.current.last = target;
+    if (lane.repoPath) agentAnchorsRef.current.byRepo.set(lane.repoPath, target);
     const choreography = reducedMotion() ? null : takeSpawnChoreography();
     const start = choreography?.origin ?? target;
-    const reservation = { id, x: target.x, y: target.y, w: 280, h: 128 };
-    if (choreography) spawnReservationsRef.current.push(reservation);
+    // Always reserve the target — cardRectsRef only picks up the real rect on the
+    // next commit's effect, so a synchronous burst (entering the canvas over a
+    // running fleet) would otherwise read a stale field and stack every card on
+    // the same spot. Released once the card's rect takes over collision duty.
+    const reservation = { id, x: target.x, y: target.y, w: AGENT_FULL_W, h: AGENT_FULL_H };
+    spawnReservationsRef.current.push(reservation);
     setAgentCards((previous) => {
       if (previous.some((card) => card.laneId === lane.id)) {
         spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
@@ -1912,9 +1947,14 @@ export default function CanvasGlassPreviewPage() {
         x: start.x,
         y: start.y,
         z: zPeakRef.current,
-        w: 280,
-        h: 92,
+        w: AGENT_FULL_W,
+        h: AGENT_FULL_H,
         laneId: lane.id,
+        packetId: lane.packetId ?? null,
+        sessionKey: lane.sessionKey ?? null,
+        repoPath: lane.repoPath ?? null,
+        startedAt: lane.createdAt ?? null,
+        expanded: true,
         number,
         codename: codename(lane.id),
         title: lane.label?.trim() || repoTail || lane.id,
@@ -1937,20 +1977,23 @@ export default function CanvasGlassPreviewPage() {
           },
         });
       }, choreography.delayMs));
+    } else {
+      // Static bloom (entry burst / single new lane): hold the reservation just
+      // long enough for the next commit's cardRects effect to pick up the real
+      // card rect, then release so it doesn't over-reserve the field.
+      timersRef.current.push(setTimeout(() => {
+        spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
+      }, 400));
     }
   }, [findFreeSpot, reducedMotion, takeSpawnChoreography]);
 
-  /** Watch live lanes: seed the carded-set on first read (no bloom over an
-   *  already-running fleet), then bloom a card for every NEW lane — i.e. exactly
-   *  what voice/canvas just spawned. Cards read their phase live from activeLanes
-   *  thereafter; a lane leaving the set settles its card to "done". */
+  /** Watch live lanes: bloom a card for every lane not yet carded — including the
+   *  fleet already running when the canvas opens (dispatched from the IDE/MCP
+   *  while it was closed). Entering the canvas cards them ALL (entrance animation,
+   *  no choreography), deduped by laneId. Cards read their phase live from
+   *  activeLanes thereafter; a lane leaving the set settles its card to "done". */
   useEffect(() => {
     if (!canvasEnabled) return;
-    if (!lanesSeededRef.current) {
-      for (const lane of activeLanes) cardedLaneIdsRef.current.add(lane.id);
-      lanesSeededRef.current = true;
-      return;
-    }
     for (const lane of activeLanes) {
       if (cardedLaneIdsRef.current.has(lane.id)) continue;
       cardedLaneIdsRef.current.add(lane.id);
@@ -3667,6 +3710,7 @@ export default function CanvasGlassPreviewPage() {
               const lane = activeLanes.find((row) => row.id === laneId);
               if (lane) void spawnDiffCard(lane);
             }}
+            onToggleExpand={toggleAgentCardExpand}
           />
         ))}
       </AnimatePresence>
