@@ -1,7 +1,6 @@
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
-import { ADVISOR_PROMPT_SECTION, resolvePacketAdvisorEnabled } from '@/lib/orchestrator/advisor-access';
+import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
-import { HUDDLE_PROMPT_SECTION, resolvePacketHuddleEnabled } from '@/lib/orchestrator/huddle-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
@@ -313,17 +312,13 @@ export async function buildPacketPrompt(
   // a rule set in the thread governs every Codex worker dispatched from it.
   // Null when the packet has no originating thread or that thread has no rules.
   const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
-  // Huddle mode (#1282) — armed per-mission by the orchestrator. When on, the
-  // worker posts its plan + pushback and STOPS before editing, so Claude and
-  // Codex align on the approach before implementation.
-  const huddleArmed = resolvePacketHuddleEnabled(packet);
-  const huddleSection = huddleArmed ? HUDDLE_PROMPT_SECTION : null;
-  // De-dupe overlapping alignment blocks: HUDDLE_PROMPT_SECTION already tells the
-  // worker to do the alignment turn first, and the advisor section (single-sub
-  // cheap-tier auto-arm of the SAME turn) would otherwise stack a second,
-  // near-identical "align before you edit" block. Emit exactly one — the explicit
-  // huddle section wins; the advisor section only applies when huddle is off.
-  const advisorSection = !huddleArmed && resolvePacketAdvisorEnabled(packet) ? ADVISOR_PROMPT_SECTION : null;
+  // Alignment turn (#1282 Huddle + single-sub Advisor) — armed per-mission by
+  // the orchestrator (huddle flag) OR auto-armed for cheap-tier workers (advisor
+  // rule). When on, the worker posts its plan + pushback and STOPS before
+  // editing. The unified resolver ORs both sources and picks EXACTLY ONE prompt
+  // block — huddle wins; advisor only when huddle is off — so the two overlapping
+  // "align before you edit" blocks can never stack (#1512 de-dup contract).
+  const alignmentSection = resolvePacketAlignment(packet).promptSection;
   // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).
@@ -394,8 +389,7 @@ export async function buildPacketPrompt(
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
-    huddleSection,
-    advisorSection,
+    alignmentSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,

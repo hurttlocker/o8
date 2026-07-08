@@ -109,6 +109,7 @@ export function laneStatusToStateKey(status: string | null | undefined): PacketS
     case 'reviewing':
     case 'awaiting_input':
     case 'awaiting_orchestrator':
+    case 'awaiting_human':
       return 'review';
     case 'running':
     case 'launching':
