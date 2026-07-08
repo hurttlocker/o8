@@ -28,6 +28,8 @@ import {
   backgroundModeSet,
   agentGetEscalation,
   agentSetEscalation,
+  voicePrefsGet,
+  voicePrefsSet,
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
@@ -138,6 +140,11 @@ export function VoiceTab() {
   const [autostart, setAutostart] = useState(false);
   // Two-tier brain escalation policy (~/.o8/agent_models.json via the router).
   const [escalation, setEscalation] = useState<'off' | 'auto' | 'deep'>('auto');
+  // Groq BYOK for fast transcription (free tier). The config read strips the
+  // secret; `groq_api_key_set` is the redacted presence flag.
+  const [groqKeySet, setGroqKeySet] = useState(false);
+  const [groqKeyInput, setGroqKeyInput] = useState('');
+  const [groqKeySaving, setGroqKeySaving] = useState(false);
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -158,13 +165,15 @@ export function VoiceTab() {
 
   const loadAll = useCallback(async () => {
     if (!tauri) return;
-    const [, auto, bg, esc] = await Promise.all([
+    const [, auto, bg, esc, prefs] = await Promise.all([
       refreshPermissions(),
       autostartIsEnabled(),
       backgroundModeIsEnabled(),
       agentGetEscalation().catch(() => 'auto'),
+      voicePrefsGet().catch(() => null),
     ]);
     setAutostart(auto);
+    setGroqKeySet(Boolean(prefs && (prefs as Record<string, unknown>).groq_api_key_set));
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -190,6 +199,29 @@ export function VoiceTab() {
   const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
     setEscalation(next);
     void agentSetEscalation(next);
+  }, []);
+
+  const handleGroqKeySave = useCallback(async () => {
+    const key = groqKeyInput.trim();
+    if (!key) return;
+    setGroqKeySaving(true);
+    try {
+      await voicePrefsSet('groq_api_key', key);
+      setGroqKeySet(true);
+      setGroqKeyInput('');
+    } finally {
+      setGroqKeySaving(false);
+    }
+  }, [groqKeyInput]);
+
+  const handleGroqKeyRemove = useCallback(async () => {
+    setGroqKeySaving(true);
+    try {
+      await voicePrefsSet('groq_api_key', '');
+      setGroqKeySet(false);
+    } finally {
+      setGroqKeySaving(false);
+    }
   }, []);
 
   // Only an EXPLICIT non-zero AppleFnUsageType means Apple Dictation owns the
@@ -321,6 +353,92 @@ export function VoiceTab() {
                       { value: 'hold', label: 'Hold' },
                     ]}
                   />
+                }
+              />
+            </SettingsGroup>
+          </section>
+
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Transcription"
+              footnote="A free Groq key makes release-to-paste near-instant (their free tier easily covers one person's dictation). Keys stay on this machine in ~/.o8/dictation.json — never sent anywhere but Groq."
+            >
+              <SettingsRow
+                icon={<MicIcon />}
+                label="Groq API key"
+                subtitle={groqKeySet
+                  ? 'Key saved — fast transcription active. Paste a new key to replace it.'
+                  : 'Free at console.groq.com/keys — paste it here'}
+                accessory={
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="password"
+                      value={groqKeyInput}
+                      placeholder={groqKeySet ? '••••••••' : 'gsk_...'}
+                      onChange={(e) => setGroqKeyInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleGroqKeySave(); }}
+                      style={{
+                        width: 180,
+                        height: 26,
+                        paddingLeft: 8,
+                        paddingRight: 8,
+                        fontSize: 12,
+                        fontWeight: 300,
+                        letterSpacing: '-0.1px',
+                        fontFamily: APP_FONT_STACK,
+                        color: 'var(--t-text)',
+                        background: 'var(--t-input-bg)',
+                        border: '1px solid var(--t-divider)',
+                        borderRadius: 7,
+                        outline: 'none',
+                      }}
+                    />
+                    {groqKeyInput.trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => { void handleGroqKeySave(); }}
+                        disabled={groqKeySaving}
+                        style={{
+                          height: 26,
+                          paddingLeft: 10,
+                          paddingRight: 10,
+                          fontSize: 12,
+                          fontWeight: 300,
+                          letterSpacing: '-0.1px',
+                          fontFamily: APP_FONT_STACK,
+                          color: 'var(--t-text)',
+                          background: 'var(--t-input-bg)',
+                          border: '1px solid var(--t-divider)',
+                          borderRadius: 7,
+                          cursor: groqKeySaving ? 'default' : 'pointer',
+                        }}
+                      >
+                        {groqKeySaving ? 'Saving…' : 'Save'}
+                      </button>
+                    ) : groqKeySet ? (
+                      <button
+                        type="button"
+                        onClick={() => { void handleGroqKeyRemove(); }}
+                        disabled={groqKeySaving}
+                        style={{
+                          height: 26,
+                          paddingLeft: 10,
+                          paddingRight: 10,
+                          fontSize: 12,
+                          fontWeight: 300,
+                          letterSpacing: '-0.1px',
+                          fontFamily: APP_FONT_STACK,
+                          color: 'var(--t-text-muted)',
+                          background: 'transparent',
+                          border: '1px solid var(--t-divider)',
+                          borderRadius: 7,
+                          cursor: groqKeySaving ? 'default' : 'pointer',
+                        }}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </span>
                 }
               />
             </SettingsGroup>
