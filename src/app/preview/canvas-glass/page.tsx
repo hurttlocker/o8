@@ -179,6 +179,7 @@ type CanvasCardLite = {
 const CANVAS_READ_CAP = 4096;
 type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number; expiresAt: number };
 type SpawnReservation = { id: number; x: number; y: number; w: number; h: number };
+type CanvasToast = { id: number; message: string; tone: 'error' | 'info' | 'success' };
 
 // Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
 // Manage account / Sign out / Sign in, matching the operator's reference.
@@ -329,6 +330,10 @@ export default function CanvasGlassPreviewPage() {
   const [videoCards, setVideoCards] = useState<VideoCard[]>([]);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
+  const [filePathPickerOpen, setFilePathPickerOpen] = useState(false);
+  const [filePathInput, setFilePathInput] = useState('');
+  const [filePickerBusy, setFilePickerBusy] = useState(false);
+  const [canvasToast, setCanvasToast] = useState<CanvasToast | null>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [sessionsRepoFilter, setSessionsRepoFilter] = useState<string | null>(null);
   const [composerImages, setComposerImages] = useState<Array<{ name: string; dataUri: string }>>([]);
@@ -408,6 +413,7 @@ export default function CanvasGlassPreviewPage() {
   const mountedCardIdsRef = useRef<Set<number>>(new Set());
   const spawnChoreographyRef = useRef<SpawnChoreography[]>([]);
   const spawnReservationsRef = useRef<SpawnReservation[]>([]);
+  const canvasToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
@@ -543,6 +549,10 @@ export default function CanvasGlassPreviewPage() {
     }
   }, [canvasZoomLevel]);
 
+  useEffect(() => () => {
+    if (canvasToastTimerRef.current) clearTimeout(canvasToastTimerRef.current);
+  }, []);
+
   // Persist the operator-adjustable navigator loupe size (#1281).
   useEffect(() => {
     try {
@@ -583,6 +593,7 @@ export default function CanvasGlassPreviewPage() {
       setTopMenu(null);
       setComposerMenu(null);
       setTermPickerOpen(false);
+      setFilePathPickerOpen(false);
       setReviewPickerOpen(false);
       setSessionsOpen(false);
       setSearchOpen(false);
@@ -2327,6 +2338,33 @@ export default function CanvasGlassPreviewPage() {
     }]);
   }, [findFreeSpot]);
 
+  const showCanvasToast = useCallback((message: string, tone: CanvasToast['tone'] = 'error') => {
+    const id = Date.now();
+    setCanvasToast({ id, message, tone });
+    if (canvasToastTimerRef.current) clearTimeout(canvasToastTimerRef.current);
+    canvasToastTimerRef.current = setTimeout(() => {
+      setCanvasToast((current) => (current?.id === id ? null : current));
+      canvasToastTimerRef.current = null;
+    }, 3600);
+  }, []);
+
+  const openPathAsFileCard = useCallback((rawPath: string): boolean => {
+    const path = rawPath.trim();
+    if (!path) {
+      showCanvasToast('Enter an absolute file path.', 'error');
+      return false;
+    }
+    if (!path.startsWith('/')) {
+      showCanvasToast('Open file needs an absolute path.', 'error');
+      return false;
+    }
+    spawnFileCard(path);
+    setFilePathPickerOpen(false);
+    setFilePathInput('');
+    showCanvasToast('File card opened.', 'success');
+    return true;
+  }, [showCanvasToast, spawnFileCard]);
+
   // ── Canvas persistence — the canvas is a place, not a session. ──────
   // Restore once on mount: pure-state kinds land directly, live kinds go
   // back through their real spawn paths (terminals respawn shells in the
@@ -2487,20 +2525,31 @@ export default function CanvasGlassPreviewPage() {
     };
   }, [canvasEnabled, spawnFileCard]);
 
-  /** Native macOS choose-file (server-side osascript, the browse-folder
-   *  pattern) — no Tauri dialog plugin needed, works in dev-bridge too. */
+  /** Rail Open file: native Tauri picker when present, visible path fallback otherwise. */
   const openFilePicker = useCallback(() => {
-    fetch('/api/panel/file-io', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pick' }),
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { path?: string | null } | null) => {
-        if (typeof data?.path === 'string' && data.path) spawnFileCard(data.path);
-      })
-      .catch(() => {});
-  }, [spawnFileCard]);
+    setFilePathPickerOpen(false);
+    setFilePickerBusy(true);
+    void (async () => {
+      if (isTauri()) {
+        try {
+          const { open } = await import('@tauri-apps/plugin-dialog');
+          const chosen = await open({ multiple: false, directory: false, title: 'Open a file on the canvas' });
+          const path = Array.isArray(chosen) ? chosen[0] : chosen;
+          if (typeof path === 'string' && path) {
+            openPathAsFileCard(path);
+            return;
+          }
+          showCanvasToast('No file selected.', 'info');
+          return;
+        } catch {
+          showCanvasToast('Native file picker unavailable. Enter a path instead.', 'error');
+        }
+      } else {
+        showCanvasToast('Enter an absolute path to open a file card.', 'info');
+      }
+      setFilePathPickerOpen(true);
+    })().finally(() => setFilePickerBusy(false));
+  }, [openPathAsFileCard, showCanvasToast]);
 
   /** The spawn-dock terminal button opens the cwd picker; rows spawn. */
   const toggleTermPicker = useCallback(() => {
@@ -4271,6 +4320,119 @@ export default function CanvasGlassPreviewPage() {
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
       </ProximityDock>
+
+      <AnimatePresence>
+        {filePathPickerOpen ? (
+          <>
+            <div role="presentation" onClick={() => setFilePathPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.form
+              initial={{ opacity: 0, x: -10, scale: 0.98 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -10, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+              onSubmit={(event) => {
+                event.preventDefault();
+                openPathAsFileCard(filePathInput);
+              }}
+              style={{
+                ...glassPop(),
+                position: 'absolute',
+                left: 64,
+                top: '50%',
+                marginTop: -26,
+                width: 316,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 9,
+                paddingTop: 12,
+                paddingBottom: 12,
+                paddingLeft: 12,
+                paddingRight: 12,
+                borderRadius: 14,
+                zIndex: 46,
+                fontFamily: FONT,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
+                  Open file
+                </span>
+                <button
+                  type="button"
+                  aria-label="Close file path picker"
+                  onClick={() => setFilePathPickerOpen(false)}
+                  style={{ width: 22, height: 22, borderWidth: 0, borderRadius: 8, background: 'transparent', color: 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--cnv-tint)'; event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+                >
+                  <svg style={{ width: 13, height: 13 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, borderRadius: 10, border: '1px solid var(--cnv-edge)', background: 'var(--cnv-tint)', paddingLeft: 10, paddingRight: 8 }}>
+                <input
+                  autoFocus
+                  value={filePathInput}
+                  onChange={(event) => setFilePathInput(event.target.value)}
+                  placeholder="/Users/you/project/file.ts"
+                  aria-label="Absolute file path"
+                  style={{ flex: 1, minWidth: 0, borderWidth: 0, outline: 'none', background: 'transparent', color: 'var(--cnv-ink)', fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', fontFamily: FONT }}
+                />
+                <button
+                  type="submit"
+                  disabled={filePickerBusy}
+                  style={{ height: 24, paddingLeft: 10, paddingRight: 10, borderRadius: 8, border: '1px solid var(--cnv-edge)', background: 'var(--cnv-tint-deep)', color: 'var(--cnv-ink)', cursor: filePickerBusy ? 'default' : 'pointer', fontFamily: FONT, fontSize: 11, fontWeight: 300 }}
+                >
+                  Open
+                </button>
+              </div>
+            </motion.form>
+          </>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {canvasToast ? (
+          <motion.div
+            key={canvasToast.id}
+            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            role="status"
+            style={{
+              ...glassPop(),
+              position: 'absolute',
+              top: 18,
+              left: 0,
+              right: 0,
+              width: 'fit-content',
+              marginLeft: 'auto',
+              marginRight: 'auto',
+              zIndex: 60,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              maxWidth: 360,
+              paddingTop: 9,
+              paddingBottom: 9,
+              paddingLeft: 12,
+              paddingRight: 13,
+              borderRadius: 14,
+              fontFamily: FONT,
+              fontSize: 11.5,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
+              border: `1px solid ${canvasToast.tone === 'error' ? 'var(--t-danger, #ef4444)' : canvasToast.tone === 'success' ? 'var(--t-success, #16a34a)' : 'var(--cnv-edge)'}`,
+              color: canvasToast.tone === 'error' ? 'var(--t-danger, #ef4444)' : 'var(--cnv-ink)',
+            }}
+          >
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: canvasToast.tone === 'error' ? 'var(--t-danger, #ef4444)' : canvasToast.tone === 'success' ? 'var(--t-success, #16a34a)' : 'var(--cnv-ink-muted)' }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{canvasToast.message}</span>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* ── Navigator loupe (#1239) — minimap + −/fit/+ zoom + Free/Grid toggle,
             replacing the old zoom-level chip. Bottom-left. ───────────── */}
