@@ -16,16 +16,16 @@ describe('cross-house orchestrator quota fallback', () => {
   it('routes Anthropic frontier orchestrators sideways to Codex best tier', () => {
     const fallback = resolveCrossHouseOrchestratorFallback('claude');
 
-    expect(fallback).toMatchObject({
+    expect(fallback).toEqual({
       fromBackend: 'claude',
       toBackend: 'codex',
       fromHouse: 'anthropic',
       toHouse: 'openai',
+      fromModel: CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.anthropic,
+      toModel: CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.openai,
       tier: 'frontierOrchestrator',
       noticeKind: 'cross-house-orchestrator-handoff',
     });
-    expect(fallback?.fromModel).toBe(CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.anthropic);
-    expect(fallback?.toModel).toBe(CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.openai);
   });
 
   it('does not degrade non-Anthropic orchestrators or hide the handoff in copy', () => {
@@ -34,5 +34,59 @@ describe('cross-house orchestrator quota fallback', () => {
     const fableFallback = resolveCrossHouseOrchestratorFallback('fable');
     expect(fableFallback?.toBackend).toBe('codex');
     expect(buildCrossHouseHandoffMessage(fableFallback!)).toContain('acting orchestrator on this mission thread');
+  });
+
+  it('degrades Anthropic single-sub orchestrators within house', () => {
+    const fallback = resolveCrossHouseOrchestratorFallback('claude', {
+      subscriptionProfile: 'claude-only',
+      currentModel: CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.anthropic,
+    });
+
+    expect(fallback).toMatchObject({
+      fromBackend: 'claude',
+      toBackend: 'claude',
+      fromHouse: 'anthropic',
+      toHouse: 'anthropic',
+      fromModel: CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.anthropic,
+      toModel: CROSS_HOUSE_MODEL_TIERS.reviewMechanical.anthropic,
+      action: 'downgrade',
+      noticeKind: 'cross-house-orchestrator-handoff',
+    });
+    expect(buildCrossHouseHandoffMessage(fallback!)).toBe('Claude quota hit — orchestrator degraded to Sonnet 5 until reset.');
+  });
+
+  it('holds loudly when the single-sub profile is already at the low tier', () => {
+    const fallback = resolveCrossHouseOrchestratorFallback('claude', {
+      subscriptionProfile: 'claude-only',
+      currentModel: CROSS_HOUSE_MODEL_TIERS.reviewMechanical.anthropic,
+    });
+
+    expect(fallback).toMatchObject({
+      fromBackend: 'claude',
+      toBackend: 'claude',
+      fromHouse: 'anthropic',
+      toHouse: 'anthropic',
+      fromModel: CROSS_HOUSE_MODEL_TIERS.reviewMechanical.anthropic,
+      toModel: CROSS_HOUSE_MODEL_TIERS.reviewMechanical.anthropic,
+      action: 'hold',
+      noticeKind: 'cross-house-orchestrator-handoff',
+    });
+    expect(buildCrossHouseHandoffMessage(fallback!)).toBe('quota exhausted — paused until reset');
+  });
+
+  it('holds Codex-only quota exhaustion instead of crossing houses', () => {
+    const fallback = resolveCrossHouseOrchestratorFallback('codex', {
+      subscriptionProfile: 'codex-only',
+      currentModel: CROSS_HOUSE_MODEL_TIERS.frontierOrchestrator.openai,
+    });
+
+    expect(fallback).toMatchObject({
+      fromBackend: 'codex',
+      toBackend: 'codex',
+      fromHouse: 'openai',
+      toHouse: 'openai',
+      action: 'hold',
+      noticeKind: 'cross-house-orchestrator-handoff',
+    });
   });
 });
