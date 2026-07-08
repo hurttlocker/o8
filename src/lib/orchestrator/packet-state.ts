@@ -29,6 +29,7 @@ export function packetStatusFromLaneStatus(status: LaneStatus | null | undefined
     case 'recovering': return 'recovering';
     case 'awaiting_input':
     case 'awaiting_orchestrator':
+    case 'awaiting_human':
       return 'blocked';
     case 'failed': return 'failed';
     case 'completed': return 'released';
