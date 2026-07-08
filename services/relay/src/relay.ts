@@ -158,13 +158,17 @@ export class RelayServer {
     if (!frame) return;
     switch (frame.t) {
       case 'mux': {
-        // Opaque forward Mac → phone. Strip the sid (phone leg is single-stream).
+        // Opaque forward Mac → phone. The relay owns the mux/sid addressing (D3); the phone
+        // leg is single-stream, so deliver the payload BARE — decode the transport envelope
+        // and forward the connector's raw inner frame. Symmetric with onDeviceMessage, which
+        // wraps the phone's bare frames into mux toward the Mac. The relay never parses it.
         if (!isMuxFrame(frame)) return;
         const sid = typeof frame.sid === 'string' ? frame.sid : '';
         const device = this.routing.getDevice(routingId, sid);
         if (!device) return;
         device.lastActivityAt = this.deps.now();
-        this.phoneSend(device.socket, { t: 'mux', seq: frame.seq, payload: frame.payload });
+        const payload = typeof frame.payload === 'string' ? frame.payload : '';
+        if (payload) trySend(device.socket, Buffer.from(payload, 'base64').toString('utf8'));
         return;
       }
       case 'mux-close': {
@@ -257,15 +261,22 @@ export class RelayServer {
   private onDeviceMessage(ws: WebSocket, raw: unknown): void {
     const meta = this.deviceMeta.get(ws);
     if (!meta) return;
-    const frame = decode(raw as string | Buffer);
-    if (!isMuxFrame(frame)) return; // phone speaks only opaque mux frames
     const entry = this.routing.getDevice(meta.routingId, meta.sid);
     if (!entry) return;
     entry.lastActivityAt = this.deps.now();
     const mac = this.routing.getMac(meta.routingId);
     if (!mac) return; // no peer — drop; the hold timer will close the socket.
-    // Opaque forward phone → Mac. Add the sid so the Mac can demux this phone.
-    this.macSend(mac, { t: 'mux', sid: meta.sid, seq: frame.seq, payload: frame.payload });
+    // Opaque forward phone → Mac, adding the sid so the Mac can demux. Accept BOTH shapes:
+    // a phone that already speaks the {seq,payload} mux envelope (forward as-is), or a phone
+    // that sends BARE frames per the D3 "relay owns addressing" design (wrap the raw bytes).
+    // Either way the relay never parses the inner content.
+    const frame = decode(raw as string | Buffer);
+    if (isMuxFrame(frame)) {
+      this.macSend(mac, { t: 'mux', sid: meta.sid, seq: frame.seq, payload: frame.payload });
+    } else {
+      const rawStr = typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+      this.macSend(mac, { t: 'mux', sid: meta.sid, seq: 0, payload: Buffer.from(rawStr, 'utf8').toString('base64') });
+    }
   }
 
   private onDeviceClosed(ws: WebSocket): void {
