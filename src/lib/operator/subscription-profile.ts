@@ -54,6 +54,28 @@ export function resolveSubscriptionProfileHouseDefaults(profile: SubscriptionPro
   return null;
 }
 
+function modelHouse(model: string): 'claude' | 'codex' | null {
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.startsWith('claude-') || normalized.includes('/claude-')) return 'claude';
+  if (normalized.startsWith('gpt-') || normalized.startsWith('openai-') || normalized.includes('/gpt-')) return 'codex';
+  return null;
+}
+
+function modelAllowedForProfile(profile: SubscriptionProfile, model: string): boolean {
+  const house = modelHouse(model);
+  if (!house || profile === 'both') return true;
+  return profile === 'claude-only' ? house === 'claude' : house === 'codex';
+}
+
+function effectiveProfileModel(input: ResolveSubscriptionProfileInput, fallbackModel: string | null): string | null {
+  const requested = input.requestedModel?.trim();
+  if (requested && modelAllowedForProfile(input.profile, requested)) return requested;
+  const storedDefault = input.defaultDispatchModel?.trim();
+  if (storedDefault && modelAllowedForProfile(input.profile, storedDefault)) return storedDefault;
+  return fallbackModel;
+}
+
 export function resolveSubscriptionProfileRouting(
   input: ResolveSubscriptionProfileInput,
 ): SubscriptionProfileRoutingResult | SubscriptionProfileRoutingError {
@@ -77,6 +99,6 @@ export function resolveSubscriptionProfileRouting(
   return {
     ok: true,
     requestedRuntime: house.defaultDispatchRuntime,
-    requestedModel: input.requestedModel?.trim() || input.defaultDispatchModel?.trim() || house.defaultDispatchModel,
+    requestedModel: effectiveProfileModel(input, house.defaultDispatchModel),
   };
 }
