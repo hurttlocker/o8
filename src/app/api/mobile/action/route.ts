@@ -48,6 +48,19 @@ function actionErrorResponse(error: string, status: number, detail?: unknown) {
   });
 }
 
+/**
+ * Structured, machine-readable error for approval-addressing failures — carries
+ * an explicit `ok:false` + a stable `error` code (and optional extra fields like
+ * `approvalIds`) so a newer mobile client can react programmatically instead of
+ * parsing a free-text message.
+ */
+function actionStructuredError(error: string, status: number, extra?: Record<string, unknown>) {
+  return NextResponse.json({ ok: false, error, ...extra }, {
+    status,
+    headers: NO_STORE_HEADERS,
+  });
+}
+
 async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest, clientMutationId: string) {
   const sessionKey = payload.sessionKey.trim();
   const tabId = sessionKey.replace(/^llm-chat:/, '');
@@ -362,25 +375,57 @@ export async function POST(request: NextRequest) {
 
     if (action === 'approve' || action === 'request_changes' || action === 'deny') {
       const explicitApprovalId = payload.approvalId?.trim();
-      const pendingForSession = explicitApprovalId
-        ? []
-        : listApprovals({ status: 'pending', sessionKey });
-      const approvalId = selectMobileReviewApprovalId(explicitApprovalId, pendingForSession);
-      if (!approvalId) {
-        return actionErrorResponse('No pending approval found for this mobile session.', 404);
+      let currentApproval: ReturnType<typeof getApproval> = null;
+
+      if (explicitApprovalId) {
+        // approvalId is AUTHORITATIVE. Resolve it directly and NEVER fall back to
+        // the sessionKey lookup — a stale/recycled/renamed sessionKey sent
+        // alongside a valid approvalId must not re-target a different pending
+        // card (the mis-targeted-merge hazard). A missing or already-resolved
+        // card fails structured; it does not silently address something else.
+        currentApproval = getApproval(explicitApprovalId);
+        if (!currentApproval) {
+          return actionStructuredError('approval_not_found', 409);
+        }
+        if (currentApproval.sessionKey !== sessionKey) {
+          console.warn('[mobile/action] approvalId is authoritative; ignoring mismatched sessionKey for addressing', {
+            approvalId: explicitApprovalId,
+            requestSessionKey: sessionKey,
+            approvalSessionKey: currentApproval.sessionKey,
+            clientMutationId,
+          });
+        }
+        if (currentApproval.status !== 'pending') {
+          return actionStructuredError('approval_resolved', 410);
+        }
+      } else {
+        // Legacy clients (no approvalId): resolve by session — kept exactly as
+        // before for back-compat — but refuse to GUESS when the session has more
+        // than one pending card. Returning the ids lets a newer client re-issue
+        // the request addressed to the specific approval it means.
+        const pendingForSession = listApprovals({ status: 'pending', sessionKey });
+        if (pendingForSession.length > 1) {
+          return actionStructuredError('ambiguous_approval', 409, {
+            approvalIds: pendingForSession.map((approval) => approval.id),
+          });
+        }
+        const approvalId = selectMobileReviewApprovalId(undefined, pendingForSession);
+        if (!approvalId) {
+          return actionErrorResponse('No pending approval found for this mobile session.', 404);
+        }
+        currentApproval = getApproval(approvalId);
+        if (!currentApproval) {
+          return actionErrorResponse('Approval not found.', 404);
+        }
+        if (currentApproval.status !== 'pending') {
+          return NextResponse.json(
+            { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Approval was already resolved.' },
+            { status: 200, headers: NO_STORE_HEADERS },
+          );
+        }
       }
 
-      const currentApproval = getApproval(approvalId);
-      if (!currentApproval) {
-        return actionErrorResponse('Approval not found.', 404);
-      }
-      if (currentApproval.status !== 'pending') {
-        return NextResponse.json(
-          { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Approval was already resolved.' },
-          { status: 200, headers: NO_STORE_HEADERS },
-        );
-      }
-
+      const approvalId = currentApproval.id;
       const approvalDecisionNote = payload.message?.trim();
       const approval = resolveApproval(
         approvalId,
