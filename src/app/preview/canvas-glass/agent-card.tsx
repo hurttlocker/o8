@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { CHROME, FONT, scrollFadeY } from './ui';
+import { CHROME, FONT, chatVocabularyRebind, scrollFadeY } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
 import { runtimeColor } from '@/lib/agents/codename';
 import { PhaseRing, phaseFor, type DispatchLane } from './dispatch-dock';
@@ -291,7 +291,12 @@ export function AgentGlassCard({
       onClose={onClose}
     >
       {card.expanded ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
+        // Adopt the chat-scoped canvas vocabulary for the whole card body — the
+        // same remap chat/brain cards apply (ui.ts chatVocabularyRebind). Without
+        // it the composer pill's var(--cnv-tint)/var(--cnv-edge) + the sent-line
+        // bubbles' var(--cnv-tint-deep) resolve the BASE (near-white) values and
+        // read as a light-gray blob on the dark canvas.
+        <div style={{ ...chatVocabularyRebind(), display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
           {/* Phase + task — the role label voice addresses ("the auth agent"). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
             <span style={{ display: 'inline-flex', width: 16, height: 16, flexShrink: 0 }}>
@@ -421,7 +426,7 @@ export function AgentGlassCard({
         </div>
       ) : (
         /* COMPACT — the status tile (the pre-v2 card). */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
+        <div style={{ ...chatVocabularyRebind(), display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <span style={{ display: 'inline-flex', width: 16, height: 16, flexShrink: 0 }}>
               <PhaseRing phase={phase} />
