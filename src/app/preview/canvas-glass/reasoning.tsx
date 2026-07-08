@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { FONT, TONE_DOT } from './ui';
+import { CHROME, FONT, TONE_DOT } from './ui';
 
 /** Seconds while under a minute ("38s"), m:ss + " min" once it crosses one
  *  (Q: "reasoning should be in seconds not minutes only if it's at a minute"). */
@@ -82,11 +82,11 @@ export function ReasoningView({
         {live ? (
           <span aria-hidden className="o8-orbit" style={{ width: 9, height: 9, color: TONE_DOT.working, flexShrink: 0 }} />
         ) : null}
-        <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
+        <span style={{ fontSize: CHROME.captionSize, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
           {`Reasoning · ${formatElapsed(totalSeconds)}`}
         </span>
         {!live && stages.length > 1 ? (
-          <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.7 }}>
+          <span style={{ fontSize: CHROME.captionSize, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.7 }}>
             {open ? 'collapse' : `${stages.length} stages`}
           </span>
         ) : null}
@@ -110,7 +110,7 @@ export function ReasoningView({
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingBottom: lastVisible ? 0 : 16, minWidth: 0 }}>
                 {stageSeconds !== null ? (
-                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85, fontVariantNumeric: 'tabular-nums', fontFamily: FONT }}>
+                  <span style={{ fontSize: CHROME.captionSize, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85, fontVariantNumeric: 'tabular-nums', fontFamily: FONT }}>
                     {formatElapsed(stageSeconds)}
                   </span>
                 ) : null}
@@ -119,7 +119,7 @@ export function ReasoningView({
                     {title}
                   </span>
                 ) : null}
-                <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink-muted)', whiteSpace: 'pre-wrap', fontFamily: FONT }}>
+                <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink-muted)', whiteSpace: 'pre-wrap', fontFamily: FONT }}>
                   {body}
                 </span>
               </div>
@@ -127,7 +127,7 @@ export function ReasoningView({
           );
         })}
         {!expanded && stages.length > 1 ? (
-          <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.7, paddingLeft: 16, paddingTop: 2, fontFamily: FONT }}>
+          <span style={{ fontSize: CHROME.captionSize, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.7, paddingLeft: 16, paddingTop: 2, fontFamily: FONT }}>
             {`+ ${stages.length - 1} more`}
           </span>
         ) : null}

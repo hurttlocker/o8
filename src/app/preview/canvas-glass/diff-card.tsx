@@ -9,7 +9,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { FONT, scrollFadeY } from './ui';
+import { CHROME, FONT, scrollFadeY } from './ui';
 import { GlassCardShell } from './card-shell';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
 
@@ -112,7 +112,7 @@ export function DiffGlassCard({
     >
         {/* Stat strip — quiet, no divider line. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 6, paddingLeft: 16, paddingRight: 16 }}>
-          <span style={{ flex: 1, fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ flex: 1, fontSize: CHROME.captionSize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {card.stat.split('\n').pop()?.trim() || 'No changes'}
             {card.truncated ? '  ·  truncated' : ''}
           </span>
@@ -121,12 +121,12 @@ export function DiffGlassCard({
         {/* The diff — one continuous read, glass tones. */}
         <div ref={diffScrollRef} style={{ ...scrollFadeY, height: card.h, overflowY: 'auto', overflowX: 'hidden', paddingTop: 2, paddingBottom: 8, paddingLeft: 16, paddingRight: 16, scrollbarWidth: 'thin' } as React.CSSProperties}>
           {card.diff.trim() === '' ? (
-            <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+            <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
               Clean worktree — nothing to review on this lane.
             </span>
           ) : (
             card.diff.split('\n').map((line, index) => (
-              <div key={index} style={{ fontFamily: MONO, fontSize: 10, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', paddingLeft: 'calc(4px + 2ch)', textIndent: '-2ch', paddingRight: 4, borderRadius: 3, ...diffLineStyle(line) }}>
+              <div key={index} style={{ fontFamily: MONO, fontSize: CHROME.bodySize, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', paddingLeft: 'calc(4px + 2ch)', textIndent: '-2ch', paddingRight: 4, borderRadius: 3, ...diffLineStyle(line) }}>
                 {line || ' '}
               </div>
             ))
@@ -137,11 +137,11 @@ export function DiffGlassCard({
             diff is YOUR uncommitted work, not a lane — no merge actions. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
           {card.laneId.startsWith('worktree:') ? (
-            <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+            <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
               Your uncommitted changes — commit from a terminal or the dashboard.
             </span>
           ) : merge.kind === 'merged' ? (
-            <span style={{ fontSize: 10.5, fontWeight: 400, color: '#a78bfa', fontFamily: FONT }}>Merged — the lane is on main.</span>
+            <span style={{ fontSize: CHROME.bodySize, fontWeight: 400, color: '#a78bfa', fontFamily: FONT }}>Merged — the lane is on main.</span>
           ) : (
             <>
               <button
@@ -195,7 +195,7 @@ export function DiffGlassCard({
             </>
           )}
           {merge.kind === 'blocked' ? (
-            <span style={{ flex: 1, fontSize: 9.5, fontWeight: 300, color: '#f8a5a5', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={merge.note}>
+            <span style={{ flex: 1, fontSize: CHROME.captionSize, fontWeight: 300, color: '#f8a5a5', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={merge.note}>
               {merge.note}
             </span>
           ) : null}

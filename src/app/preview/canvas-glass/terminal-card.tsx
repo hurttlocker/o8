@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { CANVAS_GLASS_CHANGED_EVENT } from '@/lib/canvas-mode/glass-settings';
-import { DEV_TERM_GLASS_TUNER, FONT, TERM_FONT_PX, TERM_MIN_H, TERM_MIN_W } from './ui';
+import { CHROME, DEV_TERM_GLASS_TUNER, FONT, TERM_FONT_PX, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell } from './card-shell';
 
 // NOTE: this module must export ONLY the component (+ types) — runtime
@@ -85,7 +85,7 @@ function ConnectingVerb() {
         WebkitBackgroundClip: 'text',
         backgroundClip: 'text',
         color: 'transparent',
-        fontSize: 11.5,
+        fontSize: CHROME.bodySize,
         fontWeight: 300,
         letterSpacing: '-0.1px',
         fontFamily: FONT,
