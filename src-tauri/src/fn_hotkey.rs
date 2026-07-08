@@ -791,6 +791,10 @@ fn begin_agent_dictation() {
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
+                // Re-assert the outside-the-window partials HUD too, so it
+                // re-anchors to the MAIN window's current monitor and floats
+                // above the frontmost app for this agent session.
+                crate::agent_partials_window::show(&app);
                 // `lane: agent` lets the dock distinguish this from a plain Fn
                 // paste dictation — mid-conversation the panel keeps the dock
                 // and renders the live transcript as a pending chat turn.
