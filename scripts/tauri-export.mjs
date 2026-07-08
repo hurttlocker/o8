@@ -459,6 +459,14 @@ const NATIVE_EXTERNALS = '--external:node-pty --external:better-sqlite3 --extern
 
 compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 
+// terminal-host fork target (#1498 follow-up). ws-server forks this when
+// O8_TERMINAL_HOST=child so node-pty spawn + data pump run in a separate
+// process. Sits next to ws-server.mjs in out/server/ — the child resolver
+// (terminal-host-client.ts) finds it via import.meta.url adjacency. Bundled
+// unconditionally so flipping the env in a packaged install just works; inline
+// (default) never forks it.
+compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts', NATIVE_EXTERNALS);
+
 // ── Compile MCP servers ──
 // Ships alongside the bundled Next.js backend so the packaged Tauri app
 // can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
@@ -551,7 +559,7 @@ exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
 
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
-const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
+const REQUIRED_BUNDLES = ['ws-server.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
 for (const bundle of REQUIRED_BUNDLES) {
   const bundlePath = join(server, bundle);
   if (!existsSync(bundlePath)) {
