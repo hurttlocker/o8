@@ -1,12 +1,8 @@
-import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
-import { promisify } from 'node:util';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { preserveLaneWorktreeHead } from './worktree-preservation';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
+import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
-
-const execFileAsync = promisify(execFile);
 
 type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'> & Partial<Pick<Lane, 'baseBranch'>>;
 
@@ -14,76 +10,26 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function isGitWorktree(worktreePath: string): Promise<boolean> {
+/**
+ * Bank the worktree HEAD as a salvage branch ref before any destructive step,
+ * so a terminal/forced removal never drops a recoverable branch. Best-effort.
+ */
+async function preserveHeadBeforeRemoval(lane: CleanupLane, worktreePath: string): Promise<void> {
   try {
-    await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
-      cwd: worktreePath,
-      timeout: 5_000,
+    await preserveLaneWorktreeHead({
+      id: lane.id,
+      repoPath: lane.repoPath,
+      worktreePath,
+      baseBranch: lane.baseBranch ?? 'main',
     });
-    return true;
-  } catch {
-    return false;
+  } catch (error) {
+    console.warn(`[lane-worktree] Failed to preserve head for ${lane.id} before removal (${formatError(error)}).`);
   }
-}
-
-async function hasUncommittedWork(worktreePath: string): Promise<boolean> {
-  try {
-    await access(worktreePath);
-  } catch {
-    return false;
-  }
-
-  try {
-    const { stdout: status } = await execFileAsync(
-      'git', ['status', '--porcelain'],
-      { cwd: worktreePath, timeout: 5000 },
-    );
-    return status.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function prepareLaneWorktreeRemoval(
-  lane: CleanupLane,
-  worktreePath: string,
-  terminal: boolean,
-): Promise<boolean> {
-  const gitWorktree = await isGitWorktree(worktreePath);
-  if (!gitWorktree) {
-    return true;
-  }
-
-  const dirty = await hasUncommittedWork(worktreePath);
-  if (dirty && !terminal) {
-    console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: non-terminal worktree has uncommitted changes.`);
-    return false;
-  }
-
-  if (terminal) {
-    try {
-      const preservation = await preserveLaneWorktreeHead({
-        id: lane.id,
-        repoPath: lane.repoPath,
-        worktreePath,
-        baseBranch: lane.baseBranch ?? 'main',
-      });
-      if (dirty && !preservation.preserved) {
-        console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: dirty terminal worktree has no preserved branch ref.`);
-        return false;
-      }
-    } catch (error) {
-      console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: failed to preserve terminal worktree head (${formatError(error)}).`);
-      return false;
-    }
-  }
-
-  return true;
 }
 
 export async function cleanupLaneWorktree(
   lane: CleanupLane,
-  opts: { deleteBranch?: boolean; terminal?: boolean } = {},
+  opts: { deleteBranch?: boolean; terminal?: boolean; force?: boolean } = {},
 ): Promise<boolean> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -102,8 +48,29 @@ export async function cleanupLaneWorktree(
     return false;
   }
 
-  const safeToRemove = await prepareLaneWorktreeRemoval(lane, worktreePath, opts.terminal === true);
-  if (!safeToRemove) return false;
+  const terminal = opts.terminal === true;
+  const force = opts.force === true;
+
+  // Bank the head branch ref before any destructive step. manager.cleanup also
+  // preserves uncommitted work internally; this covers the commit history.
+  if (terminal || force) {
+    await preserveHeadBeforeRemoval(lane, worktreePath);
+  }
+
+  // Single prune gate (Rock 1 item 3): a terminal owning lane passes cleanly; a
+  // non-terminal lane with uncommitted work / recent activity is refused unless
+  // the caller explicitly forces (reset/recovery), which records `prune_forced`.
+  const gate = await checkPruneGate({
+    repoRoot: lane.repoPath,
+    worktreePath,
+    laneId: lane.id,
+    logPrefix: 'lane-worktree',
+    operatorForce: force,
+  });
+  if (!gate.ok) {
+    console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: prune gate refused (${gate.reason}).`);
+    return false;
+  }
 
   try {
     const manager = getWorktreeManager(lane.repoPath);
@@ -122,6 +89,8 @@ export async function cleanupLaneWorktree(
     worktreePath,
     laneId: lane.id,
     logPrefix: 'lane-worktree',
+    // Already gated above — don't double-gate (avoids a duplicate prune_forced).
+    skipPruneGate: true,
   });
 }
 
