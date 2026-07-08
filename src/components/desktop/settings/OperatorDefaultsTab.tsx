@@ -120,6 +120,14 @@ function UpdateIcon() {
   );
 }
 
+function ShieldIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
 function CpuIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -556,6 +564,22 @@ export function OperatorDefaultsTab() {
               />
             }
             disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
+          />
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Privacy"
+          footnote="Crash reports contain only the error stack trace and the app version — never your code, prompts, files, or environment. They are always written locally to ~/.o8/telemetry; this only controls whether they are also sent to the o8 team to help fix crashes. Off by default."
+        >
+          <SettingsRow
+            icon={<ShieldIcon />}
+            label="Send crash reports"
+            subtitle={lockedSub('telemetryOptIn', 'Share crash stack traces + app version — nothing else')}
+            checked={values.telemetryOptIn}
+            disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
+            onToggle={(next) => { updateField('telemetryOptIn', next); }}
           />
         </SettingsGroup>
       </section>
