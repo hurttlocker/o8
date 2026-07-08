@@ -44,7 +44,7 @@ import {
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { checkAliveSessions } from '@/lib/terminal/tab-state';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
-import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, takePendingFileOpens } from '@/lib/tauri/bridge';
+import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, symonSpeakStatus, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { MicButton } from '@/components/desktop/thoughts/MicButton';
@@ -87,6 +87,7 @@ import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type Comp
 import { DispatchDock, phaseFor, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
 import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
+import { SymonVoicePresencePill } from './symon-voice-presence';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -98,6 +99,7 @@ interface InboxRow {
 }
 interface LaneRow {
   id: string;
+  packetId?: string | null;
   label?: string | null;
   repoPath?: string | null;
   status?: string | null;
@@ -384,6 +386,9 @@ export default function CanvasGlassPreviewPage() {
   const xtermHandlesRef = useRef(new Map<string, XtermPanelHandle>());
   const liveSessionsRef = useRef(new Set<string>());
   const cdSentRef = useRef(new Set<string>());
+  const symonSpawnPacketIdsRef = useRef(new Set<string>());
+  const symonSpawnWindowUntilRef = useRef(0);
+  const spokenSymonLaneIdsRef = useRef(new Set<string>());
   const dataSeenRef = useRef(new Set<string>());
   // First spawn of the visit gets the full reveal (min-play); the rest
   // bail the instant the shell answers — speed stays the default.
@@ -1885,6 +1890,11 @@ export default function CanvasGlassPreviewPage() {
       const number = agentNumberRef.current;
       agentNumberRef.current += 1;
       const repoTail = lane.repoPath?.split('/').filter(Boolean).pop() ?? null;
+      const symonOrigin = Boolean(
+        (lane.packetId && symonSpawnPacketIdsRef.current.has(lane.packetId))
+        || symonSpawnPacketIdsRef.current.has(lane.id)
+        || Date.now() < symonSpawnWindowUntilRef.current,
+      );
       return [...previous, {
         id,
         x: start.x,
@@ -1897,6 +1907,7 @@ export default function CanvasGlassPreviewPage() {
         codename: codename(lane.id),
         title: lane.label?.trim() || repoTail || lane.id,
         runtime: lane.runtime ?? null,
+        ...(symonOrigin ? { symonOrigin: true } : {}),
       }];
     });
     if (choreography) {
@@ -1939,35 +1950,60 @@ export default function CanvasGlassPreviewPage() {
    *  the governed create+dispatch seam (/api/orchestrator/spawn-prompt); the new
    *  lanes go live and bloom as cards via the watcher above. Returns an ack note
    *  on a synchronous validation failure, else null (ok). */
-  const spawnAgents = useCallback((task: string, count: number, repoOverride?: string | null): string | null => {
+  const spawnAgents = useCallback((task: string, count: number, repoOverride?: string | null, origin?: string | null): string | null => {
     const repoPath = repoOverride ?? activeRepoPath;
     if (!task.trim()) return 'spawn-agents needs args.task';
     if (!repoPath) return 'no repo scoped — pick a repo first';
     const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
+    if (origin === 'symon') symonSpawnWindowUntilRef.current = Date.now() + 20_000;
     if (n > 1 && !reducedMotion()) {
-      const origin = viewportSpawnOrigin();
+      const spawnOrigin = viewportSpawnOrigin();
       spawnChoreographyRef.current.push(...Array.from({ length: n }, (_, index) => ({
         repoPath,
-        origin,
+        origin: spawnOrigin,
         delayMs: index * CARD_ENTRANCE.staggerMs,
       })));
     }
     fetch('/api/orchestrator/spawn-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoPath, task: task.trim(), count: n }),
+      body: JSON.stringify({ repoPath, task: task.trim(), count: n, ...(origin === 'symon' ? { origin } : {}) }),
     })
       .then((response) => response.json().catch(() => null))
-      .then(() => {
+      .then((data: { result?: { packetIds?: unknown; packets?: Array<{ id?: unknown }> }; packetIds?: unknown; packets?: Array<{ id?: unknown }> } | null) => {
+        if (origin === 'symon') {
+          const result = data?.result ?? data ?? null;
+          const ids = Array.isArray(result?.packetIds)
+            ? result.packetIds
+            : Array.isArray(result?.packets)
+              ? result.packets.map((packet) => packet.id)
+              : [];
+          for (const id of ids) {
+            if (typeof id === 'string' && id) symonSpawnPacketIdsRef.current.add(id);
+          }
+        }
         // The lane-lifecycle push usually beats these, but a couple of nudges
         // catch the lanes as the worktrees + sessions come up (~1–3s).
         refreshLanes();
         timersRef.current.push(setTimeout(refreshLanes, 1200));
         timersRef.current.push(setTimeout(refreshLanes, 3000));
       })
-      .catch(() => {});
+      .catch(() => {
+        if (origin === 'symon') symonSpawnWindowUntilRef.current = 0;
+      });
     return null;
   }, [activeRepoPath, reducedMotion, refreshLanes, viewportSpawnOrigin]);
+
+  useEffect(() => {
+    if (!canvasEnabled || !inTauri) return;
+    const liveIds = new Set(activeLanes.map((lane) => lane.id));
+    for (const card of agentCards) {
+      if (!card.symonOrigin || liveIds.has(card.laneId) || spokenSymonLaneIdsRef.current.has(card.laneId)) continue;
+      spokenSymonLaneIdsRef.current.add(card.laneId);
+      const label = card.codename || card.title || `Agent ${card.number}`;
+      void symonSpeakStatus(`${label} is done`);
+    }
+  }, [activeLanes, agentCards, canvasEnabled, inTauri]);
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
@@ -2976,8 +3012,9 @@ export default function CanvasGlassPreviewPage() {
   useEffect(() => {
     if (!canvasEnabled) return;
     const onIntent = (event: Event) => {
-      const detail = (event as CustomEvent<{ verb?: string; args?: Record<string, unknown> }>).detail ?? {};
+      const detail = (event as CustomEvent<{ verb?: string; args?: Record<string, unknown>; origin?: string | null }>).detail ?? {};
       const args = (detail.args && typeof detail.args === 'object' ? detail.args : {}) as Record<string, unknown>;
+      const origin = detail.origin === 'symon' ? 'symon' : null;
       let ok = true;
       let note: string | null = null;
       let error: string | null = null;
@@ -3058,7 +3095,7 @@ export default function CanvasGlassPreviewPage() {
             const task = typeof args.task === 'string' ? args.task : (typeof args.text === 'string' ? args.text : '');
             const count = typeof args.count === 'number' ? args.count : 1;
             const repo = typeof args.repo === 'string' ? args.repo : null;
-            const failure = spawnAgents(task, count, repo);
+            const failure = spawnAgents(task, count, repo, origin);
             if (failure) {
               ok = false;
               note = failure;
@@ -3387,6 +3424,7 @@ export default function CanvasGlassPreviewPage() {
           full-page nav into the canvas auto-resumes the session via the handoff
           instead of going silent. Renders only its own fixed pill. */}
       <RealtimeVoiceHost />
+      <SymonVoicePresencePill />
 
       {/* In the app the desktop IS the backdrop (native material). The
           diffusion only stands in where there is no desktop to show. */}

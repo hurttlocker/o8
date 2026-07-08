@@ -1270,7 +1270,7 @@ pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
         // route's `ensure:true` navigation IS the action (just bring the Canvas up).
         _ => {}
     }
-    json!({ "verb": verb, "args": inner, "ensure": true })
+    json!({ "verb": verb, "args": inner, "ensure": true, "origin": "symon" })
 }
 
 /// `o8_canvas` — drive o8's Canvas surface by voice. POSTs to the SAME
@@ -1620,6 +1620,7 @@ mod canvas_tests {
         assert_eq!(body["verb"], "send-prompt");
         assert_eq!(body["args"]["text"], "fix the failing test");
         assert_eq!(body["ensure"], true);
+        assert_eq!(body["origin"], "symon");
     }
 
     #[test]
