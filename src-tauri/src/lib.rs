@@ -2,6 +2,7 @@
 mod agent;
 #[cfg(target_os = "macos")]
 mod ai;
+mod agent_partials_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
@@ -917,6 +918,10 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         let app_main = app.clone();
         let _ = app.run_on_main_thread(move || {
             dock_window::create(&app_main, api_port);
+            // Outside-the-window live agent-transcription HUD (bottom-center).
+            // Same server-up prerequisite as the dock — it loads /agent-partials
+            // on the same port.
+            agent_partials_window::create(&app_main, api_port);
         });
         // Stash the resolved port for the lazily-created Symon Points overlay
         // (point_overlay builds its window on first [POINT:...] tag, not here).
