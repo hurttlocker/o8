@@ -61,3 +61,6 @@ branding/
 .claude/settings.local.json
 .claude/settings.json
 .claude/scheduled_tasks.lock
+src-tauri/helpers/speech-local
+src-tauri/helpers/speech-local-*
+src-tauri/sidecars/speech-local/.build/
