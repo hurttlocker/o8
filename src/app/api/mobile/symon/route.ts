@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { loadPersistedAgentSession } from '@/lib/mobile/symon-agent-registry';
 
 /**
  * Mobile Symon remote — gated in middleware (loopback + ws-token, the whole
@@ -62,12 +63,29 @@ function bridgeError(error: unknown, verb: string) {
   });
 }
 
+/**
+ * Additive Agent-mode field (docs/symon-agent-mode.md §GET). Reads the disk
+ * mirror of the process-local activeAgentSession registry that the ws-server
+ * owns — null unless a phone-hosted Agent session is live. Never affects the
+ * existing Remote-mode `ready`/`status` shape.
+ */
+function agentSessionField(): { sessionId: string; startedAt: number; status: string } | null {
+  const record = loadPersistedAgentSession();
+  if (!record) return null;
+  return { sessionId: record.sessionId, startedAt: record.startedAt, status: record.lastStatus };
+}
+
 export async function GET() {
+  const agentSession = agentSessionField();
   try {
     const probed = await probe(STATUS_EVAL);
-    return NextResponse.json({ ok: true, ready: probed.ready, status: probed.status });
+    return NextResponse.json({ ok: true, ready: probed.ready, status: probed.status, agentSession });
   } catch (error) {
-    return bridgeError(error, 'status');
+    // Remote-mode bridge probe failed, but the Agent-session field is derived
+    // from the registry mirror (independent of the webview), so still surface it.
+    const res = bridgeError(error, 'status');
+    const payload = await res.json();
+    return NextResponse.json({ ...payload, agentSession });
   }
 }
 
