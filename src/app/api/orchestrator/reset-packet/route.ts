@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resetPacket } from '@/lib/orchestrator/operator-mission-service';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,13 +29,27 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'packetId is required.', 400);
   }
 
+  // #1497 — persisted idempotency (reset_packet + retry_packet share this route).
+  // clearWorktree distinguishes the two verbs, so it's part of the derived key:
+  // a reset and a retry on the same packet must NOT collide.
+  const clearWorktree = record.clearWorktree === true;
+  const reason = typeof record.reason === 'string' ? record.reason.trim() : undefined;
+  const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
+    ? record.idempotencyKey.trim()
+    : null;
+  const key = deriveIdempotencyKey({
+    verb: 'reset_packet',
+    scopeId: packetId,
+    clientKey,
+    body: `${clearWorktree ? 'clear' : 'keep'}:${reason ?? ''}`,
+  });
+
   try {
-    const result = await resetPacket({
-      packetId,
-      reason: typeof record.reason === 'string' ? record.reason.trim() : undefined,
-      clearWorktree: record.clearWorktree === true,
-    });
-    return operatorSuccess(result);
+    const outcome = await withIdempotency(
+      { key, verb: 'reset_packet', scopeId: packetId },
+      () => resetPacket({ packetId, reason, clearWorktree }),
+    );
+    return operatorSuccess(replayShape(outcome));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to reset packet.';
     return operatorError('reset_failed', message, 500, error);
