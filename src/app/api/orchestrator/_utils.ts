@@ -42,3 +42,19 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown>
     : null;
 }
+
+/**
+ * Shape an idempotency outcome (#1497) for `operatorSuccess`. A fresh
+ * execution returns the raw result; a replay stamps `replayed:true` (and
+ * `inProgress:true` for a duplicate that raced the still-running original) so
+ * callers can distinguish a re-executed call from a deduped one.
+ */
+export function replayShape<T>(outcome: { replayed: boolean; inProgress: boolean; result: T }): unknown {
+  if (!outcome.replayed) return outcome.result;
+  const base: Record<string, unknown> = outcome.result && typeof outcome.result === 'object' && !Array.isArray(outcome.result)
+    ? { ...(outcome.result as Record<string, unknown>) }
+    : { result: outcome.result };
+  base.replayed = true;
+  if (outcome.inProgress) base.inProgress = true;
+  return base;
+}
