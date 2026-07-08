@@ -2,9 +2,11 @@
  * Wedge-timeout enforcement (Rock 1 item 2).
  *
  * The zombie reaper only chased heartbeat-stale `running`/`merging` lanes. A
- * lane parked in `recovering` / `awaiting_orchestrator` / `paused` /
- * `awaiting_input` had no timeout at all — it sat there forever (the "status
- * self-contradicts for hours" class). This module adds conservative
+ * lane parked in `launching` / `recovering` / `awaiting_orchestrator` /
+ * `paused` / `awaiting_input` had no timeout at all — it sat there forever (the
+ * "status self-contradicts for hours" class; `launching` in particular has no
+ * watcher of its own once startup finishes — reconcile only runs at boot). This
+ * module adds conservative
  * wedge-timeouts so nothing parks SILENTLY. The invariant is "nothing parks
  * silently", NOT "nothing parks" — `paused`/`awaiting_input` legitimately wait
  * on a human, so those only raise a reminder card and never auto-fail.
@@ -25,6 +27,7 @@ import { appendEvent, getLaneEvents, listActiveLanes, setLaneStatus } from './re
 
 // Conservative defaults. Named + exported so tests and operators can reason
 // about them without magic numbers.
+export const WEDGE_LAUNCHING_MS = 10 * 60_000; // 10 min
 export const WEDGE_RECOVERING_MS = 15 * 60_000; // 15 min
 export const WEDGE_AWAITING_ORCHESTRATOR_MS = 60 * 60_000; // 60 min
 export const WEDGE_PARKED_REMINDER_MS = 24 * 60 * 60_000; // 24 h
@@ -67,6 +70,26 @@ export function computeWedgeAction(lane: Lane, now: number): WedgeAction | null 
   if (elapsedMs < 0) return null;
 
   switch (lane.status) {
+    case 'launching': {
+      // A lane whose session-spawn never completed has NO watcher of its own:
+      // the reaper only chases heartbeat-stale running/merging lanes, and
+      // reconcile runs once at boot. A packet-bound lane stuck `launching` past
+      // the spawn window is a wedged launch — escalate it to the orchestrator
+      // rather than let it sit in a permanent "spawning" limbo. Phantom
+      // launching lanes (no packet) are left to archiveStaleDeadLanes.
+      if (!lane.packetId) return null;
+      if (elapsedMs < WEDGE_LAUNCHING_MS) return null;
+      return {
+        kind: 'escalate_orchestrator',
+        from: 'launching',
+        to: 'awaiting_orchestrator',
+        elapsedMs,
+        thresholdMs: WEDGE_LAUNCHING_MS,
+        blockedReason: 'launch_stalled',
+        transitions: true,
+        raisesCard: false,
+      };
+    }
     case 'recovering': {
       // Phantom recovering lanes (no packet) are left to archiveStaleDeadLanes.
       // A packet-bound recovering lane that stalls past the auto-rerun window
