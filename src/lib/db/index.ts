@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 31;
+const DB_SCHEMA_VERSION = 32;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -190,7 +190,31 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // to one orchestrator thread. Ephemeral (die with the thread). CREATE TABLE
   // IF NOT EXISTS + index, safe on every boot.
   ensureSessionRulesTable(sqlite);
+  // Schema v32 (#1497) — `idempotency_keys` table. Persists the dedupe guard
+  // for orchestrator control verbs (steer/rerun/retry/dispatch) so a client
+  // timeout+retry can't double-fire and a restart can't wipe the guard.
+  // CREATE TABLE IF NOT EXISTS + index, safe on every boot.
+  ensureIdempotencyKeysTable(sqlite);
   migrateProjectsLedgerJsonIfNeeded(sqlite);
+}
+
+/**
+ * Schema v32 (#1497) — persisted idempotency keys. See schema.ts
+ * `idempotencyKeys` + `orchestrator/idempotency-store.ts` for the reserve →
+ * finalize protocol. Machine-only table; ms-epoch stamps.
+ */
+function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      key TEXT PRIMARY KEY,
+      verb TEXT NOT NULL,
+      packet_id TEXT,
+      result_json TEXT,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at);
+  `);
 }
 
 /**
