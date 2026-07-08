@@ -4,6 +4,7 @@ import { createLane, getLane, getLaneEvents, updateLane } from './registry';
 import type { Lane, LaneStatus } from './types';
 import {
   WEDGE_AWAITING_ORCHESTRATOR_MS,
+  WEDGE_LAUNCHING_MS,
   WEDGE_PARKED_REMINDER_MS,
   WEDGE_RECOVERING_MS,
   computeWedgeAction,
@@ -42,6 +43,26 @@ function agedLane(status: LaneStatus, ageMs: number, overrides: Partial<Lane> = 
 }
 
 describe('computeWedgeAction (pure decision matrix)', () => {
+  it('launching + packet past 10m escalates to awaiting_orchestrator (no card)', () => {
+    const action = computeWedgeAction(agedLane('launching', WEDGE_LAUNCHING_MS + 1_000, { packetId: 'pkt-1' }), NOW);
+    expect(action).toMatchObject({
+      kind: 'escalate_orchestrator',
+      from: 'launching',
+      to: 'awaiting_orchestrator',
+      transitions: true,
+      raisesCard: false,
+      blockedReason: 'launch_stalled',
+    });
+  });
+
+  it('launching WITHOUT a packet is left alone (phantom → archiver owns it)', () => {
+    expect(computeWedgeAction(agedLane('launching', WEDGE_LAUNCHING_MS + 1_000), NOW)).toBeNull();
+  });
+
+  it('launching under 10m does not fire', () => {
+    expect(computeWedgeAction(agedLane('launching', WEDGE_LAUNCHING_MS - 1_000, { packetId: 'pkt-1' }), NOW)).toBeNull();
+  });
+
   it('recovering + packet past 15m escalates to awaiting_orchestrator (no card)', () => {
     const action = computeWedgeAction(agedLane('recovering', WEDGE_RECOVERING_MS + 1_000, { packetId: 'pkt-1' }), NOW);
     expect(action).toMatchObject({
@@ -89,7 +110,9 @@ describe('computeWedgeAction (pure decision matrix)', () => {
   });
 
   it('active/terminal statuses never wedge', () => {
-    for (const status of ['running', 'reviewing', 'merging', 'completed', 'failed', 'archived', 'idle', 'launching'] as const) {
+    // `launching` is intentionally absent — it now wedges (packet-bound) via the
+    // launch_stalled rule above.
+    for (const status of ['running', 'reviewing', 'merging', 'completed', 'failed', 'archived', 'idle'] as const) {
       expect(computeWedgeAction(agedLane(status, WEDGE_PARKED_REMINDER_MS + 1_000, { packetId: 'pkt-x' }), NOW)).toBeNull();
     }
   });
@@ -116,6 +139,18 @@ function parkLane(status: LaneStatus, ageMs: number, opts: { packetId?: string }
 }
 
 describe('enforceWedgeTimeouts (real path through the registry)', () => {
+  it('escalates a stalled launching packet lane to awaiting_orchestrator and emits a wedge_timeout event', () => {
+    const lane = parkLane('launching', WEDGE_LAUNCHING_MS + 60_000, { packetId: 'pkt-wedge-launch' });
+
+    const outcomes = enforceWedgeTimeouts(NOW);
+    expect(outcomes.some((o) => o.laneId === lane.id && o.action.kind === 'escalate_orchestrator')).toBe(true);
+
+    const after = getLane(lane.id);
+    expect(after?.status).toBe('awaiting_orchestrator');
+    const wedge = getLaneEvents(lane.id, 100).find((e) => e.verb === 'wedge_timeout');
+    expect(wedge?.payload).toMatchObject({ from: 'launching', to: 'awaiting_orchestrator', blockedReason: 'launch_stalled' });
+  });
+
   it('escalates a stalled recovering packet lane and emits a wedge_timeout event, edge-triggered', () => {
     const lane = parkLane('recovering', WEDGE_RECOVERING_MS + 60_000, { packetId: 'pkt-wedge-rec' });
 
