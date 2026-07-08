@@ -55,6 +55,14 @@ const PARALLEL_CAP_PRESETS: Array<{ key: string; label: string; value: number }>
 const DEFAULT_WORKER_RUNTIME_OPTIONS = DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
   opt.value === 'codex' || opt.value === 'claude-code');
 
+type CliHouseStatus = NonNullable<OperatorDefaultsResponse['cliAuth']>['statuses']['codex'];
+
+function cliStatusLabel(status: CliHouseStatus | undefined) {
+  if (!status?.installed) return 'not installed';
+  if (!status.authenticated) return 'not signed in';
+  return 'installed + signed in';
+}
+
 // ── Minimal raw-SVG glyphs for row icon tiles ──
 
 function LanesIcon() {
@@ -205,6 +213,7 @@ export function OperatorDefaultsTab() {
 
   const values = data?.values;
   const sources = data?.sources;
+  const cliAuth = data?.cliAuth;
 
   const activePresetKey = useMemo(() => {
     if (!values) return '';
@@ -260,6 +269,10 @@ export function OperatorDefaultsTab() {
     const backendLabel = backend === 'claude' ? 'Claude' : backend === 'codex' ? 'Codex' : backend;
     return `Paired opposite your orchestrator (${backendLabel}) — pick one to override`;
   })();
+  const profileHint = cliAuth?.suggestedSubscriptionProfile.profile
+    && cliAuth.suggestedSubscriptionProfile.profile !== activeProfile
+    ? cliAuth.suggestedSubscriptionProfile
+    : null;
 
   return (
     <div style={{
@@ -480,7 +493,11 @@ export function OperatorDefaultsTab() {
           <SettingsRow
             icon={<RocketIcon />}
             label="Subscription profile"
-            subtitle={lockedSub('subscriptionProfile', SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Use both houses by default')}
+            subtitle={lockedSub('subscriptionProfile', [
+              SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Use both houses by default',
+              `Codex: ${cliStatusLabel(cliAuth?.statuses.codex)} · Claude: ${cliStatusLabel(cliAuth?.statuses.claude)}`,
+              profileHint?.detail ? `${profileHint.detail} Consider ${SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === profileHint.profile)?.label}.` : '',
+            ].filter(Boolean).join(' '))}
             accessory={
               <PickerMenu<SubscriptionProfile>
                 value={activeProfile}

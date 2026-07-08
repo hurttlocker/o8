@@ -24,6 +24,7 @@ import {
   type WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
 import { isDispatchHalted } from './dispatch-halt';
 
 import { buildPacketPrompt } from './packet-prompt';
@@ -271,6 +272,7 @@ async function dispatchPacket(
     source: 'scheduler-dispatch',
   });
   const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
+  await assertRuntimeDispatchable(workerRouting.selectedRuntime);
   const laneResult = await dispatchLaneCommand({
     verb: 'open_lane',
     packetId: packet.id,

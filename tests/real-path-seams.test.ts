@@ -57,12 +57,61 @@ const runtimeInventoryMock = vi.hoisted(() => ({
   }>,
 }));
 
+const authDetectMock = vi.hoisted(() => {
+  class MockDispatchPreflightError extends Error {
+    public readonly code = 'dispatch_cli_auth_unavailable';
+    public readonly status: {
+      house: 'codex' | 'claude';
+      runtime: 'codex' | 'claude-code';
+      installed: boolean;
+      authenticated: boolean;
+      detail: string;
+      fix: string;
+      checkedAt: number;
+    };
+
+    constructor(status: MockDispatchPreflightError['status']) {
+      super(status.detail);
+      this.name = 'DispatchPreflightError';
+      this.status = status;
+    }
+  }
+  return {
+    unauthRuntime: null as 'codex' | 'claude-code' | null,
+    DispatchPreflightError: MockDispatchPreflightError,
+  };
+});
+
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => {}),
 }));
 
 vi.mock('@/lib/runtime/inventory', () => ({
   getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: runtimeInventoryMock.agents })),
+}));
+
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
+  DispatchPreflightError: authDetectMock.DispatchPreflightError,
+  assertRuntimeDispatchable: vi.fn(async (runtime: 'codex' | 'claude-code') => {
+    if (authDetectMock.unauthRuntime !== runtime) return;
+    const house = runtime === 'codex' ? 'codex' : 'claude';
+    throw new authDetectMock.DispatchPreflightError({
+      house,
+      runtime,
+      installed: true,
+      authenticated: false,
+      detail: `${house === 'codex' ? 'Codex' : 'Claude Code'} CLI is installed but not signed in.`,
+      fix: house === 'codex' ? 'Run `codex login`.' : 'Run `claude` once to sign in.',
+      checkedAt: Date.now(),
+    });
+  }),
+  getRuntimeAuthSnapshot: vi.fn(async () => ({
+    statuses: {
+      codex: { house: 'codex', runtime: 'codex', installed: true, authenticated: true, detail: 'Codex ready.', fix: 'Run `codex login`.', checkedAt: Date.now() },
+      claude: { house: 'claude', runtime: 'claude-code', installed: true, authenticated: true, detail: 'Claude ready.', fix: 'Run `claude` once to sign in.', checkedAt: Date.now() },
+    },
+    suggestedSubscriptionProfile: { profile: null, detail: null },
+  })),
 }));
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-real-path-seams-'));
@@ -91,6 +140,7 @@ const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
+  authDetectMock.unauthRuntime = null;
   rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -371,6 +421,31 @@ describe('seam E — create-mission without a runtime uses the paired operator d
     expect(json.ok).toBe(false);
     expect(json.error.code).toBe('subscription_profile_runtime_unavailable');
     expect(json.error.message).toContain('subscriptionProfile "claude-only"');
+  });
+
+  it('codex unauthenticated fails preflight before creating a mission', async () => {
+    authDetectMock.unauthRuntime = 'codex';
+    const before = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const beforeMissionId = before.mission?.missionId ?? null;
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      requestedRuntime: 'codex',
+      issues: [{
+        number: 90_000_128,
+        title: 'dispatch auth preflight seam',
+        body: 'Codex is selected but not signed in.',
+        url: '',
+      }],
+    }));
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('dispatch_cli_auth_unavailable');
+    expect(json.error.message).toContain('Run `codex login`');
+    const after = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    expect(after.mission?.missionId ?? null).toBe(beforeMissionId);
   });
 });
 
