@@ -1,5 +1,11 @@
-import type { Lane } from '@/lib/lane/types';
+import type { Lane, LaneEventVerb } from '@/lib/lane/types';
 import type { RuntimeId } from '@/lib/runtimes/types';
+import { recordLaneEvent } from '@/lib/lane/events';
+
+// #1471 S1 — `kill_escalated` is a new lane-event verb owned by the
+// state-machine-truth builder's union. Until it lands in `LaneEventVerb`, cast
+// at the single emit site (INTEGRATION: add `| 'kill_escalated'` to the union).
+const KILL_ESCALATED = 'kill_escalated' as unknown as LaneEventVerb;
 
 /**
  * Reap live runtime processes for a set of lanes — shared by `stop-packet`
@@ -53,6 +59,129 @@ export async function interruptLaneSessions(lanes: Lane[]): Promise<number> {
     }
   }
   return interrupted;
+}
+
+/**
+ * #1471 S1 — CONFIRMED kill with escalation. The plain `interruptLaneSessions`
+ * above fires a single best-effort SIGINT and returns; the caller then flips the
+ * lane's status whether or not the process actually died — the lie #1471 filed.
+ *
+ * This reaps each lane's live session through the SIGINT → SIGTERM → SIGKILL
+ * escalation ladder (`runtime/interrupt-escalation.ts`, PID-reuse-guarded) and
+ * only reports `confirmed` after the process is verified gone (kill(pid,0) →
+ * ESRCH). It emits a `kill_escalated` lane event per stage so the operator can
+ * audit exactly which signal ended the worker (payload {stage, pid, confirmed}).
+ * When even SIGKILL can't be confirmed, `confirmed:false` bubbles up so the
+ * caller marks the lane `kill_unconfirmed` instead of pretending it stopped.
+ *
+ * Owned dispatch workers (`codex-owned:` / `claude-code-owned:`) get the full
+ * ladder. Discovered / gemini / opencode sessions fall back to the single-signal
+ * interrupt (no live pid to probe) — best-effort, `verified:false` in the event.
+ */
+export interface ConfirmedKillStage {
+  stage: 'SIGINT' | 'SIGTERM' | 'SIGKILL' | 'interrupt';
+  confirmed: boolean;
+  pid?: number;
+}
+
+export interface ConfirmedKillOutcome {
+  laneId: string;
+  sessionKey: string;
+  runtime: RuntimeId;
+  confirmed: boolean;
+  alreadyDead: boolean;
+  pid?: number;
+  stages: ConfirmedKillStage[];
+  note: string;
+}
+
+function hasEscalationLadder(sessionKey: string): boolean {
+  return sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('claude-code-owned:');
+}
+
+async function killTargetConfirmed(target: InterruptTarget): Promise<ConfirmedKillOutcome> {
+  const emit = (stage: ConfirmedKillStage, extra: Record<string, unknown> = {}) => {
+    try {
+      recordLaneEvent(target.laneId, KILL_ESCALATED, 'system', {
+        sessionKey: target.sessionKey,
+        stage: stage.stage,
+        pid: stage.pid,
+        confirmed: stage.confirmed,
+        ...extra,
+      });
+    } catch (error) {
+      console.warn(`[kill] failed to record kill_escalated for lane ${target.laneId}:`, error);
+    }
+  };
+
+  if (hasEscalationLadder(target.sessionKey)) {
+    const { escalateInterruptOwnedSurface } = await import('@/lib/runtime/interrupt-escalation');
+    const result = await escalateInterruptOwnedSurface(target.sessionKey);
+    if (result) {
+      const stages: ConfirmedKillStage[] = result.steps.map((step) => ({
+        stage: step.signal,
+        confirmed: !step.aliveAfter,
+        pid: result.pid,
+      }));
+      for (const stage of stages) emit(stage);
+      return {
+        laneId: target.laneId,
+        sessionKey: target.sessionKey,
+        runtime: target.runtime,
+        confirmed: result.confirmedDead,
+        alreadyDead: result.alreadyDead,
+        pid: result.pid,
+        stages,
+        note: result.note,
+      };
+    }
+    // null → surface outside the live inventory; fall through to best-effort.
+  }
+
+  // Fallback: single-signal interrupt through the runtime router. No live pid to
+  // probe, so `confirmed` reflects the runtime's own ok, flagged unverified.
+  try {
+    const { routeAction } = await import('@/lib/runtimes/registry');
+    const res = await routeAction(target.runtime, 'interrupt', target.sessionKey) as { ok?: boolean; note?: string };
+    const confirmed = res?.ok === true;
+    const stage: ConfirmedKillStage = { stage: 'interrupt', confirmed };
+    emit(stage, { verified: false });
+    return {
+      laneId: target.laneId,
+      sessionKey: target.sessionKey,
+      runtime: target.runtime,
+      confirmed,
+      alreadyDead: false,
+      stages: [stage],
+      note: res?.note ?? 'Best-effort interrupt (no live pid to confirm).',
+    };
+  } catch (error) {
+    const note = error instanceof Error ? error.message : String(error);
+    console.warn(`[kill] interrupt failed for lane ${target.laneId} (${target.runtime}):`, error);
+    return {
+      laneId: target.laneId,
+      sessionKey: target.sessionKey,
+      runtime: target.runtime,
+      confirmed: false,
+      alreadyDead: false,
+      stages: [],
+      note,
+    };
+  }
+}
+
+/**
+ * Confirmed-kill each lane's live session (SIGINT→SIGTERM→SIGKILL + exit probe).
+ * Returns one outcome per lane that HAD a session; lanes with no sessionKey are
+ * skipped. Never throws — a failed kill is captured as `confirmed:false`.
+ */
+export async function killLaneSessionsConfirmed(lanes: Lane[]): Promise<ConfirmedKillOutcome[]> {
+  const targets = interruptableSessions(lanes);
+  const outcomes: ConfirmedKillOutcome[] = [];
+  for (const target of targets) {
+    outcomes.push(await killTargetConfirmed(target));
+  }
+  return outcomes;
 }
 
 /**

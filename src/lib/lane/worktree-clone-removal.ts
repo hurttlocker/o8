@@ -3,6 +3,8 @@ import { existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import { checkPruneGate } from './prune-gate';
+
 const execFileAsync = promisify(execFile);
 
 function formatError(error: unknown) {
@@ -25,6 +27,10 @@ export async function removeCortexWorktreePath(input: {
   worktreePath: string;
   laneId?: string;
   logPrefix?: string;
+  /** Operator/recovery override — deletes past the prune gate (records `prune_forced`). */
+  operatorForce?: boolean;
+  /** Set by callers (e.g. cleanupLaneWorktree) that already ran the prune gate. */
+  skipPruneGate?: boolean;
 }): Promise<boolean> {
   const logPrefix = input.logPrefix ?? 'lane-worktree';
   const label = input.laneId ? ` for lane ${input.laneId}` : '';
@@ -36,6 +42,24 @@ export async function removeCortexWorktreePath(input: {
   if (!input.worktreePath?.trim() || resolvedTarget === resolve(input.repoRoot)) {
     console.error(`[${logPrefix}] REFUSED removal of ${JSON.stringify(input.worktreePath)}${label} — equals repo root or empty (repo-root write guard, #1404)`);
     return false;
+  }
+
+  // Prune-safety gate (Rock 1 item 3): refuse a tree with uncommitted work /
+  // recent activity / a non-terminal lane unless the caller already gated or
+  // explicitly forces. This is the check the force path historically lacked —
+  // the one that ate two worktrees mid-surgery (#1498).
+  if (!input.skipPruneGate) {
+    const gate = await checkPruneGate({
+      repoRoot: input.repoRoot,
+      worktreePath: input.worktreePath,
+      laneId: input.laneId ?? null,
+      logPrefix,
+      operatorForce: input.operatorForce,
+    });
+    if (!gate.ok) {
+      console.warn(`[${logPrefix}] REFUSED removal of ${JSON.stringify(input.worktreePath)}${label} — prune gate: ${gate.reason}`);
+      return false;
+    }
   }
 
   if (!existsSync(input.worktreePath)) {

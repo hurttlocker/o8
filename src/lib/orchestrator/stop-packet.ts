@@ -7,7 +7,7 @@
  * stop must INTERRUPT the live session first (kills the process via the runtime
  * adapter), THEN archive — and must NOT relaunch. "Stop" means stop.
  */
-import { interruptLaneSessions } from '@/lib/lane/reap-sessions';
+import { interruptLaneSessions, killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 
 export interface StopPacketResult {
   ok: boolean;
@@ -15,6 +15,10 @@ export interface StopPacketResult {
   interruptedSessions: number;
   archivedLanes: number;
   worktreePruned: boolean;
+  /** #1471 S1 — false when a worker survived even SIGKILL (lane parked kill_unconfirmed). */
+  killConfirmed: boolean;
+  /** Set to 'kill_unconfirmed' when the process could not be confirmed dead. */
+  blockedReason?: string;
   note: string;
 }
 
@@ -36,7 +40,33 @@ export async function stopPacket(packetId: string): Promise<StopPacketResult> {
   const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service');
 
   const lanes = listLanes().filter((lane) => lane.packetId === packetId);
-  const interrupted = await interruptLaneSessions(lanes);
+
+  // #1471 S1 — confirmed kill FIRST. Escalate SIGINT→SIGTERM→SIGKILL and verify
+  // exit before touching lane state, so we never archive + prune a worktree out
+  // from under a worker that is still churning (the zombie the stop verb exists
+  // to prevent). If ANY session survived even SIGKILL, park the packet
+  // `kill_unconfirmed` and DO NOT archive/prune — telling the truth beats lying.
+  const kills = await killLaneSessionsConfirmed(lanes);
+  const reaped = kills.filter((kill) => kill.confirmed || kill.alreadyDead).length;
+  const survivors = kills.filter((kill) => !kill.confirmed && !kill.alreadyDead);
+
+  if (survivors.length > 0) {
+    await markPacketKillUnconfirmed(packetId, survivors.map((survivor) => ({
+      laneId: survivor.laneId,
+      sessionKey: survivor.sessionKey,
+      pid: survivor.pid,
+    })));
+    return {
+      ok: false,
+      packetId,
+      interruptedSessions: reaped,
+      archivedLanes: 0,
+      worktreePruned: false,
+      killConfirmed: false,
+      blockedReason: 'kill_unconfirmed',
+      note: `Stop could not confirm ${survivors.length} live worker${survivors.length === 1 ? '' : 's'} exited after SIGKILL. Packet parked kill_unconfirmed; worktree left intact. Reset again or kill the pid manually.`,
+    };
+  }
 
   const reset = await resetPacket({
     packetId,
@@ -48,11 +78,43 @@ export async function stopPacket(packetId: string): Promise<StopPacketResult> {
   return {
     ok: true,
     packetId,
-    interruptedSessions: interrupted,
+    interruptedSessions: reaped,
     archivedLanes: lanes.length,
     worktreePruned,
-    note: `Stopped packet ${packetId}: reaped ${interrupted} live session${interrupted === 1 ? '' : 's'}, archived ${lanes.length} lane${lanes.length === 1 ? '' : 's'}${worktreePruned ? ', pruned worktree' : ''}. Not relaunched.`,
+    killConfirmed: true,
+    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live session${reaped === 1 ? '' : 's'}, archived ${lanes.length} lane${lanes.length === 1 ? '' : 's'}${worktreePruned ? ', pruned worktree' : ''}. Not relaunched.`,
   };
+}
+
+/**
+ * #1471 S1 — park a packet `kill_unconfirmed` when its worker survived SIGKILL.
+ * Held under the control-plane lock so a concurrent dispatch tick can't relaunch
+ * it. Best-effort — a failed write is logged, never thrown.
+ */
+async function markPacketKillUnconfirmed(
+  packetId: string,
+  survivors: Array<{ laneId: string; sessionKey: string; pid?: number }>,
+): Promise<void> {
+  try {
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    await withLockedState((state) => {
+      const packet = state.packets.find((candidate) => candidate.id === packetId);
+      if (!packet) return;
+      packet.operatorStopped = true;
+      packet.queueState = 'held';
+      packet.status = 'blocked';
+      packet.blockedReason = 'kill_unconfirmed';
+      packet.lastEventAt = new Date().toISOString();
+      packet.lastEventLabel = 'kill_unconfirmed';
+    });
+  } catch (error) {
+    console.warn(`[kill] failed to mark packet ${packetId} kill_unconfirmed:`, error);
+  }
+  console.warn(
+    `[kill] packet ${packetId}: ${survivors.length} worker(s) unconfirmed after SIGKILL — ${survivors
+      .map((survivor) => `${survivor.sessionKey}${survivor.pid ? ` pid ${survivor.pid}` : ''}`)
+      .join(', ')}`,
+  );
 }
 
 /**

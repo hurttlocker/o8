@@ -9,6 +9,7 @@ import {
   reportAgentEvent,
 } from '@/lib/lane/agent-report';
 import { getPacketTailBatch, resolvePacketTailPacketId } from '@/lib/lane/packet-tail';
+import { checkSessionBindingFault } from '@/lib/lane/session-binding-fault';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -153,6 +154,11 @@ export async function POST(
   if (!result) {
     return NextResponse.json({ ok: false, note: 'Lane not found.' }, { status: 404 });
   }
+
+  // #1502 — a worker posting ANY report is alive; if its lane has no session
+  // binding it has no transcript and will misfire the silent-exit detector on
+  // completion. The detector self-guards on active status + null sessionKey.
+  checkSessionBindingFault(id);
 
   return NextResponse.json({
     ok: true,

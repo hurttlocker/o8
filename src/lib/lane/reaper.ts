@@ -15,6 +15,7 @@ import {
   updateLane,
 } from './registry';
 import { preserveLaneWorktreeHead, type LaneWorktreePreservation } from './worktree-preservation';
+import { enforceWedgeTimeouts } from './wedge-timeouts';
 
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
@@ -431,6 +432,14 @@ export async function runLaneZombieReaperTick(): Promise<void> {
       console.log(
         `[lane-reaper] ${item.candidate.lane.id} stale ${Math.round(item.candidate.staleMs / 1000)}s; owner dead via ${item.candidate.probe.source} — recovering`,
       );
+    }
+    // Wedge-timeout enforcement runs BEFORE archiveStaleDeadLanes so a
+    // packet-bound `recovering` lane escalates to the orchestrator instead of
+    // being silently archived out from under its packet.
+    try {
+      enforceWedgeTimeouts();
+    } catch (error) {
+      console.error('[lane-lifecycle] wedge-timeout enforcement failed:', error);
     }
     const archivedDead = archiveStaleDeadLanes();
     if (archivedDead > 0) {

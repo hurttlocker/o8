@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { recordLaneHeartbeat } from '@/lib/lane/reaper';
+import { checkSessionBindingFault } from '@/lib/lane/session-binding-fault';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,10 @@ export async function POST(
   if (!lane) {
     return NextResponse.json({ ok: false, note: 'Lane not found.' }, { status: 404 });
   }
+
+  // #1502 — a live worker heartbeating with no session binding is running into
+  // the void (empty transcript, silent-exit misfire). Raise the fault once.
+  checkSessionBindingFault(id);
 
   return NextResponse.json({
     ok: true,
