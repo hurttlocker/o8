@@ -3,19 +3,23 @@ import { eq } from 'drizzle-orm';
 import { getDb, lanes } from '@/lib/db';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
-import { findLiveCodexProcessByCwd } from '@/lib/runtimes/shared/codex-process-cwd';
-import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import type { Lane } from './types';
 import {
   appendEvent,
-  archiveLane,
   getLane,
   getLaneEvents,
   listActiveLanes,
   updateLane,
 } from './registry';
 import { preserveLaneWorktreeHead, type LaneWorktreePreservation } from './worktree-preservation';
-import { enforceWedgeTimeouts } from './wedge-timeouts';
+import {
+  isOwnedSessionKey,
+  isPidAlive,
+  probeClaudeCwdAlive,
+  probeOwnedSessionLiveness,
+} from './owned-session-liveness';
+import { decideRunningLaneSalvage } from './salvage';
+import { runDeadLaneSweep } from './dead-lane-archiver';
 
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
@@ -48,77 +52,11 @@ function getLaneDb() {
   return db;
 }
 
-function isPidAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isFinite(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function parseLivePidSessionKey(sessionKey: string): number | null {
   const match = sessionKey.match(/^(?:codex-live:|claude-code:live-)(\d+)$/);
   if (!match?.[1]) return null;
   const pid = Number(match[1]);
   return Number.isFinite(pid) && pid > 0 ? pid : null;
-}
-
-async function probeCodexWorktreeContinuity(
-  sessionKey: string,
-  lane: Lane,
-): Promise<LaneOwnerProbe | null> {
-  if (!sessionKey.startsWith('codex-owned:')) return null;
-  const match = await findLiveCodexProcessByCwd(lane.worktreePath);
-  if (!match) return null;
-  return {
-    alive: true,
-    source: 'codex-process-cwd',
-    pid: match.pid,
-    note: 'live codex process cwd matches lane worktree',
-  };
-}
-
-async function probeOwnedSession(
-  sessionKey: string,
-  lane: Lane,
-): Promise<LaneOwnerProbe> {
-  // Shared, TTL-memoized owned-session index (perf 2026-07-03) — one readdir
-  // per root per tick, shared with the silent-exit detector, instead of a
-  // per-lane scan. Semantics unchanged: null=gone, {}=cleared.
-  const run = await lookupOwnedActiveRun(sessionKey);
-  if (!run) {
-    return (await probeCodexWorktreeContinuity(sessionKey, lane))
-      ?? { alive: false, source: 'owned-session-registry', note: 'owned session metadata not found' };
-  }
-  if (run.tmuxSession === undefined && run.pid === undefined) {
-    return (await probeCodexWorktreeContinuity(sessionKey, lane))
-      ?? { alive: false, source: 'owned-session-registry', note: 'owned session activeRun cleared' };
-  }
-  if (run.tmuxSession) {
-    const alive = await isBridgeSessionAlive(run.tmuxSession);
-    if (!alive) {
-      const continuity = await probeCodexWorktreeContinuity(sessionKey, lane);
-      if (continuity) return continuity;
-    }
-    return {
-      alive,
-      source: 'owned-session-registry',
-      sessionName: run.tmuxSession,
-      pid: run.pid,
-    };
-  }
-  const pidAlive = isPidAlive(run.pid);
-  if (!pidAlive) {
-    const continuity = await probeCodexWorktreeContinuity(sessionKey, lane);
-    if (continuity) return continuity;
-  }
-  return {
-    alive: pidAlive,
-    source: 'owned-session-registry',
-    pid: run.pid,
-  };
 }
 
 async function findOwnerPidViaWorktreeManager(lane: Lane): Promise<number | null | undefined> {
@@ -134,31 +72,6 @@ async function findOwnerPidViaWorktreeManager(lane: Lane): Promise<number | null
     return typeof pid === 'number' && Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
     return undefined;
-  }
-}
-
-async function probeClaudeCodeCwd(lane: Lane): Promise<LaneOwnerProbe> {
-  try {
-    const { findLiveClaudeProcesses } = await import('@/lib/runtimes/claude-code');
-    const processes = await findLiveClaudeProcesses();
-    const targetCwds = [lane.worktreePath, lane.repoPath]
-      .map((value) => value?.trim())
-      .filter((value): value is string => Boolean(value));
-    if (targetCwds.length === 0) {
-      return { alive: undefined, source: 'claude-process-cwd', note: 'no cwd to compare' };
-    }
-    const match = processes.find((proc) => proc.cwd && targetCwds.includes(proc.cwd));
-    return {
-      alive: Boolean(match),
-      source: 'claude-process-cwd',
-      pid: match?.pid,
-    };
-  } catch (error) {
-    return {
-      alive: undefined,
-      source: 'claude-process-cwd',
-      note: error instanceof Error ? error.message : String(error),
-    };
   }
 }
 
@@ -182,17 +95,9 @@ async function probeLaneOwner(lane: Lane): Promise<LaneOwnerProbe> {
     return { alive: isPidAlive(livePid), source: 'session-key-pid', pid: livePid };
   }
 
-  if (sessionKey.startsWith('codex-owned:')) {
-    return probeOwnedSession(sessionKey, lane);
-  }
-  if (sessionKey.startsWith('claude-code-owned:')) {
-    return probeOwnedSession(sessionKey, lane);
-  }
-  if (sessionKey.startsWith('gemini-owned:')) {
-    return probeOwnedSession(sessionKey, lane);
-  }
-  if (sessionKey.startsWith('opencode-owned:')) {
-    return probeOwnedSession(sessionKey, lane);
+  // Owned worker sessions (codex/claude-code/gemini/opencode) → shared probe.
+  if (isOwnedSessionKey(sessionKey)) {
+    return probeOwnedSessionLiveness(sessionKey, lane.worktreePath);
   }
 
   const terminalSession = getRuntimeTerminalSession(sessionKey);
@@ -205,7 +110,7 @@ async function probeLaneOwner(lane: Lane): Promise<LaneOwnerProbe> {
   }
 
   if (lane.runtime === 'claude-code') {
-    return probeClaudeCodeCwd(lane);
+    return probeClaudeCwdAlive(lane);
   }
 
   return { alive: undefined, source: 'process-registry', note: 'no owner pid mapping found' };
@@ -329,12 +234,12 @@ export async function reapZombieLane(
   // its tree can corrupt the in-flight merge.
   if (before.status === 'running' && before.worktreePath) {
     try {
-      const { autoCommitCompletionWorktree, hasReviewableCompletionDiff } =
-        await import('@/lib/supervisor/completion-verification');
       const baseRef = before.baseBranch?.trim() || 'main';
-      const autoCommitted = preservedWork?.autoCommitted ?? await autoCommitCompletionWorktree(before.worktreePath, before.label);
-      const reviewable =
-        autoCommitted || (await hasReviewableCompletionDiff(before.worktreePath, baseRef));
+      const { autoCommitted, reviewable } = await decideRunningLaneSalvage(
+        before.worktreePath,
+        baseRef,
+        { label: before.label, preCommitted: preservedWork?.autoCommitted },
+      );
       if (reviewable) {
         appendEvent(before.id, 'zombie_reap', 'system', { ...payload, salvaged: true, autoCommitted });
         return updateLane(
@@ -403,26 +308,6 @@ export async function reapZombieLanes(options: {
   return reaped;
 }
 
-// A lane that lost its session and is NOT actively recovering (no auto-escalate
-// re-attempt) gets stuck in `paused`/`recovering` with an empty session_key
-// forever — it renders as a phantom "Recovering" agent and never terminalizes.
-// Archive any that have been dead this long so they stop showing and don't
-// accumulate. Generous threshold so a brief legitimate pause/recovery is safe. (#1282)
-export const STALE_DEAD_LANE_MS = 15 * 60_000;
-
-export function archiveStaleDeadLanes(now: number = Date.now()): number {
-  let archived = 0;
-  for (const lane of listActiveLanes()) {
-    if (lane.status !== 'paused' && lane.status !== 'recovering') continue;
-    if (lane.sessionKey) continue; // still owns a session — leave it alone
-    const lastTouch = lane.lastEventAt ? Date.parse(lane.lastEventAt) : Number.NaN;
-    const staleMs = Number.isFinite(lastTouch) ? now - lastTouch : Number.MAX_SAFE_INTEGER;
-    if (staleMs <= STALE_DEAD_LANE_MS) continue;
-    if (archiveLane(lane.id, 'system')) archived += 1;
-  }
-  return archived;
-}
-
 export async function runLaneZombieReaperTick(): Promise<void> {
   if (zombieReaperInFlight) return;
   zombieReaperInFlight = true;
@@ -433,17 +318,13 @@ export async function runLaneZombieReaperTick(): Promise<void> {
         `[lane-reaper] ${item.candidate.lane.id} stale ${Math.round(item.candidate.staleMs / 1000)}s; owner dead via ${item.candidate.probe.source} — recovering`,
       );
     }
-    // Wedge-timeout enforcement runs BEFORE archiveStaleDeadLanes so a
-    // packet-bound `recovering` lane escalates to the orchestrator instead of
-    // being silently archived out from under its packet.
-    try {
-      enforceWedgeTimeouts();
-    } catch (error) {
-      console.error('[lane-lifecycle] wedge-timeout enforcement failed:', error);
-    }
-    const archivedDead = archiveStaleDeadLanes();
-    if (archivedDead > 0) {
-      console.log(`[lane-reaper] archived ${archivedDead} stale dead lane(s) (paused/recovering, no session)`);
+    // Wedge escalation THEN archive, in one structural pass (runDeadLaneSweep) —
+    // a packet-bound recovering/launching lane escalates to the orchestrator
+    // before any archive rule can consider it. Replaces the old hard-coded
+    // "enforceWedgeTimeouts() before archiveStaleDeadLanes()" call ordering.
+    const { archived } = await runDeadLaneSweep();
+    if (archived > 0) {
+      console.log(`[lane-reaper] archived ${archived} stale dead lane(s)`);
     }
   } finally {
     zombieReaperInFlight = false;
