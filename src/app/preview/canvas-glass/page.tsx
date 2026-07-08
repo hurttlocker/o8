@@ -2600,18 +2600,19 @@ export default function CanvasGlassPreviewPage() {
     markdown: markdownCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, title: card.title, markdown: card.markdown })),
     brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
   }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, markdownCards, brainCards]);
-  const flushCanvasSnapshot = useCallback(() => {
-    if (!restoredRef.current || Date.now() < persistArmedAtRef.current) return;
+  const flushCanvasSnapshot = useCallback((force = false) => {
+    if (!restoredRef.current || (!force && Date.now() < persistArmedAtRef.current)) return;
     saveCanvasSnapshot({ v: 1, ...JSON.parse(persistSignature) });
   }, [persistSignature]);
 
   useEffect(() => {
     const target = window as unknown as Record<string, unknown>;
-    target.__o8CanvasFlushSnapshot = flushCanvasSnapshot;
-    window.addEventListener('beforeunload', flushCanvasSnapshot);
+    const forceFlush = () => flushCanvasSnapshot(true);
+    target.__o8CanvasFlushSnapshot = forceFlush;
+    window.addEventListener('beforeunload', forceFlush);
     return () => {
-      if (target.__o8CanvasFlushSnapshot === flushCanvasSnapshot) delete target.__o8CanvasFlushSnapshot;
-      window.removeEventListener('beforeunload', flushCanvasSnapshot);
+      if (target.__o8CanvasFlushSnapshot === forceFlush) delete target.__o8CanvasFlushSnapshot;
+      window.removeEventListener('beforeunload', forceFlush);
     };
   }, [flushCanvasSnapshot]);
 
