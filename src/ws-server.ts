@@ -56,6 +56,17 @@ migrateDataDirOnce();
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
+import {
+  startAgentSession,
+  updateAgentStatus,
+  touchAgentSession,
+  stopAgentSession,
+  sweepStaleAgentSession,
+  getAgentSession,
+  persistAgentSession,
+  type AgentSessionStatus,
+} from '@/lib/mobile/symon-agent-registry';
+import { ToolCallTracker, TOOL_TIMEOUT_MS } from '@/lib/mobile/symon-tool-relay';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -2965,8 +2976,231 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'orchestrator-interrupt':
       handleOrchestratorInterrupt(client, msg);
       break;
+
+    // ── Symon Agent Mode channel (phone-hosted voice, Mac-executed tools) ──
+    case 'symon-tool-call':
+      void handleSymonToolCall(client, msg);
+      break;
+    case 'symon-agent-status':
+      handleSymonAgentStatus(client, msg);
+      break;
+    case 'symon-stop':
+      handleSymonStop(client, msg);
+      break;
   }
 }
+
+// ── Symon Agent Mode channel handlers (docs/symon-agent-mode.md) ──
+//
+// The PHONE hosts the WebRTC voice session; every tool STILL executes here on the
+// Mac. This process owns the socket pushes + the one activeAgentSession registry
+// (src/lib/mobile/symon-agent-registry.ts), mirrored to disk for the Next GET.
+// DURABLE channel: `symon` messages fall through isLossyMessage() → queued under
+// backpressure (never dropped), like agent-lifecycle.
+
+/** sessionId → the client socket currently hosting it (for server→phone pushes). */
+const symonSessions = new Map<string, { clientId: string }>();
+/** In-flight tool calls, correlated strictly by the model's callId. */
+const symonToolTracker = new ToolCallTracker();
+
+const AGENT_STATUSES = new Set<AgentSessionStatus>(['connecting', 'live', 'acting', 'idle', 'error']);
+function isAgentSessionStatus(v: string): v is AgentSessionStatus {
+  return AGENT_STATUSES.has(v as AgentSessionStatus);
+}
+
+function persistAgentRegistry(): void {
+  persistAgentSession(getAgentSession());
+}
+
+function pushSymonStatus(clientId: string, sessionId: string, status: AgentSessionStatus, detail?: string): void {
+  const client = clients.get(clientId);
+  if (!client) return;
+  send(client, { channel: 'symon', type: 'symon-agent-status', sessionId, status, ...(detail ? { detail } : {}) });
+}
+
+function pushSymonToolResult(
+  clientId: string,
+  sessionId: string,
+  callId: string,
+  ok: boolean,
+  result: unknown,
+): void {
+  const client = clients.get(clientId);
+  if (!client) return;
+  send(client, { channel: 'symon', type: 'symon-tool-result', sessionId, callId, ok, result });
+}
+
+/** Last-start-wins: idle-push + drop every symon session EXCEPT the one to keep. */
+function preemptOtherSymonSessions(keepSessionId: string, detail: string): void {
+  for (const [sid, route] of Array.from(symonSessions.entries())) {
+    if (sid === keepSessionId) continue;
+    pushSymonStatus(route.clientId, sid, 'idle', detail);
+    symonSessions.delete(sid);
+    symonToolTracker.removeSession(sid);
+  }
+}
+
+function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown>): void {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const status = typeof msg.status === 'string' ? msg.status : '';
+  if (!sessionId || !isAgentSessionStatus(status)) return;
+
+  if (status === 'idle' || status === 'error') {
+    // Phone tore the session down (user tap / background / WebRTC close).
+    if (symonSessions.get(sessionId)?.clientId === client.id || symonSessions.has(sessionId)) {
+      symonSessions.delete(sessionId);
+      symonToolTracker.removeSession(sessionId);
+    }
+    stopAgentSession(sessionId);
+    persistAgentRegistry();
+    return;
+  }
+
+  // connecting / live / acting → register + preempt any OTHER live session
+  // (last-start-wins; makes phone-app restarts self-healing).
+  startAgentSession(sessionId);
+  symonSessions.set(sessionId, { clientId: client.id });
+  preemptOtherSymonSessions(sessionId, 'preempted');
+  updateAgentStatus(sessionId, status);
+  persistAgentRegistry();
+}
+
+function handleSymonStop(client: ClientState, msg: Record<string, unknown>): void {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  if (!sessionId) return;
+  void client; // stop is authoritative regardless of which socket sent it
+  symonSessions.delete(sessionId);
+  symonToolTracker.removeSession(sessionId);
+  stopAgentSession(sessionId);
+  persistAgentRegistry();
+}
+
+async function handleSymonToolCall(client: ClientState, msg: Record<string, unknown>): Promise<void> {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const callId = typeof msg.callId === 'string' ? msg.callId : '';
+  const tool = typeof msg.tool === 'string' ? msg.tool : '';
+  const args = msg.args && typeof msg.args === 'object' ? (msg.args as Record<string, unknown>) : {};
+  if (!sessionId || !callId || !tool) return;
+
+  // Status usually precedes the first tool call, but be defensive — a tool call
+  // is itself proof the session is live.
+  if (!symonSessions.has(sessionId)) {
+    symonSessions.set(sessionId, { clientId: client.id });
+    startAgentSession(sessionId);
+    preemptOtherSymonSessions(sessionId, 'preempted');
+  }
+  touchAgentSession(sessionId);
+  persistAgentRegistry();
+
+  // Strict callId correlation — tolerate parallel calls, ignore a duplicate.
+  if (!symonToolTracker.add({ sessionId, callId, tool, startedAt: Date.now() })) return;
+
+  // acting while the tool executes.
+  pushSymonStatus(client.id, sessionId, 'acting');
+
+  let outcome: { ok: boolean; result: unknown };
+  try {
+    outcome = await fetchNextJson<{ ok: boolean; result: unknown }>('/api/mobile/symon/tool', {
+      method: 'POST',
+      body: { sessionId, callId, tool, args },
+      // The Next route enforces the authoritative 60s cap; give the fetch a small
+      // margin so the route's structured tool_timeout wins over a transport abort.
+      timeoutMs: TOOL_TIMEOUT_MS + 5_000,
+    });
+  } catch {
+    outcome = { ok: false, result: { error: 'tool_timeout' } };
+  }
+
+  symonToolTracker.resolve(callId);
+  touchAgentSession(sessionId);
+  persistAgentRegistry();
+
+  // The session may have been preempted/stopped while the tool ran — only push
+  // if it's still the live owner (a late result is otherwise dropped).
+  const owner = symonSessions.get(sessionId);
+  if (!owner) return;
+
+  const resultObj = outcome.result && typeof outcome.result === 'object'
+    ? (outcome.result as Record<string, unknown>)
+    : null;
+  if (resultObj && resultObj.error === 'needs_confirmation') {
+    // Honest v1: the dock card is up on the Mac; tell the tab so it can render it.
+    pushSymonStatus(owner.clientId, sessionId, 'acting', 'awaiting Mac approval');
+  }
+
+  pushSymonToolResult(owner.clientId, sessionId, callId, outcome.ok, outcome.result);
+
+  // Back to live once nothing remains in flight for this session.
+  if (symonToolTracker.inFlightForSession(sessionId) === 0) {
+    pushSymonStatus(owner.clientId, sessionId, 'live');
+    if (getAgentSession()?.sessionId === sessionId) {
+      updateAgentStatus(sessionId, 'live');
+      persistAgentRegistry();
+    }
+  }
+}
+
+/** Disconnect cleanup — drop any symon sessions this socket owned. */
+function cleanupSymonForClient(clientId: string): void {
+  let changed = false;
+  for (const [sid, route] of Array.from(symonSessions.entries())) {
+    if (route.clientId !== clientId) continue;
+    symonSessions.delete(sid);
+    symonToolTracker.removeSession(sid);
+    stopAgentSession(sid);
+    changed = true;
+  }
+  if (changed) persistAgentRegistry();
+}
+
+/**
+ * Stale sweep — an agent session with no status event or tool call for 10 min is
+ * marked idle + dropped (contract §"Session registry"). Also reaps any tool call
+ * that somehow outlived the route's 60s cap.
+ */
+function sweepStaleSymon(): void {
+  const dropped = sweepStaleAgentSession();
+  if (dropped) {
+    const route = symonSessions.get(dropped.sessionId);
+    if (route) pushSymonStatus(route.clientId, dropped.sessionId, 'idle', 'stale');
+    symonSessions.delete(dropped.sessionId);
+    symonToolTracker.removeSession(dropped.sessionId);
+    persistAgentRegistry();
+  }
+  for (const call of symonToolTracker.timedOut(Date.now())) {
+    const route = symonSessions.get(call.sessionId);
+    if (route) pushSymonToolResult(route.clientId, call.sessionId, call.callId, false, { error: 'tool_timeout' });
+  }
+}
+
+/**
+ * Lazy DESK preemption (Case B, contract §"Mutual exclusion"). A desk-mic session
+ * started by in-app double-tap never passes through our routes; detect it here on
+ * a ≤5s cadence by reading the desk status (GET /api/mobile/symon → __o8RealtimeStatus)
+ * and, if it went live while a phone agent session is active, push idle to the phone.
+ */
+async function sweepDeskPreemption(): Promise<void> {
+  if (symonSessions.size === 0) return;
+  let deskStatus = 'idle';
+  try {
+    const snap = await fetchNextJson<{ status?: string }>('/api/mobile/symon');
+    deskStatus = typeof snap.status === 'string' ? snap.status : 'idle';
+  } catch {
+    return; // bridge hiccup — try again next tick
+  }
+  const deskLive = deskStatus === 'live' || deskStatus === 'connecting' || deskStatus === 'requesting-mic';
+  if (!deskLive) return;
+  for (const [sid, route] of Array.from(symonSessions.entries())) {
+    pushSymonStatus(route.clientId, sid, 'idle', 'preempted_by_desk');
+    symonSessions.delete(sid);
+    symonToolTracker.removeSession(sid);
+  }
+  stopAgentSession();
+  persistAgentRegistry();
+}
+
+setInterval(sweepStaleSymon, 30_000);
+setInterval(() => { void sweepDeskPreemption(); }, 3_000);
 
 // ── Orchestrator channel handlers ──
 
@@ -5219,6 +5453,8 @@ wss.on('connection', (ws, req) => {
     for (const key of orchestratorSubscriptions.keys()) {
       if (key.startsWith(`${client.id}::`)) orchestratorSubscriptions.delete(key);
     }
+    // Drop any Symon Agent Mode session this socket hosted.
+    cleanupSymonForClient(client.id);
     clients.delete(client.id);
     console.log(`[ws-server] Client disconnected: ${client.id} (${clients.size} total)`);
   });

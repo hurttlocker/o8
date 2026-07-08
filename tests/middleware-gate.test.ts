@@ -140,6 +140,49 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('gates /api/mobile/symon/session (Agent-mode ephemeral-token mint) against LAN without a token', () => {
+    // The phone reaches this with the paired Bearer ws-token; a bare LAN request
+    // is denied (mint runs on the operator's BYOK OpenAI key).
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/session', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('passes /api/mobile/symon/session with the paired Bearer ws-token (the phone path)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/session', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001', authorization: `Bearer ${TEST_TOKEN}` },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('gates /api/mobile/symon/tool (internal ws-server → Next tool relay) against LAN', () => {
+    // Not phone-facing; the ws-server reaches it over loopback with the ws-token.
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/tool', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('passes /api/mobile/symon/tool from loopback (the ws-server relay origin)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://localhost:3001/api/mobile/symon/tool', {
+        method: 'POST',
+        headers: { host: 'localhost:3001' },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
   it('gates /api/invites (beta founding-invite codes) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/invites', {
