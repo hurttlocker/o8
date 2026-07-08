@@ -40,15 +40,20 @@ const { killLaneSessionsConfirmed } = await import('@/lib/lane/reap-sessions');
 const { getLaneEvents, createLane } = await import('@/lib/lane/registry');
 import type { InterruptEscalationResult } from '@/lib/runtime/interrupt-escalation';
 
-/** Spawn a detached child (its own process-group leader) that traps `traps`. */
+/**
+ * Spawn a detached child (its own process-group leader) that traps `traps` and
+ * signals `ready` ONLY after the handlers are installed. We must wait for that
+ * IPC before signaling — under full-suite parallelism node startup can lag, and
+ * a SIGINT that races the handler install would kill the child on the first
+ * signal (a false "died at SIGINT"). No time-based fallback for that reason.
+ */
 function spawnTrapChild(traps: string[]): Promise<{ pid: number; done: Promise<void> }> {
-  const script = `${traps.map((sig) => `process.on(${JSON.stringify(sig)}, () => {});`).join('')}setInterval(() => {}, 1000);process.send && process.send('ready');`;
+  const script = `${traps.map((sig) => `process.on(${JSON.stringify(sig)}, () => {});`).join('')}setInterval(() => {}, 1000);process.send('ready');`;
   const child = spawn(process.execPath, ['-e', script], { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   const done = new Promise<void>((resolve) => child.on('exit', () => resolve()));
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     child.on('message', () => resolve({ pid: child.pid as number, done }));
-    // Fallback if IPC 'ready' is missed — the handlers install synchronously.
-    setTimeout(() => resolve({ pid: child.pid as number, done }), 300);
+    child.on('error', reject);
   });
 }
 
