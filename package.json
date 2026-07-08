@@ -52,7 +52,7 @@
     "release": "node scripts/release.mjs",
     "ship": "node scripts/detach-stale-dmg.mjs && npm run tauri:build:nonotary && npm run sign-and-notarize && npm run release && node scripts/detach-stale-dmg.mjs",
     "postinstall": "node scripts/postinstall.mjs",
-    "tauri:prebuild": "node scripts/preship-cleanup.mjs && npm run build && node scripts/tauri-export.mjs",
+    "tauri:prebuild": "node scripts/preship-cleanup.mjs && node scripts/build-speech-local.mjs && npm run build && node scripts/tauri-export.mjs",
     "version": "node scripts/sync-version.mjs",
     "tauri:build:nonotary": "sh -c 'unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= cargo tauri build -- --features dev-mcp-plugin'",
     "sign-and-notarize": "node scripts/sign-and-notarize.mjs",
