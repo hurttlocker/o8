@@ -57,6 +57,8 @@ interface SttEventPayload {
    * guard the review asked for.
    */
   origin?: 'system' | 'in-window';
+  /** Session lane: 'agent' = Right-Option Symon command (never painted here). */
+  lane?: string;
   sessionId?: number;
   text?: string;
   level?: number;
@@ -78,6 +80,7 @@ export function useNativeDictation() {
   const optionsRef = useRef<DictationStartOptions | null>(null);
   const sessionIdRef = useRef<number>(0);
   const systemActiveRef = useRef(false);
+  const systemAgentRef = useRef(false);
   const startTimeRef = useRef<number>(0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -106,6 +109,20 @@ export function useNativeDictation() {
   const handleEvent = useCallback((payload: SttEventPayload) => {
     const systemEvent = payload.origin === 'system' || payload.type === 'system-pasted' || payload.type === 'system-start' || payload.type === 'system-idle';
     if (systemEvent) {
+      // Agent-mode (Right-Option) sessions NEVER paint the in-window pill —
+      // their partials belong to the canvas presence pill / screen surfaces.
+      // Only `system-start` carries `lane`, so latch it for the session and
+      // swallow everything until the session tears down (2026-07-08: the big
+      // white pill was double-painting over the canvas partials bar).
+      if (payload.type === 'system-start') {
+        systemAgentRef.current = payload.lane === 'agent';
+      }
+      if (systemAgentRef.current) {
+        if (payload.type === 'system-idle' || payload.type === 'system-pasted' || payload.type === 'error') {
+          systemAgentRef.current = false;
+        }
+        return;
+      }
       if (payload.sessionId !== undefined) sessionIdRef.current = payload.sessionId;
       switch (payload.type) {
         case 'system-start':

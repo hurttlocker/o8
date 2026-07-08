@@ -460,6 +460,10 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
     let packet_id = resp.get("packetId").and_then(|v| v.as_str()).unwrap_or("");
     let lane_id = resp.get("laneId").and_then(|v| v.as_str()).unwrap_or("");
     let note = resp.get("note").and_then(|v| v.as_str()).unwrap_or("");
+    // The name on the agent's canvas card (server computes codename(laneId) —
+    // single source of truth). Symon must announce THIS name, never invent one
+    // (2026-07-08: voice said "Pigeon", the card said "Pike").
+    let card_name = resp.get("codename").and_then(|v| v.as_str()).unwrap_or("");
 
     if !ok {
         // 202 path: launch is queued behind a policy gate / approval card.
@@ -467,6 +471,7 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
         return Ok(json!({
             "dispatched": false,
             "packet_id": packet_id,
+            "codename": card_name,
             "approval_id": approval,
             "note": if note.is_empty() { "The orchestrator queued the task pending approval." } else { note },
         }));
@@ -480,6 +485,7 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
         "dispatched": true,
         "packet_id": packet_id,
         "lane_id": lane_id,
+        "codename": card_name,
         "repo": repo,
     }))
 }

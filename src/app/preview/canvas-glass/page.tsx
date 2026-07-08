@@ -403,6 +403,7 @@ export default function CanvasGlassPreviewPage() {
   const symonSpawnPacketIdsRef = useRef(new Set<string>());
   const symonSpawnWindowUntilRef = useRef(0);
   const spokenSymonLaneIdsRef = useRef(new Set<string>());
+  const announcedSymonLaneIdsRef = useRef(new Set<string>());
   const dataSeenRef = useRef(new Set<string>());
   // First spawn of the visit gets the full reveal (min-play); the rest
   // bail the instant the shell answers — speed stays the default.
@@ -2125,6 +2126,14 @@ export default function CanvasGlassPreviewPage() {
     if (!canvasEnabled || !inTauri) return;
     const liveIds = new Set(activeLanes.map((lane) => lane.id));
     for (const card of agentCards) {
+      // Announce the ASSIGNED card name the moment a Symon-spawned card lands —
+      // the spawn is async, so the model can't know the codename at dispatch
+      // time and must never invent one (2026-07-08: voice "Pigeon", card "Pike").
+      if (card.symonOrigin && liveIds.has(card.laneId) && !announcedSymonLaneIdsRef.current.has(card.laneId)) {
+        announcedSymonLaneIdsRef.current.add(card.laneId);
+        const spawnLabel = card.codename || card.title || `Agent ${card.number}`;
+        void symonSpeakStatus(`${spawnLabel} is on it`);
+      }
       if (!card.symonOrigin || liveIds.has(card.laneId) || spokenSymonLaneIdsRef.current.has(card.laneId)) continue;
       spokenSymonLaneIdsRef.current.add(card.laneId);
       const label = card.codename || card.title || `Agent ${card.number}`;
