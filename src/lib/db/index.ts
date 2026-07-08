@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 32;
+const DB_SCHEMA_VERSION = 33;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -202,6 +202,13 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
  * Schema v32 (#1497) — persisted idempotency keys. See schema.ts
  * `idempotencyKeys` + `orchestrator/idempotency-store.ts` for the reserve →
  * finalize protocol. Machine-only table; ms-epoch stamps.
+ *
+ * Schema v33 (#1513) — adds the `pid` column (owning process id of an in-flight
+ * reservation) and reaps reservations left behind by a dead process on every
+ * connection open. This preserves the old in-memory merge cache's "a restart
+ * forgets in-flight merges so the operator can retry immediately" behavior now
+ * that merge verbs share the persisted store — a LIVE in-flight duplicate is
+ * still deduped, but a reservation whose owner died is released.
  */
 function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
   sqlite.exec(`
@@ -210,11 +217,56 @@ function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
       verb TEXT NOT NULL,
       packet_id TEXT,
       result_json TEXT,
+      pid INTEGER,
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at);
   `);
+  // v33 — additive column for installs created at v32 (table already existed
+  // without `pid`). Tolerant of the duplicate-column race on a repeat boot.
+  if (!tableColumnExists(sqlite, 'idempotency_keys', 'pid')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN pid INTEGER');
+  }
+  reapDeadIdempotencyReservations(sqlite);
+}
+
+/** True when the OS process `pid` is still alive (kill(pid,0) doesn't ESRCH). */
+function isPidAlive(pid: number | null | undefined): boolean {
+  if (!pid || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    // ESRCH (gone) or EPERM (exists, other user) — treat only ESRCH-shaped as
+    // dead. A same-user o8 fleet never trips EPERM, so any throw == dead here.
+    return false;
+  }
+}
+
+/**
+ * Release in-flight reservations (result_json NULL) whose owning process is
+ * dead. Finalized rows (result_json set) are legitimate replay caches and MUST
+ * survive to their TTL so a post-restart duplicate still replays the SUCCESS —
+ * only orphaned reservations are reaped. Runs on every connection open, so a
+ * process restart makes a restart-interrupted merge immediately retryable.
+ */
+function reapDeadIdempotencyReservations(sqlite: Database.Database): void {
+  try {
+    const orphans = sqlite
+      .prepare('SELECT key, pid FROM idempotency_keys WHERE result_json IS NULL AND pid IS NOT NULL')
+      .all() as Array<{ key: string; pid: number }>;
+    const dead = orphans.filter((row) => !isPidAlive(row.pid)).map((row) => row.key);
+    if (dead.length === 0) return;
+    const del = sqlite.prepare('DELETE FROM idempotency_keys WHERE key = ?');
+    const tx = sqlite.transaction((keys: string[]) => {
+      for (const key of keys) del.run(key);
+    });
+    tx(dead);
+    console.log(`[db] Reaped ${dead.length} idempotency reservation(s) from dead process(es)`);
+  } catch (error) {
+    console.warn('[db] idempotency reservation reap failed:', error instanceof Error ? error.message : error);
+  }
 }
 
 /**

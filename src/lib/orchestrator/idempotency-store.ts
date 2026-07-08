@@ -24,9 +24,13 @@
  * is deleted so a legitimate retry of a genuinely-failed op can proceed
  * (idempotency replays SUCCESSES, never caches failures).
  *
- * Merge verbs deliberately stay on the in-memory `idempotency-cache.ts`: a
- * restart SHOULD invalidate a merge-in-flight guard (documented there), so
- * they are not migrated here.
+ * Merge verbs (approve_and_merge) now share this store too (#1513). The old
+ * in-memory `idempotency-cache.ts` — deleted — intentionally forgot in-flight
+ * merges on restart so the operator could retry immediately; that property is
+ * preserved by stamping the owning `pid` on each reservation and reaping
+ * reservations from dead processes on DB init (see `reapDeadIdempotencyReservations`
+ * in `db/index.ts`). A LIVE in-flight merge is still deduped; a restart-orphaned
+ * one becomes immediately retryable.
  */
 
 import { createHash } from 'node:crypto';
@@ -100,16 +104,18 @@ function selectFresh(key: string, now: number): KeyRow | undefined {
 function reserve(key: string, verb: string, packetId: string, now: number, expiresAt: number): boolean {
   const info = getSqlite()
     .prepare(
-      `INSERT OR IGNORE INTO idempotency_keys (key, verb, packet_id, result_json, created_at, expires_at)
-       VALUES (?, ?, ?, NULL, ?, ?)`,
+      `INSERT OR IGNORE INTO idempotency_keys (key, verb, packet_id, result_json, pid, created_at, expires_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?)`,
     )
-    .run(key, verb, packetId, now, expiresAt);
+    .run(key, verb, packetId, process.pid, now, expiresAt);
   return info.changes > 0;
 }
 
 function finalize(key: string, resultJson: string, expiresAt: number): void {
+  // Clear pid on finalize — a finalized row is a replay cache with no live
+  // owner, so it must never look like a reapable in-flight reservation.
   getSqlite()
-    .prepare('UPDATE idempotency_keys SET result_json = ?, expires_at = ? WHERE key = ?')
+    .prepare('UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ? WHERE key = ?')
     .run(resultJson, expiresAt, key);
 }
 
