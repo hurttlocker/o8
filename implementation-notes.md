@@ -1,3 +1,0 @@
-## Deviations
-
-- None.
