@@ -1,6 +1,15 @@
-# Phone ↔ Symon conversation — desktop/mobile contract (PROPOSAL v1)
+# Phone ↔ Symon conversation — desktop/mobile contract (HISTORICAL PROPOSAL)
 
-Status: **DRAFT for mobile-team redline** — desktop seams verified against code 2026-07-08; nothing here is built yet. Operator intent: talk to Symon from the phone (conversation on the phone), Symon executes on the iMac; dogfood Symon remotely.
+Status: **SUPERSEDED for the voice path — see `docs/symon-agent-mode.md`, the AUTHORITATIVE contract that actually shipped** (phone-hosted WebRTC voice: mobile `84a975c`, desktop `8edbfe16`, live e2e in v0.1.566). Disposition of this document's sections:
+
+| Section | Disposition |
+|---|---|
+| v1 phone-text-first (`{action:"say"}` → `agent_run`, text replies, WS `symon` relay of `agent_tasks`) | **PROPOSED, unbuilt** — still the valid design for the async/text conversation complement to voice (works on cellular without a live WebRTC session; conversation persists as a thread) |
+| Confirm bridge (`symon-confirm` into the mobile ApprovalStack + `{action:"confirm"}`) | **PROPOSED, unbuilt** — the named follow-up for phone-side approval of Symon's gated actions; referenced by symon-agent-mode.md §tool-relay |
+| "v2: phone-hosted S2S" exclusion | **DEAD as written** — it shipped first, as the authoritative contract |
+| Ground-truth section (seam pointers) | Superseded by fresher scouting; trust code over this snapshot |
+
+Original intent preserved below for the still-proposed sections. Desktop seams were verified against code 2026-07-08.
 
 ## Ground truth (verified)
 
