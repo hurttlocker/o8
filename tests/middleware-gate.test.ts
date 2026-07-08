@@ -183,6 +183,26 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(200);
   });
 
+  it('gates /api/telemetry/crash (renderer crash sink) against LAN', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/telemetry/crash', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('passes /api/telemetry/crash from loopback (the webview origin)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://localhost:3001/api/telemetry/crash', {
+        method: 'POST',
+        headers: { host: 'localhost:3001' },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
   it('gates /api/invites (beta founding-invite codes) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/invites', {
