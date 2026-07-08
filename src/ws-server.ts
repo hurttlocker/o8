@@ -168,6 +168,7 @@ import {
   recordRealtimeBridgeFailure,
   recordRealtimeBridgeSuccess,
 } from './lib/realtime/bridge-backoff';
+import { WsWatchdog } from './lib/ws-server/health-watchdog';
 
 const execFileAsync = promisify(execFile);
 
@@ -204,6 +205,12 @@ const NEXT_FETCH_INITIAL_BACKOFF_MS = 100;
 const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if client buffer exceeds this
 const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
 const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
+
+// Event-loop lag watchdog (#1498 structural follow-up). ws-server pumps every
+// mobile client, PTY, and orchestrator stream on this one loop; a sync wedge
+// freezes them all. Sample loop lag; log + count sustained wedges. Cheap when
+// healthy, queryable via /health.
+const wsWatchdog = new WsWatchdog();
 
 const RETRYABLE_NEXT_FETCH_CODES = new Set([
   'ECONNREFUSED',
@@ -5323,6 +5330,7 @@ const httpServer = createServer((req, res) => {
       status: 'ok',
       clients: clients.size,
       gateway: 'disabled',
+      eventLoop: wsWatchdog.getStats(),
     }));
     return;
   }
@@ -5834,6 +5842,7 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
       setTimeout(() => {
         httpServer.listen(WS_PORT, '0.0.0.0', () => {
           console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+          wsWatchdog.start(); // idempotent — covers the port-reclaim retry path
         });
       }, 500);
     } catch {
@@ -5980,6 +5989,9 @@ async function bootstrapWsServer() {
 
   httpServer.listen(WS_PORT, '0.0.0.0', () => {
     console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+
+    // Begin event-loop lag sampling (#1498 follow-up).
+    wsWatchdog.start();
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
@@ -6504,6 +6516,7 @@ function shutdown(signal: string) {
   stopWorktreeReaper();
   stopLaneZombieReaper();
   stopDashSessionGc();
+  wsWatchdog.stop();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
