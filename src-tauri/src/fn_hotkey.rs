@@ -801,6 +801,9 @@ fn begin_agent_dictation() {
                 let payload = serde_json::json!({ "type": "system-start", "origin": "system", "lane": "agent" });
                 log::info!("[fn-hotkey] morph dock → recording (agent start)");
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
+                // Direct delivery to the partials HUD too — its latch keys off
+                // this exact event, and the broadcast can miss secondary webviews.
+                let _ = app.emit_to(crate::agent_partials_window::PARTIALS_LABEL, "o8:stt-event", payload.clone());
                 let _ = app.emit("o8:stt-event", payload);
             }
         });
