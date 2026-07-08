@@ -2845,6 +2845,10 @@ mod stt_engine {
         let _ = app.emit("o8:stt-event", payload);
     }
 
+    fn emit_agent_stt(app: &AppHandle, payload: serde_json::Value) {
+        emit_stt(app, "system", payload);
+    }
+
     /// Forward one TranscriptEvent to the webview. Partial/Level events are
     /// passed straight through for live UI; Final triggers the finalize chain.
     fn forward_event(app: &AppHandle, event: crate::stt::TranscriptEvent) {
@@ -3218,15 +3222,13 @@ mod stt_engine {
                     "sessionId": session_id,
                     "text": polished.clone(),
                 });
-                let _ = app.emit_to(
-                    crate::dock_window::DOCK_LABEL,
-                    "o8:stt-event",
-                    polished_payload.clone(),
-                );
-                let _ = app.emit("o8:stt-event", polished_payload);
-                let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                let _ = app.emit("o8:stt-event", idle);
+                emit_agent_stt(&app, polished_payload);
+                let idle = serde_json::json!({
+                    "type": "system-idle",
+                    "origin": "system",
+                    "lane": "agent"
+                });
+                emit_agent_stt(&app, idle);
                 crate::dictation_history::record("agent", &polished, None);
                 crate::agent::spawn_agent(app.clone(), polished);
                 return;
