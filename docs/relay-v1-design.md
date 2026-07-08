@@ -73,19 +73,34 @@ Mac connector ──outbound wss──► relay.o8.run ◄──wss── phone
 4. **approvalId punchlist (desktop half):** the handler already resolves approvalId-first (`action/route.ts:364-368`); Phase B hardens it — when `approvalId` is present it is authoritative and session fallback is skipped entirely; stale-`sessionKey`-cannot-mistarget proven by a contract test; sessionKey-only addressing kept for old clients.
 5. Contract tests (`scripts/contract-test.ts` style) + live cross-network e2e (relay round trip, mid-session revocation, Mac-disconnect → push). `railway up` is **Q-gated**.
 
-## Wire contract (v1.0 — Phase B freezes this section verbatim)
+## Resolutions to the mobile redline (2026-07-08, desktop lane — all R1–R8 accepted)
 
-- Mac: `wss://relay.o8.run/mac` — headers `Authorization: Bearer <plan JWT>`, `x-o8-routing-id: <base58>`.
-- Phone: `wss://relay.o8.run/device/{routingId}`.
-- Relay↔endpoint control frames (JSON, unencrypted, no user content): `presence`, `devices`, `push-req`, `mux {sid}` open/close. All device↔Mac frames opaque (`{sid, seq, payload:<raw bytes incl. e2ee frames>}`).
-- In-tunnel (E2EE) additions: `http-req` / `http-res` as §D3.
-- Close codes: 4401/4403 (Mac-origin, unchanged) · 4408 `mac_offline` · 4409 `entitlement_lapsed`.
+- **R1 → no maintained allowlist; the existing middleware is the gate.** The connector does NOT tunnel to `127.0.0.1` as a loopback caller. It replays each `http-req` against the local Next app stamping the socket-truth header `x-o8-client-addr` with a **non-loopback** marker AND attaching the device's `Authorization: Bearer` — so `src/middleware.ts` default-deny runs per-route exactly as it does for a LAN phone. Result: all 26 paths across 11 prefixes work off-network with their existing policies, nothing is silently dropped, and we never build a parallel allowlist that drifts or a loopback-trusted tunnel that sidesteps the gate (which the security doctrine forbids). The connector's only path constraint is a deny of anything the middleware itself wouldn't allow a remote Bearer client — i.e. none of our own; the gate decides.
+- **R2 → first-frame `auth {token}` on every bridged socket, loopback-trust explicitly closed.** Adopted verbatim. The bridged ws-server connection is held unauthenticated — no channel traffic, no `http-req` processed — until it sends `auth {token}` and the Mac validates it against the device registry (`@/lib/mobile/device-registry`); invalid → close `4403`. Because R1 removes loopback-trust for tunneled HTTP, the device token + the mandatory E2EE handshake are the complete, explicit off-network auth story — stated here so it is never implicit.
+- **R3 → option (a): real remote-notification registration.** Mobile adds `registerForRemoteNotifications` → a standard APNs **device token**, registered to the Mac alongside the ActivityKit token (new field on `/api/mobile/live-activity/register` or a sibling route — desktop stores both). The relay's `push-req` carries that alert-capable token; the relay sends `apns-push-type: alert`, generic body. ActivityKit update/push-to-start tokens are untouched (LAN Live Activities unchanged). Boring and reliable, per the redline.
+- **R4 → published limits:** ≤8 pending un-authed `/device` sockets per routingId; ≤30 device-connect attempts/min per routingId; the 10s handshake deadline starts at **socket-admit**, not DNS. Client back-off must stay under these; the direct-first prober's relay fallback is well within 30/min.
+- **R5 → per-transport E2EE, accepted.** LAN keeps today's behavior (flag `O8_MOBILE_E2EE`, 1500ms raw grace). Relay is **mandatory, fail-closed** — a relayed socket that doesn't complete the handshake is closed `4403`, no raw fallback. Devices paired before `serverIdentityPublicKey` existed in the QR get honest **"re-pair at your Mac to enable remote"** UX (they can derive neither routingId nor a session key) — not an error state.
+- **R6 → chunked responses, accepted.** `http-res` gains a continuation `http-res-part {rid, i, last}`; the connector streams the local response in ≤256KB post-base64 chunks; no hard size cap (diffs already accept a client `maxBytes`). A logical response exceeding a generous relay ceiling (env, default 32MB) returns an `http-res {rid, status:413, error:"tunnel_response_too_large"}` the client renders.
+- **R7 → 4408/4409 never touch revocation, accepted.** Contract-stated client expectations: `4401`/`4403` → `markRevoked()` + re-pair (Mac-origin, unchanged); `4408` → offline UX + backoff retry; `4409` → stop relay attempts until entitlement refresh. Distinct namespaces guarantee a client can't confuse "Mac rejected me" with "relay can't route me".
+- **R8 → derive `relayRoutingId` at connect, accepted.** Pure derivation of the pinned `serverIdentityPublicKey`; never persisted. Mobile's only new config is the relay hostname (+ optional self-hoster override).
 
-## Open questions routed to Q (see decision summary)
+## Wire contract (v1.1 — CHANGED from v1.0; Phase B + the mobile leg freeze THIS verbatim)
 
-1. Relay entitlement: founders-only vs all-paid ($19) — flag mapping per plan.
-2. Confirm LAN-first pairing for v1 (remote-pair = v2).
-3. Relay hostname (`relay.o8.run` assumed).
+> v1.1 deltas vs v1.0: added first-frame `auth`; `http-req` is presented to Next as remote-Bearer (no allowlist, no loopback-trust); added `http-res-part` chunking + `413`; published rate limits; push token is a real APNs alert token, not ActivityKit.
+
+- Mac connector → relay: `wss://relay.o8.run/mac` — headers `Authorization: Bearer <plan JWT>`, `x-o8-routing-id: <base58>`. Relay verifies JWT sig + `resolveFlags(plan)['relay.offNetwork']===true` else close `4409`. One socket per routingId; newest supersedes.
+- Phone → relay: `wss://relay.o8.run/device/{routingId}` — **no auth at the relay**. Rate limits R4. Relay bridges to the Mac connector; the Mac's per-device auth + E2EE are the gate.
+- Relay↔endpoint control frames (JSON, unencrypted, zero user content): `presence {mac}`, `devices {count}`, `push-req {apnsAlertToken, environment, kind}`, `mux-open {sid}` / `mux-close {sid}`.
+- Device↔Mac data frames: opaque `{sid, seq, payload:<raw bytes, incl. {e2ee:1,n,c}>}` — relay never parses `payload`.
+- In-tunnel (inside E2EE), first frame per bridged socket: `auth {token}` → validated → all subsequent traffic; else `4403`.
+- In-tunnel HTTP: `http-req {rid, method, path, headers, bodyB64}` → `http-res {rid, status, headers, bodyB64}` (+ `http-res-part {rid, i, last}` for chunked; `413 tunnel_response_too_large` over the ceiling). Connector replays to local Next with non-loopback `x-o8-client-addr` + the request's Bearer; middleware gates per-route.
+- Close codes: `4401` token revoked · `4403` handshake/auth rejected (both Mac-origin, → re-pair) · `4408` `mac_offline` (→ backoff) · `4409` `entitlement_lapsed` (→ stop until refresh).
+
+## Q rulings (recorded)
+
+1. Entitlement: all-paid in principle, **founders-only today** ($19 tier not yet offered) — flag map founder→true, free→false, future paid→true at launch. ✅
+2. LAN-first pairing for v1; remote-pair = v2. ✅
+3. Relay hostname `relay.o8.run`. ✅
 
 ## Mobile client redline (2026-07-08 — mobile lane, pre-build review per Track-2 protocol)
 
