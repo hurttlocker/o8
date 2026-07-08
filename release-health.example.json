@@ -1,0 +1,7 @@
+{
+  "_comment": "Updater kill-switch manifest. The REAL file lives at the root of the hurttlocker/o8-releases repo (raw.githubusercontent.com/hurttlocker/o8-releases/main/release-health.json) and is operator-edited AFTER a bad release ships. Before applying an auto-update, o8 fetches it and skips any version listed in `pulled`. Fail-open: if this file is missing, unreachable, or malformed, updates proceed normally.",
+  "pulled": [
+    "0.1.567"
+  ],
+  "note": "0.1.567 crashes on launch for some installs — auto-update paused while a fixed build ships. You can still update manually from GitHub releases."
+}
