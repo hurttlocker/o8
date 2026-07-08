@@ -2,7 +2,7 @@ import 'server-only';
 
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { findLaneByPacket } from '@/lib/lane/registry';
-import { isTerminalLaneStatus } from '@/lib/lane/types';
+import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 import { readOrchestratorControlPlaneState, withControlPlaneLock, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listActiveMissionRegistryEntries, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -65,7 +65,7 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
   const lane = packet.lane?.laneId ? null : findLaneByPacket(packet.id);
   const laneId = packet.lane?.laneId ?? lane?.id ?? null;
   const laneStatus = lane?.status ?? null;
-  if (laneStatus && isTerminalLaneStatus(laneStatus)) {
+  if (laneStatus && isWorkerTerminal(laneStatus)) {
     return {
       packetId: packet.id,
       status: 'already-terminal',
