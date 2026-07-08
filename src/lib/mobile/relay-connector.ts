@@ -15,7 +15,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame, type EncryptedFrame } from './e2ee-crypto';
 import { getServerIdentity } from './e2ee-identity';
-import { resolveDeviceByToken, type MobileDevice } from './device-registry';
+import { listDevices, resolveDeviceByToken, type MobileDevice } from './device-registry';
 import { listRemoteNotificationTokens } from './live-activity-push';
 import {
   buildHttpReplay,
@@ -63,7 +63,11 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
 const STREAM_HANDSHAKE_DEADLINE_MS = 8_000; // must beat the relay's 10s deadline
 
-type StreamPhase = 'await-auth' | 'handshaking' | 'ready';
+// v1.1 contract sequence: Mac-initiated E2EE handshake on bridge → device identified
+// by the client's init signature against the enrolled registry (mutual-auth, no plaintext
+// token to the relay) → then `auth {token}` as the first IN-TUNNEL (encrypted) frame
+// before any channel/http traffic.
+type StreamPhase = 'handshaking' | 'await-tunnel-auth' | 'ready';
 
 interface StreamState {
   sid: string;
@@ -202,10 +206,14 @@ export class RelayConnector {
 
   private openStream(sid: string): void {
     if (this.streams.has(sid)) return;
-    const state: StreamState = { sid, phase: 'await-auth' };
+    const state: StreamState = { sid, phase: 'handshaking' };
     state.deadline = setTimeout(() => this.closeStream(sid, 4403, 'handshake_deadline'), STREAM_HANDSHAKE_DEADLINE_MS);
     state.deadline.unref?.();
     this.streams.set(sid, state);
+    // Contract: the Mac initiates the handshake unconditionally on bridge. The hello is
+    // server-side only (no device needed yet) — the device is identified from the client's
+    // init signature below.
+    this.startStreamHandshake(state);
   }
 
   private onStreamPayload(sid: string, payloadB64: string): void {
@@ -213,39 +221,50 @@ export class RelayConnector {
     if (!state) return;
     const bytes = Buffer.from(payloadB64, 'base64');
 
-    if (state.phase === 'await-auth') {
-      const inner = parseJson(bytes);
-      if (!inner || inner.t !== 'auth') return; // held unauthenticated — drop
-      const token = typeof inner.token === 'string' ? inner.token : '';
-      const device = token ? safe(() => resolveDeviceByToken(token)) : null;
-      if (!device) {
-        this.closeStream(sid, 4403, 'auth_rejected');
-        return;
-      }
-      state.device = device;
-      state.deviceToken = token;
-      this.startStreamHandshake(state);
-      return;
-    }
-
     if (state.phase === 'handshaking') {
       const inner = parseJson(bytes);
       if (!inner || inner.type !== 'e2ee-init' || !state.handshake) return;
-      const result = completeServerHandshake(state.handshake, {
-        clientEphPub: inner.clientEphPub,
-        clientNonce: inner.clientNonce,
-        clientSig: inner.clientSig,
-      });
-      if ('error' in result) {
-        this.closeStream(sid, 4403, `e2ee: ${result.error}`);
+      const init = { clientEphPub: inner.clientEphPub, clientNonce: inner.clientNonce, clientSig: inner.clientSig };
+      // Identify AND authenticate the device from its init signature: the one enrolled
+      // device whose identity public key verifies clientSig is the caller. No plaintext
+      // token ever crosses the relay — the token check is deferred to the encrypted tunnel.
+      let matched: { device: MobileDevice; sessionKey: Uint8Array } | null = null;
+      for (const dev of safe(() => listDevices()) ?? []) {
+        const result = completeServerHandshake({ ...state.handshake, deviceIdentityPubB64: dev.identityPublicKey }, init);
+        if (!('error' in result)) { matched = { device: dev, sessionKey: result.sessionKey }; break; }
+      }
+      if (!matched) {
+        this.closeStream(sid, 4403, 'e2ee: no enrolled device verifies the init signature');
         return;
       }
-      state.sessionKey = result.sessionKey;
+      state.device = matched.device;
+      state.sessionKey = matched.sessionKey;
       state.handshake = undefined;
-      state.phase = 'ready';
-      if (state.deadline) clearTimeout(state.deadline);
+      state.phase = 'await-tunnel-auth';
+      console.log(`${P} handshake OK sid=${sid.slice(0, 8)} device=${matched.device.id.slice(0, 8)} — awaiting in-tunnel auth{token}`);
       this.sendEncrypted(state, { channel: 'system', event: 'e2ee-ready' });
       this.sendControl({ t: 'mux-ready', sid }); // relay clears pending + its deadline
+      return;
+    }
+
+    if (state.phase === 'await-tunnel-auth') {
+      // First frame INSIDE the tunnel must be `auth {token}`, validated against the device
+      // the handshake already identified (same device must hold identity secret + token).
+      if (!state.sessionKey) return;
+      const parsed = parseJson(bytes);
+      if (!isEncryptedFrame(parsed)) return;
+      const plaintext = decryptFrame(parsed as EncryptedFrame, state.sessionKey);
+      if (plaintext === null) return;
+      const inner = safeParse(plaintext);
+      const data = inner && typeof inner.data === 'object' && inner.data ? (inner.data as Record<string, unknown>) : null;
+      const isAuth = inner?.t === 'auth' || inner?.event === 'auth';
+      const token = typeof inner?.token === 'string' ? inner.token : (data && typeof data.token === 'string' ? data.token : '');
+      if (!isAuth || !token) { this.closeStream(sid, 4403, 'expected in-tunnel auth{token}'); return; }
+      const byToken = safe(() => resolveDeviceByToken(token));
+      if (!byToken || byToken.id !== state.device?.id) { this.closeStream(sid, 4403, 'auth token/identity mismatch'); return; }
+      state.deviceToken = token;
+      state.phase = 'ready';
+      if (state.deadline) clearTimeout(state.deadline);
       this.openBridge(state);
       return;
     }
@@ -273,9 +292,10 @@ export class RelayConnector {
   }
 
   private startStreamHandshake(state: StreamState): void {
-    if (!state.device) return;
     try {
-      const { handshake, hello } = startServerHandshake(getServerIdentity(), state.device.identityPublicKey);
+      // deviceIdentityPubB64 deferred ('') — the hello is server-side only; the device is
+      // identified from the client's init signature (see the handshaking phase above).
+      const { handshake, hello } = startServerHandshake(getServerIdentity(), '');
       state.handshake = handshake;
       state.phase = 'handshaking';
       // hello is PLAINTEXT (it establishes the key) but signed by the server identity.
@@ -375,6 +395,10 @@ export class RelayConnector {
 
   private closeStream(sid: string, code?: number, reason?: string): void {
     if (!this.streams.has(sid)) return;
+    const phase = this.streams.get(sid)?.phase;
+    if (code && code !== 1000 && code !== 1001) {
+      console.warn(`${P} stream REJECT sid=${sid.slice(0, 8)} code=${code} reason=${reason ?? '?'} phase=${phase ?? '?'}`);
+    }
     this.sendControl({ t: 'mux-close', sid, ...(code ? { code, reason } : {}) });
     this.teardownStream(sid);
   }
