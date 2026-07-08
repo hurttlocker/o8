@@ -62,6 +62,10 @@ struct Controls {
     /// fallback, so Ctrl+Shift+S / Escape route to `stop()` rather than starting a
     /// second voice. Mutated only under the `sink` lock.
     is_active: Arc<AtomicBool>,
+    /// True after a speak call claims generation but before audio is active.
+    /// This covers the synth-before-sink gap so queued status callouts do not
+    /// supersede a pending answer.
+    is_pending: Arc<AtomicBool>,
     is_paused: Arc<AtomicBool>,
     /// The live rodio `Sink`, created inside the playback thread and stored here
     /// so `stop` / `toggle_pause` can reach it. Also the serialization mutex for
@@ -77,6 +81,7 @@ impl Controls {
     fn new() -> Self {
         Self {
             is_active: Arc::new(AtomicBool::new(false)),
+            is_pending: Arc::new(AtomicBool::new(false)),
             is_paused: Arc::new(AtomicBool::new(false)),
             sink: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
@@ -102,6 +107,11 @@ pub fn is_active() -> bool {
     controls().is_active.load(Ordering::SeqCst)
 }
 
+fn is_busy() -> bool {
+    let ctl = controls();
+    ctl.is_pending.load(Ordering::SeqCst) || ctl.is_active.load(Ordering::SeqCst)
+}
+
 /// Stop the active playback immediately. Bumps the generation (so any in-flight
 /// synth/say thread bails before touching the now-stopped sink) under the sink
 /// lock so a concurrently-publishing thread can't re-raise `is_active` after we
@@ -112,6 +122,7 @@ pub fn stop() {
     {
         let mut guard = lock_recover(&ctl.sink);
         ctl.generation.fetch_add(1, Ordering::SeqCst);
+        ctl.is_pending.store(false, Ordering::SeqCst);
         was_active = ctl.is_active.swap(false, Ordering::SeqCst);
         ctl.is_paused.store(false, Ordering::SeqCst);
         if let Some(sink) = guard.take() {
@@ -163,6 +174,27 @@ pub fn play_thread(text: String, config: TtsConfig) {
     play_thread_with_message(text, config, None);
 }
 
+/// Queue a short lifecycle callout behind any pending/active utterance. The
+/// actual audio still uses the normal single-flight playback path; this wrapper
+/// only waits its turn so callouts do not cut off Symon's final answer.
+pub fn play_status_queued(text: String, config: TtsConfig) {
+    if text.trim().is_empty() {
+        return;
+    }
+    static STATUS_QUEUE: OnceLock<Mutex<()>> = OnceLock::new();
+    let queue = STATUS_QUEUE.get_or_init(|| Mutex::new(()));
+    std::thread::spawn(move || {
+        let _guard = lock_recover(queue);
+        while is_busy() {
+            std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
+        }
+        play_thread(text, config);
+        while is_busy() {
+            std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
+        }
+    });
+}
+
 /// Speak `text`, optionally attributing playback to `message_id`. When `Some`
 /// (the message play button), the ORIGINAL text is chunked at BLOCK (`\n\n`)
 /// boundaries with byte spans (`build_chunks_with_spans`) and an `o8:tts-chunk`
@@ -195,6 +227,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
     {
         let mut guard = lock_recover(&ctl.sink);
         my_gen = ctl.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        ctl.is_pending.store(true, Ordering::SeqCst);
         ctl.is_active.store(false, Ordering::SeqCst);
         ctl.is_paused.store(false, Ordering::SeqCst);
         if let Some(sink) = guard.take() {
@@ -203,6 +236,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
     }
 
     let is_active = ctl.is_active.clone();
+    let is_pending = ctl.is_pending.clone();
     let is_paused = ctl.is_paused.clone();
     let sink_slot = ctl.sink.clone();
     let generation = ctl.generation.clone();
@@ -230,11 +264,13 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
         crate::sound::play_sound("ReadStart"); // read-aloud start cue (#1208)
         struct DockGuard {
             generation: Arc<AtomicU64>,
+            is_pending: Arc<AtomicBool>,
             my_gen: u64,
         }
         impl Drop for DockGuard {
             fn drop(&mut self) {
                 if self.generation.load(Ordering::SeqCst) == self.my_gen {
+                    self.is_pending.store(false, Ordering::SeqCst);
                     emit_tts_state("idle");
                     crate::sound::play_sound("ReadDone"); // read-aloud finish cue (#1208)
                 }
@@ -242,6 +278,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
         }
         let _dock_guard = DockGuard {
             generation: generation.clone(),
+            is_pending: is_pending.clone(),
             my_gen,
         };
 
@@ -254,7 +291,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[tts] failed to build playback runtime: {e}; falling back to say");
-                run_say_fallback(&text, speed, &is_active, &sink_slot, &generation, my_gen);
+                run_say_fallback(&text, speed, &is_active, &is_pending, &sink_slot, &generation, my_gen);
                 return;
             }
         };
@@ -315,6 +352,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
                 }
                 *guard = Some(sink);
                 is_active.store(true, Ordering::SeqCst);
+                is_pending.store(false, Ordering::SeqCst);
                 is_paused.store(false, Ordering::SeqCst);
             }
 
@@ -431,7 +469,15 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
         // played. `run_say_fallback` itself re-checks the generation, so a
         // superseded thread never speaks the stale text.
         if tts_failed_before_audio {
-            run_say_fallback(&text, speed, &is_active, &sink_slot, &generation, my_gen);
+            run_say_fallback(
+                &text,
+                speed,
+                &is_active,
+                &is_pending,
+                &sink_slot,
+                &generation,
+                my_gen,
+            );
         }
 
         // Release our sink + flags if we're still current — under the lock, and
@@ -439,6 +485,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
         let mut guard = lock_recover(&sink_slot);
         if generation.load(Ordering::SeqCst) == my_gen {
             is_active.store(false, Ordering::SeqCst);
+            is_pending.store(false, Ordering::SeqCst);
             is_paused.store(false, Ordering::SeqCst);
             let _ = guard.take();
         }
@@ -453,6 +500,7 @@ fn run_say_fallback(
     text: &str,
     speed: f32,
     is_active: &Arc<AtomicBool>,
+    is_pending: &Arc<AtomicBool>,
     sink_slot: &Arc<Mutex<Option<rodio::Sink>>>,
     generation: &Arc<AtomicU64>,
     my_gen: u64,
@@ -467,6 +515,7 @@ fn run_say_fallback(
             return;
         }
         is_active.store(true, Ordering::SeqCst);
+        is_pending.store(false, Ordering::SeqCst);
     }
     log::warn!("[tts] no audio played; falling back to macOS say");
     super::native_say::speak_with_say_cancellable(text, speed, &|| {

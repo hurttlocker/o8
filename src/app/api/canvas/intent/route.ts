@@ -24,6 +24,7 @@ interface IntentBody {
   verb?: unknown;
   args?: unknown;
   ensure?: unknown;
+  origin?: unknown;
 }
 
 interface DispatchProbe {
@@ -39,20 +40,20 @@ function webviewClient(): O8WebviewClient {
   return store.__o8BrowserAgentClient;
 }
 
-function dispatchEval(verb: string, args: Record<string, unknown>): string {
+function dispatchEval(verb: string, args: Record<string, unknown>, origin: string | null): string {
   return `(() => {
     const w = window;
     if (w.__o8CanvasIntentReady !== true) {
       return JSON.stringify({ ready: false, route: location.pathname });
     }
-    w.dispatchEvent(new CustomEvent('o8:canvas-intent', { detail: { verb: ${JSON.stringify(verb)}, args: ${JSON.stringify(args)} } }));
+    w.dispatchEvent(new CustomEvent('o8:canvas-intent', { detail: { verb: ${JSON.stringify(verb)}, args: ${JSON.stringify(args)}, origin: ${JSON.stringify(origin)} } }));
     return JSON.stringify({ ready: true, route: location.pathname, ack: w.__o8CanvasIntentLast || null });
   })()`;
 }
 
-async function probeDispatch(client: O8WebviewClient, verb: string, args: Record<string, unknown>): Promise<DispatchProbe> {
+async function probeDispatch(client: O8WebviewClient, verb: string, args: Record<string, unknown>, origin: string | null): Promise<DispatchProbe> {
   try {
-    const result = await client.evalJs(dispatchEval(verb, args));
+    const result = await client.evalJs(dispatchEval(verb, args, origin));
     return JSON.parse(result.result) as DispatchProbe;
   } catch {
     // evalJs can throw transiently while the webview is mid-navigation (the
@@ -70,10 +71,11 @@ export async function POST(request: NextRequest) {
   }
   const args = (body?.args && typeof body.args === 'object' ? body.args : {}) as Record<string, unknown>;
   const ensure = body?.ensure !== false;
+  const origin = body?.origin === 'symon' ? 'symon' : null;
 
   try {
     const client = webviewClient();
-    let probe = await probeDispatch(client, verb, args);
+    let probe = await probeDispatch(client, verb, args, origin);
     let navigated = false;
 
     if (!probe.ready && ensure) {
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest) {
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (!probe.ready && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
-        probe = await probeDispatch(client, verb, args);
+        probe = await probeDispatch(client, verb, args, origin);
       }
     }
 

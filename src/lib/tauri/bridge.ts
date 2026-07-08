@@ -417,6 +417,12 @@ export async function ttsSpeak(text: string): Promise<void> {
   await invoke('tts_speak', { text });
 }
 
+/** Speak a short Symon lifecycle callout without interrupting active speech.
+ * Rust gates this against the live voice_callouts preference at speak time. */
+export async function symonSpeakStatus(text: string): Promise<void> {
+  await invoke('symon_speak_status', { text });
+}
+
 /** Stop any active TTS playback (preview / read-aloud). Safe no-op when idle. */
 export async function ttsStop(): Promise<void> {
   await invoke('tts_stop');
