@@ -608,6 +608,41 @@ export default function CanvasGlassPreviewPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // ⌘= / ⌘+ zoom IN · ⌘- / ⌘_ zoom OUT · ⌘0 reset to 100% — the keyboard peer of
+  // the loupe's −/fit/+ cluster. Steps the SAME ZOOM_STEPS array through the same
+  // setCanvasZoomLevel the loupe's onZoomChange drives (index −1 = more zoomed in
+  // = bigger cards + text, +1 = more out), so every path lands on the identical
+  // discrete rungs. preventDefault stops WebKit's native page zoom, which would
+  // scale the whole chrome instead of only the canvas layer. Never fires while
+  // typing — a focused input / textarea / CodeMirror editor keeps ⌘-/⌘= for
+  // itself so the file-card editor is untouched.
+  useEffect(() => {
+    const onZoomKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]')) return;
+      const stepZoom = (delta: number) => {
+        setCanvasZoomLevel((current) => {
+          const idx = Math.max(0, ZOOM_STEPS.findIndex((step) => step.value === current));
+          const next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, idx + delta))];
+          return next ? next.value : current;
+        });
+      };
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault();
+        stepZoom(-1);
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        stepZoom(1);
+      } else if (event.key === '0') {
+        event.preventDefault();
+        setCanvasZoomLevel(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
+      }
+    };
+    window.addEventListener('keydown', onZoomKey);
+    return () => window.removeEventListener('keydown', onZoomKey);
+  }, []);
+
   // Repos load at mount — the composer is scoped to a repo from the first
   // keystroke, not from the first picker open. Default scope: o8, else first.
   useEffect(() => {

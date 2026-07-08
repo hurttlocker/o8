@@ -56,6 +56,16 @@ export const CHROME = {
   closeSize: 16,
   /** Body field text inside a card header (url bar, tab labels) — same family. */
   fieldSize: 14,
+  /**
+   * Card BODY vocabulary — the one scale for a card's CONTENT text, the peer of
+   * the header sizes above. Two rungs so every card reads alike at any zoom step:
+   *  - bodySize: reading text (prose, transcript, code, list items, editor body)
+   *  - captionSize: quiet sublines / meta / eyebrows / counts (= hurttlocker row-meta)
+   * Pre-zoom px like the rest of CHROME. Route in-card content here so a markdown
+   * card, a diff, and a Brain answer never read at three different sizes.
+   */
+  bodySize: 12.5,
+  captionSize: 9.5,
 } as const;
 
 /**

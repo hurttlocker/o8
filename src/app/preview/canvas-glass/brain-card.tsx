@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FONT, scrollFadeY } from './ui';
+import { CHROME, FONT, scrollFadeY } from './ui';
 import { Citations, InlineMarkdown, SourcesLine } from './response-blocks';
 import { CardComposer } from './card-composer';
 import { GlassCardShell } from './card-shell';
@@ -209,7 +209,7 @@ export function BrainConversation({
         } as React.CSSProperties}
       >
         {messages.length === 0 ? (
-          <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, lineHeight: 1.6 }}>
+          <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, lineHeight: 1.6 }}>
             Ask the Engineering Brain about {repoTail ?? 'this repo'} — instant cited answers from directives, sessions, and PRs.
           </span>
         ) : null}
@@ -217,7 +217,7 @@ export function BrainConversation({
           <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
             {message.role === 'user' ? (
               // Soft pill — the same UserMessage shape the orchestrator tab runs.
-              <span style={{ maxWidth: '82%', fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, background: 'var(--cnv-tint)', borderRadius: 15, paddingTop: 8, paddingBottom: 8, paddingLeft: 13, paddingRight: 13 }}>
+              <span style={{ maxWidth: '82%', fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.5, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, background: 'var(--cnv-tint)', borderRadius: 15, paddingTop: 8, paddingBottom: 8, paddingLeft: 13, paddingRight: 13 }}>
                 {message.content}
               </span>
             ) : (
@@ -227,10 +227,10 @@ export function BrainConversation({
                 {message.sources ? (
                   <SourcesLine count={message.sources.count} pending={message.pending && !message.content} />
                 ) : message.pending && !message.content ? (
-                  <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>Thinking…</span>
+                  <span style={{ fontSize: CHROME.captionSize, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>Thinking…</span>
                 ) : null}
                 {message.content ? (
-                  <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
+                  <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
                     {/* Strip the Brain's inline [CITATION:rowId] markers — the
                         titled Sources pills below carry them; raw markers in the
                         prose read as a bug. */}

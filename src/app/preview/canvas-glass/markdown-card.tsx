@@ -15,7 +15,7 @@
  */
 
 import { useRef, type ReactNode } from 'react';
-import { FONT, scrollFadeY } from './ui';
+import { CHROME, FONT, scrollFadeY } from './ui';
 import { InlineMarkdown } from './response-blocks';
 import { GlassCardShell } from './card-shell';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
@@ -57,7 +57,7 @@ function MarkdownBody({ md }: { md: string }) {
             borderRadius: 8,
             background: 'var(--cnv-tint)',
             fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-            fontSize: 11,
+            fontSize: CHROME.bodySize,
             lineHeight: 1.5,
             color: 'var(--cnv-ink)',
             whiteSpace: 'pre-wrap',
@@ -102,7 +102,7 @@ function MarkdownBody({ md }: { md: string }) {
       blocks.push(
         <div key={`b${key++}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', paddingLeft: 2 }}>
           <span aria-hidden style={{ flexShrink: 0, marginTop: 8, width: 4, height: 4, borderRadius: '50%', background: 'var(--cnv-ink-muted)' }} />
-          <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT }}>
+          <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT }}>
             <InlineMarkdown text={bullet[1]} />
           </span>
         </div>,
@@ -114,8 +114,8 @@ function MarkdownBody({ md }: { md: string }) {
     if (numbered) {
       blocks.push(
         <div key={`b${key++}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', paddingLeft: 2 }}>
-          <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 500, lineHeight: 1.6, color: 'var(--cnv-ink-muted)', fontFamily: FONT, fontVariantNumeric: 'tabular-nums' }}>{numbered[1]}.</span>
-          <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT }}>
+          <span style={{ flexShrink: 0, fontSize: CHROME.bodySize, fontWeight: 500, lineHeight: 1.6, color: 'var(--cnv-ink-muted)', fontFamily: FONT, fontVariantNumeric: 'tabular-nums' }}>{numbered[1]}.</span>
+          <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT }}>
             <InlineMarkdown text={numbered[2]} />
           </span>
         </div>,
@@ -128,7 +128,7 @@ function MarkdownBody({ md }: { md: string }) {
       blocks.push(
         <div
           key={`b${key++}`}
-          style={{ paddingLeft: 10, borderLeft: '2px solid var(--cnv-edge)', fontSize: 12, fontWeight: 300, lineHeight: 1.6, fontStyle: 'italic', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}
+          style={{ paddingLeft: 10, borderLeft: '2px solid var(--cnv-edge)', fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.6, fontStyle: 'italic', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}
         >
           <InlineMarkdown text={quote[1]} />
         </div>,
@@ -137,7 +137,7 @@ function MarkdownBody({ md }: { md: string }) {
     }
 
     blocks.push(
-      <p key={`b${key++}`} style={{ margin: 0, fontSize: 12.5, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT }}>
+      <p key={`b${key++}`} style={{ margin: 0, fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT }}>
         <InlineMarkdown text={line} />
       </p>,
     );

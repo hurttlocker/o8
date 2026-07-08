@@ -82,12 +82,12 @@ function EngineLiveView({ scope, active }: { scope: string; active: boolean }) {
           style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top center' }}
         />
       ) : (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 300, color: 'rgba(0,0,0,0.45)', textAlign: 'center', paddingLeft: 24, paddingRight: 24 }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: CHROME.bodySize, fontWeight: 300, color: 'rgba(0,0,0,0.45)', textAlign: 'center', paddingLeft: 24, paddingRight: 24 }}>
           Engine idle — agents land here when they open an external URL.
         </div>
       )}
       {live && meta?.url ? (
-        <div style={{ position: 'absolute', left: 8, bottom: 8, maxWidth: 'calc(100% - 16px)', paddingTop: 3, paddingBottom: 3, paddingLeft: 8, paddingRight: 8, borderRadius: 7, background: 'rgba(17,17,17,0.78)', color: 'rgba(255,255,255,0.92)', fontSize: 10.5, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ position: 'absolute', left: 8, bottom: 8, maxWidth: 'calc(100% - 16px)', paddingTop: 3, paddingBottom: 3, paddingLeft: 8, paddingRight: 8, borderRadius: 7, background: 'rgba(17,17,17,0.78)', color: 'rgba(255,255,255,0.92)', fontSize: CHROME.captionSize, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           Agent Chrome · {meta.url}
         </div>
       ) : null}
