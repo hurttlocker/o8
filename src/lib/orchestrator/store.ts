@@ -355,9 +355,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     comparisonIndex: typeof packet.comparisonIndex === 'number' && Number.isFinite(packet.comparisonIndex) && packet.comparisonIndex >= 0
       ? Math.floor(packet.comparisonIndex)
       : undefined,
-    assignedModel: typeof packet.assignedModel === 'string' && packet.assignedModel.trim()
-      ? packet.assignedModel.trim()
-      : null,
+    assignedModel: (typeof packet.assignedModel === 'string' && packet.assignedModel.trim()) || null,
     tierEscalated: packet.tierEscalated === true ? true : undefined,
     predictedFiles: Array.isArray(packet.predictedFiles)
       ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
