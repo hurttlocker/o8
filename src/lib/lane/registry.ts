@@ -772,7 +772,10 @@ export function reconcileLanesWithSessions(
 
         // Session came back (or never went missing) — clear any pending grace timer.
         sessionMissingSince.delete(lane.sessionKey);
-        if (lane.status === 'awaiting_orchestrator') {
+        // A lane parked for a human decision (awaiting_orchestrator, or the
+        // layer-5 awaiting_human give-up #1513) must NOT be flipped back to
+        // `running` just because a session still lingers — the operator owns it.
+        if (lane.status === 'awaiting_orchestrator' || lane.status === 'awaiting_human') {
           continue;
         }
         if (
