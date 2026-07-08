@@ -270,7 +270,13 @@ export type LaneEventVerb =
   | 'prune_refused'
   // Prune gate: an operator/recovery override deleted a tree the gate would
   // otherwise have refused. Payload: { worktreePath, reason, forced:true }
-  | 'prune_forced';
+  | 'prune_forced'
+  // Confirmed-kill escalation (Rock 1, #1471 S1): one event per ladder stage.
+  // Payload: { stage, pid, confirmed }
+  | 'kill_escalated'
+  // Session-binding fault detector (Rock 1, #1502): an active lane reported
+  // progress/heartbeat with no sessionKey bound. Payload: { packetId, source }
+  | 'no_session_binding';
 
 export type AgentReportReason =
   | 'needs_clarification'
