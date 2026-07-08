@@ -14,7 +14,7 @@ real use. Beta exit = five rocks (four engineering, one proof) + three explicit 
 
 ## The five rocks
 
-### Rock 1 — Dispatch/lane lifecycle contract (M-L) — BLOCKS EVERYTHING
+### Rock 1 — Dispatch/lane lifecycle contract (M-L) — IN PROGRESS (this PR)
 - [ ] Defined terminal-state contract for the packet/lane state machine (no silent wedges)
 - [ ] Real cancel/kill verb, reachable from every surface (#1471)
 - [ ] Idempotency persisted across restarts (rerun/steer double-fire class, #1497 — live-hit
