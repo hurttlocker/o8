@@ -29,7 +29,7 @@ function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
  * that touches nothing), so it carries no approval gate; only the downstream
  * irreversible verbs (merge / push / prod) stay gated.
  *
- * Body: { repoPath, task, count?, runtime?, constraints?, useBrain? }
+ * Body: { repoPath, task, count?, runtime?, constraints?, useBrain?, origin? }
  */
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -91,7 +91,13 @@ export async function POST(request: NextRequest) {
 
     const dispatch = await dispatchMission({ missionId: mission.missionId });
 
-    return operatorSuccess({ ...mission, ...dispatch }, 201);
+    const packetIds = mission.packets.map((packet) => packet.id);
+    return operatorSuccess({
+      ...mission,
+      ...dispatch,
+      packetIds,
+      ...(record.origin === 'symon' ? { origin: 'symon' } : {}),
+    }, 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to spawn agents.';
     return operatorError('spawn_prompt_failed', message, 500, error);

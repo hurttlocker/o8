@@ -39,6 +39,8 @@ export interface AgentCard {
   title: string;
   /** Worker runtime label (codex / claude-code / …), snapshotted at bloom. */
   runtime: string | null;
+  /** True when this card came from a Symon voice-triggered spawn. */
+  symonOrigin?: boolean;
 }
 
 const reviewButton: CSSProperties = {

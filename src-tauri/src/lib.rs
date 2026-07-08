@@ -3050,29 +3050,28 @@ mod stt_engine {
                     "[stt] whisper skipped: short utterance ({apple_word_count} words) — using Apple transcript"
                 );
             }
-            let (raw_text, whisper_used) =
-                match (
-                    crate::stt::whisper::enabled() && !skip_whisper_short,
-                    audio_file.as_str(),
-                ) {
-                    (true, path) if !path.is_empty() => {
-                        match crate::stt::whisper::transcribe_file(path) {
-                            Some(result) => {
-                                log::info!(
-                                    "[stt] whisper used (latency={}ms model={})",
-                                    result.latency_ms,
-                                    result.model
-                                );
-                                (result.text, true)
-                            }
-                            None => {
-                                log::warn!("[stt] whisper failed/empty; using Apple transcript");
-                                (apple_text.clone(), false)
-                            }
+            let (raw_text, whisper_used) = match (
+                crate::stt::whisper::enabled() && !skip_whisper_short,
+                audio_file.as_str(),
+            ) {
+                (true, path) if !path.is_empty() => {
+                    match crate::stt::whisper::transcribe_file(path) {
+                        Some(result) => {
+                            log::info!(
+                                "[stt] whisper used (latency={}ms model={})",
+                                result.latency_ms,
+                                result.model
+                            );
+                            (result.text, true)
+                        }
+                        None => {
+                            log::warn!("[stt] whisper failed/empty; using Apple transcript");
+                            (apple_text.clone(), false)
                         }
                     }
-                    _ => (apple_text.clone(), false),
-                };
+                }
+                _ => (apple_text.clone(), false),
+            };
 
             // ── Voice commands (system-Fn path ONLY) ──
             // Deterministic command phrases at the END of the transcript, run on
@@ -3212,6 +3211,19 @@ mod stt_engine {
             #[cfg(target_os = "macos")]
             if is_agent {
                 crate::fn_hotkey::set_system_origin(false);
+                let polished_payload = serde_json::json!({
+                    "type": "polished",
+                    "origin": "system",
+                    "lane": "agent",
+                    "sessionId": session_id,
+                    "text": polished.clone(),
+                });
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
+                    "o8:stt-event",
+                    polished_payload.clone(),
+                );
+                let _ = app.emit("o8:stt-event", polished_payload);
                 let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                 let _ = app.emit("o8:stt-event", idle);
@@ -3549,6 +3561,24 @@ fn stt_set_input_device(device_uid: String) -> Result<(), String> {
 #[tauri::command]
 fn tts_speak(text: String, message_id: Option<String>) {
     tts::playback::play_thread_with_message(text, tts::load_config(), message_id);
+}
+
+/// Speak a short Symon status callout, gated at speak time by Voice settings.
+/// Main webview only: the native browser child must not gain app-level speech.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_speak_status(window: tauri::WebviewWindow, text: String) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("symon_speak_status is only available to the main webview".into());
+    }
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    if stt::keys::config_bool("voice_callouts", true) {
+        tts::playback::play_status_queued(text.to_string(), tts::load_config());
+    }
+    Ok(())
 }
 
 /// Stop any active TTS playback immediately (the "say"/Ask voice). Single-flight
@@ -4520,6 +4550,8 @@ pub fn run() {
             stt_set_input_device,
             #[cfg(target_os = "macos")]
             tts_speak,
+            #[cfg(target_os = "macos")]
+            symon_speak_status,
             tts_stop,
             tts_toggle_pause,
             tts_set_speed,
