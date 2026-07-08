@@ -29,6 +29,8 @@ import { FONT, glassMedia, TONE_DOT } from './ui';
  *  kept loose so the host passes them straight through. */
 export interface DispatchLane {
   id: string;
+  packetId?: string | null;
+  sessionKey?: string | null;
   label?: string | null;
   repoPath?: string | null;
   status?: string | null;
