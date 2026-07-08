@@ -59,4 +59,12 @@ describe('updateOperatorDefaults round-trip', () => {
     const after = await updateOperatorDefaults({ parallelCap: 5 });
     expect(after.values.reviewerBackend).toBe('codex');
   });
+
+  it('subscriptionProfile persists and flips the effective house defaults', async () => {
+    const after = await updateOperatorDefaults({ subscriptionProfile: 'claude-only' });
+    expect(after.values.subscriptionProfile).toBe('claude-only');
+    expect(after.values.orchestratorBackend).toBe('claude');
+    expect(after.values.defaultDispatchRuntime).toBe('claude-code');
+    expect(after.values.reviewerBackend).toBe('claude');
+  });
 });

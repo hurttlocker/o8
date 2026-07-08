@@ -30,6 +30,7 @@ import { resolveEffectiveDefaultOrchestratorBackend } from '@/lib/operator/dispa
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import {
   PickerMenu,
+  SUBSCRIPTION_PROFILE_OPTIONS,
   ORCHESTRATOR_MODEL_OPTIONS,
   DISPATCH_RUNTIME_OPTIONS,
   CODEX_WORKER_EFFORT_OPTIONS,
@@ -42,6 +43,7 @@ import {
   type OrchestratorBackendSetting,
   type ReviewerBackendSetting,
   type OverlapGateMode,
+  type SubscriptionProfile,
 } from './dispatch-shared';
 
 const PARALLEL_CAP_PRESETS: Array<{ key: string; label: string; value: number }> = [
@@ -239,7 +241,14 @@ export function OperatorDefaultsTab() {
   const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(field) ? ENV_LOCKED_REASON : normal;
+  const activeProfile = values.subscriptionProfile;
+  const profileOverrideReason = activeProfile === 'claude-only'
+    ? 'Subscription profile is Claude only — this is pinned to Claude.'
+    : activeProfile === 'codex-only'
+      ? 'Subscription profile is Codex / OpenAI only — this is pinned to Codex.'
+      : null;
   const dispatchDefaultSubtitle = (() => {
+    if (profileOverrideReason) return profileOverrideReason;
     if (envLocked('defaultDispatchRuntime')) return ENV_LOCKED_REASON;
     if (sources.defaultDispatchRuntime !== 'default') {
       return 'Used when you say "dispatch" without naming a runtime';
@@ -382,7 +391,7 @@ export function OperatorDefaultsTab() {
           <SettingsRow
             icon={<CpuIcon />}
             label="Backend"
-            subtitle={lockedSub('orchestratorBackend', 'The brain that drives chat and background turns')}
+            subtitle={profileOverrideReason ?? lockedSub('orchestratorBackend', 'The brain that drives chat and background turns')}
             accessory={
               <SettingsSegmented
                 value={values.orchestratorBackend}
@@ -397,13 +406,13 @@ export function OperatorDefaultsTab() {
                 ]}
               />
             }
-            disabled={envLocked('orchestratorBackend') || busyField === 'orchestratorBackend'}
+            disabled={Boolean(profileOverrideReason) || envLocked('orchestratorBackend') || busyField === 'orchestratorBackend'}
             divider
           />
           <SettingsRow
             icon={<CpuIcon />}
             label="Reviewer"
-            subtitle={lockedSub('reviewerBackend', 'Who reviews finished lanes before merge — Follow rides the Backend above')}
+            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Who reviews finished lanes before merge — Follow rides the Backend above')}
             accessory={
               <SettingsSegmented
                 value={values.reviewerBackend}
@@ -415,7 +424,7 @@ export function OperatorDefaultsTab() {
                 ]}
               />
             }
-            disabled={envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
+            disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
             divider
           />
           <SettingsRow
@@ -470,6 +479,22 @@ export function OperatorDefaultsTab() {
         >
           <SettingsRow
             icon={<RocketIcon />}
+            label="Subscription profile"
+            subtitle={lockedSub('subscriptionProfile', SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Use both houses by default')}
+            accessory={
+              <PickerMenu<SubscriptionProfile>
+                value={activeProfile}
+                options={SUBSCRIPTION_PROFILE_OPTIONS}
+                onChange={(next) => { updateField('subscriptionProfile', next); }}
+                disabled={envLocked('subscriptionProfile') || busyField === 'subscriptionProfile'}
+                minWidth={190}
+              />
+            }
+            disabled={envLocked('subscriptionProfile') || busyField === 'subscriptionProfile'}
+            divider
+          />
+          <SettingsRow
+            icon={<RocketIcon />}
             label="Default worker"
             subtitle={dispatchDefaultSubtitle}
             accessory={
@@ -477,11 +502,11 @@ export function OperatorDefaultsTab() {
                 value={values.defaultDispatchRuntime}
                 options={DEFAULT_WORKER_RUNTIME_OPTIONS}
                 onChange={(next) => { updateField('defaultDispatchRuntime', next); }}
-                disabled={envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
+                disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
                 minWidth={150}
               />
             }
-            disabled={envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
+            disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
             divider
           />
           <SettingsRow

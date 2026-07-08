@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
-import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
@@ -82,17 +83,28 @@ export async function POST(request: NextRequest) {
   const requestedEffort = isThinkingEffort(requestedEffortRaw)
     ? requestedEffortRaw
     : null;
-  const requestedRuntime = requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === ''
+  const explicitRuntimeRequested = !(requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === '');
+  const requestedRuntime = !explicitRuntimeRequested
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(requestedRuntimeRaw);
   if (!requestedRuntime) {
     return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode".', 400);
   }
+  const defaults = getOperatorDefaultsSync().values;
+  const profileRouting = resolveSubscriptionProfileRouting({
+    profile: defaults.subscriptionProfile,
+    requestedRuntime: explicitRuntimeRequested ? requestedRuntime : null,
+    requestedModel: typeof requestedModel === 'string' ? requestedModel : null,
+    defaultDispatchModel: defaults.defaultDispatchModel,
+  });
+  if (!profileRouting.ok) {
+    return operatorError(profileRouting.code, profileRouting.message, 400);
+  }
   const workerRouting = resolveWorkerRouting({
     workerIntent: record.workerIntent,
     requestedProvider: record.requestedProvider,
-    requestedRuntime,
-    requestedModel,
+    requestedRuntime: profileRouting.requestedRuntime,
+    requestedModel: profileRouting.requestedModel,
     requestedEffort,
     source: 'create-mission-api',
   });
@@ -108,7 +120,7 @@ export async function POST(request: NextRequest) {
       runtime: workerRouting.selectedRuntime,
       workerIntent: workerRouting.workerIntent,
       requestedProvider: workerRouting.requestedProvider,
-      requestedRuntime,
+      requestedRuntime: profileRouting.requestedRuntime,
       requestedModel: workerRouting.requestedModel,
       requestedEffort,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',

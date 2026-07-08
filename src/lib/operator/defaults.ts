@@ -12,7 +12,14 @@ import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
 } from './dispatch-runtime-default';
+import {
+  isSubscriptionProfile,
+  resolveSubscriptionProfileHouseDefaults,
+  type SubscriptionProfile,
+} from './subscription-profile';
 import { resolveWorkerEffortDefault } from './worker-effort-default';
+
+export { isSubscriptionProfile };
 
 const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode'];
 function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
@@ -148,6 +155,7 @@ export function isCollideAggregator(value: unknown): value is CollideAggregator 
 }
 
 export interface OperatorDefaults {
+  subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
@@ -300,6 +308,7 @@ export interface OperatorDefaultsWithSources {
 // ── Hardcoded fallbacks (the "locked defaults") ──
 
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
+  subscriptionProfile: 'both',
   parallelCap: 5,
   overlapGate: 'advisory',
   healBotEnabled: true,
@@ -405,6 +414,12 @@ function envParallelCap(): number | null {
   if (!raw) return null;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function envSubscriptionProfile(): SubscriptionProfile | null {
+  const raw = process.env.O8_SUBSCRIPTION_PROFILE?.trim();
+  if (raw && isSubscriptionProfile(raw)) return raw;
+  return null;
 }
 
 function envOverlapGate(): OverlapGateMode | null {
@@ -591,6 +606,7 @@ function envAutoApplyUpdates(): AutoApplyUpdates | null {
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
+  subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
   healBotEnabled?: boolean;
@@ -648,6 +664,9 @@ function isMissingFile(error: unknown) {
 
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   const result: FileOperatorDefaults = {};
+  if (isSubscriptionProfile(stored.subscriptionProfile)) {
+    result.subscriptionProfile = stored.subscriptionProfile;
+  }
   if (typeof stored.parallelCap === 'number' && Number.isFinite(stored.parallelCap) && stored.parallelCap > 0) {
     result.parallelCap = Math.max(1, Math.min(32, Math.floor(stored.parallelCap)));
   }
@@ -750,6 +769,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
 // ── Resolution ──
 
 function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWithSources {
+  const envProfile = envSubscriptionProfile();
   const envCap = envParallelCap();
   const envGate = envOverlapGate();
   const envHeal = envHealBotEnabled();
@@ -782,17 +802,23 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envCollideAgg = envCollideAggregator();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
+  const subscriptionProfile =
+    envProfile ?? fileValues.subscriptionProfile ?? OPERATOR_DEFAULTS_FALLBACK.subscriptionProfile;
+  const profileDefaults = resolveSubscriptionProfileHouseDefaults(subscriptionProfile);
   const inAppOrchestratorEnabled =
     envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled;
-  const orchestratorBackend =
+  const baseOrchestratorBackend =
     envOrchBackend ?? fileValues.orchestratorBackend ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend;
-  const defaultDispatchRuntime = resolvePairedDefaultDispatchRuntime({
+  const orchestratorBackend = profileDefaults?.orchestratorBackend ?? baseOrchestratorBackend;
+  const baseDefaultDispatchRuntime = resolvePairedDefaultDispatchRuntime({
     explicitRuntime: envRuntime ?? (fileValues.defaultDispatchRuntimeExplicit ? fileValues.defaultDispatchRuntime : null),
-    orchestratorBackend,
+    orchestratorBackend: baseOrchestratorBackend,
     inAppOrchestratorEnabled,
   });
+  const defaultDispatchRuntime = profileDefaults?.defaultDispatchRuntime ?? baseDefaultDispatchRuntime;
 
   const resolved: OperatorDefaults = {
+    subscriptionProfile,
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
     overlapGate: envGate ?? fileValues.overlapGate ?? OPERATOR_DEFAULTS_FALLBACK.overlapGate,
     healBotEnabled: envHeal ?? fileValues.healBotEnabled ?? OPERATOR_DEFAULTS_FALLBACK.healBotEnabled,
@@ -822,7 +848,10 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
     orchestratorBackend,
-    reviewerBackend: envRevBackend ?? fileValues.reviewerBackend ?? OPERATOR_DEFAULTS_FALLBACK.reviewerBackend,
+    reviewerBackend: profileDefaults?.reviewerBackend
+      ?? envRevBackend
+      ?? fileValues.reviewerBackend
+      ?? OPERATOR_DEFAULTS_FALLBACK.reviewerBackend,
     packetExplainerEnabled: envExplainer ?? fileValues.packetExplainerEnabled ?? OPERATOR_DEFAULTS_FALLBACK.packetExplainerEnabled,
     quizGateEnabled: envQuizGate ?? fileValues.quizGateEnabled ?? OPERATOR_DEFAULTS_FALLBACK.quizGateEnabled,
     buyinDocEnabled: envBuyinDoc ?? fileValues.buyinDocEnabled ?? OPERATOR_DEFAULTS_FALLBACK.buyinDocEnabled,
@@ -833,6 +862,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
+    subscriptionProfile: envProfile !== null ? 'env' : fileValues.subscriptionProfile !== undefined ? 'file' : 'default',
     parallelCap: envCap !== null ? 'env' : fileValues.parallelCap !== undefined ? 'file' : 'default',
     overlapGate: envGate !== null ? 'env' : fileValues.overlapGate !== undefined ? 'file' : 'default',
     healBotEnabled: envHeal !== null ? 'env' : fileValues.healBotEnabled !== undefined ? 'file' : 'default',
@@ -920,6 +950,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
       throw new Error('parallelCap must be a positive number.');
     }
     stored.parallelCap = Math.max(1, Math.min(32, Math.floor(update.parallelCap)));
+  }
+  if (update.subscriptionProfile !== undefined) {
+    if (!isSubscriptionProfile(update.subscriptionProfile)) {
+      throw new Error('subscriptionProfile must be one of "both", "claude-only", "codex-only".');
+    }
+    stored.subscriptionProfile = update.subscriptionProfile;
   }
   if (update.overlapGate !== undefined) {
     if (update.overlapGate !== 'advisory' && update.overlapGate !== 'strict') {
