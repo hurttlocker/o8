@@ -1609,7 +1609,8 @@ export default function CanvasGlassPreviewPage() {
   // it lands before this reads usableCanvasArea().
   const gridCardCount =
     termCards.length + fileCards.length + imageCards.length + browserCards.length +
-    chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length;
+    chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length +
+    agentCards.length;
 
   // Navigator loupe minimap (#1239) — every card as a scaled rect; image cards
   // carry their thumbnail. The usable area is the minimap's stable frame.
