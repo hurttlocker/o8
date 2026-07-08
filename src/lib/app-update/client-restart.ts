@@ -5,15 +5,57 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 
-export async function installUpdateAndRestart(releaseUrl?: string): Promise<boolean> {
+export interface InstallUpdateOutcome {
+  /** True when the update downloaded + a restart was initiated. */
+  installed: boolean;
+  /** Set when the update was skipped because the version is pulled (kill-switch). */
+  blocked?: { version: string; note?: string };
+}
+
+/**
+ * Ask the (loopback-gated) server whether `version` is pulled. FAIL-OPEN: any
+ * error resolves to not-pulled so the update proceeds. The server does the
+ * actual raw.githubusercontent.com fetch because the webview CSP forbids it.
+ */
+async function isVersionPulled(version: string): Promise<{ pulled: boolean; note?: string }> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const res = await fetch(`/api/panel/release-health?version=${encodeURIComponent(version)}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!res.ok) return { pulled: false };
+      const payload = await res.json().catch(() => null) as { pulled?: unknown; note?: unknown } | null;
+      if (payload && payload.pulled === true) {
+        return { pulled: true, note: typeof payload.note === 'string' ? payload.note : undefined };
+      }
+      return { pulled: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return { pulled: false }; // fail open
+  }
+}
+
+export async function installUpdateAndRestart(releaseUrl?: string): Promise<InstallUpdateOutcome> {
   if (!isTauri()) {
     openExternalUrl(releaseUrl ?? RELEASE_URL);
-    return false;
+    return { installed: false };
   }
 
   const { check } = await import('@tauri-apps/plugin-updater');
   const result = await check();
-  if (!result) return false;
+  if (!result) return { installed: false };
+
+  // Kill-switch: skip a version the operator has pulled post-release.
+  const health = await isVersionPulled(result.version);
+  if (health.pulled) {
+    console.warn(`[app-update] update to ${result.version} blocked by release-health kill-switch`);
+    return { installed: false, blocked: { version: result.version, note: health.note } };
+  }
 
   await result.downloadAndInstall();
   try {
@@ -23,5 +65,5 @@ export async function installUpdateAndRestart(releaseUrl?: string): Promise<bool
     const { relaunch } = await import('@tauri-apps/plugin-process');
     await relaunch();
   }
-  return true;
+  return { installed: true };
 }

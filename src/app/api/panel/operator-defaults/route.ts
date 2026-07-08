@@ -258,6 +258,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.collideAggregator = raw;
   }
 
+  if (body.telemetryOptIn !== undefined) {
+    if (typeof body.telemetryOptIn !== 'boolean') {
+      throw new Error('telemetryOptIn must be boolean.');
+    }
+    update.telemetryOptIn = body.telemetryOptIn;
+  }
+
+  if (body.telemetryIngestUrl !== undefined) {
+    if (typeof body.telemetryIngestUrl !== 'string') {
+      throw new Error('telemetryIngestUrl must be a string.');
+    }
+    update.telemetryIngestUrl = body.telemetryIngestUrl.trim();
+  }
+
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
     if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
     const o = raw as Record<string, unknown>;

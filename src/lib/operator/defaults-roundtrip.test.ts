@@ -44,6 +44,8 @@ const NON_DEFAULT_UPDATE = {
   buyinDocEnabled: true,
   autoApplyUpdates: 'off',
   collideAggregator: 'claude',
+  telemetryOptIn: true,
+  telemetryIngestUrl: 'https://telemetry.example/ingest',
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {
