@@ -54,6 +54,9 @@ var isShuttingDown = false
 // Set once the final transcript has been emitted (either via callback or safety net)
 var shutdownEmitted = false
 var shutdownGeneration: UInt64 = 0
+/// Fences the deferred engine-stop after a session (the 15s hot linger) so a
+/// new session starting inside the window cancels the pending stop.
+var engineLingerGeneration: UInt64 = 0
 // When true, after emitting final and audio_file we exit() instead of going idle.
 var isQuitting = false
 // Current Rust-assigned session ID. Used to fence late callbacks.
@@ -610,11 +613,30 @@ func emitFinalAndReturnToIdle() {
     let pendingStart = pendingStartSessionId
     pendingStartSessionId = nil
 
-    // Turn the mic off between sessions. If a pending start was queued
-    // (rapid Fn tap), skip the stop unless Settings queued a microphone
-    // change that requires rebuilding the input graph.
-    if (pendingStart == nil || pendingInputDeviceUID != nil) && audioEngine.isRunning {
-        audioEngine.stop()
+    // Turn the mic off between sessions — but LINGER hot for a short window
+    // first (2026-07-08: consecutive dictations were each paying the engine
+    // cold start — 30-80ms built-in, 300-800ms on Bluetooth — eating the first
+    // spoken words; the operator's real cadence is press → answer → press
+    // again within seconds). The gate is CLOSED (currentSessionId == 0), so
+    // buffers during the linger are discarded at the top of the tap; the
+    // orange mic dot staying on ~15s after a dictation is the honest signal
+    // that the hardware is still warm. A mic-device change still stops
+    // immediately (the input graph must be rebuilt anyway).
+    if pendingInputDeviceUID != nil {
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+    } else if pendingStart == nil && audioEngine.isRunning {
+        engineLingerGeneration &+= 1
+        let lingerGeneration = engineLingerGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) {
+            if engineLingerGeneration == lingerGeneration
+                && currentSessionId == 0
+                && !isShuttingDown
+                && audioEngine.isRunning {
+                audioEngine.stop()
+            }
+        }
     }
 
     // Reset session state and return to idle.
@@ -997,6 +1019,10 @@ func handleStart(sessionId: UInt64) {
         return
     }
 
+    // A fresh session cancels any pending hot-linger engine stop (the fence
+    // checks the generation at fire time).
+    engineLingerGeneration &+= 1
+
     // Safety: if the hot engine died for any reason, bring it back before
     // opening the session gate. Normal path: this is a no-op.
     if !audioEngine.isRunning {
@@ -1008,11 +1034,15 @@ func handleStart(sessionId: UInt64) {
         }
     }
 
-    // Create the recognition task FIRST, then flip the session id. The tap
-    // callback is already live and will start routing audio the moment
-    // `currentSessionId` becomes non-zero.
-    startRecognitionSession(sessionId: sessionId)
+    // Open the gate the INSTANT the engine is live — before recognition-task
+    // setup — so the earliest buffers land in `recordedSamples` (the Whisper
+    // WAV hears the true head of the utterance) instead of being discarded.
+    // `currentRequest?.append` is nil-safe, and SFSpeechAudioBufferRecognition-
+    // Request buffers appended audio, so Apple loses at most the few ms until
+    // the request is assigned below. (2026-07-08: first words were missing on
+    // both Fn and Right-Option — the gate used to open only AFTER task setup.)
     currentSessionId = sessionId
+    startRecognitionSession(sessionId: sessionId)
 
     emit("status", "listening", sessionId: sessionId)
 }

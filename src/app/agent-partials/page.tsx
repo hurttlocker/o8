@@ -58,6 +58,9 @@ const DISMISS_DELAY_MS = 600;
 // Defensive auto-clear if a terminal event is somehow missed — never strand a
 // black bar on screen.
 const SAFETY_MS = 60_000;
+/** Delay before the FIRST paint of a session — gives an in-canvas surface claim
+ *  time to land so the HUD never flashes over a composer that owns the partials. */
+const PAINT_GRACE_MS = 300;
 
 type Phase = 'listening' | 'final';
 
@@ -86,6 +89,8 @@ export default function AgentPartialsPage() {
   // `o8:agent-partials-claim` and THIS HUD stops painting — single-surface rule,
   // no doubles. Tied to a session id; auto-expires on release or the 60s safety.
   const [suppressed, setSuppressed] = useState(false);
+  const [graceElapsed, setGraceElapsed] = useState(false);
+  const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const claimSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentActiveRef = useRef(false);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,6 +142,17 @@ export default function AgentPartialsPage() {
       clearDismiss();
       clearSafety();
       safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
+      // PAINT GRACE (2026-07-08 live-hit): the canvas composer's surface CLAIM
+      // races this system-start — both fan out from the same keypress, and the
+      // claim can land a beat late (or get missed by the broadcast entirely; a
+      // Rust relay now also forwards it directly). Hold the first paint ~300ms
+      // so a claiming canvas means this HUD never flashes an empty bar over it.
+      setGraceElapsed(false);
+      if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
+      graceTimerRef.current = setTimeout(() => {
+        graceTimerRef.current = null;
+        setGraceElapsed(true);
+      }, PAINT_GRACE_MS);
       setState({ phase: 'listening', text: '' });
     };
     const showText = (phase: Phase, text: string) => {
@@ -268,6 +284,10 @@ export default function AgentPartialsPage() {
     return () => {
       disposed = true;
       clearClaimSafety();
+      if (graceTimerRef.current) {
+        clearTimeout(graceTimerRef.current);
+        graceTimerRef.current = null;
+      }
       if (unlisten) {
         try {
           unlisten();
@@ -307,7 +327,7 @@ export default function AgentPartialsPage() {
       }}
     >
       <AnimatePresence>
-        {state && !suppressed ? (
+        {state && !suppressed && graceElapsed ? (
           <motion.div
             key="agent-partials-bar"
             role="status"
