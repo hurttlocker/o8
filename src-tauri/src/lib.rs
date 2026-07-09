@@ -3,6 +3,7 @@ mod agent;
 #[cfg(target_os = "macos")]
 mod ai;
 mod agent_partials_window;
+mod spatial_ink_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
@@ -922,6 +923,10 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
             // Same server-up prerequisite as the dock — it loads /agent-partials
             // on the same port.
             agent_partials_window::create(&app_main, api_port);
+            // Symon Spatial Context — the draw-on-screen ink overlay. Sized to
+            // the cursor's monitor + mouse-captured only during an agent hold
+            // (arm/disarm); click-through + transparent at rest.
+            spatial_ink_window::create(&app_main, api_port);
         });
         // Relay the canvas composer's partials-surface CLAIM directly to the HUD
         // window. The canvas emits it as a JS broadcast, and cross-webview
@@ -944,6 +949,9 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
                 }
             });
         }
+        // JS → Rust listeners for the ink page (first-stroke capture trigger,
+        // stroke payload at finalize, page-side disarm request).
+        spatial_ink_window::register_listeners(&app);
         // Stash the resolved port for the lazily-created Symon Points overlay
         // (point_overlay builds its window on first [POINT:...] tag, not here).
         point_overlay::init(api_port);
@@ -2873,6 +2881,15 @@ mod stt_engine {
                 "o8:stt-event",
                 payload.clone(),
             );
+            // The spatial-ink page latches on the same agent-lane start and
+            // needs the `final` event to ship its strokes — direct delivery, as
+            // the broadcast can miss secondary webviews (same reason as the HUD).
+            #[cfg(target_os = "macos")]
+            let _ = app.emit_to(
+                crate::spatial_ink_window::SPATIAL_INK_LABEL,
+                "o8:stt-event",
+                payload.clone(),
+            );
         }
         let _ = app.emit("o8:stt-event", payload);
     }
@@ -2951,6 +2968,9 @@ mod stt_engine {
                     crate::fn_hotkey::set_system_origin(false);
                     #[cfg(target_os = "macos")]
                     crate::audio_ducker::restore();
+                    // Teardown path — restore ink click-through + clear strokes.
+                    #[cfg(target_os = "macos")]
+                    crate::spatial_ink_window::disarm(app);
                 }
                 emit_stt(
                     app,
@@ -3265,7 +3285,13 @@ mod stt_engine {
                 });
                 emit_agent_stt(&app, idle);
                 crate::dictation_history::record("agent", &polished, None);
-                crate::agent::spawn_agent(app.clone(), polished);
+                // Symon Spatial Context: if the operator drew on the screen
+                // during this hold, drain the composite + full-res crop and ride
+                // them on the brain turn. None → text-only turn, zero behavior
+                // change. Disarm the ink window on this teardown path regardless.
+                let spatial = crate::spatial_ink_window::take_spatial_context();
+                crate::spatial_ink_window::disarm(&app);
+                crate::agent::spawn_agent_with_spatial(app.clone(), polished, spatial);
                 return;
             }
 
