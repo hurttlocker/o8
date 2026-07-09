@@ -24,7 +24,7 @@ import type {
 
 export function isAgentRuntimeTab(
   tab: TerminalTab | null | undefined,
-): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' } {
+): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi' } {
   return tab?.kind === 'chat'
     && (
       tab.chatRuntime === 'codex'
@@ -192,7 +192,7 @@ export function normalizeWorkspaceChatSessionKey(
   if (runtime === 'gemini') return `gemini-owned:${trimmed}`;
   if (runtime === 'opencode') return `opencode-owned:${trimmed}`;
   if (runtime === 'cursor') return `cursor-owned:${trimmed}`;
-  if (runtime === 'grok') return `grok-owned:${trimmed}`;
+  if (runtime === 'grok' || runtime === 'pi') return `grok-owned:${trimmed}`;
   return trimmed;
 }
 
@@ -329,7 +329,7 @@ export function generateLlmChatTabId() {
 }
 
 export function fallbackWorkspaceChatSessionKey(
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok',
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi',
   tabId: string,
   scope: string,
 ) {

@@ -184,7 +184,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         defaultDispatchRuntime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok'],
+          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi'],
           description: 'Default worker runtime for dispatches.',
         },
         healBotEnabled: {

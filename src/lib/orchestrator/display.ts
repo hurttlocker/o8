@@ -42,7 +42,7 @@ export function resolveDisplayRuntime(
     }
   }
   const runtime = packet?.runtime;
-  if (runtime === 'codex' || runtime === 'claude-code' || runtime === 'gemini' || runtime === 'opencode') {
+  if (runtime === 'codex' || runtime === 'claude-code' || runtime === 'gemini' || runtime === 'opencode' || runtime === 'pi') {
     return runtime;
   }
   return 'codex';

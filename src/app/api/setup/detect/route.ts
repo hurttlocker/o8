@@ -418,7 +418,7 @@ function buildSummary(tools: DetectedTool[]): string {
 
 function buildDetectionResult(tools: DetectedTool[], flags: { partial?: boolean; timedOut?: boolean } = {}): DetectionResult {
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', 'cursor', 'grok'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;

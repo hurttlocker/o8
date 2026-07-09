@@ -129,7 +129,7 @@ export interface PlanApprovalContinuation {
   issueTitle: string;
   issueUrl: string;
   tasks: Array<{ title: string; body: string }>;
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
   constraints?: string;
 }
 
