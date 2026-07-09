@@ -1103,6 +1103,13 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         // broadcasts can miss secondary windows (the dock's known failure mode,
         // 2026-07-08 live-hit: the HUD painted an empty bar over the canvas
         // because the claim never arrived). Rust listen → emit_to is reliable.
+        //
+        // CRITICAL: the forward MUST use a DIFFERENT event name. `listen_any`
+        // hears EVERY emit — including this handler's own `emit_to` — so
+        // re-emitting under the same name recursed until the thread's stack
+        // blew (2026-07-09 crash ×2: EXC_BAD_ACCESS / stack_overflow abort on
+        // tokio-rt-worker, triggered the moment the canvas claimed). The HUD
+        // page listens for both the direct name and the `-fwd` relay name.
         #[cfg(target_os = "macos")]
         {
             use tauri::Listener;
@@ -1113,7 +1120,7 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
                 {
                     let _ = relay.emit_to(
                         agent_partials_window::PARTIALS_LABEL,
-                        "o8:agent-partials-claim",
+                        "o8:agent-partials-claim-fwd",
                         payload,
                     );
                 }
