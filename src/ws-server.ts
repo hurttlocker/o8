@@ -87,6 +87,7 @@ import {
   writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
@@ -202,6 +203,15 @@ import {
   createChildTerminalHost,
   type TerminalHost,
 } from './lib/ws-server/terminal-host-client';
+import {
+  duplicateOrchestratorSendAck,
+  orchestratorCommandAckCorrelation,
+  orchestratorInterruptAckDisposition,
+  orchestratorSendIdempotencyScope,
+  resolveOrchestratorCommandCorrelationId,
+  type OrchestratorInterruptAckState,
+  type OrchestratorSendAckState,
+} from './lib/ws-server/orchestrator-command-idempotency';
 import { installProcessCrashCapture } from './lib/telemetry/crash-capture';
 import { initSentryNode } from './lib/telemetry/sentry-node';
 
@@ -3208,7 +3218,149 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   }
 }
 
+const ORCHESTRATOR_SEND_IDEMPOTENCY_VERB = 'orchestrator-send';
+// A governed turn may legitimately run far longer than the generic store's
+// ten-minute default. Keep its reservation alive for a full operator day so a
+// reconnect/retry cannot fork the same command while the original is working.
+const ORCHESTRATOR_SEND_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+class OrchestratorSendRejectedBeforeAcceptance extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : 'Orchestrator command was not accepted');
+    this.name = 'OrchestratorSendRejectedBeforeAcceptance';
+  }
+}
+
+function sendOrchestratorSendAck(client: ClientState, input: {
+  repoPath: string;
+  threadId: string | null;
+  backend: OrchestratorBackendId;
+  agent?: string;
+  correlationId?: string;
+  state: OrchestratorSendAckState;
+  duplicate: boolean;
+}) {
+  send(client, {
+    channel: 'orchestrator',
+    event: 'send-ack',
+    data: {
+      repoPath: input.repoPath,
+      threadId: input.threadId,
+      backend: input.backend,
+      agent: input.agent,
+      ...orchestratorCommandAckCorrelation(input.correlationId),
+      state: input.state,
+      duplicate: input.duplicate,
+    },
+  });
+}
+
+function sendOrchestratorInterruptAck(client: ClientState, input: {
+  repoPath: string;
+  threadId: string | null;
+  backend: OrchestratorBackendId;
+  agent?: string;
+  correlationId?: string;
+  state: OrchestratorInterruptAckState;
+  interrupted: boolean;
+  duplicate: boolean;
+  note?: string;
+}) {
+  send(client, {
+    channel: 'orchestrator',
+    event: 'interrupt-ack',
+    data: {
+      repoPath: input.repoPath,
+      threadId: input.threadId,
+      backend: input.backend,
+      agent: input.agent,
+      ...orchestratorCommandAckCorrelation(input.correlationId),
+      state: input.state,
+      interrupted: input.interrupted,
+      duplicate: input.duplicate,
+      note: input.note,
+    },
+  });
+}
+
 async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  const message = typeof msg.message === 'string' ? msg.message : null;
+  if (!repoPath || !message) return;
+
+  const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+  // Legacy clients did not send a correlation id. Preserve their exact
+  // execution behavior; the one-shot handler still emits an uncorrelated
+  // accepted ACK at the later, truthful acceptance point.
+  if (!correlationId) {
+    await handleOrchestratorSendMsgOnce(client, msg, undefined);
+    return;
+  }
+
+  const backendId = resolveMsgBackendId(msg);
+  const agentId = resolveMsgAgentId(msg, backendId);
+  const threadId = resolveMsgThreadId(msg);
+  const scopeId = orchestratorSendIdempotencyScope({
+    repoPath,
+    backend: backendId,
+    agent: agentId,
+    threadId,
+  });
+  const key = deriveIdempotencyKey({
+    verb: ORCHESTRATOR_SEND_IDEMPOTENCY_VERB,
+    scopeId,
+    clientKey: correlationId,
+  });
+
+  try {
+    const outcome = await withIdempotency<void>({
+      key,
+      verb: ORCHESTRATOR_SEND_IDEMPOTENCY_VERB,
+      scopeId,
+      ttlMs: ORCHESTRATOR_SEND_IDEMPOTENCY_TTL_MS,
+    }, async () => {
+      await handleOrchestratorSendMsgOnce(client, msg, correlationId);
+    });
+
+    // The first caller receives `accepted` from inside the reserved execution,
+    // after the turn is durably owned. A duplicate never re-enters that body,
+    // so acknowledge its exact disposition here instead.
+    if (outcome.replayed) {
+      const duplicateAck = duplicateOrchestratorSendAck(outcome.inProgress);
+      sendOrchestratorSendAck(client, {
+        repoPath,
+        threadId,
+        backend: backendId,
+        agent: agentId || undefined,
+        correlationId,
+        ...duplicateAck,
+      });
+    }
+  } catch (error) {
+    if (error instanceof OrchestratorSendRejectedBeforeAcceptance) return;
+    // A keyed command fails closed when its durable reservation cannot be
+    // established. Executing without the guard would make a retry capable of
+    // starting a second governed turn.
+    send(client, {
+      channel: 'orchestrator',
+      event: 'error',
+      data: {
+        error: error instanceof Error ? error.message : 'Failed to reserve orchestrator command',
+        repoPath,
+        threadId,
+        backend: backendId,
+        agent: agentId || undefined,
+        ...orchestratorCommandAckCorrelation(correlationId),
+      },
+    });
+  }
+}
+
+async function handleOrchestratorSendMsgOnce(
+  client: ClientState,
+  msg: Record<string, unknown>,
+  correlationId: string | undefined,
+) {
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
@@ -3245,18 +3397,12 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   let activeAgentId = requestedAgentId;
   let activeAgentTag = activeAgentId || undefined;
   const threadId = resolveMsgThreadId(msg);
-  const clientMessageId = typeof msg.clientMessageId === 'string' ? msg.clientMessageId : undefined;
   let abortKey = orchestratorAbortKey(repoPath, activeBackend.id, activeAgentId, threadId);
   const turnAbortKeys = new Set<string>([abortKey]);
 
-  send(client, {
-    channel: 'orchestrator',
-    event: 'send-ack',
-    data: { repoPath, threadId, clientMessageId },
-  });
-
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
+  let commandAccepted = false;
   // Declared outside try so the catch can broadcast the terminal error to EVERY
   // subscriber on this thread (phone + desktop), not just the origin client. A
   // phone-started turn that threw used to leave the desktop latched at "busy"
@@ -3410,13 +3556,6 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       console.log(`[openclaw-diag] send key=${orchestratorSubKey(client.id, activeBackend.id, activeAgentId)} sessionName=${sessionName} clientId=${client.id}`);
     }
 
-    // Emit busy status.
-    broadcastToOrchestratorSession(sessionName, JSON.stringify({
-      channel: 'orchestrator',
-      event: 'status',
-      data: { status: 'busy', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
-    }));
-
     // #624 — Attach an AbortController for this turn. Defensively abort any
     // prior entry for the same repo+backend+agent so a stale subprocess never
     // outlives a fresh send.
@@ -3426,6 +3565,30 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     }
     turnController = new AbortController();
     orchestratorInflightAborts.set(abortKey, turnController);
+
+    // Receipt is not acceptance. Only ACK after the route is subscribed, the
+    // canonical user message has been persisted (for thoughts-* threads), and
+    // the in-flight controller owns this turn. For keyed clients the outer
+    // withIdempotency call has also durably reserved the command by this point.
+    commandAccepted = true;
+    sendOrchestratorSendAck(client, {
+      repoPath,
+      threadId,
+      backend: activeBackend.id,
+      agent: activeAgentTag,
+      correlationId,
+      state: 'accepted',
+      duplicate: false,
+    });
+
+    // Live activity follows the acceptance ACK on the same ordered socket.
+    // Older clients may use this busy event as their delivery fallback, so it
+    // must never precede durable command ownership.
+    broadcastToOrchestratorSession(sessionName, JSON.stringify({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'busy', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
+    }));
 
     // Track whether the backend stream delivered a terminal event. If it
     // resolves without one (a hung claude/codex child that never closes, so no
@@ -3762,12 +3925,25 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     const errorMsg = {
       channel: 'orchestrator' as const,
       event: 'error' as const,
-      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
+      data: {
+        error: err instanceof Error ? err.message : 'Failed to send message',
+        repoPath,
+        threadId,
+        backend: activeBackend.id,
+        agent: activeAgentTag,
+        ...orchestratorCommandAckCorrelation(correlationId),
+      },
     };
     if (sessionName) {
       broadcastToOrchestratorSession(sessionName, JSON.stringify(errorMsg));
     } else {
       send(client, errorMsg);
+    }
+    // withIdempotency releases a thrown reservation. Only do that when the
+    // command failed before the accepted ACK point; once accepted, a backend
+    // failure is the terminal outcome for this id and must replay, not rerun.
+    if (correlationId && !commandAccepted) {
+      throw new OrchestratorSendRejectedBeforeAcceptance(err);
     }
   }
 }
@@ -3784,14 +3960,48 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const backendId = resolveMsgBackendId(msg);
   const agentId = resolveMsgAgentId(msg, backendId);
   const threadId = resolveMsgThreadId(msg);
+  const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const label = `${backendId}${agentId ? `/${agentId}` : ''}`;
   const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId, agentId, threadId));
   if (!controller) {
     console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}${threadId ? ` ${threadId}` : ''}) — no in-flight turn`);
+    const disposition = orchestratorInterruptAckDisposition({ hasController: false, alreadyAborted: false });
+    sendOrchestratorInterruptAck(client, {
+      repoPath,
+      threadId,
+      backend: backendId,
+      agent: agentId || undefined,
+      correlationId,
+      ...disposition,
+      note: 'No in-flight turn.',
+    });
+    return;
+  }
+  if (controller.signal.aborted) {
+    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}${threadId ? ` ${threadId}` : ''}) — already interrupted`);
+    const disposition = orchestratorInterruptAckDisposition({ hasController: true, alreadyAborted: true });
+    sendOrchestratorInterruptAck(client, {
+      repoPath,
+      threadId,
+      backend: backendId,
+      agent: agentId || undefined,
+      correlationId,
+      ...disposition,
+      note: 'Interrupt was already accepted.',
+    });
     return;
   }
   console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}${threadId ? ` ${threadId}` : ''}, client ${client.id})`);
   controller.abort();
+  const disposition = orchestratorInterruptAckDisposition({ hasController: true, alreadyAborted: false });
+  sendOrchestratorInterruptAck(client, {
+    repoPath,
+    threadId,
+    backend: backendId,
+    agent: agentId || undefined,
+    correlationId,
+    ...disposition,
+  });
   // Leave the map entry in place; handleOrchestratorSendMsg removes it when
   // the turn resolves (the abort causes close to fire within 1-2s).
 }
