@@ -308,6 +308,20 @@ function probeTerminalPacketIncident(item: SupervisorInboxItem, context: ProbeCo
 }
 
 async function probeItem(item: SupervisorInboxItem, context: ProbeContext): Promise<boolean> {
+  let resolved = false;
+  try {
+    resolved = await probeItemByKind(item, context);
+  } catch (error) {
+    // A failing primary probe (missing repo, pruned worktree) must not block
+    // the subject-gone fallthrough — those are exactly the cards it exists for.
+    console.warn(`[liveness-probes] ${item.kind} probe failed for ${item.id}:`, error instanceof Error ? error.message : error);
+    resolved = false;
+  }
+  if (resolved) return true;
+  return expireWhenSubjectGone(item, context);
+}
+
+async function probeItemByKind(item: SupervisorInboxItem, context: ProbeContext): Promise<boolean> {
   if (TERMINAL_PACKET_INCIDENT_KINDS.has(item.kind)) {
     return probeTerminalPacketIncident(item, context);
   }
@@ -329,6 +343,45 @@ async function probeItem(item: SupervisorInboxItem, context: ProbeContext): Prom
     default:
       return false;
   }
+}
+
+// Subject-gone TTL fallthrough: a card can only be fact-checked while its
+// subject (the packet) still exists in the control plane. When the packet is
+// gone, the probes above can never confirm OR refute the fault — the evidence
+// was pruned. Holding such a card human_required forever is the graveyard
+// pattern #1266 kills; expiring it after the same 7-day window as
+// packet_missing, with an explicit note, is the honest alternative. Kinds with
+// their own TTL (packet_missing) or no packet subject are excluded.
+function expireWhenSubjectGone(item: SupervisorInboxItem, context: ProbeContext): boolean {
+  if (!item.packetId) return false;
+  if (item.kind === 'packet_missing' || item.kind === 'fetch_unreachable' || item.kind === 'repo_misconfigured') {
+    return false;
+  }
+  if (context.packetById.has(item.packetId)) return false;
+  const ageMs = context.nowMs - createdAtMs(item);
+  if (ageMs < PACKET_GONE_TTL_MS) return false;
+
+  const lane = findLatestLaneByPacket(item.packetId);
+  resolveWithEvidence({
+    item,
+    lane,
+    probeKind: 'subject_gone_ttl',
+    event: 'liveness_probe_sweep',
+    note: [
+      `Auto-resolved: ${item.kind} expired after 7 days; its packet left the control plane so the fault can no longer be verified.`,
+      `packetId=${item.packetId}`,
+    ].join(' '),
+    terminalState: 'expired',
+    now: context.now,
+    evidence: {
+      packetId: item.packetId,
+      kind: item.kind,
+      createdAt: item.createdAt,
+      ageMs,
+      ttlMs: PACKET_GONE_TTL_MS,
+    },
+  });
+  return true;
 }
 
 export async function runLivenessProbeSweep(input: { now?: Date } = {}): Promise<LivenessProbeSweepResult> {
