@@ -43,11 +43,13 @@ function classifyStatus(rawStatus?: string): VisualStatus {
   return 'idle';
 }
 
-function inferRuntime(sessionKey: string, rawRuntime?: string): 'codex' | 'claude-code' | 'gemini' | 'opencode' {
+function inferRuntime(sessionKey: string, rawRuntime?: string): 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok' {
   const normalized = (rawRuntime ?? '').toLowerCase();
   if (normalized.includes('claude') || sessionKey.startsWith('claude-code:')) return 'claude-code';
   if (normalized.includes('gemini') || sessionKey.startsWith('gemini-owned:')) return 'gemini';
   if (normalized.includes('opencode') || sessionKey.startsWith('opencode-owned:')) return 'opencode';
+  if (normalized.includes('cursor') || sessionKey.startsWith('cursor-owned:')) return 'cursor';
+  if (normalized.includes('grok') || sessionKey.startsWith('grok-owned:')) return 'grok';
   return 'codex';
 }
 

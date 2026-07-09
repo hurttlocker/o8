@@ -103,6 +103,28 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     tier: 'standard',
     description: 'Multi-provider coding CLI — disabled by default. Use Codex / Gemini for dispatch.',
   },
+  cursor: {
+    label: 'Cursor',
+    shortLabel: 'Cursor',
+    dispatchable: true,
+    requiresModel: false,
+    defaultModel: 'cursor-agent',
+    accentColor: '#111827',
+    binaryName: 'cursor-agent',
+    tier: 'frontier',
+    description: 'Cursor CLI headless worker via `cursor-agent -p --output-format stream-json`.',
+  },
+  grok: {
+    label: 'Grok Build',
+    shortLabel: 'Grok',
+    dispatchable: true,
+    requiresModel: false,
+    defaultModel: 'grok-build',
+    accentColor: '#16a34a',
+    binaryName: 'grok',
+    tier: 'frontier',
+    description: 'xAI Grok Build coding CLI with headless JSON-schema constrained output.',
+  },
 };
 
 // `opencode` + `gemini` ship hidden behind their own experimental operator

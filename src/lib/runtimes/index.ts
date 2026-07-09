@@ -44,11 +44,17 @@ import { claudeCodeRuntime } from './claude-code';
 import { geminiRuntime } from './gemini';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
+import { cursorRuntime } from './cursor';
+import { grokRuntime } from './grok';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
 import { invalidateOwnedGeminiFleetCache } from '@/lib/gemini/owned';
 import { invalidateOwnedOpencodeFleetCache } from '@/lib/opencode/owned';
+import { invalidateOwnedCursorFleetCache } from '@/lib/cursor/owned';
+import { invalidateOwnedGrokFleetCache } from '@/lib/grok/owned';
 import './opencode-cost-parser';
+import './cursor-cost-parser';
+import './grok-cost-parser';
 
 /**
  * Flush the fleet cache across all owned-session stores. Callers (e.g. the
@@ -60,6 +66,8 @@ export function invalidateAllOwnedFleets(): void {
   invalidateOwnedClaudeCodeFleetCache();
   invalidateOwnedGeminiFleetCache();
   invalidateOwnedOpencodeFleetCache();
+  invalidateOwnedCursorFleetCache();
+  invalidateOwnedGrokFleetCache();
 }
 
 registerRuntime(codexRuntime);
@@ -72,6 +80,8 @@ registerRuntime(geminiRuntime);
 // --format json --model provider/model`. Sessions 'opencode-owned:' with
 // 'ses_' prefixed threads. See src/lib/opencode/owned.ts.
 registerRuntime(opencodeRuntime);
+registerRuntime(cursorRuntime);
+registerRuntime(grokRuntime);
 // #514 — Cloud runtime adapter (Cursor-style self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires
 // a worker CLI to connect to /api/cloud/worker-poll with a provisioned key.

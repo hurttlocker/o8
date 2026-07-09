@@ -24,13 +24,15 @@ import type {
 
 export function isAgentRuntimeTab(
   tab: TerminalTab | null | undefined,
-): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode' } {
+): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok' } {
   return tab?.kind === 'chat'
     && (
       tab.chatRuntime === 'codex'
       || tab.chatRuntime === 'claude-code'
       || tab.chatRuntime === 'gemini'
       || tab.chatRuntime === 'opencode'
+      || tab.chatRuntime === 'cursor'
+      || tab.chatRuntime === 'grok'
     );
 }
 
@@ -179,6 +181,8 @@ export function normalizeWorkspaceChatSessionKey(
     || trimmed.startsWith('codex-live:')
     || trimmed.startsWith('gemini-owned:')
     || trimmed.startsWith('opencode-owned:')
+    || trimmed.startsWith('cursor-owned:')
+    || trimmed.startsWith('grok-owned:')
   ) {
     return trimmed;
   }
@@ -187,6 +191,8 @@ export function normalizeWorkspaceChatSessionKey(
   if (runtime === 'codex') return `codex:${trimmed}`;
   if (runtime === 'gemini') return `gemini-owned:${trimmed}`;
   if (runtime === 'opencode') return `opencode-owned:${trimmed}`;
+  if (runtime === 'cursor') return `cursor-owned:${trimmed}`;
+  if (runtime === 'grok') return `grok-owned:${trimmed}`;
   return trimmed;
 }
 
@@ -216,6 +222,12 @@ export function runtimeTransportSessionId(
   if (runtime === 'opencode' && normalized.startsWith('opencode-owned:')) {
     return normalized.slice('opencode-owned:'.length);
   }
+  if (runtime === 'cursor' && normalized.startsWith('cursor-owned:')) {
+    return normalized.slice('cursor-owned:'.length);
+  }
+  if (runtime === 'grok' && normalized.startsWith('grok-owned:')) {
+    return normalized.slice('grok-owned:'.length);
+  }
   return undefined;
 }
 
@@ -234,7 +246,9 @@ export function isOwnedCliRuntimeSession(sessionKey?: string | null) {
   return key.startsWith('codex-owned:')
     || key.startsWith('claude-code-owned:')
     || key.startsWith('gemini-owned:')
-    || key.startsWith('opencode-owned:');
+    || key.startsWith('opencode-owned:')
+    || key.startsWith('cursor-owned:')
+    || key.startsWith('grok-owned:');
 }
 
 export function resolveWorkspaceChatLaneStatus(tab: TerminalTab) {
@@ -315,7 +329,7 @@ export function generateLlmChatTabId() {
 }
 
 export function fallbackWorkspaceChatSessionKey(
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok',
   tabId: string,
   scope: string,
 ) {

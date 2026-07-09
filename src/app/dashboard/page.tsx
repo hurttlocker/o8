@@ -69,6 +69,7 @@ import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
   OrchestratorPacket,
+  OrchestratorRuntime,
   OrchestratorRuntimeTruth,
   WorkspaceLaneState,
   WorkspaceOrchestrationPacketBadge,
@@ -3000,7 +3001,7 @@ function DashboardInner() {
 
   const handleLaunchWorkspaceAgent = useCallback(async (request: {
     repoPath: string;
-    runtime?: 'codex' | 'claude-code' | 'gemini' | 'opencode';
+    runtime?: OrchestratorRuntime;
     modelId?: string;
     initialText?: string;
     autoSend?: boolean;

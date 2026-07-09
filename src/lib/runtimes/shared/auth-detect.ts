@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
-export type RuntimeHouse = 'codex' | 'claude';
+export type RuntimeHouse = 'codex' | 'claude' | 'cursor' | 'grok';
 
 export interface RuntimeAuthStatus {
   house: RuntimeHouse;
@@ -156,6 +156,52 @@ async function detectClaude(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectCursor(): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink('cursor-agent') ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('cursor', 'cursor', {
+      installed: false,
+      authenticated: false,
+      detail: 'Cursor CLI is not installed.',
+      fix: 'Install Cursor CLI, then run `cursor-agent login` or set CURSOR_API_KEY.',
+    });
+  }
+  const authenticated = Boolean(process.env.CURSOR_API_KEY)
+    || await fileExists(path.join(os.homedir(), '.cursor'));
+  return nowStatus('cursor', 'cursor', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? 'Cursor CLI is installed and has local sign-in or CURSOR_API_KEY evidence.'
+      : 'Cursor CLI is installed but no local sign-in evidence was found.',
+    fix: 'Run `cursor-agent login` or set CURSOR_API_KEY.',
+    binaryPath,
+  });
+}
+
+async function detectGrok(): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink('grok') ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('grok', 'grok', {
+      installed: false,
+      authenticated: false,
+      detail: 'Grok Build CLI is not installed.',
+      fix: 'Install Grok Build, then sign in or set GROK_CODE_XAI_API_KEY.',
+    });
+  }
+  const authenticated = Boolean(process.env.GROK_CODE_XAI_API_KEY)
+    || await fileExists(path.join(os.homedir(), '.grok'));
+  return nowStatus('grok', 'grok', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? 'Grok Build CLI is installed and has local sign-in or GROK_CODE_XAI_API_KEY evidence.'
+      : 'Grok Build CLI is installed but no local sign-in evidence was found.',
+    fix: 'Sign in with Grok Build or set GROK_CODE_XAI_API_KEY.',
+    binaryPath,
+  });
+}
+
 function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): MachineAuthProfileSuggestion {
   const codexReady = statuses.codex.installed && statuses.codex.authenticated;
   const claudeReady = statuses.claude.installed && statuses.claude.authenticated;
@@ -174,8 +220,8 @@ export function invalidateRuntimeAuthCache(): void {
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) return cache.snapshot;
-  const [codex, claude] = await Promise.all([detectCodex(), detectClaude()]);
-  const statuses = { codex, claude };
+  const [codex, claude, cursor, grok] = await Promise.all([detectCodex(), detectClaude(), detectCursor(), detectGrok()]);
+  const statuses = { codex, claude, cursor, grok };
   const snapshot = {
     statuses,
     suggestedSubscriptionProfile: suggestProfile(statuses),
@@ -187,6 +233,8 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
 function houseForRuntime(runtime: OrchestratorRuntime): RuntimeHouse | null {
   if (runtime === 'codex') return 'codex';
   if (runtime === 'claude-code') return 'claude';
+  if (runtime === 'cursor') return 'cursor';
+  if (runtime === 'grok') return 'grok';
   return null;
 }
 

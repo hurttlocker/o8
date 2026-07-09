@@ -13,7 +13,7 @@ const USAGE_LOG_DIR = process.env.O8_DATA_DIR
 const USAGE_LOG_PATH = path.join(USAGE_LOG_DIR, 'usage.jsonl');
 const inFlightUsageDispatches = new Set<string>();
 
-export type DispatchUsageRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode';
+export type DispatchUsageRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'grok';
 
 export interface UsageSnapshot {
   inputTokens: number;

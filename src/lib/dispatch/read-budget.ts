@@ -102,6 +102,9 @@ export function resolveModelTier(input: {
   if (input.runtime === 'opencode' && !model) {
     return 'weak';
   }
+  if ((input.runtime === 'cursor' || input.runtime === 'grok') && !model) {
+    return 'codex-strong';
+  }
   return 'unknown';
 }
 

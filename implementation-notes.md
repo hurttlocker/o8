@@ -6,3 +6,8 @@
   file list); `cargo tauri dev` may need a follow-up devUrl update for the 47120 DEV block.
 - Port-identity phase B: broad `sidecar_lifecycle::reap_o8_orphans()` untouched; the production
   port allocation path in `lib.rs` is identity-gated.
+
+## Runtime expansion P1 notes
+
+- Added Cursor CLI (`cursor`) and Grok Build (`grok`) adapters using the shared owned-session store and dispatch registry.
+- Local CLI smoke skipped because `cursor-agent`, `grok`, and `grok-build` were not installed on this machine.

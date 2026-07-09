@@ -231,6 +231,8 @@ export async function computeRestoredTabs(
           if (
             inner.startsWith('gemini-owned:')
             || inner.startsWith('opencode-owned:')
+            || inner.startsWith('cursor-owned:')
+            || inner.startsWith('grok-owned:')
             || inner.startsWith('codex-owned:')
             || inner.startsWith('codex-discovered:')
             || inner.startsWith('codex-live:')
@@ -248,6 +250,12 @@ export async function computeRestoredTabs(
       } else if (unwrappedSessionKey.startsWith('opencode-owned:') && effectiveRuntime !== 'opencode') {
         effectiveRuntime = 'opencode';
         effectiveModel = 'opencode/gpt-5-nano';
+      } else if (unwrappedSessionKey.startsWith('cursor-owned:') && effectiveRuntime !== 'cursor') {
+        effectiveRuntime = 'cursor';
+        effectiveModel = 'cli:cursor:default';
+      } else if (unwrappedSessionKey.startsWith('grok-owned:') && effectiveRuntime !== 'grok') {
+        effectiveRuntime = 'grok';
+        effectiveModel = 'cli:grok:default';
       } else if (
         (unwrappedSessionKey.startsWith('codex-owned:')
           || unwrappedSessionKey.startsWith('codex:')
@@ -272,7 +280,10 @@ export async function computeRestoredTabs(
       }
       const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
         ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey)
-        : (effectiveSessionKey.startsWith('gemini-owned:') || effectiveSessionKey.startsWith('opencode-owned:'))
+        : (effectiveSessionKey.startsWith('gemini-owned:')
+          || effectiveSessionKey.startsWith('opencode-owned:')
+          || effectiveSessionKey.startsWith('cursor-owned:')
+          || effectiveSessionKey.startsWith('grok-owned:'))
           ? effectiveSessionKey
           : undefined;
       const restoredClaudeSessionId = effectiveRuntime === 'claude-code'
@@ -282,7 +293,9 @@ export async function computeRestoredTabs(
         || effectiveSessionKey.startsWith('codex-discovered:')
         || effectiveSessionKey.startsWith('codex-live:')
         || effectiveSessionKey.startsWith('gemini-owned:')
-        || effectiveSessionKey.startsWith('opencode-owned:');
+        || effectiveSessionKey.startsWith('opencode-owned:')
+        || effectiveSessionKey.startsWith('cursor-owned:')
+        || effectiveSessionKey.startsWith('grok-owned:');
       const restoredChatSessionKey = liveSessionKey
         ?? (shouldPreserveHistoricalSessionKey ? effectiveSessionKey : undefined);
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);

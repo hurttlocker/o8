@@ -638,7 +638,7 @@ export function useWorkspaceTerminal({
     throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setActiveTileId, setTerminalTileRepoScope]);
 
-  // openWorkspaceTabForLane now supports all four runtimes natively — the
+  // openWorkspaceTabForLane supports owned worker runtimes natively — the
   // monitoring tab opens with the actual lane.runtime, so the chat pane
   // labels the agent correctly and /api/mobile/history serves the right
   // owned-session transcript. Pre-v0.1.27 callers downcast gemini/opencode
@@ -650,7 +650,7 @@ export function useWorkspaceTerminal({
     packetReferenceLabel?: string | null;
     packetTitle?: string | null;
     sessionKey: string;
-    runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode';
+    runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
     repoPath: string;
     status?: string | null;
     branch?: string | null;
@@ -734,7 +734,9 @@ export function useWorkspaceTerminal({
 
       const mutationRuntime = (mutation.runtime === 'claude-code'
         || mutation.runtime === 'gemini'
-        || mutation.runtime === 'opencode')
+        || mutation.runtime === 'opencode'
+        || mutation.runtime === 'cursor'
+        || mutation.runtime === 'grok')
         ? mutation.runtime
         : 'codex';
       void openWorkspaceTabForLane({
@@ -779,7 +781,9 @@ export function useWorkspaceTerminal({
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
           const laneRuntime = (lane.runtime === 'claude-code'
             || lane.runtime === 'gemini'
-            || lane.runtime === 'opencode')
+            || lane.runtime === 'opencode'
+            || lane.runtime === 'cursor'
+            || lane.runtime === 'grok')
             ? lane.runtime
             : 'codex';
           void openWorkspaceTabForLane({

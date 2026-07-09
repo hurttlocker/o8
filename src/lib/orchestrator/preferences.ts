@@ -3,7 +3,7 @@ import type { OrchestratorRuntime } from './types';
 export const ORCHESTRATOR_RUNTIME_STORAGE_KEY = 'o8:orchestrator:runtime';
 export const ORCHESTRATOR_RUNTIME_EVENT = 'cortex:orchestrator-runtime-changed';
 
-const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok']);
 
 function coerceRuntime(value: string | null | undefined): OrchestratorRuntime {
   if (value && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {

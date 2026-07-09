@@ -50,6 +50,9 @@ function providerForRuntime(runtime: string): UsageProvider | null {
   if (runtime === 'gemini') {
     return 'google';
   }
+  if (runtime === 'cursor' || runtime === 'grok') {
+    return null;
+  }
   // opencode routes to the user-selected provider; cost is attributed externally
   return null;
 }
