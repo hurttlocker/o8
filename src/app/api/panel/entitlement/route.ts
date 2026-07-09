@@ -14,13 +14,26 @@ export const dynamic = 'force-dynamic';
  * Already loopback+token gated via GATED_PREFIXES ('/api/panel/') in
  * src/middleware.ts. Never throws (repo rule): falls back to free on any error.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     let activeSubject: string | null = null;
     try {
       activeSubject = (await auth()).userId;
     } catch {
       activeSubject = null;
+    }
+    // Native-mode fallback (#1483): auth() reads cookies, but the desktop Clerk
+    // session lives in the Tauri store, so cookies carry no user. The client
+    // (EntitlementProvider) forwards the clerk-js-known subject as ?subject= so a
+    // GENUINE cross-user mismatch still drops. Absent/loading → null → keep (the
+    // guard never drops on unknown). This is loopback+token gated, and the worst
+    // a wrong subject can do is wipe the caller's own cache (reversible re-sync).
+    if (!activeSubject) {
+      try {
+        activeSubject = new URL(request.url).searchParams.get('subject')?.trim() || null;
+      } catch {
+        activeSubject = null;
+      }
     }
     readCachedEntitlement({ activeSubject });
     const entitlement = await getEntitlement();

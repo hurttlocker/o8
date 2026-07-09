@@ -308,6 +308,9 @@ export default function CanvasGlassPreviewPage() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [inTauri, setInTauri] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  // Whether the bottom-center DispatchDock agents tray is expanded (owned here so
+  // the grid can re-reserve space for the taller tray — see the re-grid effect).
+  const [dockTrayExpanded, setDockTrayExpanded] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
   const [orbSettings, setOrbSettings] = useState<OrbSettings>(ORB_DEFAULTS);
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
@@ -403,6 +406,7 @@ export default function CanvasGlassPreviewPage() {
   const symonSpawnPacketIdsRef = useRef(new Set<string>());
   const symonSpawnWindowUntilRef = useRef(0);
   const spokenSymonLaneIdsRef = useRef(new Set<string>());
+  const announcedSymonLaneIdsRef = useRef(new Set<string>());
   const dataSeenRef = useRef(new Set<string>());
   // First spawn of the visit gets the full reveal (min-play); the rest
   // bail the instant the shell answers — speed stays the default.
@@ -1490,8 +1494,9 @@ export default function CanvasGlassPreviewPage() {
       ...specCards.map((c) => ({ kind: 'spec', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...brainCards.map((c) => ({ kind: 'brain', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...markdownCards.map((c) => ({ kind: 'markdown', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...agentCards.map((c) => ({ kind: 'agent', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   const gridAnimRef = useRef<{ stop: () => void } | null>(null);
   const [gridPlaceholder, setGridPlaceholder] = useState<Slot | null>(null);
@@ -1607,7 +1612,8 @@ export default function CanvasGlassPreviewPage() {
   // it lands before this reads usableCanvasArea().
   const gridCardCount =
     termCards.length + fileCards.length + imageCards.length + browserCards.length +
-    chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length;
+    chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length +
+    agentCards.length;
 
   // Navigator loupe minimap (#1239) — every card as a scaled rect; image cards
   // carry their thumbnail. The usable area is the minimap's stable frame.
@@ -1645,8 +1651,15 @@ export default function CanvasGlassPreviewPage() {
     // setState must never re-enter this effect synchronously (→ "maximum update
     // depth"). One rAF after the render storm settles applies the layout once.
     const raf = requestAnimationFrame(() => applyGridLayout());
-    return () => cancelAnimationFrame(raf);
-  }, [gridMode, gridCardCount, winSize.w, winSize.h, canvasZoomLevel, dockOpen, applyGridLayout]);
+    // The bottom DispatchDock tray appears + expands/collapses with a ~220ms
+    // height animation; the rAF above would measure it mid-flight and under-
+    // reserve. Re-pack once more after it settles so the grid ends above the tray
+    // at its FINAL height. Cheap (layout is fast); harmless for the other triggers.
+    const settle = window.setTimeout(() => applyGridLayout(), 260);
+    return () => { cancelAnimationFrame(raf); window.clearTimeout(settle); };
+    // activeLanes.length = tray visibility, dockTrayExpanded = its expanded state
+    // (both change the reserved bottom stack height, same role as dockOpen).
+  }, [gridMode, gridCardCount, winSize.w, winSize.h, canvasZoomLevel, dockOpen, activeLanes.length, dockTrayExpanded, applyGridLayout]);
 
   // Grid mode packs to the viewport — snap the pan back to origin so the grid
   // lands centered, not wherever you'd roamed.
@@ -2124,6 +2137,14 @@ export default function CanvasGlassPreviewPage() {
     if (!canvasEnabled || !inTauri) return;
     const liveIds = new Set(activeLanes.map((lane) => lane.id));
     for (const card of agentCards) {
+      // Announce the ASSIGNED card name the moment a Symon-spawned card lands —
+      // the spawn is async, so the model can't know the codename at dispatch
+      // time and must never invent one (2026-07-08: voice "Pigeon", card "Pike").
+      if (card.symonOrigin && liveIds.has(card.laneId) && !announcedSymonLaneIdsRef.current.has(card.laneId)) {
+        announcedSymonLaneIdsRef.current.add(card.laneId);
+        const spawnLabel = card.codename || card.title || `Agent ${card.number}`;
+        void symonSpeakStatus(`${spawnLabel} is on it`);
+      }
       if (!card.symonOrigin || liveIds.has(card.laneId) || spokenSymonLaneIdsRef.current.has(card.laneId)) continue;
       spokenSymonLaneIdsRef.current.add(card.laneId);
       const label = card.codename || card.title || `Agent ${card.number}`;
@@ -5081,13 +5102,14 @@ export default function CanvasGlassPreviewPage() {
       >
         {/* Live agents working — grows out of the composer (gabriell_lab borrow).
             Sits ABOVE the queue so the two stack and never collide. */}
-        <div data-canvas-chrome style={{ width: '100%' }}>
+        <div data-canvas-chrome data-canvas-bottom-stack style={{ width: '100%' }}>
           <AnimatePresence>
             {dispatchLanes.length ? (
               <DispatchDock
                 lanes={dispatchLanes}
                 onSelect={(lane) => { if (lane.repoPath) setActiveRepoPath(lane.repoPath); setDockOpen(true); }}
                 onReview={(lane) => { void spawnDiffCard(lane); }}
+                onExpandedChange={setDockTrayExpanded}
               />
             ) : null}
           </AnimatePresence>
@@ -5103,6 +5125,7 @@ export default function CanvasGlassPreviewPage() {
       {/* ── Bottom orchestrator input — first contact lives here ─── */}
       <div
         data-canvas-chrome
+        data-canvas-bottom-stack
         onDragOver={(event) => {
           // Claim drags over the composer — the page-level veil stays out
           // of it and the drop becomes a picture pill, not a canvas card.

@@ -415,14 +415,28 @@ fn begin_system_dictation() {
     // into 'recording' immediately so the user sees the waveform the instant they
     // hold Fn, before the daemon's first partial lands. Both run on the main
     // thread (window + emit).
+    // The on-screen partials HUD during PLAIN Fn dictation is opt-in
+    // (`fn_hud_partials`, default OFF). When enabled, tag the system-start with
+    // `hud: true` so the /agent-partials page latches (it otherwise only latches
+    // on `lane: agent`), deliver the start DIRECTLY to the HUD webview, and
+    // re-assert/re-anchor the HUD — mirrors the agent-dictation start path.
+    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", false);
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                let payload =
-                    serde_json::json!({ "type": "system-start", "origin": "system" });
+                if hud_partials {
+                    // Re-anchor the HUD to the MAIN window's current monitor (and
+                    // window frame, if o8 is focused) for this session.
+                    crate::agent_partials_window::show(&app);
+                }
+                let payload = if hud_partials {
+                    serde_json::json!({ "type": "system-start", "origin": "system", "hud": true })
+                } else {
+                    serde_json::json!({ "type": "system-start", "origin": "system" })
+                };
                 // Emit DIRECTLY to the dock window so the morph (idle → recording)
                 // always lands — the broadcast `app.emit` can miss the second
                 // (dock) webview. `emit_to(DOCK_LABEL, …)` is the reliable path.
@@ -432,6 +446,15 @@ fn begin_system_dictation() {
                     "o8:stt-event",
                     payload.clone(),
                 );
+                // Direct delivery to the partials HUD too (same reliability reason
+                // as the dock) — only when the HUD is enabled for Fn dictation.
+                if hud_partials {
+                    let _ = app.emit_to(
+                        crate::agent_partials_window::PARTIALS_LABEL,
+                        "o8:stt-event",
+                        payload.clone(),
+                    );
+                }
                 // Keep the broadcast too for any other listeners (no-op for the
                 // in-window pill, which ignores system-origin events).
                 let _ = app.emit("o8:stt-event", payload);
@@ -554,21 +577,37 @@ fn begin_long_form_dictation() {
     set_system_origin(true);
 
     // Morph the always-on dock into 'recording' (same surface as push-to-talk —
-    // the user sees the waveform). Emit DIRECTLY to the dock window.
+    // the user sees the waveform). Emit DIRECTLY to the dock window. The Fn
+    // partials HUD is opt-in (`fn_hud_partials`, default OFF) — same treatment
+    // as push-to-talk so long-form Fn dictation shows the bar when enabled.
+    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", false);
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                let payload =
-                    serde_json::json!({ "type": "system-start", "origin": "system" });
+                if hud_partials {
+                    crate::agent_partials_window::show(&app);
+                }
+                let payload = if hud_partials {
+                    serde_json::json!({ "type": "system-start", "origin": "system", "hud": true })
+                } else {
+                    serde_json::json!({ "type": "system-start", "origin": "system" })
+                };
                 log::info!("[fn-hotkey] morph dock → recording (long-form start)");
                 let _ = app.emit_to(
                     crate::dock_window::DOCK_LABEL,
                     "o8:stt-event",
                     payload.clone(),
                 );
+                if hud_partials {
+                    let _ = app.emit_to(
+                        crate::agent_partials_window::PARTIALS_LABEL,
+                        "o8:stt-event",
+                        payload.clone(),
+                    );
+                }
                 let _ = app.emit("o8:stt-event", payload);
             }
         });
@@ -791,12 +830,19 @@ fn begin_agent_dictation() {
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
+                // Re-assert the outside-the-window partials HUD too, so it
+                // re-anchors to the MAIN window's current monitor and floats
+                // above the frontmost app for this agent session.
+                crate::agent_partials_window::show(&app);
                 // `lane: agent` lets the dock distinguish this from a plain Fn
                 // paste dictation — mid-conversation the panel keeps the dock
                 // and renders the live transcript as a pending chat turn.
                 let payload = serde_json::json!({ "type": "system-start", "origin": "system", "lane": "agent" });
                 log::info!("[fn-hotkey] morph dock → recording (agent start)");
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
+                // Direct delivery to the partials HUD too — its latch keys off
+                // this exact event, and the broadcast can miss secondary webviews.
+                let _ = app.emit_to(crate::agent_partials_window::PARTIALS_LABEL, "o8:stt-event", payload.clone());
                 let _ = app.emit("o8:stt-event", payload);
             }
         });

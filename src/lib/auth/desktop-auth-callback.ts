@@ -18,6 +18,13 @@ export interface ConsumeDesktopAuthCallbackOptions {
   getExpectedState: () => string | null;
   clearExpectedState: () => void;
   retrySignIn?: () => void;
+  /**
+   * Fired once, after a fresh ticket sign-in fully activates. The handler uses
+   * this to retire the server-side sign-out marker so it can't reject the
+   * follow-up license sync as stale (#1483). Best-effort — its failure never
+   * fails an otherwise-successful sign-in.
+   */
+  onSignInComplete?: () => void | Promise<void>;
 }
 
 // Module-level so remounts cannot reset the one-time-ticket guard.
@@ -110,6 +117,9 @@ export async function consumeDesktopAuthCallback(
 
     options.clearExpectedState();
     clearDesktopAuthError();
+    // Sign-in is fully activated; retiring the sign-out marker is best-effort
+    // and must not surface as a sign-in failure.
+    await Promise.resolve(options.onSignInComplete?.()).catch(() => {});
   } catch (err) {
     const reason = reasonFromUnknown(err, 'The sign-in ticket exchange failed unexpectedly.');
     console.error('[auth] ticket exchange threw:', err);
