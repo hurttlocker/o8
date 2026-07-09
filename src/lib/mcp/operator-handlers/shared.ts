@@ -241,7 +241,7 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
   ) {
     return value;
   }
-  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok"');
+  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok", "pi"');
 }
 
 export function parseIssueList(value: unknown) {

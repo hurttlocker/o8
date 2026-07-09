@@ -833,7 +833,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.defaultDispatchRuntime !== undefined) {
     if (!isDispatchRuntime(update.defaultDispatchRuntime)) {
-      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "opencode", "cursor", "grok".');
+      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "opencode", "cursor", "grok", "pi".');
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
     stored.defaultDispatchRuntimeExplicit = true;

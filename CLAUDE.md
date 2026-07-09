@@ -93,7 +93,7 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Go
 
 Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-Six adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `cursor.ts`, `grok.ts`. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+Seven adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `cursor.ts`, `grok.ts`, `pi.ts` (plus the `antigravity` discovery skeleton). All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
 
@@ -325,7 +325,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 **~74 feature domains.** This grew fast; the canonical list is `ls src/lib/`. Don't try to enumerate every dir here — point at it and call out the load-bearing ones:
 
-- **Runtime layer**: `runtimes/` (6 adapters: codex, claude-code, gemini, opencode, cursor, grok), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`.
+- **Runtime layer**: `runtimes/` (7 adapters: codex, claude-code, gemini, opencode, cursor, grok, pi + antigravity skeleton), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`, `pi/`.
 - **Dispatch + lanes**: `lane/` (single-lane logic incl. `worktree-side-merge.ts` + `codex-orchestrator-session.ts`), `lanes/` (multi-lane fleet view), `dispatch/`, `supervisor/`, `intake/`.
 - **Orchestrator**: `orchestrator/` (types, backends, runtime-capabilities, auto-compact), `agents/`.
 - **Cortex v2**: `cortex/` (see "Cortex v2" section above — directives, ledger, qa, embeddings, indexer, ingest).

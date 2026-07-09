@@ -88,7 +88,7 @@ export function useWorkspaceChatPane({
   const chatRuntime = (
     tab.orchestrationPacket?.runtime
     ?? tab.chatRuntime
-  ) as 'codex' | 'claude-code' | 'gemini' | 'opencode' | undefined;
+  ) as 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'pi' | undefined;
   const chatSessionKey = tab.chatSessionKey;
   const linkedIssue = tab.linkedIssue ?? null;
   const normalizedSessionKey = useMemo(

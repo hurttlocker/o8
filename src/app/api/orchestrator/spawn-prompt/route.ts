@@ -15,7 +15,7 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_uti
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok']);
+const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi']);
 
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
   if (typeof value === 'string' && VALID_REQUESTED_RUNTIMES.has(value as OrchestratorRuntime)) {
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(requestedRuntimeRaw);
   if (!requestedRuntime) {
-    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode", "cursor", "grok".', 400);
+    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode", "cursor", "grok", "pi".', 400);
   }
   const defaults = getOperatorDefaultsSync().values;
   const profileRouting = resolveSubscriptionProfileRouting({
