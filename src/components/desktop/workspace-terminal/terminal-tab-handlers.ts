@@ -12,6 +12,7 @@ import type {
   LocalhostPreview,
   RegisteredRepo,
   TerminalTab,
+  WorkspaceChatRuntime,
 } from '@/components/desktop/workspace-terminal/types';
 import {
   buildCheckpointLabel,
@@ -99,7 +100,7 @@ export function computeNewTerminalTab(
 /* ------------------------------------------------------------------ */
 
 export function buildNewChatTab(
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
+  runtime: Exclude<WorkspaceChatRuntime, 'chat'>,
   repo?: RegisteredRepo,
 ): TerminalTab {
   const tabId = createWorkspaceTabId('chat');
@@ -114,6 +115,10 @@ export function buildNewChatTab(
       ? GEMINI_CLI_MODELS[0].id
       : runtime === 'opencode'
         ? getOpenCodeModels([])[0].id
+        : runtime === 'cursor'
+          ? 'cli:cursor:default'
+          : runtime === 'grok'
+            ? 'cli:grok:default'
         : CODEX_CLI_MODELS[0].id;
   return {
     id: tabId,

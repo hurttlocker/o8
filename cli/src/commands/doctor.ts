@@ -138,7 +138,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
   if (serverReachable) {
     try {
       const res = await apiFetch<{ tools: DetectRuntime[] }>(cfg, '/api/setup/detect');
-      const ids = ['codex', 'claude-code', 'gemini', 'opencode'];
+      const ids = ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok'];
       runtimes = (res.data?.tools ?? []).filter((t) => ids.includes(t.id));
     } catch {
       // best-effort; server reachability is already reported above

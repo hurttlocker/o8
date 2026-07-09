@@ -3,6 +3,8 @@ import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import { getOwnedGeminiRuntimeTail } from '@/lib/gemini/owned';
 import { getOwnedOpencodeRuntimeTail } from '@/lib/opencode/owned';
+import { getOwnedCursorRuntimeTail } from '@/lib/cursor/owned';
+import { getOwnedGrokRuntimeTail } from '@/lib/grok/owned';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import '@/lib/runtimes'; // Ensure runtimes are registered
@@ -92,13 +94,15 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Owned CLI sessions (codex / gemini / opencode) — identical tail shape
+    // Owned CLI sessions — identical tail shape
     // since they share the owned-session-store primitive. Build a chat-style
     // flat transcript for any of the three owned prefixes.
     const ownedMatch =
       sessionKey.startsWith('codex-owned:') ? { tail: await getOwnedCodexRuntimeTail(sessionKey), kind: 'codex' as const }
       : sessionKey.startsWith('gemini-owned:') ? { tail: await getOwnedGeminiRuntimeTail(sessionKey), kind: 'gemini' as const }
       : sessionKey.startsWith('opencode-owned:') ? { tail: await getOwnedOpencodeRuntimeTail(sessionKey), kind: 'opencode' as const }
+      : sessionKey.startsWith('cursor-owned:') ? { tail: await getOwnedCursorRuntimeTail(sessionKey), kind: 'cursor' as const }
+      : sessionKey.startsWith('grok-owned:') ? { tail: await getOwnedGrokRuntimeTail(sessionKey), kind: 'grok' as const }
       : null;
 
     if (ownedMatch) {
@@ -110,6 +114,8 @@ export async function GET(request: NextRequest) {
       const noiseMarkers =
         kind === 'codex' ? ['Usage •', 'Owned Codex session', 'Codex run launched']
         : kind === 'gemini' ? ['Usage •', 'Owned Gemini session', 'Gemini run launched', 'Rate limited', 'Silent exit']
+        : kind === 'cursor' ? ['Usage •', 'Owned Cursor session', 'Cursor run launched']
+        : kind === 'grok' ? ['Usage •', 'Owned Grok Build session', 'Grok run launched']
         : ['Usage •', 'Owned opencode session', 'opencode run launched'];
 
       for (const group of groups) {

@@ -47,7 +47,7 @@ import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 
 // ── Types ──
 
-type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
+type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
 type LaneOwnership = 'managed' | 'attached';
 
 interface LaneSummary {

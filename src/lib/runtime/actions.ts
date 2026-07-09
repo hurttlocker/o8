@@ -442,11 +442,13 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   // attach the session itself. We only auto-wrap launches that got a worktree;
   // un-isolated scratch runs still fall through without a lane.
   let laneId: string | null = payload.existingLaneId ?? null;
-  const laneRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | null =
+  const laneRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok' | null =
     runtimeId === 'codex' ? 'codex'
     : runtimeId === 'claude-code' ? 'claude-code'
     : runtimeId === 'gemini' ? 'gemini'
     : runtimeId === 'opencode' ? 'opencode'
+    : runtimeId === 'cursor' ? 'cursor'
+    : runtimeId === 'grok' ? 'grok'
     : null;
   if (!laneId && launchWorktree?.worktree && laneRuntime) {
     try {

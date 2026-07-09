@@ -165,6 +165,8 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
     'claude-code': emptyRuntimeTokenSummary(),
     gemini: emptyRuntimeTokenSummary(),
     opencode: emptyRuntimeTokenSummary(),
+    cursor: emptyRuntimeTokenSummary(),
+    grok: emptyRuntimeTokenSummary(),
   };
 
   let totalCostUsd = 0;

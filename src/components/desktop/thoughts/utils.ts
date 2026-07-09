@@ -6,7 +6,7 @@ import type {
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
 
-const VALID_ORCHESTRATOR_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+const VALID_ORCHESTRATOR_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok']);
 
 function coerceAgentRuntime(value?: string | null): OrchestratorRuntime {
   if (value && VALID_ORCHESTRATOR_RUNTIMES.has(value as OrchestratorRuntime)) {
