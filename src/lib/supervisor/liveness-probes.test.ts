@@ -233,3 +233,39 @@ describe('runLivenessProbeSweep', () => {
     expect(inboxItem(item.id)?.payload.autoResolution).toBeUndefined();
   });
 });
+
+describe('subject-gone TTL fallthrough', () => {
+  it('expires a merge_blocked card whose packet left the control plane after 7 days, with evidence', async () => {
+    const { runLivenessProbeSweep } = await import('./liveness-probes');
+    const { enqueueInboxItem, listInboxItems } = await import('./inbox');
+    const item = enqueueInboxItem({
+      repoPath: '/tmp/o8-liveness-subject-gone',
+      packetId: 'pkt-subject-gone-ttl',
+      kind: 'merge_blocked',
+      payload: { stage: 'pre_launch_rebase', branch: 'inline/gone-branch', baseBranch: 'main' },
+      status: 'human_required',
+    });
+    const eightDays = new Date(Date.now() + 8 * 24 * 60 * 60_000);
+    const result = await runLivenessProbeSweep({ now: eightDays });
+    expect(result.resolved).toBeGreaterThanOrEqual(1);
+    const after = listInboxItems({ includeDismissed: true, includeAllProjects: true }).find((row) => row.id === item.id);
+    expect(after?.status).not.toBe('human_required');
+    expect(JSON.stringify(after?.payload ?? {})).toContain('subject_gone_ttl');
+  });
+
+  it('keeps a young subject-gone card human_required (under TTL)', async () => {
+    const { runLivenessProbeSweep } = await import('./liveness-probes');
+    const { enqueueInboxItem, listInboxItems } = await import('./inbox');
+    const item = enqueueInboxItem({
+      repoPath: '/tmp/o8-liveness-subject-gone-young',
+      packetId: 'pkt-subject-gone-young',
+      kind: 'session_lost',
+      payload: {},
+      status: 'human_required',
+    });
+    const result = await runLivenessProbeSweep({ now: new Date() });
+    void result;
+    const after = listInboxItems({ includeAllProjects: true }).find((row) => row.id === item.id);
+    expect(after?.status).toBe('human_required');
+  });
+});
