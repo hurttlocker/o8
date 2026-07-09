@@ -740,16 +740,34 @@ pub fn maybe_speak_filler(spoke: &mut bool, tool_name: &str) {
 /// the live mic isn't dead air while Opus thinks). Deterministic rotation (no
 /// rng dependency); resets per process.
 pub fn speak_filler_now() {
-    const FILLERS: [&str; 6] = [
+    // A small pool of warm, short fillers so the ack isn't always "One sec."
+    // (operator ask 2026-07-08 — "add some more lingo in there"). All ≤4 words
+    // and TTS-safe: no em-dashes / slang the voice mangles.
+    const FILLERS: [&str; 8] = [
         "One sec.",
         "On it.",
-        "Let me take a look.",
+        "Right away.",
+        "Working on it.",
+        "Let me look.",
+        "Give me a sec.",
         "Checking now.",
-        "Sec — pulling that up.",
-        "Let me see what I've got.",
+        "Pulling that up.",
     ];
-    static FILLER_IDX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let i = FILLER_IDX.fetch_add(1, Ordering::Relaxed) % FILLERS.len();
+    // Time-seeded pick that never repeats the previous filler (persist the last
+    // index across calls). Sentinel MAX = "no previous", so even the FIRST ack
+    // after launch is randomized — not deterministically "One sec.".
+    static LAST_IDX: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as usize)
+        .unwrap_or(0);
+    let prev = LAST_IDX.load(Ordering::Relaxed);
+    let mut i = seed % FILLERS.len();
+    if i == prev {
+        i = (i + 1) % FILLERS.len();
+    }
+    LAST_IDX.store(i, Ordering::Relaxed);
     crate::tts::playback::play_thread(FILLERS[i].to_string(), crate::tts::load_config());
 }
 
