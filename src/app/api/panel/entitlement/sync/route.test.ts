@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -43,6 +43,15 @@ vi.mock('@/lib/entitlement/store', () => ({
 function sessionToken(iat: number): string {
   const payload = Buffer.from(JSON.stringify({ iat })).toString('base64url');
   return `header.${payload}.signature`;
+}
+
+function markerPath(): string {
+  if (!tempDataDir) throw new Error('temp data dir not initialized');
+  return path.join(tempDataDir, 'auth-signed-out-at');
+}
+
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
 async function post(body: unknown, token = sessionToken(20)) {
@@ -127,5 +136,52 @@ describe('entitlement sync route', () => {
     expect(clearFounderRecordMock).toHaveBeenCalledOnce();
     expect(writeCachedEntitlementMock).not.toHaveBeenCalled();
     expect(writeFounderRecordMock).not.toHaveBeenCalled();
+  });
+
+  // ── Sign-out marker hygiene (#1483 — auto-signout loop) ──────────────────
+  describe('sign-out marker hygiene', () => {
+    it('retires the marker on the desktop sign-in callback action', async () => {
+      writeFileSync(markerPath(), `${nowSeconds()}\n`);
+      const response = await post({ clearSignInMarker: true });
+      const data = await response.json();
+
+      expect(data.ok).toBe(true);
+      expect(existsSync(markerPath())).toBe(false);
+    });
+
+    it('still rejects a genuinely stale pre-sign-out token against a recent marker', async () => {
+      const now = nowSeconds();
+      writeFileSync(markerPath(), `${now}\n`);
+      // Token issued BEFORE the sign-out — the guard must still block it.
+      const response = await post({ clerkUserId: 'user_founder' }, sessionToken(now - 60));
+      const data = await response.json();
+
+      expect(response.status).toBe(401);
+      expect(data.reason).toBe('stale_session');
+    });
+
+    it('ignores a marker older than the max age so a fresh session is never purged forever', async () => {
+      const eightDaysAgo = nowSeconds() - 8 * 24 * 60 * 60;
+      writeFileSync(markerPath(), `${eightDaysAgo}\n`);
+      // Even a token whose iat predates the (expired) marker must sync — the
+      // stale marker self-expires instead of trapping the account in a loop.
+      const response = await post({ clerkUserId: 'user_founder' }, sessionToken(eightDaysAgo - 100));
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.ok).toBe(true);
+      expect(existsSync(markerPath())).toBe(false);
+    });
+
+    it('clears the marker after a successful subject-matched sync', async () => {
+      const now = nowSeconds();
+      writeFileSync(markerPath(), `${now - 3600}\n`); // 1h ago — within max age
+      const response = await post({ clerkUserId: 'user_founder' }, sessionToken(now)); // fresh token
+      const data = await response.json();
+
+      expect(data.ok).toBe(true);
+      expect(writeCachedEntitlementMock).toHaveBeenCalledOnce();
+      expect(existsSync(markerPath())).toBe(false);
+    });
   });
 });

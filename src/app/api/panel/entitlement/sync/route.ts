@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,6 +27,8 @@ interface AccountLicenseResponse {
 interface SyncBody {
   signedOut?: unknown;
   clerkUserId?: unknown;
+  /** Set by the desktop sign-in callback to retire the sign-out marker (#1483). */
+  clearSignInMarker?: unknown;
 }
 
 function dataDir(): string {
@@ -36,6 +38,15 @@ function dataDir(): string {
 function signOutMarkerPath(): string {
   return path.join(dataDir(), 'auth-signed-out-at');
 }
+
+// The sign-out marker only guards the brief window between an explicit sign-out
+// and the next sign-in: it stops a lingering pre-sign-out session token from
+// silently re-applying a license. Past that window it has outlived its purpose.
+// Without an upper bound a marker — which the client purge path itself re-stamps
+// to "now" on every stale_session response — can keep rejecting freshly-issued
+// session tokens whose iat lands just before it, auto-signing-out a legitimate
+// user forever with zero action (#1483). Any marker older than this is ignored.
+const SIGN_OUT_MARKER_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 function markSignedOut(): void {
   try {
@@ -47,10 +58,24 @@ function markSignedOut(): void {
   }
 }
 
+function clearSignOutMarker(): void {
+  try {
+    rmSync(signOutMarkerPath(), { force: true });
+  } catch (error) {
+    console.error('[entitlement] failed to clear sign-out marker:', error);
+  }
+}
+
 function readSignedOutAt(): number | null {
   try {
     const parsed = Number(readFileSync(signOutMarkerPath(), 'utf8').trim());
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    // Self-expire a stale marker so it can never purge a future session.
+    if (Math.floor(Date.now() / 1000) - parsed > SIGN_OUT_MARKER_MAX_AGE_SECONDS) {
+      clearSignOutMarker();
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -89,6 +114,14 @@ export async function POST(request: Request) {
     if (body?.signedOut === true) {
       markSignedOut();
       return clearSignedOutEntitlement('signed_out');
+    }
+    // Desktop sign-in just completed a fresh ticket exchange — retire the marker
+    // deterministically so the follow-up license sync can't be rejected as
+    // stale (#1483). Single-shot: fires on every real sign-in, independent of
+    // the marker's own age or the incoming token's iat.
+    if (body?.clearSignInMarker === true) {
+      clearSignOutMarker();
+      return NextResponse.json({ ok: true });
     }
     const activeClerkUserId = typeof body?.clerkUserId === 'string' ? body.clerkUserId.trim() : '';
 
@@ -137,6 +170,9 @@ export async function POST(request: Request) {
     // Signed in but no paid entitlement on this account — fine; the free-token
     // path covers them. Clear any stale founder badge and report success.
     if (res.status === 404) {
+      // A fresh authenticated session for this account is confirmed — the
+      // sign-out marker has served its purpose (#1483).
+      clearSignOutMarker();
       clearCachedEntitlement();
       clearFounderRecord();
       const entitlement = await getEntitlement();
@@ -173,6 +209,11 @@ export async function POST(request: Request) {
       licenseKey: license,
     });
     if (!wrote) return NextResponse.json({ ok: false, reason: 'failed_to_persist' });
+
+    // Verified, subject-matched license persisted for a fresh session — the
+    // sign-out marker has served its purpose and must not linger to purge a
+    // later reload (#1483).
+    clearSignOutMarker();
 
     // Founding Operator → stamp the local badge record; otherwise clear it.
     const founder = data.founder;

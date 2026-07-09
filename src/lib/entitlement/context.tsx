@@ -25,6 +25,8 @@ import {
   useMemo,
 } from 'react';
 
+import { useO8Auth } from '@/components/auth/O8AuthProvider';
+
 import { resolveFlags } from './flags';
 import type { EntitlementFlags, FounderInfo, Plan } from './types';
 
@@ -85,9 +87,20 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
   const [founder, setFounder] = useState<FounderInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // In desktop native mode server-side auth() can't see the Clerk session (it
+  // lives in the Tauri store), so forward the clerk-js-known subject to the GET
+  // route as evidence — a genuine cross-user mismatch still drops the cached
+  // license, while an unknown subject keeps it (#1483). Null when signed-out /
+  // Clerk-disabled / still loading; that path keeps the license by design.
+  const { user } = useO8Auth();
+  const activeSubject = user?.id ?? null;
+
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/panel/entitlement', { cache: 'no-store' });
+      const url = activeSubject
+        ? `/api/panel/entitlement?subject=${encodeURIComponent(activeSubject)}`
+        : '/api/panel/entitlement';
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`entitlement fetch failed: ${res.status}`);
       const data = (await res.json()) as EntitlementResponse;
       const nextPlan = coercePlan(data.plan);
@@ -111,7 +124,7 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeSubject]);
 
   // Initial load.
   useEffect(() => {
