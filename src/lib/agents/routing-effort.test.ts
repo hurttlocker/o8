@@ -42,11 +42,11 @@ describe('resolveWorkerRouting — effort per-runtime', () => {
     expect(resolveWorkerRouting({ requestedEffort: 'low' }).selectedEffort).toBe('low');
   });
 
-  it('gemini has no reasoning-effort surface → selectedEffort null (no-op), request still recorded', () => {
+  it('gemini is retired → request falls back to codex, effort applies there, ask preserved', () => {
     const r = resolveWorkerRouting({ requestedRuntime: 'gemini', requestedEffort: 'high' });
-    expect(r.selectedRuntime).toBe('gemini');
-    expect(r.selectedEffort).toBeNull();
-    expect(r.requestedEffort).toBe('high'); // the ask is preserved even though it's a no-op
+    expect(r.selectedRuntime).toBe('codex'); // retired runtimes reroute to the default workhorse
+    expect(r.selectedEffort).toBe('high'); // codex has an effort surface, so the ask lands
+    expect(r.requestedEffort).toBe('high');
   });
 
   it('opencode → no-op too', () => {
