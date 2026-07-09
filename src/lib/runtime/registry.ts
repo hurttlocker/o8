@@ -11,6 +11,7 @@ const execFileAsync = promisify(execFile);
 const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
   codex: ['codex'],
   gemini: ['gemini'],
+  antigravity: ['agy', 'antigravity'],
   opencode: ['opencode'],
   cursor: ['cursor-agent'],
   grok: ['grok'],

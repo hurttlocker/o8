@@ -650,7 +650,7 @@ export function useWorkspaceTerminal({
     packetReferenceLabel?: string | null;
     packetTitle?: string | null;
     sessionKey: string;
-    runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+    runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
     repoPath: string;
     status?: string | null;
     branch?: string | null;

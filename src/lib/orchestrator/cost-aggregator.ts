@@ -164,6 +164,7 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
     codex: emptyRuntimeTokenSummary(),
     'claude-code': emptyRuntimeTokenSummary(),
     gemini: emptyRuntimeTokenSummary(),
+    antigravity: emptyRuntimeTokenSummary(),
     opencode: emptyRuntimeTokenSummary(),
     cursor: emptyRuntimeTokenSummary(),
     grok: emptyRuntimeTokenSummary(),
