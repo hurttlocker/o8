@@ -31,12 +31,23 @@ import { resolveFlags } from './flags';
 import type { EntitlementFlags, FounderInfo, Plan } from './types';
 
 interface EntitlementContextValue {
+  /** EFFECTIVE plan — after the dev "view-as" min-clamp (#1517). */
   plan: Plan;
   flags: EntitlementFlags;
   isPro: boolean;
   isTeam: boolean;
-  /** Founding Operator status (cosmetic) — null unless this account is a founder. */
+  /**
+   * EFFECTIVE Founding Operator status (cosmetic) — null unless this account is
+   * a founder AND no view-as override is downclamping. Feature gates read this
+   * so founder surfaces hide faithfully while viewing-as-free.
+   */
   founder: FounderInfo | null;
+  /** Real plan BEFORE the view-as clamp — for the dev-switch / billing surfaces. */
+  actualPlan: Plan;
+  /** Real Founding Operator record (never suppressed) — gates the dev switch. */
+  actualFounder: FounderInfo | null;
+  /** True while a `~/.o8/dev-plan-override` view-as switch is active. */
+  overrideActive: boolean;
   loading: boolean;
 }
 
@@ -48,6 +59,9 @@ const EntitlementContext = createContext<EntitlementContextValue>({
   isPro: false,
   isTeam: false,
   founder: null,
+  actualPlan: 'free',
+  actualFounder: null,
+  overrideActive: false,
   loading: true,
 });
 
@@ -65,6 +79,9 @@ interface EntitlementResponse {
   flags?: unknown;
   source?: unknown;
   founder?: FounderResponse | null;
+  actualPlan?: unknown;
+  actualFounder?: FounderResponse | null;
+  overrideActive?: unknown;
 }
 
 function coercePlan(value: unknown): Plan {
@@ -85,6 +102,9 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
   const [plan, setPlan] = useState<Plan>('free');
   const [flags, setFlags] = useState<EntitlementFlags>(FREE_FLAGS);
   const [founder, setFounder] = useState<FounderInfo | null>(null);
+  const [actualPlan, setActualPlan] = useState<Plan>('free');
+  const [actualFounder, setActualFounder] = useState<FounderInfo | null>(null);
+  const [overrideActive, setOverrideActive] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // In desktop native mode server-side auth() can't see the Clerk session (it
@@ -109,6 +129,11 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
       // single source of truth (flags.ts), even if the payload is partial.
       setFlags(resolveFlags(nextPlan));
       setFounder(coerceFounder(data.founder));
+      // View-as (#1517): the server already clamped `plan`/`flags`/`founder` to
+      // the effective (free) view; keep the real state for the dev-switch gate.
+      setActualPlan(coercePlan(data.actualPlan));
+      setActualFounder(coerceFounder(data.actualFounder));
+      setOverrideActive(data.overrideActive === true);
       // First-run: no token yet (source 'default') → issue a free account token
       // in the background so this install has a stable `sub` for usage
       // attribution + can reach the managed proxy. Idempotent + fail-soft.
@@ -121,6 +146,9 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
       setPlan('free');
       setFlags(FREE_FLAGS);
       setFounder(null);
+      setActualPlan('free');
+      setActualFounder(null);
+      setOverrideActive(false);
     } finally {
       setLoading(false);
     }
@@ -148,9 +176,12 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
       isPro: plan === 'pro' || plan === 'team',
       isTeam: plan === 'team',
       founder,
+      actualPlan,
+      actualFounder,
+      overrideActive,
       loading,
     }),
-    [plan, flags, founder, loading],
+    [plan, flags, founder, actualPlan, actualFounder, overrideActive, loading],
   );
 
   return (

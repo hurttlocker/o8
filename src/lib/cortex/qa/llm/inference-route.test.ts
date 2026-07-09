@@ -7,6 +7,12 @@ vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({
 vi.mock('@/lib/entitlement/license', () => ({
   readCachedEntitlement: vi.fn(),
 }));
+// planToken() now gates the managed proxy on the RESOLVED entitlement (which
+// applies the #1517 view-as clamp), not the raw file plan — so drive
+// getEntitlementSync too. The `setEnt` helper keeps both mocks consistent.
+vi.mock('@/lib/entitlement/store', () => ({
+  getEntitlementSync: vi.fn(),
+}));
 vi.mock('@/lib/operator/defaults', () => ({
   resolveLocalInferenceBaseUrlSync: vi.fn(),
   resolveLocalChatModelSync: vi.fn(),
@@ -14,6 +20,9 @@ vi.mock('@/lib/operator/defaults', () => ({
 
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
+import { getEntitlementSync } from '@/lib/entitlement/store';
+import { resolveFlags } from '@/lib/entitlement/flags';
+import type { Plan } from '@/lib/entitlement/types';
 import {
   resetLocalInferenceProbeCacheForTests,
   resolveEmbedRoute,
@@ -26,8 +35,31 @@ import {
 
 const mockKey = vi.mocked(resolveOpenRouterKey);
 const mockEnt = vi.mocked(readCachedEntitlement);
+const mockStore = vi.mocked(getEntitlementSync);
 const mockLocalBaseUrl = vi.mocked(resolveLocalInferenceBaseUrlSync);
 const mockLocalChatModel = vi.mocked(resolveLocalChatModelSync);
+
+/**
+ * Set the cached entitlement AND the resolved entitlement together, so the
+ * managed-proxy gate (getEntitlementSync().flags['proxy.inference']) tracks the
+ * mocked plan. `overridePlan` simulates the #1517 view-as clamp.
+ */
+function setEnt(
+  ent: { plan?: Plan; licenseKey?: string } | null,
+  overridePlan: Plan | null = null,
+) {
+  mockEnt.mockReturnValue(ent as ReturnType<typeof readCachedEntitlement>);
+  const realPlan: Plan = ent?.plan ?? 'free';
+  const rank: Record<Plan, number> = { free: 0, pro: 1, team: 2, founder: 3 };
+  const effective: Plan = overridePlan && rank[overridePlan] < rank[realPlan] ? overridePlan : realPlan;
+  mockStore.mockReturnValue({
+    plan: effective,
+    flags: resolveFlags(effective),
+    source: 'file',
+    actualPlan: realPlan,
+    overrideActive: overridePlan !== null,
+  });
+}
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -47,6 +79,9 @@ describe('inference-route', () => {
     delete process.env.O8_PROXY_URL;
     mockLocalBaseUrl.mockReturnValue('');
     mockLocalChatModel.mockReturnValue('');
+    // Default: free / no token. planToken() reads getEntitlementSync(), which
+    // runs before the BYO-key fallback, so every test needs a resolved state.
+    setEnt(null);
   });
 
   describe('resolveOpenRouterRoute', () => {
@@ -60,7 +95,7 @@ describe('inference-route', () => {
 
     it('routes to PROXY when no local key but a plan token exists', async () => {
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
+      setEnt({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('proxy');
       expect(route?.url).toContain('/v1/inference');
@@ -71,13 +106,13 @@ describe('inference-route', () => {
 
     it('returns null when there is neither a key nor a token', async () => {
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue(null);
+      setEnt(null);
       expect(await resolveOpenRouterRoute()).toBeNull();
     });
 
     it('routes plan-token users to PROXY before a local OpenRouter key', async () => {
       mockKey.mockResolvedValue('sk-local-key');
-      mockEnt.mockReturnValue({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
+      setEnt({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('proxy');
       expect(route?.url).toContain('/v1/inference');
@@ -85,21 +120,30 @@ describe('inference-route', () => {
 
     it('ignores a malformed plan token (not a 3-part JWT)', async () => {
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue({ plan: 'pro', licenseKey: 'not-a-jwt' });
+      setEnt({ plan: 'pro', licenseKey: 'not-a-jwt' });
+      expect(await resolveOpenRouterRoute()).toBeNull();
+    });
+
+    it('drops the managed proxy when "View as Free" downclamps a founder (#1517)', async () => {
+      // Real founder + valid token, but the view-as override forces free → the
+      // managed proxy is NOT used; with no local key/endpoint we return null so
+      // the Brain falls through to the free CLI tiers.
+      mockKey.mockResolvedValue(null);
+      setEnt({ plan: 'founder', licenseKey: 'aaa.bbb.ccc' }, 'free');
       expect(await resolveOpenRouterRoute()).toBeNull();
     });
 
     it('respects the O8_PROXY_URL override (trailing slash trimmed)', async () => {
       process.env.O8_PROXY_URL = 'https://proxy.example.com/';
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue({ plan: 'pro', licenseKey: 'a.b.c' });
+      setEnt({ plan: 'pro', licenseKey: 'a.b.c' });
       const route = await resolveOpenRouterRoute();
       expect(route?.url).toBe('https://proxy.example.com/v1/inference');
     });
 
     it('routes LOCAL when a free user has a configured live local endpoint', async () => {
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue(null);
+      setEnt(null);
       mockLocalBaseUrl.mockReturnValue('http://localhost:11434/');
       mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
       const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
@@ -120,7 +164,7 @@ describe('inference-route', () => {
 
     it('falls through to DIRECT when configured local is dead', async () => {
       mockKey.mockResolvedValue('sk-local-key');
-      mockEnt.mockReturnValue(null);
+      setEnt(null);
       mockLocalBaseUrl.mockReturnValue('http://localhost:11434');
       mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
@@ -132,7 +176,7 @@ describe('inference-route', () => {
 
     it('returns null instead of LOCAL when configured local is dead and no BYO key exists', async () => {
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue(null);
+      setEnt(null);
       mockLocalBaseUrl.mockReturnValue('http://localhost:11434');
       mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, { error: 'down' })));
@@ -142,7 +186,7 @@ describe('inference-route', () => {
 
     it('routes plan-token founders to PROXY, not LOCAL, even when local is configured and alive', async () => {
       mockKey.mockResolvedValue(null);
-      mockEnt.mockReturnValue({ plan: 'founder', licenseKey: 'aaa.bbb.ccc' });
+      setEnt({ plan: 'founder', licenseKey: 'aaa.bbb.ccc' });
       mockLocalBaseUrl.mockReturnValue('http://localhost:11434');
       mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
       const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
@@ -160,7 +204,7 @@ describe('inference-route', () => {
   describe('resolveEmbedRoute', () => {
     it('routes DIRECT with a local Gemini key (key in the query string)', () => {
       process.env.GEMINI_API_KEY = 'g-local';
-      mockEnt.mockReturnValue(null);
+      setEnt(null);
       const route = resolveEmbedRoute('gemini-embedding-001');
       expect(route?.via).toBe('direct');
       expect(route?.url).toContain('generativelanguage.googleapis.com');
@@ -169,7 +213,7 @@ describe('inference-route', () => {
     });
 
     it('routes to PROXY (Bearer) when no Gemini key but a plan token exists', () => {
-      mockEnt.mockReturnValue({ plan: 'pro', licenseKey: 'a.b.c' });
+      setEnt({ plan: 'pro', licenseKey: 'a.b.c' });
       const route = resolveEmbedRoute('gemini-embedding-001');
       expect(route?.via).toBe('proxy');
       expect(route?.url).toContain('/v1/embeddings');
@@ -177,7 +221,7 @@ describe('inference-route', () => {
     });
 
     it('returns null when neither a Gemini key nor a token is present', () => {
-      mockEnt.mockReturnValue(null);
+      setEnt(null);
       expect(resolveEmbedRoute('gemini-embedding-001')).toBeNull();
     });
   });

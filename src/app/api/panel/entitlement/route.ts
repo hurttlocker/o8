@@ -39,10 +39,25 @@ export async function GET(request: Request) {
     const entitlement = await getEntitlement();
     // founder is cosmetic display metadata (Founding Operator #N) — null for
     // everyone who isn't a founder. The signed plan above is the real gate.
-    return NextResponse.json({ ...entitlement, founder: readFounderRecord() });
+    const actualFounder = readFounderRecord();
+    // View-as (#1517): when the dev override is downclamping the plan, present
+    // the EFFECTIVE view so every consumer that reads `plan`/`flags`/`founder`
+    // (settings gates, canvas glass, use-founder-status) sees the free
+    // experience with no per-callsite change. The real state stays available on
+    // `actualPlan` + `actualFounder` for the management/dev-switch surfaces.
+    const founder = entitlement.overrideActive ? null : actualFounder;
+    return NextResponse.json({ ...entitlement, founder, actualFounder });
   } catch (error) {
     console.error('[entitlement] route failed:', error);
-    return NextResponse.json({ plan: 'free', flags: resolveFlags('free'), source: 'default', founder: null });
+    return NextResponse.json({
+      plan: 'free',
+      flags: resolveFlags('free'),
+      source: 'default',
+      actualPlan: 'free',
+      overrideActive: false,
+      founder: null,
+      actualFounder: null,
+    });
   }
 }
 

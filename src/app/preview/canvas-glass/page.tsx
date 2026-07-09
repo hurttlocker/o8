@@ -69,6 +69,7 @@ import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { CanvasFeedbackButton } from './canvas-feedback';
+import { ViewAsFreeIndicator } from '@/components/desktop/ViewAsFreeIndicator';
 import { ProximityDock } from './proximity-dock';
 import { AnticipationRing } from './anticipation-ring';
 import { OrchestratorDock } from './dock';
@@ -4159,6 +4160,7 @@ export default function CanvasGlassPreviewPage() {
           ...glass(true),
         }}
       >
+        <ViewAsFreeIndicator palette="canvas" />
         <CanvasFeedbackButton />
         <button
           type="button"
