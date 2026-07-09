@@ -1,8 +1,7 @@
 import { getLaneEvents, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import { resolvePacketAdvisorEnabled } from '@/lib/orchestrator/advisor-access';
+import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
-import { resolvePacketHuddleEnabled } from '@/lib/orchestrator/huddle-access';
 
 export const HUDDLE_READY_EVENT_LABEL = 'huddle_ready';
 
@@ -44,18 +43,18 @@ export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<{ parked:
 
   // An explicit huddle packet is DESIGNED to produce a zero-diff alignment turn.
   // So is a single-sub cheap-tier worker: it's auto-armed with the SAME
-  // plan-then-stop alignment turn via the advisor prompt (resolvePacketAdvisorEnabled),
-  // so its zero-diff exit is equally EXPECTED. Park either for the orchestrator
-  // rather than classifying it `zero_diff_failed` (which structurally kills the
-  // steer path, #1496). Reuse the advisor predicate — never re-derive the tier
-  // logic here.
+  // plan-then-stop alignment turn via the advisor rule, so its zero-diff exit is
+  // equally EXPECTED. Park either for the orchestrator rather than classifying it
+  // `zero_diff_failed` (which structurally kills the steer path, #1496). Use the
+  // unified alignment resolver — the SAME OR + precedence buildPacketPrompt uses,
+  // so "did we arm an alignment turn?" can never disagree between the two.
   //
   // We previously ALSO required a persisted `huddle` report or a plan-like
   // transcript, but that gate false-failed real alignment exits: the headless
   // transcript drops (#1502) and workers sometimes report via
   // `needs_clarification` instead of `huddle`. So the readiness probe is now
   // only an observability annotation — never a reason to withhold parking.
-  const alignmentArmed = resolvePacketHuddleEnabled(packet) || resolvePacketAdvisorEnabled(packet);
+  const alignmentArmed = resolvePacketAlignment(packet).armed;
   if (!alignmentArmed) return { parked: false };
 
   const huddleReady = hasPersistedHuddleReport(lane.id) || await transcriptEndsWithPlan(lane);

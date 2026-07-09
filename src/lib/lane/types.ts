@@ -29,6 +29,7 @@ export type LaneStatus =
   | 'paused'          // agent idle, can resume
   | 'awaiting_input'  // agent needs a human decision
   | 'awaiting_orchestrator' // agent reported a blocker/question for o8
+  | 'awaiting_human'  // layer-5 escalation: orchestrator gave up, operator must decide (NOT terminal)
   | 'recovering'      // agent/session died; operator can retry the packet
   | 'reviewing'       // work done, review needed
   | 'merging'         // merge in progress
@@ -43,6 +44,7 @@ const LANE_STATUS_RECORD = {
   paused: true,
   awaiting_input: true,
   awaiting_orchestrator: true,
+  awaiting_human: true,
   recovering: true,
   reviewing: true,
   merging: true,

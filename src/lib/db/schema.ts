@@ -400,7 +400,7 @@ export const lanes = sqliteTable('lanes', {
   packetId: text('packet_id'),
   prNumber: integer('pr_number'),
   status: text('status', {
-    enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'recovering', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
+    enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human', 'recovering', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
   }).notNull(),
   ownership: text('ownership', { enum: ['managed', 'attached'] }).notNull(),
   writerToken: text('writer_token'),
@@ -746,13 +746,22 @@ export const artifacts = sqliteTable('artifacts', {
 
 /**
  * Schema v32 (#1497) — persisted idempotency keys for orchestrator control
- * verbs (steer / rerun / retry / dispatch). Replaces the in-memory-only guard
- * that (a) only covered merge and (b) evaporated on restart — a timed-out
- * rerun retry double-dispatched into two parallel clones. A row is RESERVED
- * (result_json NULL) the instant a verb starts and FINALIZED with the JSON
- * result on success; a concurrent duplicate that finds a reserved row is told
- * "in progress, not re-executed" instead of forking a second worker. Rows
- * self-expire via `expires_at` (~10-min TTL) and are pruned on access.
+ * verbs (steer / rerun / retry / dispatch — and, since v33, merge). Replaces
+ * the in-memory-only guard that (a) only covered merge and (b) evaporated on
+ * restart — a timed-out rerun retry double-dispatched into two parallel clones.
+ * A row is RESERVED (result_json NULL) the instant a verb starts and FINALIZED
+ * with the JSON result on success; a concurrent duplicate that finds a reserved
+ * row is told "in progress, not re-executed" instead of forking a second
+ * worker. Rows self-expire via `expires_at` (~10-min TTL) and are pruned on
+ * access.
+ *
+ * Schema v33 (#1513) — `pid` column: the process id that owns an in-flight
+ * reservation. The in-memory merge cache deliberately forgot in-flight merges
+ * on restart so the operator could retry immediately; the persisted store must
+ * not regress that. On store/DB init we reap reservations (result_json NULL)
+ * whose owning `pid` is dead (kill(pid,0)→ESRCH), so a restart-interrupted
+ * merge becomes immediately retryable while a LIVE in-flight duplicate is still
+ * deduped.
  */
 export const idempotencyKeys = sqliteTable('idempotency_keys', {
   /** Derived key: explicit client key, else hash(verb + scopeId + body). PK. */
@@ -762,6 +771,8 @@ export const idempotencyKeys = sqliteTable('idempotency_keys', {
   packetId: text('packet_id'),
   /** JSON-serialized original result. NULL while the verb is still in flight. */
   resultJson: text('result_json'),
+  /** OS pid that reserved the row. NULL for finalized rows / legacy inserts. */
+  pid: integer('pid'),
   /** ms-epoch stamps (integers, not ISO — this table is machine-only). */
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at').notNull(),
