@@ -5,9 +5,12 @@ import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
 import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 
 const TOKENS_PER_MILLION = 1_000_000;
-const DEFAULT_MODEL = 'grok-build';
-const INPUT_USD_PER_MILLION = 1;
-const OUTPUT_USD_PER_MILLION = 2;
+// grok-4.5 is the headline dispatched worker model (sub-billed via the SuperGrok
+// CLI). Pricing per xAI: $2 / $6 per 1M in/out (cache reads -90%). Used only for
+// cost-attribution display when the run log carries no embedded total_cost_usd.
+const DEFAULT_MODEL = 'grok-4.5';
+const INPUT_USD_PER_MILLION = 2;
+const OUTPUT_USD_PER_MILLION = 6;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

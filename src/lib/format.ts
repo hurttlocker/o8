@@ -5,6 +5,9 @@
 export function formatModelLabel(model: string): string {
   return model
     // Vendor-prefixed model ids from runtime and config surfaces
+    .replace('openai-codex/gpt-5.6-sol', 'Codex 5.6 Sol')
+    .replace('openai-codex/gpt-5.6-terra', 'Codex 5.6 Terra')
+    .replace('openai-codex/gpt-5.6-luna', 'Codex 5.6 Luna')
     .replace('openai-codex/gpt-5.5', 'Codex 5.5')
     .replace('openai-codex/gpt-5.4', 'Codex 5.4')
     .replace('openai-codex/gpt-5.3-codex', 'Codex 5.3')
@@ -19,6 +22,9 @@ export function formatModelLabel(model: string): string {
     .replace('anthropic/claude-haiku-4-5-20251001', 'Haiku 4.5')
     .replace('google/gemini-3-flash-preview', 'Gemini 3 Flash')
     // Bare forms (from live sessions)
+    .replace('gpt-5.6-sol', 'GPT-5.6 Sol')
+    .replace('gpt-5.6-terra', 'GPT-5.6 Terra')
+    .replace('gpt-5.6-luna', 'GPT-5.6 Luna')
     .replace('gpt-5.5', 'GPT-5.5')
     .replace('gpt-5.4', 'GPT-5.4')
     .replace('gpt-5.3-codex', 'Codex 5.3')
@@ -37,6 +43,7 @@ export function formatModelLabel(model: string): string {
     .replace('gemini-2.5-pro', 'Gemini 2.5 Pro')
     .replace('gemini-2.5-flash', 'Gemini 2.5 Flash')
     .replace('gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite')
+    .replace('grok-4.5', 'Grok 4.5')
     .replace('codex owned', 'Codex')
     .replace(/^openai-codex\//, '')
     .replace(/^anthropic\//, '')

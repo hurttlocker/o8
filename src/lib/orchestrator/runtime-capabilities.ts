@@ -36,15 +36,16 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     shortLabel: 'Codex',
     dispatchable: true,
     requiresModel: false,
-    // 2026-04-30: switched from 'gpt-5-codex' to 'gpt-5.5'. Upstream Codex API
-    // started returning HTTP 400 invalid_request_error "model is not supported
-    // when using Codex with a ChatGPT account" for gpt-5-codex. gpt-5.5 is the
-    // current supported model on ChatGPT-account Codex CLI.
-    defaultModel: MODEL_IDS.codexDefault,
+    // 2026-07-09: dispatched-worker default flipped to gpt-5.6-terra (Sonnet-class,
+    // ~half Sol's price). The codex ORCHESTRATOR default is gpt-5.6-sol (see
+    // MODEL_IDS.codexDefault); workers ride the cheaper Terra tier. gpt-5.5
+    // remains selectable. (History: gpt-5-codex → gpt-5.5 on 2026-04-30 after
+    // upstream 400'd gpt-5-codex on ChatGPT-account Codex CLI.)
+    defaultModel: MODEL_IDS.codexWorkerDefault,
     accentColor: '#2563eb', // blue — matches existing codex tone in display.ts
     binaryName: 'codex',
     tier: 'frontier',
-    description: 'GPT-5.5 coding agent via `codex exec --json`. Full-access sandbox, thread resume.',
+    description: 'GPT-5.6 coding agent via `codex exec --json` (Sol orchestration · Terra workers). Full-access sandbox, thread resume.',
   },
   'claude-code': {
     label: 'Claude Code',
@@ -135,11 +136,14 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     shortLabel: 'Grok',
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'grok-build',
+    // 2026-07-09: headline model is grok-4.5 (Opus-class, cheaper for context),
+    // passed to the `grok` CLI via `--model grok-4.5` — sub-billed through
+    // SuperGrok, not a metered API path. Frontier tier (Opus-class treatment).
+    defaultModel: MODEL_IDS.grokWorkerDefault,
     accentColor: '#16a34a',
     binaryName: 'grok',
     tier: 'frontier',
-    description: 'xAI Grok Build coding CLI with headless JSON-schema constrained output.',
+    description: 'xAI Grok Build coding CLI (grok-4.5) with headless JSON-schema output — sub-billed via SuperGrok.',
   },
 };
 

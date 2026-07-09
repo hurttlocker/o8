@@ -31,6 +31,9 @@ const CLAUDE_MODEL_MAP: Record<string, string> = {
 };
 
 const CODEX_MODEL_MAP: Record<string, string> = {
+  'gpt-5.6-sol': 'gpt-5.6-sol',
+  'gpt-5.6-terra': 'gpt-5.6-terra',
+  'gpt-5.6-luna': 'gpt-5.6-luna',
   'gpt-5.5': 'gpt-5.5',
   'gpt-5.4': 'gpt-5.4',
   'o4-mini': 'o4-mini',
@@ -115,7 +118,7 @@ export async function POST(request: Request) {
         }, { status: 410 });
       }
       case 'codex': {
-        const cliModel = CODEX_MODEL_MAP[modelKey] ?? 'gpt-5.5';
+        const cliModel = CODEX_MODEL_MAP[modelKey] ?? 'gpt-5.6-sol';
         cmd = 'codex';
         args = ['exec', '--json', '-c', `model="${cliModel}"`, '--', prompt];
         break;
