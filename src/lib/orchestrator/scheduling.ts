@@ -562,19 +562,33 @@ export async function runDispatchTick(
   const queue = [...dispatchablePackets];
   let launchedThisTick = 0;
   const runtimeCountsInTick: Partial<Record<OrchestratorRuntime, number>> = {};
+  const effectiveRuntimeByPacket = new Map<string, OrchestratorRuntime>();
   while (queue.length > 0 && launchedThisTick < maxLaunches) {
     const batch: typeof dispatchablePackets = [];
     const deferred: typeof dispatchablePackets = [];
     const runtimeCountsInBatch: Partial<Record<OrchestratorRuntime, number>> = {};
     const batchLimit = Math.min(parallelCap, maxLaunches - launchedThisTick);
     for (const candidate of queue) {
-      const runtime = candidate.packet.runtime;
+      // Budget against the EFFECTIVE runtime, not the persisted one: a packet
+      // stamped with a retired runtime (gemini) reroutes at dispatch (see
+      // dispatchPacket's resolveWorkerRouting), and its launch must count
+      // against the runtime it will actually run on — otherwise legacy packets
+      // bypass the workhorse's parallel budget.
+      const runtime = resolveWorkerRouting({
+        workerIntent: candidate.packet.workerIntent,
+        requestedProvider: candidate.packet.workerRouting?.requestedProvider,
+        requestedRuntime: candidate.packet.workerRouting?.requestedRuntime ?? candidate.packet.runtime,
+        requestedModel: candidate.packet.workerRouting?.requestedModel ?? candidate.packet.assignedModel,
+        source: 'scheduler-budget',
+      }).selectedRuntime;
+      effectiveRuntimeByPacket.set(candidate.packet.id, runtime);
       const perRuntimeCap = RUNTIME_PARALLEL_CAP[runtime];
       const perRuntimeBudget = options.launchBudget?.perRuntime?.[runtime];
       const hitRuntimeCap =
         perRuntimeCap !== undefined && (runtimeCountsInBatch[runtime] ?? 0) >= perRuntimeCap;
       const hitRuntimeBudget =
-        perRuntimeBudget !== undefined && (runtimeCountsInTick[runtime] ?? 0) >= perRuntimeBudget;
+        perRuntimeBudget !== undefined
+        && (runtimeCountsInTick[runtime] ?? 0) + (runtimeCountsInBatch[runtime] ?? 0) >= perRuntimeBudget;
       if (batch.length < batchLimit && !hitRuntimeCap && !hitRuntimeBudget) {
         batch.push(candidate);
         runtimeCountsInBatch[runtime] = (runtimeCountsInBatch[runtime] ?? 0) + 1;
@@ -587,7 +601,8 @@ export async function runDispatchTick(
     queue.push(...deferred);
     launchedThisTick += batch.length;
     for (const { packet } of batch) {
-      runtimeCountsInTick[packet.runtime] = (runtimeCountsInTick[packet.runtime] ?? 0) + 1;
+      const effective = effectiveRuntimeByPacket.get(packet.id) ?? packet.runtime;
+      runtimeCountsInTick[effective] = (runtimeCountsInTick[effective] ?? 0) + 1;
     }
     console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel (cap ${parallelCap}): ${batch.map(({ packet }) => packet.id).join(', ')}`);
 
