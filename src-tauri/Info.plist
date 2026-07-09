@@ -57,6 +57,17 @@
                 <string>public.text</string>
                 <string>public.source-code</string>
                 <string>public.plain-text</string>
+                <!-- Explicit UTIs: LaunchServices does NOT reliably surface
+                     Open With entries via public.data conformance alone —
+                     PNG/HTML were missing from the menu (operator 2026-07-09)
+                     despite the catch-all above. Images render via the file
+                     card / ImagePreview; HTML via HtmlPreview. -->
+                <string>public.image</string>
+                <string>public.html</string>
+                <string>public.xml</string>
+                <string>public.json</string>
+                <string>public.yaml</string>
+                <string>com.netscape.javascript-source</string>
             </array>
         </dict>
     </array>
