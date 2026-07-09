@@ -29,6 +29,7 @@ mod window_restore;
 // (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
 #[cfg(target_os = "macos")]
 mod entitlement;
+mod telemetry;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -956,6 +957,14 @@ fn spawn_bundled_ws_server(
             .env("O8_NODE_BIN", node_bin)
             .env("WS_PORT", ws_port.to_string())
             .env("NEXT_ORIGIN", next_origin)
+            // Packaged marker (parity with the next-server child, which gets it
+            // from the generated server.js wrapper). The Sentry telemetry layer
+            // gates on it — without this the ws-server surface stays dormant
+            // even in a packaged build with a baked DSN.
+            .env("O8_PACKAGED_APP", "1")
+            // App version for the telemetry release tag (the next-server child
+            // gets it baked into the server.js wrapper; ws-server has no wrapper).
+            .env("O8_APP_VERSION", env!("CARGO_PKG_VERSION"))
             // Issue #776: same sidecar marker as the next-server child.
             .env("O8_SIDECAR_PID", std::process::id().to_string());
         // Issue #935: same AI key forward for ws-server children.
@@ -4349,6 +4358,13 @@ fn take_pending_auth_callbacks() -> Vec<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Sentry (native shell). Dormant unless a RELEASE build baked a DSN; dev /
+    // `tauri dev` stay silent. Init FIRST so panics during startup are captured;
+    // hold the guard for the whole program so events flush on exit. Then export
+    // the DSN so the Next server + ws-server children inherit it.
+    let _sentry_guard = telemetry::init();
+    telemetry::export_dsn_to_env();
+
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
 
     if !preship_gate {

@@ -238,7 +238,7 @@ console.log('📦 Created frontend loader (port-probing)');
 // repo root (gitignored, deployment-specific — see o8.release.example.json).
 // Absent → nothing is stamped and the packaged build behaves exactly as today.
 function resolveReleaseConfig() {
-  const cfg = { githubOAuthClientId: '' };
+  const cfg = { githubOAuthClientId: '', sentryDsn: '' };
   const cfgPath = join(root, 'o8.release.json');
   if (existsSync(cfgPath)) {
     try {
@@ -246,12 +246,20 @@ function resolveReleaseConfig() {
       if (typeof parsed.githubOAuthClientId === 'string') {
         cfg.githubOAuthClientId = parsed.githubOAuthClientId.trim();
       }
+      // Sentry crash/error reporting DSN (telemetry ruling). Bound to the exact
+      // `sentryDsn` key the operator pastes into o8.release.json. Absent → the
+      // packaged build stays fully dormant (no Sentry init, no network).
+      if (typeof parsed.sentryDsn === 'string') {
+        cfg.sentryDsn = parsed.sentryDsn.trim();
+      }
     } catch (e) {
       console.warn('⚠️  o8.release.json parse failed — ignoring:', e.message);
     }
   }
   const fromEnv = process.env.GITHUB_OAUTH_CLIENT_ID?.trim();
   if (fromEnv) cfg.githubOAuthClientId = fromEnv;
+  const sentryFromEnv = process.env.SENTRY_DSN?.trim();
+  if (sentryFromEnv) cfg.sentryDsn = sentryFromEnv;
   return cfg;
 }
 const releaseConfig = resolveReleaseConfig();
@@ -268,6 +276,20 @@ if (releaseConfig.githubOAuthClientId) {
   console.log(`📦 Baking GITHUB_OAUTH_CLIENT_ID into server.js wrapper (device flow enabled)`);
 } else {
   console.log('📦 No GITHUB_OAUTH_CLIENT_ID configured — device flow stays disabled in this build');
+}
+
+// Bake the Sentry DSN so the Next server process (and, via inheritance, any
+// child it spawns) inits @sentry/node. The `if (!process.env…)` guard means the
+// Rust sidecar's O8_SENTRY_DSN (which it also passes to ws-server) wins when
+// present. Absent → the whole telemetry stack stays dormant.
+const SENTRY_ENV_STANZA = releaseConfig.sentryDsn
+  ? `\n// Sentry crash/error reporting DSN, baked at release build (telemetry ruling).\n` +
+    `if (!process.env.O8_SENTRY_DSN) process.env.O8_SENTRY_DSN = ${JSON.stringify(releaseConfig.sentryDsn)};\n`
+  : '';
+if (releaseConfig.sentryDsn) {
+  console.log('📦 Baking O8_SENTRY_DSN into server.js wrapper (Sentry enabled)');
+} else {
+  console.log('📦 No sentryDsn configured — Sentry stays dormant in this build');
 }
 
 // Bake the app version so both the boot crash guard below AND the server's
@@ -361,7 +383,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-${RELEASE_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
+${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
 process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
@@ -469,7 +491,14 @@ function compileServerBundle(label, entry, extraArgs = '') {
 // repo registry + lane tables) and node-pty is used by the terminal bridge.
 const NATIVE_EXTERNALS = '--external:node-pty --external:better-sqlite3 --external:bindings';
 
-compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
+// @sentry/node uses dynamic require-in-the-middle instrumentation that does not
+// bundle cleanly with esbuild — keep it external so ws-server.mjs `import()`s it
+// at runtime from out/server/node_modules (present via the Next standalone
+// trace). A dormant build never reaches the dynamic import, so a missing module
+// degrades to a no-op rather than a bundle failure.
+const SENTRY_EXTERNAL = '--external:@sentry/node';
+
+compileServerBundle('ws-server', 'src/ws-server.ts', `${NATIVE_EXTERNALS} ${SENTRY_EXTERNAL}`);
 
 // terminal-host fork target (#1498 follow-up). ws-server forks this when
 // O8_TERMINAL_HOST=child so node-pty spawn + data pump run in a separate

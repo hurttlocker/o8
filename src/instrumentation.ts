@@ -25,6 +25,11 @@ export async function register(): Promise<void> {
     installProcessCrashCapture('next-server');
     const { startTelemetryUploadLoop } = await import('@/lib/telemetry/uploader');
     startTelemetryUploadLoop();
+    // Sentry (dormant unless PACKAGED + a DSN was baked). Fire-and-forget so a
+    // slow/failed SDK import can't delay boot. Crash semantics stay unchanged —
+    // the crash-capture monitor above still writes the local JSONL sink.
+    const { initSentryNode } = await import('@/lib/telemetry/sentry-node');
+    void initSentryNode('server');
   } catch {
     // never block boot on telemetry
   }

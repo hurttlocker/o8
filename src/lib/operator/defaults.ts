@@ -54,6 +54,7 @@ import {
   envQuizGateEnabled,
   envReviewerBackend,
   envSubscriptionProfile,
+  envCrashReports,
   envSupervisorAutoEscalate,
   envTelemetryIngestUrl,
   envTelemetryOptIn,
@@ -302,6 +303,15 @@ export interface OperatorDefaults {
    * {@link telemetryOptIn} is on.
    */
   telemetryIngestUrl: string;
+  /**
+   * Sentry crash/error reporting — "Crash & error reports" toggle. **On by
+   * default.** Only ever active in a PACKAGED build that had a DSN baked in
+   * (dev stays silent regardless). Scrubs home paths, query strings, and
+   * identity before send; carries the app version + plan + a founder boolean,
+   * never a user id/email/machine name. Off → the Sentry clients drop every
+   * event (no wire) within ~30s. Env: `O8_CRASH_REPORTS` (1/0).
+   */
+  crashReportsEnabled: boolean;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -363,6 +373,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Crash telemetry OFF by default — local capture only, nothing uploaded.
   telemetryOptIn: false,
   telemetryIngestUrl: '',
+  // Sentry crash/error reports ON by default — but dormant unless a packaged
+  // build baked a DSN, so a fresh clone / dev run ships zero behavior change.
+  crashReportsEnabled: true,
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -453,6 +466,7 @@ interface StoredOperatorDefaults {
   collideAggregator?: CollideAggregator;
   telemetryOptIn?: boolean;
   telemetryIngestUrl?: string;
+  crashReportsEnabled?: boolean;
 }
 
 type FileOperatorDefaults = Partial<OperatorDefaults> & {
@@ -578,6 +592,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.telemetryIngestUrl === 'string') {
     result.telemetryIngestUrl = stored.telemetryIngestUrl.trim();
   }
+  if (typeof stored.crashReportsEnabled === 'boolean') {
+    result.crashReportsEnabled = stored.crashReportsEnabled;
+  }
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -621,6 +638,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envCollideAgg = envCollideAggregator();
   const envTelemetry = envTelemetryOptIn();
   const envTelemetryUrl = envTelemetryIngestUrl();
+  const envCrash = envCrashReports();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
   const subscriptionProfile =
@@ -682,6 +700,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
     telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
     telemetryIngestUrl: envTelemetryUrl ?? fileValues.telemetryIngestUrl ?? OPERATOR_DEFAULTS_FALLBACK.telemetryIngestUrl,
+    crashReportsEnabled: envCrash ?? fileValues.crashReportsEnabled ?? OPERATOR_DEFAULTS_FALLBACK.crashReportsEnabled,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -726,6 +745,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
     telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
     telemetryIngestUrl: envTelemetryUrl !== null ? 'env' : fileValues.telemetryIngestUrl !== undefined ? 'file' : 'default',
+    crashReportsEnabled: envCrash !== null ? 'env' : fileValues.crashReportsEnabled !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -921,6 +941,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   if (update.telemetryOptIn !== undefined) {
     stored.telemetryOptIn = Boolean(update.telemetryOptIn);
   }
+  if (update.crashReportsEnabled !== undefined) {
+    stored.crashReportsEnabled = Boolean(update.crashReportsEnabled);
+  }
   if (update.telemetryIngestUrl !== undefined) {
     if (typeof update.telemetryIngestUrl !== 'string') {
       throw new Error('telemetryIngestUrl must be a string.');
@@ -1074,6 +1097,11 @@ export function resolveTelemetryOptInSync(): boolean {
 /** Crash-telemetry ingest endpoint ('' = no upload). Env overrides file. */
 export function resolveTelemetryIngestUrlSync(): string {
   return getOperatorDefaultsSync().values.telemetryIngestUrl;
+}
+
+/** Sentry "Crash & error reports" toggle (default ON; dormant without a DSN). */
+export function resolveCrashReportsEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.crashReportsEnabled;
 }
 
 /** The Targeting Machine's cheap triage/rationale tier (env > file > fallback). */
