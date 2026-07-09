@@ -99,7 +99,7 @@ export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it
 export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
   { value: 'both', label: 'Both houses', detail: 'Use Claude and Codex together with the existing paired defaults.' },
   { value: 'claude-only', label: 'Claude only', detail: 'Everything runs on your Claude subscription — Opus orchestrates, Sonnet works, escalates only when needed.' },
-  { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-5.5 orchestrates, works, and reviews.' },
+  { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-5.6 Sol orchestrates, Terra works, escalates to Sol when needed.' },
 ];
 
 export const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
@@ -138,8 +138,10 @@ export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }>
 ];
 
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> = [
-  { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
+  { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse (GPT-5.6 Terra workers).' },
   { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — pairs opposite Codex orchestration.' },
+  { value: 'grok', label: 'Grok Build', detail: 'xAI Grok Build CLI — Grok 4.5 (Opus-class), sub-billed via SuperGrok.' },
+  { value: 'cursor', label: 'Cursor', detail: 'Cursor CLI — subscription or CURSOR_API_KEY authenticated.' },
   { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3 Pro CLI — fastest for parallel fan-out.' },
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
 ];

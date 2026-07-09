@@ -34,6 +34,10 @@ const MODEL_COLORS: Record<string, string> = {
   'gpt-5.3-codex': '#64d2ff',
   'gpt-5.4': '#64d2ff',
   'gpt-5.5': '#64d2ff',
+  'gpt-5.6-sol': '#64d2ff',
+  'gpt-5.6-terra': '#64d2ff',
+  'gpt-5.6-luna': '#64d2ff',
+  'grok-4.5': '#bf5af2',
 };
 
 function shortModel(model: string): string {

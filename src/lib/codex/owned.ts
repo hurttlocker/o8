@@ -41,6 +41,7 @@ import {
   type ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session';
 import { codexModelArgs } from './local-model';
+import { resolveCodexReasoningEffort } from './reasoning-effort';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 // Re-export the fleet additions shape under its original Codex name.
@@ -243,13 +244,13 @@ const IGNORE_USER_CONFIG = ['--ignore-user-config'];
 /**
  * Codex reasoning-effort flag. Emitted ONLY for an explicit tier — undefined /
  * 'adaptive' → [] so the launch stays at Codex's default (parity: unset effort
- * produces byte-identical args to before this feature). `max` → `xhigh` (Codex's
- * top tier), mirroring the orchestrator's reasoningEffortFromThinkingEffort.
+ * produces byte-identical args to before this feature). `max`/`ultra` pass
+ * through ONLY on gpt-5.6-sol; every other model clamps to `xhigh` (shared with
+ * the orchestrator via resolveCodexReasoningEffort).
  */
-export function codexReasoningEffortArgs(effort?: ThinkingEffort): string[] {
+export function codexReasoningEffortArgs(effort?: ThinkingEffort, model?: string): string[] {
   if (!effort || effort === 'adaptive') return [];
-  const mapped = effort === 'max' ? 'xhigh' : effort; // low | medium | high | xhigh
-  return ['-c', `model_reasoning_effort=${mapped}`];
+  return ['-c', `model_reasoning_effort=${resolveCodexReasoningEffort(effort, model)}`];
 }
 
 export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string[] {
@@ -267,7 +268,7 @@ export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: stri
     // (--oss --local-provider …); a plain name → --model; empty → Codex default.
     ...codexModelArgs(ctx.model),
     // Per-runtime effort surface — no-op unless an explicit tier was requested.
-    ...codexReasoningEffortArgs(ctx.effort),
+    ...codexReasoningEffortArgs(ctx.effort, ctx.model),
     ctx.prompt,
   ];
 }
