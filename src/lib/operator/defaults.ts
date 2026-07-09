@@ -389,6 +389,8 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label
   { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
   { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3.1 Pro CLI — fastest for parallel fan-out.' },
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
+  { value: 'cursor', label: 'Cursor', detail: 'Cursor CLI — subscription or CURSOR_API_KEY authenticated.' },
+  { value: 'grok', label: 'Grok Build', detail: 'xAI coding CLI — SuperGrok/X or GROK_CODE_XAI_API_KEY authenticated.' },
 ];
 
 export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSetting; label: string; detail: string }> = [
