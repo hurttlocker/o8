@@ -24,6 +24,14 @@ export const subscriptions = pgTable('subscriptions', {
   stripeSubscriptionId: text('stripe_subscription_id').notNull(),
   /** Clerk user_id carried through Stripe checkout metadata. */
   clerkUserId: text('clerk_user_id'),
+  /** GitHub external-account id (Clerk's `provider_user_id`) resolved via the
+   *  Clerk Backend API — the STABLE identity that survives a duplicate Clerk
+   *  user or a Clerk-instance migration. Nullable: backfilled best-effort at
+   *  checkout / account-fetch and by the admin backfill; the clerkUserId lookup
+   *  is still primary (#1519). */
+  githubAccountId: text('github_account_id'),
+  /** GitHub login/username at resolution time — debuggability only, never trusted. */
+  githubLogin: text('github_login'),
   /** Resolved entitlement tier: 'pro' | 'team'. */
   plan: text('plan').notNull(),
   /** Mirrors the Stripe subscription status (active, past_due, canceled, ...). */
@@ -99,6 +107,13 @@ export const founders = pgTable('founders', {
   stripeCustomerId: text('stripe_customer_id'),
   /** Clerk user_id from checkout metadata — the account the license binds to. */
   clerkUserId: text('clerk_user_id'),
+  /** GitHub external-account id (Clerk's `provider_user_id`) resolved via the
+   *  Clerk Backend API — the STABLE identity used as the read-path fallback when
+   *  the clerkUserId no longer matches (duplicate Clerk user / instance
+   *  migration). Nullable, best-effort backfilled (#1519). */
+  githubAccountId: text('github_account_id'),
+  /** GitHub login/username at resolution time — debuggability only, never trusted. */
+  githubLogin: text('github_login'),
   /** Buyer email (Stripe customer_details) — welcome mail + contact. */
   email: text('email'),
   /** Serial "Founding Operator #N", assigned at first insert (max+1). Unique. */

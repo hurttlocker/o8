@@ -130,6 +130,44 @@ subject. `/validate-entitlement` then cross-checks revocation by that subject.
 | `POST /validate-entitlement` | none | `{ token }` | `{ valid, plan, expiresAt, revoked, graceDaysLeft }` |
 | `POST /issue-entitlement` | `Bearer ADMIN_TOKEN` | `{ plan, sub?, days? }` | `{ license, plan, sub, days }` |
 | `DELETE /revoke/:subscriptionId` | `Bearer ADMIN_TOKEN` | path param | `{ revoked, subscriptionId }` |
+| `POST /admin/backfill-github` | `Bearer ADMIN_TOKEN` | `{ dryRun?, limit? }` | `{ dryRun, scanned, resolved, updated, skipped }` |
+
+## GitHub-account identity resolution (#1519)
+
+Founder / subscription rows historically key ONLY on the exact `clerkUserId`
+stamped in Stripe checkout metadata. A duplicate Clerk user on the same GitHub
+account — or a Clerk-instance migration — strands the entitlement: the direct
+`/account/license` lookup 404s and the desktop silently falls back to a free
+token. To harden this, rows also carry the **STABLE GitHub account id**
+(`github_account_id`, Clerk's `provider_user_id`) + `github_login`.
+
+Requires **`CLERK_SECRET_KEY`** (Clerk Backend API). When unset the server behaves
+exactly as before — no backfill, no fallback; the direct `clerkUserId` lookup is
+unaffected.
+
+- **Backfill (write path):** best-effort at checkout/webhook and on a successful
+  `/account/license` resolution, the row's GitHub account is resolved via the
+  Clerk Backend API (`users.getUser → external_accounts`, provider `github`) and
+  stamped. Never blocks the payment path.
+- **Fallback (read path):** when the caller's `clerkUserId` has no direct
+  entitlement, resolve THEIR GitHub account; if a row keys on that
+  `github_account_id`, honor it AND migrate that row's `clerkUserId` to the caller
+  (one-way, logged `identity_migrated old→new`). The Clerk lookup is cached
+  ~10min so a hot loop can't hammer the API.
+- **Admin backfill:** `POST /admin/backfill-github` (ADMIN_TOKEN) walks existing
+  rows with a `clerkUserId` but no `github_account_id` and populates them.
+  Idempotent (only null rows); `{ "dryRun": true }` resolves + counts without
+  writing.
+
+```bash
+# dry run — see how many rows would be populated
+curl -sX POST https://<url>/admin/backfill-github \
+  -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"dryRun":true}'
+```
+
+Adds nullable columns to `founders` + `subscriptions`; run `npm run db:push`
+after deploy to apply.
 
 **`/issue-entitlement`** is for testing before live Stripe — mint a token by
 hand:

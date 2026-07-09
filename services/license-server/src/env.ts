@@ -110,6 +110,16 @@ export const env = {
   // when unset, /account/license is disabled (503).
   CLERK_ISSUER: optional('CLERK_ISSUER', ''),
 
+  // Clerk Backend API secret key (sk_...). Used ONLY to resolve a Clerk user's
+  // GitHub external account (users.getUser → externalAccounts) so an entitlement
+  // can key on the STABLE GitHub identity, not just the exact Clerk user id
+  // stamped in Stripe metadata (#1519). Powers: best-effort githubAccountId
+  // backfill at checkout/account-fetch, the /account/license GitHub fallback +
+  // clerkUserId migration, and the admin backfill endpoint. Optional: when unset
+  // the server behaves exactly as before — no backfill, no fallback (the direct
+  // clerkUserId lookup is unaffected). NEVER shipped in the desktop build.
+  CLERK_SECRET_KEY: optional('CLERK_SECRET_KEY', ''),
+
   // Welcome email (best-effort, Resend). Optional: when RESEND_API_KEY is unset
   // the mail is skipped (Stripe sends its own receipt, and the license is
   // delivered by account-fetch on sign-in regardless).

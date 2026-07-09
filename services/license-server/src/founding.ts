@@ -7,6 +7,7 @@ import { db } from './db/client.js';
 import { founders, productEvents } from './db/schema.js';
 import { sendFounderWelcome } from './email.js';
 import { env } from './env.js';
+import { backfillGithubForRow } from './identity.js';
 import { mintLicense } from './mint.js';
 import type { WebhookResult } from './stripe-webhook.js';
 
@@ -149,6 +150,11 @@ export async function handleFoundingCheckout(
     );
     return { handled: true, type };
   }
+
+  // Best-effort: stamp the STABLE GitHub identity on the row so a future
+  // duplicate-Clerk-user / instance-migration can still resolve this founder
+  // (#1519). NEVER blocks the payment path — fire-and-forget, self-logging.
+  void backfillGithubForRow('founder', sessionId, clerkUserId);
 
   const { tier } = founderTier(finalNumber);
   const license = await mintLicense({ plan: 'founder', sub: clerkUserId ?? sessionId, days });
