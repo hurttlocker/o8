@@ -35,6 +35,12 @@ export interface DispatchLane {
   repoPath?: string | null;
   status?: string | null;
   runtime?: string | null;
+  /** Lane creation (ISO) — origin for the live/settled duration. */
+  createdAt?: string | null;
+  /** Last write (ISO) — freeze point for a settled lane's ran-duration. */
+  updatedAt?: string | null;
+  /** Last event (ISO) — preferred freeze point; the moment work last moved. */
+  lastEventAt?: string | null;
 }
 
 type PhaseKey = 'working' | 'finalizing' | 'review' | 'blocked' | 'done' | 'error';
