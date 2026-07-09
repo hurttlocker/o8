@@ -24,7 +24,7 @@ export type { ThinkingEffort };
 export type SettingSource = 'env' | 'file' | 'default';
 
 export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
-export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
 export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';

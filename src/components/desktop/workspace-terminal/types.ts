@@ -64,7 +64,7 @@ export interface TerminalTab {
   repo?: RegisteredRepo;
   createdAt: number;
   lastActivity: number;
-  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
   chatSessionKey?: string;
   claudeSessionId?: string;
   chatModel?: string;
@@ -125,7 +125,7 @@ export interface TerminalTab {
 
 export type LocalhostPreview = DetectedLocalhostPreview;
 export type { PreviewSelectionPayload };
-export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok' | 'chat';
+export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'chat';
 
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
