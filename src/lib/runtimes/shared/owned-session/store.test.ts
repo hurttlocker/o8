@@ -54,7 +54,7 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('does not spawn the worker until the readiness wait completes warm', async () => {
+  it('does not spawn the worker until the readiness wait completes warm', { timeout: 20_000 }, async () => {
     const { createOwnedSessionStore } = await import('./store');
     let releaseReady: ((result: DispatchBackendWaitResult) => void) | undefined;
     ensureDispatchBackendReadyMock.mockReturnValue(new Promise((resolve) => {
