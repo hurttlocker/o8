@@ -272,6 +272,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.telemetryIngestUrl = body.telemetryIngestUrl.trim();
   }
 
+  if (body.crashReportsEnabled !== undefined) {
+    if (typeof body.crashReportsEnabled !== 'boolean') {
+      throw new Error('crashReportsEnabled must be boolean.');
+    }
+    update.crashReportsEnabled = body.crashReportsEnabled;
+  }
+
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
     if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
     const o = raw as Record<string, unknown>;
