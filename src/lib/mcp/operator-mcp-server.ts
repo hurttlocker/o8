@@ -7,7 +7,7 @@
  * Communicates over stdin/stdout with newline-delimited JSON.
  *
  * Environment:
- *   O8_API_BASE — e.g. http://localhost:3001 (default)
+ *   O8_API_BASE — e.g. http://localhost:47100 (default)
  */
 
 // MUST run before shared imports: re-exec onto Node 22 before native addon loads.
@@ -23,6 +23,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { exitWhenBundleDeleted } from '@/lib/mcp/orphan-exit';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
@@ -344,7 +345,7 @@ function readKnownRepos(): string[] {
  *      swaps, dev-frontend mode flips, and stale parent-shell env vars)
  *   2. O8_API_BASE env var (explicit override)
  *   3. O8_API_PORT env var (set by Tauri sidecar at spawn time)
- *   4. Legacy default http://localhost:3001 (dev workflow)
+ *   4. Port-block default http://localhost:47100 (sidecar-free workflow)
  *
  * File-first is critical: Claude Code spawns this MCP from a parent shell
  * whose env may have been set before a port change (e.g. operator started
@@ -368,7 +369,7 @@ function resolveApiBase(): string {
   if (process.env.O8_API_PORT) {
     return `http://127.0.0.1:${process.env.O8_API_PORT}`;
   }
-  return 'http://localhost:3001';
+  return `http://localhost:${DEFAULT_API_PORT}`;
 }
 
 const API_BASE = resolveApiBase();

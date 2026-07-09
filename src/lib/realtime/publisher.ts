@@ -4,8 +4,9 @@ import type {
   RealtimeRefreshRequest,
 } from '@/lib/realtime/types';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { getWsBase } from '@/lib/panel/api-port';
 
-const REALTIME_INTERNAL_ORIGIN = process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? 'http://127.0.0.1:3002';
+const REALTIME_INTERNAL_ORIGIN = process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? getWsBase();
 const REALTIME_INTERNAL_TIMEOUT_MS = 2_500;
 
 async function postInternalRealtimeRequest(payload: RealtimeInternalRequest) {

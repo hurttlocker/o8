@@ -2,13 +2,14 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-const WS_PORT = Number(process.env.WS_PORT ?? 3002);
+import { resolvePortInfo } from '@/lib/panel/api-port';
 
 /** GET — list alive dashboard terminal sessions owned by the WS bridge */
 export async function GET() {
   try {
     const wsToken = getOrCreateWsToken();
-    const response = await fetch(`http://127.0.0.1:${WS_PORT}/terminal-sessions`, {
+    const { wsPort } = resolvePortInfo();
+    const response = await fetch(`http://127.0.0.1:${wsPort}/terminal-sessions`, {
       headers: { Authorization: `Bearer ${wsToken}` },
       cache: 'no-store',
     });

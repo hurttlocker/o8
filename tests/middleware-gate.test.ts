@@ -313,6 +313,25 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
     expect(res.status).toBe(200);
   });
 
+  it('allows setup identity GETs from anywhere with cross-origin callers', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/setup/identity', {
+        headers: { host: '192.168.1.50:3001', origin: 'https://example.com' },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('still gates setup identity non-GETs from LAN', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/setup/identity', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001', origin: 'https://example.com' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('still gates setup WRITES from LAN (config-write CSRF protection)', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/setup/claude-desktop', {

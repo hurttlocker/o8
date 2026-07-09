@@ -24,12 +24,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { isLanDevHost } from '@/lib/mobile/lan-dev-host';
+import { getWsBase } from '@/lib/panel/api-port';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const REALTIME_INTERNAL_ORIGIN =
-  process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? 'http://127.0.0.1:3002';
+  process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? getWsBase();
 const REALTIME_INTERNAL_TIMEOUT_MS = 2_500;
 
 interface PushUrlBody {

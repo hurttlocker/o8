@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-const WS_PORT = Number(process.env.WS_PORT ?? 3002);
+import { resolvePortInfo } from '@/lib/panel/api-port';
 
 /**
  * POST /api/panel/terminal-exec
@@ -11,6 +11,7 @@ const WS_PORT = Number(process.env.WS_PORT ?? 3002);
 export async function POST(request: Request) {
   try {
     const wsToken = getOrCreateWsToken();
+    const { wsPort } = resolvePortInfo();
     const { sessionName, command } = await request.json();
 
     if (!sessionName || !command) {
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid session name' }, { status: 400 });
     }
 
-    const response = await fetch(`http://127.0.0.1:${WS_PORT}/terminal-exec`, {
+    const response = await fetch(`http://127.0.0.1:${wsPort}/terminal-exec`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

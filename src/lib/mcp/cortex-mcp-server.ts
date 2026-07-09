@@ -7,7 +7,7 @@
  * Communicates over stdin/stdout with newline-delimited JSON.
  *
  * Environment:
- *   CORTEX_API_BASE  — e.g. http://localhost:3001 (required)
+ *   CORTEX_API_BASE  — e.g. http://localhost:47100 (required)
  *   CORTEX_REPO_PATH — workspace repo path (optional, for context)
  *   CORTEX_REPO_SLUG — e.g. owner/repo (optional, for GitHub queries)
  */
@@ -23,6 +23,7 @@ import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_API_PORT, DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { parseMcpConfigInput, type ParsedMcpServer } from './parse-config';
 import { getOrCreateWsToken } from '../ws-auth';
 import {
@@ -60,7 +61,7 @@ function resolveApiBase(): string {
       }
     }
   } catch { /* fall through */ }
-  return 'http://localhost:3001';
+  return `http://localhost:${DEFAULT_API_PORT}`;
 }
 
 // ── Types ──
@@ -903,7 +904,7 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
       // Register with the supervisor for automatic monitoring
       const surfaceId = result.surfaceId as string;
       try {
-        const wsPort = process.env.WS_PORT || '3002';
+        const wsPort = process.env.O8_WS_PORT || process.env.WS_PORT || String(DEFAULT_WS_PORT);
         await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
           method: 'POST',
           headers: {
