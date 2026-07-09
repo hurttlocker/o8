@@ -2,6 +2,7 @@ import type { BrowserAttachmentSummary, BrowserInventorySnapshot } from '@/lib/b
 import type { FleetSnapshot, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import type { LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { MobileInboxDelta } from '@/lib/mobile/inbox-delta';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 
 export const REALTIME_PROTOCOL_VERSION = 1 as const;
@@ -78,6 +79,11 @@ export interface BrowserRealtimeSnapshotPayload {
 
 export interface MobileInboxRealtimeSnapshotPayload {
   inbox: MobileInboxSnapshot;
+  revision?: number;
+}
+
+export interface MobileInboxRealtimeDeltaPayload {
+  delta: MobileInboxDelta;
 }
 
 export interface SessionHistoryRealtimePayload {
@@ -91,6 +97,7 @@ export type RealtimeEventPayload =
   | ReviewRealtimeSnapshotPayload
   | BrowserRealtimeSnapshotPayload
   | MobileInboxRealtimeSnapshotPayload
+  | MobileInboxRealtimeDeltaPayload
   | SessionHistoryRealtimePayload
   | { mutation: RealtimeMutationRecord };
 
@@ -99,6 +106,7 @@ export type RealtimeEventName =
   | 'review.snapshot'
   | 'browser.snapshot'
   | 'mobile.inbox.snapshot'
+  | 'mobile.inbox.delta'
   | 'history.snapshot'
   | 'mutation.record'
   | 'mutation.settled';
@@ -123,6 +131,8 @@ export interface RealtimeEventEnvelope<T extends RealtimeEventPayload = Realtime
   delivery?: RealtimeDeliveryMode;
   entityId?: string;
   health?: RealtimeHealthDescriptor;
+  /** Server-side replay audience for capability-gated additive events. */
+  audience?: 'mobile-inbox-delta-v1' | 'mobile-inbox-legacy';
   data: T;
 }
 

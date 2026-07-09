@@ -47,7 +47,7 @@ import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -152,6 +152,10 @@ import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/r
 import { getServerIdentity } from './lib/mobile/e2ee-identity';
 import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
+import {
+  buildMobileInboxDelta,
+  MOBILE_INBOX_DELTA_CAPABILITY,
+} from './lib/mobile/inbox-delta';
 import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
@@ -772,6 +776,7 @@ interface ClientState {
   alive: boolean;
   terminalSessions: Set<string>;
   realtimeSubscriptions: RealtimeSubscription[];
+  realtimeCapabilities: Set<string>;
   packetTailSubscriptions: Set<string>;
   /** Queued durable messages waiting for backpressure to clear */
   backpressureQueue: string[];
@@ -1981,6 +1986,24 @@ const lastRealtimeFingerprint = {
   mobileInbox: '',
   history: new Map<string, string>(),
 };
+let mobileInboxRevision = 0;
+let lastMobileInboxSnapshot: MobileInboxSnapshot | null = null;
+let mobileInboxDeltasSinceCheckpoint = 0;
+const MOBILE_INBOX_CHECKPOINT_INTERVAL = 20;
+
+async function getRegisteredMobileInboxCheckpoint(): Promise<{
+  inbox: MobileInboxSnapshot;
+  revision: number;
+}> {
+  if (lastMobileInboxSnapshot) {
+    return { inbox: lastMobileInboxSnapshot, revision: mobileInboxRevision };
+  }
+  const inbox = await getMobileInboxSnapshot();
+  lastMobileInboxSnapshot = inbox;
+  mobileInboxRevision = Math.max(1, mobileInboxRevision);
+  lastRealtimeFingerprint.mobileInbox = fingerprintInboxSnapshot(inbox);
+  return { inbox, revision: mobileInboxRevision };
+}
 
 function currentIsoTime() {
   return new Date().toISOString();
@@ -2056,8 +2079,16 @@ function normalizeRealtimeStreamKey(raw: string | undefined, sessionKey?: string
 function eventMatchesRealtimeSubscription(
   envelope: RealtimeEventEnvelope,
   subscription: RealtimeSubscription,
+  client: ClientState,
 ) {
-  return envelope.stream === subscription.stream;
+  if (envelope.stream !== subscription.stream) return false;
+  if (envelope.audience === MOBILE_INBOX_DELTA_CAPABILITY) {
+    return client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY);
+  }
+  if (envelope.audience === 'mobile-inbox-legacy') {
+    return !client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY);
+  }
+  return true;
 }
 
 function sendRealtimeBatch(
@@ -2092,6 +2123,7 @@ function buildRealtimeEnvelope(
     entityId?: string;
     delivery?: RealtimeEventEnvelope['delivery'];
     capturedSeq?: number;
+    audience?: RealtimeEventEnvelope['audience'];
   } = {},
 ): RealtimeEventEnvelope {
   const envelope: RealtimeEventEnvelope = {
@@ -2106,6 +2138,7 @@ function buildRealtimeEnvelope(
     delivery: options.delivery,
     entityId: options.entityId,
     health: options.health,
+    audience: options.audience,
     data,
   };
 
@@ -2134,7 +2167,11 @@ function broadcastRealtimeEvents(events: RealtimeEventEnvelope[]) {
     for (const subscription of client.realtimeSubscriptions) {
       const matching = eventsByStream.get(subscription.stream);
       if (!matching?.length) continue;
-      sendRealtimeBatch(client, subscription.stream, 'live', matching);
+      const visible = matching.filter((event) =>
+        eventMatchesRealtimeSubscription(event, subscription, client));
+      if (visible.length > 0) {
+        sendRealtimeBatch(client, subscription.stream, 'live', visible);
+      }
     }
   }
 }
@@ -2164,7 +2201,7 @@ function replayRealtimeSubscriptions(client: ClientState, subscriptions: Realtim
       continue;
     }
     const replay = realtimeLog.filter((event) => (
-      event.seq > since && eventMatchesRealtimeSubscription(event, subscription)
+      event.seq > since && eventMatchesRealtimeSubscription(event, subscription, client)
     ));
     if (replay.length > 0) {
       sendRealtimeBatch(client, stream, 'replay', replay);
@@ -2209,13 +2246,13 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
         ),
       ];
 
-      const inbox = await getMobileInboxSnapshot({ fresh: true }).catch(() => null);
-      if (inbox) {
+      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint().catch(() => null);
+      if (inboxCheckpoint) {
         events.push(buildRealtimeEnvelope(
           'global',
           'mobile',
           'mobile.inbox.snapshot',
-          { inbox },
+          { inbox: inboxCheckpoint.inbox, revision: inboxCheckpoint.revision },
           { snapshot: true, entityId: 'mobile-inbox', health: degradedHealth, capturedSeq },
         ));
       }
@@ -2304,17 +2341,19 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
         ),
       ];
 
-      const inbox = await getMobileInboxSnapshot().catch(() => null);
-      if (inbox) {
+      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint().catch(() => null);
+      if (inboxCheckpoint) {
         events.push(buildRealtimeEnvelope(
           'global',
           'mobile',
           'mobile.inbox.snapshot',
-          { inbox },
+          { inbox: inboxCheckpoint.inbox, revision: inboxCheckpoint.revision },
           {
             snapshot: true,
             entityId: 'mobile-inbox',
-            health: inbox.mode === 'live' ? { state: 'live' } : { state: 'degraded', reason: inbox.note },
+            health: inboxCheckpoint.inbox.mode === 'live'
+              ? { state: 'live' }
+              : { state: 'degraded', reason: inboxCheckpoint.inbox.note },
             delivery: 'bootstrap',
             capturedSeq,
           },
@@ -2391,24 +2430,12 @@ function fingerprintBrowserSnapshot(
 }
 
 function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInboxSnapshot>>) {
-  // Encode inbox.summary as a flat key-value string (it's a small typed object).
-  const sum = inbox.summary;
-  let fp = `${sum.activeRuns}\x01${sum.approvals}\x01${sum.alerts}\x01${sum.reviewItems}`;
-  for (const s of inbox.sessions) {
-    fp += `\x02${s.id}\x01${s.sessionKey}\x01${s.status}\x01${s.currentTask}\x01${s.approvalStatus}\x01${s.lastEventAt}\x01${s.branch}\x01${s.alerts}`;
-  }
-  for (const s of inbox.fleetSessions ?? []) {
-    fp += `\x05${s.id}\x01${s.sessionKey}\x01${s.runtime}\x01${s.status}\x01${s.title}\x01${s.repoPath}\x01${s.branch}\x01${s.terminalSessionName ?? ''}\x01${s.previewUrl ?? ''}\x01${s.approvalId ?? ''}\x01${s.reviewAuthority ?? ''}\x01${s.actions.join(',')}\x01${s.lastEventAt ?? ''}\x01${s.lastActivityAt ?? ''}`;
-  }
-  for (const item of inbox.items) {
-    fp += `\x03${item.id}\x01${item.kind}\x01${item.severity}\x01${item.detail}\x01${item.title}\x01${item.sessionKey}`;
-  }
-  if (inbox.review) {
-    const r = inbox.review;
-    fp += `\x04${r.repoSlug}\x01${r.branch}\x01${r.diffStat}`;
-    for (const f of r.changedFiles) fp += `\x02${f.path}\x01${f.status}`;
-  }
-  return fp;
+  // Hash the complete wire snapshot. The older hand-picked fingerprint missed
+  // approval/review field updates and could suppress an operationally relevant
+  // delta even though the JSON sent to the phone had changed. generatedAt is
+  // intentionally excluded so an unchanged 30s safety read emits no empty delta.
+  const { generatedAt: _generatedAt, ...semanticSnapshot } = inbox;
+  return createHash('sha256').update(JSON.stringify(semanticSnapshot)).digest('base64url');
 }
 
 function fingerprintHistory(sessionKey: string, entries: Awaited<ReturnType<typeof getSessionTranscript>>) {
@@ -2558,18 +2585,80 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
       });
     const fingerprint = fingerprintInboxSnapshot(inbox);
     if (fingerprint === lastRealtimeFingerprint.mobileInbox) return;
+    const previous = lastMobileInboxSnapshot;
+    const baseRevision = mobileInboxRevision;
+    mobileInboxRevision += 1;
+    lastMobileInboxSnapshot = inbox;
     lastRealtimeFingerprint.mobileInbox = fingerprint;
+    const health: RealtimeHealthDescriptor = inbox.mode === 'live'
+      ? { state: 'live' }
+      : { state: 'degraded', reason: inbox.note };
 
+    if (!previous) {
+      mobileInboxDeltasSinceCheckpoint = 0;
+      broadcastRealtimeEvents([
+        buildRealtimeEnvelope(
+          'global',
+          'mobile',
+          'mobile.inbox.snapshot',
+          { inbox, revision: mobileInboxRevision },
+          { snapshot: true, entityId: 'mobile-inbox', health },
+        ),
+      ]);
+      return;
+    }
+
+    const delta = buildMobileInboxDelta(
+      previous,
+      inbox,
+      baseRevision,
+      mobileInboxRevision,
+    );
+    const snapshotBytes = JSON.stringify(inbox).length;
+    const deltaBytes = JSON.stringify(delta).length;
+    const checkpointDue =
+      mobileInboxDeltasSinceCheckpoint >= MOBILE_INBOX_CHECKPOINT_INTERVAL - 1 ||
+      deltaBytes >= snapshotBytes * 0.8;
+
+    if (checkpointDue) {
+      mobileInboxDeltasSinceCheckpoint = 0;
+      broadcastRealtimeEvents([
+        buildRealtimeEnvelope(
+          'global',
+          'mobile',
+          'mobile.inbox.snapshot',
+          { inbox, revision: mobileInboxRevision },
+          { snapshot: true, entityId: 'mobile-inbox', health },
+        ),
+      ]);
+      return;
+    }
+
+    mobileInboxDeltasSinceCheckpoint += 1;
     broadcastRealtimeEvents([
+      // Legacy realtime consumers continue receiving the exact full-snapshot
+      // event until they explicitly negotiate the additive delta capability.
       buildRealtimeEnvelope(
         'global',
         'mobile',
         'mobile.inbox.snapshot',
-        { inbox },
+        { inbox, revision: mobileInboxRevision },
         {
           snapshot: true,
           entityId: 'mobile-inbox',
-          health: inbox.mode === 'live' ? { state: 'live' } : { state: 'degraded', reason: inbox.note },
+          health,
+          audience: 'mobile-inbox-legacy',
+        },
+      ),
+      buildRealtimeEnvelope(
+        'global',
+        'mobile',
+        'mobile.inbox.delta',
+        { delta },
+        {
+          entityId: 'mobile-inbox',
+          health,
+          audience: MOBILE_INBOX_DELTA_CAPABILITY,
         },
       ),
     ]);
@@ -2809,6 +2898,12 @@ function handleClientMessage(client: ClientState, raw: string) {
       break;
     }
     case 'realtime-subscribe': {
+      const requestedCapabilities = Array.isArray(msg.capabilities)
+        ? msg.capabilities.filter((value): value is string => typeof value === 'string')
+        : [];
+      client.realtimeCapabilities = new Set(
+        requestedCapabilities.filter((value) => value === MOBILE_INBOX_DELTA_CAPABILITY),
+      );
       const rawSubscriptions = Array.isArray(msg.subscriptions) ? msg.subscriptions as Array<Record<string, unknown>> : [];
       const subscriptions: RealtimeSubscription[] = [];
       for (const item of rawSubscriptions) {
@@ -4036,6 +4131,10 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
 }
 
 async function syncClientInbox(client: ClientState) {
+  // Delta-capable clients receive revisioned inbox events from the realtime
+  // log. Suppress the legacy full snapshot safety poll after negotiation; the
+  // initial connection/bootstrap checkpoint still seeds canonical state.
+  if (client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY)) return;
   const data = await fetchSync({ inbox: { etag: client.inboxEtag ?? undefined } });
   if (!data) return;
 
@@ -5521,6 +5620,7 @@ wss.on('connection', (ws, req) => {
     alive: true,
     terminalSessions: new Set(),
     realtimeSubscriptions: [],
+    realtimeCapabilities: new Set(),
     packetTailSubscriptions: new Set(),
     backpressureQueue: [],
     flushTimer: null,
