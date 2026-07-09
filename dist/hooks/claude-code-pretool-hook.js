@@ -117,7 +117,7 @@ function evaluateToolUse(input) {
 
 function approvalEndpoint() {
   const host = process.env.O8_API_HOST || 'localhost';
-  const port = process.env.O8_API_PORT || process.env.PORT || '3001';
+  const port = process.env.O8_API_PORT || process.env.PORT || '47100';
   return `http://${host}:${port}/api/panel/approvals`;
 }
 
