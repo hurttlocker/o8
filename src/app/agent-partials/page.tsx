@@ -264,18 +264,29 @@ export default function AgentPartialsPage() {
       }
     };
 
+    // Two channels, one handler: the canvas's own broadcast AND the Rust
+    // relay's forward. The relay MUST use a DIFFERENT event name — its
+    // listen_any hears every emit including its own emit_to, so relaying under
+    // the original name recursed Rust-side until the thread's stack blew
+    // (2026-07-09 crash, EXC_BAD_ACCESS stack_overflow on tokio-rt-worker).
+    let unlistenFwd: (() => void) | null = null;
     import('@tauri-apps/api/event')
-      .then(({ listen }) =>
-        listen<{ claimed?: boolean; sessionId?: string }>('o8:agent-partials-claim', (e) =>
-          handleClaim(e.payload ?? {}),
-        ),
-      )
-      .then((un) => {
+      .then(async ({ listen }) => {
+        const direct = await listen<{ claimed?: boolean; sessionId?: string }>(
+          'o8:agent-partials-claim',
+          (e) => handleClaim(e.payload ?? {}),
+        );
+        const fwd = await listen<{ claimed?: boolean; sessionId?: string }>(
+          'o8:agent-partials-claim-fwd',
+          (e) => handleClaim(e.payload ?? {}),
+        );
         if (disposed) {
-          un();
+          direct();
+          fwd();
           return;
         }
-        unlisten = un;
+        unlisten = direct;
+        unlistenFwd = fwd;
       })
       .catch(() => {
         /* noop — no claim bridge simply means the HUD never yields */
@@ -291,6 +302,13 @@ export default function AgentPartialsPage() {
       if (unlisten) {
         try {
           unlisten();
+        } catch {
+          /* noop */
+        }
+      }
+      if (unlistenFwd) {
+        try {
+          unlistenFwd();
         } catch {
           /* noop */
         }
