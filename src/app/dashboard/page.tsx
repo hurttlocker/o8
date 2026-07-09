@@ -199,6 +199,13 @@ const RESPONSIVE_COMPACT_SHELL_WIDTH = 420;
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
 const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
 
+/** Image extensions that open in the ImagePreview inspector ('image' tab kind)
+ *  instead of the Monaco FileViewer — so a Finder-opened PNG renders instead of
+ *  falling to the "Could not load file content" text fallback. Everything else
+ *  (source, config, docs, svg) opens in the 'file' viewer, which itself routes
+ *  .html/.htm to HtmlPreview. */
+const WORKSPACE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
+
 /** Floating terminal toggle sitting at the bottom-center of the
  *  workspace card. Moved here from the column header per operator
  *  request — "put the terminal button down under the input where main
@@ -2560,6 +2567,25 @@ function DashboardInner() {
     handleSelectSession(sessionKey);
   }, [handleSelectSession]);
 
+  // Opens a file path as a tab in the workspace. Shared by (a) agent-chat file
+  // clicks routed through O8Panel's `o8:open-file` → onOpenFile, and (b) Finder
+  // "Open With → o8" opens on the default IDE surface (FileOpenBridge). Prefers a
+  // live WorkspaceTerminal target; falls back to a center canvas tab when none
+  // is ready yet (waitForWorkspaceTerminalTarget resolves after hydration, so a
+  // cold-launch open lands once the workspace exists — never before).
+  const handleOpenFileInWorkspace = useCallback((filePath: string) => {
+    const path = filePath.trim();
+    if (!path) return;
+    const ext = path.split('.').pop()?.toLowerCase() ?? '';
+    const kind = (WORKSPACE_IMAGE_EXTENSIONS.has(ext) ? 'image' : 'file') as 'image' | 'file';
+    const tab = { id: `${kind}:${path}`, kind, label: path.split('/').pop() ?? path, resourceId: path };
+    void (async () => {
+      const target = await waitForWorkspaceTerminalTarget({});
+      if (target) target.handle.openInspectorTab(tab);
+      else openCanvasTab(tab);
+    })();
+  }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
+
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
     setRightPanelKind('review');
     openRightPanelFromUser();
@@ -4199,7 +4225,7 @@ function DashboardInner() {
   return (
     <DictationHost>
       <AttendanceHeartbeat />
-      <FileOpenBridge />
+      <FileOpenBridge onOpenFile={handleOpenFileInWorkspace} />
       <UiZoomLayer />
       <RealtimeVoiceHost />
       <ReportIssueHost />
@@ -4870,14 +4896,7 @@ function DashboardInner() {
                           onSelectCommit={handleSelectCommit}
                           onSelectPR={handleReviewPR}
                           onSelectIssue={handleSelectIssue}
-                          onOpenFile={(filePath) => {
-                            const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
-                            void (async () => {
-                              const target = await waitForWorkspaceTerminalTarget({});
-                              if (target) target.handle.openInspectorTab(tab);
-                              else openCanvasTab(tab);
-                            })();
-                          }}
+                          onOpenFile={handleOpenFileInWorkspace}
                         />
                       </OrchestratorDataProvider>
                     </Suspense>
