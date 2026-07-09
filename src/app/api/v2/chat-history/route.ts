@@ -17,6 +17,12 @@ import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
+import {
+  chatHistoryRevision,
+  ensureStableChatMessageIds,
+  pageChatHistoryMessages,
+  parseChatHistoryPageRequest,
+} from '@/lib/llm/chat-history-pagination';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -112,44 +118,78 @@ function defaultModelForBackend(
   return undefined;
 }
 
+function emptyHistoryRecord(): Record<string, unknown> {
+  return {
+    messages: [],
+    model: null,
+    savedAt: null,
+    starred: false,
+    title: null,
+    planText: null,
+    repoName: null,
+    repoPath: null,
+    repoBranch: null,
+    githubOwner: null,
+    githubRepo: null,
+    remoteUrl: null,
+    backend: null,
+    agent: null,
+    archivedAt: null,
+    orchestratorSessionIds: null,
+    orchestratorSessionUpdatedAt: null,
+    exists: false,
+  };
+}
+
+function serverTimingHeader(startedAt: number): Record<string, string> {
+  return { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` };
+}
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
   const tabId = request.nextUrl.searchParams.get('tabId');
-  if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+  if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400, headers: serverTimingHeader(startedAt) });
 
   const filePath = safePath(tabId);
+  let parsed: Record<string, unknown>;
   try {
     const data = readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(data) as Record<string, unknown>;
-    const githubIdentity = resolveRepoGithubIdentity(parsed.repoPath, parsed.remoteUrl);
-    return NextResponse.json({
-      ...parsed,
-      githubOwner: githubIdentity.githubOwner,
-      githubRepo: githubIdentity.githubRepo,
-    }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    parsed = JSON.parse(data) as Record<string, unknown>;
   } catch {
-    return NextResponse.json({
-      messages: [],
-      model: null,
-      savedAt: null,
-      starred: false,
-      title: null,
-      planText: null,
-      repoName: null,
-      repoPath: null,
-      repoBranch: null,
-      githubOwner: null,
-      githubRepo: null,
-      remoteUrl: null,
-      backend: null,
-      agent: null,
-      archivedAt: null,
-      orchestratorSessionIds: null,
-      orchestratorSessionUpdatedAt: null,
-      exists: false,
-    }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    parsed = emptyHistoryRecord();
   }
+
+  const stableRecord = {
+    ...parsed,
+    messages: ensureStableChatMessageIds(Array.isArray(parsed.messages) ? parsed.messages : []),
+  };
+  const pageRequest = parseChatHistoryPageRequest(
+    request.nextUrl.searchParams.get('limit'),
+    request.nextUrl.searchParams.get('before'),
+  );
+  let responseRecord: Record<string, unknown> = stableRecord;
+  if (pageRequest) {
+    const revision = chatHistoryRevision(stableRecord);
+    const result = pageChatHistoryMessages(stableRecord.messages, pageRequest, revision);
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error, currentRevision: result.currentRevision },
+        { status: 409, headers: serverTimingHeader(startedAt) },
+      );
+    }
+    responseRecord = {
+      ...stableRecord,
+      messages: result.messages,
+      page: result.page,
+    };
+  }
+
+  const githubIdentity = resolveRepoGithubIdentity(responseRecord.repoPath, responseRecord.remoteUrl);
+  return NextResponse.json({
+    ...responseRecord,
+    githubOwner: githubIdentity.githubOwner,
+    githubRepo: githubIdentity.githubRepo,
+  }, { headers: serverTimingHeader(startedAt) });
 }
 
 export async function POST(request: NextRequest) {
@@ -162,14 +202,14 @@ export async function POST(request: NextRequest) {
   const filePath = safePath(body.tabId);
 
   // Don't save images in history (too large) — strip data URIs
-  const messages = body.messages.map((m: Record<string, unknown>) => ({
+  const messages = ensureStableChatMessageIds(body.messages.map((m: Record<string, unknown>) => ({
     ...m,
     images: undefined, // strip image data URIs from persistence
     // Strip data URIs from content too (they'd be huge)
     content: typeof m.content === 'string'
       ? (m.content as string).replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '[image]')
       : m.content,
-  }));
+  })));
   // Preserve starred status from existing file
   let starred = false;
   let pinned = false;
@@ -191,7 +231,7 @@ export async function POST(request: NextRequest) {
   let existingMessages: Array<Record<string, unknown>> = [];
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
-    existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
+    existingMessages = ensureStableChatMessageIds(Array.isArray(existing.messages) ? existing.messages : []);
     starred = existing.starred || false;
     pinned = existing.pinned === true;
     model = normalizeModel(existing.model);
@@ -216,9 +256,9 @@ export async function POST(request: NextRequest) {
   // reply) can never drop a stored turn. Intentional truncation (edit-and-resend
   // / delete in the single-writer Assistant tab) passes `replace: true` for a
   // full replace, since a shorter array can't be told apart from a partial here.
-  const finalMessages = body.replace === true
+  const finalMessages = ensureStableChatMessageIds(body.replace === true
     ? messages
-    : mergeChatMessages(existingMessages, messages);
+    : mergeChatMessages(existingMessages, messages));
   const extractedPlanText = extractPlanFromTranscript(finalMessages.map((m: Record<string, unknown>) => ({
     role: typeof m.role === 'string' ? m.role : undefined,
     content: m.content,
