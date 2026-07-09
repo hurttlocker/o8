@@ -3,6 +3,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { autoCommitCompletionWorktree } from '@/lib/supervisor/completion-verification';
 import type { Lane } from './types';
+import { captureWorktreeState } from './worktree-capture';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
@@ -13,6 +14,10 @@ export interface LaneWorktreePreservation {
   branchName?: string;
   refName?: string;
   headSha?: string;
+  /** True when uncommitted work was snapshotted to an out-of-band capture ref
+   *  (see captureWorktreeState) — recovery independent of the agent's commit. */
+  captured?: boolean;
+  captureRef?: string;
 }
 
 function branchSafeId(value: string): string {
@@ -57,11 +62,21 @@ export async function preserveLaneWorktreeHead(
     return { preserved: false, autoCommitted: false };
   }
 
+  // Capture the raw working state to an out-of-band ref BEFORE any commit logic
+  // runs, so recovery never depends on the agent (or a blind amend) having
+  // committed correctly — the worktree-amend false-landing trap.
+  const capture = await captureWorktreeState(worktreePath, lane.id);
+
   const autoCommitted = await autoCommitCompletionWorktree(worktreePath);
   const baseBranch = lane.baseBranch?.trim() || 'main';
   const hasUnmergedWork = await headHasUnmergedWork(worktreePath, baseBranch);
   if (!autoCommitted && !hasUnmergedWork) {
-    return { preserved: false, autoCommitted: false };
+    return {
+      preserved: false,
+      autoCommitted: false,
+      captured: capture.captured,
+      captureRef: capture.ref,
+    };
   }
 
   const id = branchSafeId(path.basename(worktreePath) || lane.id);
@@ -76,5 +91,7 @@ export async function preserveLaneWorktreeHead(
     branchName,
     refName,
     headSha: stdout.trim() || undefined,
+    captured: capture.captured,
+    captureRef: capture.ref,
   };
 }
