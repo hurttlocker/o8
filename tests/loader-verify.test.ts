@@ -1,17 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-type VerifyIdentityResponse = (json: unknown, expectedBootId?: string) => boolean;
-
-function loadVerifier(): VerifyIdentityResponse {
-  const source = readFileSync(join(process.cwd(), 'scripts', 'loader-verify.mjs'), 'utf-8')
-    .replace(/export\s*\{\s*verifyIdentityResponse\s*\};?\s*$/m, '');
-  const factory = new Function(`${source}; return verifyIdentityResponse;`);
-  return factory() as VerifyIdentityResponse;
-}
-
-const verifyIdentityResponse = loadVerifier();
+// Import the REAL shipped module (the loader inlines this same file's source at
+// build time in tauri-export.mjs). Direct ESM import — no dynamic evaluation.
+// The specifier is cast so tsc doesn't demand type declarations for the .mjs.
+const { verifyIdentityResponse } = (await import(
+  '../scripts/loader-verify.mjs' as string
+)) as { verifyIdentityResponse: (json: unknown, expectedBootId?: string) => boolean };
 
 describe('loader identity verification', () => {
   it('rejects foreign 404 or non-JSON payloads', () => {
