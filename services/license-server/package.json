@@ -13,6 +13,7 @@
     "start": "node dist/src/index.js",
     "gen-keys": "node scripts/gen-keypair.mjs",
     "contract-test": "tsx scripts/contract-test.ts",
+    "identity-test": "tsx scripts/identity-resolution-test.ts",
     "db:push": "drizzle-kit push",
     "typecheck": "tsc --noEmit"
   },

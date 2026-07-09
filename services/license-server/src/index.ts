@@ -16,6 +16,7 @@ import { handleAnalytics, handleSiteEvent, handleTelemetry } from './analytics.j
 import { handleIssueFree } from './free-issue.js';
 import { handleAccountLicense } from './account-license.js';
 import { handleLinkInstall } from './account-link.js';
+import { runGithubBackfill } from './identity.js';
 
 const app = new Hono();
 
@@ -239,6 +240,31 @@ app.post('/admin/site-event', async (c) => {
     return c.json({ error: 'unauthorized' }, 401);
   }
   return handleSiteEvent(c);
+});
+
+// ── GitHub-identity backfill (#1519) — ADMIN-guarded (write scope). Walks
+//    founders + subscriptions rows that have a clerkUserId but no
+//    github_account_id yet and populates it via the Clerk Backend API.
+//    Idempotent (only touches null rows). `{ dryRun: true }` resolves + counts
+//    without writing. 503 when CLERK_SECRET_KEY is unset. ───────────────────
+app.post('/admin/backfill-github', async (c) => {
+  if (!isAdmin(c.req.header('authorization'))) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  if (!env.CLERK_SECRET_KEY) {
+    return c.json({ error: 'clerk_backend_not_configured' }, 503);
+  }
+  let body: { dryRun?: unknown; limit?: unknown } = {};
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    /* empty/invalid body → defaults (dryRun off) */
+  }
+  const dryRun = body.dryRun === true;
+  const limit = typeof body.limit === 'number' && body.limit > 0 ? body.limit : undefined;
+  const summary = await runGithubBackfill({ dryRun, limit });
+  console.log('[identity] backfill-github summary:', JSON.stringify(summary));
+  return c.json(summary);
 });
 
 // ── Beta invites (#beta-referral) ─────────────────────────────────────────────

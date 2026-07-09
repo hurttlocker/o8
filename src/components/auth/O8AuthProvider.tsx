@@ -75,6 +75,11 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
   const clerk = useClerk();
   const provisionedRef = useRef<string | null>(null);
   const syncAbortRef = useRef<AbortController | null>(null);
+  // Wall-clock of the last entitlement-sync ATTEMPT. Gates the focus re-sync so
+  // a window that regains focus only re-pulls the plan when it's genuinely stale
+  // (>15min), never on every focus. Stamped at attempt time so a failed sync
+  // can't spin a hot loop (#1519).
+  const lastEntitlementSyncRef = useRef(0);
 
   const clearSignedOutEntitlement = useCallback(async () => {
     syncAbortRef.current?.abort();
@@ -85,6 +90,53 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     }).catch(() => {});
     window.dispatchEvent(new Event('o8:entitlement-refresh'));
   }, []);
+
+  // Pull THIS account's license from the license server and cache it locally so
+  // the plan flips without a reload. Shared by the sign-in effect and the
+  // focus re-sync. Best-effort + fail-soft — NEVER downgrades a cached license
+  // (the route's #1483 cached-license behavior governs that); failure is
+  // silent-with-console-log. On a non-free result we nudge EntitlementProvider
+  // to re-fetch live.
+  // NATIVE-MODE SEAM (live-hit 2026-07-05): the desktop Clerk session lives in
+  // the Tauri store, NOT in cookies — server-side auth() sees nothing, so the
+  // client must forward its own short-lived session token. The license server
+  // verifies it against the Clerk JWKS either way; this header is just transport.
+  const runEntitlementSync = useCallback(
+    async (activeUser: { id: string }, signal?: AbortSignal) => {
+      // Stamp at attempt time — rate-limits the focus re-sync regardless of outcome.
+      lastEntitlementSyncRef.current = Date.now();
+      try {
+        const sessionToken = await Promise.resolve(clerk.session?.getToken() ?? null).catch(
+          () => null,
+        );
+        const res = await fetch('/api/panel/entitlement/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { 'x-clerk-session-token': sessionToken } : {}),
+          },
+          body: JSON.stringify({ clerkUserId: activeUser.id }),
+          signal,
+        });
+        const data = (await res.json().catch(() => null)) as EntitlementSyncResult | null;
+        if (shouldPurgeClerkStoreForEntitlementSync(data?.reason)) {
+          void purgeTauriClerkStore();
+          void clearSignedOutEntitlement();
+          return;
+        }
+        if (data?.ok && data.plan && data.plan !== 'free') {
+          window.dispatchEvent(new Event('o8:entitlement-refresh'));
+        }
+      } catch (err) {
+        // Aborted (user change / sign-out) or transient — never blocks the UI and
+        // never downgrades; entitlement re-reads on the next mount / focus.
+        if ((err as { name?: string })?.name !== 'AbortError') {
+          console.log('[entitlement] account sync skipped:', (err as Error)?.message ?? err);
+        }
+      }
+    },
+    [clerk, clearSignedOutEntitlement],
+  );
 
   // Mirror the active Clerk user into the local users table, once per user.
   // The route re-derives the authoritative id from the verified session.
@@ -114,43 +166,49 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
       /* provisioning is best-effort; getCurrentUser retries on next sign-in */
     });
 
-    // Pull this account's license (Founding Operator / subscription) and cache
-    // it locally so the plan flips without a reload. Best-effort + fail-soft;
-    // on a non-free result we nudge EntitlementProvider to re-fetch live.
-    // NATIVE-MODE SEAM (live-hit 2026-07-05): the desktop Clerk session lives in
-    // the Tauri store, NOT in cookies — server-side auth() sees nothing, so the
-    // client must forward its own short-lived session token. The license server
-    // verifies it against the Clerk JWKS either way; this header is just
-    // transport. Web/cookie mode keeps working without it.
-    void Promise.resolve(clerk.session?.getToken() ?? null)
-      .catch(() => null)
-      .then((sessionToken) => fetch('/api/panel/entitlement/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(sessionToken ? { 'x-clerk-session-token': sessionToken } : {}),
-        },
-        body: JSON.stringify({ clerkUserId: user.id }),
-        signal: controller.signal,
-      }))
-      .then((r) => r.json().catch(() => null))
-      .then((d: EntitlementSyncResult | null) => {
-        if (shouldPurgeClerkStoreForEntitlementSync(d?.reason)) {
-          void purgeTauriClerkStore();
-          void clearSignedOutEntitlement();
-          return;
-        }
-        if (d?.ok && d.plan && d.plan !== 'free') {
-          window.dispatchEvent(new Event('o8:entitlement-refresh'));
-        }
-      })
-      .catch(() => {
-        /* sync is best-effort; entitlement re-reads on next mount */
-      });
+    // Authoritative sign-in sync — always runs (the 15-min gate is focus-only).
+    void runEntitlementSync(user, controller.signal);
     return () => {
       controller.abort();
     };
-  }, [isSignedIn, user, clerk, clearSignedOutEntitlement]);
+  }, [isSignedIn, user, runEntitlementSync]);
+
+  // Re-sync on window focus when the cached entitlement is stale (>15min). The
+  // desktop otherwise only learns a plan change at sign-in, so an app left open
+  // for hours never sees an upgrade/downgrade land. Debounced, best-effort, and
+  // never blocks the UI; the shared runEntitlementSync never downgrades a cached
+  // license (#1519 / #1483).
+  useEffect(() => {
+    if (!isSignedIn || !user) return;
+    const STALE_MS = 15 * 60 * 1000;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+
+    const maybeResync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (Date.now() - lastEntitlementSyncRef.current < STALE_MS) return;
+      if (debounce) return; // already scheduled this focus burst
+      debounce = setTimeout(() => {
+        debounce = null;
+        if (Date.now() - lastEntitlementSyncRef.current < STALE_MS) return;
+        const controller = new AbortController();
+        syncAbortRef.current?.abort();
+        syncAbortRef.current = controller;
+        void runEntitlementSync(user, controller.signal);
+      }, 400);
+    };
+
+    const onFocus = () => maybeResync();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') maybeResync();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (debounce) clearTimeout(debounce);
+    };
+  }, [isSignedIn, user, runEntitlementSync]);
 
   const value = useMemo<O8AuthState>(
     () => ({

@@ -7,6 +7,7 @@ import { db } from './db/client.js';
 import { entitlementEvents, subscriptions } from './db/schema.js';
 import { env } from './env.js';
 import { handleFoundingCheckout, isFoundingCheckout } from './founding.js';
+import { backfillGithubForRow } from './identity.js';
 import { mintLicense, type Plan } from './mint.js';
 
 export const stripe = new Stripe(env.STRIPE_SECRET_KEY);
@@ -176,6 +177,11 @@ async function handleCheckoutCompleted(
         updatedAt: new Date(),
       },
     });
+
+  // Best-effort: stamp the STABLE GitHub identity so a duplicate-Clerk-user /
+  // instance-migration can still resolve this subscription (#1519). NEVER blocks
+  // the payment path — fire-and-forget, self-logging.
+  void backfillGithubForRow('subscription', subscriptionId, clerkUserId);
 
   // Mint the license. Tie validity to the paid period when known, else default.
   const days = periodEnd
