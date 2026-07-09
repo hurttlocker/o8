@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentSummary } from '@/lib/fleet/types';
 import { buildMobileInboxDelta, mobileInboxDeltaChangedEntityCount } from './inbox-delta';
 import type { MobileInboxSnapshot } from './types';
 
@@ -19,7 +20,7 @@ function snapshot(overrides: Partial<MobileInboxSnapshot> = {}): MobileInboxSnap
 
 describe('mobile inbox delta', () => {
   it('emits only changed entities while preserving authoritative order', () => {
-    const firstSession = {
+    const firstSession: AgentSummary = {
       id: 'session-1',
       name: 'one',
       squadId: 'codex',
