@@ -111,6 +111,10 @@ interface LaneRow {
   runtime?: string | null;
   /** Lane creation (ISO) — the agent card's elapsed-timer origin. */
   createdAt?: string | null;
+  /** Last write (ISO) — freeze point for a settled agent card's ran-duration. */
+  updatedAt?: string | null;
+  /** Last event (ISO) — preferred freeze point (the moment work last moved). */
+  lastEventAt?: string | null;
 }
 interface CommitRow {
   hash: string;

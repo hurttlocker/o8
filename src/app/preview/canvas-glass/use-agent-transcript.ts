@@ -6,13 +6,18 @@
  * Reuses the SAME seam the IDE's packet tabs + the spawned-agent hover card read
  * (`GET /api/orchestrator/packet-transcript`, normalized `TranscriptEvent[]` from
  * `readPacketTranscriptEvents`). We don't invent a channel — we poll the exact
- * endpoint `use-packet-transcript-poll.ts` and `SpawnedAgentHoverCard.tsx` poll,
- * and fold the normalized events into compact log lines the card renders.
+ * endpoint `use-packet-transcript-poll.ts` and `SpawnedAgentHoverCard.tsx` poll.
+ *
+ * The hook exposes the RAW normalized `TranscriptEvent[]` tail (not a
+ * pre-flattened line list) so the card can fold it into the IDE's rich block
+ * vocabulary — tool-call pill clusters, turn summaries, running indicators — via
+ * `buildAgentTranscriptBlocks` in `agent-transcript-blocks.tsx`. Reading the
+ * exact same normalized structure the IDE reads keeps both sides rendering
+ * identical truth.
  *
  * The canvas preview surface is NOT wrapped in OrchestratorDataProvider, so we
  * can't lift the IDE's hook (it resolves live status from that context); instead
- * this takes the live/terminal signal from the card's own lane row and keeps a
- * small, purpose-built compact-line shape.
+ * this takes the live/terminal signal from the card's own lane row.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -20,8 +25,6 @@ import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 
 const POLL_MS = 3_000;
 const TAIL_LIMIT = 200;
-/** Keep at most this many mapped lines in memory per card (brief: a few hundred). */
-const KEEP_LINES = 160;
 
 // Module-level semaphore — a fleet of agent cards must not each hold a transcript
 // request against the webview's ~6-connection pool (the 2026-07-04 scoring-run
@@ -41,49 +44,11 @@ function release(): void {
   waiters.shift()?.();
 }
 
-export interface AgentLogLine {
-  seq: number;
-  kind: 'assistant' | 'tool' | 'error';
-  text: string;
-}
-
-/** A compact, past-tense label for a tool call ("ran command · npm test"). */
-function toolLabel(event: Extract<TranscriptEvent, { type: 'tool_call' }>): string {
-  const tool = event.tool;
-  const verb =
-    tool === 'exec_command' ? 'ran command'
-      : tool === 'read_file' || tool === 'Read' ? 'read a file'
-        : tool === 'list_files' || tool === 'Glob' ? 'listed files'
-          : tool === 'search_code' || tool === 'Grep' ? 'searched code'
-            : tool === 'search_web' || tool === 'WebSearch' ? 'searched the web'
-              : tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit' || tool === 'apply_patch' ? 'edited a file'
-                : `ran ${tool}`;
-  const detail = event.summary?.trim();
-  return detail ? `${verb} · ${detail}` : verb;
-}
-
-/** Fold the normalized transcript into compact log lines. tool_result/steer/done
- *  are intentionally dropped: the tool_call line already names the action, and
- *  steer messages are owned by the card composer's own optimistic list (no dupes). */
-export function mapAgentLogLines(events: TranscriptEvent[]): AgentLogLine[] {
-  const out: AgentLogLine[] = [];
-  for (const event of events) {
-    if (event.type === 'assistant') {
-      const text = event.text.trim();
-      if (text) out.push({ seq: event.seq, kind: 'assistant', text });
-    } else if (event.type === 'tool_call') {
-      out.push({ seq: event.seq, kind: 'tool', text: toolLabel(event) });
-    } else if (event.type === 'error') {
-      out.push({ seq: event.seq, kind: 'error', text: event.message.trim() || 'Error' });
-    }
-  }
-  return out.slice(-KEEP_LINES);
-}
-
 export type AgentTranscriptStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'unavailable';
 
 export interface AgentTranscriptState {
-  lines: AgentLogLine[];
+  /** The raw normalized transcript tail — folded into blocks by the card. */
+  events: TranscriptEvent[];
   status: AgentTranscriptStatus;
 }
 
@@ -103,7 +68,7 @@ export function useAgentTranscript({
   live: boolean;
   enabled: boolean;
 }): AgentTranscriptState {
-  const [lines, setLines] = useState<AgentLogLine[]>([]);
+  const [events, setEvents] = useState<TranscriptEvent[]>([]);
   const [status, setStatus] = useState<AgentTranscriptStatus>('idle');
   const hasLoadedRef = useRef(false);
 
@@ -134,10 +99,10 @@ export function useAgentTranscript({
         }
         const payload = await response.json().catch(() => null) as { events?: TranscriptEvent[] } | null;
         if (cancelled || !payload || !Array.isArray(payload.events)) return;
-        const mapped = mapAgentLogLines(payload.events);
+        const next = payload.events;
         hasLoadedRef.current = true;
-        setLines(mapped);
-        setStatus(mapped.length > 0 ? 'loaded' : 'empty');
+        setEvents(next);
+        setStatus(next.length > 0 ? 'loaded' : 'empty');
       } catch {
         /* transient network error / abort — keep the last good tail */
       } finally {
@@ -155,5 +120,5 @@ export function useAgentTranscript({
     };
   }, [enabled, query, live]);
 
-  return { lines, status };
+  return { events, status };
 }
