@@ -29,6 +29,7 @@ import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canva
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
+import { ViewAsFreeIndicator } from './ViewAsFreeIndicator';
 import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
 
@@ -90,7 +91,7 @@ function DesktopStatusBarBase({
   onOpenMobilePairing,
   onPortPreview,
 }: DesktopStatusBarProps) {
-  const { founder } = useEntitlement();
+  const { founder, overrideActive } = useEntitlement();
   const settingsButtonRef = useRef<HTMLDivElement | null>(null);
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
@@ -395,7 +396,11 @@ function DesktopStatusBarBase({
           gap: 6,
         }}
       >
-        {founder ? <FoundingStatusBadge operatorNumber={founder.operatorNumber} /> : null}
+        {overrideActive ? (
+          <ViewAsFreeIndicator palette="chrome" />
+        ) : founder ? (
+          <FoundingStatusBadge operatorNumber={founder.operatorNumber} />
+        ) : null}
         {onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>
     </div>

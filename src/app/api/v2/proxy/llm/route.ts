@@ -5,6 +5,7 @@ import { createApproval } from '@/lib/approvals/store';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
+import { getEntitlementSync } from '@/lib/entitlement/store';
 import {
   parseAnthropicStopMetadata,
   resolveAnthropicTaskBudget,
@@ -357,7 +358,11 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
   const messages: Message[] = [{ role: 'system', content: systemPrompt }, ...nonSystemMessages];
 
-  if (auth?.user && auth.user.plan !== 'free') {
+  // The paid-plan budget gate is skipped while "View as Free" (#1517) is active,
+  // so the effective-free experience isn't metered against a paid budget. The
+  // getEntitlementSync().plan read applies the view-as min-clamp; the auth.user
+  // short-circuit keeps it off the hot path for genuine free users.
+  if (auth?.user && auth.user.plan !== 'free' && getEntitlementSync().plan !== 'free') {
     const spent = getCurrentPeriodCost(auth.user.id);
     const budget = auth.user.tokenBudgetUsd;
     if (budget != null && spent >= budget) {

@@ -34,9 +34,15 @@ export interface EntitlementFlags {
 export type EntitlementSource = 'env' | 'file' | 'default';
 
 export interface EntitlementState {
+  /** EFFECTIVE plan — the real plan after the dev "view-as" min-clamp (#1517). */
   plan: Plan;
+  /** Flags derived from the EFFECTIVE plan. */
   flags: EntitlementFlags;
   source: EntitlementSource;
+  /** Real resolved plan BEFORE the view-as clamp. Equals `plan` when no override. */
+  actualPlan: Plan;
+  /** True when a `~/.o8/dev-plan-override` view-as switch is active. */
+  overrideActive: boolean;
 }
 
 /**
