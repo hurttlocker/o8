@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 
 import {
   createO8WebviewCompositeHandlers,
@@ -750,7 +751,7 @@ function browserApiBase(): string {
   if (envBase) return envBase;
   const envPort = process.env.O8_API_PORT?.trim();
   if (envPort) return `http://127.0.0.1:${envPort}`;
-  return 'http://localhost:3001';
+  return `http://localhost:${DEFAULT_API_PORT}`;
 }
 
 function browserApiToken(): string | null {

@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
@@ -116,7 +117,7 @@ function resolveWsPort(): string {
   } catch {
     /* fall through */
   }
-  return process.env.O8_WS_PORT?.trim() || process.env.WS_PORT?.trim() || '3002';
+  return process.env.O8_WS_PORT?.trim() || process.env.WS_PORT?.trim() || String(DEFAULT_WS_PORT);
 }
 
 /**
