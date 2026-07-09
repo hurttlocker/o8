@@ -1,5 +1,6 @@
 ## Deviations
 
+- Pi permission-gate bridge: reused `src/lib/pi/permission-bridge.ts` from the existing packet commit and rewired `owned.ts` to it so `owned.ts` stays below the 800-line ceiling; no behavior deviation.
 - Port-identity phase B (#1520): `scripts/dev.mjs` did not exist, so it was added and the
   package dev scripts rewired to call it.
 - Port-identity phase B: `src-tauri/tauri.conf.json` left unchanged (outside the packet-owned
