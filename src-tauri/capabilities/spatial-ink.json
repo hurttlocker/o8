@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "spatial-ink",
+  "description": "Symon Spatial Context ink overlay window. Scopes IPC to the 'spatial-ink' label so the /spatial-ink webview can listen to o8:stt-event (latch the agent-lane hold) + o8:spatial-ink-clear (disarm), and EMIT o8:spatial-ink-first-stroke / o8:spatial-ink-strokes / o8:spatial-ink-disarm-request back to Rust. Without a capability whose `remote.urls` matches the bundled-Next origin AND whose `windows` includes 'spatial-ink', Tauri injects no __TAURI_INTERNALS__ into this remote-URL webview, so isTauri() is false, listen()/emit() never attach, and the operator can never draw. Label-disciplined: events only, NO window-control / updater / process / shell perms (mouse-capture arm/disarm + window ops stay main-only per spatial_ink_window.rs).",
+  "windows": ["spatial-ink"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to"
+  ]
+}
