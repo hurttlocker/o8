@@ -179,6 +179,127 @@ pub fn init() -> Option<sentry::ClientInitGuard> {
     Some(guard)
 }
 
+/// Start native crash capture — the crash class the `sentry` panic hook in
+/// `init()` CANNOT observe: hardware faults + aborts (SIGSEGV / SIGABRT / SIGBUS
+/// / SIGILL / SIGFPE, and stack-overflow). Returns the reporter handle (hold it
+/// for the program lifetime — dropping it closes the reporter process) or None
+/// when dormant/gated.
+///
+/// Composes with EVERY gate in `init()`: this is only reachable when `init()`
+/// returned a live guard, i.e. a RELEASE build that baked a DSN (debug / no-DSN
+/// stay dormant — the caller never has a guard to pass).
+///
+/// Architecture (`sentry-rust-minidump 0.8` → `minidumper-child 0.2` →
+/// `crash-handler 0.6` + `minidumper 0.8`): `sentry_rust_minidump::init` RE-EXECS
+/// this binary with `--crash-reporter-server=<uuid>` to run an out-of-process
+/// reporter sibling. Everything BEFORE that call runs in BOTH processes; inside
+/// it the reporter runs its server loop and `process::exit(0)`s, so it never
+/// returns to run the app's boot-identity / port-allocation / orphan-reaping /
+/// window setup. That is exactly why the caller places this immediately after
+/// `init()` and BEFORE any of that setup — both to catch early crashes and so
+/// the reporter never becomes a second full app instance (never binds ports,
+/// never reaps the main app's Node children).
+///
+/// Toggle: honored at LAUNCH. If `crashReportsEnabled` is OFF when the main
+/// process starts, the reporter is never spawned (a mid-session flip to ON
+/// applies on the NEXT launch — the settings subtitle discloses this). If ON at
+/// launch, a mid-session flip to OFF is ALSO respected: the reporter runs
+/// `init()` too, so its own `before_send` drops the minidump event within ~30s.
+///
+/// PII honesty: a minidump is a raw memory snapshot — thread stacks (locals,
+/// string fragments, and any secret/token that was live on a stack at crash
+/// time), CPU registers, and the loaded-module list (dylib paths carry the
+/// username). `before_send` scrubs EVENT metadata only; the minidump ATTACHMENT
+/// bytes are uploaded RAW. This is industry-standard for crash reporting and is
+/// covered by the disclosed "Crash & error reports" toggle.
+pub fn init_minidump_handler(
+    guard: &sentry::ClientInitGuard,
+) -> Option<sentry_rust_minidump::Handle> {
+    // Detect the re-exec'd reporter child by minidumper-child's default server
+    // arg. In the reporter we MUST call through to `sentry_rust_minidump::init`
+    // REGARDLESS of the toggle: inside it the reporter runs its server loop and
+    // `process::exit(0)`s, never reaching the app's port/window setup. Skipping
+    // it here (e.g. because the toggle raced OFF between the parent spawning us
+    // and us reading it) would let this process fall through and boot a second
+    // full app instance. The launch-toggle gate therefore applies to the MAIN
+    // process only.
+    let is_reporter = std::env::args().any(|arg| arg.starts_with("--crash-reporter-server"));
+
+    if !is_reporter && !read_toggle() {
+        return None;
+    }
+
+    // `guard: &ClientInitGuard` coerces to the `&sentry::Client` the API wants
+    // via `Deref<Target = Client>`.
+    match sentry_rust_minidump::init(guard) {
+        Ok(handle) => Some(handle),
+        Err(err) => {
+            log::warn!("[telemetry] native crash handler failed to start: {err}");
+            None
+        }
+    }
+}
+
+/// Hidden crash-test trigger for post-ship end-to-end verification of the native
+/// crash pipeline (a real crash can't be exercised by a `#[cfg(test)]` unit).
+/// Set `O8_CRASH_TEST=segv|abort|stackoverflow` and launch once — the process
+/// crashes that exact way so the operator can confirm the event + minidump land
+/// in the Sentry dashboard.
+///
+/// Checked ONCE at startup, AFTER telemetry + minidump init, in the MAIN process
+/// only (the reporter child `exit(0)`s inside `init_minidump_handler` and never
+/// reaches this call). Active in debug AND release, but only a signed release
+/// with a baked DSN and the toggle ON actually uploads — a debug/no-DSN build
+/// just crashes. No-op when the var is unset or empty.
+pub fn maybe_trigger_crash_test() {
+    let Ok(mode) = std::env::var("O8_CRASH_TEST") else {
+        return;
+    };
+    let mode = mode.trim().to_ascii_lowercase();
+    if mode.is_empty() {
+        return;
+    }
+
+    log::error!(
+        "[telemetry] O8_CRASH_TEST={mode} — deliberately crashing to verify native crash capture"
+    );
+    // Let the log line and any queued sentry envelope drain before we crash.
+    std::thread::sleep(Duration::from_millis(250));
+
+    match mode.as_str() {
+        "abort" => {
+            // Raises SIGABRT — the same signal Rust's stack-overflow handler
+            // raises via abort(); crash-handler hooks SIGABRT explicitly on macOS.
+            std::process::abort();
+        }
+        "segv" => {
+            // Null write → SIGSEGV / EXC_BAD_ACCESS (Mach exception port path).
+            #[allow(deref_nullptr)]
+            unsafe {
+                std::ptr::null_mut::<u8>().write_volatile(1);
+            }
+        }
+        "stackoverflow" => {
+            // Unbounded recursion → guard-page fault: reproduces tonight's exact
+            // crash class (EXC_BAD_ACCESS in Rust's stack-overflow handler →
+            // abort). Captured out-of-process on a fresh stack. `black_box` keeps
+            // the optimizer from turning this into a tail call / eliding it.
+            #[allow(unconditional_recursion)] // deliberate: this IS the overflow
+            fn overflow(depth: u64) -> u64 {
+                let frame = [depth; 256];
+                std::hint::black_box(&frame);
+                overflow(std::hint::black_box(frame[0]).wrapping_add(1))
+            }
+            std::hint::black_box(overflow(std::hint::black_box(0)));
+        }
+        other => {
+            log::warn!(
+                "[telemetry] unknown O8_CRASH_TEST value {other:?} (want segv|abort|stackoverflow) — not crashing"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::scrub_paths;
