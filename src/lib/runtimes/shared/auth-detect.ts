@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
-export type RuntimeHouse = 'codex' | 'claude' | 'cursor' | 'grok';
+export type RuntimeHouse = 'codex' | 'claude' | 'opencode' | 'cursor' | 'grok';
 
 export interface RuntimeAuthStatus {
   house: RuntimeHouse;
@@ -156,6 +156,30 @@ async function detectClaude(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectOpencode(): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink('opencode') ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('opencode', 'opencode', {
+      installed: false,
+      authenticated: false,
+      detail: 'opencode CLI is not installed.',
+      fix: 'Install opencode, then run `opencode auth login`.',
+    });
+  }
+
+  const authFile = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json');
+  const authenticated = await fileExists(authFile);
+  return nowStatus('opencode', 'opencode', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? 'opencode CLI is installed and has local auth.json evidence.'
+      : 'opencode CLI is installed but no auth.json was found.',
+    fix: 'Run `opencode auth login`.',
+    binaryPath,
+  });
+}
+
 async function detectCursor(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('cursor-agent') ?? undefined;
   if (!binaryPath) {
@@ -220,8 +244,14 @@ export function invalidateRuntimeAuthCache(): void {
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) return cache.snapshot;
-  const [codex, claude, cursor, grok] = await Promise.all([detectCodex(), detectClaude(), detectCursor(), detectGrok()]);
-  const statuses = { codex, claude, cursor, grok };
+  const [codex, claude, opencode, cursor, grok] = await Promise.all([
+    detectCodex(),
+    detectClaude(),
+    detectOpencode(),
+    detectCursor(),
+    detectGrok(),
+  ]);
+  const statuses = { codex, claude, opencode, cursor, grok };
   const snapshot = {
     statuses,
     suggestedSubscriptionProfile: suggestProfile(statuses),
@@ -233,6 +263,7 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
 function houseForRuntime(runtime: OrchestratorRuntime): RuntimeHouse | null {
   if (runtime === 'codex') return 'codex';
   if (runtime === 'claude-code') return 'claude';
+  if (runtime === 'opencode') return 'opencode';
   if (runtime === 'cursor') return 'cursor';
   if (runtime === 'grok') return 'grok';
   return null;
