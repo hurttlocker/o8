@@ -34,7 +34,7 @@ mod telemetry;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Command;
@@ -603,16 +603,18 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
 
 // ── Dynamic port allocation ──
 //
-// A packaged Tauri app can't assume port 3001 is free — another dev tool,
+// A packaged Tauri app can't assume the default port is free — another dev tool,
 // a running o8 dev server, or an unrelated service may already own it.
 // `find_free_port(preferred)` probes from the preferred port upward and
 // returns the first one that binds successfully. The result is persisted
-// to `~/.cortex-ide/api-port` so downstream consumers (the MCP server,
+// to `~/.o8/api-port` so downstream consumers (the MCP server,
 // `/api/setup/mcp-config`, the orchestrator session config writer) all
 // agree on where the backend actually lives.
 
-const API_PORT_RANGE: std::ops::Range<u16> = 3001..3050;
-const WS_PORT_RANGE: std::ops::Range<u16> = 3002..3100;
+const PROD_API_DEFAULT_PORT: u16 = 47100;
+const PROD_WS_DEFAULT_PORT: u16 = 47105;
+const PROD_API_PORT_RANGE: std::ops::Range<u16> = 47100..47105;
+const PROD_WS_PORT_RANGE: std::ops::Range<u16> = 47105..47110;
 
 /// Take at most `max` bytes from the head of `s`, floored to a char boundary.
 /// `&s[..n]` panics when byte `n` lands mid-UTF-8-sequence — error bodies from
@@ -673,6 +675,173 @@ fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16>
         }
     }
     None
+}
+
+fn bind_ephemeral_port(skip: Option<u16>) -> u16 {
+    for _ in 0..16 {
+        if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) {
+            if let Ok(addr) = listener.local_addr() {
+                let port = addr.port();
+                if Some(port) != skip {
+                    return port;
+                }
+            }
+        }
+    }
+    0
+}
+
+fn random_uuid_v4() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut bytes);
+    } else {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        bytes[..8].copy_from_slice(&(now as u64).to_be_bytes());
+        bytes[8..12].copy_from_slice(&std::process::id().to_be_bytes());
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
+    )
+}
+
+#[derive(Clone, Debug)]
+struct BootIdentity {
+    boot_id: String,
+    instance_id: String,
+}
+
+fn read_or_create_boot_identity() -> BootIdentity {
+    let dir = o8_data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let instance_path = format!("{}/instance-id", dir);
+    let instance_id = std::fs::read_to_string(&instance_path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            let id = random_uuid_v4();
+            let _ = std::fs::write(&instance_path, &id);
+            id
+        });
+    let boot_id = random_uuid_v4();
+    let _ = std::fs::write(format!("{}/boot-id", dir), &boot_id);
+    BootIdentity {
+        boot_id,
+        instance_id,
+    }
+}
+
+fn export_boot_identity(identity: &BootIdentity) {
+    std::env::set_var("O8_BOOT_ID", &identity.boot_id);
+    std::env::set_var("O8_INSTANCE_ID", &identity.instance_id);
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupIdentityResponse {
+    product: Option<String>,
+    instance_id: Option<String>,
+    boot_id: Option<String>,
+}
+
+fn fetch_setup_identity(port: u16) -> Option<SetupIdentityResponse> {
+    let url = format!("http://127.0.0.1:{}/api/setup/identity", port);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(450))
+        .build()
+        .ok()?;
+    let response = client.get(url).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<SetupIdentityResponse>().ok()
+}
+
+fn listener_is_stale_current_instance(port: u16, identity: &BootIdentity) -> bool {
+    let Some(remote) = fetch_setup_identity(port) else {
+        return false;
+    };
+    remote.product.as_deref() == Some("o8")
+        && remote.instance_id.as_deref() == Some(identity.instance_id.as_str())
+        && remote.boot_id.as_deref() != Some(identity.boot_id.as_str())
+}
+
+fn allocate_identity_gated_api_port(identity: &BootIdentity) -> u16 {
+    for port in PROD_API_PORT_RANGE {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+        if listener_is_stale_current_instance(port, identity) {
+            match classify_port_listener(port) {
+                PortListener::Orphan { pid, command }
+                | PortListener::Legit { pid, command, .. }
+                    if pid != 0 =>
+                {
+                    log::info!(
+                        "[identity-port] :{} stale o8 instance pid={} cmd={:?} — killing",
+                        port,
+                        pid,
+                        command
+                    );
+                    sidecar_lifecycle::kill_orphan_and_wait(pid, port);
+                    if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                        return port;
+                    }
+                }
+                _ => {
+                    log::warn!(
+                        "[identity-port] :{} matched stale identity but listener PID was unavailable — skipping",
+                        port
+                    );
+                }
+            }
+        } else {
+            log::info!(
+                "[identity-port] :{} occupied by foreign or current listener — trying next",
+                port
+            );
+        }
+    }
+    let port = bind_ephemeral_port(None);
+    log::warn!(
+        "[identity-port] production API block occupied — falling back to ephemeral :{}",
+        port
+    );
+    port
+}
+
+fn allocate_ws_port(api_port: u16) -> u16 {
+    find_free_port(PROD_WS_PORT_RANGE, Some(api_port)).unwrap_or_else(|| {
+        let port = bind_ephemeral_port(Some(api_port));
+        log::warn!(
+            "[identity-port] production WS block occupied — falling back to ephemeral :{}",
+            port
+        );
+        port
+    })
 }
 
 /// Persist the chosen ports to the data dir so child processes (MCP server,
@@ -970,6 +1139,7 @@ fn spawn_bundled_ws_server(
     next_origin: &str,
     ws_log: Option<&std::fs::File>,
     ai_keys: &[(String, String)],
+    identity: &BootIdentity,
 ) {
     let ws_server_js = server_dir.join("ws-server.mjs");
     if ws_server_js.exists() {
@@ -994,6 +1164,8 @@ fn spawn_bundled_ws_server(
             // App version for the telemetry release tag (the next-server child
             // gets it baked into the server.js wrapper; ws-server has no wrapper).
             .env("O8_APP_VERSION", env!("CARGO_PKG_VERSION"))
+            .env("O8_BOOT_ID", &identity.boot_id)
+            .env("O8_INSTANCE_ID", &identity.instance_id)
             // Issue #776: same sidecar marker as the next-server child.
             .env("O8_SIDECAR_PID", std::process::id().to_string());
         // Issue #935: same AI key forward for ws-server children.
@@ -2359,7 +2531,7 @@ fn read_data_file(name: &str) -> Option<String> {
 
 /// Resolve the API port the Next server is bound to. Mirrors the precedence
 /// in `src/lib/panel/api-port.ts` — env var first, on-disk file second,
-/// default 3001 last.
+/// production default last.
 fn resolve_api_port() -> u16 {
     if let Ok(p) = std::env::var("O8_API_PORT") {
         if let Ok(parsed) = p.parse() {
@@ -2371,7 +2543,7 @@ fn resolve_api_port() -> u16 {
             return parsed;
         }
     }
-    3001
+    PROD_API_DEFAULT_PORT
 }
 
 /// Read the cross-origin auth token. Empty string if missing — the loopback
@@ -3825,7 +3997,7 @@ fn open_voice_settings(app: tauri::AppHandle) {
             let port = std::env::var("O8_API_PORT")
                 .ok()
                 .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(3001);
+                .unwrap_or(PROD_API_DEFAULT_PORT);
             format!("http://127.0.0.1:{}", port)
         }
     };
@@ -4411,6 +4583,8 @@ pub fn run() {
     // the DSN so the Next server + ws-server children inherit it.
     let _sentry_guard = telemetry::init();
     telemetry::export_dsn_to_env();
+    let boot_identity = read_or_create_boot_identity();
+    export_boot_identity(&boot_identity);
 
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
 
@@ -4451,6 +4625,22 @@ pub fn run() {
                 dev_frontend::ENV_VAR
             );
         }
+    }
+    let main_window_config = context
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned();
+    if let Some(window) = context
+        .config_mut()
+        .app
+        .windows
+        .iter_mut()
+        .find(|window| window.label == "main")
+    {
+        window.create = false;
     }
 
     // Clerk publishable key (PUBLIC — safe in source; also baked into the web
@@ -4713,6 +4903,7 @@ pub fn run() {
             background::open_system_settings,
         ])
         .setup(move |app| {
+            let boot_identity = boot_identity.clone();
             // Nudge the user to move o8 to /Applications when it's running
             // translocated / from a DMG — otherwise dictation paste, Accessibility,
             // and auto-update silently break (#fresh-user). Off-thread so the
@@ -5068,7 +5259,7 @@ pub fn run() {
                 ensure_cli_on_path(&server_dir.join("bin").join("o8"));
             }
 
-            // If a dev server is already running on the default port (e.g. the
+            // If a dev server is already running on the default production API port (e.g. the
             // user is running `npm run desktop:dev` in a terminal), defer to it
             // and don't spawn the bundled copy — the dev server is the source
             // of truth during iteration.
@@ -5082,10 +5273,10 @@ pub fn run() {
                 false
             } else if dev_frontend.is_some() {
                 // The explicit frontend override owns API selection; probing
-                // :3001 here could kill an unrelated listener during hot reload.
+                // the production API default here could kill an unrelated listener during hot reload.
                 false
             } else {
-                match classify_port_listener(3001) {
+                match classify_port_listener(PROD_API_DEFAULT_PORT) {
                     PortListener::Free => false,
                     PortListener::Legit {
                         pid,
@@ -5094,46 +5285,56 @@ pub fn run() {
                     } => {
                         if !o8_owned {
                             log::info!(
-                                "[orphan-check] :3001 is owned by non-o8 listener (pid={}, cmd={:?}) — bundled server will allocate another port",
-                                pid, command
+                                "[orphan-check] :{} is owned by non-o8 listener (pid={}, cmd={:?}) — bundled server will allocate another port",
+                                PROD_API_DEFAULT_PORT, pid, command
                             );
+                            false
+                        } else if listener_is_stale_current_instance(
+                            PROD_API_DEFAULT_PORT,
+                            &boot_identity,
+                        ) {
+                            log::info!(
+                                "[orphan-check] :{} is stale o8 identity (pid={}, cmd={:?}) — killing",
+                                PROD_API_DEFAULT_PORT,
+                                pid,
+                                command
+                            );
+                            sidecar_lifecycle::kill_orphan_and_wait(pid, PROD_API_DEFAULT_PORT);
                             false
                         } else {
                             log::info!(
-                                "[orphan-check] :3001 looks like an active o8 listener (pid={}, cmd={:?}) — deferring",
-                                pid, command
+                                "[orphan-check] :{} looks like an active o8 listener (pid={}, cmd={:?}) — deferring",
+                                PROD_API_DEFAULT_PORT, pid, command
                             );
                             true
                         }
                     }
                     PortListener::Orphan { pid, command } => {
-                        log::info!(
-                            "[orphan-check] :3001 owned by ORPHAN pid={} cmd={:?} — killing",
-                            pid, command
-                        );
-                        sidecar_lifecycle::kill_orphan_and_wait(pid, 3001);
-                        // Re-probe in case another legit process grabbed the port
-                        // between kill and this check. Unlikely but cheap.
-                        std::net::TcpStream::connect("127.0.0.1:3001").is_ok()
+                        if listener_is_stale_current_instance(PROD_API_DEFAULT_PORT, &boot_identity)
+                        {
+                            log::info!(
+                                "[orphan-check] :{} owned by stale o8 orphan pid={} cmd={:?} — killing",
+                                PROD_API_DEFAULT_PORT,
+                                pid,
+                                command
+                            );
+                            sidecar_lifecycle::kill_orphan_and_wait(pid, PROD_API_DEFAULT_PORT);
+                        }
+                        false
                     }
                 }
             };
 
-            // Default ports that survived from the legacy 3001/3002 era. If
+            // Production block defaults. If
             // nothing is on them and the bundled server is about to start,
             // these become the actual bindings. If they're taken, we probe
-            // upward from the Rust side.
-            let mut api_port: u16 = 3001;
-            let mut ws_port: u16 = 3002;
+            // upward within the o8-owned block only, then fall back to :0.
+            let mut api_port: u16 = PROD_API_DEFAULT_PORT;
+            let mut ws_port: u16 = PROD_WS_DEFAULT_PORT;
 
             if let Some(dev_frontend) = dev_frontend.as_ref() {
                 api_port = dev_frontend.port();
-                if api_port != 3002 {
-                    // Keep the WS orphan cleanup, but never kill the explicit
-                    // dev frontend if an operator intentionally points at 3002.
-                    sidecar_lifecycle::kill_o8_orphans_on_port(3002);
-                }
-                ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
+                ws_port = allocate_ws_port(api_port);
                 log::info!(
                     "[dev-frontend] {}={} — skipping bundled Next; ports api={} ws={}",
                     dev_frontend::ENV_VAR,
@@ -5176,6 +5377,7 @@ pub fn run() {
                     dev_frontend.origin(),
                     ws_log.as_ref(),
                     &ai_keys,
+                    &boot_identity,
                 );
                 // Dev-bridge: the bundled Next isn't spawned here, but the dev
                 // server IS up on `api_port` — create the dock pill against it.
@@ -5185,7 +5387,10 @@ pub fn run() {
                 // into the bundled-spawn branch), so dock UI couldn't be iterated.
                 prewarm_bundled_next_server(app.handle().clone(), api_port);
             } else if dev_server_running {
-                log::info!("Dev server already running on :3001 — skipping bundled servers");
+                log::info!(
+                    "Dev server already running on :{} — skipping bundled servers",
+                    PROD_API_DEFAULT_PORT
+                );
                 // Write the dev ports so MCP servers launched from this
                 // session agree with the dev backend.
                 let _ = write_port_file("api-port", api_port);
@@ -5229,24 +5434,12 @@ pub fn run() {
                         .unwrap_or(3061);
                     log::info!("[preship-gate] forced isolated ports: api={} ws={}", api_port, ws_port);
                 } else {
-                    // ── Reap o8 orphans on default ports (issue #719) ──
-                    // If a previous install crashed or was killed in a way that
-                    // left its Node children reparented to launchd, they're
-                    // still serving on 3001/3002 right now. The naive
-                    // find_free_port() below would step around them and pick
-                    // 3003+ — but the webview keeps loading from 3001 and gets
-                    // the stale orphan. Force-clear only o8-owned launchd orphans
-                    // first so the new sidecar binds cleanly without killing
-                    // unrelated local services.
-                    sidecar_lifecycle::kill_o8_orphans_on_port(3001);
-                    sidecar_lifecycle::kill_o8_orphans_on_port(3002);
-
                     // ── Port allocation ──
-                    // Probe for free ports starting at the legacy defaults. If the
-                    // user has something else on 3001/3002 (another o8 instance, a
-                    // Next dev server, a random service), fall through to 3003+.
-                    api_port = find_free_port(API_PORT_RANGE, None).unwrap_or(3001);
-                    ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
+                    // Probe only inside the production blocks. Occupied foreign
+                    // listeners are skipped; current-install stale boots are
+                    // killed only after /api/setup/identity proves ownership.
+                    api_port = allocate_identity_gated_api_port(&boot_identity);
+                    ws_port = allocate_ws_port(api_port);
                     log::info!("Allocated ports: api={} ws={}", api_port, ws_port);
                 }
                 let _ = write_port_file("api-port", api_port);
@@ -5290,6 +5483,8 @@ pub fn run() {
                     .env("O8_NODE_BIN", &node_bin)
                     .env("O8_API_PORT", api_port.to_string())
                     .env("O8_WS_PORT", ws_port.to_string())
+                    .env("O8_BOOT_ID", &boot_identity.boot_id)
+                    .env("O8_INSTANCE_ID", &boot_identity.instance_id)
                     .env("WS_PORT", ws_port.to_string())
                     // Issue #776: marker so future sidecar boots can identify
                     // this child as an o8 sibling. macOS doesn't let us read
@@ -5357,6 +5552,7 @@ pub fn run() {
                     &next_origin,
                     ws_log.as_ref(),
                     &ai_keys,
+                    &boot_identity,
                 );
             } else {
                 log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
@@ -5370,6 +5566,21 @@ pub fn run() {
             // knows where to navigate.
             std::env::set_var("CORTEX_IDE_API_PORT", api_port.to_string());
             std::env::set_var("CORTEX_IDE_WS_PORT", ws_port.to_string());
+
+            if app.get_webview_window("main").is_none() {
+                if let Some(config) = main_window_config.as_ref() {
+                    let init_script = format!(
+                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {};",
+                        api_port,
+                        serde_json::to_string(&boot_identity.boot_id).unwrap_or_else(|_| "\"\"".into())
+                    );
+                    tauri::WebviewWindowBuilder::from_config(app, config)?
+                        .initialization_script(init_script)
+                        .build()?;
+                } else {
+                    log::warn!("[main-window] config missing; could not create main webview");
+                }
+            }
 
             log::info!("Cortex IDE desktop shell initialized");
 
