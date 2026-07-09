@@ -45,7 +45,7 @@
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
-import { execSync, execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -57,6 +57,7 @@ migrateDataDirOnce();
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { resolvePortInfo } from '@/lib/panel/api-port';
+import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import {
   startAgentSession,
   updateAgentStatus,
@@ -192,6 +193,11 @@ import {
   fetchNextJson,
 } from './lib/ws-server/next-fetch';
 import {
+  decideStalePortRecovery,
+  fetchWsHealthIdentity,
+} from './lib/ws-server/stale-port-recovery';
+import { buildWsHealthPayload } from './lib/ws-server/health-payload';
+import {
   createInlineTerminalHost,
   createChildTerminalHost,
   type TerminalHost,
@@ -265,7 +271,8 @@ void import('node-pty')
 
 // ── Config ──
 
-const { wsPort: WS_PORT } = resolvePortInfo();
+const INSTANCE_IDENTITY = getInstanceIdentity();
+const { wsPort: WS_PORT } = INSTANCE_IDENTITY;
 const PING_INTERVAL_MS = 25_000;
 // Event-loop lag watchdog (#1498 structural follow-up). ws-server pumps every
 // mobile client, PTY, and orchestrator stream on this one loop; a sync wedge
@@ -5213,12 +5220,10 @@ const httpServer = createServer((req, res) => {
   // Health check endpoint
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
+    res.end(JSON.stringify(buildWsHealthPayload(INSTANCE_IDENTITY, {
       clients: clients.size,
-      gateway: 'disabled',
       eventLoop: wsWatchdog.getStats(),
-    }));
+    })));
     return;
   }
   res.writeHead(404);
@@ -5323,6 +5328,8 @@ wss.on('connection', (ws, req) => {
       clientId: client.id,
       gateway: 'disabled',
       realtimeSeq,
+      instanceId: INSTANCE_IDENTITY.instanceId,
+      bootId: INSTANCE_IDENTITY.bootId,
     },
   });
 
@@ -5692,29 +5699,45 @@ if (reviewPollTimer.unref) reviewPollTimer.unref();
 // - On WS disconnect, a 10s grace period allows hot-reload reconnects before killing.
 // - cortex-codex-*/cortex-claude-* sessions persist indefinitely (stall detector manages them).
 
+async function recoverFromPortInUse(): Promise<void> {
+  console.log(`[ws-server] Port ${WS_PORT} in use — checking listener identity before recovery`);
+  const health = await fetchWsHealthIdentity(WS_PORT);
+  const decision = decideStalePortRecovery(INSTANCE_IDENTITY, health);
+
+  if (decision.action !== 'kill') {
+    console.error(
+      `[ws-server] Port ${WS_PORT} is occupied (${decision.reason}); refusing to kill the listener. `
+      + 'Stop the process or choose another O8_WS_PORT.',
+    );
+    process.exit(1);
+  }
+
+  try {
+    const pids = execFileSync('lsof', ['-ti', `:${WS_PORT}`, '-sTCP:LISTEN'], { encoding: 'utf-8' }).trim();
+    if (pids) {
+      execFileSync('kill', ['-9', ...pids.split('\n').filter(Boolean)], { encoding: 'utf-8' });
+      console.log(`[ws-server] Killed stale o8 process(es): ${pids.replace(/\n/g, ', ')}`);
+    } else {
+      console.log(`[ws-server] Port ${WS_PORT} reported in use but no listener found — retrying`);
+    }
+    setTimeout(() => {
+      httpServer.listen(WS_PORT, '0.0.0.0', () => {
+        console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+        wsWatchdog.start();
+        startRelayConnectorIfEnabled();
+      });
+    }, 500);
+  } catch (error) {
+    console.error(
+      `[ws-server] Failed to clear stale o8 listener on port ${WS_PORT}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exit(1);
+  }
+}
+
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`[ws-server] Port ${WS_PORT} in use — killing stale process...`);
-    try {
-      const pids = execSync(`lsof -ti :${WS_PORT} -sTCP:LISTEN`, { encoding: 'utf-8' }).trim();
-      if (pids) {
-        execSync(`kill -9 ${pids.split('\n').join(' ')}`, { encoding: 'utf-8' });
-        console.log(`[ws-server] Killed stale process(es): ${pids.replace(/\n/g, ', ')}`);
-      } else {
-        console.log(`[ws-server] Port ${WS_PORT} reported in use but no listener found — retrying`);
-      }
-      // Retry once after a short delay (also covers the holder having already exited)
-      setTimeout(() => {
-        httpServer.listen(WS_PORT, '0.0.0.0', () => {
-          console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
-          wsWatchdog.start(); // idempotent — covers the port-reclaim retry path
-          startRelayConnectorIfEnabled(); // self-gating — relay must also start on this boot path
-        });
-      }, 500);
-    } catch {
-      console.error(`[ws-server] Failed to clear port ${WS_PORT} — exiting`);
-      process.exit(1);
-    }
+    void recoverFromPortInUse();
   } else {
     throw err;
   }
