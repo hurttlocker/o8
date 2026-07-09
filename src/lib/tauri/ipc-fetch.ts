@@ -15,6 +15,7 @@
  */
 
 import { isTauri } from './bridge';
+import { getApiBase } from '@/lib/panel/api-port';
 
 // ── IPC route mapping ──
 
@@ -103,7 +104,7 @@ export async function ipcFetch(
   // Parse the URL to match against IPC routes
   let url: URL;
   try {
-    url = new URL(urlStr, 'http://localhost:3001');
+    url = new URL(urlStr, getApiBase());
   } catch {
     return fetch(input, init);
   }
