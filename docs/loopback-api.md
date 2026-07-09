@@ -72,6 +72,21 @@ trade-off for dev ergonomics — packaged builds always have Tier 1.
   itself proved loopback** (`headersIndicateLoopback`), so a LAN fetch of the
   page HTML cannot harvest the token.
 
+## Setup identity
+
+`GET /api/setup/identity` is a public read-only setup endpoint. It returns
+`{ product: "o8", instanceId, bootId, apiPort, wsPort, version }`, always with
+`Access-Control-Allow-Origin: *` and `Cache-Control: no-store`. It contains no
+secrets and is covered by the `/api/setup/*` GET/HEAD allowlist; non-GET methods
+still go through the normal loopback/token gate.
+
+`instanceId` is stable for an install and persisted at `~/.o8/instance-id`
+(respecting `CORTEX_IDE_DATA_DIR`). When an existing mobile E2EE server identity
+is already present, o8 derives the instance id from that public key fingerprint;
+otherwise it creates a random UUID once. `bootId` resolves from `O8_BOOT_ID`,
+then `~/.o8/boot-id`, else a generated dev fallback. Sidecars should export a
+fresh boot id per app launch.
+
 ## Rules when adding routes
 
 - New route family that touches agent/repo/operator state → **nothing to do**:

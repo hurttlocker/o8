@@ -10,17 +10,32 @@
  *      consistent with the running webview without requiring a duplicate
  *      PORT/NEXT_ORIGIN env on every helper process.
  *   3. `~/.o8/api-port` written by the Tauri Rust sidecar during
- *      startup (probe-from-3001-upward). Stale files are tolerated because
+ *      startup (prod block starts at 47100). Stale files are tolerated because
  *      the env var path wins when present.
- *   4. Legacy default 3001 so dev workflows (`npm run dev`) still work.
+ *   4. Port-block defaults so dev workflows still work without a sidecar.
  *
  * This is the single source of truth for /api/setup/mcp-config,
  * /api/setup/claude-desktop, orchestrator-session.ts, and the MCP server.
- * Never hardcode 3001 in a new file — import from here.
+ * Never hardcode backend ports in a new file — import from here.
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  DEFAULT_API_PORT,
+  DEFAULT_WS_PORT,
+} from '@/lib/panel/port-constants';
+export {
+  DEFAULT_API_PORT,
+  DEFAULT_WS_PORT,
+  DEFAULT_DEV_API_PORT,
+  DEFAULT_DEV_WS_PORT,
+  DEV_API_PORT_BLOCK,
+  DEV_WS_PORT_BLOCK,
+  PROD_API_PORT_BLOCK,
+  PROD_WS_PORT_BLOCK,
+  RESERVED_PORT_BLOCK,
+} from '@/lib/panel/port-constants';
 
 export interface PortInfo {
   apiPort: number;
@@ -89,7 +104,7 @@ export function resolvePortInfo(): PortInfo {
   if (apiFromEnv && Number.isFinite(apiFromEnv)) {
     return {
       apiPort: apiFromEnv,
-      wsPort: wsFromEnv && Number.isFinite(wsFromEnv) ? wsFromEnv : 3002,
+      wsPort: wsFromEnv && Number.isFinite(wsFromEnv) ? wsFromEnv : DEFAULT_WS_PORT,
       source: 'env',
     };
   }
@@ -101,7 +116,7 @@ export function resolvePortInfo(): PortInfo {
   if (devFrontendPort) {
     return {
       apiPort: devFrontendPort,
-      wsPort: wsFromEnv && Number.isFinite(wsFromEnv) ? wsFromEnv : 3002,
+      wsPort: wsFromEnv && Number.isFinite(wsFromEnv) ? wsFromEnv : DEFAULT_WS_PORT,
       source: 'env',
     };
   }
@@ -116,15 +131,15 @@ export function resolvePortInfo(): PortInfo {
   if (apiFromFile) {
     const info: PortInfo = {
       apiPort: apiFromFile,
-      wsPort: wsFromFile ?? 3002,
+      wsPort: wsFromFile ?? DEFAULT_WS_PORT,
       source: 'file',
     };
     if (apiMtime != null) _cached = { info, mtimeMs: apiMtime };
     return info;
   }
 
-  // 3) Default fallback — dev workflow.
-  return { apiPort: 3001, wsPort: 3002, source: 'default' };
+  // 4) Default fallback — sidecar-free workflow.
+  return { apiPort: DEFAULT_API_PORT, wsPort: DEFAULT_WS_PORT, source: 'default' };
 }
 
 export function getApiBase(): string {

@@ -1,4 +1,5 @@
 export { parseReviewFindings, parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Types ──
@@ -19,7 +20,7 @@ export interface McpToolResult {
 
 // ── API Client State ──
 
-let _apiBase = 'http://localhost:3001';
+let _apiBase = `http://localhost:${DEFAULT_API_PORT}`;
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [500, 1500, 4000];
 const FETCH_TIMEOUT_MS = 15_000;

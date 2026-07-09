@@ -6,12 +6,12 @@
  * that file server-side and injects the value as `window.__O8_WS_PORT__`
  * before any client code runs.
  *
- * Browser hooks call `getBrowserWsPort()` instead of hardcoding 3002. Legacy
- * dev workflows (`npm run dev` without Tauri) fall back to the default 3002,
+ * Browser hooks call `getBrowserWsPort()` instead of hardcoding a port. Legacy
+ * dev workflows (`npm run dev` without Tauri) fall back to DEFAULT_WS_PORT,
  * which matches the port ws-server binds to when no override is set.
  */
 
-const DEFAULT_WS_PORT = 3002;
+import { DEFAULT_WS_PORT } from '@/lib/panel/port-constants';
 
 declare global {
   interface Window {

@@ -53,6 +53,7 @@ import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPa
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { fetchWorkerRun } from '@/lib/worker/runs';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import { parseGitDiff } from '@/lib/worktree/diff-parser';
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
@@ -431,7 +432,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         // Register with supervisor for completion detection + stuck monitoring.
         // The supervisor runs in the ws-server process — use HTTP, not direct import.
         try {
-          const wsPort = process.env.WS_PORT || '3002';
+          const { wsPort } = resolvePortInfo();
           await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
@@ -631,7 +632,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         // Register with supervisor (ws-server process) via HTTP
         try {
-          const wsPort = process.env.WS_PORT || '3002';
+          const { wsPort } = resolvePortInfo();
           await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },

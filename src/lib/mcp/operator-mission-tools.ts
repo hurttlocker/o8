@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -32,7 +33,7 @@ function resolveApiBase(): string {
   if (envBase) return envBase;
   const envPort = process.env.O8_API_PORT?.trim();
   if (envPort) return `http://127.0.0.1:${envPort}`;
-  return 'http://localhost:3001';
+  return `http://localhost:${DEFAULT_API_PORT}`;
 }
 
 // ── Panel Bearer token ──
