@@ -19,6 +19,7 @@ import 'server-only';
 
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
+import { getEntitlementSync } from '@/lib/entitlement/store';
 import {
   resolveLocalChatModelSync,
   resolveLocalInferenceBaseUrlSync,
@@ -52,10 +53,12 @@ export interface InferenceRoute {
 function planToken(): string | null {
   const entitlement = readCachedEntitlement();
   const token = entitlement?.licenseKey?.trim();
-  const managedPlan =
-    entitlement?.plan === 'founder' ||
-    entitlement?.plan === 'pro' ||
-    entitlement?.plan === 'team';
+  // Gate on the RESOLVED entitlement (getEntitlementSync applies the #1517
+  // view-as min-clamp) rather than the raw file plan, so "View as Free" actually
+  // routes the Brain through the free tiers instead of the managed proxy. The
+  // licenseKey file itself stays untouched — we simply don't USE the token while
+  // the effective plan is free; clearing the override restores the fast path.
+  const managedPlan = getEntitlementSync().flags['proxy.inference'] === true;
   if (!managedPlan) return null;
   return token && token.split('.').length === 3 ? token : null;
 }
