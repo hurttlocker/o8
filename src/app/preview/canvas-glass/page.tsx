@@ -1588,7 +1588,18 @@ export default function CanvasGlassPreviewPage() {
         // leaving photo/video cards a chrome-height SHORT of their cell — the
         // dead gap + outlined "wonky" tiles the operator saw. Now they fill the
         // full grid cell like every borderless shell card.
-        const c = el.offsetHeight - it.h;
+        //
+        // Coordinate space: `it.h` and the slot are LAYER units. In-layer cards
+        // sit under the canvas CSS-zoom layer, whose zoom this WebKit does NOT
+        // fold into offsetHeight, so their offsetHeight is already layer units.
+        // The o8.md spec card is the one card rendered OUT of that layer
+        // (screenMap, so CodeMirror's caret hit-tests at device 1:1), so ITS
+        // offsetHeight is real screen px = layerHeight × zoom. Difference the two
+        // spaces and the chrome comes out garbage at any zoom ≠ 1 (negative →
+        // wrong fallback, or wildly inflated → the card mis-sizes past its slot).
+        // Divide the out-of-layer card back to layer units first.
+        const layerHeight = it.kind === 'spec' ? el.offsetHeight / zoom : el.offsetHeight;
+        const c = layerHeight - it.h;
         if (c >= 0 && c < 400) return c;
       }
       return undefined;
