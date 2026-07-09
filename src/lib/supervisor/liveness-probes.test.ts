@@ -1,0 +1,235 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
+
+process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-liveness-probes-data-'));
+process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
+
+const { getSqlite } = await import('@/lib/db');
+const { createLane, deleteLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { enqueueInboxItem, listInboxItems } = await import('@/lib/supervisor/inbox');
+const { runLivenessProbeSweep } = await import('@/lib/supervisor/liveness-probes');
+
+const tempDirs: string[] = [];
+const laneIds: string[] = [];
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function commitAll(cwd: string, message: string): string {
+  git(cwd, ['add', '-A']);
+  git(cwd, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-m', message]);
+  return git(cwd, ['rev-parse', 'HEAD']);
+}
+
+function makeRepo(name: string) {
+  const root = mkdtempSync(join(tmpdir(), `${name}-`));
+  const origin = join(root, 'origin.git');
+  const seed = join(root, 'seed');
+  const clone = join(root, 'clone');
+  tempDirs.push(root);
+
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, seed], { stdio: 'pipe' });
+  git(seed, ['checkout', '-b', 'main']);
+  writeFileSync(join(seed, 'README.md'), 'base\n');
+  commitAll(seed, 'base');
+  git(seed, ['push', '-u', 'origin', 'main']);
+
+  execFileSync('git', ['clone', origin, clone], { stdio: 'pipe' });
+  git(clone, ['checkout', '-b', 'main', 'origin/main']);
+  git(clone, ['checkout', '-b', 'packet']);
+
+  return { seed, clone };
+}
+
+function packetFixture(repoPath: string, packetId: string, laneId: string): OrchestratorPacket {
+  return {
+    id: packetId,
+    referenceLabel: packetId,
+    title: packetId,
+    summary: packetId,
+    workspaceTargetPath: repoPath,
+    branchTarget: 'packet',
+    runtime: 'codex',
+    dependencyLabels: [],
+    dependencyPacketIds: [],
+    queueState: 'held',
+    releaseState: 'pending',
+    status: 'running',
+    blockedReason: null,
+    lastEventAt: null,
+    lastEventLabel: null,
+    archivedAt: null,
+    review: null,
+    lane: {
+      tileId: laneId,
+      tabId: laneId,
+      repoPath,
+      worktreePath: repoPath,
+      runtime: 'codex',
+      laneId,
+      sessionKey: `codex-owned:${laneId}`,
+    } satisfies OrchestratorLaneBinding,
+  };
+}
+
+function seedPacket(repoPath: string, packetId: string, status: OrchestratorPacket['status'] = 'running') {
+  const lane = createLane({
+    repoPath,
+    worktreePath: repoPath,
+    branch: 'packet',
+    baseBranch: 'main',
+    runtime: 'codex',
+    packetId,
+  });
+  laneIds.push(lane.id);
+  writeOrchestratorControlPlaneState({
+    ...createEmptyOrchestratorMissionState(),
+    missionId: `mission-${packetId}`,
+    repoPath,
+    packets: [packetFixture(repoPath, packetId, lane.id)].map((packet) => ({ ...packet, status })),
+  });
+  return lane;
+}
+
+function inboxItem(id: string) {
+  return listInboxItems({ includeAllProjects: true, includeDismissed: true })
+    .find((item) => item.id === id);
+}
+
+function ageInboxItem(id: string, createdAt: string) {
+  getSqlite().prepare(`
+    UPDATE supervisor_inbox
+    SET created_at = ?, last_seen_at = ?
+    WHERE id = ?
+  `).run(createdAt, createdAt, id);
+}
+
+afterEach(() => {
+  while (laneIds.length > 0) {
+    deleteLane(laneIds.pop()!);
+  }
+  while (tempDirs.length > 0) {
+    rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  }
+  writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+});
+
+describe('runLivenessProbeSweep', () => {
+  it('resolves merge_blocked with sha evidence when the branch head is merged', async () => {
+    const { clone, seed } = makeRepo('o8-liveness-merged');
+    writeFileSync(join(clone, 'packet.txt'), 'packet\n');
+    commitAll(clone, 'packet work');
+    git(clone, ['push', 'origin', 'packet']);
+    git(seed, ['fetch', 'origin', 'packet', '--quiet']);
+    git(seed, ['merge', '--ff-only', 'origin/packet']);
+    const mergedSha = git(seed, ['rev-parse', '--short', 'HEAD']);
+    git(seed, ['push', 'origin', 'main']);
+    git(clone, ['fetch', 'origin', 'main', '--quiet']);
+
+    const lane = seedPacket(clone, 'pkt-merge-blocked-resolves');
+    const item = enqueueInboxItem({
+      repoPath: clone,
+      packetId: 'pkt-merge-blocked-resolves',
+      kind: 'merge_blocked',
+      payload: { laneId: lane.id, baseBranch: 'main', error: 'Merge blocked.' },
+    });
+
+    await expect(runLivenessProbeSweep({ now: new Date('2026-07-09T12:00:00.000Z') }))
+      .resolves.toMatchObject({ resolved: 1 });
+
+    const resolved = inboxItem(item.id);
+    expect(resolved?.status).toBe('resolved');
+    expect(resolved?.payload.autoResolutionNote).toContain(`merged at ${mergedSha}`);
+    expect(resolved?.payload.autoResolution).toMatchObject({
+      probeKind: 'merge_blocked_ancestry',
+      evidence: {
+        mergeCommit: mergedSha,
+        ahead: 0,
+      },
+    });
+  }, 20_000);
+
+  it('leaves merge_blocked active when the branch head is not merged', async () => {
+    const { clone } = makeRepo('o8-liveness-unmerged');
+    writeFileSync(join(clone, 'packet.txt'), 'packet\n');
+    commitAll(clone, 'packet work');
+    const lane = seedPacket(clone, 'pkt-merge-blocked-stays');
+    const item = enqueueInboxItem({
+      repoPath: clone,
+      packetId: 'pkt-merge-blocked-stays',
+      kind: 'merge_blocked',
+      payload: { laneId: lane.id, baseBranch: 'main', error: 'Merge blocked.' },
+    });
+
+    await expect(runLivenessProbeSweep({ now: new Date('2026-07-09T12:00:00.000Z') }))
+      .resolves.toMatchObject({ resolved: 0 });
+
+    const active = inboxItem(item.id);
+    expect(active?.status).toBe('human_required');
+    expect(active?.payload.autoResolution).toBeUndefined();
+  }, 20_000);
+
+  it('expires packet_missing only after the 7-day packet-gone TTL', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-liveness-packet-missing-'));
+    tempDirs.push(repoPath);
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    const recent = enqueueInboxItem({
+      repoPath,
+      packetId: 'pkt-missing-recent',
+      kind: 'packet_missing',
+      payload: { error: 'Packet missing.' },
+    });
+    const expired = enqueueInboxItem({
+      repoPath,
+      packetId: 'pkt-missing-expired',
+      kind: 'packet_missing',
+      payload: { error: 'Packet missing.' },
+    });
+    ageInboxItem(recent.id, '2026-07-03T12:00:01.000Z');
+    ageInboxItem(expired.id, '2026-07-02T12:00:00.000Z');
+
+    await expect(runLivenessProbeSweep({ now: new Date('2026-07-09T12:00:00.000Z') }))
+      .resolves.toMatchObject({ resolved: 1 });
+
+    expect(inboxItem(recent.id)?.status).toBe('human_required');
+    const expiredItem = inboxItem(expired.id);
+    expect(expiredItem?.status).toBe('resolved');
+    expect(expiredItem?.payload.autoResolutionNote).toContain('expired after 7 days');
+    expect(expiredItem?.payload.autoResolution).toMatchObject({
+      probeKind: 'packet_gone_ttl',
+      terminalState: 'expired',
+    });
+  });
+
+  it('leaves bounded_retry_exhausted active when the latest lane has not merged', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-liveness-bounded-retry-'));
+    tempDirs.push(repoPath);
+    const lane = seedPacket(repoPath, 'pkt-bounded-retry-stays');
+    setLaneStatus(lane.id, 'running', 'system', 'still_running');
+    const item = enqueueInboxItem({
+      repoPath,
+      packetId: 'pkt-bounded-retry-stays',
+      kind: 'bounded_retry_exhausted',
+      payload: { laneId: lane.id, error: 'Retry budget exhausted.' },
+    });
+
+    await expect(runLivenessProbeSweep({ now: new Date('2026-07-09T12:00:00.000Z') }))
+      .resolves.toMatchObject({ resolved: 0 });
+
+    expect(inboxItem(item.id)?.status).toBe('human_required');
+    expect(inboxItem(item.id)?.payload.autoResolution).toBeUndefined();
+  });
+});

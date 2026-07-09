@@ -96,7 +96,9 @@ export interface SupervisorInboxResolutionNote {
   packetId: string | null;
   laneId: string | null;
   event: string;
-  terminalState: 'released' | 'archived';
+  terminalState?: 'released' | 'archived' | 'failed' | 'expired';
+  probeKind?: string;
+  evidence?: Record<string, unknown>;
   resolvedAt: string;
 }
 
