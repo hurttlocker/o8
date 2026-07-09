@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, animate, motion } from 'framer-motion';
+import { AnimatePresence, animate, motion, useReducedMotion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import {
   CANVAS_GLASS_DEFAULTS,
@@ -71,6 +71,7 @@ import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from '
 import { CanvasFeedbackButton } from './canvas-feedback';
 import { ProximityDock } from './proximity-dock';
 import { AnticipationRing } from './anticipation-ring';
+import { ComposerPartialsFill, useAgentPartialsMorph } from './agent-partials-morph';
 import { OrchestratorDock } from './dock';
 import type { SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { FileGlassCard, type FileCard } from './file-card';
@@ -393,6 +394,21 @@ export default function CanvasGlassPreviewPage() {
       fill: (text: string) => setComposerValue((current) => (current.trim() ? `${current.trim()} ${text}` : text)),
     });
   }, [dictationHost]);
+  const reduceMotion = useReducedMotion() ?? false;
+  // Right-Option agent dictation morphs the composer in place — its controls
+  // fade out and the live partial words stream where you'd type, growing the
+  // pill upward like the outside HUD. Latch + HUD-yield claim live in the hook;
+  // `canClaim` only lets the canvas own the partials when its composer is truly
+  // on screen + the window is focused (else the outside HUD keeps painting).
+  const partialsMorph = useAgentPartialsMorph(() => {
+    if (!canvasEnabled) return false;
+    if (typeof document === 'undefined') return false;
+    if (document.visibilityState !== 'visible') return false;
+    if (!document.hasFocus()) return false;
+    // offsetParent === null ⇒ the composer is display:none / a backgrounded tab.
+    if (composerInputRef.current && composerInputRef.current.offsetParent === null) return false;
+    return true;
+  });
   const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
@@ -5157,6 +5173,24 @@ export default function CanvasGlassPreviewPage() {
         }}
       >
         <AnticipationRing focused={composerFocused} radius={24} />
+        {/* Controls layer — fades out AND drops out of flow while an agent-lane
+            (Right-Option) dictation morphs the composer into the live partials
+            transcript, so the transcript fill alone drives the pill's height. */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flex: 1,
+            minWidth: 0,
+            ...(partialsMorph.active
+              ? { position: 'absolute', top: 8, bottom: 8, left: 10, right: 10 }
+              : null),
+            opacity: partialsMorph.active && !partialsMorph.closing ? 0 : 1,
+            pointerEvents: partialsMorph.active && !partialsMorph.closing ? 'none' : 'auto',
+            transition: reduceMotion ? undefined : 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
         {/* Mode — fleet (dispatch) / single (solo) / fusion. The glyph IS the
             chip (the operator asked for "a fleet icon"); the popover carries the
             labels. Orange marks the live mode, matching the default composer. */}
@@ -5285,6 +5319,17 @@ export default function CanvasGlassPreviewPage() {
             </svg>
           )}
         </button>
+        </div>
+        {/* Live agent partials — the Right-Option dictation streams here in place
+            of the controls, the pill growing upward like the outside HUD. */}
+        {partialsMorph.active ? (
+          <ComposerPartialsFill
+            phase={partialsMorph.phase}
+            text={partialsMorph.text}
+            closing={partialsMorph.closing}
+            reduce={reduceMotion}
+          />
+        ) : null}
       </div>
 
       {/* Composer menus — repo scope / model / thinking effort. */}
