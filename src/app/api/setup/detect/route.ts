@@ -314,6 +314,75 @@ function detectOpenCode(deadlineAt?: number): DetectedTool {
   };
 }
 
+function detectCursor(deadlineAt?: number): DetectedTool {
+  const path = locateBin('cursor-agent', deadlineAt);
+  const detected = !!path;
+  let version: string | undefined;
+
+  if (detected) {
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
+  }
+
+  const authPresent = keyPresent(['CURSOR_API_KEY'], loadConfiguredKeyNames())
+    || existsSync(join(homedir(), '.cursor'));
+  return {
+    id: 'cursor',
+    name: 'Cursor CLI',
+    detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'set CURSOR_API_KEY or sign in to Cursor' : undefined,
+    version,
+    path,
+    details: { authPresent },
+  };
+}
+
+function detectGrok(deadlineAt?: number): DetectedTool {
+  const path = locateBin('grok', deadlineAt);
+  const detected = !!path;
+  let version: string | undefined;
+
+  if (detected) {
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
+  }
+
+  const authPresent = keyPresent(['GROK_CODE_XAI_API_KEY'], loadConfiguredKeyNames())
+    || existsSync(join(homedir(), '.grok'));
+  return {
+    id: 'grok',
+    name: 'Grok Build',
+    detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'set GROK_CODE_XAI_API_KEY or sign in to Grok' : undefined,
+    version,
+    path,
+    details: { authPresent },
+  };
+}
+
+function detectPi(deadlineAt?: number): DetectedTool {
+  const path = locateBin('pi', deadlineAt);
+  const detected = !!path;
+  let version: string | undefined;
+
+  if (detected) {
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
+  }
+
+  const authPresent = keyPresent(['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'], loadConfiguredKeyNames())
+    || existsSync(join(homedir(), '.pi'));
+  return {
+    id: 'pi',
+    name: 'Pi',
+    detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'set ANTHROPIC_API_KEY or OPENAI_API_KEY' : undefined,
+    version,
+    path,
+    details: { authPresent },
+  };
+}
+
 async function detectOllama(deadlineAt?: number): Promise<DetectedTool> {
   const res = await safeFetch('http://localhost:11434/api/tags', 2000, deadlineAt);
   const detected = res?.ok ?? false;
@@ -461,6 +530,9 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectOpenCode(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectCursor(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectGrok(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectPi(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOllama(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectApiKeys());
 
