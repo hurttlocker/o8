@@ -44,10 +44,33 @@ pub fn proxy_base_url() -> String {
     base.trim_end_matches('/').to_string()
 }
 
+/// True when the dev "View as Free" switch (#1517) is downclamping this machine
+/// to the free experience. Mirrors the TS `dev-override.ts` file: the view-as
+/// switch only ever writes a DOWNGRADE, and the only plan Q previews is `free`,
+/// so a `{ "plan": "free" }` override forces the free voice path. A missing file
+/// (or any non-free override plan) leaves the token path unchanged. Never panics.
+fn dev_override_forces_free() -> bool {
+    let path = o8_data_dir().join("dev-plan-override");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    value.get("plan").and_then(|p| p.as_str()) == Some("free")
+}
+
 /// The plan-token bearer — the raw EdDSA JWT from `~/.o8/entitlement.json`
 /// (`licenseKey`). Returns None unless it looks like a compact JWT (3
 /// dot-separated segments); the proxy makes the real validity call.
+///
+/// When "View as Free" is active we return None so the managed-proxy voice paths
+/// (Symon / Ask / dictation polish / Whisper STT) simulate the free experience.
+/// The license FILE is never modified — clearing the override restores the perk.
 pub fn read_license_token() -> Option<String> {
+    if dev_override_forces_free() {
+        return None;
+    }
     let path = o8_data_dir().join("entitlement.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
