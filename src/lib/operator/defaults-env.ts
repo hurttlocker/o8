@@ -11,7 +11,7 @@ import { isSubscriptionProfile, type SubscriptionProfile } from './subscription-
  * holds the leaf types, their validators, and the `envXxx()` readers;
  * defaults.ts re-exports the public names so import sites are unchanged).
  */
-export const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok'];
+export const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'opencode', 'cursor', 'grok'];
 export function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
   return typeof value === 'string' && (DISPATCH_RUNTIMES as string[]).includes(value);
 }

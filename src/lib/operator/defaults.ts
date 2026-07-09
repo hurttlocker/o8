@@ -387,7 +387,6 @@ export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: str
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> = [
   { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
   { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
-  { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3.1 Pro CLI — fastest for parallel fan-out.' },
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
   { value: 'cursor', label: 'Cursor', detail: 'Cursor CLI — subscription or CURSOR_API_KEY authenticated.' },
   { value: 'grok', label: 'Grok Build', detail: 'xAI coding CLI — SuperGrok/X or GROK_CODE_XAI_API_KEY authenticated.' },
@@ -834,7 +833,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.defaultDispatchRuntime !== undefined) {
     if (!isDispatchRuntime(update.defaultDispatchRuntime)) {
-      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "gemini", "opencode".');
+      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "opencode", "cursor", "grok".');
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
     stored.defaultDispatchRuntimeExplicit = true;

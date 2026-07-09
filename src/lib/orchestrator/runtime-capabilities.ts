@@ -61,13 +61,10 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     description: 'Anthropic Claude Code CLI worker via interactive stream-json. Full-access permission mode, sub-billed; never --print.',
   },
   gemini: {
-    label: 'Gemini',
+    label: 'Gemini (retired)',
     shortLabel: 'Gemini',
-    // dispatchable=false: Gemini is hidden from the v1 picker (decision
-    // 2026-05-31). We ship Claude + Codex only; Gemini lives behind the
-    // `experimentalGemini` operator-defaults flag, mirroring opencode. The
-    // adapter still ships so existing Gemini lanes stay readable + dispatch
-    // validation (includeExperimental) keeps accepting them.
+    // Google retired Gemini CLI consumer access on 2026-06-18. Keep the
+    // runtime literal for persisted lanes, but never accept new dispatch.
     dispatchable: false,
     requiresModel: false,
     // 2026-04-28: reverted from gemini-3.1-pro to gemini-3-pro-preview after
@@ -79,17 +76,26 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     accentColor: '#4285f4', // Google blue
     binaryName: 'gemini',
     tier: 'standard',
-    description: 'Google Gemini CLI with --yolo autonomous dispatch and JSONL streaming.',
+    description: 'Retired Gemini CLI adapter. Existing sessions stay readable; new dispatch uses Antigravity once its contract is proven.',
+  },
+  antigravity: {
+    label: 'Antigravity',
+    shortLabel: 'AGY',
+    dispatchable: false,
+    requiresModel: false,
+    defaultModel: 'antigravity-default',
+    accentColor: '#0f9d58',
+    binaryName: 'agy',
+    tier: 'standard',
+    description: 'Google Antigravity CLI discovery skeleton. Launch stays disabled until a resumable JSON/event contract is documented.',
   },
   opencode: {
     label: 'opencode',
     shortLabel: 'opencode',
-    // dispatchable=false: opencode disabled in the v1 picker (decision
-    // 2026-04-30). The big-3 (Codex / Gemini / Claude) cover every operator
-    // request we've seen; opencode adds support burden without a user pulling
-    // for it. Re-enable when someone asks. Adapter still ships so existing
-    // owned sessions remain readable.
-    dispatchable: false,
+    // Promoted in runtime expansion P2: `opencode run --format json --session`
+    // gives us a real JSONL/event + resume contract, with auth gated by
+    // ~/.local/share/opencode/auth.json in dispatch preflight.
+    dispatchable: true,
     requiresModel: true,
     // 2026-04-30: switched from 'opencode/gpt-5-nano' (OpenAI-routed; users
     // without OPENAI_API_KEY silently fail launch) to 'google/gemini-2.5-flash'
@@ -101,7 +107,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     accentColor: '#a855f7', // purple — distinct from the other three
     binaryName: 'opencode',
     tier: 'standard',
-    description: 'Multi-provider coding CLI — disabled by default. Use Codex / Gemini for dispatch.',
+    description: 'Multi-provider coding CLI via `opencode run --format json`; dispatch requires local opencode auth.',
   },
   cursor: {
     label: 'Cursor',
@@ -127,26 +133,13 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   },
 };
 
-// `opencode` + `gemini` ship hidden behind their own experimental operator
-// flags. Server-side validation passes `includeExperimental: true` to accept
-// every hidden runtime (existing lanes must still validate); client pickers
-// pass `experimental: [...]` to ungate only the runtimes whose flag is on.
-// Hide opencode and gemini from the shipping v1 picker while they remain experimental/non-primary dispatch paths.
-const HIDDEN_DISPATCH_RUNTIMES = new Set<OrchestratorRuntime>(['opencode', 'gemini']);
-
 export function listDispatchableRuntimes(options?: {
   includeExperimental?: boolean;
   experimental?: OrchestratorRuntime[];
 }): OrchestratorRuntime[] {
-  const includeAll = options?.includeExperimental ?? false;
-  const allow = new Set<OrchestratorRuntime>(options?.experimental ?? []);
+  void options;
   return (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
-    .filter((id) => {
-      const cap = ORCHESTRATOR_RUNTIMES[id];
-      if (cap.dispatchable) return true;
-      if (HIDDEN_DISPATCH_RUNTIMES.has(id)) return includeAll || allow.has(id);
-      return false;
-    });
+    .filter((id) => ORCHESTRATOR_RUNTIMES[id].dispatchable);
 }
 
 export function getRuntimeCapability(runtime: OrchestratorRuntime): OrchestratorRuntimeCapability {
@@ -154,4 +147,4 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): Orchestrator
 }
 
 /** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
-export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code'];
+export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();

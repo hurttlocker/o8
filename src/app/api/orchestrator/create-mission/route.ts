@@ -6,13 +6,14 @@ import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/li
 import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok']);
+const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'antigravity', 'opencode', 'cursor', 'grok']);
 const VALID_EXISTING_BRANCH_POLICIES = new Set<ExistingBranchPolicy>(['auto', 'reset', 'continue', 'error']);
 
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
@@ -45,6 +46,15 @@ function normalizeExistingBranchPolicy(value: unknown): ExistingBranchPolicy | u
   return VALID_EXISTING_BRANCH_POLICIES.has(value as ExistingBranchPolicy)
     ? value as ExistingBranchPolicy
     : undefined;
+}
+
+function runtimeDispatchError(runtime: OrchestratorRuntime) {
+  const cap = getRuntimeCapability(runtime);
+  if (cap.dispatchable) return null;
+  return operatorError('runtime_not_dispatchable', `${cap.label} is not available for new dispatch. ${cap.description}`, 400, {
+    runtime,
+    dispatchable: false,
+  });
 }
 
 // Best-of-N (item 3): the seed packet's comparison models. Clamp to ≤4 so the
@@ -89,7 +99,11 @@ export async function POST(request: NextRequest) {
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(requestedRuntimeRaw);
   if (!requestedRuntime) {
-    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode", "cursor", "grok".', 400);
+    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "antigravity", "opencode", "cursor", "grok".', 400);
+  }
+  if (explicitRuntimeRequested) {
+    const dispatchError = runtimeDispatchError(requestedRuntime);
+    if (dispatchError) return dispatchError;
   }
   const defaults = getOperatorDefaultsSync().values;
   const profileRouting = resolveSubscriptionProfileRouting({
@@ -103,6 +117,8 @@ export async function POST(request: NextRequest) {
   }
   for (const issue of issues) {
     if (!issue.runtime) continue;
+    const dispatchError = runtimeDispatchError(issue.runtime);
+    if (dispatchError) return dispatchError;
     const issueProfileRouting = resolveSubscriptionProfileRouting({
       profile: defaults.subscriptionProfile,
       requestedRuntime: issue.runtime,
