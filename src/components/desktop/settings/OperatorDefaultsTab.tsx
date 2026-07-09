@@ -571,7 +571,7 @@ export function OperatorDefaultsTab() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Privacy"
-          footnote="Crash reports contain only the error stack trace and the app version — never your code, prompts, files, or environment. Home paths, query strings, and identity are scrubbed before anything leaves your machine. Turning a report off is respected within seconds across the app, server, and native shell."
+          footnote="Crash reports carry the error stack trace and the app version — never your code, prompts, or files. Home paths, query strings, and identity are scrubbed before anything leaves your machine. A native (non-JS) crash also attaches a memory snapshot of the moment it failed so we can diagnose it. Turning reports off is respected within seconds across the app, server, and native shell; turning native crash capture back on takes effect on the next launch."
         >
           <SettingsRow
             icon={<ShieldIcon />}
