@@ -82,16 +82,26 @@ export function pickTailscaleIp(): string | null {
   return candidates[0].address;
 }
 
-export function pickMobilePairingHost(): ReachableMobileHost {
+/**
+ * Every address the phone might reach this Mac at, in preference order:
+ * explicit override, then Tailscale (survives leaving the local Wi-Fi), then
+ * LAN (works without Tailscale on the phone). The QR carries the full list so
+ * the phone can probe and pick the one that actually answers — a Tailscale-only
+ * QR silently fails for a phone that is on the same Wi-Fi but not on Tailscale.
+ */
+export function pickMobilePairingHosts(): ReachableMobileHost[] {
+  const hosts: ReachableMobileHost[] = [];
+  const push = (host: string | null, kind: ReachableMobileHostKind) => {
+    if (host && !hosts.some((h) => h.host === host)) hosts.push({ host, kind });
+  };
+
   const override = process.env.O8_MOBILE_PAIRING_HOST?.trim()
     || process.env.O8_TAILSCALE_HOST?.trim()
     || null;
-  if (override) return { host: stripHostDecorations(override), kind: 'override' };
-
-  const tailscale = pickTailscaleIp();
-  if (tailscale) return { host: tailscale, kind: 'tailscale' };
-
-  return { host: pickLanIp(), kind: 'lan' };
+  if (override) push(stripHostDecorations(override), 'override');
+  push(pickTailscaleIp(), 'tailscale');
+  push(pickLanIp(), 'lan');
+  return hosts;
 }
 
 function privateRangeRank(ip: string): number {

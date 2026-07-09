@@ -28,6 +28,7 @@ const MONO_FONT = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regu
 
 interface PairingPayload {
   host: string | null;
+  hosts?: string[];
   apiPort: number;
   wsPort: number;
   token: string;
@@ -36,7 +37,7 @@ interface PairingPayload {
 
 type ViewState =
   | { status: 'loading' }
-  | { status: 'ready'; host: string; apiPort: number; wsPort: number; token: string; qrDataUrl: string }
+  | { status: 'ready'; host: string; hosts: string[]; apiPort: number; wsPort: number; token: string; qrDataUrl: string }
   | { status: 'error'; message: string };
 
 export function MobilePairingView() {
@@ -62,10 +63,17 @@ export function MobilePairingView() {
           }
           return;
         }
-        // The payload shape is the contract with o8-mobile's QR scanner —
-        // exactly { host, apiPort, wsPort, token }, parsed via JSON.parse.
+        // The payload shape is the contract with o8-mobile's QR scanner
+        // (src/app/pair-scan.tsx): { host, apiPort, wsPort, token } plus
+        // `hosts` — every address the phone might reach this Mac at
+        // (Tailscale + LAN, preference order). The phone probes them on scan
+        // and pairs with the first that answers; an old app ignores `hosts`.
+        const hosts = Array.isArray(data.hosts) && data.hosts.length > 0
+          ? data.hosts
+          : [data.host];
         const qrPayload = JSON.stringify({
           host: data.host,
+          hosts,
           apiPort: data.apiPort,
           wsPort: data.wsPort,
           token: data.token,
@@ -80,6 +88,7 @@ export function MobilePairingView() {
           setState({
             status: 'ready',
             host: data.host,
+            hosts,
             apiPort: data.apiPort,
             wsPort: data.wsPort,
             token: data.token,
@@ -126,7 +135,7 @@ export function MobilePairingView() {
     ? 'Preparing a one-time pairing code…'
     : state.status === 'error'
       ? 'Pairing is unavailable right now.'
-      : 'Open o8 on your phone and scan this code. Your phone and this Mac must be on the same Wi-Fi network.';
+      : 'Open o8 on your phone and scan this code. Your phone needs to reach this Mac — same Wi-Fi network, or Tailscale when you’re away.';
 
   return (
     <div
@@ -289,7 +298,7 @@ export function MobilePairingView() {
                 color: 'var(--t-text-muted)',
               }}
             >
-              <span style={{ color: 'var(--t-text-secondary)', fontWeight: 600 }}>{state.host}</span>
+              <span style={{ color: 'var(--t-text-secondary)', fontWeight: 600 }}>{state.hosts.join(' / ')}</span>
               <span style={{ opacity: 0.5 }}>·</span>
               <span>API {state.apiPort}</span>
               <span style={{ opacity: 0.5 }}>·</span>
