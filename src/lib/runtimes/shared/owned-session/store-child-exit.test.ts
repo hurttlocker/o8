@@ -46,7 +46,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('records nonzero exit code and stderr tail from the real runner child', async () => {
+  it('records nonzero exit code and stderr tail from the real runner child', { timeout: 20_000 }, async () => {
     const { createOwnedSessionStore } = await import('./store');
     const store = createOwnedSessionStore(testAdapter('exit-1'));
 
@@ -62,7 +62,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
   }, 15_000);
 
-  it('records SIGKILL signal and stderr tail from the real runner child', async () => {
+  it('records SIGKILL signal and stderr tail from the real runner child', { timeout: 20_000 }, async () => {
     const { createOwnedSessionStore } = await import('./store');
     const store = createOwnedSessionStore(testAdapter('sigkill'));
 
