@@ -20,7 +20,7 @@ Eight load-bearing concepts. Different lifetimes, different write authorities, d
 
 | Concept | What it is | Code term | DB / type |
 |---|---|---|---|
-| **Runtime** | Adapter abstraction for a CLI agent (Codex / Claude Code / Gemini / opencode). | `runtime` | `OrchestratorRuntime` union |
+| **Runtime** | Adapter abstraction for a CLI agent (Codex / Claude Code / Gemini / opencode / Pi). | `runtime` | `OrchestratorRuntime` union |
 | **Agent** | A live runtime process — one CLI invocation in one worktree. | `agent` | (no DB row of its own; surfaces via the lane it owns) |
 | **Session** | A conversation thread inside a runtime. One runtime can carry many resumed sessions. | `session` | `ide_sessions` (registry) |
 | **Packet** | The orchestrator's unit of planned work — a brief + result. May be retried (creating new lanes) or never dispatched. | `packet` | `OrchestratorPacket` |
@@ -54,7 +54,7 @@ How each concept actually shows up across audiences. Cells marked **(divergent)*
 ### Documented divergences
 
 - **"Packets" tab id is `'agents'`** — `LeftPanelProjectFocus.tsx` and `RepoTabs.tsx` carry `{ id: 'agents', label: 'Packets' }`. The id is unchanged for localStorage state-key compatibility; only the visible label was relabeled (May 2026). Future cleanup may align the id, but it requires a state-migration.
-- **`kind:'chat'` tab kind ≠ casual chat** — `WorkspaceTerminal` tab kinds are `'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator'`. `'chat'` is a single-runtime CLI session (Codex / Gemini / opencode); `'llm-chat'` is the casual orchestrator chat. Documented at `src/components/desktop/workspace-terminal/types.ts`. Rename to `'cli-session'` is tracked debt — 75 sites + persisted-layout migration. Defer until forced.
+- **`kind:'chat'` tab kind ≠ casual chat** — `WorkspaceTerminal` tab kinds are `'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator'`. `'chat'` is a single-runtime CLI session (Codex / Gemini / opencode / Pi); `'llm-chat'` is the casual orchestrator chat. Documented at `src/components/desktop/workspace-terminal/types.ts`. Rename to `'cli-session'` is tracked debt — 75 sites + persisted-layout migration. Defer until forced.
 - **Palette `dark` vs "midnight"** — `PaletteId` is `'light' | 'dark'` (`src/lib/theme/registry.ts`); the Appearance card labels match (`Light` / `Dark`). `midnight` is a LEGACY id remapped by `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`. Older docs/memories that say "midnight" mean today's `dark`. Verified 2026-06-11.
 - **`OrchestrationMode = 'fleet' | 'single' | 'chat'`** — surface-level mode for the orchestrator chooser. Post-#650 (claude-code dropped as dispatch target) it's worth re-investigating whether `'fleet'` and `'single'` still drive different code paths or whether they could collapse. Tracked as future cleanup.
 

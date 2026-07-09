@@ -12,3 +12,9 @@
 - Added Cursor CLI (`cursor`) and Grok Build (`grok`) adapters using the shared owned-session store and dispatch registry.
 - Local CLI smoke skipped because `cursor-agent`, `grok`, and `grok-build` were not installed on this machine.
 - Reused existing Cursor and Grok adapter scaffolding already present in this worktree; the conservative work was to close stale enum/docs surfaces instead of duplicating adapter files.
+
+## Runtime expansion P3 notes (Pi)
+
+- Pi adapter built from a stale pre-P1 worktree base (queued mission cut at create-time); orchestrator rebased onto current main and re-applied registry wiring against the 7-runtime state.
+- Pi worker deviation (verbatim): packet scope reported only CLAUDE.md/docs/claude-code.ts as allowed paths; task required Pi runtime files — worker followed the task.
+- No `pi` entry in /api/setup/detect tool detectors yet (only the hasCliAgent id list) — follow-up pebble.

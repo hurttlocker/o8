@@ -30,7 +30,7 @@ export interface RunAutomationResult {
 function asLaneRuntime(value: string): LaneRuntime {
   // Narrow runtime to the LaneRuntime union; default to 'codex' if unknown
   // so we never throw on a stale row.
-  if (value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode') {
+  if (value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode' || value === 'pi') {
     return value;
   }
   return 'codex';

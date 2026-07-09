@@ -109,6 +109,16 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     tier: 'standard',
     description: 'Multi-provider coding CLI via `opencode run --format json`; dispatch requires local opencode auth.',
   },
+  pi: {
+    label: 'Pi',
+    shortLabel: 'Pi',
+    dispatchable: true,
+    requiresModel: false,
+    accentColor: '#16a34a',
+    binaryName: 'pi',
+    tier: 'standard',
+    description: 'earendil-works/pi coding agent via RPC-mode JSONL with native steer.',
+  },
   cursor: {
     label: 'Cursor',
     shortLabel: 'Cursor',

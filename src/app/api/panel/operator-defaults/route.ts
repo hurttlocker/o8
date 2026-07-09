@@ -290,7 +290,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       && o.runtime !== 'cursor'
       && o.runtime !== 'grok'
     ) {
-      throw new Error(`${name}.runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok".`);
+      throw new Error(`${name}.runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok", "pi".`);
     }
     if (typeof o.model !== 'string') throw new Error(`${name}.model must be a string ('' = runtime default).`);
     if (!isThinkingEffort(o.effort)) throw new Error(`${name}.effort must be a valid thinking effort.`);
