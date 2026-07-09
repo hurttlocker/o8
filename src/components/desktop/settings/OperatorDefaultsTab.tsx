@@ -571,12 +571,21 @@ export function OperatorDefaultsTab() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Privacy"
-          footnote="Crash reports contain only the error stack trace and the app version — never your code, prompts, files, or environment. They are always written locally to ~/.o8/telemetry; this only controls whether they are also sent to the o8 team to help fix crashes. Off by default."
+          footnote="Crash reports contain only the error stack trace and the app version — never your code, prompts, files, or environment. Home paths, query strings, and identity are scrubbed before anything leaves your machine. Turning a report off is respected within seconds across the app, server, and native shell."
         >
           <SettingsRow
             icon={<ShieldIcon />}
-            label="Send crash reports"
-            subtitle={lockedSub('telemetryOptIn', 'Share crash stack traces + app version — nothing else')}
+            label="Crash & error reports"
+            subtitle={lockedSub('crashReportsEnabled', 'Send anonymous crash reports to help fix issues faster. Never includes your code, file paths, or identity.')}
+            checked={values.crashReportsEnabled}
+            disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}
+            onToggle={(next) => { updateField('crashReportsEnabled', next); }}
+            divider
+          />
+          <SettingsRow
+            icon={<ShieldIcon />}
+            label="Send local crash log to the o8 team"
+            subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log — stack traces + app version only')}
             checked={values.telemetryOptIn}
             disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
             onToggle={(next) => { updateField('telemetryOptIn', next); }}
