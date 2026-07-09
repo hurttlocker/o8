@@ -1,9 +1,12 @@
-export type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+// 'ultra' is a codex GPT-5.6-sol-only reasoning tier (internal sub-agent fan-out,
+// heavy token burn). It is a valid app effort but is clamped to 'xhigh' by the
+// codex effort resolver for every non-sol model, and mapped down for Claude.
+export type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'ultra';
 
 export type ManualThinkingEffort = Exclude<ThinkingEffort, 'adaptive'>;
 
-export const THINKING_EFFORTS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'];
-export const MANUAL_THINKING_EFFORTS: ManualThinkingEffort[] = ['low', 'medium', 'high', 'max', 'xhigh'];
+export const THINKING_EFFORTS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'];
+export const MANUAL_THINKING_EFFORTS: ManualThinkingEffort[] = ['low', 'medium', 'high', 'max', 'xhigh', 'ultra'];
 
 export function isThinkingEffort(value: unknown): value is ThinkingEffort {
   return typeof value === 'string' && THINKING_EFFORTS.includes(value as ThinkingEffort);
@@ -11,4 +14,14 @@ export function isThinkingEffort(value: unknown): value is ThinkingEffort {
 
 export function isManualThinkingEffort(value: unknown): value is ManualThinkingEffort {
   return typeof value === 'string' && MANUAL_THINKING_EFFORTS.includes(value as ManualThinkingEffort);
+}
+
+/**
+ * Value for the Claude CLI `--effort` flag. Claude has no `ultra` tier (that's a
+ * codex gpt-5.6-sol-only reasoning level), so a stale `ultra` selection carried
+ * onto a Claude turn maps down to `max`. Every other tier passes through
+ * byte-identically.
+ */
+export function claudeEffortFlagValue(effort: string): string {
+  return effort === 'ultra' ? 'max' : effort;
 }

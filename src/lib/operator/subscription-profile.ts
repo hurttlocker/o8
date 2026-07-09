@@ -57,7 +57,10 @@ export function resolveSubscriptionProfileHouseDefaults(profile: SubscriptionPro
     return {
       orchestratorBackend: 'codex',
       defaultDispatchRuntime: 'codex',
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      // Codex-only workers ride the cheaper Terra tier; the orchestrator runs Sol
+      // (gpt-5.6-sol via resolveOrchestratorModelSync). Cheap→Sol escalation is
+      // wired below in frontierEscalationModelForCheapTier.
+      defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
       reviewerBackend: 'codex',
     };
   }
@@ -82,16 +85,37 @@ function isClaudeCheapTierModel(model: string): boolean {
   return normalized.includes('sonnet') || normalized.includes('haiku') || normalized.includes('opus-4-6');
 }
 
+/** Codex frontier tier — gpt-5.6-sol (Opus-class), the escalation target. */
+export function isCodexFrontierModel(model: string): boolean {
+  return model.trim().toLowerCase().includes('gpt-5.6-sol');
+}
+
+/** Codex cheap tier — gpt-5.6-terra / gpt-5.6-luna (Sonnet/Haiku-class). */
+export function isCodexCheapTierModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return normalized.includes('gpt-5.6-terra') || normalized.includes('gpt-5.6-luna');
+}
+
 export function isSingleSubCheapTierWorker(input: CheapTierWorkerInput): boolean {
   if (!isSingleSubscriptionProfile(input.profile)) return false;
-  if (input.profile !== 'claude-only' || input.runtime !== 'claude-code') return false;
-  const model = input.model?.trim() || MODEL_IDS.claudeWorkerDefault;
-  if (isClaudeFrontierModel(model)) return false;
-  return isClaudeCheapTierModel(model);
+  if (input.profile === 'claude-only' && input.runtime === 'claude-code') {
+    const model = input.model?.trim() || MODEL_IDS.claudeWorkerDefault;
+    if (isClaudeFrontierModel(model)) return false;
+    return isClaudeCheapTierModel(model);
+  }
+  if (input.profile === 'codex-only' && input.runtime === 'codex') {
+    const model = input.model?.trim() || MODEL_IDS.codexWorkerDefault;
+    if (isCodexFrontierModel(model)) return false;
+    return isCodexCheapTierModel(model);
+  }
+  return false;
 }
 
 export function frontierEscalationModelForCheapTier(input: CheapTierWorkerInput): string | null {
-  return isSingleSubCheapTierWorker(input) ? MODEL_IDS.raw.anthropicClaudeOpus48 : null;
+  if (!isSingleSubCheapTierWorker(input)) return null;
+  return input.profile === 'codex-only'
+    ? MODEL_IDS.raw.openAiGpt56Sol
+    : MODEL_IDS.raw.anthropicClaudeOpus48;
 }
 
 function modelAllowedForProfile(profile: SubscriptionProfile, model: string): boolean {

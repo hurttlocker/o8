@@ -127,7 +127,7 @@ function resolveActiveComposerBackend(defaults: {
 }
 
 function formatComposerBackendLabel(backend: OrchestratorBackendSetting, model: string): string {
-  if (backend === 'codex') return 'Codex GPT-5.5';
+  if (backend === 'codex') return 'Codex GPT-5.6';
   if (backend === 'fable') return 'Fable 5';
   if (backend === 'openclaw') return 'OpenClaw';
   if (backend === 'hermes') return 'Hermes';

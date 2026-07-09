@@ -8,7 +8,7 @@ import {
   createClaudeCodeStreamJsonParser,
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   ClaudeCodeStreamJsonParser,
   ClaudeCodeStreamJsonParserEvent,
@@ -152,7 +152,7 @@ export function buildClaudeStreamJsonArgs(
   }
 
   if (effort && effort !== 'adaptive') {
-    args.push('--effort', effort);
+    args.push('--effort', claudeEffortFlagValue(effort));
   }
 
   const normalizedResumeSessionId = normalizeResumeSessionId(resumeSessionId);

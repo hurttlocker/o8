@@ -47,7 +47,10 @@ export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
 ];
 
 export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
-  { id: MODEL_IDS.codexCliDefault, label: 'GPT-5.5', color: '#10b981' },
+  { id: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', color: '#10b981' },
+  { id: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', color: '#10b981' },
+  { id: MODEL_IDS.raw.openAiGpt56Luna, label: 'GPT-5.6 Luna', color: '#10b981' },
+  { id: MODEL_IDS.raw.openAiGpt55, label: 'GPT-5.5', color: '#10b981' },
   { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
 ];
 
@@ -78,7 +81,7 @@ const OPENCODE_PROVIDER_MAP: Record<string, { label: string; models: Array<{ id:
   xai: {
     label: 'xAI',
     models: [
-      { id: 'opencode/grok-3', label: 'Grok 3' },
+      { id: 'opencode/grok-4.5', label: 'Grok 4.5' },
     ],
   },
 };

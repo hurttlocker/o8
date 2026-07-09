@@ -33,6 +33,7 @@ import {
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
 import { parseLocalModel } from '@/lib/codex/local-model';
+import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
@@ -347,13 +348,12 @@ function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): string[] {
   return ['--dangerously-bypass-approvals-and-sandbox'];
 }
 
-function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined): string {
+function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined, model?: string): string {
   if (!effort || effort === 'adaptive') return 'xhigh';
-  // Codex effort levels per ~/.codex/models_cache.json: minimal, low, medium,
-  // high, xhigh. Our ThinkingEffort uses: low, medium, high, max, xhigh —
-  // 'max' maps to xhigh because Codex doesn't have a 'max' tier.
-  if (effort === 'max') return 'xhigh';
-  return effort;
+  // GPT-5.6 effort tiers: low, medium, high, xhigh, max, ultra. The `max`/`ultra`
+  // tiers are honored ONLY on gpt-5.6-sol; every other model (terra, luna,
+  // gpt-5.5, locals) clamps to xhigh — see resolveCodexReasoningEffort.
+  return resolveCodexReasoningEffort(effort, model);
 }
 
 /**
@@ -429,7 +429,7 @@ export async function sendToCodexOrchestrator(
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
   const model = resolveOrchestratorModelSync(options.model);
   const isLocalModel = !!parseLocalModel(model);
-  const reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort);
+  const reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model);
 
   // Steer-Now / queue preempt: the ws-server aborts the prior turn's
   // controller before calling sendTurn, so a still-'busy' session here is a
