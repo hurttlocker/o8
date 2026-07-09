@@ -46,6 +46,21 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
     command: 'npm i -g opencode-ai',
     hint: 'Install OpenCode to bring your own keys across 75+ providers.',
   },
+  cursor: {
+    id: 'cursor',
+    label: 'Cursor CLI',
+    hint: 'Install Cursor CLI to dispatch packets through Cursor.',
+  },
+  grok: {
+    id: 'grok',
+    label: 'Grok Build',
+    hint: 'Install Grok Build and set GROK_CODE_XAI_API_KEY to dispatch packets.',
+  },
+  pi: {
+    id: 'pi',
+    label: 'Pi',
+    hint: 'Install Pi and bring your Anthropic or OpenAI API key.',
+  },
   ollama: {
     id: 'ollama',
     label: 'Ollama',

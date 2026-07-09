@@ -19,3 +19,7 @@
 - Pi adapter built from a stale pre-P1 worktree base (queued mission cut at create-time); orchestrator rebased onto current main and re-applied registry wiring against the 7-runtime state.
 - Pi worker deviation (verbatim): packet scope reported only CLAUDE.md/docs/claude-code.ts as allowed paths; task required Pi runtime files — worker followed the task.
 - No `pi` entry in /api/setup/detect tool detectors yet (only the hasCliAgent id list) — follow-up pebble.
+
+## Setup-detect all CLIs notes
+
+- Confirmed `src/lib/runtimes/shared/cli-locate.ts` needs no branching for cursor/grok/pi; the existing loop scans by binary name and returns null cleanly when a binary is absent.

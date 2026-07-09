@@ -11,11 +11,13 @@ export interface DetectedRuntime {
   id: string;
   name: string;
   detected: boolean;
+  ready?: boolean;
+  authHint?: string;
   version?: string;
 }
 
 interface DetectPayload {
-  tools?: Array<{ id: string; name: string; detected: boolean; version?: string }>;
+  tools?: Array<{ id: string; name: string; detected: boolean; ready?: boolean; authHint?: string; version?: string }>;
   error?: string;
   partial?: boolean;
   timedOut?: boolean;
@@ -69,6 +71,8 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
         id: t.id,
         name: t.name,
         detected: t.detected,
+        ready: t.ready,
+        authHint: t.authHint,
         version: t.version,
       }));
       onRuntimesChange(tools);
