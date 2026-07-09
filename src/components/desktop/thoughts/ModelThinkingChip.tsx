@@ -11,10 +11,13 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   high: 'high',
   max: 'max',
   xhigh: 'xhigh',
+  ultra: 'ultra',
 };
 
 // Adaptive sits BETWEEN medium and high — that's the band it auto-picks in,
 // and its half-lit fourth bar reads the same way (operator, 2026-07-06).
+// 'ultra' is codex gpt-5.6-sol-only (appended dynamically below) — not in the
+// base list, so it never shows for Claude/Fable turns.
 const EFFORT_OPTIONS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
@@ -25,6 +28,7 @@ const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   high: 4,
   xhigh: 5,
   max: 6,
+  ultra: 6,
 };
 
 const SWARM_ACCENT = 'var(--t-brand-orange, #FF5A1F)';
@@ -38,7 +42,7 @@ type ComposerModelOption = {
 };
 
 const COMPOSER_MODEL_OPTIONS: ComposerModelOption[] = [
-  { value: 'codex-gpt-5-5', label: 'Codex GPT-5.5', backend: 'codex' },
+  { value: 'codex-gpt-5-6', label: 'Codex GPT-5.6', backend: 'codex' },
   { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5', backend: 'fable', model: MODEL_IDS.fableDefault },
   { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.orchestratorDefault },
   { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', backend: 'claude', model: MODEL_IDS.claudeQaDefault },
@@ -47,7 +51,7 @@ const COMPOSER_MODEL_OPTIONS: ComposerModelOption[] = [
 function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; active?: boolean }) {
   const level = EFFORT_LEVEL[effort];
   const color = active
-    ? (effort === 'max' ? SWARM_ACCENT : 'var(--t-accent)')
+    ? (effort === 'max' || effort === 'ultra' ? SWARM_ACCENT : 'var(--t-accent)')
     : 'var(--t-text-faint)';
   return (
     <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 1.25, width: 18, height: 9, flexShrink: 0 }}>
@@ -120,7 +124,11 @@ export function ModelThinkingChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
+  const baseEffortOptions = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
+  // 'ultra' (codex gpt-5.6-sol's internal-fan-out tier) is only selectable on the
+  // codex backend, whose composer model is always Sol. Every other backend caps
+  // at 'max' — see resolveCodexReasoningEffort / claudeEffortFlagValue.
+  const options = activeBackend === 'codex' ? [...baseEffortOptions, 'ultra' as ThinkingEffort] : baseEffortOptions;
   const selectedLabel = EFFORT_LABELS[effort];
   const ultraActive = Boolean(swarmEnabled);
   const collideActive = Boolean(collideEnabled);
@@ -177,7 +185,7 @@ export function ModelThinkingChip({
           </span>
         )}
         {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
-        <ThinkingBars effort={effort} active={open || effort === 'max' || (isCodexBackend && effort === 'xhigh')} />
+        <ThinkingBars effort={effort} active={open || effort === 'max' || effort === 'ultra' || (isCodexBackend && effort === 'xhigh')} />
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
@@ -226,6 +234,9 @@ export function ModelThinkingChip({
                         if (option.model) onModelChange?.(option.model);
                         if (!active) onBackendChange?.(option.backend);
                         if (option.backend === 'codex') onEffortChange?.('xhigh');
+                        // 'ultra' is codex-Sol-only — drop a stale selection when
+                        // switching to a Claude/Fable backend that can't run it.
+                        else if (effort === 'ultra') onEffortChange?.('max');
                         setOpen(false);
                       }}
                       style={{
@@ -310,12 +321,12 @@ export function ModelThinkingChip({
                   <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.25 }}>{EFFORT_LABELS[option]}</span>
                     <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0', color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', lineHeight: 1.25 }}>
-                      {option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`}
+                      {option === 'adaptive' ? 'auto' : option === 'ultra' ? 'burns tokens fast' : `${EFFORT_LEVEL[option]}/6`}
                     </span>
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     <ThinkingBars effort={option} active={active} />
-                    <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? (option === 'max' ? SWARM_ACCENT : 'var(--t-accent)') : 'transparent', flexShrink: 0 }} />
+                    <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? (option === 'max' || option === 'ultra' ? SWARM_ACCENT : 'var(--t-accent)') : 'transparent', flexShrink: 0 }} />
                   </span>
                 </button>
               );

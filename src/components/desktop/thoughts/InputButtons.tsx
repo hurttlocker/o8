@@ -16,6 +16,7 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   high: 'high',
   max: 'max',
   xhigh: 'xhigh',
+  ultra: 'ultra',
 };
 // xhigh stays in the menu but reads as a sibling option to max, NOT as
 // "even better than max". max gets the brand orange to anchor it as the
@@ -28,6 +29,7 @@ const EFFORT_DOT: Record<ThinkingEffort, string> = {
   high: 'var(--t-text-muted)',
   xhigh: 'var(--t-text-muted)',
   max: '#FF5A1F',
+  ultra: '#FF5A1F',
 };
 /**
  * Thinking effort control — Rams pill matching ThreadsDropdown aesthetic.

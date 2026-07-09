@@ -101,6 +101,36 @@ function detectPricingModel(rawModel: string | null | undefined): CodexPricingMo
     return null;
   }
 
+  // GPT-5.6 generation (per xAI/OpenAI pricing 2026-07-09, cache reads -90%).
+  if (normalizedModel.includes('gpt-5.6-sol')) {
+    return {
+      canonicalModel: 'gpt-5.6-sol',
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      outputUsdPerMillion: 30,
+      longContextEligible: true,
+    };
+  }
+
+  if (normalizedModel.includes('gpt-5.6-terra')) {
+    return {
+      canonicalModel: 'gpt-5.6-terra',
+      inputUsdPerMillion: 2.5,
+      cachedInputUsdPerMillion: 0.25,
+      outputUsdPerMillion: 15,
+      longContextEligible: true,
+    };
+  }
+
+  if (normalizedModel.includes('gpt-5.6-luna')) {
+    return {
+      canonicalModel: 'gpt-5.6-luna',
+      inputUsdPerMillion: 1,
+      cachedInputUsdPerMillion: 0.1,
+      outputUsdPerMillion: 6,
+    };
+  }
+
   if (normalizedModel.includes('gpt-5.5')) {
     return {
       canonicalModel: 'gpt-5.5',

@@ -17,11 +17,23 @@ describe('codexReasoningEffortArgs', () => {
     expect(codexReasoningEffortArgs('adaptive')).toEqual([]);
   });
 
-  it('explicit tiers ⇒ the -c model_reasoning_effort flag; max → xhigh', () => {
+  it('explicit tiers ⇒ the -c model_reasoning_effort flag; max → xhigh (no model = not Sol)', () => {
     expect(codexReasoningEffortArgs('low')).toEqual(['-c', 'model_reasoning_effort=low']);
     expect(codexReasoningEffortArgs('high')).toEqual(['-c', 'model_reasoning_effort=high']);
     expect(codexReasoningEffortArgs('xhigh')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
     expect(codexReasoningEffortArgs('max')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
+    expect(codexReasoningEffortArgs('ultra')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
+  });
+
+  it('max/ultra pass through ONLY on gpt-5.6-sol; terra/luna/5.5 clamp to xhigh', () => {
+    expect(codexReasoningEffortArgs('max', 'gpt-5.6-sol')).toEqual(['-c', 'model_reasoning_effort=max']);
+    expect(codexReasoningEffortArgs('ultra', 'gpt-5.6-sol')).toEqual(['-c', 'model_reasoning_effort=ultra']);
+    // Non-Sol 5.6 tiers + prior gen clamp down (worker default is Terra).
+    expect(codexReasoningEffortArgs('max', 'gpt-5.6-terra')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
+    expect(codexReasoningEffortArgs('ultra', 'gpt-5.6-luna')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
+    expect(codexReasoningEffortArgs('max', 'gpt-5.5')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
+    // A concrete sub-xhigh tier is unaffected by the model.
+    expect(codexReasoningEffortArgs('high', 'gpt-5.6-sol')).toEqual(['-c', 'model_reasoning_effort=high']);
   });
 });
 

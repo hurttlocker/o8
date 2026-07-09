@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { MODEL_IDS } from '@/lib/models';
 import {
+  frontierEscalationModelForCheapTier,
+  isCodexCheapTierModel,
+  isCodexFrontierModel,
+  isSingleSubCheapTierWorker,
   resolveSubscriptionProfileHouseDefaults,
   resolveSubscriptionProfileRouting,
 } from './subscription-profile';
@@ -38,13 +42,38 @@ describe('subscription profile resolver', () => {
     });
   });
 
-  it('pins Codex-only to Codex orchestration, workers, reviews, and GPT-5.5', () => {
+  it('pins Codex-only to Codex orchestration, Terra workers, reviews', () => {
     expect(resolveSubscriptionProfileHouseDefaults('codex-only')).toEqual({
       orchestratorBackend: 'codex',
       defaultDispatchRuntime: 'codex',
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
       reviewerBackend: 'codex',
     });
+    // Sanity: the codex worker default is the Terra tier, not the Sol orchestrator.
+    expect(MODEL_IDS.codexWorkerDefault).toBe('gpt-5.6-terra');
+    expect(MODEL_IDS.codexDefault).toBe('gpt-5.6-sol');
+  });
+
+  it('classifies codex frontier (Sol) vs cheap tiers (Terra/Luna)', () => {
+    expect(isCodexFrontierModel('gpt-5.6-sol')).toBe(true);
+    expect(isCodexFrontierModel('gpt-5.6-terra')).toBe(false);
+    expect(isCodexCheapTierModel('gpt-5.6-terra')).toBe(true);
+    expect(isCodexCheapTierModel('gpt-5.6-luna')).toBe(true);
+    expect(isCodexCheapTierModel('gpt-5.6-sol')).toBe(false);
+  });
+
+  it('escalates a codex-only cheap-tier worker to Sol; frontier + both stay put', () => {
+    // Terra worker under codex-only → cheap tier → escalates to Sol.
+    expect(isSingleSubCheapTierWorker({ profile: 'codex-only', runtime: 'codex', model: MODEL_IDS.codexWorkerDefault })).toBe(true);
+    expect(frontierEscalationModelForCheapTier({ profile: 'codex-only', runtime: 'codex', model: MODEL_IDS.codexWorkerDefault }))
+      .toBe(MODEL_IDS.raw.openAiGpt56Sol);
+    // A Sol worker is already frontier — no escalation.
+    expect(isSingleSubCheapTierWorker({ profile: 'codex-only', runtime: 'codex', model: MODEL_IDS.codexDefault })).toBe(false);
+    // Both-house never single-sub escalates.
+    expect(frontierEscalationModelForCheapTier({ profile: 'both', runtime: 'codex', model: MODEL_IDS.codexWorkerDefault })).toBeNull();
+    // Claude-only still escalates its cheap tier to Opus (unchanged).
+    expect(frontierEscalationModelForCheapTier({ profile: 'claude-only', runtime: 'claude-code', model: MODEL_IDS.claudeWorkerDefault }))
+      .toBe(MODEL_IDS.raw.anthropicClaudeOpus48);
   });
 
   it('returns a structured error for an unavailable explicit runtime', () => {

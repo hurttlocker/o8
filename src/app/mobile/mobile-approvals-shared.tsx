@@ -175,6 +175,9 @@ export const RISK_COLORS: Record<string, string> = {
 /** CLI-backed models — use installed runtimes, no API key needed.
  *  claude-code rows removed June 2026 (Anthropic Agent SDK credit pool change). */
 export const CLI_MODELS: ModelOption[] = [
+  { id: 'cli:codex:gpt-5.6-sol', label: 'GPT-5.6 Sol', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
+  { id: 'cli:codex:gpt-5.6-terra', label: 'GPT-5.6 Terra', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
+  { id: 'cli:codex:gpt-5.6-luna', label: 'GPT-5.6 Luna', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
   { id: 'cli:codex:gpt-5.5', label: 'GPT-5.5', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
   { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
   { id: 'cli:gemini:gemini-3.1-pro', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Gemini CLI', backend: 'cli', cliRuntime: 'gemini' },
@@ -185,12 +188,13 @@ export const CLI_MODELS: ModelOption[] = [
 export const API_MODELS: ModelOption[] = [
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Via API key', backend: 'api' },
   { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', description: 'Via API key', backend: 'api' },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', provider: 'openai', description: 'Via API key', backend: 'api' },
   { id: 'gpt-5.5', label: 'GPT-5.5', provider: 'openai', description: 'Via API key', backend: 'api' },
 ];
 
 export const AVAILABLE_MODELS: ModelOption[] = [...CLI_MODELS, ...API_MODELS];
 
-export const DEFAULT_MOBILE_CHAT_MODEL = 'cli:codex:gpt-5.5';
+export const DEFAULT_MOBILE_CHAT_MODEL = 'cli:codex:gpt-5.6-sol';
 export const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 export const MOBILE_CHAT_MODEL_STORAGE_KEY = 'o8-mobile-chat-model';
 export const MOBILE_EFFORT_STORAGE_KEY = 'o8-mobile-effort';
