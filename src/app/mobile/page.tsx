@@ -1,5 +1,6 @@
 import os from 'node:os';
 import packageJson from '../../../package.json';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { ThemeProvider } from '@/lib/theme/context';
 import { MobileApprovalsClient } from './mobile-approvals-client';
 
@@ -22,7 +23,7 @@ interface PrefetchedApproval {
 
 async function fetchPendingApprovals(): Promise<PrefetchedApproval[]> {
   try {
-    const port = process.env.PORT || '3001';
+    const port = process.env.PORT || String(DEFAULT_API_PORT);
     const res = await fetch(`http://127.0.0.1:${port}/api/panel/approvals?status=pending`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(3000),

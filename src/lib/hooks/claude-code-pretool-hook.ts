@@ -5,6 +5,7 @@
 // build step that generates the .js from this file — they are kept in sync by
 // hand. Mirror EVERY logic change in both, or dev and prod behave differently.
 import process from 'node:process';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 
 interface PreToolUseHookInput {
   session_id: string;
@@ -131,7 +132,7 @@ function evaluateToolUse(input: PreToolUseHookInput): PreToolUseHookOutput {
 
 function approvalEndpoint() {
   const host = process.env.O8_API_HOST || 'localhost';
-  const port = process.env.O8_API_PORT || process.env.PORT || '3001';
+  const port = process.env.O8_API_PORT || process.env.PORT || String(DEFAULT_API_PORT);
   return `http://${host}:${port}/api/panel/approvals`;
 }
 
