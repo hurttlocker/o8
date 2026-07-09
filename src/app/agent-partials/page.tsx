@@ -81,6 +81,12 @@ interface HudState {
 export default function AgentPartialsPage() {
   const prefersReducedMotion = useReducedMotion();
   const [state, setState] = useState<HudState | null>(null);
+  // While the in-canvas composer owns the partials (Right-Option dictation with
+  // o8 focused + the canvas visible), it claims the surface via
+  // `o8:agent-partials-claim` and THIS HUD stops painting — single-surface rule,
+  // no doubles. Tied to a session id; auto-expires on release or the 60s safety.
+  const [suppressed, setSuppressed] = useState(false);
+  const claimSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentActiveRef = useRef(false);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -214,6 +220,64 @@ export default function AgentPartialsPage() {
     };
   }, []);
 
+  // HUD-yield protocol — listen for the in-canvas composer's surface claim. When
+  // claimed, suppress our paint (the composer streams the partials in place); on
+  // release, resume. Safety: a dead canvas that never sends `claimed: false`
+  // still frees the HUD after SAFETY_MS, so we can never stay dark forever.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const clearClaimSafety = () => {
+      if (claimSafetyRef.current) {
+        clearTimeout(claimSafetyRef.current);
+        claimSafetyRef.current = null;
+      }
+    };
+    const handleClaim = (p: { claimed?: boolean }) => {
+      if (p.claimed) {
+        setSuppressed(true);
+        clearClaimSafety();
+        claimSafetyRef.current = setTimeout(() => {
+          claimSafetyRef.current = null;
+          setSuppressed(false);
+        }, SAFETY_MS);
+      } else {
+        clearClaimSafety();
+        setSuppressed(false);
+      }
+    };
+
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<{ claimed?: boolean; sessionId?: string }>('o8:agent-partials-claim', (e) =>
+          handleClaim(e.payload ?? {}),
+        ),
+      )
+      .then((un) => {
+        if (disposed) {
+          un();
+          return;
+        }
+        unlisten = un;
+      })
+      .catch(() => {
+        /* noop — no claim bridge simply means the HUD never yields */
+      });
+
+    return () => {
+      disposed = true;
+      clearClaimSafety();
+      if (unlisten) {
+        try {
+          unlisten();
+        } catch {
+          /* noop */
+        }
+      }
+    };
+  }, []);
+
   // Pin the transcript to the bottom so the NEWEST words are always visible; the
   // top fades out via the mask. Runs after each text change.
   useLayoutEffect(() => {
@@ -243,7 +307,7 @@ export default function AgentPartialsPage() {
       }}
     >
       <AnimatePresence>
-        {state ? (
+        {state && !suppressed ? (
           <motion.div
             key="agent-partials-bar"
             role="status"
