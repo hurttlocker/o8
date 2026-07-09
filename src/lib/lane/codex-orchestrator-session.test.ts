@@ -14,6 +14,25 @@ describe('codexOrchestratorModelFlags', () => {
     ]);
   });
 
+  it('emits the gpt-5.6-sol flagship at max reasoning effort', () => {
+    // The Sol-only `max` tier reaches the CLI as -c model_reasoning_effort=max.
+    expect(codexOrchestratorModelFlags('gpt-5.6-sol', 'max')).toEqual([
+      '-c',
+      'model=gpt-5.6-sol',
+      '-c',
+      'model_reasoning_effort=max',
+    ]);
+  });
+
+  it('emits the gpt-5.6-sol ultra tier', () => {
+    expect(codexOrchestratorModelFlags('gpt-5.6-sol', 'ultra')).toEqual([
+      '-c',
+      'model=gpt-5.6-sol',
+      '-c',
+      'model_reasoning_effort=ultra',
+    ]);
+  });
+
   it('expands an Ollama model to the --oss local form (no reasoning effort)', () => {
     expect(codexOrchestratorModelFlags('ollama:qwen2.5-coder:32b', 'xhigh')).toEqual([
       '--oss',

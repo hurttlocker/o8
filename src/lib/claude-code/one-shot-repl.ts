@@ -35,6 +35,7 @@ import {
   createClaudeCodeStreamJsonParser,
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
+import { claudeEffortFlagValue } from '@/lib/orchestrator/thinking-effort';
 
 export interface AskClaudeOneShotOptions {
   /** Explicit `claude` binary path. Caller resolves; we don't probe. */
@@ -68,7 +69,7 @@ export function buildOneShotArgs(model: string, effort?: string): string[] {
   ];
   // Mirror the orchestrator precedent (orchestrator-session.ts) — attach an
   // explicit reasoning effort only when the caller asks for a non-adaptive one.
-  if (effort && effort !== 'adaptive') args.push('--effort', effort);
+  if (effort && effort !== 'adaptive') args.push('--effort', claudeEffortFlagValue(effort));
   // #1066 billing guard — enforce what line 52's comment only described.
   assertNoPrintFlag(args, 'One-shot Claude REPL');
   return args;
