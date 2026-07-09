@@ -47,7 +47,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns Codex/Gemini/Claude in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
+      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns CLI runtimes in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -276,7 +276,7 @@ export const MISSION_TOOLS: McpTool[] = [
         requestedRuntime: {
           type: 'string',
           enum: ['codex', 'claude-code', 'gemini', 'cursor', 'grok'],
-          description: 'Worker runtime for this task. Codex (default), Claude Code, or Gemini — all are dispatchable. Claude Code uses interactive stream-json, never --print.',
+          description: 'Worker runtime for this task. Codex (default), Claude Code, Gemini, Cursor, and Grok Build are dispatchable. Claude Code uses interactive stream-json, never --print.',
         },
         model: {
           type: 'string',
@@ -373,7 +373,7 @@ export const MISSION_TOOLS: McpTool[] = [
         requestedRuntime: {
           type: 'string',
           enum: ['codex', 'claude-code', 'gemini', 'cursor', 'grok'],
-          description: 'Worker runtime for this task. Codex (default), Claude Code, or Gemini — all are dispatchable. Claude Code uses interactive stream-json, never --print.',
+          description: 'Worker runtime for this task. Codex (default), Claude Code, Gemini, Cursor, and Grok Build are dispatchable. Claude Code uses interactive stream-json, never --print.',
         },
         projectId: {
           type: 'string',
