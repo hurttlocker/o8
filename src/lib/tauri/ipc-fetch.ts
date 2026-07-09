@@ -15,7 +15,7 @@
  */
 
 import { isTauri } from './bridge';
-import { getApiBase } from '@/lib/panel/api-port';
+import { DEFAULT_API_PORT } from '@/lib/panel/port-constants';
 
 // ── IPC route mapping ──
 
@@ -104,7 +104,13 @@ export async function ipcFetch(
   // Parse the URL to match against IPC routes
   let url: URL;
   try {
-    url = new URL(urlStr, getApiBase());
+    // Parse base only (relative URLs must resolve to match IPC routes). This
+    // file ships in the CLIENT bundle — never import api-port here (node:fs).
+    // The webview's own origin is always the correct backend in packaged mode.
+    const parseBase = typeof window !== 'undefined' && window.location?.origin?.startsWith('http')
+      ? window.location.origin
+      : `http://127.0.0.1:${DEFAULT_API_PORT}`;
+    url = new URL(urlStr, parseBase);
   } catch {
     return fetch(input, init);
   }
