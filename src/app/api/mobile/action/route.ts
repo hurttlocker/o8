@@ -13,7 +13,15 @@ import {
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { selectMobileReviewApprovalId } from '@/lib/mobile/action-approval';
+import {
+  mobileActionInProgressPayload,
+  resolveMobileActionIdempotencyIdentity,
+  restoreMobileActionResponse,
+  serializeMobileActionResponse,
+  type SerializedMobileActionResponse,
+} from '@/lib/mobile/action-idempotency';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchCodexFromMobile, launchRuntimeSurface, performRuntimeAction } from '@/lib/runtime/actions';
 import { writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
@@ -24,6 +32,8 @@ import { getRuntime } from '@/lib/runtimes/registry';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
+const MOBILE_ACTION_IDEMPOTENCY_VERB = 'mobile-action';
+const MOBILE_ACTION_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 function previewMessage(message?: string) {
   if (!message) return '';
@@ -293,7 +303,7 @@ async function publishMobileMutation(
   });
 }
 
-export async function POST(request: NextRequest) {
+async function handleMobileActionPost(request: NextRequest) {
   let action: MobileActionRequest['action'] | undefined;
   let sessionKey: string | undefined;
   let clientMutationId = `mutation-${Date.now()}`;
@@ -792,4 +802,36 @@ export async function POST(request: NextRequest) {
 
     return actionErrorResponse(message, 500);
   }
+}
+
+/**
+ * Persisted retry guard for explicit native control actions. The clone is used
+ * only to inspect correlation/scope; the untouched Request still flows through
+ * the existing handler, keeping every legacy and validation path byte-for-byte.
+ */
+export async function POST(request: NextRequest) {
+  const probe = await request.clone().json().catch(() => null);
+  const identity = resolveMobileActionIdempotencyIdentity(probe);
+  if (!identity) return handleMobileActionPost(request);
+
+  const key = deriveIdempotencyKey({
+    verb: MOBILE_ACTION_IDEMPOTENCY_VERB,
+    scopeId: identity.scopeId,
+    clientKey: identity.clientMutationId,
+  });
+  const outcome = await withIdempotency<SerializedMobileActionResponse>({
+    key,
+    verb: MOBILE_ACTION_IDEMPOTENCY_VERB,
+    scopeId: identity.scopeId,
+    ttlMs: MOBILE_ACTION_IDEMPOTENCY_TTL_MS,
+  }, async () => serializeMobileActionResponse(await handleMobileActionPost(request)));
+
+  if (outcome.inProgress) {
+    return NextResponse.json(mobileActionInProgressPayload(identity), {
+      status: 202,
+      headers: NO_STORE_HEADERS,
+    });
+  }
+
+  return restoreMobileActionResponse(outcome.result, { replayed: outcome.replayed });
 }
