@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "agent-partials",
+  "description": "Agent partials HUD window. Scopes IPC + the o8:stt-event subscription to the 'agent-partials' label so the always-on /agent-partials webview can listen and render the outside-the-window live transcription bar during an agent-lane (Right-Option) dictation. Without a capability whose `remote.urls` matches the bundled-Next origin AND whose `windows` includes 'agent-partials', Tauri injects no __TAURI_INTERNALS__ into this remote-URL webview, so isTauri() is false and listen() never attaches — the window would stay blank. Label-disciplined: events only, NO window-control / updater / process / shell perms (those stay main-only per agent_partials_window.rs).",
+  "windows": ["agent-partials"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to"
+  ]
+}

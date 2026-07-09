@@ -39,6 +39,14 @@ export function shouldDropCachedLicenseForSubject(input: {
 }): boolean {
   if (!isClerkUserSubject(input.licenseSubject)) return false;
   const activeSubject = input.activeSubject?.trim() || null;
-  if (!activeSubject) return true;
+  // UNKNOWN active subject ≠ mismatch (#1483). Desktop native mode keeps the
+  // Clerk session in the Tauri store, NOT in cookies, so server-side auth()
+  // sees no user and activeSubject is null on EVERY desktop read. Dropping on
+  // null silently wiped founder licenses and fell the app back to a free token.
+  // Only drop when we KNOW the active subject AND it genuinely conflicts with
+  // the license's subject; when unknown, keep the cached license — the 30-day
+  // offline grace in license.ts is the staleness backstop, and the sync route
+  // (license_subject_mismatch) still catches genuine cross-user swaps at sign-in.
+  if (!activeSubject) return false;
   return input.licenseSubject !== activeSubject;
 }

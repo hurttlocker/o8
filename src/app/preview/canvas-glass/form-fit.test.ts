@@ -68,11 +68,46 @@ describe('form-fit computeGrid (justified rows)', () => {
     }
   });
 
-  it('centers the packed block in the available height for a light load', () => {
+  it('FILLS the height for a light load in a landscape area (no dead band)', () => {
+    // The fix: a light load must fill the viewport, not center into one short
+    // band leaving dead space above/below (the operator screenshot). Two cards
+    // in a landscape area pack as a single full-height row hugging the top.
     const slots = [...computeGrid([{ id: 0, kind: 'term' }, { id: 1, kind: 'brain' }], AREA).values()];
     const top = Math.min(...slots.map((s) => s.y));
-    // A single centered row sits below the area top, not hugging it.
-    expect(top).toBeGreaterThan(AREA.y + 1);
+    const bottom = Math.max(...slots.map((s) => s.y + s.h));
+    expect(top).toBeCloseTo(AREA.y, 0); // flush to the top, not a centered band
+    expect(bottom - top).toBeGreaterThan(AREA.h * 0.9); // spans (almost) the full height
+  });
+
+  it('packs 6 cards into 2 rows of 3 in a wide-tall area (never 5+1)', () => {
+    const BIG = { x: 0, y: 0, w: 2800, h: 1500 };
+    const items = Array.from({ length: 6 }, (_, i) => ({ id: i, kind: 'image' }));
+    const slots = [...computeGrid(items, BIG).values()];
+    // Two distinct row tops → two rows.
+    const tops = [...new Set(slots.map((s) => Math.round(s.y)))];
+    expect(tops).toHaveLength(2);
+    // Each row holds 3 cards (balance: 3+3, not 5+1).
+    for (const t of tops) {
+      expect(slots.filter((s) => Math.round(s.y) === t)).toHaveLength(3);
+    }
+  });
+
+  it('cards fill far more area than the old fixed-300 cap allowed', () => {
+    // Regression pin for the "single 300px row centered" bug: 6 cards in a big
+    // area must land tall (well past the retired GRID_MAX_ROW_H of 300).
+    const BIG = { x: 0, y: 0, w: 2800, h: 1500 };
+    const items = Array.from({ length: 6 }, (_, i) => ({ id: i, kind: 'image' }));
+    const slots = [...computeGrid(items, BIG).values()];
+    expect(Math.max(...slots.map((s) => s.h))).toBeGreaterThan(600);
+  });
+
+  it('row heights scale with the area height (taller area → taller rows)', () => {
+    const items = Array.from({ length: 6 }, (_, i) => ({ id: i, kind: 'image' }));
+    const base = [...computeGrid(items, { x: 0, y: 0, w: 2800, h: 1500 }).values()];
+    const taller = [...computeGrid(items, { x: 0, y: 0, w: 2800, h: 3000 }).values()];
+    const baseH = Math.max(...base.map((s) => s.h));
+    const tallerH = Math.max(...taller.map((s) => s.h));
+    expect(tallerH).toBeGreaterThan(baseH);
   });
 
   it('is deterministic — same cards produce the same layout', () => {

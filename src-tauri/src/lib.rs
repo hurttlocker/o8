@@ -2,6 +2,7 @@
 mod agent;
 #[cfg(target_os = "macos")]
 mod ai;
+mod agent_partials_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
@@ -917,6 +918,10 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         let app_main = app.clone();
         let _ = app.run_on_main_thread(move || {
             dock_window::create(&app_main, api_port);
+            // Outside-the-window live agent-transcription HUD (bottom-center).
+            // Same server-up prerequisite as the dock — it loads /agent-partials
+            // on the same port.
+            agent_partials_window::create(&app_main, api_port);
         });
         // Stash the resolved port for the lazily-created Symon Points overlay
         // (point_overlay builds its window on first [POINT:...] tag, not here).
@@ -2833,11 +2838,17 @@ mod stt_engine {
     /// listens on the broadcast); for SYSTEM-origin events it ALSO emits
     /// directly to the screen `dock` window via `emit_to(DOCK_LABEL, …)` so the
     /// live morph (recording waveform + transcript + paste flash) reliably lands
-    /// in the second webview — `app.emit` broadcast can miss the dock.
+    /// in the second webview — `app.emit` broadcast can miss the dock. The
+    /// agent-partials HUD gets the same direct delivery for the same reason.
     fn emit_stt(app: &AppHandle, origin: &str, payload: serde_json::Value) {
         if origin == "system" {
             let _ = app.emit_to(
                 crate::dock_window::DOCK_LABEL,
+                "o8:stt-event",
+                payload.clone(),
+            );
+            let _ = app.emit_to(
+                crate::agent_partials_window::PARTIALS_LABEL,
                 "o8:stt-event",
                 payload.clone(),
             );
@@ -3048,7 +3059,10 @@ mod stt_engine {
             // (operator-approved 2026-07-07). Polish still runs and still
             // hears the audio, so a rare short mishear gets corrected there.
             let apple_word_count = apple_text.split_whitespace().count();
-            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12;
+            // Skip Whisper for SHORT dictations (Apple's live transcript is fine at command
+            // length + it saves latency) — but NEVER for the agent path: a command the brain
+            // is about to EXECUTE needs Whisper's accuracy more than the paste-latency win.
+            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12 && !is_agent;
             if skip_whisper_short {
                 log::info!(
                     "[stt] whisper skipped: short utterance ({apple_word_count} words) — using Apple transcript"

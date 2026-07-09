@@ -57,6 +57,11 @@ interface SttEventPayload {
    * guard the review asked for.
    */
   origin?: 'system' | 'in-window';
+  /** Session lane: 'agent' = Right-Option Symon command (never painted here). */
+  lane?: string;
+  /** Opt-in Fn partials HUD (`fn_hud_partials`) — when the outside-the-window
+   *  HUD owns this session's partials, this pill stands down too. */
+  hud?: boolean;
   sessionId?: number;
   text?: string;
   level?: number;
@@ -78,6 +83,7 @@ export function useNativeDictation() {
   const optionsRef = useRef<DictationStartOptions | null>(null);
   const sessionIdRef = useRef<number>(0);
   const systemActiveRef = useRef(false);
+  const systemAgentRef = useRef(false);
   const startTimeRef = useRef<number>(0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -106,6 +112,21 @@ export function useNativeDictation() {
   const handleEvent = useCallback((payload: SttEventPayload) => {
     const systemEvent = payload.origin === 'system' || payload.type === 'system-pasted' || payload.type === 'system-start' || payload.type === 'system-idle';
     if (systemEvent) {
+      // Agent-mode (Right-Option) sessions NEVER paint the in-window pill —
+      // their partials belong to the canvas presence pill / screen surfaces.
+      // Same for Fn sessions tagged `hud: true` (the opt-in outside-the-window
+      // partials HUD owns them). Only `system-start` carries the tags, so latch
+      // for the session and swallow everything until it tears down (2026-07-08:
+      // the big white pill was double-painting over the black partials bar).
+      if (payload.type === 'system-start') {
+        systemAgentRef.current = payload.lane === 'agent' || payload.hud === true;
+      }
+      if (systemAgentRef.current) {
+        if (payload.type === 'system-idle' || payload.type === 'system-pasted' || payload.type === 'error') {
+          systemAgentRef.current = false;
+        }
+        return;
+      }
       if (payload.sessionId !== undefined) sessionIdRef.current = payload.sessionId;
       switch (payload.type) {
         case 'system-start':
