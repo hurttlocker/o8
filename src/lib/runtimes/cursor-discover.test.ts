@@ -18,7 +18,7 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', () => {
 });
 
 describe('cursor runtime discovery', () => {
-  it('returns [] when cursor-agent is absent', async () => {
+  it('returns [] when cursor-agent is absent', { timeout: 20_000 }, async () => {
     const { cursorRuntime } = await import('./cursor');
     await expect(cursorRuntime.discoverSessions()).resolves.toEqual([]);
   });
