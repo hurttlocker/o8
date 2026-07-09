@@ -36,6 +36,7 @@ import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceH
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
 import { TelemetryCrashCapture } from '@/components/desktop/TelemetryCrashCapture';
+import { SentryBrowserInit } from '@/components/desktop/SentryBrowserInit';
 import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
 import { ReportIssueHost } from '@/components/desktop/ReportIssueHost';
 import {
@@ -4203,6 +4204,7 @@ function DashboardInner() {
       <RealtimeVoiceHost />
       <ReportIssueHost />
       <TelemetryCrashCapture />
+      <SentryBrowserInit />
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       // Divided by --ui-zoom: WebKit CSS zoom scales output but vh keeps
       // computing against the unscaled window, so a plain 100vh shell shrinks

@@ -46,6 +46,7 @@ const NON_DEFAULT_UPDATE = {
   collideAggregator: 'claude',
   telemetryOptIn: true,
   telemetryIngestUrl: 'https://telemetry.example/ingest',
+  crashReportsEnabled: false,
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {
