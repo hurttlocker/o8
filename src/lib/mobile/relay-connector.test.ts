@@ -7,10 +7,74 @@ import {
   buildHttpReplay,
   chunkBase64,
   deriveRoutingId,
+  httpCancelRequestId,
   passthroughCloseCode,
+  RelayHttpRequestRegistry,
   relayConnectorEligible,
   RELAY_FORWARD_MARKER,
 } from './relay-connector-protocol';
+
+describe('HTTP replay cancellation', () => {
+  it('accepts only a well-formed http-cancel frame', () => {
+    expect(httpCancelRequestId({ t: 'http-cancel', rid: 'request-1' })).toBe('request-1');
+    expect(httpCancelRequestId({ t: 'http-cancel', rid: '' })).toBeNull();
+    expect(httpCancelRequestId({ t: 'http-cancel', rid: '   ' })).toBeNull();
+    expect(httpCancelRequestId({ t: 'http-cancel' })).toBeNull();
+    expect(httpCancelRequestId({ t: 'http-req', rid: 'request-1' })).toBeNull();
+    expect(httpCancelRequestId(null)).toBeNull();
+  });
+
+  it('isolates identical request ids across streams and ignores late cancels', () => {
+    const registry = new RelayHttpRequestRegistry();
+    const first = registry.begin('stream-a', 'request-1');
+    const second = registry.begin('stream-b', 'request-1');
+
+    expect(registry.cancel('stream-a', 'request-1')).toBe(true);
+    expect(first.signal.aborted).toBe(true);
+    expect(first.signal.reason).toBe('client-cancel');
+    expect(second.signal.aborted).toBe(false);
+    expect(registry.cancel('stream-a', 'request-1')).toBe(false);
+
+    registry.finish('stream-b', 'request-1', second);
+    expect(registry.cancel('stream-b', 'request-1')).toBe(false);
+    expect(registry.size).toBe(0);
+  });
+
+  it('aborts every request owned by a torn-down stream only', () => {
+    const registry = new RelayHttpRequestRegistry();
+    const a1 = registry.begin('stream-a', 'request-1');
+    const a2 = registry.begin('stream-a', 'request-2');
+    const b1 = registry.begin('stream-b', 'request-1');
+
+    expect(registry.abortStream('stream-a')).toBe(2);
+    expect(a1.signal.reason).toBe('stream-teardown');
+    expect(a2.signal.reason).toBe('stream-teardown');
+    expect(b1.signal.aborted).toBe(false);
+    expect(registry.size).toBe(1);
+  });
+
+  it('supersedes a reused id without letting stale cleanup remove its replacement', () => {
+    const registry = new RelayHttpRequestRegistry();
+    const stale = registry.begin('stream-a', 'request-1');
+    const current = registry.begin('stream-a', 'request-1');
+
+    expect(stale.signal.reason).toBe('superseded');
+    registry.finish('stream-a', 'request-1', stale);
+    expect(registry.cancel('stream-a', 'request-1')).toBe(true);
+    expect(current.signal.reason).toBe('client-cancel');
+  });
+
+  it('allows only the owning request to fire its timeout', () => {
+    const registry = new RelayHttpRequestRegistry();
+    const stale = registry.begin('stream-a', 'request-1');
+    const current = registry.begin('stream-a', 'request-1');
+
+    expect(registry.timeout('stream-a', 'request-1', stale)).toBe(false);
+    expect(registry.timeout('stream-a', 'request-1', current)).toBe(true);
+    expect(current.signal.reason).toBe('timeout');
+    expect(registry.size).toBe(0);
+  });
+});
 
 describe('base58Encode (must equal bs58 so the routingId matches the mobile client)', () => {
   it('matches known bs58 vectors', () => {
