@@ -22,6 +22,7 @@ describe('mobile inbox delta', () => {
     const firstSession = {
       id: 'session-1',
       name: 'one',
+      squadId: 'codex',
       runtime: 'codex',
       model: 'gpt',
       status: 'running',
@@ -31,13 +32,14 @@ describe('mobile inbox delta', () => {
       sessionKey: 'session-1',
       approvalStatus: 'none',
       lastEventAt: 'now',
+      context: { usedPercent: 0, trend: 'stable' as const },
       alerts: 0,
     };
     const secondSession = { ...firstSession, id: 'session-2', sessionKey: 'session-2', name: 'two' };
     const previous = snapshot({ sessions: [firstSession, secondSession] });
     const next = snapshot({
       generatedAt: '2026-07-09T12:00:01.000Z',
-      sessions: [{ ...secondSession, status: 'awaiting_review' }, firstSession],
+      sessions: [{ ...secondSession, status: 'reviewing' }, firstSession],
     });
 
     const delta = buildMobileInboxDelta(previous, next, 7, 8);
@@ -45,7 +47,7 @@ describe('mobile inbox delta', () => {
     expect(delta.baseRevision).toBe(7);
     expect(delta.revision).toBe(8);
     expect(delta.entities.sessions.upserts).toEqual([
-      expect.objectContaining({ id: 'session-2', status: 'awaiting_review' }),
+      expect.objectContaining({ id: 'session-2', status: 'reviewing' }),
     ]);
     expect(delta.entities.sessions.removals).toEqual([]);
     expect(delta.entities.sessions.order).toEqual(['session-2', 'session-1']);
