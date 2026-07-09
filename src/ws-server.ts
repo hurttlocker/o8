@@ -197,8 +197,12 @@ import {
   type TerminalHost,
 } from './lib/ws-server/terminal-host-client';
 import { installProcessCrashCapture } from './lib/telemetry/crash-capture';
+import { initSentryNode } from './lib/telemetry/sentry-node';
 
 installProcessCrashCapture('ws-server');
+// Sentry (dormant unless PACKAGED + a DSN was baked). Fire-and-forget; the
+// local JSONL crash capture above is independent and always runs.
+void initSentryNode('ws');
 
 const execFileAsync = promisify(execFile);
 

@@ -14,6 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
+# Parse o8.release.json at build time to bake the Sentry DSN (release only).
+serde_json = "1.0"
 
 [features]
 default = []
@@ -60,6 +62,12 @@ tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
 tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }
 window-vibrancy = "0.6"
 rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Crash/error reporting for the native shell (telemetry ruling). DORMANT unless a
+# RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). rustls
+# transport matches the repo's TLS stance; reqwest 0.12 is already in the lock
+# graph, so this adds no new reqwest major. `panic` installs the panic hook.
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 
 # Issue #755: runtime-download for codebase-memory-mcp static binary.
 # All three crates are already in the transitive lock graph (reqwest pulled

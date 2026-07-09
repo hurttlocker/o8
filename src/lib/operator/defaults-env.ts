@@ -285,3 +285,10 @@ export function envTelemetryOptIn(): boolean | null {
 export function envTelemetryIngestUrl(): string | null {
   return process.env.O8_TELEMETRY_INGEST_URL?.trim() || null;
 }
+
+export function envCrashReports(): boolean | null {
+  const raw = process.env.O8_CRASH_REPORTS;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
