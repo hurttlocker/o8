@@ -37,25 +37,27 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import {
   getLane,
   listActiveLanes,
   setLaneStatus,
 } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import { findLiveCodexProcessByCwd } from '@/lib/runtimes/shared/codex-process-cwd';
-import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
-import {
-  autoCommitCompletionWorktree,
-  runCompletionVerification,
-} from '@/lib/supervisor/completion-verification';
+import { probeLaneSessionAlive } from '@/lib/lane/owned-session-liveness';
+import { commitCrashedWorkerWork } from '@/lib/lane/salvage';
+import { archiveDeadLanes } from '@/lib/lane/dead-lane-archiver';
+import { runCompletionVerification } from '@/lib/supervisor/completion-verification';
 import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
 import {
   enqueueSupervisorInboxItem,
   type SupervisorInboxKind,
   type SupervisorInboxPayload,
 } from '@/lib/supervisor/heal-bot';
+
+// Re-exported so callers/tests keep importing the dead-label policy from the
+// detector surface; the canonical definition now lives in the unified archiver
+// (src/lib/lane/dead-lane-archiver.ts).
+export { DEAD_LANE_EVENT_LABELS } from '@/lib/lane/dead-lane-archiver';
 
 const execFileAsync = promisify(execFile);
 
@@ -86,64 +88,10 @@ export const INTERESTING_LANE_STATUSES = new Set<Lane['status']>([
 ]);
 
 const SILENT_EXIT_EVENT_PREFIX = 'silent_exit_';
-// Owned-session roots + the readdir/parse loop now live in the shared,
-// TTL-memoized `owned-session-index` (perf 2026-07-03) — the DRY extraction the
-// old duplicated-constants comment said was overdue.
-
-function isPidAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isFinite(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-
-async function hasCodexWorktreeContinuity(
-  surfaceId: string,
-  worktreePath: string | null | undefined,
-): Promise<boolean> {
-  if (!surfaceId.startsWith('codex-owned:')) return false;
-  return Boolean(await findLiveCodexProcessByCwd(worktreePath));
-}
-
-async function isOwnedSessionAlive(
-  surfaceId: string,
-  worktreePath?: string | null,
-): Promise<boolean | undefined> {
-  // Shared, TTL-memoized index (perf 2026-07-03): one readdir per root per tick
-  // instead of one per-lane. Semantics unchanged — null=gone, {}=cleared.
-  const run = await lookupOwnedActiveRun(surfaceId);
-  if (!run) return await hasCodexWorktreeContinuity(surfaceId, worktreePath) ? true : false;
-  // F44 — when session.json exists but `activeRun` is cleared (the runtime
-  // store does this when the recorded pid dies, see owned-session/store.ts
-  // line 253), readOwnedActiveRun returns `{}`. That's not "I can't tell" —
-  // it's "session was definitively cleared." Promote to false so the
-  // silent-exit triage runs and a clean-exit-with-diff lane graduates to
-  // `reviewing`. Without this, F44 lanes stayed `running` for 45+ min after
-  // Codex finished.
-  if (run.tmuxSession === undefined && run.pid === undefined) {
-    return await hasCodexWorktreeContinuity(surfaceId, worktreePath) ? true : false;
-  }
-  // Trust the tmux/bridge session first — it survives `zsh -l -c CMD` exec-ing
-  // into the CLI, where the wrapper pid is replaced by the child pid and our
-  // stored pid goes stale. If tmux exists AND is dead, we know the session is
-  // gone. If tmux exists AND is alive, the session is alive regardless of pid.
-  if (run.tmuxSession) {
-    const bridgeAlive = await isBridgeSessionAlive(run.tmuxSession);
-    if (bridgeAlive) return true;
-    return await hasCodexWorktreeContinuity(surfaceId, worktreePath) ? true : false;
-  }
-  // No tmux session recorded (e.g. bridge failed to spawn) — fall back to pid.
-  if (isPidAlive(run.pid)) return true;
-  if (await hasCodexWorktreeContinuity(surfaceId, worktreePath)) return true;
-  // pid was set but is now dead, with no tmux to confirm — bail rather than
-  // miscategorize. The store will clear activeRun on its next pass and the
-  // case above will then trigger the silent-exit triage.
-  return undefined;
-}
+// The owned-session liveness probe (`probeLaneSessionAlive`) + its owned/codex-
+// continuity internals now live in the shared `@/lib/lane/owned-session-liveness`
+// module, used by both this detector and the lane zombie reaper — one policy, one
+// place. See `probeSessionAlive` below for the thin delegation.
 
 let detectorTimer: ReturnType<typeof setInterval> | null = null;
 let tickInFlight = false;
@@ -159,58 +107,13 @@ interface WorktreeState {
 type MergedWorkCheck = { alreadyMerged: boolean; headSha: string | null; comparisonRef: string | null; warning: string | null };
 
 /**
- * Per-runtime liveness probe. Returns true when we are confident the session
- * is still alive, false when the session is clearly gone, and `undefined`
- * when we cannot tell (in which case the detector conservatively bails out
- * rather than miscategorize the lane).
+ * Per-runtime liveness verdict — now the shared `probeLaneSessionAlive`
+ * (owned/codex-continuity/claude-cwd logic lives in
+ * `@/lib/lane/owned-session-liveness`, single-sourced with the reaper). Returns
+ * true when confident the session is alive, false when clearly gone, and
+ * `undefined` when we cannot tell (the detector conservatively bails out then).
  */
-async function probeSessionAlive(lane: Lane): Promise<boolean | undefined> {
-  const sessionKey = lane.sessionKey?.trim();
-  if (!sessionKey) return undefined;
-
-  if (
-    sessionKey.startsWith('codex-owned:')
-    || sessionKey.startsWith('claude-code-owned:')
-    || sessionKey.startsWith('gemini-owned:')
-    || sessionKey.startsWith('opencode-owned:')
-  ) {
-    try {
-      return await isOwnedSessionAlive(sessionKey, lane.worktreePath);
-    } catch (error) {
-      console.warn(`[silent-exit] Owned session probe failed for ${sessionKey}:`, error);
-      return undefined;
-    }
-  }
-
-  // Discovered codex terminals belong to the operator, not the IDE. We never
-  // kill or mutate those sessions, so we also do not make claims about their
-  // liveness — that would risk yanking a packet the operator is still driving
-  // by hand. Skip silent-exit triage for them.
-  if (sessionKey.startsWith('codex-live:') || sessionKey.startsWith('codex:')) {
-    return undefined;
-  }
-
-  if (lane.runtime === 'claude-code') {
-    // We have no sessionKey -> pid mapping for claude-code sessions because
-    // the CLI writes to JSONL transcripts owned by the user. The cheap proxy
-    // is to check whether any claude CLI process still has `lane.worktreePath`
-    // (or `lane.repoPath`) as its cwd. If nothing matches, treat it as gone.
-    try {
-      const { findLiveClaudeProcesses } = await import('@/lib/runtimes/claude-code');
-      const processes = await findLiveClaudeProcesses();
-      const targetCwds = [lane.worktreePath, lane.repoPath]
-        .map((value) => value?.trim())
-        .filter((value): value is string => Boolean(value));
-      if (targetCwds.length === 0) return undefined;
-      if (processes.length === 0) return false;
-      return processes.some((proc) => proc.cwd && targetCwds.includes(proc.cwd));
-    } catch {
-      return undefined;
-    }
-  }
-
-  return undefined;
-}
+const probeSessionAlive = probeLaneSessionAlive;
 
 async function readCommitCount(cwd: string, baseBranch: string): Promise<number> {
   try {
@@ -421,7 +324,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 
   if (state.hasUncommittedWork) {
     try {
-      const committed = await autoCommitCompletionWorktree(cwd, lane.label);
+      const committed = await commitCrashedWorkerWork(cwd, lane.label);
       if (committed) {
         console.log(`[silent-exit] Auto-committed salvaged work in ${cwd} for lane ${lane.id}`);
       }
@@ -531,58 +434,10 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
   return true;
 }
 
-// #23 — Auto-archive lanes whose Codex session is confirmed dead (silent_exit_* /
-// zombie_reap) and which have sat stale past a grace window. Without this they
-// stay in a non-terminal status forever ("orange" in the UI) when their work
-// landed out-of-band (direct salvage, the dogfood loop, an update-relaunch).
-// Archives BOTH the lane row and the owned-codex session dir so the UI/inventory
-// clears on its own.
-const ARCHIVE_DEAD_LANE_GRACE_MS = 30 * 60 * 1000;
-// Pipeline root fix (2026-07-03): `silent_exit_work_present` REMOVED from the
-// terminally-dead set. Work-present means committed, reviewable output exists —
-// that lane is REVIEW-READY, not dead, and the operator (or orchestrator) owns
-// its disposition. This archiver buried three review-ready wave-1B lanes
-// (worktrees pruned, branches deleted) 30 minutes after a mislabel. Only
-// genuinely workless terminal states are auto-archivable.
-export const DEAD_LANE_EVENT_LABELS = new Set<string>([
-  'silent_exit_no_work',
-  'silent_exit_verification_failed',
-  'zombie_reap',
-]);
-const ARCHIVABLE_STALE_STATUSES = new Set<Lane['status']>(['reviewing', 'recovering', 'awaiting_input']);
-
-async function archiveTerminallyDeadLanes(now: number): Promise<void> {
-  // listActiveLanes, not listLanes — the unfiltered read walked every archived
-  // row every 30s tick for nothing (perf: O(all-ever-lanes) → O(active)).
-  const { listActiveLanes: listActive, archiveLane } = await import('@/lib/lane/registry');
-  const stale = listActive().filter((lane) => {
-    if (!ARCHIVABLE_STALE_STATUSES.has(lane.status)) return false;
-    if (!lane.lastEventLabel || !DEAD_LANE_EVENT_LABELS.has(lane.lastEventLabel)) return false;
-    const ms = lane.lastEventAt ? new Date(lane.lastEventAt).getTime() : 0;
-    return Number.isFinite(ms) && ms > 0 && now - ms > ARCHIVE_DEAD_LANE_GRACE_MS;
-  });
-  for (const lane of stale) {
-    // Re-confirm the session is really dead so we never archive a revived one.
-    const alive = await probeSessionAlive(lane);
-    if (alive === true) continue;
-    const refreshed = getLane(lane.id);
-    if (!refreshed || !ARCHIVABLE_STALE_STATUSES.has(refreshed.status)) continue;
-    try {
-      archiveLane(lane.id, 'system');
-      const key = lane.sessionKey?.trim();
-      if (key?.startsWith('codex-owned:')) {
-        const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
-        await archiveOwnedCodexSession(key).catch(() => {});
-      } else if (key?.startsWith('claude-code-owned:')) {
-        const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
-        await archiveOwnedClaudeCodeSession(key).catch(() => {});
-      }
-      console.log(`[silent-exit] Auto-archived stale dead lane ${lane.id} (${lane.lastEventLabel})`);
-    } catch (error) {
-      console.warn(`[silent-exit] Auto-archive failed for lane ${lane.id}:`, error);
-    }
-  }
-}
+// The terminally-dead-lane archiver moved to the unified, policy-table-driven
+// `archiveDeadLanes` (src/lib/lane/dead-lane-archiver.ts) — one archiver shared
+// with the reaper. The dead-label policy (`DEAD_LANE_EVENT_LABELS`) is re-exported
+// from this module's top for callers/tests that still import it here.
 
 async function silentExitTick(): Promise<void> {
   if (tickInFlight) return;
@@ -627,8 +482,10 @@ async function silentExitTick(): Promise<void> {
     }
 
     // #23 — sweep lanes already declared dead + stale into 'archived' so they
-    // don't sit orange forever when their work landed out-of-band.
-    await archiveTerminallyDeadLanes(now);
+    // don't sit orange forever when their work landed out-of-band. Silent-exit is
+    // the fast 30s first responder; it runs the ARCHIVE half of the shared policy
+    // (the reaper owns the wedge-then-archive sweep on its 5-min backstop).
+    await archiveDeadLanes(now);
   } finally {
     tickInFlight = false;
   }
