@@ -27,6 +27,7 @@ function resolutionNote(input: {
   laneId: string | null;
   event: string;
   terminalState: 'released' | 'archived';
+  resolvedAt: string;
 }) {
   const status = input.terminalState === 'released' ? 'lane merged' : 'packet archived';
   return [
@@ -34,6 +35,7 @@ function resolutionNote(input: {
     `packetId=${input.packetId}`,
     `laneId=${input.laneId ?? 'unknown'}`,
     `event=${input.event}`,
+    `checkedAt=${input.resolvedAt}`,
   ].join(' ');
 }
 
@@ -61,6 +63,7 @@ export function resolveVerificationIncidentsForMergedPacket(input: {
     laneId,
     event: input.event,
     terminalState,
+    resolvedAt,
   });
 
   let resolved = 0;
@@ -74,6 +77,16 @@ export function resolveVerificationIncidentsForMergedPacket(input: {
       laneId,
       event: input.event,
       terminalState,
+      probeKind: 'packet_terminal',
+      evidence: {
+        packetId: input.packetId,
+        laneId,
+        terminalState,
+        checkedAt: resolvedAt,
+        packetStatus: packet.status,
+        releaseState: packet.releaseState,
+        archivedAt: packet.archivedAt,
+      },
       resolvedAt,
     });
     resolved += 1;

@@ -7,7 +7,7 @@ import { getSqlite } from '@/lib/db';
 import { probeBranchMerged } from '@/lib/orchestrator/branch-merge-probe';
 import { markRepoOriginConfigured } from '@/lib/repos/origin-readiness';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
-import { enqueueInboxItem, resolveInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
+import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 
 const execFileAsync = promisify(execFile);
 
@@ -727,37 +727,6 @@ function recentEventWithinWindow(values: Array<string | null | undefined>, now: 
   return latest > 0 && now - latest < AUTO_RELEASE_MIN_EVENT_AGE_MS;
 }
 
-/**
- * Escalated → resolved auto-close. An item is `escalated` when the operator
- * handed the fault to the orchestrator ("Add to orchestrator chat"). The fix
- * is a rerun/steer of the SAME packet (reused packet_id, new lane), so when
- * that packet's latest lane merges (status 'completed') the fault is genuinely
- * fixed — flip the item to 'resolved' and stamp the lane that closed it.
- * Source-agnostic: catches operator-merged fixes too, not just heal-bot
- * auto-releases. Closes the loop the Supervisor inbox was missing (the
- * human_required roach-motel — see o8.md / supervisor-inbox-resolution-contract).
- */
-async function runEscalatedInboxResolveSweep(): Promise<void> {
-  const { findLatestLaneByPacket } = await import('@/lib/lane/registry');
-  const rows = getDb().prepare(`
-    SELECT id, packet_id
-      FROM supervisor_inbox
-     WHERE status = 'escalated'
-       AND packet_id IS NOT NULL
-  `).all() as Array<{ id: string; packet_id: string | null }>;
-
-  for (const row of rows) {
-    if (!row.packet_id) continue;
-    const lane = findLatestLaneByPacket(row.packet_id);
-    if (lane && lane.status === 'completed') {
-      resolveInboxItem(row.id, lane.id);
-      console.log(
-        `[heal-bot] resolved escalated inbox item ${row.id} — packet ${row.packet_id} merged on lane ${lane.id}`,
-      );
-    }
-  }
-}
-
 async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
   const { readOrchestratorControlPlaneState, withLockedState } = await import('@/lib/orchestrator/control-plane');
   const { findLaneByPacket, getLane, setLaneStatus } = await import('@/lib/lane/registry');
@@ -831,13 +800,17 @@ async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
 }
 
 async function runHealBotMaintenance(): Promise<void> {
+  const { runLivenessProbeSweep } = await import('@/lib/supervisor/liveness-probes');
   const dismissed = runRetentionSweep();
   if (dismissed > 0) {
     console.log(`[heal-bot] Retention sweep dismissed ${dismissed} stale inbox item(s)`);
   }
   await runFetchUnreachableSweep();
   await runAwaitingReviewAutoReleaseSweep();
-  await runEscalatedInboxResolveSweep();
+  const resolved = await runLivenessProbeSweep();
+  if (resolved.resolved > 0) {
+    console.log(`[heal-bot] Liveness sweep resolved ${resolved.resolved} stale inbox item(s)`);
+  }
 }
 
 async function drainHealBotQueue(): Promise<void> {
