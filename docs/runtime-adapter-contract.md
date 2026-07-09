@@ -1,4 +1,4 @@
-*An AgentRuntime is o8's universal interface for talking to any CLI-based AI coding agent (Codex, Claude Code, Gemini, opencode) — the control plane never speaks to a specific runtime directly, always through this contract.*
+*An AgentRuntime is o8's universal interface for talking to any CLI-based AI coding agent (Codex, Claude Code, Gemini, opencode, Cursor, Grok Build) — the control plane never speaks to a specific runtime directly, always through this contract.*
 
 # Runtime Adapter Contract
 

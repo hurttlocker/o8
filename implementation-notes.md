@@ -11,3 +11,4 @@
 
 - Added Cursor CLI (`cursor`) and Grok Build (`grok`) adapters using the shared owned-session store and dispatch registry.
 - Local CLI smoke skipped because `cursor-agent`, `grok`, and `grok-build` were not installed on this machine.
+- Reused existing Cursor and Grok adapter scaffolding already present in this worktree; the conservative work was to close stale enum/docs surfaces instead of duplicating adapter files.

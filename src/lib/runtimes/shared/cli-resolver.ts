@@ -41,7 +41,7 @@ export interface ResolvedCli {
 }
 
 export interface CliResolverSpec {
-  /** Logical name for the runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode' */
+  /** Logical name for the runtime, e.g. 'codex', 'claude-code', 'gemini', 'cursor'. */
   runtimeId: string;
   /** The binary name to search for: 'codex', 'claude', etc. */
   binaryName: string;

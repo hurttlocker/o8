@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider.
 
-**Shipping runtime pattern (v1):** Claude Code orchestrates, Codex works. Specifically — Claude Code running as an interactive **REPL** spawn (subscription-billed; **not** `claude -p` print mode, which was retired in epic #1066 because it billed against the Agent SDK pool) is the orchestrator; Codex GPT-5.5 xhigh is the worker that runs in isolated worktrees. Gemini and opencode adapters are wired in code for future expansion but are not the primary dispatch path. All four runtimes route through a universal CLI-based adapter interface (`src/lib/runtimes/`), with separate desktop and mobile surfaces.
+**Shipping runtime pattern (v1):** Claude Code orchestrates, Codex works. Specifically — Claude Code running as an interactive **REPL** spawn (subscription-billed; **not** `claude -p` print mode, which was retired in epic #1066 because it billed against the Agent SDK pool) is the orchestrator; Codex GPT-5.5 xhigh is the worker that runs in isolated worktrees. Gemini, opencode, Cursor, and Grok Build adapters are wired in code for runtime expansion; Codex remains the primary dispatch path. All six runtimes route through a universal CLI-based adapter interface (`src/lib/runtimes/`), with separate desktop and mobile surfaces.
 
 See `docs/o8-product-brief.md` for the full product vision, monetization, and Karpathy alignment.
 
@@ -325,7 +325,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 **~74 feature domains.** This grew fast; the canonical list is `ls src/lib/`. Don't try to enumerate every dir here — point at it and call out the load-bearing ones:
 
-- **Runtime layer**: `runtimes/` (4 adapters: codex, claude-code, gemini, opencode), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`.
+- **Runtime layer**: `runtimes/` (6 adapters: codex, claude-code, gemini, opencode, cursor, grok), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`.
 - **Dispatch + lanes**: `lane/` (single-lane logic incl. `worktree-side-merge.ts` + `codex-orchestrator-session.ts`), `lanes/` (multi-lane fleet view), `dispatch/`, `supervisor/`, `intake/`.
 - **Orchestrator**: `orchestrator/` (types, backends, runtime-capabilities, auto-compact), `agents/`.
 - **Cortex v2**: `cortex/` (see "Cortex v2" section above — directives, ledger, qa, embeddings, indexer, ingest).
@@ -367,7 +367,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 - **Respect the 800-line file ceiling** — if your changes would push a file past 800 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
-- **Build for both runtimes** — Codex and Claude Code. The adapter interface allows adding new runtimes later.
+- **Build through the runtime contract** — Codex and Claude Code are primary, with Gemini/opencode/Cursor/Grok adapters sharing the same surface.
 - **Don't build what models will commoditize** — Cost dashboards, context optimization, prompt tools, orchestration quality, and briefing features are table-stakes, never differentiators. Our moats are governance, organizational memory, and the operator approval surface.
 - **Console logging prefix**: `[feature-name]` (e.g., `[memory-recall]`, `[compaction]`)
 - **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`

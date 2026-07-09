@@ -20,6 +20,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
@@ -296,7 +297,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
           source: 'server',
           action: 'runtime-fallback',
           status: 'completed',
-          runtime: runtimeId as 'codex' | 'claude-code' | 'gemini' | 'opencode',
+          runtime: runtimeId as OrchestratorRuntime,
           surfaceId: session.surfaceId,
           sessionKey: session.surfaceId,
           note: `${runtimeId} ${fromModel} → ${toModel}: ${reason}`,
