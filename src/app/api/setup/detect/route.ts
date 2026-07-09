@@ -239,13 +239,41 @@ function detectGemini(deadlineAt?: number): DetectedTool {
   );
   return {
     id: 'gemini',
-    name: 'Gemini CLI',
+    name: 'Gemini CLI (retired)',
     detected,
-    ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent ? 'set GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY)' : undefined,
+    ready: false,
+    authHint: detected ? 'Gemini CLI is retired; install Antigravity CLI for Google runtime coverage.' : undefined,
     version,
     path,
-    details: { authPresent },
+    details: { authPresent, retired: true },
+  };
+}
+
+function detectAntigravity(deadlineAt?: number): DetectedTool {
+  const path = locateBin('agy', deadlineAt) || locateBin('antigravity', deadlineAt);
+  const detected = !!path;
+  let version: string | undefined;
+
+  if (detected) {
+    version = safeExec(path, ['--version'], 2000, deadlineAt);
+  }
+
+  const authPresent = keyPresent(
+    ['ANTIGRAVITY_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_AI_API_KEY'],
+    loadConfiguredKeyNames(),
+  ) || existsSync(join(homedir(), '.antigravity'));
+
+  return {
+    id: 'antigravity',
+    name: 'Antigravity CLI',
+    detected,
+    ready: false,
+    authHint: detected
+      ? 'Discovery only until agy documents a resumable JSON/event contract.'
+      : undefined,
+    version,
+    path,
+    details: { authPresent, dispatchable: false },
   };
 }
 
@@ -390,7 +418,7 @@ function buildSummary(tools: DetectedTool[]): string {
 
 function buildDetectionResult(tools: DetectedTool[], flags: { partial?: boolean; timedOut?: boolean } = {}): DetectionResult {
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', 'cursor', 'grok'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;
@@ -431,6 +459,7 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectCodex(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectClaudeCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectOpenCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOllama(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectApiKeys());

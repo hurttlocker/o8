@@ -3,11 +3,11 @@ import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
-export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
 export type OrchestrationMode = 'fleet' | 'single' | 'chat';
 export type OrchestratorPacketReviewSeverity = 'info' | 'warning' | 'high';
 export type WorkerIntent = 'light_worker' | 'heavy_worker' | 'reviewer' | 'diagnostic' | 'orchestrator';
-export type WorkerProvider = 'codex' | 'kimi' | 'minimax' | 'claude' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+export type WorkerProvider = 'codex' | 'kimi' | 'minimax' | 'claude' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
 export type WorkerRoutingConfidence = 'high' | 'medium' | 'low';
 
 export interface WorkerRouting {

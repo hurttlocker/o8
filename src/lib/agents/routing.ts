@@ -9,7 +9,7 @@ import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilitie
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 // Runtimes with a reasoning-effort surface. codex → `-c model_reasoning_effort`,
-// claude-code → `--effort`. gemini/opencode have none, so a requested effort is a
+// claude-code → `--effort`. opencode has none, so a requested effort is a
 // clean no-op there (selectedEffort stays null and no launch flag is emitted).
 const EFFORT_CAPABLE_RUNTIMES: readonly OrchestratorRuntime[] = ['codex', 'claude-code'];
 
@@ -24,6 +24,7 @@ export const PRODUCTION_AGENT_ENFORCEMENT = 'dispatchable_runtimes' as const;
 function providerForRuntime(runtime: OrchestratorRuntime): WorkerProvider {
   switch (runtime) {
     case 'gemini': return 'gemini';
+    case 'antigravity': return 'antigravity';
     case 'claude-code': return 'claude';
     case 'opencode': return 'opencode';
     case 'cursor': return 'cursor';
@@ -47,6 +48,7 @@ const WORKER_PROVIDERS: readonly WorkerProvider[] = [
   'minimax',
   'claude',
   'gemini',
+  'antigravity',
   'opencode',
   'cursor',
   'grok',
@@ -56,6 +58,7 @@ const ORCHESTRATOR_RUNTIMES: readonly OrchestratorRuntime[] = [
   'codex',
   'claude-code',
   'gemini',
+  'antigravity',
   'opencode',
   'cursor',
   'grok',
@@ -147,7 +150,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     && (requestedProvider === null || requestedProvider === selectedProvider);
 
   // Effort applies only when the selected runtime has a reasoning-effort surface;
-  // on gemini/opencode it's a clean no-op (null → no launch flag).
+  // on opencode it's a clean no-op (null → no launch flag).
   const selectedEffort = requestedEffort && EFFORT_CAPABLE_RUNTIMES.includes(selectedRuntime)
     ? requestedEffort
     : null;

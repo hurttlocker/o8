@@ -42,6 +42,7 @@ import { registerRuntime } from './registry';
 import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
 import { geminiRuntime } from './gemini';
+import { antigravityRuntime } from './antigravity';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
 import { cursorRuntime } from './cursor';
@@ -76,6 +77,9 @@ registerRuntime(claudeCodeRuntime);
 // Code. Surfaces 'gemini-owned:' sessions, uses `gemini -p … --yolo
 // --output-format stream-json` under the hood. See src/lib/gemini/owned.ts.
 registerRuntime(geminiRuntime);
+// Antigravity replaces Gemini CLI at the Google runtime layer, but is
+// discovery-only until agy documents a resumable JSON/event contract.
+registerRuntime(antigravityRuntime);
 // Wave 2c: opencode CLI — multi-provider coding runtime via `opencode run
 // --format json --model provider/model`. Sessions 'opencode-owned:' with
 // 'ses_' prefixed threads. See src/lib/opencode/owned.ts.
