@@ -72,6 +72,8 @@ pub async fn run_eval(app: tauri::AppHandle, models: Vec<String>) -> String {
                 task_id: format!("eval-{i}-{model}"),
                 app: app.clone(),
                 screen: None,
+                spatial: false,
+                crop_png_base64: None,
                 edit: None,
                 cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             };

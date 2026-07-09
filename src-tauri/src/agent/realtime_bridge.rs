@@ -54,6 +54,8 @@ pub async fn realtime_invoke_tool(
         task_id: format!("realtime-{seq}"),
         app,
         screen: None,
+        spatial: false,
+        crop_png_base64: None,
         edit: None,
         cancel: Arc::new(AtomicBool::new(false)),
     };

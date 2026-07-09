@@ -826,6 +826,11 @@ fn begin_agent_dictation() {
 
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
+        // Arm the spatial-ink overlay FIRST: cover the cursor's monitor + CAPTURE
+        // the mouse so the operator can draw while talking. Called before the
+        // dock/partials show below so those re-order ABOVE the ink (arm orders
+        // the ink front; the closure then re-fronts the dock + HUD over it).
+        crate::spatial_ink_window::arm(&app);
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
@@ -843,6 +848,9 @@ fn begin_agent_dictation() {
                 // Direct delivery to the partials HUD too — its latch keys off
                 // this exact event, and the broadcast can miss secondary webviews.
                 let _ = app.emit_to(crate::agent_partials_window::PARTIALS_LABEL, "o8:stt-event", payload.clone());
+                // Same direct delivery to the spatial-ink page so it latches on
+                // the agent-lane start and enables drawing for this hold.
+                let _ = app.emit_to(crate::spatial_ink_window::SPATIAL_INK_LABEL, "o8:stt-event", payload.clone());
                 let _ = app.emit("o8:stt-event", payload);
             }
         });
@@ -892,6 +900,11 @@ fn discard_agent_dictation() {
     request_discard_finalize(sid);
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] agent cancel stop failed: {e}");
+    }
+    // Teardown path — restore the ink overlay's click-through + clear any strokes
+    // (a too-short brush never reaches finalize, so disarm here).
+    if let Some(app) = APP_HANDLE.get() {
+        crate::spatial_ink_window::disarm(app);
     }
     morph_dock_idle();
 }
