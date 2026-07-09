@@ -312,7 +312,11 @@ fn copy_dir_recursive(src: &str, dst: &str) -> std::io::Result<()> {
 // entries to upgrade. SHA-256 values come from the upstream release
 // `checksums.txt` for that tag. See `docs/codebase-memory-build.md`.
 
-const CODEBASE_MEMORY_VERSION: &str = "0.6.0";
+// 0.9.0 bump (2026-07-09): upstream DELETED the v0.6.0 release assets — every
+// fresh install's download 404'd forever, and the Settings→MCP readiness gate
+// misread the permanent failure as "still downloading" (beta report: "MCP still
+// saying install after days"). SHAs below are from v0.9.0's checksums.txt.
+const CODEBASE_MEMORY_VERSION: &str = "0.9.0";
 const CODEBASE_MEMORY_REPO: &str = "DeusData/codebase-memory-mcp";
 
 /// SHA-256 of the upstream archive (tar.gz / zip) — the binary inside
@@ -321,19 +325,22 @@ const CODEBASE_MEMORY_REPO: &str = "DeusData/codebase-memory-mcp";
 fn codebase_memory_archive_sha(asset: &str) -> Option<&'static str> {
     match asset {
         "codebase-memory-mcp-darwin-amd64.tar.gz" => {
-            Some("a4d09d97fe1f47e1a0a23309bc34d9937f74c61950bed3259f9576800cc78727")
+            Some("6af3d02a27f589901fa763d3971089337bc8c9838bbed5d0cf543ca9f1a9e543")
         }
         "codebase-memory-mcp-darwin-arm64.tar.gz" => {
-            Some("a1d3f8a4c353ab94ea8fe1fb60159758020f2f256c9652699a0bd6725189a439")
+            Some("faa02f0404230c451a9812230394481948f80183801fa5bf67044b41c2f25ed4")
         }
         "codebase-memory-mcp-linux-amd64.tar.gz" => {
-            Some("0dfd70f73337219925f3ec6a572fe776dbbe1c4c8c6ab546ab214fe16e56a426")
+            Some("e2832a8d207c26beaa30efa6222ed4a37cb3f526ca4bee060bfbf336ed6fc679")
         }
         "codebase-memory-mcp-linux-arm64.tar.gz" => {
-            Some("f1fad27262fe7af4a356af128e43942355cb2189491079b6790ecc5ae3af069c")
+            Some("68a345d9a6842f02a3cb07e187b28bc38c4f3a22967f47fadbcd0757ba93a680")
         }
         "codebase-memory-mcp-windows-amd64.zip" => {
-            Some("da3d7d7bd6f687b697145457ff9d113ecf6daffe173d236457a43223e89a5e9c")
+            Some("92f96896f952e539f0d6cb34d7892a25064b677ccbf808b8f8310ad897e86f2c")
+        }
+        "codebase-memory-mcp-windows-arm64.zip" => {
+            Some("63994fcfd15bf5e3f03cbf368cce86261713c7d7802e31469ae81a3939e4fae6")
         }
         _ => None,
     }
@@ -406,6 +413,21 @@ fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
 /// child inherits it (mirrors the `O8_NODE_BIN` pattern). On failure
 /// sets the var to an empty string — downstream MCP registration in
 /// #740 treats empty/unset as "feature unavailable".
+/// Persist the downloader's lifecycle state where the NODE side can see it.
+/// `app.emit` only reaches webviews; the Settings→MCP readiness gate runs in
+/// the bundled Next server, which was blind to the "error" state and misread
+/// a permanently failed download as "still downloading" — blocking the
+/// one-click Connect forever (2026-07-09 beta report). Values: "downloading" |
+/// "ready" | "error". Best-effort — a write failure only costs status fidelity.
+fn write_codebase_memory_status(status: &str) {
+    let path = std::path::PathBuf::from(format!("{}/bin", o8_data_dir()))
+        .join(".codebase-memory-status");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, status);
+}
+
 fn ensure_codebase_memory_binary(app: AppHandle) {
     std::thread::spawn(move || {
         let Some((asset_name, binary_name, is_zip)) = detect_codebase_memory_asset() else {
@@ -415,11 +437,13 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
                 std::env::consts::ARCH
             );
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             return;
         };
         let Some(expected_sha) = codebase_memory_archive_sha(asset_name) else {
             log::warn!("[codebase-memory] no checksum pinned for {}", asset_name);
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             return;
         };
 
@@ -427,6 +451,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if let Err(e) = std::fs::create_dir_all(&bin_dir) {
             log::warn!("[codebase-memory] mkdir {} failed: {}", bin_dir, e);
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             return;
         }
         let bin_path = std::path::PathBuf::from(&bin_dir).join(binary_name);
@@ -448,12 +473,14 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
                     );
                     let bin_str = bin_path.to_string_lossy().to_string();
                     std::env::set_var("O8_CODEBASE_MEMORY_BIN", &bin_str);
+                    write_codebase_memory_status("ready");
                     let _ = app.emit("codebase-memory:status", "ready");
                     return;
                 }
             }
         }
 
+        write_codebase_memory_status("downloading");
         let _ = app.emit("codebase-memory:status", "downloading");
 
         // Materialise the archive into a tmp file, verify SHA, extract,
@@ -467,6 +494,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if let Err(e) = std::fs::create_dir_all(&tmp_root) {
             log::warn!("[codebase-memory] mkdir tmp failed: {}", e);
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             let _ = app.emit("codebase-memory:status", "error");
             return;
         }
@@ -498,6 +526,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if let Err(e) = download_result {
             log::warn!("[codebase-memory] download failed (non-fatal): {}", e);
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             let _ = app.emit("codebase-memory:status", "error");
             let _ = std::fs::remove_dir_all(&tmp_root);
             return;
@@ -508,7 +537,8 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
             Err(e) => {
                 log::warn!("[codebase-memory] hash failed: {}", e);
                 std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
-                let _ = app.emit("codebase-memory:status", "error");
+                write_codebase_memory_status("error");
+            let _ = app.emit("codebase-memory:status", "error");
                 let _ = std::fs::remove_dir_all(&tmp_root);
                 return;
             }
@@ -520,6 +550,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
                 actual_sha
             );
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             let _ = app.emit("codebase-memory:status", "error");
             let _ = std::fs::remove_dir_all(&tmp_root);
             return;
@@ -554,6 +585,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if let Err(e) = extract_result {
             log::warn!("[codebase-memory] extract failed: {}", e);
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             let _ = app.emit("codebase-memory:status", "error");
             let _ = std::fs::remove_dir_all(&tmp_root);
             return;
@@ -566,6 +598,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
                 extracted
             );
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             let _ = app.emit("codebase-memory:status", "error");
             let _ = std::fs::remove_dir_all(&tmp_root);
             return;
@@ -577,6 +610,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         if let Err(e) = std::fs::copy(&extracted, &bin_path) {
             log::warn!("[codebase-memory] install failed: {}", e);
             std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            write_codebase_memory_status("error");
             let _ = app.emit("codebase-memory:status", "error");
             let _ = std::fs::remove_dir_all(&tmp_root);
             return;
@@ -597,7 +631,8 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
         let bin_str = bin_path.to_string_lossy().to_string();
         log::info!("[codebase-memory] installed at {}", bin_str);
         std::env::set_var("O8_CODEBASE_MEMORY_BIN", &bin_str);
-        let _ = app.emit("codebase-memory:status", "ready");
+        write_codebase_memory_status("ready");
+                    let _ = app.emit("codebase-memory:status", "ready");
     });
 }
 
