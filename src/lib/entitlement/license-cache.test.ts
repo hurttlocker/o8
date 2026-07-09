@@ -41,13 +41,16 @@ describe('cached entitlement read guards', () => {
     delete process.env.CORTEX_IDE_DATA_DIR;
   });
 
-  it('drops an account-bound cached license when no active subject is present', async () => {
+  it('KEEPS an account-bound cached license when no active subject is present (native-mode desktop)', async () => {
+    // #1483: desktop native mode keeps the Clerk session in the Tauri store, so
+    // server-side auth() sees no cookie user and activeSubject is null on every
+    // read. UNKNOWN ≠ mismatch — the founder license must survive, not be wiped.
     writeCache(tokenWithSubject('user_founder'));
     const { readCachedEntitlement } = await import('./license');
 
-    expect(readCachedEntitlement()).toBeNull();
-    expect(existsSync(entitlementPath())).toBe(false);
-    expect(existsSync(founderPath())).toBe(false);
+    expect(readCachedEntitlement()?.plan).toBe('founder');
+    expect(existsSync(entitlementPath())).toBe(true);
+    expect(existsSync(founderPath())).toBe(true);
   });
 
   it('keeps an account-bound cached license for the active subject', async () => {

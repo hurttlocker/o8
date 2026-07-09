@@ -58,6 +58,16 @@ export function DesktopAuthCallbackHandler() {
             }
           },
           retrySignIn: startDesktopSignIn,
+          // Retire the server-side sign-out marker now that a fresh session is
+          // active, so the follow-up license sync isn't rejected as stale and
+          // auto-signed-out (#1483). Fire-and-forget; never blocks sign-in.
+          onSignInComplete: async () => {
+            await fetch('/api/panel/entitlement/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clearSignInMarker: true }),
+            }).catch(() => {});
+          },
         });
       } finally {
         processingRef.current = false;

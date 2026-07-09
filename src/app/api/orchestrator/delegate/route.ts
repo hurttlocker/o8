@@ -8,6 +8,7 @@ import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
 import { normalizeRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
+import { codename } from '@/lib/agents/codename';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
@@ -237,6 +238,7 @@ export async function POST(request: NextRequest) {
         ok: false,
         laneId,
         packetId,
+        codename: codename(laneId),
         approvalId: launchResult.approvalId,
         note: launchResult.note,
       }, { status: 202 });
@@ -276,6 +278,10 @@ export async function POST(request: NextRequest) {
       ok: true,
       laneId,
       packetId,
+      // The canvas card labels this lane `codename(laneId)` (deterministic,
+      // codename.ts is the single source of truth) — return it so voice
+      // surfaces announce the SAME name the operator sees on the card.
+      codename: codename(laneId),
       surfaceId: launchResult.lane?.sessionKey || null,
       worktreePath: launchResult.lane?.worktreePath || null,
       branch,

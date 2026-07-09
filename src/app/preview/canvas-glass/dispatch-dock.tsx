@@ -21,7 +21,7 @@
  * the composer's queue and this dock stack and never collide.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FONT, glassMedia, TONE_DOT } from './ui';
 
@@ -173,16 +173,22 @@ function DispatchRow({
  *  expanded = the staggered packet list (capped, with "+N more"). Returns null
  *  with no lanes (composer is bare). */
 export function DispatchDock({
-  lanes, onSelect, onReview,
+  lanes, onSelect, onReview, onExpandedChange,
 }: {
   lanes: DispatchLane[];
   onSelect: (lane: DispatchLane) => void;
   onReview: (lane: DispatchLane) => void;
+  /** Report the tray's expanded state up so the host can re-reserve grid space
+   *  for the taller tray (the expanded rows add ~110px above the summary bar). */
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   const phased = useMemo(() => lanes.map((lane) => ({ lane, phase: phaseFor(lane.status) })), [lanes]);
+  // Kept before the early return so the hook order is stable (mount reports the
+  // collapsed default, syncing the host even after a prior tray unmounted expanded).
+  useEffect(() => { onExpandedChange?.(expanded); }, [expanded, onExpandedChange]);
   if (!phased.length) return null;
 
   const workingCount = phased.filter((entry) => entry.phase.key === 'working' || entry.phase.key === 'finalizing').length;

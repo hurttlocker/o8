@@ -118,6 +118,16 @@ function SparkleIcon() {
   );
 }
 
+function CaptionsIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <line x1="7" y1="15" x2="11" y2="15" />
+      <line x1="14" y1="15" x2="17" y2="15" />
+    </svg>
+  );
+}
+
 function BrainGlyph() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -145,6 +155,10 @@ export function VoiceTab() {
   const [groqKeySet, setGroqKeySet] = useState(false);
   const [groqKeyInput, setGroqKeyInput] = useState('');
   const [groqKeySaving, setGroqKeySaving] = useState(false);
+  // Opt-in on-screen partials bar during plain Fn dictation (`fn_hud_partials`,
+  // default OFF). Read back from the same dictation.json config the other voice
+  // prefs use.
+  const [fnHudPartials, setFnHudPartials] = useState(false);
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -174,6 +188,7 @@ export function VoiceTab() {
     ]);
     setAutostart(auto);
     setGroqKeySet(Boolean(prefs && (prefs as Record<string, unknown>).groq_api_key_set));
+    setFnHudPartials(Boolean(prefs && (prefs as Record<string, unknown>).fn_hud_partials));
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -199,6 +214,11 @@ export function VoiceTab() {
   const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
     setEscalation(next);
     void agentSetEscalation(next);
+  }, []);
+
+  const handleFnHudPartials = useCallback((next: boolean) => {
+    setFnHudPartials(next);
+    void voicePrefsSet('fn_hud_partials', next);
   }, []);
 
   const handleGroqKeySave = useCallback(async () => {
@@ -354,6 +374,14 @@ export function VoiceTab() {
                     ]}
                   />
                 }
+                divider
+              />
+              <SettingsRow
+                icon={<CaptionsIcon />}
+                label="On-screen partials bar"
+                subtitle="Show the live transcript in a bar at the bottom of the screen while you hold Fn to dictate"
+                checked={fnHudPartials}
+                onToggle={handleFnHudPartials}
               />
             </SettingsGroup>
           </section>
