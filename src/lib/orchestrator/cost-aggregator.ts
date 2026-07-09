@@ -168,6 +168,7 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
     opencode: emptyRuntimeTokenSummary(),
     cursor: emptyRuntimeTokenSummary(),
     grok: emptyRuntimeTokenSummary(),
+    pi: emptyRuntimeTokenSummary(),
   };
 
   let totalCostUsd = 0;
