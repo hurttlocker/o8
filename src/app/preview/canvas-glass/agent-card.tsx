@@ -21,8 +21,14 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import { CHROME, FONT, chatVocabularyRebind, scrollFadeY } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
 import { runtimeColor } from '@/lib/agents/codename';
-import { PhaseRing, phaseFor, type DispatchLane } from './dispatch-dock';
+import { PhaseRing, phaseFor, type DispatchLane, type Phase } from './dispatch-dock';
 import { useAgentTranscript } from './use-agent-transcript';
+import {
+  AgentThinkingRow,
+  AgentTranscriptBlocks,
+  buildAgentTranscriptBlocks,
+  formatDurationShort,
+} from './agent-transcript-blocks';
 
 /** Compact-mode floor (the old status tile). */
 export const AGENT_MIN_W = 240;
@@ -119,35 +125,36 @@ function formatElapsed(ms: number): string {
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
 }
 
-/** Live-ticking elapsed since lane start. Ticks each second while the lane is
- *  live (working/finalizing); freezes at the last value once it settles. */
+/** Live-ticking elapsed since lane start. Ticks each second ONLY while the lane
+ *  is genuinely live (working/finalizing); returns null the moment it settles so
+ *  a dead lane never renders a bogus "since-start-until-mount" stopwatch (the
+ *  24:10:27 bug — the clock read hours because it measured start→mount on a lane
+ *  that died yesterday). A settled lane's honest ran-duration is computed
+ *  separately from the lane's own last-event timestamp. */
 function useElapsed(startedAt: string | null, live: boolean): string | null {
   const startMs = useMemo(() => parseStartMs(startedAt), [startedAt]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!live || startMs === null) return undefined;
+    setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [live, startMs]);
-  if (startMs === null) return null;
+  if (!live || startMs === null) return null;
   return formatElapsed(now - startMs);
 }
 
-function LogLine({ kind, text }: { kind: 'assistant' | 'tool' | 'error'; text: string }) {
-  if (kind === 'assistant') {
-    return (
-      <div style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.45, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {text}
-      </div>
-    );
+/** Compact, lowercase state word for a settled lane's badge — pairs with the
+ *  ran-duration ("failed · ran 22m", "review · 41m"). Colors ride phase.color. */
+function settledStateWord(phase: Phase): string {
+  switch (phase.key) {
+    case 'review': return 'review';
+    case 'done': return 'done';
+    case 'blocked': return 'needs you';
+    case 'error': return 'failed';
+    case 'finalizing': return 'finalizing';
+    default: return 'working';
   }
-  const isError = kind === 'error';
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: CHROME.captionSize, fontWeight: 300, lineHeight: 1.4, letterSpacing: '-0.1px', color: isError ? '#f87171' : 'var(--cnv-ink-muted)' }}>
-      <span aria-hidden style={{ flexShrink: 0, opacity: 0.7 }}>{isError ? '!' : '›'}</span>
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
-    </div>
-  );
 }
 
 function SentLine({ message }: { message: SentMessage }) {
@@ -213,6 +220,23 @@ export function AgentGlassCard({
     enabled: card.expanded,
   });
 
+  // Fold the raw normalized tail into the IDE block vocabulary (assistant prose,
+  // tool-call pill clusters, turn summaries, errors) — the same parsed structure
+  // the desktop packet tabs read, so both sides render identical truth.
+  const blocks = useMemo(() => buildAgentTranscriptBlocks(transcript.events), [transcript.events]);
+
+  // Honest settled duration — lane start → the lane's own last-event freeze
+  // point. Only when NOT live and the lane still exposes an end timestamp; null
+  // otherwise (a lane that left the active set has no end, so the badge shows
+  // just the state word). Never a ticking or since-mount value.
+  const settledDuration = useMemo(() => {
+    if (live) return null;
+    const startMs = parseStartMs(card.startedAt);
+    const endMs = parseStartMs(lane?.lastEventAt ?? lane?.updatedAt ?? null);
+    if (startMs === null || endMs === null || endMs < startMs) return null;
+    return formatDurationShort(endMs - startMs);
+  }, [live, card.startedAt, lane?.lastEventAt, lane?.updatedAt]);
+
   const [draft, setDraft] = useState('');
   const [sent, setSent] = useState<SentMessage[]>([]);
   const sentIdRef = useRef(1);
@@ -225,7 +249,7 @@ export function AgentGlassCard({
     if (!card.expanded) return;
     const node = scrollRef.current;
     if (node && stickRef.current) node.scrollTop = node.scrollHeight;
-  }, [transcript.lines, sent, card.expanded]);
+  }, [blocks, sent, live, card.expanded]);
 
   const onScroll = () => {
     const node = scrollRef.current;
@@ -279,9 +303,13 @@ export function AgentGlassCard({
       minH={card.expanded ? AGENT_FULL_MIN_H : AGENT_MIN_H}
       title={card.codename || `Agent ${card.number}`}
       badge={
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : undefined }}>
           <span aria-hidden style={{ width: 5, height: 5, borderRadius: 3, background: phase.color, flexShrink: 0 }} />
-          {elapsed ?? phase.label}
+          {live && elapsed
+            ? elapsed
+            : settledDuration
+              ? `${settledStateWord(phase)} · ran ${settledDuration}`
+              : phase.label}
         </span>
       }
       actions={expandAction}
@@ -337,7 +365,7 @@ export function AgentGlassCard({
             onPointerDown={(event) => event.stopPropagation()}
             style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 7, paddingRight: 4, ...scrollFadeY }}
           >
-            {transcript.lines.length === 0 && sent.length === 0 ? (
+            {blocks.length === 0 && sent.length === 0 ? (
               <div style={{ fontSize: CHROME.bodySize, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', paddingTop: 6 }}>
                 {transcript.status === 'loading'
                   ? 'Reading transcript…'
@@ -347,8 +375,9 @@ export function AgentGlassCard({
               </div>
             ) : (
               <>
-                {transcript.lines.map((line) => <LogLine key={line.seq} kind={line.kind} text={line.text} />)}
+                <AgentTranscriptBlocks blocks={blocks} />
                 {sent.map((message) => <SentLine key={`s-${message.id}`} message={message} />)}
+                {live ? <AgentThinkingRow /> : null}
               </>
             )}
           </div>
