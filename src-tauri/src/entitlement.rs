@@ -81,6 +81,41 @@ pub fn read_license_token() -> Option<String> {
     Some(token)
 }
 
+/// The effective plan string from `~/.o8/entitlement.json` (`plan` field), or
+/// None when absent/invalid. Read-only; never panics. Honors the "View as Free"
+/// dev override for parity with the TS entitlement resolver. Used to tag Sentry
+/// events (telemetry) — never any richer identity.
+pub fn read_plan() -> Option<String> {
+    if dev_override_forces_free() {
+        return Some("free".to_string());
+    }
+    let path = o8_data_dir().join("entitlement.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let plan = value.get("plan")?.as_str()?.trim().to_string();
+    if plan.is_empty() {
+        return None;
+    }
+    Some(plan)
+}
+
+/// True when a Founding Operator record exists (`~/.o8/founder.json` carries an
+/// `operatorNumber`). BOOLEAN ONLY — the operator number itself is NEVER read or
+/// surfaced. Never panics.
+pub fn is_founder() -> bool {
+    let path = o8_data_dir().join("founder.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    value
+        .get("operatorNumber")
+        .and_then(|n| n.as_i64())
+        .is_some()
+}
+
 /// Where a Gemini `generateContent` call should go.
 pub enum GeminiTarget {
     /// Direct Google API — the key is already in the URL; send the body unchanged.

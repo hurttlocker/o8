@@ -74,6 +74,7 @@ export interface OperatorDefaults {
   collideAggregator: CollideAggregator;
   telemetryOptIn: boolean;
   telemetryIngestUrl: string;
+  crashReportsEnabled: boolean;
 }
 
 export interface OperatorDefaultsResponse {
