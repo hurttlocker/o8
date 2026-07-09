@@ -103,6 +103,9 @@ export async function GET() {
       setupReady: mcpReady.ready,
       setupBlockedReason: mcpReady.reason,
       setupBlockedDetail: mcpReady.detail,
+      // Non-blocking degradation (e.g. codebase-memory download failed —
+      // Connect proceeds without it). Rendered as a calm note, never [WAIT].
+      setupWarning: mcpReady.warning,
       server,
       codebaseMemory,
       fullConfig,

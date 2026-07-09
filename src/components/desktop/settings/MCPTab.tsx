@@ -51,6 +51,7 @@ interface McpServerConfig {
 interface McpConfigResponse {
   setupReady?: boolean;
   setupBlockedDetail?: string | null;
+  setupWarning?: string | null;
   server: McpServerConfig | null;
   fullConfig: { mcpServers: Record<string, McpServerConfig> };
   instructions: { claudeDesktop: string; claudeCode: string };
@@ -366,6 +367,23 @@ export function MCPTab() {
           <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
             {data.setupBlockedDetail ?? 'Finish first launch, then reconnect your MCP client.'}
           </div>
+        </div>
+      ) : null}
+
+      {/* Non-blocking degradation note (e.g. codebase-memory download failed):
+          Connect stays ENABLED — the config generator simply omits the missing
+          entry — so this renders as a calm footnote, never a [WAIT] block.
+          (2026-07-09 beta bug: a failed optional download blocked setup for days.) */}
+      {setupReady && data.setupWarning ? (
+        <div style={{
+          marginBottom: 28,
+          paddingTop: 2,
+          paddingBottom: 2,
+          color: 'var(--t-text-secondary)',
+          fontSize: 12,
+          lineHeight: 1.55,
+        }}>
+          {data.setupWarning}
         </div>
       ) : null}
 
