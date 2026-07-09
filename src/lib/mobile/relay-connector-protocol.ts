@@ -71,6 +71,99 @@ export interface HttpReqFrame {
   authorization?: unknown;
 }
 
+export interface HttpCancelFrame {
+  t: 'http-cancel';
+  rid: string;
+}
+
+export type RelayHttpAbortReason =
+  | 'client-cancel'
+  | 'stream-teardown'
+  | 'connector-stop'
+  | 'superseded'
+  | 'timeout';
+
+/** Return a request id only for the encrypted HTTP cancellation control frame. */
+export function httpCancelRequestId(frame: unknown): string | null {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return null;
+  const candidate = frame as { t?: unknown; rid?: unknown };
+  return candidate.t === 'http-cancel' && typeof candidate.rid === 'string' && candidate.rid.trim()
+    ? candidate.rid
+    : null;
+}
+
+/**
+ * Owns in-flight local HTTP replays by tunnel stream and request id. Removing an
+ * entry before aborting makes unknown/late cancels no-ops and prevents a stale
+ * request's finally block from deleting a newer request that reused the same id.
+ */
+export class RelayHttpRequestRegistry {
+  private readonly streams = new Map<string, Map<string, AbortController>>();
+
+  begin(sid: string, rid: string): AbortController {
+    let requests = this.streams.get(sid);
+    if (!requests) {
+      requests = new Map();
+      this.streams.set(sid, requests);
+    }
+    const previous = requests.get(rid);
+    const controller = new AbortController();
+    requests.set(rid, controller);
+    previous?.abort('superseded' satisfies RelayHttpAbortReason);
+    return controller;
+  }
+
+  cancel(sid: string, rid: string): boolean {
+    return this.abortCurrent(sid, rid, undefined, 'client-cancel');
+  }
+
+  timeout(sid: string, rid: string, controller: AbortController): boolean {
+    return this.abortCurrent(sid, rid, controller, 'timeout');
+  }
+
+  finish(sid: string, rid: string, controller: AbortController): void {
+    const requests = this.streams.get(sid);
+    if (requests?.get(rid) !== controller) return;
+    requests.delete(rid);
+    if (requests.size === 0) this.streams.delete(sid);
+  }
+
+  abortStream(sid: string, reason: RelayHttpAbortReason = 'stream-teardown'): number {
+    const requests = this.streams.get(sid);
+    if (!requests) return 0;
+    this.streams.delete(sid);
+    for (const controller of requests.values()) controller.abort(reason);
+    return requests.size;
+  }
+
+  abortAll(reason: RelayHttpAbortReason = 'connector-stop'): number {
+    let count = 0;
+    for (const sid of [...this.streams.keys()]) count += this.abortStream(sid, reason);
+    return count;
+  }
+
+  get size(): number {
+    let count = 0;
+    for (const requests of this.streams.values()) count += requests.size;
+    return count;
+  }
+
+  private abortCurrent(
+    sid: string,
+    rid: string,
+    expected: AbortController | undefined,
+    reason: RelayHttpAbortReason,
+  ): boolean {
+    const requests = this.streams.get(sid);
+    const controller = requests?.get(rid);
+    if (!requests || !controller || (expected && controller !== expected)) return false;
+    requests.delete(rid);
+    if (requests.size === 0) this.streams.delete(sid);
+    controller.abort(reason);
+    return true;
+  }
+}
+
 // Only forward a safe subset of client headers; the marker + Bearer are set below.
 const FORWARDABLE_HEADERS = new Set([
   'content-type',
