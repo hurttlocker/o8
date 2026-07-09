@@ -31,7 +31,7 @@ export interface ArchivedLaneRow {
   repoPath: string;
   branch: string;
   baseBranch: string;
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
   sessionKey: string | null;
   updatedAt: string;
   status?: string;
