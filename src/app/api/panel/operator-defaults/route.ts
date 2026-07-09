@@ -10,6 +10,7 @@ import {
   type OperatorDefaults,
   type OverlapGateMode,
 } from '@/lib/operator/defaults';
+import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
 
@@ -95,11 +96,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   }
 
   if (body.defaultDispatchRuntime !== undefined) {
-    const raw = body.defaultDispatchRuntime;
-    if (raw !== 'codex' && raw !== 'claude-code' && raw !== 'gemini' && raw !== 'opencode') {
-      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "gemini", "opencode".');
+    // Single-source guard (mirrors the orchestratorBackend pattern below): a
+    // hand-rolled list here silently rejected cursor/grok/pi even though the
+    // dispatch layer + tier validator accept them (2026-07-09).
+    if (!isDispatchRuntime(body.defaultDispatchRuntime)) {
+      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "opencode", "cursor", "grok", "pi".');
     }
-    update.defaultDispatchRuntime = raw;
+    update.defaultDispatchRuntime = body.defaultDispatchRuntime;
   }
 
   if (body.codexWorkerEffort !== undefined) {

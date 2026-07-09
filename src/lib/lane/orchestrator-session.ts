@@ -40,7 +40,7 @@ import {
   processStreamEvent,
   type OrchestratorEvent,
 } from '@/lib/lane/orchestrator-stream-events';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
@@ -828,7 +828,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     '--mcp-config', mcpConfigPath,
     '--model', config.model,
   ];
-  if (config.effort && config.effort !== 'adaptive') args.push('--effort', config.effort);
+  if (config.effort && config.effort !== 'adaptive') args.push('--effort', claudeEffortFlagValue(config.effort));
   if (session.claudeSessionId) args.push('--resume', session.claudeSessionId);
   else args.push('--append-system-prompt', buildOrchestratorSystemPrompt(session.repoPath));
 
