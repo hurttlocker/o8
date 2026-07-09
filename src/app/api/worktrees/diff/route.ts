@@ -2,121 +2,60 @@
  * GET /api/worktrees/diff?sessionKey=<sessionKey>
  *                        [&worktreePath=<path>]
  *                        [&baseBranch=<name>]
+ *                        [&file=<repo-relative-path>&headSha=<expected>]
  *
- * Returns the full unified diff body for an agent's worktree, comparing the
- * branch + dirty tree against the base. Powers the mobile inline diff viewer.
- *
- * Resolution mirrors `diff-summary`:
- *   1. Explicit worktreePath param wins.
- *   2. Lane lookup by sessionKey.
- *   3. 404-equivalent empty body.
+ * Legacy callers still receive a full unified diff. New callers can pin the
+ * reviewed HEAD and request one exact file, keeping large mobile review
+ * payloads bounded without weakening review identity.
  */
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-import { NextResponse, type NextRequest } from 'next/server';
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { promisify } from 'node:util';
-import { requirePanelAuth } from '@/lib/panel/auth';
-import { findLaneBySession } from '@/lib/lane/registry';
+import { NextResponse, type NextRequest } from 'next/server';
 
-const execFileAsync = promisify(execFile);
+import { findLaneBySession } from '@/lib/lane/registry';
+import { requirePanelAuth } from '@/lib/panel/auth';
+import {
+  collectBoundedDiffBody,
+  collectWorktreeDiffSnapshot,
+  FULL_DIFF_MAX_BYTES,
+  parseDiffMaxBytes,
+  SELECTED_DIFF_MAX_BYTES,
+  validateRepoRelativePath,
+  WorktreeHeadChangedError,
+  type WorktreeDiffFile,
+  worktreeDiffErrorMessage,
+} from '@/lib/worktree/diff-transport';
 
 interface DiffResponse {
   sessionKey: string | null;
   worktreePath: string | null;
   baseBranch: string | null;
+  headSha: string | null;
+  revision: string | null;
+  filePath: string | null;
+  files: WorktreeDiffFile[];
   diff: string;
   additions: number;
   deletions: number;
   fileCount: number;
+  sizeBytes: number;
+  sizeBytesExact: boolean;
+  maxBytes: number;
+  truncated: boolean;
+  truncationReason?: 'max_bytes';
   error?: string;
 }
 
-const MAX_DIFF_BYTES = 4 * 1024 * 1024;
-
-function resolvePath(raw: string | null) {
+function resolvePath(raw: string | null): string {
   if (!raw) return '';
   const trimmed = raw.trim();
   if (!trimmed) return '';
   if (trimmed.startsWith('~')) return trimmed.replace('~', homedir());
   return trimmed;
-}
-
-async function runGit(cwd: string, args: string[], maxBuffer = MAX_DIFF_BYTES) {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    timeout: 10_000,
-    maxBuffer,
-  });
-  return stdout;
-}
-
-async function collectDiff(cwd: string, baseBranch: string | null) {
-  const sections: string[] = [];
-
-  if (baseBranch) {
-    try {
-      const branchDiff = await runGit(cwd, ['diff', '--no-color', `${baseBranch}...HEAD`]);
-      if (branchDiff.trim()) sections.push(branchDiff);
-    } catch {
-      // ignore — falls back to dirty-tree diff
-    }
-  }
-
-  try {
-    const dirtyDiff = await runGit(cwd, ['diff', '--no-color', 'HEAD']);
-    if (dirtyDiff.trim()) sections.push(dirtyDiff);
-  } catch {
-    // ignore
-  }
-
-  // Track per-file totals across both numstat runs to avoid double-counting
-  // files that appear in both the base-branch diff and the dirty-tree diff.
-  const fileStats = new Map<string, { additions: number; deletions: number }>();
-
-  async function consumeNumstat(args: string[]) {
-    try {
-      const out = await runGit(cwd, args);
-      for (const line of out.split('\n')) {
-        if (!line.trim()) continue;
-        const [addStr = '0', delStr = '0', ...rest] = line.split('\t');
-        const filePath = rest.join('\t');
-        if (!filePath) continue;
-        const add = addStr !== '-' ? (Number.parseInt(addStr, 10) || 0) : 0;
-        const del = delStr !== '-' ? (Number.parseInt(delStr, 10) || 0) : 0;
-        const existing = fileStats.get(filePath);
-        if (existing) {
-          // Already seen this file — keep the higher stat (prefer broader diff).
-          existing.additions = Math.max(existing.additions, add);
-          existing.deletions = Math.max(existing.deletions, del);
-        } else {
-          fileStats.set(filePath, { additions: add, deletions: del });
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  if (baseBranch) await consumeNumstat(['diff', '--numstat', `${baseBranch}...HEAD`]);
-  await consumeNumstat(['diff', '--numstat', 'HEAD']);
-
-  let additions = 0;
-  let deletions = 0;
-  for (const stat of fileStats.values()) {
-    additions += stat.additions;
-    deletions += stat.deletions;
-  }
-
-  return {
-    diff: sections.join('\n'),
-    additions,
-    deletions,
-    fileCount: fileStats.size,
-  };
 }
 
 export async function GET(req: NextRequest) {
@@ -126,6 +65,17 @@ export async function GET(req: NextRequest) {
   const sessionKey = req.nextUrl.searchParams.get('sessionKey');
   const worktreePathParam = resolvePath(req.nextUrl.searchParams.get('worktreePath'));
   const baseBranchParam = req.nextUrl.searchParams.get('baseBranch');
+  const expectedHeadSha = req.nextUrl.searchParams.get('headSha')?.trim() || null;
+  const requestedFilePath = req.nextUrl.searchParams.get('file');
+  let filePath: string | null = null;
+
+  if (requestedFilePath !== null) {
+    try {
+      filePath = validateRepoRelativePath(requestedFilePath);
+    } catch {
+      return NextResponse.json({ error: 'invalid_file_path' }, { status: 400 });
+    }
+  }
 
   let worktreePath = worktreePathParam || null;
   let baseBranch = baseBranchParam || null;
@@ -138,18 +88,28 @@ export async function GET(req: NextRequest) {
         if (!baseBranch) baseBranch = lane.baseBranch ?? null;
       }
     } catch {
-      // ignore — fall through to error response below
+      // Keep the legacy structured-error response below.
     }
   }
 
-  const empty = (error?: string): DiffResponse => ({
+  const hardMaxBytes = filePath ? SELECTED_DIFF_MAX_BYTES : FULL_DIFF_MAX_BYTES;
+  const maxBytes = parseDiffMaxBytes(req.nextUrl.searchParams.get('maxBytes'), hardMaxBytes, hardMaxBytes);
+  const empty = (error: string): DiffResponse => ({
     sessionKey,
     worktreePath,
     baseBranch,
+    headSha: null,
+    revision: null,
+    filePath,
+    files: [],
     diff: '',
     additions: 0,
     deletions: 0,
     fileCount: 0,
+    sizeBytes: 0,
+    sizeBytesExact: true,
+    maxBytes,
+    truncated: false,
     error,
   });
 
@@ -157,15 +117,40 @@ export async function GET(req: NextRequest) {
   if (!existsSync(worktreePath)) return NextResponse.json(empty('worktree_path_missing'));
 
   try {
-    const result = await collectDiff(worktreePath, baseBranch);
+    const snapshot = await collectWorktreeDiffSnapshot(worktreePath, baseBranch, expectedHeadSha);
+    const body = await collectBoundedDiffBody(worktreePath, snapshot, filePath, maxBytes);
+    const selectedFiles = filePath
+      ? snapshot.files.filter((file) => file.path === filePath)
+      : snapshot.files;
+    const additions = selectedFiles.reduce((sum, file) => sum + file.additions, 0);
+    const deletions = selectedFiles.reduce((sum, file) => sum + file.deletions, 0);
     const value: DiffResponse = {
       sessionKey,
       worktreePath,
       baseBranch,
-      ...result,
+      headSha: snapshot.headSha,
+      revision: snapshot.revision,
+      filePath,
+      files: selectedFiles,
+      diff: body.diff,
+      additions,
+      deletions,
+      fileCount: selectedFiles.length,
+      sizeBytes: body.sizeBytes,
+      sizeBytesExact: body.sizeBytesExact,
+      maxBytes: body.maxBytes,
+      truncated: body.truncated,
+      ...(body.truncated ? { truncationReason: 'max_bytes' as const } : {}),
     };
-    return NextResponse.json(value, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(value, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error) {
-    return NextResponse.json(empty(error instanceof Error ? error.message : 'Unknown error'));
+    if (error instanceof WorktreeHeadChangedError) {
+      return NextResponse.json({
+        error: 'head_changed',
+        expectedHeadSha: error.expectedHeadSha,
+        currentHeadSha: error.currentHeadSha,
+      }, { status: 409, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    }
+    return NextResponse.json(empty(worktreeDiffErrorMessage(error)));
   }
 }
