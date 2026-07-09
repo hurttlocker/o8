@@ -93,6 +93,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hound = "3.5"
 flacenc = "0.5"
 base64 = "0.22"
+#   - image:     pure-Rust PNG decode/encode + resize for Symon Spatial Context
+#     (burn the operator's drawn strokes into the screenshot + cut a full-res
+#     crop of the marked region). PNG feature only — no system codecs.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # ── Symon voice agent (tool-calling loop, lifted from aqua, de-Symonized) ──
 # The agent parses model-emitted ISO due-dates/event-times into macOS date
