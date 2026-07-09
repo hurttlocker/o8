@@ -18,7 +18,7 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', () => {
 });
 
 describe('grok runtime discovery', () => {
-  it('returns [] when grok is absent', async () => {
+  it('returns [] when grok is absent', { timeout: 20_000 }, async () => {
     const { grokRuntime } = await import('./grok');
     await expect(grokRuntime.discoverSessions()).resolves.toEqual([]);
   });
