@@ -42,6 +42,8 @@ export function runtimeColor(runtime: string | null | undefined): string {
     case 'claude-code': return '#e07a3a'; // orange
     case 'gemini': return '#4285f4'; // Google blue
     case 'opencode': return '#a855f7'; // purple
+    case 'cursor': return '#111827'; // near-black
+    case 'grok': return '#16a34a'; // green
     default: return 'var(--cnv-ink-muted)';
   }
 }

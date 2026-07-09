@@ -11,6 +11,7 @@ import type {
   RegisteredRepo,
   TerminalTab,
   TerminalTabHandle,
+  WorkspaceChatRuntime,
 } from '@/components/desktop/workspace-terminal/types';
 import {
   createWorkspaceTabId,
@@ -35,7 +36,7 @@ function sameRepoPath(left?: RegisteredRepo, right?: RegisteredRepo) {
 function isOrphanSessionLabelMatch(
   tab: TerminalTab,
   options: Parameters<TerminalTabHandle['openCliChatSession']>[0],
-  resolvedRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
+  resolvedRuntime: Exclude<WorkspaceChatRuntime, 'chat'>,
 ) {
   if (tab.kind !== 'chat') return false;
   if (tab.chatRuntime !== resolvedRuntime) return false;
@@ -59,7 +60,7 @@ export interface CliChatSessionResult {
 function findSupervisorRetryExistingTab(
   currentTabs: TerminalTab[],
   options: Parameters<TerminalTabHandle['openCliChatSession']>[0],
-  resolvedRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
+  resolvedRuntime: Exclude<WorkspaceChatRuntime, 'chat'>,
   normalizedTargetSessionKey: string | null,
 ): TerminalTab | null {
   if (!options.createNew || !options.targetSessionKey || options.initialText) return null;
@@ -95,6 +96,10 @@ export function computeCliChatSession(
         ? 'gemini'
         : options.targetSessionKey?.startsWith('opencode-owned:')
           ? 'opencode'
+          : options.targetSessionKey?.startsWith('cursor-owned:')
+            ? 'cursor'
+            : options.targetSessionKey?.startsWith('grok-owned:')
+              ? 'grok'
           : null;
   // When the targetSessionKey carries a definitive runtime prefix, trust it
   // over options.runtime. Prevents wrong-runtime tabs when upstream (e.g.
@@ -181,6 +186,8 @@ export function computeCliChatSession(
       ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
       : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
       : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
+      : resolvedRuntime === 'cursor' ? 'cli:cursor:default'
+      : resolvedRuntime === 'grok' ? 'cli:grok:default'
       : CODEX_CLI_MODELS[0].id;
     const updatedTabs = currentTabs.map((tab) => (
       tab.id === resolvedTabId
@@ -226,6 +233,8 @@ export function computeCliChatSession(
       resolvedRuntime === 'claude-code' ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
         : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
         : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
+        : resolvedRuntime === 'cursor' ? 'cli:cursor:default'
+        : resolvedRuntime === 'grok' ? 'cli:grok:default'
         : CODEX_CLI_MODELS[0].id
     ),
     chatContinueLatest: false,

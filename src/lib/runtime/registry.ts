@@ -12,6 +12,8 @@ const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
   codex: ['codex'],
   gemini: ['gemini'],
   opencode: ['opencode'],
+  cursor: ['cursor-agent'],
+  grok: ['grok'],
   'claude-code': ['claude', 'claude-code'],
 };
 

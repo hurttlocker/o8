@@ -113,13 +113,15 @@ call `registerRuntime(<runtime>Runtime)`.
 
 ---
 
-## Current shipped status (Wave 2e)
+## Current shipped status (Wave 2f)
 
-Four runtimes in the union:
+Six runtimes in the union:
 - `codex` — GPT-5.4 xhigh, `codex exec --json`, thread resume
 - `claude-code` — Claude Code CLI, session resume, full tool surface
 - `gemini` — Gemini CLI, `--yolo` dispatch, JSONL streaming
 - `opencode` — multi-provider coding CLI, `opencode run`, requires `--model` flag
+- `cursor` — Cursor CLI, `cursor-agent -p --output-format stream-json`
+- `grok` — Grok Build CLI, headless JSON-schema constrained output
 
 All label, accentColor, shortLabel, description, and dispatchable data lives in
 `src/lib/orchestrator/runtime-capabilities.ts`. UI must read from the map, not

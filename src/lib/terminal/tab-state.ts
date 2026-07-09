@@ -23,7 +23,7 @@ export interface PersistedTab {
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
-  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode'; // for kind='chat' (CLI Session)
+  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'cursor' | 'grok'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   claudeSessionId?: string; // persisted Claude Code session_id for --resume
   chatModel?: string;
@@ -83,7 +83,9 @@ export type PersistedRuntimeSessionKey =
   | `codex-live:${string}`
   | `claude-code:${string}`
   | `gemini-owned:${string}`
-  | `opencode-owned:${string}`;
+  | `opencode-owned:${string}`
+  | `cursor-owned:${string}`
+  | `grok-owned:${string}`;
 
 const API_PATH = '/api/panel/terminal-state';
 
@@ -290,12 +292,18 @@ export function formatPersistedRuntimeSessionKey(
   if (runtime === 'opencode' && trimmed.startsWith('opencode-owned:')) {
     return trimmed as PersistedRuntimeSessionKey;
   }
+  if (runtime === 'cursor' && trimmed.startsWith('cursor-owned:')) {
+    return trimmed as PersistedRuntimeSessionKey;
+  }
+  if (runtime === 'grok' && trimmed.startsWith('grok-owned:')) {
+    return trimmed as PersistedRuntimeSessionKey;
+  }
   if (runtime === 'codex' || runtime === 'claude-code') {
     return trimmed.startsWith(`${runtime}:`)
       ? trimmed as PersistedRuntimeSessionKey
       : `${runtime}:${trimmed}`;
   }
-  // Gemini/opencode only use owned prefixes — any sessionKey without that
+  // Gemini/opencode/Cursor/Grok only use owned prefixes — any sessionKey without that
   // prefix isn't trackable as a persisted live runtime session for now.
   return null;
 }
@@ -321,6 +329,12 @@ export function stripPersistedRuntimeSessionKey(
     return trimmed;
   }
   if (runtime === 'opencode' && trimmed.startsWith('opencode-owned:')) {
+    return trimmed;
+  }
+  if (runtime === 'cursor' && trimmed.startsWith('cursor-owned:')) {
+    return trimmed;
+  }
+  if (runtime === 'grok' && trimmed.startsWith('grok-owned:')) {
     return trimmed;
   }
   return trimmed.startsWith(`${runtime}:`) ? trimmed.slice(`${runtime}:`.length) : trimmed;

@@ -93,11 +93,11 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Go
 
 Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-Four adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+Six adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `cursor.ts`, `grok.ts`. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
 
-**Adding a 5th runtime is a 6-file patch.** See [`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md) for the exact recipe. Short version:
+**Adding another runtime is a 6-file patch.** See [`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md) for the exact recipe. Short version:
 1. `src/lib/<runtime>/owned.ts` — adapter + owned-session store
 2. `src/lib/runtimes/<runtime>.ts` — `AgentRuntime` implementation
 3. `src/lib/runtimes/<runtime>-cost-parser.ts` — telemetry parser
@@ -230,7 +230,7 @@ Built on top of the Cortex v2 substrate, the **Engineering Brain** is the Q&A la
 
 ### Engineering Brain — workers use the Brain
 
-Dispatched workers get `o8 ask "<question>"` taught in their packet prompt when enabled (2026-06-11) — instant cited repo answers instead of context-burning searches. Operator setting `workersUseBrain: off | auto | all` (default **auto** = Brain on only for non-frontier runtime `tier` in `runtime-capabilities.ts`; Codex/Claude are frontier and stay lean, Gemini/opencode are standard, future local models auto-qualify). Per-mission `useBrain` on `create_mission` overrides the setting either way. Resolution lives in `src/lib/orchestrator/brain-access.ts`; injection happens at the single `buildPacketPrompt` chokepoint so every dispatch path (mission, task pool, rerun) inherits. Each worker ask is recorded as a `brain_consulted` lane event the operator can audit.
+Dispatched workers get `o8 ask "<question>"` taught in their packet prompt when enabled (2026-06-11) — instant cited repo answers instead of context-burning searches. Operator setting `workersUseBrain: off | auto | all` (default **auto** = Brain on only for non-frontier runtime `tier` in `runtime-capabilities.ts`; Codex/Claude/Cursor/Grok are frontier and stay lean, Gemini/opencode are standard, future local models auto-qualify). Per-mission `useBrain` on `create_mission` overrides the setting either way. Resolution lives in `src/lib/orchestrator/brain-access.ts`; injection happens at the single `buildPacketPrompt` chokepoint so every dispatch path (mission, task pool, rerun) inherits. Each worker ask is recorded as a `brain_consulted` lane event the operator can audit.
 
 ### Engineering Brain — caching, billing & spend guardrails
 

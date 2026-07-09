@@ -104,11 +104,13 @@ export function sessionIdentity(session: IdeWorkspaceSession): string[] {
     .flatMap((value) => [value, value.replace(/^llm-chat:/, '')]);
 }
 
-export function historyRuntime(item: ChatHistoryItem): 'claude-code' | 'codex' | 'gemini' | 'opencode' {
+export function historyRuntime(item: ChatHistoryItem): 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'grok' {
   const value = `${item.model} ${item.title}`.toLowerCase();
   if (value.includes('claude') || value.includes('opus')) return 'claude-code';
   if (value.includes('gemini')) return 'gemini';
   if (value.includes('opencode')) return 'opencode';
+  if (value.includes('cursor')) return 'cursor';
+  if (value.includes('grok')) return 'grok';
   return 'codex';
 }
 

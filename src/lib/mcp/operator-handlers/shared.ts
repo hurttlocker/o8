@@ -231,10 +231,17 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
       return 'codex';
     }
   }
-  if (value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode') {
+  if (
+    value === 'codex'
+    || value === 'claude-code'
+    || value === 'gemini'
+    || value === 'opencode'
+    || value === 'cursor'
+    || value === 'grok'
+  ) {
     return value;
   }
-  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode"');
+  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok"');
 }
 
 export function parseIssueList(value: unknown) {
