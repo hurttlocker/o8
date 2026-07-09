@@ -29,11 +29,22 @@ export const CARD_CHROME: Record<string, number> = {
   browser: 92,
   chat: 63,
   diff: 36,
-  spec: 44,
+  // The o8.md card uses the default pill header (SHELL_CHROME_H = 63 in
+  // card-shell.tsx), not the 44 an earlier estimate assumed. This is only the
+  // FALLBACK — the live pack measures real chrome — but an undercount here made
+  // the fallback body too tall (chrome + body > slot) and reintroduced the
+  // exact overlap this file guards against.
+  spec: 63,
   brain: 92,
 };
 
-/** Min body height a card can shrink to before the grid stops compressing it. */
+/** Body height a grid card WANTS at rest — guaranteed by the row-height floor
+ *  (GRID_MIN_ROW_H below) whenever the viewport has room, NOT re-applied after
+ *  the pack. It is never used to floor a card ABOVE its slot: doing that (the
+ *  old behaviour) is exactly what let a short-slot card — worst on the
+ *  tall-chrome o8.md spec card — paint past its cell and overlap its neighbours
+ *  when the viewport shrank and rows scaled down. In grid mode a card takes an
+ *  undersized, scrolling body before it is ever allowed to overflow its slot. */
 export const GRID_MIN_BODY_H = 96;
 
 /** Default gap (canvas px) between cells. Callers pass a zoom-aware value so the
@@ -181,13 +192,24 @@ export function computeGrid(items: GridItem[], area: Slot, gap = DEFAULT_GAP): M
 /** Convert a TOTAL slot rect into the geometry a card array stores: full width,
  *  body height (chrome subtracted), positioned at the slot origin. `chromeOverride`
  *  is a measured chrome height (preferred over the per-kind estimate) so the
- *  card's TOTAL height matches the slot exactly — no overlap, symmetric rows. */
+ *  card's TOTAL height matches the slot exactly — no overlap, symmetric rows.
+ *
+ *  The body is ALWAYS `slot.h − chrome` (floored only at 0 so it never goes
+ *  negative). It is deliberately NOT floored at a fixed minimum: a body min
+ *  bigger than `slot.h − chrome` would make `chrome + body` exceed the slot, so
+ *  the card would paint past its cell and overlap the disjoint slots above and
+ *  below it. That was the grid-mode overlap bug — worst on the o8.md spec card,
+ *  whose header is the tallest chrome — which surfaced whenever the viewport
+ *  shrank and computeGrid's vScale pushed rows below chrome + the old floor. The
+ *  usable-body minimum is instead honoured up-front by GRID_MIN_ROW_H (the row
+ *  never floors shorter than a readable card unless the whole block must scale
+ *  to fit); once it does scale, cards shrink WITH their slots and stay disjoint. */
 export function slotToCardGeom(slot: Slot, kind: string, chromeOverride?: number): Slot {
   const chrome = chromeOverride ?? CARD_CHROME[kind] ?? 40;
   return {
     x: Math.round(slot.x),
     y: Math.round(slot.y),
     w: Math.round(slot.w),
-    h: Math.max(GRID_MIN_BODY_H, Math.round(slot.h - chrome)),
+    h: Math.max(0, Math.round(slot.h - chrome)),
   };
 }
