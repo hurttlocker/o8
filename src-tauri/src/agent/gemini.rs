@@ -56,6 +56,12 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         first_text.push_str("\n\n");
         first_text.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
     }
+    // Symon Spatial Context: teach the two-image + "this/here = marked region"
+    // scaffold when the operator drew on the screen this turn.
+    if ctx.spatial {
+        first_text.push_str("\n\n");
+        first_text.push_str(&super::spatial_prompt_section(ctx.crop_png_base64.is_some()));
+    }
     if let Some(edit) = &ctx.edit {
         first_text.push_str("\n\n");
         first_text.push_str(&super::edit_prompt_section(edit));
@@ -63,9 +69,18 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     first_text.push_str(&format!("\n\nUser request: {intent}"));
     first_parts.push(json!({ "text": first_text }));
     if let Some(screen) = &ctx.screen {
+        // Image 1 — full screen (composite with strokes burned in on a spatial turn).
         first_parts.push(json!({
             "inline_data": { "mime_type": "image/png", "data": screen.png_base64 }
         }));
+    }
+    // Image 2 — full-res close-up of the marked region (spatial turn only).
+    if ctx.spatial {
+        if let Some(crop) = &ctx.crop_png_base64 {
+            first_parts.push(json!({
+                "inline_data": { "mime_type": "image/png", "data": crop }
+            }));
+        }
     }
     let mut contents: Vec<Value> = vec![json!({ "role": "user", "parts": first_parts })];
 

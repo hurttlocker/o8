@@ -53,6 +53,14 @@ pub struct TaskCtx {
     /// to the model request and used to map `[POINT:...]` tags back to screen
     /// coordinates. None unless the prompt referenced the screen.
     pub screen: Option<std::sync::Arc<screen::ScreenContext>>,
+    /// Symon Spatial Context: the operator drew on the screen this turn. When
+    /// true, `screen` is the composite (strokes burned in), `crop_png_base64` is
+    /// the close-up of the marked region, and the builders teach the model the
+    /// two-image + "this/here refers to the marked region" scaffold.
+    pub spatial: bool,
+    /// Full-res crop of the marked region (rides as a second image on a spatial
+    /// turn). None off the spatial path.
+    pub crop_png_base64: Option<String>,
     /// Intent-gated editable text under the user (selection or focused field)
     /// — the noun for `apply_text_edit`. None unless the prompt was an edit
     /// verb (magic roadmap #1).
@@ -158,7 +166,10 @@ pub(crate) fn system_prompt() -> String {
          native tool first (never guess what a tool can tell you); o8_ask for \
          anything about the code or the fleet; o8_dispatch when the work changes a \
          repo; when a screenshot is attached, POINT at the screen to show the user \
-         where to act (you cannot click for them); and if no tool fits, say plainly \
+         where to act (you cannot click for them) — and if you see ORANGE strokes \
+         drawn on that screenshot, the operator marked a region, so treat \
+         \"this/here/that\" as that region and point or draw back at it; and if no \
+         tool fits, say plainly \
          what you would need. When NO tool covers the ask (sending texts, \
          controlling an app you have no tool for), say so after at MOST one \
          exploratory call and name the closest thing you CAN do — never chain \
@@ -824,7 +835,70 @@ fn emit_confirm(app: &tauri::AppHandle, payload: Value) {
 /// Run one agent task to completion: persist → run the loop → persist result →
 /// speak it → notify. Called inside a worker thread's current-thread runtime.
 pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, String> {
-    run_agent_inner(app, prompt, None, None).await
+    run_agent_inner(app, prompt, None, None, None).await
+}
+
+/// True when the resolved brain can accept inline images. Gemini (direct id, no
+/// `/`) always can; the Claude text-planner CLI never can; an OpenRouter id is
+/// gated on a conservative vision-model substring allowlist. Drives whether a
+/// spatial turn attaches the images or falls back to an honest "I can't see" note.
+pub(crate) fn model_can_see_images(model: &str) -> bool {
+    if model.starts_with("claude") {
+        return false; // background text-planner CLI — no inline vision
+    }
+    if !model.contains('/') {
+        return true; // direct Gemini id
+    }
+    // OpenRouter id — known multimodal families only.
+    let m = model.to_lowercase();
+    const VISION: &[&str] = &[
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-5",
+        "o4",
+        "gemini",
+        "claude-3",
+        "claude-4",
+        "claude-sonnet-4",
+        "claude-opus-4",
+        "llama-3.2",
+        "llama-4",
+        "pixtral",
+        "qwen2-vl",
+        "qwen2.5-vl",
+        "qwen-vl",
+        "-vl",
+        "vision",
+        "grok-2-vision",
+        "grok-4",
+        "internvl",
+        "molmo",
+    ];
+    VISION.iter().any(|v| m.contains(v))
+}
+
+/// Appended to the request when the operator DREW on the screen (Symon Spatial
+/// Context). Teaches the model the two attached images + that deictic words
+/// ("this", "here", "that") resolve to the marked region.
+pub(crate) fn spatial_prompt_section(has_crop: bool) -> String {
+    let mut s = String::from(
+        "The operator drew on their screen while speaking. Image 1 is the full \
+         screen with their ORANGE strokes burned in — that mark is where they're \
+         pointing. ",
+    );
+    if has_crop {
+        s.push_str(
+            "Image 2 is a clean close-up of that same marked region (no strokes) \
+             so you can read the detail. ",
+        );
+    }
+    s.push_str(
+        "When the command says \"this\", \"here\", \"that\", or \"it\", it refers \
+         to the marked region — answer about THAT, not the whole screen. You may \
+         point or box it back with [POINT:x,y:label] / [DRAW:rect:x1,y1,x2,y2:label] \
+         in image-1 pixel coordinates.",
+    );
+    s
 }
 
 /// Core agent run. `model_override` forces a specific brain (the background
@@ -837,6 +911,7 @@ async fn run_agent_inner(
     prompt: String,
     model_override: Option<String>,
     task_prefix: Option<&str>,
+    spatial: Option<screen::SpatialContext>,
 ) -> Result<String, String> {
     let prompt = prompt.trim().to_string();
     if prompt.is_empty() {
@@ -873,8 +948,18 @@ async fn run_agent_inner(
     // Keep capturing while a teaching drawing is live so a bare follow-up
     // ("go deeper", "now add the angles") continues the same figure even with
     // no explicit draw cue in the words (#1251).
-    let screen_wanted = screen::wants_screen(&prompt) || drawing_session_fresh();
-    let screen_ctx = if screen_wanted {
+    // Symon Spatial Context: when the operator drew on the screen this turn, the
+    // composite (strokes burned in) + crop are pre-built — use them and SKIP the
+    // intent-gated live capture. Otherwise fall back to the dossier-#2 behavior.
+    let (spatial_active, spatial_crop, prebuilt_screen) = match spatial {
+        Some(sc) => (true, sc.crop_png_base64, Some(std::sync::Arc::new(sc.screen))),
+        None => (false, None, None),
+    };
+    let screen_wanted =
+        spatial_active || screen::wants_screen(&prompt) || drawing_session_fresh();
+    let screen_ctx = if let Some(s) = prebuilt_screen {
+        Some(s)
+    } else if screen_wanted {
         screen::capture(&app).map(std::sync::Arc::new)
     } else {
         None
@@ -892,6 +977,8 @@ async fn run_agent_inner(
         task_id: task_id.clone(),
         app: app.clone(),
         screen: screen_ctx,
+        spatial: spatial_active,
+        crop_png_base64: spatial_crop,
         edit,
         cancel: cancel.clone(),
     };
@@ -943,6 +1030,16 @@ async fn run_agent_inner(
     // (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
     // `model_override` (Some for background Claude tasks) wins over the config.
     let model = model_override.unwrap_or_else(|| router::load_config().mac_native_action);
+    // Spatial honesty guard: the operator drew a region, but this brain can't see
+    // images (Claude text-planner, or a non-vision OpenRouter id). Tell it plainly
+    // so it never pretends to have looked at the mark.
+    if spatial_active && !model_can_see_images(&model) {
+        llm_prompt.push_str(
+            "\n\n(NOTE: the operator drew on the screen while speaking to mark a \
+             region, but THIS model cannot see images — you can NOT see what they \
+             marked. Say so briefly if the region matters to answering.)",
+        );
+    }
     let loop_result = if model.starts_with("claude") {
         claude::run_loop(&model, &llm_prompt, &ctx).await
     } else if model.contains('/') {
@@ -1057,6 +1154,36 @@ pub fn spawn_agent(app: tauri::AppHandle, prompt: String) {
     });
 }
 
+/// Like `spawn_agent`, but carries Symon Spatial Context — the composite +
+/// crop the operator drew this turn. `spatial` is `None` when nothing was drawn
+/// (the finalize path always calls this; a `None` turn is byte-for-byte the old
+/// text-only behavior). Fire-and-forget on its own thread + runtime.
+pub fn spawn_agent_with_spatial(
+    app: tauri::AppHandle,
+    prompt: String,
+    spatial: Option<screen::SpatialContext>,
+) {
+    let prompt = prompt.trim().to_string();
+    if prompt.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => {
+                log::error!("[symon-agent] failed to build runtime: {e}");
+                return;
+            }
+        };
+        let tag = if spatial.is_some() { " +spatial" } else { "" };
+        log::info!("[symon-agent] intent: {} chars{tag}", prompt.len());
+        match rt.block_on(async { run_agent_inner(app, prompt, None, None, spatial).await }) {
+            Ok(text) => log::info!("[symon-agent] done: {} chars", text.len()),
+            Err(e) => log::warn!("[symon-agent] failed: {e}"),
+        }
+    });
+}
+
 /// Spawn a BACKGROUND task on the Claude brain — the async target of
 /// `escalate(target:"claude_brain")`. Sibling of `spawn_agent`, but forces the
 /// Claude text-planner brain and a `claude-task-` id prefix so the dock can
@@ -1077,7 +1204,7 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         };
         log::info!("[symon-agent] claude-task: {} chars", task.len());
         match rt.block_on(async {
-            run_agent_inner(app, task, Some(CLAUDE_BRAIN_MODEL.to_string()), Some("claude-task")).await
+            run_agent_inner(app, task, Some(CLAUDE_BRAIN_MODEL.to_string()), Some("claude-task"), None).await
         }) {
             Ok(text) => log::info!("[symon-agent] claude-task done: {} chars", text.len()),
             Err(e) => log::warn!("[symon-agent] claude-task failed: {e}"),

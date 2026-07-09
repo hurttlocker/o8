@@ -286,6 +286,339 @@ fn cleanup(files: &[std::path::PathBuf]) {
     }
 }
 
+// ─────────────────────────── Spatial Context ───────────────────────────
+//
+// Symon Spatial Context: while holding Right-Option the operator can draw
+// glowing strokes anywhere on the live screen. `capture_full` grabs the marked
+// monitor at (near-)full resolution BEFORE the ink renders (fired on the FIRST
+// stroke), and `composite_strokes` later burns the operator's normalized
+// strokes into that screenshot and cuts a full-res crop of the marked region.
+// Both images ride the same multimodal brain turn as the spoken command, so
+// "why does THIS look off?" + a circle tells the model exactly where to look.
+//
+// Reuses the same macOS-native `screencapture` + `sips` + IHDR-parse toolchain
+// as `capture`; the strokes are rasterized with the pure-Rust `image` crate.
+
+/// Higher capture ceiling for spatial context than the plain `capture`
+/// downscale (1440): the CROP of the marked region needs detail. Still bounded
+/// so `image` decode + composite stays fast on a Retina panel.
+const SPATIAL_CAPTURE_MAX_WIDTH: u32 = 2560;
+/// The full-screen composite (with strokes burned in) is downscaled to this max
+/// dimension — the "here's the whole screen and where I marked" image. ~1568 is
+/// the sweet spot models attend to without burning tokens.
+const SPATIAL_COMPOSITE_MAX: u32 = 1568;
+/// The close-up crop is capped at this max dimension too (models attend far
+/// better to a crop, but an un-bounded 4K region would be wasteful).
+const SPATIAL_CROP_MAX: u32 = 1568;
+
+/// A raw, undownscaled-to-composite screen grab kept around between the first
+/// stroke and finalize so strokes can be burned into it after the fact.
+pub struct RawCapture {
+    pub png_bytes: Vec<u8>,
+    pub mon_x: f64,
+    pub mon_y: f64,
+    pub mon_w: f64,
+    pub mon_h: f64,
+}
+
+/// The two images a spatial turn carries: `screen` is the full-screen composite
+/// (strokes burned in) — it doubles as the `ScreenContext` that maps any
+/// `[POINT:...]` reply back onto the screen; `crop_png_base64` is the full-res
+/// close-up of the marked region (None if the crop couldn't be cut).
+pub struct SpatialContext {
+    pub screen: ScreenContext,
+    pub crop_png_base64: Option<String>,
+}
+
+/// Capture the monitor under the cursor at up to `SPATIAL_CAPTURE_MAX_WIDTH`,
+/// returning the raw PNG bytes + geometry (NOT base64 — the strokes get burned
+/// in first). Blocking subprocess; call off the main thread. Mirrors `capture`'s
+/// multi-display pick, but keeps more resolution for the crop.
+pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
+    let monitors = app.available_monitors().ok()?;
+    if monitors.is_empty() {
+        return None;
+    }
+    let cursor = app.cursor_position().ok();
+    let monitor = cursor
+        .and_then(|c| {
+            monitors
+                .iter()
+                .find(|m| {
+                    let p = m.position();
+                    let s = m.size();
+                    c.x >= p.x as f64
+                        && c.x < (p.x + s.width as i32) as f64
+                        && c.y >= p.y as f64
+                        && c.y < (p.y + s.height as i32) as f64
+                })
+                .cloned()
+        })
+        .or_else(|| app.primary_monitor().ok().flatten())
+        .or_else(|| monitors.first().cloned())?;
+
+    let tmp = std::env::temp_dir();
+    let stamp = std::process::id();
+    let files: Vec<std::path::PathBuf> = (0..monitors.len())
+        .map(|i| tmp.join(format!("o8-spatial-{stamp}-{i}.png")))
+        .collect();
+
+    let mut cmd = std::process::Command::new("screencapture");
+    cmd.arg("-x");
+    for f in &files {
+        cmd.arg(f);
+    }
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        log::warn!(
+            "[spatial-context] screencapture failed ({}): {} — grant o8 Screen \
+             Recording in System Settings if this is a permission denial",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        request_screen_permission();
+        cleanup(&files);
+        return None;
+    }
+
+    let want_w = monitor.size().width;
+    let want_h = monitor.size().height;
+    let picked = files
+        .iter()
+        .find(|f| png_dimensions(f).is_some_and(|(w, h)| w == want_w && h == want_h))
+        .or_else(|| files.iter().find(|f| f.exists()))
+        .cloned();
+    let Some(path) = picked else {
+        cleanup(&files);
+        return None;
+    };
+
+    if png_dimensions(&path).is_some_and(|(w, _)| w > SPATIAL_CAPTURE_MAX_WIDTH) {
+        let _ = std::process::Command::new("sips")
+            .arg("--resampleWidth")
+            .arg(SPATIAL_CAPTURE_MAX_WIDTH.to_string())
+            .arg(&path)
+            .output();
+    }
+
+    let (img_w, img_h) = png_dimensions(&path)?;
+    let bytes = std::fs::read(&path).ok()?;
+    cleanup(&files);
+
+    let scale = monitor.scale_factor();
+    log::info!(
+        "[spatial-context] captured {}x{} px ({} KB) of monitor at {},{}",
+        img_w,
+        img_h,
+        bytes.len() / 1024,
+        monitor.position().x as f64 / scale,
+        monitor.position().y as f64 / scale
+    );
+    Some(RawCapture {
+        png_bytes: bytes,
+        mon_x: monitor.position().x as f64 / scale,
+        mon_y: monitor.position().y as f64 / scale,
+        mon_w: monitor.size().width as f64 / scale,
+        mon_h: monitor.size().height as f64 / scale,
+    })
+}
+
+/// Burn the operator's strokes into `raw` and produce the two spatial images.
+/// `strokes` is a list of polylines, each a `Vec` of NORMALIZED (0..1) points in
+/// the marked monitor's coordinate space (the ink page reports them normalized
+/// so they survive the capture-vs-window resolution mismatch). Returns None if
+/// there are no drawable points or the screenshot can't be decoded.
+pub fn composite_strokes(raw: &RawCapture, strokes: &[Vec<(f64, f64)>]) -> Option<SpatialContext> {
+    use image::imageops::FilterType;
+    use image::RgbaImage;
+
+    let stroke_count = strokes.iter().filter(|s| !s.is_empty()).count();
+    if stroke_count == 0 {
+        return None;
+    }
+
+    let mut img: RgbaImage = image::load_from_memory(&raw.png_bytes).ok()?.to_rgba8();
+    let (w, h) = (img.width(), img.height());
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let wf = w as f64;
+    let hf = h as f64;
+
+    // Stroke geometry in pixels + the union bounding box (for the crop).
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+    let mut px_strokes: Vec<Vec<(f64, f64)>> = Vec::with_capacity(strokes.len());
+    for stroke in strokes {
+        if stroke.is_empty() {
+            continue;
+        }
+        let mut pts = Vec::with_capacity(stroke.len());
+        for &(nx, ny) in stroke {
+            let px = (nx.clamp(0.0, 1.0)) * wf;
+            let py = (ny.clamp(0.0, 1.0)) * hf;
+            min_x = min_x.min(px);
+            min_y = min_y.min(py);
+            max_x = max_x.max(px);
+            max_y = max_y.max(py);
+            pts.push((px, py));
+        }
+        px_strokes.push(pts);
+    }
+    if max_x < min_x || max_y < min_y {
+        return None;
+    }
+
+    // Crop the CLEAN screenshot (no strokes) so the close-up shows unobstructed
+    // content — the composite already shows WHERE the mark is. +15% margin,
+    // floored to a minimum region so a single tap still yields a useful crop.
+    let crop_png_base64 = cut_crop(&img, min_x, min_y, max_x, max_y, wf, hf);
+
+    // Ember-orange (#FF5A1F) core with a lighter rim, both opaque so a dense
+    // polyline never over-accumulates alpha. Radius scales with resolution.
+    let core_r = (wf / 300.0).clamp(5.0, 14.0);
+    let halo_r = core_r * 1.9;
+    const CORE: [u8; 4] = [0xFF, 0x5A, 0x1F, 0xFF];
+    const HALO: [u8; 4] = [0xFF, 0x8A, 0x4A, 0xFF];
+    for pts in &px_strokes {
+        draw_polyline(&mut img, pts, halo_r, HALO);
+    }
+    for pts in &px_strokes {
+        draw_polyline(&mut img, pts, core_r, CORE);
+    }
+
+    // Downscale the stroked composite to the token-friendly ceiling.
+    let longest = w.max(h);
+    let composite = if longest > SPATIAL_COMPOSITE_MAX {
+        let s = SPATIAL_COMPOSITE_MAX as f64 / longest as f64;
+        let nw = ((w as f64 * s).round() as u32).max(1);
+        let nh = ((h as f64 * s).round() as u32).max(1);
+        image::imageops::resize(&img, nw, nh, FilterType::Triangle)
+    } else {
+        img
+    };
+    let (cw, ch) = (composite.width(), composite.height());
+    let png = encode_png(&composite)?;
+
+    let screen = ScreenContext {
+        png_base64: base64::engine::general_purpose::STANDARD.encode(&png),
+        img_w: cw,
+        img_h: ch,
+        mon_x: raw.mon_x,
+        mon_y: raw.mon_y,
+        mon_w: raw.mon_w,
+        mon_h: raw.mon_h,
+    };
+    log::info!(
+        "[spatial-context] composited {stroke_count} stroke(s): composite {cw}x{ch}, crop={}",
+        if crop_png_base64.is_some() { "yes" } else { "no" }
+    );
+    Some(SpatialContext {
+        screen,
+        crop_png_base64,
+    })
+}
+
+/// Cut the +15%-margin crop of the marked region out of a CLEAN screenshot.
+fn cut_crop(
+    img: &image::RgbaImage,
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+    wf: f64,
+    hf: f64,
+) -> Option<String> {
+    use image::imageops::FilterType;
+    let span_x = (max_x - min_x).max(1.0);
+    let span_y = (max_y - min_y).max(1.0);
+    let margin_x = (span_x * 0.15).max(wf * 0.04);
+    let margin_y = (span_y * 0.15).max(hf * 0.04);
+    let x0 = (min_x - margin_x).clamp(0.0, wf);
+    let y0 = (min_y - margin_y).clamp(0.0, hf);
+    let x1 = (max_x + margin_x).clamp(0.0, wf);
+    let y1 = (max_y + margin_y).clamp(0.0, hf);
+    let cx = x0.floor() as u32;
+    let cy = y0.floor() as u32;
+    let cw = ((x1 - x0).ceil() as u32).clamp(1, img.width().saturating_sub(cx).max(1));
+    let ch = ((y1 - y0).ceil() as u32).clamp(1, img.height().saturating_sub(cy).max(1));
+    if cw < 2 || ch < 2 {
+        return None;
+    }
+    let crop = image::imageops::crop_imm(img, cx, cy, cw, ch).to_image();
+    let longest = cw.max(ch);
+    let crop = if longest > SPATIAL_CROP_MAX {
+        let s = SPATIAL_CROP_MAX as f64 / longest as f64;
+        let nw = ((cw as f64 * s).round() as u32).max(1);
+        let nh = ((ch as f64 * s).round() as u32).max(1);
+        image::imageops::resize(&crop, nw, nh, FilterType::Triangle)
+    } else {
+        crop
+    };
+    let png = encode_png(&crop)?;
+    Some(base64::engine::general_purpose::STANDARD.encode(&png))
+}
+
+/// Stamp a filled disc of round caps along a polyline (round joins for free).
+fn draw_polyline(img: &mut image::RgbaImage, pts: &[(f64, f64)], r: f64, color: [u8; 4]) {
+    if pts.is_empty() {
+        return;
+    }
+    if pts.len() == 1 {
+        stamp_disc(img, pts[0].0, pts[0].1, r, color);
+        return;
+    }
+    for seg in pts.windows(2) {
+        let (x0, y0) = seg[0];
+        let (x1, y1) = seg[1];
+        let dist = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+        let steps = ((dist / (r * 0.4)).ceil() as usize).max(1);
+        for i in 0..=steps {
+            let t = i as f64 / steps as f64;
+            stamp_disc(img, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r, color);
+        }
+    }
+}
+
+/// Paint one opaque filled disc at (cx,cy). Opaque so overlapping stamps along a
+/// dense stroke never accumulate — the rim reads as a clean glow band.
+fn stamp_disc(img: &mut image::RgbaImage, cx: f64, cy: f64, r: f64, color: [u8; 4]) {
+    let w = img.width() as i64;
+    let h = img.height() as i64;
+    let r2 = r * r;
+    let x0 = ((cx - r).floor() as i64).max(0);
+    let x1 = ((cx + r).ceil() as i64).min(w - 1);
+    let y0 = ((cy - r).floor() as i64).max(0);
+    let y1 = ((cy + r).ceil() as i64).min(h - 1);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let dx = x as f64 + 0.5 - cx;
+            let dy = y as f64 + 0.5 - cy;
+            if dx * dx + dy * dy <= r2 {
+                img.get_pixel_mut(x as u32, y as u32).0 = color;
+            }
+        }
+    }
+}
+
+/// Encode an RgbaImage to PNG bytes without a DynamicImage clone.
+fn encode_png(img: &image::RgbaImage) -> Option<Vec<u8>> {
+    use image::codecs::png::PngEncoder;
+    use image::ImageEncoder;
+    let mut buf = Vec::new();
+    PngEncoder::new(&mut buf)
+        .write_image(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(buf)
+}
+
 /// Width/height from the PNG IHDR chunk (bytes 16..24 after the 8-byte
 /// signature + 4-byte length + "IHDR"). Avoids pulling an image crate for two
 /// big-endian u32 reads.
@@ -388,5 +721,74 @@ mod wants_screen_tests {
         assert!(!wants_screen("Remind me to call Q at 3pm"));
         assert!(!wants_screen("Where is my meeting tomorrow?"));
         assert!(!wants_screen("What's shipping in o8?"));
+    }
+}
+
+#[cfg(test)]
+mod composite_tests {
+    use super::{composite_strokes, encode_png, RawCapture};
+    use base64::Engine;
+
+    /// A plain white RawCapture of the given pixel size (the "screenshot").
+    fn white_capture(w: u32, h: u32) -> RawCapture {
+        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
+        RawCapture {
+            png_bytes: encode_png(&img).expect("encode white png"),
+            mon_x: 0.0,
+            mon_y: 0.0,
+            mon_w: w as f64,
+            mon_h: h as f64,
+        }
+    }
+
+    fn decode(b64: &str) -> image::RgbaImage {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("valid base64");
+        image::load_from_memory(&bytes).expect("valid png").to_rgba8()
+    }
+
+    #[test]
+    fn no_strokes_yields_none() {
+        let raw = white_capture(200, 160);
+        assert!(composite_strokes(&raw, &[]).is_none());
+        assert!(composite_strokes(&raw, &[vec![]]).is_none());
+    }
+
+    #[test]
+    fn burns_orange_ink_and_cuts_a_crop() {
+        let raw = white_capture(400, 300);
+        // A diagonal stroke through the middle (normalized 0.25,0.25 → 0.6,0.6).
+        let strokes = vec![vec![(0.25, 0.25), (0.4, 0.4), (0.6, 0.6)]];
+        let sc = composite_strokes(&raw, &strokes).expect("composited");
+
+        // Composite decodes and is bounded to the token ceiling.
+        let composite = decode(&sc.screen.png_base64);
+        assert!(composite.width().max(composite.height()) <= 1568);
+        assert_eq!(composite.width(), sc.screen.img_w);
+        assert_eq!(composite.height(), sc.screen.img_h);
+        // Monitor geometry rides through unchanged (drives POINT-back mapping).
+        assert_eq!(sc.screen.mon_w, 400.0);
+
+        // At least one pixel near the stroke path is warm ember-orange, i.e.
+        // clearly not the white background (R high, B distinctly lower than R).
+        let mut found_ink = false;
+        for py in 0..composite.height() {
+            for px in 0..composite.width() {
+                let p = composite.get_pixel(px, py).0;
+                if p[0] > 200 && (p[2] as u16) + 40 < p[0] as u16 {
+                    found_ink = true;
+                    break;
+                }
+            }
+            if found_ink {
+                break;
+            }
+        }
+        assert!(found_ink, "expected orange ink burned into the composite");
+
+        // The marked region was cropped and is strictly smaller than the source.
+        let crop = decode(sc.crop_png_base64.as_ref().expect("crop present"));
+        assert!(crop.width() < composite.width() || crop.height() < composite.height());
     }
 }

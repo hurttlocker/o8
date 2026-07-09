@@ -42,9 +42,40 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         system_text.push_str("\n\n");
         system_text.push_str(&convo);
     }
+    // Symon Spatial Context: attach the composite + crop as image_url parts when
+    // the operator drew AND the model is a known vision family. On a non-vision
+    // model the honesty note was already folded into `intent` upstream, so we
+    // send text only and never pretend to have seen the mark.
+    let spatial_vision = ctx.spatial && super::model_can_see_images(model);
+    if spatial_vision {
+        if let Some(screen) = &ctx.screen {
+            system_text.push_str("\n\n");
+            system_text.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
+        }
+        system_text.push_str("\n\n");
+        system_text.push_str(&super::spatial_prompt_section(ctx.crop_png_base64.is_some()));
+    }
+    let user_msg = if spatial_vision {
+        let mut parts: Vec<Value> = vec![json!({ "type": "text", "text": intent })];
+        if let Some(screen) = &ctx.screen {
+            parts.push(json!({
+                "type": "image_url",
+                "image_url": { "url": format!("data:image/png;base64,{}", screen.png_base64) }
+            }));
+        }
+        if let Some(crop) = &ctx.crop_png_base64 {
+            parts.push(json!({
+                "type": "image_url",
+                "image_url": { "url": format!("data:image/png;base64,{}", crop) }
+            }));
+        }
+        json!({ "role": "user", "content": parts })
+    } else {
+        json!({ "role": "user", "content": intent })
+    };
     let mut messages: Vec<Value> = vec![
         json!({ "role": "system", "content": system_text }),
-        json!({ "role": "user", "content": intent }),
+        user_msg,
     ];
 
     let mut tool_call_log: Vec<Value> = Vec::new();
