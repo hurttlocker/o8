@@ -16,6 +16,7 @@ const server = join(out, 'server');
 const standalone = join(root, '.next', 'standalone');
 const staticDir = join(root, '.next', 'static');
 const pub = join(root, 'public');
+const loaderVerifyPath = join(root, 'scripts', 'loader-verify.mjs');
 
 // Clean previous build
 if (existsSync(out)) rmSync(out, { recursive: true });
@@ -30,11 +31,12 @@ if (!existsSync(standalone)) {
 
 // ── Frontend (loader HTML for Tauri webview) ──
 //
-// The loader probes a range of ports because the Rust sidecar may have
-// picked something other than 3001 when 3001 was taken. It reads
-// `window.__O8_PORT_HINT__` first (the sidecar injects this via the
-// `additional_browser_args`/window-state plumbing if available), then falls
-// back to probing 3001-3050. Once a port responds, it navigates there.
+// The loader probes the sidecar identity endpoint because any HTTP response on
+// a port is not proof that it belongs to this o8 launch. It reads
+// `window.__O8_PORT_HINT__` first (injected by Rust's webview initialization
+// script), then falls back to the production API block.
+const loaderVerifySource = readFileSync(loaderVerifyPath, 'utf-8')
+  .replace(/export\s*\{\s*verifyIdentityResponse\s*\};?\s*$/m, '');
 const loaderHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -73,9 +75,12 @@ const loaderHtml = `<!DOCTYPE html>
     @keyframes step { 0%, 100% { opacity: 0.25; } 40% { opacity: 0.9; } }
   </style>
   <script>
+    ${loaderVerifySource}
+
     const HINT = typeof window.__O8_PORT_HINT__ === 'number' ? window.__O8_PORT_HINT__ : null;
+    const EXPECTED_BOOT_ID = typeof window.__O8_EXPECTED_BOOT_ID__ === 'string' ? window.__O8_EXPECTED_BOOT_ID__ : '';
     const PROBE_RANGE = [];
-    for (let p = 3001; p < 3050; p++) PROBE_RANGE.push(p);
+    for (let p = 47100; p <= 47104; p++) PROBE_RANGE.push(p);
     const CANDIDATES = HINT ? [HINT, ...PROBE_RANGE.filter(p => p !== HINT)] : PROBE_RANGE;
 
     const STAGES = [
@@ -111,7 +116,13 @@ const loaderHtml = `<!DOCTYPE html>
 
     async function probe(port) {
       try {
-        await fetch('http://127.0.0.1:' + port + '/api/panel/status', { mode: 'no-cors' });
+        const response = await fetch('http://127.0.0.1:' + port + '/api/setup/identity', {
+          method: 'GET',
+          cache: 'no-store',
+        });
+        if (!response.ok) return false;
+        const identity = await response.json();
+        if (!verifyIdentityResponse(identity, EXPECTED_BOOT_ID)) return false;
         window.location.href = 'http://127.0.0.1:' + port + '/dashboard';
         return true;
       } catch { return false; }
