@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { clampPlan, readDevPlanOverride, readDevPlanOverrideSync } from './dev-override';
 import { resolveFlags } from './flags';
 import type { EntitlementState, Plan } from './types';
 
@@ -14,6 +15,14 @@ import type { EntitlementState, Plan } from './types';
  * (a missing file is the common free case, not an error). Never throws.
  *
  * The license/Stripe path (M4/M5) writes the file; M1 only reads it.
+ *
+ * View-as clamp (#1517): after the real plan resolves (env > file > free), the
+ * dev `~/.o8/dev-plan-override` switch is applied as `min(realPlan, override)`,
+ * so the effective plan can only ever DOWNGRADE. env `O8_PLAN` is a RAW dev
+ * override (trusted, can raise/lower); the file override is the min-clamped
+ * "view as free" switch. The clamp lives HERE, the single server-side chokepoint
+ * every consumer reads through, so a downgrade can never be bypassed by a caller
+ * comparing plan strings directly. See dev-override.ts.
  */
 
 const ENTITLEMENT_FILE = 'entitlement.json';
@@ -55,40 +64,53 @@ function isMissingFile(error: unknown) {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
-function toState(plan: Plan, source: EntitlementState['source']): EntitlementState {
-  return { plan, flags: resolveFlags(plan), source };
+function toState(
+  realPlan: Plan,
+  source: EntitlementState['source'],
+  overridePlan: Plan | null,
+): EntitlementState {
+  const effective = clampPlan(realPlan, overridePlan);
+  return {
+    plan: effective,
+    flags: resolveFlags(effective),
+    source,
+    actualPlan: realPlan,
+    overrideActive: overridePlan !== null,
+  };
 }
 
 export async function getEntitlement(): Promise<EntitlementState> {
+  const overridePlan = await readDevPlanOverride();
   const envPlan = getEnvPlan();
-  if (envPlan) return toState(envPlan, 'env');
+  if (envPlan) return toState(envPlan, 'env', overridePlan);
 
   try {
     const raw = await readFile(getEntitlementPath(), 'utf8');
     const filePlan = readFilePlan(raw);
-    if (filePlan) return toState(filePlan, 'file');
+    if (filePlan) return toState(filePlan, 'file', overridePlan);
   } catch (error) {
     if (!isMissingFile(error)) {
       console.error('[entitlement] Failed to read entitlement:', error);
     }
   }
 
-  return toState('free', 'default');
+  return toState('free', 'default', overridePlan);
 }
 
 export function getEntitlementSync(): EntitlementState {
+  const overridePlan = readDevPlanOverrideSync();
   const envPlan = getEnvPlan();
-  if (envPlan) return toState(envPlan, 'env');
+  if (envPlan) return toState(envPlan, 'env', overridePlan);
 
   try {
     const raw = readFileSync(getEntitlementPath(), 'utf8');
     const filePlan = readFilePlan(raw);
-    if (filePlan) return toState(filePlan, 'file');
+    if (filePlan) return toState(filePlan, 'file', overridePlan);
   } catch (error) {
     if (!isMissingFile(error)) {
       console.error('[entitlement] Failed to read entitlement during startup:', error);
     }
   }
 
-  return toState('free', 'default');
+  return toState('free', 'default', overridePlan);
 }
