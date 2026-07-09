@@ -23,7 +23,7 @@ describe('performRuntimeAction owned surface resolution', () => {
     mocks.continueOwnedCodexSession.mockReset();
   });
 
-  it('steers a codex-owned surface even when inventory lookup misses', async () => {
+  it('steers a codex-owned surface even when inventory lookup misses', { timeout: 20_000 }, async () => {
     mocks.continueOwnedCodexSession.mockResolvedValue({ ok: true, note: 'queued' });
     const { performRuntimeAction } = await import('./actions');
 

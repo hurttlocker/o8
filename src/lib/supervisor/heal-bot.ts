@@ -470,7 +470,11 @@ async function markHumanRequired(
   });
 
   const { setLaneStatus } = await import('@/lib/lane/registry');
-  setLaneStatus(lane.id, 'awaiting_input', 'system', 'heal_bot_give_up');
+  // Layer-5 escalation: self-heal gave up, so this is the operator's call — park
+  // at `awaiting_human` (now a real persistable status, #1513) rather than the
+  // ambiguous `awaiting_input` (which reads as "the agent needs an answer").
+  // `status-events.ts` already narrates awaiting_human-from-failure as an escalation.
+  setLaneStatus(lane.id, 'awaiting_human', 'system', 'heal_bot_give_up');
 }
 
 async function markSelfHealed(
