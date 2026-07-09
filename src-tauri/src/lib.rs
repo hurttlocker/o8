@@ -923,6 +923,27 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
             // on the same port.
             agent_partials_window::create(&app_main, api_port);
         });
+        // Relay the canvas composer's partials-surface CLAIM directly to the HUD
+        // window. The canvas emits it as a JS broadcast, and cross-webview
+        // broadcasts can miss secondary windows (the dock's known failure mode,
+        // 2026-07-08 live-hit: the HUD painted an empty bar over the canvas
+        // because the claim never arrived). Rust listen → emit_to is reliable.
+        #[cfg(target_os = "macos")]
+        {
+            use tauri::Listener;
+            let relay = app.clone();
+            app.listen_any("o8:agent-partials-claim", move |event| {
+                if let Ok(payload) =
+                    serde_json::from_str::<serde_json::Value>(event.payload())
+                {
+                    let _ = relay.emit_to(
+                        agent_partials_window::PARTIALS_LABEL,
+                        "o8:agent-partials-claim",
+                        payload,
+                    );
+                }
+            });
+        }
         // Stash the resolved port for the lazily-created Symon Points overlay
         // (point_overlay builds its window on first [POINT:...] tag, not here).
         point_overlay::init(api_port);
