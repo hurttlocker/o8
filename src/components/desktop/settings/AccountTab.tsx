@@ -9,7 +9,7 @@
  * account-less with your own API keys; signing in unlocks managed tokens + Pro.
  */
 
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
@@ -35,9 +35,19 @@ function ShieldIcon() {
   );
 }
 
+// "View as" — an eye glyph for the founder-only dev switch.
+function EyeIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 export function AccountTab() {
   const auth = useO8Auth();
-  const { founder } = useEntitlement();
+  const { founder, actualFounder, overrideActive } = useEntitlement();
 
   // Usage-data sharing (telemetry). Default on; the toggle persists an opt-out
   // flag honored by track() (analytics epic #1249). Read on mount so the switch
@@ -46,6 +56,37 @@ export function AccountTab() {
   useEffect(() => {
     setShareUsage(!isTelemetryOptedOut());
   }, []);
+
+  // "View as Free" dev switch (#1517) — Founding Operator #1 only (Q ruling).
+  // The route enforces the same gate server-side; this only hides the control.
+  // Stays visible while an override is active so the switch can always be turned
+  // OFF even though the effective plan then reads free.
+  const canDevSwitch = actualFounder?.operatorNumber === 1 || overrideActive;
+  const [viewAsBusy, setViewAsBusy] = useState(false);
+  const [viewAsError, setViewAsError] = useState<string | null>(null);
+  const setViewAsFree = useCallback(async (next: boolean) => {
+    if (viewAsBusy) return;
+    setViewAsBusy(true);
+    setViewAsError(null);
+    try {
+      const res = await fetch('/api/panel/entitlement/override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next ? { plan: 'free' } : { clear: true }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
+      if (data && data.ok === false) {
+        setViewAsError(data.reason ?? 'Could not update view-as.');
+        return;
+      }
+      // Flip every surface live (chrome pill, canvas, sibling gates).
+      window.dispatchEvent(new Event('o8:entitlement-refresh'));
+    } catch {
+      setViewAsError('Could not update view-as.');
+    } finally {
+      setViewAsBusy(false);
+    }
+  }, [viewAsBusy]);
 
   let body: ReactNode;
   if (!auth.clerkEnabled) {
@@ -146,6 +187,28 @@ export function AccountTab() {
           />
         </SettingsGroup>
       </section>
+
+      {canDevSwitch ? (
+        <section style={{ marginTop: 28 }}>
+          <SettingsGroup
+            header="Developer"
+            footnote={
+              viewAsError
+                ? viewAsError
+                : 'Downgrades this machine to the free experience so you can dogfood it. Local-only, reversible, never touches your license — flip it off to return.'
+            }
+          >
+            <SettingsRow
+              icon={<EyeIcon />}
+              label="View as Free"
+              subtitle="Preview the free experience on this machine"
+              checked={overrideActive}
+              disabled={viewAsBusy}
+              onToggle={(next) => { void setViewAsFree(next); }}
+            />
+          </SettingsGroup>
+        </section>
+      ) : null}
     </div>
   );
 }
