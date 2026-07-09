@@ -4583,6 +4583,27 @@ pub fn run() {
     // the DSN so the Next server + ws-server children inherit it.
     let _sentry_guard = telemetry::init();
     telemetry::export_dsn_to_env();
+
+    // Native crash capture (signals/faults the sentry panic hook can't see:
+    // SIGSEGV/SIGABRT/SIGBUS/stack-overflow). MUST start HERE — right after
+    // sentry, and BEFORE boot-identity, port allocation, orphan reaping, and
+    // window creation — because it re-execs THIS binary as an out-of-process
+    // reporter and everything before this line runs in BOTH processes. The
+    // reporter `exit(0)`s inside init and never runs the setup below, so it
+    // never binds ports, reaps the main app's Node children, or opens a window
+    // (see telemetry::init_minidump_handler). Held for the program lifetime so
+    // the reporter process stays alive; None when dormant (debug/no-DSN) or the
+    // crash-reports toggle is OFF at launch.
+    let _minidump_handle = _sentry_guard
+        .as_ref()
+        .and_then(telemetry::init_minidump_handler);
+
+    // Hidden crash-test hook (O8_CRASH_TEST=segv|abort|stackoverflow) — lets the
+    // operator verify the native crash pipeline end-to-end post-ship with one
+    // terminal launch. Runs only in the main process; no-op when the var is
+    // unset. Placed AFTER minidump init so the reporter is already listening.
+    telemetry::maybe_trigger_crash_test();
+
     let boot_identity = read_or_create_boot_identity();
     export_boot_identity(&boot_identity);
 
