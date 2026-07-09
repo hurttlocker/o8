@@ -69,7 +69,7 @@ function buildPiPermissionApprovedResponse(frame: PiRpcFrame): PiRpcFrame | null
   return response;
 }
 
-function buildPiPermissionDeniedResponse(frame: PiRpcFrame, note?: string): PiRpcFrame | null {
+export function buildPiPermissionDeniedResponse(frame: PiRpcFrame, note?: string): PiRpcFrame | null {
   const response = buildPiPermissionDefaultResponse(frame);
   if (response && note?.trim()) {
     response.message = note.trim();
