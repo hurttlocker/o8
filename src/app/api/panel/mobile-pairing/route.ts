@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { resolvePortInfo } from '@/lib/panel/api-port';
-import { pickMobilePairingHost, type ReachableMobileHostKind } from '@/lib/panel/lan-ip';
+import { pickMobilePairingHosts, type ReachableMobileHostKind } from '@/lib/panel/lan-ip';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { mobileE2eeEnabled } from '@/lib/mobile/e2ee-flag';
 import { createEnrollCode } from '@/lib/mobile/device-registry';
@@ -30,9 +30,15 @@ import { getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
 interface MobilePairingResponse {
   /** Protocol version the phone reads to pick the enroll vs legacy-token path. */
   v: 1;
-  /** Mac's Tailscale/LAN host — null when no reachable interface is found. */
+  /** Mac's preferred host (hosts[0]) — null when no reachable interface is found. */
   host: string | null;
   hostKind: ReachableMobileHostKind | null;
+  /**
+   * Every address the phone might reach this Mac at, preference order
+   * (override → Tailscale → LAN). The phone probes these on scan and pairs
+   * with the first that answers.
+   */
+  hosts: string[];
   apiPort: number;
   wsPort: number;
   /** Shared ws-token — kept during transition; a new (enroll-aware) app ignores it. */
@@ -46,11 +52,15 @@ interface MobilePairingResponse {
 export async function GET() {
   try {
     const { apiPort, wsPort } = resolvePortInfo();
-    const pairingHost = pickMobilePairingHost();
+    const pairingHosts = pickMobilePairingHosts();
+    const primary = pairingHosts[0] ?? { host: null, kind: null };
     const payload: MobilePairingResponse = {
       v: 1,
-      host: pairingHost.host,
-      hostKind: pairingHost.kind,
+      host: primary.host,
+      hostKind: primary.kind,
+      hosts: pairingHosts
+        .map((h) => h.host)
+        .filter((h): h is string => h !== null),
       apiPort,
       wsPort,
       token: getOrCreateWsToken(),
