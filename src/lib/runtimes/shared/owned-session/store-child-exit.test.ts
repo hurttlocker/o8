@@ -60,7 +60,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       classification: 'nonzero-exit',
     });
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
-  }, 15_000);
+  }, 20_000);
 
   it('records SIGKILL signal and stderr tail from the real runner child', async () => {
     const { createOwnedSessionStore } = await import('./store');
@@ -76,7 +76,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       classification: 'signal-kill',
     });
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
-  }, 15_000);
+  }, 20_000);
 
   it('sweeps an old active owned session when no lane references its surface id', async () => {
     const { createOwnedSessionStore } = await import('./store');

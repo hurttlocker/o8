@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { loadMergeModule } from '@/lib/orchestrator/operator-mission-service/merge-warmup';
-import { getIdempotent, setIdempotent } from '@/lib/orchestrator/idempotency-cache';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,9 +13,13 @@ export const dynamic = 'force-dynamic';
 // the MCP approve_and_merge handler, MCP-process-local). Server-side means every
 // client — MCP, the `o8 packet approve-merge` CLI, future mobile — inherits the
 // same dedupe + clean-tree-on-return guarantee through this one route.
-function buildIdempotencyKey(packetId: string, clientKey: string): string {
-  return `approve_and_merge:${packetId}:${clientKey}`;
-}
+//
+// #1513 — migrated off the in-memory `idempotency-cache.ts` (deleted) onto the
+// persisted reserve→finalize store the other control verbs use. The old cache's
+// "a restart forgets in-flight merges so the operator retries immediately"
+// property is preserved by the store's dead-pid reservation reaper (see
+// `reapDeadIdempotencyReservations` in db/index.ts): a LIVE in-flight merge is
+// still deduped, a restart-orphaned one is immediately retryable.
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -70,33 +74,38 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // #1513 — persisted idempotency. A client timeout+retry of approve_and_merge
+  // (a merge outlasts the 15s client budget) must not merge twice. Always derive
+  // a key: an explicit client key wins, else hash(verb + packetId + commit body)
+  // so the SAME logical merge collides within the TTL window.
   const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
     ? record.idempotencyKey.trim()
     : null;
-  const cacheKey = clientKey ? buildIdempotencyKey(packetId, clientKey) : null;
-  if (cacheKey) {
-    const cached = getIdempotent<Record<string, unknown>>(cacheKey);
-    if (cached) {
-      return operatorSuccess({ ...cached, idempotencyReplay: true });
-    }
-  }
+  const commitMessage = typeof record.commitMessage === 'string' && record.commitMessage.trim()
+    ? record.commitMessage.trim()
+    : undefined;
+  const expectedHeadSha = typeof record.expectedHeadSha === 'string' && record.expectedHeadSha.trim()
+    ? record.expectedHeadSha.trim()
+    : undefined;
+  const key = deriveIdempotencyKey({
+    verb: 'approve_and_merge',
+    scopeId: packetId,
+    clientKey,
+    body: `${commitMessage ?? ''} ${expectedHeadSha ?? ''}`,
+  });
 
   try {
     const { approveAndMergePacket } = await loadMergeModule();
-    // #622 — guarantee a clean working tree before control returns to any client.
-    const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({
-      packetId,
-      commitMessage: typeof record.commitMessage === 'string' && record.commitMessage.trim()
-        ? record.commitMessage.trim()
-        : undefined,
-      expectedHeadSha: typeof record.expectedHeadSha === 'string' && record.expectedHeadSha.trim()
-        ? record.expectedHeadSha.trim()
-        : undefined,
-    }));
-    if (cacheKey) {
-      setIdempotent(cacheKey, result as unknown as Record<string, unknown>);
-    }
-    return operatorSuccess(result);
+    const outcome = await withIdempotency(
+      { key, verb: 'approve_and_merge', scopeId: packetId },
+      // #622 — guarantee a clean working tree before control returns to any client.
+      () => withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({
+        packetId,
+        commitMessage,
+        expectedHeadSha,
+      })),
+    );
+    return operatorSuccess(replayShape(outcome));
   } catch (error) {
     const { isHeadShaMismatchError } = await loadMergeModule();
     if (isHeadShaMismatchError(error)) {

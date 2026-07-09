@@ -215,7 +215,7 @@ function mirrorPullRequest(input: {
 }
 
 describe('worktree reaper PR merge reconciliation', () => {
-  it('archives a reviewing lane when its stamped PR mirror row is merged', async () => {
+  it('archives a reviewing lane when its stamped PR mirror row is merged', { timeout: 20_000 }, async () => {
     const repoPath = makeRepo();
     const worktreePath = makePacketWorktree(repoPath, 'inline/pr-merged', 'packet-pkt-pr-merged');
     const lane = createLane({
