@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import {
-  deleteProject,
   getProjectWithRepos,
   updateProject,
 } from '@/lib/projects/store';
+import { deleteProject } from '@/lib/repos/projects';
 import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 
 export const runtime = 'nodejs';
@@ -92,9 +92,17 @@ export async function DELETE(
   if (denied) return denied;
 
   const { id } = await params;
-  const deleted = deleteProject(id);
-  if (!deleted) {
+  // Full-semantics delete (shared with the panel route): kills the SQLite row,
+  // the ledger entry, AND the project's exclusive repos — otherwise unassigned
+  // repos re-project as same-named virtual rows and the delete "doesn't work".
+  if (!getProjectWithRepos(id)) {
     return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+  }
+  try {
+    await deleteProject(id);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete project.';
+    return NextResponse.json({ error: message }, { status: 400 });
   }
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }

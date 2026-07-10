@@ -8,26 +8,22 @@ import { performance } from 'node:perf_hooks';
 import {
   addRepo,
   listRepos,
-  removeRepo,
   touchRepo,
   updateRepo,
   validateRepo,
 } from '@/lib/repos/registry';
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
 import { removeRepoPathFromProjects } from '@/lib/repos/projects';
-import { removeRepoFromAllProjects } from '@/lib/projects/store';
+import { removeRepoFromPool } from '@/lib/repos/remove';
 import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readiness';
-import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
-import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
+import { triggerScan, triggerScanIfStale, startChangePolling } from '@/lib/skeleton/autoscan';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { removeRuntimeTerminalSessionsForRepoPath, getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
-import { pruneTerminalStateForRepoPath } from '@/lib/terminal/state-store';
 import { killTmuxSession } from '@/lib/terminal/tmux';
-import { removeWorkspaceLifecycleRecordsForRepoPath } from '@/lib/workspace/lifecycle';
 import type {
   RepoRegistryDeleteBody,
   RepoRegistryPostBody,
@@ -279,23 +275,17 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    // Look up localPath before removal so we can clean up skeleton cache
+    // Look up localPath before removal so the realtime note + runtime cleanup
+    // below can reference the repo record.
     const repos = await listRepos();
     const toRemove = repos.find(r => r.id === body.id);
-    const removedTerminalBindings = toRemove?.localPath
-      ? removeRuntimeTerminalSessionsForRepoPath(toRemove.localPath)
-      : [];
 
-    await removeRepo(body.id);
-
-    // Clean up skeleton/chunk cache + stop polling for this repo
+    // Registry + SQLite links + lifecycle + terminal state + skeleton cache +
+    // polling all go through the shared removal flow (also used by project
+    // deletion). Ledger cleanup stays here.
+    const removed = await removeRepoFromPool(body.id);
     if (toRemove?.localPath) {
       await removeRepoPathFromProjects(toRemove.localPath);
-      removeRepoFromAllProjects(toRemove.id);
-      removeWorkspaceLifecycleRecordsForRepoPath(toRemove.localPath);
-      pruneTerminalStateForRepoPath(toRemove.localPath);
-      clearSkeletonCache(toRemove.localPath);
-      stopChangePolling(toRemove.localPath);
     }
 
     invalidateCommandCenterSnapshotCaches();
@@ -329,7 +319,7 @@ export async function DELETE(request: Request) {
       stoppedSessions: {
         targetedSessionCount: 0,
         stoppedSessionCount: 0,
-        removedTerminalBindings: removedTerminalBindings.length,
+        removedTerminalBindings: removed.removedTerminalBindings,
         cleanupPending: Boolean(toRemove),
       },
     });
