@@ -152,6 +152,9 @@ export interface OperatorDefaults {
   supervisorAutoEscalate: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
+  /** Opt-in: replay the repo's test command against a rebased branch in the
+   *  merge gate (in addition to typecheck). Default off — tests can be slow. */
+  mergeTestReplayEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: OrchestratorRuntime;
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
@@ -332,6 +335,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // existing Claude Code MAX plan — not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
+  mergeTestReplayEnabled: false,
   orchestratorModel: MODEL_IDS.orchestratorDefault,
   defaultDispatchRuntime: 'codex',
   codexWorkerEffort: 'adaptive',
@@ -438,6 +442,7 @@ interface StoredOperatorDefaults {
   supervisorAutoEscalate?: boolean;
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
+  mergeTestReplayEnabled?: boolean;
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchRuntimeExplicit?: boolean;
@@ -512,6 +517,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.promptCachingEnabled === 'boolean') {
     result.promptCachingEnabled = stored.promptCachingEnabled;
+  }
+  if (typeof stored.mergeTestReplayEnabled === 'boolean') {
+    result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
   if (typeof stored.orchestratorModel === 'string' && stored.orchestratorModel.trim()) {
     result.orchestratorModel = stored.orchestratorModel.trim();
@@ -667,6 +675,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
+    mergeTestReplayEnabled:
+      fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime,
     codexWorkerEffort:
@@ -714,6 +724,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
+    mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
     codexWorkerEffort:
@@ -823,6 +834,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.promptCachingEnabled !== undefined) {
     stored.promptCachingEnabled = Boolean(update.promptCachingEnabled);
+  }
+  if (update.mergeTestReplayEnabled !== undefined) {
+    stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }
   if (update.orchestratorModel !== undefined) {
     const trimmed = update.orchestratorModel.trim();
@@ -992,6 +1006,10 @@ export function resolveHealBotEnabledSync(): boolean {
 
 export function resolvePromptCachingEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.promptCachingEnabled;
+}
+
+export function resolveMergeTestReplayEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.mergeTestReplayEnabled;
 }
 
 export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
