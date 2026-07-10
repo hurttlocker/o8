@@ -1197,10 +1197,51 @@ if CommandLine.arguments.contains("--input-devices-json") {
     emitInputDevicesAndExit()
 }
 
-requestAuthorization { authorized in
-    guard authorized else { exit(1) }
-    DispatchQueue.main.async {
-        prepareAudioEngine()
+/// Explicitly request MICROPHONE access before anything touches the engine.
+///
+/// Under the disclaimed-responsibility spawn (#1534 v2) the helper is its own
+/// TCC client — and its mic state starts `notDetermined` on every machine
+/// where only the app identity was ever granted. CoreAudio does NOT reliably
+/// auto-prompt for a background helper's first input IO; it just delivers
+/// zero-filled buffers (the exact silent-capture the zero-fill watchdog
+/// flags). Same failure class this file already fixed for Speech Recognition
+/// ("left a fresh install permanently notDetermined → EMPTY transcripts") —
+/// the mic needs the same explicit ask. One system prompt ("o8 Speech
+/// Helper"), one Allow, own TCC row, real audio.
+func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized:
+        completion(true)
+    case .notDetermined:
+        emit("status", "microphone:requesting")
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            DispatchQueue.main.async {
+                emit("status", granted ? "microphone:granted" : "microphone:denied")
+                completion(granted)
+            }
+        }
+    default:
+        // denied / restricted — surface it loudly instead of recording zeros.
+        emit("status", "microphone:denied")
+        emitError(
+            "o8 Speech Helper has no microphone access. Enable it in System Settings → Privacy & Security → Microphone, then relaunch o8.",
+            sessionId: nil
+        )
+        completion(false)
+    }
+}
+
+requestMicrophoneAccess { micGranted in
+    // Even without the mic we keep booting: the daemon still answers
+    // status/permission queries, and the zero-fill watchdog + the error above
+    // tell the operator exactly what to fix — a hard exit here would just
+    // read as "dictation does nothing" again.
+    _ = micGranted
+    requestAuthorization { authorized in
+        guard authorized else { exit(1) }
+        DispatchQueue.main.async {
+            prepareAudioEngine()
+        }
     }
 }
 
