@@ -366,6 +366,13 @@ impl LiveRecognizer {
             ));
         }
 
+        // #1539: kill stale helpers BEFORE spawning ours. A zombie from a dead
+        // or replaced app instance holds the microphone open and garbles every
+        // capture the new helper makes (live incident 2026-07-10: one zombie
+        // survived two app swaps and poisoned 5h of testing). We have no child
+        // yet (guarded above), so any live speech_recognizer is a stray.
+        Self::kill_stale_helpers();
+
         let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper)?;
 
         // Read stderr in background for diagnostics
@@ -402,14 +409,26 @@ impl LiveRecognizer {
                                 text: evt.text,
                             },
                             "status" => {
-                                // Engine-health statuses must reach the PROD log
+                                // Diagnostic statuses must reach the PROD log
                                 // file (`log::` → tauri_plugin_log → o8.log);
                                 // `tracing::` goes to stdout, which a bundled
                                 // .app discards — #1534 was undiagnosable in the
                                 // field because every capture/paste breadcrumb
-                                // was tracing-only.
-                                if evt.text.starts_with("audio_engine") {
-                                    log::warn!("[stt] helper audio-engine health: {}", evt.text);
+                                // was tracing-only, and the 0.1.578 regression
+                                // hid again because the helper's boot-time
+                                // microphone:/speech_recognition: statuses were
+                                // never logged. Log every diagnostic prefix;
+                                // only the high-frequency session chatter
+                                // (listening/locale/on_device/input_device)
+                                // stays UI-only.
+                                const LOGGED_PREFIXES: [&str; 4] = [
+                                    "audio_engine",
+                                    "microphone:",
+                                    "speech_recognition:",
+                                    "recognizer",
+                                ];
+                                if LOGGED_PREFIXES.iter().any(|p| evt.text.starts_with(p)) {
+                                    log::warn!("[stt] helper health: {}", evt.text);
                                 }
                                 TranscriptEvent::Status {
                                     session_id: evt.session_id,
@@ -464,6 +483,38 @@ impl LiveRecognizer {
         );
 
         Ok(rx)
+    }
+
+    /// SIGKILL any `speech_recognizer` process owned by this user (#1539).
+    /// Only called when we have no child of our own (spawn_daemon guards), so
+    /// every match is a stray from a dead/replaced app instance. Best-effort:
+    /// a failure here must never block the spawn.
+    fn kill_stale_helpers() {
+        #[cfg(unix)]
+        {
+            // -f with an end-anchored regex, NOT -x with the bare name: the
+            // kernel truncates p_comm to 16 chars ("speech_recognize"), so an
+            // -x match on the full 17-char name silently finds nothing. The
+            // anchor also covers the dev build's target-triple-suffixed helper
+            // while excluding unrelated argv mentions of the word.
+            let Ok(out) = Command::new("pgrep")
+                .args(["-f", r"speech_recognizer(-[a-z0-9_-]+)?$"])
+                .output()
+            else {
+                return;
+            };
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let Ok(pid) = line.trim().parse::<i32>() else {
+                    continue;
+                };
+                log::warn!(
+                    "[stt] killing stale speech_recognizer helper (pid={pid}) before spawn (#1539)"
+                );
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
     }
 
     /// Spawn the helper, preferring the DISCLAIMED path on macOS.
