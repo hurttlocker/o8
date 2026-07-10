@@ -143,6 +143,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = "0.4"
 tauri-plugin-clerk = "0.1.1"
 tauri-plugin-http = "2.5.9"
+cpal = "0.17.1"
 
 # Shutdown safety net (issue #719). Both crates are already in the lock graph
 # transitively; promoting them to direct deps is zero binary cost. Used to
