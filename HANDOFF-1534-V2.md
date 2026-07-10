@@ -20,6 +20,10 @@ The third row is this PR — validated empirically against the exact shipped 0.1
 - `DaemonChild` enum wraps both spawn shapes behind `id()/poll()/kill_and_reap()`; `is_running`/`respawn`/`shutdown`/`Drop` semantics preserved 1:1 (SIGTERM grace → 3s → SIGKILL; stdin-EOF still quits the daemon).
 - Spawn path is logged via `log::` (`[stt] helper spawned with disclaimed TCC responsibility` / fallback warning) so the field evidence shows which shape is running.
 
+## Also in this PR: speak-selection dead under remote control (one-line fix)
+
+`wait_for_chord_release` polled CGEventSourceFlagsState(1) believing 1 = combined session state — 1 is actually kCGEventSourceStateHIDSystemState (hardware-only). Chords injected by Chrome Remote Desktop are synthetic and never appear in hardware state, so the poll returned "released" instantly and the synthetic Cmd+C merged with the still-held Ctrl+Shift → "no selection to speak" every time the operator drove the machine remotely (field log 04:40Z). Fixed to 0 (combined = hardware + synthetic). The similar constant in fn_hotkey's poll fallback is intentionally untouched (it only ever arms on hardware Fn, where hardware state is correct).
+
 ## UX note for review
 
 First dictation after this ships will raise ONE new macOS prompt: "o8 Speech Helper" wants to use the microphone (and possibly Speech Recognition). That is by design — the helper needs its own grant. Consider a release-note line. If the prompt is deemed unacceptable, the alternative is moving capture into the main app process (architecture change — the app's own mic attribution is healthy per tccd logs).
