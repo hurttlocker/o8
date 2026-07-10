@@ -3558,7 +3558,39 @@ mod stt_engine {
                         app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
-                    let paste_outcome = crate::paste::paste_text_with_status(&polished);
+                    // In-app delivery (#1542 slim-down + composer-focus fix):
+                    // when o8 itself is frontmost, a synthetic Cmd+V into our
+                    // own webview is fragile — the partials/dock windows can
+                    // shuffle first responder mid-session and the paste lands
+                    // nowhere (live incident 2026-07-10). Deliver through the
+                    // SAME fill path the in-window dictation uses instead:
+                    // DictationHost fills the sticky-registered composer, else
+                    // inserts at the focused editable, and only falls back to
+                    // a real Cmd+V (o8_debug_paste) if it has nowhere to put
+                    // the text. Fake keystrokes to ourselves are now a last
+                    // resort, not the default.
+                    let paste_outcome = if crate::paste::frontmost_is_o8() {
+                        let fill = serde_json::json!({
+                            "type": "system-fill",
+                            "origin": "system",
+                            "text": polished.clone(),
+                        });
+                        match app.emit("o8:stt-event", fill) {
+                            Ok(()) => {
+                                log::info!(
+                                    "[paste] outcome=filled-in-app chars={} (o8 frontmost — delivered via composer fill path)",
+                                    polished.len()
+                                );
+                                crate::paste::PasteOutcome::Pasted
+                            }
+                            Err(e) => {
+                                log::warn!("[paste] in-app fill emit failed ({e}); falling back to synthetic paste");
+                                crate::paste::paste_text_with_status(&polished)
+                            }
+                        }
+                    } else {
+                        crate::paste::paste_text_with_status(&polished)
+                    };
                     let paste_error = match &paste_outcome {
                         crate::paste::PasteOutcome::Failed(message) => Some(message.clone()),
                         crate::paste::PasteOutcome::ClipboardOnly => Some(

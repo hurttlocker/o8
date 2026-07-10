@@ -420,7 +420,7 @@ fn begin_system_dictation() {
     // `hud: true` so the /agent-partials page latches (it otherwise only latches
     // on `lane: agent`), deliver the start DIRECTLY to the HUD webview, and
     // re-assert/re-anchor the HUD — mirrors the agent-dictation start path.
-    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", false);
+    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", true);
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
@@ -580,7 +580,7 @@ fn begin_long_form_dictation() {
     // the user sees the waveform). Emit DIRECTLY to the dock window. The Fn
     // partials HUD is opt-in (`fn_hud_partials`, default OFF) — same treatment
     // as push-to-talk so long-form Fn dictation shows the bar when enabled.
-    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", false);
+    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", true);
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
