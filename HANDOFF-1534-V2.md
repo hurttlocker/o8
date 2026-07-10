@@ -1,3 +1,30 @@
+> **⚠️ HOLD MERGE — read this first (updated after 0.1.578 shipped).**
+> 0.1.578 (disclaimed spawn) did NOT fix capture: the helper still records
+> -91 dB silence and no permission prompt appears. Worse, my permission
+> diagnosis was WRONG. tccd receipts on the affected machine show the
+> disclaimed helper's `kTCCServiceMicrophone` resolves **Allowed**, and the
+> `kTCCServiceAudioCapture: Unknown (None)` verdict I flagged as the smoking
+> gun is **normal** — a Terminal-run ffmpeg capturing real audio at -28.8 dB
+> gets the identical verdict (control run, 2026-07-10 10:04Z).
+>
+> **The zero-fill is therefore NOT a TCC permission problem.** Root cause is
+> still OPEN. My earlier "disclaim spawn = real audio" validation was
+> confounded: it was spawned from python under Terminal (a responsible
+> process with healthy capture), not from o8.app.
+>
+> What is safe to merge here: the honest error message + the zero-fill/stall
+> watchdogs (they make the failure loud), and the speak-selection chord fix
+> (independent, verified reasoning). The disclaimed spawn itself is
+> behavior-neutral-with-fallback but is NOT the cure — do not ship it as one.
+>
+> Next investigative step (not yet done): why does the SAME signed helper
+> binary capture real audio when its parent is Terminal, and zeros when its
+> parent is o8.app, with mic Allowed in both cases? Suspects: o8's own
+> concurrent audio clients (rodio sound-cue OutputStream, TTS sink) colliding
+> with the input AUHAL on Intel; or an audio-session/device-binding issue
+> specific to the app process. Test by booting o8 with the sound worker and
+> TTS disabled entirely and measuring WAV levels.
+
 # fix(voice): spawn speech helper with disclaimed TCC responsibility — cures zero-filled Intel capture (#1534 follow-up)
 
 **Branch:** `fix/intel-mic-tcc-disclaim` → `main`. Follow-up to #1535 (which fixed the engine cold-restart stall and added the capture watchdogs). Refs #1534.
