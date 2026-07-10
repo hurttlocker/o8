@@ -18,7 +18,7 @@ import {
   setLaneStatus,
   updateLane,
 } from '@/lib/lane/registry';
-import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
+import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { emitProductEvent } from '@/lib/analytics/server';
@@ -364,12 +364,12 @@ async function readPacketTypecheckRetries(
   }
 }
 
-async function handlePostRebaseTypecheckFailure(
+async function handlePostRebaseVerifyFailure(
   input: WorktreeSideMergeInput,
-  output: string,
+  failure: { kind: 'typecheck' | 'tests'; output: string },
 ): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
-  const truncatedOutput = truncateForBlocker(output);
+  const truncatedOutput = truncateForBlocker(failure.output);
   // The retry budget lives ON the packet, not the lane: layer-1 auto-rerun
   // archives this lane and dispatches a brand-new one, so a per-lane count is
   // always 0 again on the retry's own merge attempt — which silently defeated
@@ -385,8 +385,8 @@ async function handlePostRebaseTypecheckFailure(
   if (priorAutoRetries >= 1 || !lane.packetId) {
     const escalationReason = priorAutoRetries >= 1 ? 'retry_exhausted' : 'no_packet';
     const blockedReason = !lane.packetId
-      ? `Typecheck failed after rebase onto ${lane.baseBranch}. No packetId on lane, cannot auto-rerun. Orchestrator decision needed (steer / redispatch / abandon).\n\n${truncatedOutput}`
-      : `Typecheck failed after 1 auto-retry. Orchestrator decision needed (steer / redispatch / abandon).\n\n${truncatedOutput}`;
+      ? `${failure.kind === 'tests' ? 'Tests' : 'Typecheck'} failed after rebase onto ${lane.baseBranch}. No packetId on lane, cannot auto-rerun. Orchestrator decision needed (steer / redispatch / abandon).\n\n${truncatedOutput}`
+      : `${failure.kind === 'tests' ? 'Tests' : 'Typecheck'} failed after 1 auto-retry. Orchestrator decision needed (steer / redispatch / abandon).\n\n${truncatedOutput}`;
     appendEvent(command.laneId, 'typecheck_escalation', 'system', {
       reason: escalationReason,
       priorAutoRetries,
@@ -439,7 +439,7 @@ async function handlePostRebaseTypecheckFailure(
   // Fire-and-forget the redispatch. The operator's merge call returns
   // immediately; the new lane spins up async. If the call fails outright
   // we promote to awaiting_orchestrator so nothing silently stalls.
-  const feedback = formatTypecheckFeedback(lane, output);
+  const feedback = formatTypecheckFeedback(lane, failure.output);
   void (async () => {
     try {
       // Guard the reset_packet race (#1257): the operator may have held this
@@ -545,9 +545,9 @@ async function retryBaseAdvancedAfterRebase(
       throw error;
     }
 
-    const typecheck = await runLaneRebaseTypecheck({ cwd: opts.worktreePath, actualBranch: opts.actualBranch, logPrefix: 'lane-merge' });
-    if (!typecheck.ok) {
-      return handlePostRebaseTypecheckFailure(input, typecheck.output);
+    const verify = await runLaneRebaseVerify({ cwd: opts.worktreePath, actualBranch: opts.actualBranch, logPrefix: 'lane-merge' });
+    if (!verify.ok) {
+      return handlePostRebaseVerifyFailure(input, verify);
     }
 
     await fetchWorkerHeadIntoMainRepo(lane.repoPath, opts.worktreePath, opts.actualBranch, opts.integrationRef);
@@ -705,18 +705,18 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       throw error;
     }
 
-    const typecheck = await runLaneRebaseTypecheck({
+    const verify = await runLaneRebaseVerify({
       cwd: worktreePath,
       actualBranch,
       logPrefix: 'lane-merge',
     });
-    if (!typecheck.ok) {
+    if (!verify.ok) {
       // #1108 — Layered escalation. Layer 1 fires an auto-rerun_with_feedback
       // (capped at 1 per lane lifecycle); layer 2 promotes to
       // awaiting_orchestrator so o8_status surfaces the blocker. Layers 3-5
       // (steer warm session / fresh redispatch / human approval) are owned
       // by the orchestrator and not handled in this file.
-      return handlePostRebaseTypecheckFailure(input, typecheck.output);
+      return handlePostRebaseVerifyFailure(input, verify);
     }
 
     if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(worktreePath, lane.label);
