@@ -25,9 +25,9 @@ pub mod polish;
 pub mod whisper;
 
 use serde::Deserialize;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 
 /// Phrase-replacement vocabulary + post-pass applier.
@@ -202,14 +202,107 @@ pub enum TranscriptEvent {
     Ready,
 }
 
+/// Poll result for the daemon child — the tri-state the lifecycle code needs
+/// (`try_wait` semantics) expressed over both spawn paths.
+enum ChildPoll {
+    Alive,
+    Exited(String),
+    Gone,
+}
+
+/// A helper spawned via raw `posix_spawn` with TCC responsibility DISCLAIMED
+/// (see `spawn_disclaimed`). Only the pid is held — stdio pipes are taken at
+/// spawn time. `reaped` guards double-waitpid.
+#[cfg(target_os = "macos")]
+struct DisclaimedChild {
+    pid: libc::pid_t,
+    reaped: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl DisclaimedChild {
+    fn poll(&mut self) -> ChildPoll {
+        if self.reaped {
+            return ChildPoll::Gone;
+        }
+        let mut status: libc::c_int = 0;
+        match unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) } {
+            0 => ChildPoll::Alive,
+            pid if pid == self.pid => {
+                self.reaped = true;
+                ChildPoll::Exited(format!("status {status}"))
+            }
+            _ => {
+                self.reaped = true;
+                ChildPoll::Gone
+            }
+        }
+    }
+
+    fn kill_and_reap(&mut self) {
+        if self.reaped {
+            return;
+        }
+        unsafe {
+            libc::kill(self.pid, libc::SIGKILL);
+            let mut status: libc::c_int = 0;
+            libc::waitpid(self.pid, &mut status, 0);
+        }
+        self.reaped = true;
+    }
+}
+
+/// The spawned helper process, over either spawn path: `Std` = classic
+/// `std::process::Command` (non-macOS, and the macOS fallback), `Disclaimed` =
+/// raw posix_spawn with TCC responsibility disclaimed (the macOS primary path
+/// — the fix for #1534's zero-filled capture).
+enum DaemonChild {
+    Std(Child),
+    #[cfg(target_os = "macos")]
+    Disclaimed(DisclaimedChild),
+}
+
+impl DaemonChild {
+    fn id(&self) -> u32 {
+        match self {
+            Self::Std(c) => c.id(),
+            #[cfg(target_os = "macos")]
+            Self::Disclaimed(d) => d.pid as u32,
+        }
+    }
+
+    fn poll(&mut self) -> ChildPoll {
+        match self {
+            Self::Std(c) => match c.try_wait() {
+                Ok(None) => ChildPoll::Alive,
+                Ok(Some(status)) => ChildPoll::Exited(status.to_string()),
+                Err(_) => ChildPoll::Gone,
+            },
+            #[cfg(target_os = "macos")]
+            Self::Disclaimed(d) => d.poll(),
+        }
+    }
+
+    fn kill_and_reap(&mut self) {
+        match self {
+            Self::Std(c) => {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            #[cfg(target_os = "macos")]
+            Self::Disclaimed(d) => d.kill_and_reap(),
+        }
+    }
+}
+
 /// Manages the lifecycle of the speech recognition subprocess.
 ///
 /// The child is spawned once via `spawn_daemon()` and then reused for
 /// every dictation session. `start()` / `stop()` are cheap stdin writes.
 #[derive(Default)]
 pub struct LiveRecognizer {
-    child: Option<Child>,
-    stdin: Option<ChildStdin>,
+    child: Option<DaemonChild>,
+    stdin: Option<Box<dyn Write + Send>>,
     locale: Option<String>,
     on_device: Option<bool>,
     input_device_uid: Option<String>,
@@ -273,25 +366,10 @@ impl LiveRecognizer {
             ));
         }
 
-        let mut child = Command::new(&helper)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn speech_recognizer: {e}"))?;
-
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Failed to capture speech_recognizer stdin".to_string())?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Failed to capture speech_recognizer stdout".to_string())?;
+        let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper)?;
 
         // Read stderr in background for diagnostics
-        if let Some(stderr) = child.stderr.take() {
+        {
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().map_while(Result::ok) {
@@ -386,6 +464,181 @@ impl LiveRecognizer {
         );
 
         Ok(rx)
+    }
+
+    /// Spawn the helper, preferring the DISCLAIMED path on macOS.
+    ///
+    /// Why (#1534, the clean-install Intel killer): a helper spawned normally
+    /// inherits the app as its TCC "responsible process". On the affected
+    /// machines tccd REPORTS the mic as authorized for that chain, yet
+    /// CoreAudio delivers all-zero sample buffers to the helper — dictation
+    /// records pure silence (-91 dB WAVs) and every transcript finalizes
+    /// empty. The SAME binary run so that responsibility does NOT resolve to
+    /// the app captures perfectly (verified live on the Intel MacBook,
+    /// including a posix_spawn+disclaim run of the exact shipped binary).
+    ///
+    /// `responsibility_spawnattrs_setdisclaim` makes the helper its OWN
+    /// responsible process: macOS prompts once for "o8 Speech Helper"
+    /// (usage strings ship in its embedded Info.plist) and creates a TCC
+    /// entry keyed to the helper itself — the attribution shape that
+    /// demonstrably captures real audio. Any failure on this path falls back
+    /// to the classic Command spawn (today's behavior), so dictation can
+    /// never regress below the status quo.
+    #[allow(clippy::type_complexity)]
+    fn spawn_helper(
+        helper: &std::path::Path,
+    ) -> Result<
+        (
+            DaemonChild,
+            Box<dyn Write + Send>,
+            Box<dyn Read + Send>,
+            Box<dyn Read + Send>,
+        ),
+        String,
+    > {
+        #[cfg(target_os = "macos")]
+        match Self::spawn_disclaimed(helper) {
+            Ok((child, stdin, stdout, stderr)) => {
+                log::info!(
+                    "[stt] helper spawned with disclaimed TCC responsibility (pid={})",
+                    child.pid
+                );
+                return Ok((
+                    DaemonChild::Disclaimed(child),
+                    Box::new(stdin),
+                    Box::new(stdout),
+                    Box::new(stderr),
+                ));
+            }
+            Err(e) => {
+                log::warn!(
+                    "[stt] disclaimed spawn failed ({e}) — falling back to inherited-responsibility spawn"
+                );
+            }
+        }
+
+        let mut child = Command::new(helper)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn speech_recognizer: {e}"))?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Failed to capture speech_recognizer stdin".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Failed to capture speech_recognizer stdout".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Failed to capture speech_recognizer stderr".to_string())?;
+
+        Ok((
+            DaemonChild::Std(child),
+            Box::new(stdin),
+            Box::new(stdout),
+            Box::new(stderr),
+        ))
+    }
+
+    /// Raw `posix_spawn` of the helper with TCC responsibility disclaimed and
+    /// stdio wired to fresh pipes. See `spawn_helper` for the why.
+    #[cfg(target_os = "macos")]
+    fn spawn_disclaimed(
+        helper: &std::path::Path,
+    ) -> Result<(DisclaimedChild, std::fs::File, std::fs::File, std::fs::File), String> {
+        use std::os::fd::FromRawFd;
+        use std::os::unix::ffi::OsStrExt;
+
+        // Private-but-stable libSystem API (the mechanism Chromium and other
+        // multi-process apps use for exactly this): child becomes its own
+        // TCC responsible process instead of inheriting ours.
+        extern "C" {
+            fn responsibility_spawnattrs_setdisclaim(
+                attr: *mut libc::posix_spawnattr_t,
+                disclaim: libc::c_int,
+            ) -> libc::c_int;
+            fn _NSGetEnviron() -> *mut *mut *mut libc::c_char;
+        }
+
+        let path = std::ffi::CString::new(helper.as_os_str().as_bytes())
+            .map_err(|_| "helper path contains NUL".to_string())?;
+
+        // Three pipes: [read, write] each. Parent keeps stdin-write,
+        // stdout-read, stderr-read; the child ends are dup2'd onto 0/1/2 and
+        // every raw pipe fd is closed in the child.
+        let mut fds_in = [0 as libc::c_int; 2];
+        let mut fds_out = [0 as libc::c_int; 2];
+        let mut fds_err = [0 as libc::c_int; 2];
+        unsafe {
+            if libc::pipe(fds_in.as_mut_ptr()) != 0
+                || libc::pipe(fds_out.as_mut_ptr()) != 0
+                || libc::pipe(fds_err.as_mut_ptr()) != 0
+            {
+                return Err("pipe() failed".to_string());
+            }
+        }
+        let close_all = |fds: &[libc::c_int]| {
+            for fd in fds {
+                unsafe { libc::close(*fd) };
+            }
+        };
+
+        unsafe {
+            let mut attr: libc::posix_spawnattr_t = std::mem::zeroed();
+            if libc::posix_spawnattr_init(&mut attr) != 0 {
+                close_all(&[fds_in[0], fds_in[1], fds_out[0], fds_out[1], fds_err[0], fds_err[1]]);
+                return Err("posix_spawnattr_init failed".to_string());
+            }
+            if responsibility_spawnattrs_setdisclaim(&mut attr, 1) != 0 {
+                libc::posix_spawnattr_destroy(&mut attr);
+                close_all(&[fds_in[0], fds_in[1], fds_out[0], fds_out[1], fds_err[0], fds_err[1]]);
+                return Err("responsibility_spawnattrs_setdisclaim failed".to_string());
+            }
+
+            let mut fa: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+            if libc::posix_spawn_file_actions_init(&mut fa) != 0 {
+                libc::posix_spawnattr_destroy(&mut attr);
+                close_all(&[fds_in[0], fds_in[1], fds_out[0], fds_out[1], fds_err[0], fds_err[1]]);
+                return Err("posix_spawn_file_actions_init failed".to_string());
+            }
+            libc::posix_spawn_file_actions_adddup2(&mut fa, fds_in[0], 0);
+            libc::posix_spawn_file_actions_adddup2(&mut fa, fds_out[1], 1);
+            libc::posix_spawn_file_actions_adddup2(&mut fa, fds_err[1], 2);
+            for fd in [fds_in[0], fds_in[1], fds_out[0], fds_out[1], fds_err[0], fds_err[1]] {
+                libc::posix_spawn_file_actions_addclose(&mut fa, fd);
+            }
+
+            let argv: [*mut libc::c_char; 2] = [path.as_ptr() as *mut _, std::ptr::null_mut()];
+            let envp = *_NSGetEnviron();
+
+            let mut pid: libc::pid_t = 0;
+            let rc = libc::posix_spawn(&mut pid, path.as_ptr(), &fa, &attr, argv.as_ptr(), envp);
+
+            libc::posix_spawn_file_actions_destroy(&mut fa);
+            libc::posix_spawnattr_destroy(&mut attr);
+
+            // Parent closes the child-side ends regardless of outcome.
+            libc::close(fds_in[0]);
+            libc::close(fds_out[1]);
+            libc::close(fds_err[1]);
+
+            if rc != 0 {
+                close_all(&[fds_in[1], fds_out[0], fds_err[0]]);
+                return Err(format!("posix_spawn failed (errno {rc})"));
+            }
+
+            Ok((
+                DisclaimedChild { pid, reaped: false },
+                std::fs::File::from_raw_fd(fds_in[1]),
+                std::fs::File::from_raw_fd(fds_out[0]),
+                std::fs::File::from_raw_fd(fds_err[0]),
+            ))
+        }
     }
 
     /// Begin a new dictation session by writing `start\n` to the daemon.
@@ -493,7 +746,7 @@ impl LiveRecognizer {
     /// Whether the daemon subprocess is currently alive.
     pub fn is_running(&mut self) -> bool {
         if let Some(ref mut child) = self.child {
-            matches!(child.try_wait(), Ok(None))
+            matches!(child.poll(), ChildPoll::Alive)
         } else {
             false
         }
@@ -512,10 +765,9 @@ impl LiveRecognizer {
         }
         if let Some(mut child) = self.child.take() {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            if let Ok(None) = child.try_wait() {
-                let _ = child.kill();
+            if matches!(child.poll(), ChildPoll::Alive) {
+                child.kill_and_reap();
             }
-            let _ = child.wait();
         }
         self.locale = None;
         self.on_device = None;
@@ -553,10 +805,9 @@ impl LiveRecognizer {
 
         if let Some(mut child) = self.child.take() {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            if let Ok(None) = child.try_wait() {
-                let _ = child.kill();
+            if matches!(child.poll(), ChildPoll::Alive) {
+                child.kill_and_reap();
             }
-            let _ = child.wait();
         }
 
         self.locale = None;
@@ -585,7 +836,7 @@ impl Drop for LiveRecognizer {
             std::thread::sleep(std::time::Duration::from_millis(200));
 
             // If still alive, send SIGTERM.
-            if let Ok(None) = child.try_wait() {
+            if matches!(child.poll(), ChildPoll::Alive) {
                 #[cfg(unix)]
                 unsafe {
                     libc::kill(pid as i32, libc::SIGTERM);
@@ -595,21 +846,20 @@ impl Drop for LiveRecognizer {
             // Wait for graceful exit (up to 3s), then force kill.
             let start = std::time::Instant::now();
             loop {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
+                match child.poll() {
+                    ChildPoll::Exited(status) => {
                         tracing::info!("STT: helper exited with {status}");
                         break;
                     }
-                    Ok(None) => {
+                    ChildPoll::Alive => {
                         if start.elapsed() > std::time::Duration::from_secs(3) {
                             tracing::warn!("STT: helper did not exit in time, killing");
-                            let _ = child.kill();
-                            let _ = child.wait();
+                            child.kill_and_reap();
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(50));
                     }
-                    Err(_) => break,
+                    ChildPoll::Gone => break,
                 }
             }
         }
