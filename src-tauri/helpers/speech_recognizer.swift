@@ -73,10 +73,9 @@ var tapBufferCount: UInt64 = 0
 var engineNeedsRebuild = false
 /// Peak |sample| seen by the tap since the current session's gate opened.
 /// Distinguishes "no callbacks" (stalled engine — the watchdog rebuilds) from
-/// "callbacks full of digital zeros" — macOS quietly zero-fills the input for
-/// a client whose TCC/signing attribution it dislikes while reporting the mic
-/// as authorized (the -91 dB clean-install failure, #1534). Same benign-race
-/// caveat as tapBufferCount.
+/// "callbacks full of digital zeros" (the -91 dB Intel failure, #1534 — cause
+/// still open; NOT TCC: the helper's Microphone right resolves Allowed on the
+/// affected machine). Same benign-race caveat as tapBufferCount.
 var sessionPeakSample: Float = 0
 // When true, after emitting final and audio_file we exit() instead of going idle.
 var isQuitting = false
@@ -1162,10 +1161,12 @@ func handleStart(sessionId: UInt64) {
         }
     }
 
-    // Zero-FILL detector (#1534, the clean-install killer): buffers flow but
-    // every sample is EXACTLY 0.0 — macOS zero-fills the input for a client
-    // whose TCC/signing attribution it dislikes while still reporting the mic
-    // as authorized. A real mic never sits at exact digital zero (thermal
+    // Zero-FILL detector (#1534): buffers flow but every sample is EXACTLY
+    // 0.0. Cause is NOT TCC — measured on the affected Intel machine, the
+    // helper's kTCCServiceMicrophone resolves 'Allowed' and the 'Unknown'
+    // kTCCServiceAudioCapture verdict is normal (a Terminal ffmpeg capturing
+    // real audio gets the same verdict). Root cause still open; this detector
+    // exists so the failure is LOUD instead of a silent empty transcript. A real mic never sits at exact digital zero (thermal
     // noise floor keeps the LSBs moving), so peak == 0 after 1.5s of live
     // buffers is conclusive. Surface it as an error — the OLD behavior was a
     // silent empty transcript that looked like "dictation just doesn't work".
@@ -1176,7 +1177,7 @@ func handleStart(sessionId: UInt64) {
               sessionPeakSample == 0 else { return }
         emit("status", "audio_engine_zero_fill", sessionId: sessionId)
         emitError(
-            "macOS is delivering silent audio to o8 (permission attribution). Toggle o8 OFF and back ON in System Settings → Privacy & Security → Microphone, then relaunch o8.",
+            "The microphone is delivering silent audio. Quit and reopen o8; if it persists, restart the Mac.",
             sessionId: sessionId
         )
     }
