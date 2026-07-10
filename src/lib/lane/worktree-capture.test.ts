@@ -94,4 +94,26 @@ describe('captureWorktreeState', () => {
     expect(await captureWorktreeState(null, 'lane-x')).toEqual({ captured: false });
     expect(await captureWorktreeState('   ', 'lane-x')).toEqual({ captured: false });
   });
+
+  it('banks the ref into the main repo so it survives clone teardown', async () => {
+    // Mirror the apfs-cow-clone isolation: the dispatch worktree is a full
+    // local clone whose refs die with rmSync at teardown.
+    const mainRepo = initRepo();
+    const clone = mkdtempSync(join(tmpdir(), 'o8-capture-clone-'));
+    tempDirs.push(clone);
+    execFileSync('git', ['clone', '-q', '--local', mainRepo, clone], { encoding: 'utf8' });
+    git(clone, ['config', 'user.email', 'agent@o8.dev']);
+    git(clone, ['config', 'user.name', 'o8 agent']);
+    writeFileSync(join(clone, 'uncommitted.ts'), 'export const w = 5;\n');
+
+    const result = await captureWorktreeState(clone, 'lane-clone', mainRepo);
+    expect(result.captured).toBe(true);
+
+    rmSync(clone, { recursive: true, force: true });
+
+    // The snapshot must be resolvable from the MAIN repo after the clone is gone.
+    expect(git(mainRepo, ['rev-parse', result.ref!])).toBe(result.sha);
+    const files = git(mainRepo, ['ls-tree', '-r', '--name-only', result.sha!]).split('\n');
+    expect(files).toContain('uncommitted.ts');
+  });
 });

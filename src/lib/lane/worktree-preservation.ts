@@ -65,7 +65,7 @@ export async function preserveLaneWorktreeHead(
   // Capture the raw working state to an out-of-band ref BEFORE any commit logic
   // runs, so recovery never depends on the agent (or a blind amend) having
   // committed correctly — the worktree-amend false-landing trap.
-  const capture = await captureWorktreeState(worktreePath, lane.id);
+  const capture = await captureWorktreeState(worktreePath, lane.id, lane.repoPath);
 
   const autoCommitted = await autoCommitCompletionWorktree(worktreePath);
   const baseBranch = lane.baseBranch?.trim() || 'main';

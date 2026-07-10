@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -58,6 +58,7 @@ async function isDirty(worktreePath: string): Promise<boolean> {
 export async function captureWorktreeState(
   worktreePath: string | null | undefined,
   laneId: string,
+  repoPath?: string | null,
 ): Promise<WorktreeCapture> {
   const wt = worktreePath?.trim();
   if (!wt) return { captured: false };
@@ -66,30 +67,53 @@ export async function captureWorktreeState(
     if (!(await isDirty(wt))) return { captured: false };
 
     // Throwaway index so `git add -A` never mutates the real index.
-    const tmpIndex = path.join(mkdtempSync(path.join(tmpdir(), 'o8-capture-')), 'index');
-    const env = { ...CAPTURE_IDENTITY, GIT_INDEX_FILE: tmpIndex };
+    const tmpIndexDir = mkdtempSync(path.join(tmpdir(), 'o8-capture-'));
+    const env = { ...CAPTURE_IDENTITY, GIT_INDEX_FILE: path.join(tmpIndexDir, 'index') };
 
-    await git(wt, ['add', '-A'], env);
-    const tree = (await git(wt, ['write-tree'], env)).stdout.trim();
-    if (!tree) return { captured: false };
-
-    // Parent on HEAD when it exists; fresh repos with no commits capture as a
-    // root commit instead of failing.
-    let parentArgs: string[] = [];
+    let sha = '';
     try {
-      const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-      if (head) parentArgs = ['-p', head];
-    } catch {
-      // no HEAD yet
-    }
+      await git(wt, ['add', '-A'], env);
+      const tree = (await git(wt, ['write-tree'], env)).stdout.trim();
+      if (!tree) return { captured: false };
 
-    const sha = (
-      await git(wt, ['commit-tree', tree, ...parentArgs, '-m', `o8-capture: ${laneId}`], env)
-    ).stdout.trim();
+      // Parent on HEAD when it exists; fresh repos with no commits capture as a
+      // root commit instead of failing.
+      let parentArgs: string[] = [];
+      try {
+        const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+        if (head) parentArgs = ['-p', head];
+      } catch {
+        // no HEAD yet
+      }
+
+      sha = (
+        await git(wt, ['commit-tree', tree, ...parentArgs, '-m', `o8-capture: ${laneId}`], env)
+      ).stdout.trim();
+    } finally {
+      rmSync(tmpIndexDir, { recursive: true, force: true });
+    }
     if (!sha) return { captured: false };
 
     const ref = `refs/o8-capture/${captureSafeId(laneId)}`;
     await git(wt, ['update-ref', ref, sha]);
+
+    // Bank the ref into the main repo when the worktree is a CLONE
+    // (apfs-cow-clone isolation): the clone's refs die with rmSync at teardown,
+    // and teardown is exactly when this snapshot matters. Mirrors
+    // preserveHeadRef's fetch-from-clone pattern. Best-effort — an in-clone
+    // capture is still better than none.
+    const repo = repoPath?.trim();
+    if (repo && path.resolve(repo) !== path.resolve(wt)) {
+      try {
+        await git(repo, ['fetch', wt, `+${ref}:${ref}`]);
+      } catch (error) {
+        console.warn(
+          `[worktree-capture] Could not bank ${ref} into ${repo}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
     return { captured: true, ref, sha };
   } catch (error) {
     console.warn(
