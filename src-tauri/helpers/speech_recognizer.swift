@@ -1182,6 +1182,32 @@ func handleStart(sessionId: UInt64) {
     }
 }
 
+/// Ensure MICROPHONE authorization on the daemon path. Under the disclaimed
+/// spawn (#1534 v2) the helper is its OWN TCC client: the app's mic grant no
+/// longer covers it, and CoreAudio never prompts on behalf of an
+/// AVAudioEngine/HAL client — an unauthorized client silently receives
+/// exact-zero buffers. That was the v0.1.578 field failure: disclaim ran,
+/// no prompt appeared, no TCC entry was created, and capture stayed silent.
+/// Explicitly requesting access here makes tccd present the one-time
+/// "o8 Speech Helper" prompt (usage strings ship in the embedded
+/// __info_plist) and key the grant to the helper itself — the same thing
+/// Chromium helpers do at startup.
+func ensureMicrophoneAuthorization(completion: @escaping (Bool) -> Void) {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized:
+        completion(true)
+    case .notDetermined:
+        emit("status", "microphone:requesting")
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            DispatchQueue.main.async { completion(granted) }
+        }
+    case .denied, .restricted:
+        completion(false)
+    @unknown default:
+        completion(false)
+    }
+}
+
 // MARK: - Main
 
 if CommandLine.arguments.contains("--permissions-json") {
@@ -1200,7 +1226,15 @@ if CommandLine.arguments.contains("--input-devices-json") {
 requestAuthorization { authorized in
     guard authorized else { exit(1) }
     DispatchQueue.main.async {
-        prepareAudioEngine()
+        ensureMicrophoneAuthorization { micGranted in
+            if !micGranted {
+                emit("status", "microphone:denied")
+                emitError(
+                    "o8 Speech Helper has no microphone access. Enable 'o8 Speech Helper' in System Settings → Privacy & Security → Microphone, then relaunch o8."
+                )
+            }
+            prepareAudioEngine()
+        }
     }
 }
 
