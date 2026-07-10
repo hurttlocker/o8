@@ -3512,7 +3512,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.573"
+version = "0.1.577"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -6394,6 +6394,7 @@ dependencies = [
  "image 0.24.9",
  "interprocess",
  "log",
+ "parking_lot",
  "serde",
  "serde_json",
  "subtle",
