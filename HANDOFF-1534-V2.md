@@ -17,13 +17,33 @@
 > (independent, verified reasoning). The disclaimed spawn itself is
 > behavior-neutral-with-fallback but is NOT the cure — do not ship it as one.
 >
-> Next investigative step (not yet done): why does the SAME signed helper
-> binary capture real audio when its parent is Terminal, and zeros when its
-> parent is o8.app, with mic Allowed in both cases? Suspects: o8's own
-> concurrent audio clients (rodio sound-cue OutputStream, TTS sink) colliding
-> with the input AUHAL on Intel; or an audio-session/device-binding issue
-> specific to the app process. Test by booting o8 with the sound worker and
-> TTS disabled entirely and measuring WAV levels.
+> **A/B evidence (2026-07-10 10:20Z, Intel MacBook, back-to-back):**
+> | Helper | Spawned by | Result |
+> |---|---|---|
+> | shipped 0.1.576 (pre-fix) | Terminal | **no WAV at all** — the cold-start stall |
+> | this branch's helper | Terminal | **-17.9 dB, perfect transcript**, zero health events |
+> | this branch's helper | **o8.app** | **-91 dB zeros** + rebuild churn |
+>
+> So: the helper is correct, the mic is correct, TCC is correct. Capture only
+> dies when **o8.app is the parent**. The engine-recreation fix genuinely
+> repairs the stall (row 1 → row 2). The zero-fill is an APP-PROCESS
+> phenomenon and it predates this branch (a -91 dB WAV was captured from the
+> stock 0.1.576 app before any helper swap).
+>
+> **Next experiment (decisive, not yet run — needs a build):** boot o8 with
+> `sound::spawn_worker()` and TTS init disabled, and with whatever opens an
+> audio INPUT client in the app process (tccd shows `ai.o8.desktop` itself
+> requesting kTCCServiceMicrophone at 09:49:13Z — why does the APP need the
+> mic if the helper does the capture?). Measure the helper's WAV level. If
+> levels come back, the app's own CoreAudio client is starving the helper's
+> input AUHAL on Intel — the fix is to stop opening it, or to move capture
+> fully into one process.
+>
+> **Also note:** the config-change observer this branch adds fires during its
+> own rebuild in-app (`config_changed_rebuilding` → `stalled_rebuilding` →
+> `zero_fill` inside 2s, 13:54:42-44Z). It does not reproduce standalone, but
+> it should be fenced (ignore notifications while a rebuild is in flight)
+> before this lands, regardless of the root cause.
 
 # fix(voice): spawn speech helper with disclaimed TCC responsibility — cures zero-filled Intel capture (#1534 follow-up)
 
