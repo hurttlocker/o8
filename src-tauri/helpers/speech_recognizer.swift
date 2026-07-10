@@ -73,10 +73,9 @@ var tapBufferCount: UInt64 = 0
 var engineNeedsRebuild = false
 /// Peak |sample| seen by the tap since the current session's gate opened.
 /// Distinguishes "no callbacks" (stalled engine — the watchdog rebuilds) from
-/// "callbacks full of digital zeros" — macOS quietly zero-fills the input for
-/// a client whose TCC/signing attribution it dislikes while reporting the mic
-/// as authorized (the -91 dB clean-install failure, #1534). Same benign-race
-/// caveat as tapBufferCount.
+/// "callbacks full of digital zeros" (the -91 dB Intel failure, #1534 — cause
+/// still open; NOT TCC: the helper's Microphone right resolves Allowed on the
+/// affected machine). Same benign-race caveat as tapBufferCount.
 var sessionPeakSample: Float = 0
 // When true, after emitting final and audio_file we exit() instead of going idle.
 var isQuitting = false
@@ -92,6 +91,17 @@ var pendingStartSessionId: UInt64?
 var currentLocaleIdentifier = "en-US"
 var pendingLocaleIdentifier: String?
 var requiresOnDeviceRecognition = false
+/// Flipped when Apple's SERVER recognition fails with kAFAssistantErrorDomain
+/// 203 ("Retry" — observed live 2026-07-10 as 'Quota limit reached for
+/// resource: speech_api, actor_type: user'): the server is refusing this
+/// user and every future server request in this daemon's lifetime fails the
+/// same way. When the machine supports on-device recognition, flip to it for
+/// the rest of the run — no server, no quota (harness-verified on the Intel
+/// machine). Re-probes the server naturally on next daemon boot.
+var onDeviceFallbackActive = false
+/// One actionable error per daemon lifetime when 203 hits and on-device
+/// is NOT available — never a silent apple=0 again.
+var quotaErrorSurfaced = false
 var appleSpeechRecognitionEnabled = false
 var selectedInputDeviceUID: String?
 // Empty string means "switch back to system default"; nil means no pending change.
@@ -100,6 +110,40 @@ var audioTapInstalled = false
 
 // Flush stdout after every write
 setbuf(stdout, nil)
+
+// ── Parent-death watchdog (#1539) ───────────────────────────────────────────
+// stdin-EOF is the normal "parent died" signal, but it is handled by
+// dispatching handleQuit to the MAIN queue — a helper whose main runloop is
+// wedged (mid-AVAudioEngine call) never runs it and lives on as a zombie that
+// contends for the microphone with every future helper (live incident
+// 2026-07-10: pid 2329 survived two app swaps and garbled 5h of captures).
+// Poll the one signal that cannot wedge: when the parent dies we are
+// reparented to launchd (ppid 1) — exit directly from this thread, no queues.
+Thread.detachNewThread {
+    while true {
+        Thread.sleep(forTimeInterval: 2.0)
+        if getppid() == 1 {
+            FileHandle.standardError.write(Data("[watchdog] parent died — exiting\n".utf8))
+            exit(0)
+        }
+    }
+}
+
+// ── Main-process capture mode (#1540) ───────────────────────────────────────
+// macOS 15.7.8 broke audio delivery to app-SPAWNED helpers on Intel Sequoia:
+// this process's own AVAudioEngine receives silence/garbage regardless of TCC
+// state, while capture in the MAIN app process still works (the composer
+// path never broke). With `--audio-fifo <path>` the parent app owns the mic
+// and streams 16kHz mono f32 PCM down the FIFO; this helper keeps
+// SFSpeechRecognizer + the Whisper WAV, fed from the pipe. No AVAudioEngine
+// is created in this mode — the entire stall/rebuild/zero-fill class is
+// unreachable.
+let audioFifoPath: String? = {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--audio-fifo"), i + 1 < args.count else { return nil }
+    return args[i + 1]
+}()
+var audioFifoMode: Bool { audioFifoPath != nil }
 
 // MARK: - Output helpers
 
@@ -397,10 +441,29 @@ func configureRecognizer(localeIdentifier: String, sessionId: UInt64? = nil) -> 
         }
     }
 
+    rec.delegate = recognizerAvailabilityDelegate
+    var onDevice = false
+    if #available(macOS 13.0, *) {
+        onDevice = rec.supportsOnDeviceRecognition
+    }
+    emit(
+        "status",
+        "recognizer_configured:\(normalized):available=\(rec.isAvailable):onDevice=\(onDevice):auth=\(SFSpeechRecognizer.authorizationStatus().rawValue)"
+    )
     recognizer = rec
     currentLocaleIdentifier = normalized
     return true
 }
+
+/// Availability delegate (#1534 addendum 3): macOS flips `isAvailable` when
+/// Dictation is toggled, assets download, or the network drops — flips were
+/// invisible before. One global instance, re-attached on every configure.
+final class RecognizerAvailabilityDelegate: NSObject, SFSpeechRecognizerDelegate {
+    func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
+        emit("status", "recognizer_availability_changed:\(available)")
+    }
+}
+let recognizerAvailabilityDelegate = RecognizerAvailabilityDelegate()
 
 func handleLocaleUpdate(_ localeIdentifier: String) {
     let normalized = localeIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -775,12 +838,23 @@ var nativeFormat: AVAudioFormat!
 func startRecognitionSession(sessionId: UInt64) {
     guard !isShuttingDown else { return }
     guard appleSpeechRecognitionEnabled else {
+        // This early-return IS the "apple=0 on every session" signature: speech
+        // auth resolved denied/restricted/never-asked at boot and every session
+        // silently skips Apple recognition. Say so — Whisper can mask it on
+        // keyed installs, but a keyless free install has NOTHING behind it
+        // (#1534 addendum 3: recognizer failures must never be silent).
+        emit("status", "recognizer_skipped:speech_auth_disabled", sessionId: sessionId)
         currentRequest = nil
         recognitionTask = nil
         sessionTranscript = ""
         return
     }
     guard let recognizer = recognizer, recognizer.isAvailable else {
+        emit(
+            "status",
+            "recognizer_unavailable:\(recognizer == nil ? "nil" : "isAvailable=false"):\(currentLocaleIdentifier)",
+            sessionId: sessionId
+        )
         emitError("Speech recognizer not available for restart.", sessionId: sessionId)
         return
     }
@@ -789,7 +863,7 @@ func startRecognitionSession(sessionId: UInt64) {
     request.shouldReportPartialResults = true
 
     if #available(macOS 13.0, *) {
-        request.requiresOnDeviceRecognition = requiresOnDeviceRecognition
+        request.requiresOnDeviceRecognition = requiresOnDeviceRecognition || onDeviceFallbackActive
         request.addsPunctuation = true
     }
 
@@ -833,6 +907,40 @@ func startRecognitionSession(sessionId: UInt64) {
         }
 
         if let error = error as NSError? {
+            // NEVER swallow recognizer errors (#1534 addendum 3) — this
+            // callback was the only witness to "SFSpeechRecognizer returns
+            // nothing from real audio" and it said nothing. 216 = canceled
+            // (our own teardown), 1110 = no speech detected; everything else
+            // is a real failure worth reading in the field log.
+            emit(
+                "status",
+                "recognizer_error:\(error.domain):\(error.code):\(error.localizedDescription)",
+                sessionId: sessionId
+            )
+            // 203 = server refused (observed live: speech_api user quota).
+            // Flip to on-device for the rest of this daemon's lifetime when
+            // the machine supports it — the chained restart below picks the
+            // flag up immediately. A transient server hiccup costs nothing
+            // (on-device transcribes fine); a real quota lock costs EVERYTHING
+            // without this. If on-device is unavailable, say so once,
+            // actionably — never a silent apple=0 again.
+            if error.domain == "kAFAssistantErrorDomain" && error.code == 203
+                && !onDeviceFallbackActive {
+                var onDeviceSupported = false
+                if #available(macOS 13.0, *) {
+                    onDeviceSupported = recognizer.supportsOnDeviceRecognition
+                }
+                if onDeviceSupported {
+                    onDeviceFallbackActive = true
+                    emit("status", "recognizer_fallback:on_device_after_203", sessionId: sessionId)
+                } else if !quotaErrorSurfaced {
+                    quotaErrorSurfaced = true
+                    emitError(
+                        "Apple's speech service is rate-limiting this Mac and offline dictation isn't installed. Enable Dictation in System Settings → Keyboard to download offline speech, then relaunch o8.",
+                        sessionId: sessionId
+                    )
+                }
+            }
             if isShuttingDown {
                 // finish() delivered an error instead of a final — still emit
                 // whatever we have accumulated and idle.
@@ -1013,6 +1121,87 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
 /// Prepare the audio engine + recognizer + converter + recording buffer.
 /// Does NOT start the engine or start recognition — those happen in
 /// handleStart() when the parent sends "start".
+/// FIFO-mode boot (#1540): no engine, no taps, no observers. Marks ingest
+/// ready (handleStart's guards check these), starts the pipe reader, emits
+/// ready. The parent pump opens the write end per-session; between sessions
+/// the reader just waits.
+func prepareFifoIngest(path: String) {
+    guard configureRecognizer(localeIdentifier: currentLocaleIdentifier) else {
+        exit(1)
+    }
+    nativeFormat = whisperFormat
+    audioTapInstalled = true
+    startFifoReader(path: path)
+    emitReady()
+}
+
+/// Read 16kHz mono f32 chunks from the FIFO and run the SAME ingestion the
+/// engine tap performed: liveness counter, session gate, recognition append,
+/// Whisper sample accumulation, level/peak emission. Audio arrives already in
+/// whisperFormat, so no converter is involved.
+func startFifoReader(path: String) {
+    Thread.detachNewThread {
+        // O_NONBLOCK so boot never deadlocks waiting for a writer; the read
+        // loop tolerates EAGAIN/empty (no session running) with a short sleep.
+        let fd = open(path, O_RDONLY | O_NONBLOCK)
+        guard fd >= 0 else {
+            emitError("Audio pipe open failed: \(String(cString: strerror(errno)))")
+            return
+        }
+        let chunkFrames = 1024
+        let chunkBytes = chunkFrames * MemoryLayout<Float>.size
+        var raw = Data()
+        var buf = [UInt8](repeating: 0, count: chunkBytes)
+        var chunkCounter = 0
+
+        while true {
+            let n = read(fd, &buf, chunkBytes)
+            if n <= 0 {
+                if n < 0 && errno != EAGAIN && errno != EINTR {
+                    emitError("Audio pipe read failed: \(String(cString: strerror(errno)))")
+                    return
+                }
+                usleep(20_000)
+                continue
+            }
+            raw.append(contentsOf: buf[0..<n])
+
+            while raw.count >= chunkBytes {
+                let chunk = raw.prefix(chunkBytes)
+                raw.removeFirst(chunkBytes)
+                tapBufferCount &+= 1
+                if currentSessionId == 0 { continue }
+
+                guard let pcm = AVAudioPCMBuffer(pcmFormat: whisperFormat, frameCapacity: AVAudioFrameCount(chunkFrames)),
+                      let dst = pcm.floatChannelData?[0] else { continue }
+                chunk.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
+                    dst.update(from: src.bindMemory(to: Float.self).baseAddress!, count: chunkFrames)
+                }
+                pcm.frameLength = AVAudioFrameCount(chunkFrames)
+
+                currentRequest?.append(pcm)
+                recordedSamples.append(contentsOf: UnsafeBufferPointer(start: dst, count: chunkFrames))
+
+                chunkCounter += 1
+                if chunkCounter % 3 == 0 {
+                    var sumOfSquares: Float = 0
+                    var peak: Float = 0
+                    for i in 0..<chunkFrames {
+                        let sample = dst[i]
+                        sumOfSquares += sample * sample
+                        peak = max(peak, abs(sample))
+                    }
+                    if peak > sessionPeakSample {
+                        sessionPeakSample = peak
+                    }
+                    let rms = sqrt(sumOfSquares / Float(chunkFrames))
+                    emitLevel(min(1.0, rms / 0.12), sessionId: currentSessionId)
+                }
+            }
+        }
+    }
+}
+
 func prepareAudioEngine() {
     guard configureRecognizer(localeIdentifier: currentLocaleIdentifier),
           configureAudioInputGraph() else {
@@ -1112,7 +1301,7 @@ func handleStart(sessionId: UInt64) {
     // stopped one — a restarted engine's AUHAL stalls for whole sessions on
     // Intel (#1534, see rebuildAudioEngine). A warm lingering engine is left
     // untouched: buffers are already flowing, restart would only add latency.
-    if engineNeedsRebuild || !audioEngine.isRunning {
+    if !audioFifoMode, engineNeedsRebuild || !audioEngine.isRunning {
         guard rebuildAudioEngine(sessionId: sessionId) else {
             emitError("Audio engine rebuild failed.", sessionId: sessionId)
             return
@@ -1143,6 +1332,21 @@ func handleStart(sessionId: UInt64) {
     // at most the watchdog window instead of the whole dictation). If the
     // REBUILT engine is also silent after a further second, tell the user
     // instead of silently finalizing an empty transcript.
+    if audioFifoMode {
+        // FIFO-mode liveness (#1540): the parent pump should be delivering
+        // chunks within ~1s of session start. If the counter never moves the
+        // pump/pipe is dead — say so instead of finalizing empty.
+        let fifoBaseline = tapBufferCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard currentSessionId == sessionId, tapBufferCount == fifoBaseline else { return }
+            emitError("No audio is arriving from the app's microphone stream. Quit and reopen o8.", sessionId: sessionId)
+        }
+        // Session + "listening" already started above this block — this path
+        // adds ONLY the liveness check; the engine watchdogs below are
+        // meaningless here (no engine exists in this mode).
+        return
+    }
+
     let watchdogBaseline = tapBufferCount
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
         guard currentSessionId == sessionId, tapBufferCount == watchdogBaseline else { return }
@@ -1162,10 +1366,12 @@ func handleStart(sessionId: UInt64) {
         }
     }
 
-    // Zero-FILL detector (#1534, the clean-install killer): buffers flow but
-    // every sample is EXACTLY 0.0 — macOS zero-fills the input for a client
-    // whose TCC/signing attribution it dislikes while still reporting the mic
-    // as authorized. A real mic never sits at exact digital zero (thermal
+    // Zero-FILL detector (#1534): buffers flow but every sample is EXACTLY
+    // 0.0. Cause is NOT TCC — measured on the affected Intel machine, the
+    // helper's kTCCServiceMicrophone resolves 'Allowed' and the 'Unknown'
+    // kTCCServiceAudioCapture verdict is normal (a Terminal ffmpeg capturing
+    // real audio gets the same verdict). Root cause still open; this detector
+    // exists so the failure is LOUD instead of a silent empty transcript. A real mic never sits at exact digital zero (thermal
     // noise floor keeps the LSBs moving), so peak == 0 after 1.5s of live
     // buffers is conclusive. Surface it as an error — the OLD behavior was a
     // silent empty transcript that looked like "dictation just doesn't work".
@@ -1176,35 +1382,9 @@ func handleStart(sessionId: UInt64) {
               sessionPeakSample == 0 else { return }
         emit("status", "audio_engine_zero_fill", sessionId: sessionId)
         emitError(
-            "macOS is delivering silent audio to o8 (permission attribution). Toggle o8 OFF and back ON in System Settings → Privacy & Security → Microphone, then relaunch o8.",
+            "The microphone is delivering silent audio. Quit and reopen o8; if it persists, restart the Mac.",
             sessionId: sessionId
         )
-    }
-}
-
-/// Ensure MICROPHONE authorization on the daemon path. Under the disclaimed
-/// spawn (#1534 v2) the helper is its OWN TCC client: the app's mic grant no
-/// longer covers it, and CoreAudio never prompts on behalf of an
-/// AVAudioEngine/HAL client — an unauthorized client silently receives
-/// exact-zero buffers. That was the v0.1.578 field failure: disclaim ran,
-/// no prompt appeared, no TCC entry was created, and capture stayed silent.
-/// Explicitly requesting access here makes tccd present the one-time
-/// "o8 Speech Helper" prompt (usage strings ship in the embedded
-/// __info_plist) and key the grant to the helper itself — the same thing
-/// Chromium helpers do at startup.
-func ensureMicrophoneAuthorization(completion: @escaping (Bool) -> Void) {
-    switch AVCaptureDevice.authorizationStatus(for: .audio) {
-    case .authorized:
-        completion(true)
-    case .notDetermined:
-        emit("status", "microphone:requesting")
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            DispatchQueue.main.async { completion(granted) }
-        }
-    case .denied, .restricted:
-        completion(false)
-    @unknown default:
-        completion(false)
     }
 }
 
@@ -1223,17 +1403,62 @@ if CommandLine.arguments.contains("--input-devices-json") {
     emitInputDevicesAndExit()
 }
 
-requestAuthorization { authorized in
-    guard authorized else { exit(1) }
-    DispatchQueue.main.async {
-        ensureMicrophoneAuthorization { micGranted in
-            if !micGranted {
-                emit("status", "microphone:denied")
-                emitError(
-                    "o8 Speech Helper has no microphone access. Enable 'o8 Speech Helper' in System Settings → Privacy & Security → Microphone, then relaunch o8."
-                )
+/// Explicitly request MICROPHONE access before anything touches the engine.
+///
+/// Under the disclaimed-responsibility spawn (#1534 v2) the helper is its own
+/// TCC client — and its mic state starts `notDetermined` on every machine
+/// where only the app identity was ever granted. CoreAudio does NOT reliably
+/// auto-prompt for a background helper's first input IO; it just delivers
+/// zero-filled buffers (the exact silent-capture the zero-fill watchdog
+/// flags). Same failure class this file already fixed for Speech Recognition
+/// ("left a fresh install permanently notDetermined → EMPTY transcripts") —
+/// the mic needs the same explicit ask. One system prompt ("o8 Speech
+/// Helper"), one Allow, own TCC row, real audio.
+func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized:
+        completion(true)
+    case .notDetermined:
+        emit("status", "microphone:requesting")
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            DispatchQueue.main.async {
+                emit("status", granted ? "microphone:granted" : "microphone:denied")
+                completion(granted)
             }
-            prepareAudioEngine()
+        }
+    default:
+        // denied / restricted — surface it loudly instead of recording zeros.
+        emit("status", "microphone:denied")
+        emitError(
+            "o8 Speech Helper has no microphone access. Enable it in System Settings → Privacy & Security → Microphone, then relaunch o8.",
+            sessionId: nil
+        )
+        completion(false)
+    }
+}
+
+if let fifoPath = audioFifoPath {
+    // Main-process capture (#1540): the PARENT owns the mic (its TCC identity
+    // is the one 15.7.8 still honors) — this helper needs no mic access at
+    // all. Speech Recognition auth is still ours.
+    requestAuthorization { authorized in
+        guard authorized else { exit(1) }
+        DispatchQueue.main.async {
+            prepareFifoIngest(path: fifoPath)
+        }
+    }
+} else {
+    requestMicrophoneAccess { micGranted in
+        // Even without the mic we keep booting: the daemon still answers
+        // status/permission queries, and the zero-fill watchdog + the error above
+        // tell the operator exactly what to fix — a hard exit here would just
+        // read as "dictation does nothing" again.
+        _ = micGranted
+        requestAuthorization { authorized in
+            guard authorized else { exit(1) }
+            DispatchQueue.main.async {
+                prepareAudioEngine()
+            }
         }
     }
 }
