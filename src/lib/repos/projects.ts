@@ -18,6 +18,7 @@ import {
   updateProject as updateSqliteProject,
 } from '@/lib/projects/store';
 import { listRepos } from './registry';
+import { removeRepoFromPool } from './remove';
 
 const PROJECTS_DIR = path.join(os.homedir(), '.o8');
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
@@ -577,14 +578,74 @@ export async function deleteProject(projectId: string): Promise<ProjectsLedger> 
     throw new Error('Cannot delete the only project.');
   }
   const target = ledger.projects.find((p) => p.id === projectId);
-  // Delete the SQLite project (source of truth) so the projection stops re-adding
-  // it — otherwise a deleted project resurrects on the next read.
-  if (target) {
-    const sqlite = resolveSqliteProject(target);
-    if (sqlite) deleteSqliteProject(sqlite.id);
+
+  // Delete removes the repos too (operator ruling 2026-07-09): a repo left in
+  // the pool re-projects as a virtual single-repo row with the same name, so
+  // the delete visibly "doesn't work". Repos on disk are never touched, and a
+  // repo that another project still uses survives.
+  if (projectId.startsWith('repo:')) {
+    // Virtual single-repo projection — nothing is persisted for it, so the ONLY
+    // real delete is removing the repo from the pool (the old filter-and-write
+    // was a silent no-op: writeLedger drops repo:* ids and the projection
+    // re-derived the row on every read).
+    if (target) {
+      const repoId = projectId.slice('repo:'.length);
+      try {
+        await removeRepoFromPool(repoId);
+      } catch (error) {
+        console.warn(`[projects] Failed to remove repo ${repoId} for virtual project delete:`, error);
+      }
+    }
+    const remaining = ledger.projects.filter((p) => p.id !== projectId);
+    const activeProjectId = ledger.activeProjectId === projectId ? remaining[0]!.id : ledger.activeProjectId;
+    await writeLedger({ projects: remaining, activeProjectId });
+    return getProjectsLedger();
   }
-  const remaining = ledger.projects.filter((p) => p.id !== projectId);
-  const activeProjectId = ledger.activeProjectId === projectId ? remaining[0]!.id : ledger.activeProjectId;
+
+  // Delete the SQLite project (source of truth) so the projection stops re-adding
+  // it — otherwise a deleted project resurrects on the next read. Resolve it
+  // whether the caller passed a ledger id or a raw SQLite id: the Settings
+  // dialog passes SQLite ids, and slug-bridged projects appear in the
+  // projection under their LEDGER id.
+  const sqlite = target ? resolveSqliteProject(target) : getSqliteProjectWithRepos(projectId);
+  let ownedRepoIds: string[] = [];
+  if (sqlite) {
+    ownedRepoIds = sqlite.repos.map((link) => link.repoId);
+    deleteSqliteProject(sqlite.id);
+  }
+
+  // Remove repos exclusive to the deleted project from the pool. Membership is
+  // re-read AFTER the SQLite delete so a repo shared with any surviving project
+  // is kept.
+  if (ownedRepoIds.length > 0) {
+    let stillUsed = new Set<string>();
+    try {
+      stillUsed = new Set(
+        listSqliteProjects().flatMap((project) => project.repos.map((link) => link.repoId)),
+      );
+    } catch {
+      // If membership can't be read, err on the side of keeping repos.
+      stillUsed = new Set(ownedRepoIds);
+    }
+    for (const repoId of ownedRepoIds) {
+      if (stillUsed.has(repoId)) continue;
+      try {
+        await removeRepoFromPool(repoId);
+      } catch (error) {
+        console.warn(`[projects] Failed to remove repo ${repoId} while deleting project ${projectId}:`, error);
+      }
+    }
+  }
+
+  // Drop every identity the project is known by: the caller's id, the projected
+  // ledger id, and the SQLite id (all can differ across the slug bridge).
+  const removedIds = new Set<string>([projectId]);
+  if (target) removedIds.add(target.id);
+  if (sqlite) removedIds.add(sqlite.id);
+  const remaining = ledger.projects.filter((p) => !removedIds.has(p.id));
+  const activeProjectId = removedIds.has(ledger.activeProjectId)
+    ? remaining[0]!.id
+    : ledger.activeProjectId;
   await writeLedger({ projects: remaining, activeProjectId });
   return getProjectsLedger();
 }
