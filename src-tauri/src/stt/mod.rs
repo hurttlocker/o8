@@ -485,10 +485,13 @@ impl LiveRecognizer {
         Ok(rx)
     }
 
-    /// SIGKILL any `speech_recognizer` process owned by this user (#1539).
-    /// Only called when we have no child of our own (spawn_daemon guards), so
-    /// every match is a stray from a dead/replaced app instance. Best-effort:
-    /// a failure here must never block the spawn.
+    /// SIGKILL ORPHANED `speech_recognizer` processes (#1539). Orphaned means
+    /// reparented to launchd (ppid == 1) — the parent app is gone, so the
+    /// helper is a true zombie holding the microphone open. The ppid check is
+    /// load-bearing: killing every helper by name is FRATRICIDE when two app
+    /// instances overlap (live incident 2026-07-10: a dev build and the
+    /// installed build each executed the other's healthy helper on boot).
+    /// Best-effort: a failure here must never block the spawn.
     fn kill_stale_helpers() {
         #[cfg(unix)]
         {
@@ -507,8 +510,17 @@ impl LiveRecognizer {
                 let Ok(pid) = line.trim().parse::<i32>() else {
                     continue;
                 };
+                let orphaned = Command::new("ps")
+                    .args(["-o", "ppid=", "-p", &pid.to_string()])
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+                    .unwrap_or(false);
+                if !orphaned {
+                    continue;
+                }
                 log::warn!(
-                    "[stt] killing stale speech_recognizer helper (pid={pid}) before spawn (#1539)"
+                    "[stt] killing orphaned speech_recognizer helper (pid={pid}, ppid=1) before spawn (#1539)"
                 );
                 unsafe {
                     libc::kill(pid, libc::SIGKILL);
