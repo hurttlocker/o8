@@ -91,6 +91,17 @@ var pendingStartSessionId: UInt64?
 var currentLocaleIdentifier = "en-US"
 var pendingLocaleIdentifier: String?
 var requiresOnDeviceRecognition = false
+/// Flipped when Apple's SERVER recognition fails with kAFAssistantErrorDomain
+/// 203 ("Retry" — observed live 2026-07-10 as 'Quota limit reached for
+/// resource: speech_api, actor_type: user'): the server is refusing this
+/// user and every future server request in this daemon's lifetime fails the
+/// same way. When the machine supports on-device recognition, flip to it for
+/// the rest of the run — no server, no quota (harness-verified on the Intel
+/// machine). Re-probes the server naturally on next daemon boot.
+var onDeviceFallbackActive = false
+/// One actionable error per daemon lifetime when 203 hits and on-device
+/// is NOT available — never a silent apple=0 again.
+var quotaErrorSurfaced = false
 var appleSpeechRecognitionEnabled = false
 var selectedInputDeviceUID: String?
 // Empty string means "switch back to system default"; nil means no pending change.
@@ -99,6 +110,24 @@ var audioTapInstalled = false
 
 // Flush stdout after every write
 setbuf(stdout, nil)
+
+// ── Parent-death watchdog (#1539) ───────────────────────────────────────────
+// stdin-EOF is the normal "parent died" signal, but it is handled by
+// dispatching handleQuit to the MAIN queue — a helper whose main runloop is
+// wedged (mid-AVAudioEngine call) never runs it and lives on as a zombie that
+// contends for the microphone with every future helper (live incident
+// 2026-07-10: pid 2329 survived two app swaps and garbled 5h of captures).
+// Poll the one signal that cannot wedge: when the parent dies we are
+// reparented to launchd (ppid 1) — exit directly from this thread, no queues.
+Thread.detachNewThread {
+    while true {
+        Thread.sleep(forTimeInterval: 2.0)
+        if getppid() == 1 {
+            FileHandle.standardError.write(Data("[watchdog] parent died — exiting\n".utf8))
+            exit(0)
+        }
+    }
+}
 
 // MARK: - Output helpers
 
@@ -396,10 +425,29 @@ func configureRecognizer(localeIdentifier: String, sessionId: UInt64? = nil) -> 
         }
     }
 
+    rec.delegate = recognizerAvailabilityDelegate
+    var onDevice = false
+    if #available(macOS 13.0, *) {
+        onDevice = rec.supportsOnDeviceRecognition
+    }
+    emit(
+        "status",
+        "recognizer_configured:\(normalized):available=\(rec.isAvailable):onDevice=\(onDevice):auth=\(SFSpeechRecognizer.authorizationStatus().rawValue)"
+    )
     recognizer = rec
     currentLocaleIdentifier = normalized
     return true
 }
+
+/// Availability delegate (#1534 addendum 3): macOS flips `isAvailable` when
+/// Dictation is toggled, assets download, or the network drops — flips were
+/// invisible before. One global instance, re-attached on every configure.
+final class RecognizerAvailabilityDelegate: NSObject, SFSpeechRecognizerDelegate {
+    func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
+        emit("status", "recognizer_availability_changed:\(available)")
+    }
+}
+let recognizerAvailabilityDelegate = RecognizerAvailabilityDelegate()
 
 func handleLocaleUpdate(_ localeIdentifier: String) {
     let normalized = localeIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -774,12 +822,23 @@ var nativeFormat: AVAudioFormat!
 func startRecognitionSession(sessionId: UInt64) {
     guard !isShuttingDown else { return }
     guard appleSpeechRecognitionEnabled else {
+        // This early-return IS the "apple=0 on every session" signature: speech
+        // auth resolved denied/restricted/never-asked at boot and every session
+        // silently skips Apple recognition. Say so — Whisper can mask it on
+        // keyed installs, but a keyless free install has NOTHING behind it
+        // (#1534 addendum 3: recognizer failures must never be silent).
+        emit("status", "recognizer_skipped:speech_auth_disabled", sessionId: sessionId)
         currentRequest = nil
         recognitionTask = nil
         sessionTranscript = ""
         return
     }
     guard let recognizer = recognizer, recognizer.isAvailable else {
+        emit(
+            "status",
+            "recognizer_unavailable:\(recognizer == nil ? "nil" : "isAvailable=false"):\(currentLocaleIdentifier)",
+            sessionId: sessionId
+        )
         emitError("Speech recognizer not available for restart.", sessionId: sessionId)
         return
     }
@@ -788,7 +847,7 @@ func startRecognitionSession(sessionId: UInt64) {
     request.shouldReportPartialResults = true
 
     if #available(macOS 13.0, *) {
-        request.requiresOnDeviceRecognition = requiresOnDeviceRecognition
+        request.requiresOnDeviceRecognition = requiresOnDeviceRecognition || onDeviceFallbackActive
         request.addsPunctuation = true
     }
 
@@ -832,6 +891,40 @@ func startRecognitionSession(sessionId: UInt64) {
         }
 
         if let error = error as NSError? {
+            // NEVER swallow recognizer errors (#1534 addendum 3) — this
+            // callback was the only witness to "SFSpeechRecognizer returns
+            // nothing from real audio" and it said nothing. 216 = canceled
+            // (our own teardown), 1110 = no speech detected; everything else
+            // is a real failure worth reading in the field log.
+            emit(
+                "status",
+                "recognizer_error:\(error.domain):\(error.code):\(error.localizedDescription)",
+                sessionId: sessionId
+            )
+            // 203 = server refused (observed live: speech_api user quota).
+            // Flip to on-device for the rest of this daemon's lifetime when
+            // the machine supports it — the chained restart below picks the
+            // flag up immediately. A transient server hiccup costs nothing
+            // (on-device transcribes fine); a real quota lock costs EVERYTHING
+            // without this. If on-device is unavailable, say so once,
+            // actionably — never a silent apple=0 again.
+            if error.domain == "kAFAssistantErrorDomain" && error.code == 203
+                && !onDeviceFallbackActive {
+                var onDeviceSupported = false
+                if #available(macOS 13.0, *) {
+                    onDeviceSupported = recognizer.supportsOnDeviceRecognition
+                }
+                if onDeviceSupported {
+                    onDeviceFallbackActive = true
+                    emit("status", "recognizer_fallback:on_device_after_203", sessionId: sessionId)
+                } else if !quotaErrorSurfaced {
+                    quotaErrorSurfaced = true
+                    emitError(
+                        "Apple's speech service is rate-limiting this Mac and offline dictation isn't installed. Enable Dictation in System Settings → Keyboard to download offline speech, then relaunch o8.",
+                        sessionId: sessionId
+                    )
+                }
+            }
             if isShuttingDown {
                 // finish() delivered an error instead of a final — still emit
                 // whatever we have accumulated and idle.
