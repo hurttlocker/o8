@@ -1,10 +1,20 @@
-import { spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 
 import { buildNode22ReexecPlan, NODE22_REEXEC_GUARD } from './operator-node22-locator';
 
 const NODE22_CHECKED = 'O8_MCP_NODE22_CHECKED';
 
-async function reexecOnNode22IfNeeded(): Promise<void> {
+/**
+ * Synchronous on purpose — no top-level await. This module is imported by
+ * operator-mcp-server.ts, which tsx compiles as CommonJS when run from the
+ * repo (no `"type": "module"`), and CJS output rejects top-level await
+ * outright: the original async version crash-looped every source-launched
+ * MCP start (the com.rainwater.mcp-o8 LaunchAgent logged 102 failed starts
+ * in one day, KeepAlive respawning a module-load crash). A re-exec shim has
+ * to block module evaluation until the child exits anyway, so spawnSync is
+ * the honest shape; the bundled ESM path is indifferent.
+ */
+function reexecOnNode22IfNeeded(): void {
   if (process.env[NODE22_CHECKED] === '1') {
     return;
   }
@@ -19,20 +29,16 @@ async function reexecOnNode22IfNeeded(): Promise<void> {
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    const child = spawn(plan.nodePath, plan.argv, {
-      env: { ...process.env, [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1' },
-      stdio: 'inherit',
-    });
-
-    child.once('error', (error) => {
-      console.error(`[o8 operator MCP] failed to re-exec on Node 22 at ${plan.nodePath}: ${error.message}; continuing on Node ${process.versions.node}`);
-      resolve();
-    });
-    child.once('close', (code, signal) => {
-      process.exit(code ?? (signal ? 1 : 0));
-    });
+  const result = spawnSync(plan.nodePath, plan.argv, {
+    env: { ...process.env, [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1' },
+    stdio: 'inherit',
   });
+
+  if (result.error) {
+    console.error(`[o8 operator MCP] failed to re-exec on Node 22 at ${plan.nodePath}: ${result.error.message}; continuing on Node ${process.versions.node}`);
+    return;
+  }
+  process.exit(result.status ?? (result.signal ? 1 : 0));
 }
 
-await reexecOnNode22IfNeeded();
+reexecOnNode22IfNeeded();
