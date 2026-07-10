@@ -116,6 +116,18 @@ async function summarizeWithOpenRouter(prompt: string): Promise<string> {
   throw new Error(`OpenRouter summary failed. ${failures.join(' | ')}`);
 }
 
+/// Non-LLM digest: the release body already IS the sanitized public
+/// changelog, so the top lines are honest, human-written content.
+function fallbackSummary(tag: string, body: string, commitTitles: string[]): string {
+  const lines = body
+    .split('\n')
+    .map((line) => line.replace(/^[-*#>\s]+/, '').trim())
+    .filter((line) => line.length > 0 && !/^\[/.test(line));
+  const source = lines.length > 0 ? lines : commitTitles;
+  const top = source.slice(0, 4).join(' \u00b7 ');
+  return top || `${tag} is ready to install.`;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const version = request.nextUrl.searchParams.get('version')?.trim();
@@ -154,10 +166,22 @@ export async function GET(request: NextRequest) {
       commitTitles.length > 0 ? commitTitles.map((title) => `- ${title}`).join('\n') : '(none)',
     ].filter(Boolean).join('\n');
 
-    const summary = await summarizeWithOpenRouter(prompt);
+    // The note must NEVER gate on inference (operator ruling 2026-07-10: the
+    // update note is product surface — free installs without any LLM route
+    // still get real content). LLM polish when a route exists; otherwise a
+    // plain digest of the sanitized release notes.
+    let summary: string;
+    let fallback = false;
+    try {
+      summary = await summarizeWithOpenRouter(prompt);
+    } catch {
+      summary = fallbackSummary(tag, body, commitTitles);
+      fallback = true;
+    }
     return NextResponse.json({
       version: tag,
       summary,
+      fallback,
       releaseUrl: release.html_url ?? null,
     });
   } catch (error) {
