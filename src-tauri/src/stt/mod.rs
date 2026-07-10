@@ -323,14 +323,28 @@ impl LiveRecognizer {
                                 session_id: sid,
                                 text: evt.text,
                             },
-                            "status" => TranscriptEvent::Status {
-                                session_id: evt.session_id,
-                                text: evt.text,
-                            },
-                            "error" => TranscriptEvent::Error {
-                                session_id: evt.session_id,
-                                text: evt.text,
-                            },
+                            "status" => {
+                                // Engine-health statuses must reach the PROD log
+                                // file (`log::` → tauri_plugin_log → o8.log);
+                                // `tracing::` goes to stdout, which a bundled
+                                // .app discards — #1534 was undiagnosable in the
+                                // field because every capture/paste breadcrumb
+                                // was tracing-only.
+                                if evt.text.starts_with("audio_engine") {
+                                    log::warn!("[stt] helper audio-engine health: {}", evt.text);
+                                }
+                                TranscriptEvent::Status {
+                                    session_id: evt.session_id,
+                                    text: evt.text,
+                                }
+                            }
+                            "error" => {
+                                log::warn!("[stt] helper error: {}", evt.text);
+                                TranscriptEvent::Error {
+                                    session_id: evt.session_id,
+                                    text: evt.text,
+                                }
+                            }
                             "level" => {
                                 let level = evt.text.parse::<f32>().unwrap_or(0.0);
                                 TranscriptEvent::Level {

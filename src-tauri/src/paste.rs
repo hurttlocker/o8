@@ -14,10 +14,18 @@ use std::sync::Mutex;
 
 /// o8's own bundle ID — used to exclude ourselves from "current frontmost" checks.
 const O8_BUNDLE_ID: &str = "ai.o8.desktop";
-// Only applied when activation actually shifted focus (cold app switch); 12ms
-// was occasionally too short for macOS to finish raising the target window
-// before Cmd+V, dropping the paste.
-const FOCUS_SETTLE_MS: u64 = 35;
+// Focus settle (only applied when activation actually shifted focus — a cold
+// app switch). A fixed sleep is wrong on both ends of the hardware range: the
+// old 35ms was tuned on Apple Silicon and loses on Intel cold activation (the
+// synthetic Cmd+V posts before the target owns key focus and vanishes,
+// #1534); a fixed larger value would tax fast machines on every shifted
+// paste. Instead poll the frontmost app until it reports the paste target
+// (or the cap expires), then give the window server one short grace period
+// to hand over key focus. Fast machines exit after one poll (~35ms total —
+// parity with the old constant); slow Intel gets up to FOCUS_SETTLE_MAX_MS.
+const FOCUS_SETTLE_POLL_MS: u64 = 10;
+const FOCUS_SETTLE_MAX_MS: u64 = 250;
+const FOCUS_SETTLE_GRACE_MS: u64 = 25;
 const COMMAND_KEY_GAP_MS: u64 = 12;
 
 /// Check if a bundle ID looks like o8 (or is invalid/garbage from the dev binary).
@@ -106,8 +114,18 @@ static CLIPBOARD_GUARD: Mutex<ClipboardGuard> = Mutex::new(ClipboardGuard {
 /// while dictating). The poisoning fix above guarantees the real original is
 /// the thing restored, so the worst case here is a rare slow app needing a
 /// re-dictate — never a lost clipboard.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const CLIPBOARD_RESTORE_DELAY_MS: u64 = 700;
+
+/// Intel story (#1534): on x86_64 Macs EVERY target app is a "slow app" — the
+/// history comment above already concedes slow apps read the pasteboard
+/// 400–1500ms after the synthetic Cmd+V, and 700ms let the restore thread
+/// swap the user's old clipboard back UNDERNEATH an in-flight paste (stale
+/// content or nothing lands). 1800ms keeps margin over the observed 1500ms
+/// tail while still returning the clipboard promptly. Apple Silicon keeps
+/// 700ms — do not flatten these into one constant.
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const CLIPBOARD_RESTORE_DELAY_MS: u64 = 1800;
 
 /// Restore delay for the Accessibility-not-granted path: there is no synthetic
 /// paste, so the user must press ⌘V themselves — keep the text on the clipboard
@@ -892,6 +910,33 @@ fn native_activate_app(app: &SavedApp) -> bool {
     })
 }
 
+/// Wait for a shifted activation to actually land before posting Cmd+V: poll
+/// the frontmost app until it reports the saved paste target (or the cap
+/// expires), then one short grace sleep for key-focus handover. See the
+/// FOCUS_SETTLE_* constants for the Intel story.
+#[cfg(target_os = "macos")]
+fn wait_for_focus_settle() {
+    let target = get_frontmost_bundle_id();
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(FOCUS_SETTLE_MAX_MS);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(FOCUS_SETTLE_POLL_MS));
+        let current = get_current_frontmost_bundle_id();
+        match (&current, &target) {
+            (Some(cur), Some(tgt)) if cur == tgt => break,
+            _ => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            log::warn!(
+                "[paste] focus settle timed out after {FOCUS_SETTLE_MAX_MS}ms \
+                 (frontmost={current:?}, target={target:?}) — posting Cmd+V anyway"
+            );
+            break;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(FOCUS_SETTLE_GRACE_MS));
+}
+
 /// Determine the correct paste target and activate it.
 ///
 /// If the user clicked a different app or window during dictation, paste there
@@ -909,6 +954,10 @@ fn smart_activate() -> ActivationOutcome {
         // (The dev binary reports an invalid bundle id and keeps the old
         // reactivate-previous behavior below.)
         (Some(cur), _) if cur == O8_BUNDLE_ID => {
+            // log:: too — if o8's own dock/pill ever steals frontmost at paste
+            // time, this branch pastes into o8 itself while reporting success;
+            // the prod log line is how we'd catch that in the field.
+            log::info!("[paste] o8 is frontmost — pasting into o8's own focused field");
             tracing::info!("paste: o8 is frontmost — pasting into o8's own focused field");
             ActivationOutcome::FocusUnchanged
         }
@@ -1012,6 +1061,7 @@ pub fn paste_text_with_status(text: &str) -> PasteOutcome {
     let injected_change_count = match copy_to_clipboard(text) {
         Ok(change_count) => change_count,
         Err(e) => {
+            log::warn!("[paste] outcome=failed — clipboard write rejected: {e}");
             tracing::error!("paste: failed to copy to clipboard: {e}");
             return PasteOutcome::Failed(format!("Could not copy dictation to the clipboard: {e}"));
         }
@@ -1028,6 +1078,10 @@ pub fn paste_text_with_status(text: &str) -> PasteOutcome {
     // The text is already on the clipboard, so the caller surfaces "copied —
     // press ⌘V" instead of a false "pasted".
     if !crate::mac_perms::accessibility_permission_granted(false) {
+        log::warn!(
+            "[paste] outcome=clipboard_only chars={} — Accessibility gate failed at paste time",
+            text.len()
+        );
         tracing::warn!(
             "paste: Accessibility not granted — {} chars copied to clipboard but synthetic Cmd+V skipped \
              (grant o8 in System Settings → Privacy & Security → Accessibility, or move o8 to /Applications if it is running from a disk image)",
@@ -1046,17 +1100,28 @@ pub fn paste_text_with_status(text: &str) -> PasteOutcome {
     // pastes there instead of the stale saved target.
     let activation = smart_activate();
 
-    // Step 3: Tiny safety sleep to ensure keyboard focus is live before
-    // we post the synthetic Cmd+V. Keep this below one frame: pre-activation
-    // already handled the slow part, and anything longer is directly visible
-    // on the release path.
+    // Step 3: Make sure keyboard focus is live before we post the synthetic
+    // Cmd+V. Pre-activation already handled the slow part; this poll exits
+    // after ~35ms on a fast machine and only stretches (capped) when a cold
+    // Intel activation is still in flight — a fixed short sleep here is how
+    // pastes silently vanished on Intel (#1534).
     if activation.needs_focus_settle() {
-        std::thread::sleep(std::time::Duration::from_millis(FOCUS_SETTLE_MS));
+        wait_for_focus_settle();
     }
 
     // Step 4: Simulate Cmd+V.
     simulate_cmd_v();
 
+    // log:: (not tracing::) so the outcome reaches o8.log in packaged builds —
+    // tracing goes to stdout, which a bundled .app discards. #1534 shipped
+    // "Pasted" outcomes with zero field evidence of which activation branch
+    // ran or whether the restore raced the target app.
+    log::info!(
+        "[paste] outcome=pasted chars={} activation={:?} target={:?}",
+        text.len(),
+        activation,
+        get_frontmost_bundle_id()
+    );
     tracing::debug!("paste: wrote {} chars to clipboard and pasted", text.len());
 
     // Step 5: Hand the user's clipboard back, fast.
