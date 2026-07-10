@@ -27,7 +27,10 @@ import AudioToolbox
 
 // MARK: - Globals
 
-let audioEngine = AVAudioEngine()
+// `var`, not `let`: cold starts RECREATE the engine (see rebuildAudioEngine —
+// a stopped engine's AUHAL resumes seconds late on Intel/Sequoia, recording
+// zero frames for a whole session; a fresh engine delivers promptly).
+var audioEngine = AVAudioEngine()
 var recognitionTask: SFSpeechRecognitionTask?
 var currentRequest: SFSpeechAudioBufferRecognitionRequest?
 
@@ -57,6 +60,24 @@ var shutdownGeneration: UInt64 = 0
 /// Fences the deferred engine-stop after a session (the 15s hot linger) so a
 /// new session starting inside the window cancels the pending stop.
 var engineLingerGeneration: UInt64 = 0
+/// Input-tap buffers delivered since daemon boot, INCLUDING gate-closed linger
+/// buffers — it counts "is the AUHAL delivering" (hardware liveness), not "is a
+/// session recording". The session watchdog snapshots it at gate-open to catch
+/// a stalled engine (#1534). Written on the render tap thread and read on main
+/// without synchronization: aligned 64-bit loads/stores are single-copy-atomic
+/// on both shipping arches, and the watchdog only asks "did it move at all".
+var tapBufferCount: UInt64 = 0
+/// Set when a `.AVAudioEngineConfigurationChange` lands (device unplugged,
+/// sample-rate change) — the prepared graph is stale; the next handleStart
+/// must rebuild even if the engine still claims isRunning.
+var engineNeedsRebuild = false
+/// Peak |sample| seen by the tap since the current session's gate opened.
+/// Distinguishes "no callbacks" (stalled engine — the watchdog rebuilds) from
+/// "callbacks full of digital zeros" — macOS quietly zero-fills the input for
+/// a client whose TCC/signing attribution it dislikes while reporting the mic
+/// as authorized (the -91 dB clean-install failure, #1534). Same benign-race
+/// caveat as tapBufferCount.
+var sessionPeakSample: Float = 0
 // When true, after emitting final and audio_file we exit() instead of going idle.
 var isQuitting = false
 // Current Rust-assigned session ID. Used to fence late callbacks.
@@ -830,6 +851,37 @@ func startRecognitionSession(sessionId: UInt64) {
 
 // MARK: - Audio engine setup (once at startup)
 
+/// Tear down and RECREATE the AVAudioEngine, then rebuild the input graph on
+/// the fresh instance.
+///
+/// Why recreation instead of reusing the stopped singleton: on Intel /
+/// macOS 15.7 an engine that has been stop()ped and start()ed again reports
+/// isRunning=true but its AUHAL delivers no input buffers for many SECONDS
+/// (worse when the parent app is simultaneously touching the shared built-in
+/// audio hardware for the dictation sound cue / audio ducker). Every
+/// dictation shorter than that stall records ZERO frames and finalizes
+/// empty — the Intel "dictation never delivers" bug (#1534): the paste seam
+/// was fine, capture was dead. A freshly created engine binds a fresh AUHAL
+/// and delivers promptly — which is exactly why the FIRST dictation after
+/// daemon boot always captured. This is also the engine-recreation fix the
+/// applySelectedInputDevice KNOWN LIMITATION comment calls for.
+///
+/// Safe mid-session: the new tap keeps appending into `currentRequest` /
+/// `recordedSamples` (all globals), so an in-flight recognition session
+/// continues across the swap.
+func rebuildAudioEngine(sessionId: UInt64? = nil) -> Bool {
+    if audioEngine.isRunning {
+        audioEngine.stop()
+    }
+    if audioTapInstalled {
+        inputNode.removeTap(onBus: 0)
+        audioTapInstalled = false
+    }
+    audioEngine = AVAudioEngine()
+    engineNeedsRebuild = false
+    return configureAudioInputGraph(sessionId: sessionId)
+}
+
 /// Rebuild the input graph for the selected microphone. The engine must be
 /// stopped before this runs.
 func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
@@ -874,6 +926,10 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
     // user's natural press-to-speak gap.
     var frameCount = 0
     inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
+        // Liveness signal for the zero-buffer watchdog — count EVERY callback,
+        // gate open or closed (see tapBufferCount doc).
+        tapBufferCount &+= 1
+
         // Pre-session idle: mic is hot but we're not recording.
         // Drop every buffer until handleStart flips the gate.
         if currentSessionId == 0 {
@@ -929,9 +985,14 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
             let frames = buffer.frameLength
             let samples = channelData[0]
             var sumOfSquares: Float = 0
+            var peak: Float = 0
             for i in 0..<Int(frames) {
                 let sample = samples[i]
                 sumOfSquares += sample * sample
+                peak = max(peak, abs(sample))
+            }
+            if peak > sessionPeakSample {
+                sessionPeakSample = peak
             }
             let rms = sqrt(sumOfSquares / Float(frames))
             let normalized = min(1.0, rms / 0.12)
@@ -957,6 +1018,28 @@ func prepareAudioEngine() {
           configureAudioInputGraph() else {
         exit(1)
     }
+
+    // A configuration change (device unplugged, sample-rate switch) leaves the
+    // prepared graph stale — the engine can claim isRunning while delivering
+    // nothing. object: nil on purpose: the engine instance is swapped on every
+    // cold start (rebuildAudioEngine), an instance-bound observer would go
+    // stale with it. Mid-session, rebuild immediately so the dictation
+    // survives the device change; idle, just mark for rebuild at next start.
+    NotificationCenter.default.addObserver(
+        forName: .AVAudioEngineConfigurationChange,
+        object: nil,
+        queue: .main
+    ) { _ in
+        if currentSessionId != 0 {
+            emit("status", "audio_engine_config_changed_rebuilding", sessionId: currentSessionId)
+            if rebuildAudioEngine(sessionId: currentSessionId) {
+                try? audioEngine.start()
+            }
+        } else {
+            engineNeedsRebuild = true
+        }
+    }
+
     emitReady()
 }
 
@@ -1013,6 +1096,7 @@ func handleStart(sessionId: UInt64) {
     isShuttingDown = false
     shutdownEmitted = false
     recordedSamples.removeAll(keepingCapacity: true)
+    sessionPeakSample = 0
 
     guard audioTapInstalled, nativeFormat != nil else {
         emitError("Audio engine not prepared.", sessionId: sessionId)
@@ -1023,9 +1107,16 @@ func handleStart(sessionId: UInt64) {
     // checks the generation at fire time).
     engineLingerGeneration &+= 1
 
-    // Safety: if the hot engine died for any reason, bring it back before
-    // opening the session gate. Normal path: this is a no-op.
-    if !audioEngine.isRunning {
+    // Cold start (linger expired and stopped the engine, or a config change
+    // invalidated the graph): RECREATE the engine instead of restarting the
+    // stopped one — a restarted engine's AUHAL stalls for whole sessions on
+    // Intel (#1534, see rebuildAudioEngine). A warm lingering engine is left
+    // untouched: buffers are already flowing, restart would only add latency.
+    if engineNeedsRebuild || !audioEngine.isRunning {
+        guard rebuildAudioEngine(sessionId: sessionId) else {
+            emitError("Audio engine rebuild failed.", sessionId: sessionId)
+            return
+        }
         do {
             try audioEngine.start()
         } catch {
@@ -1045,6 +1136,50 @@ func handleStart(sessionId: UInt64) {
     startRecognitionSession(sessionId: sessionId)
 
     emit("status", "listening", sessionId: sessionId)
+
+    // Zero-buffer watchdog (#1534): if the tap has delivered NOTHING 450ms
+    // after the gate opened, the AUHAL is stalled — rebuild the engine in
+    // place (the recognition request survives; the session continues, losing
+    // at most the watchdog window instead of the whole dictation). If the
+    // REBUILT engine is also silent after a further second, tell the user
+    // instead of silently finalizing an empty transcript.
+    let watchdogBaseline = tapBufferCount
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        guard currentSessionId == sessionId, tapBufferCount == watchdogBaseline else { return }
+        emit("status", "audio_engine_stalled_rebuilding", sessionId: sessionId)
+        if rebuildAudioEngine(sessionId: sessionId) {
+            do {
+                try audioEngine.start()
+            } catch {
+                emitError("Microphone restart failed: \(error.localizedDescription)", sessionId: sessionId)
+                return
+            }
+        }
+        let rebuiltBaseline = tapBufferCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard currentSessionId == sessionId, tapBufferCount == rebuiltBaseline else { return }
+            emitError("Microphone produced no audio. Try again, or check the Input device in Voice settings.", sessionId: sessionId)
+        }
+    }
+
+    // Zero-FILL detector (#1534, the clean-install killer): buffers flow but
+    // every sample is EXACTLY 0.0 — macOS zero-fills the input for a client
+    // whose TCC/signing attribution it dislikes while still reporting the mic
+    // as authorized. A real mic never sits at exact digital zero (thermal
+    // noise floor keeps the LSBs moving), so peak == 0 after 1.5s of live
+    // buffers is conclusive. Surface it as an error — the OLD behavior was a
+    // silent empty transcript that looked like "dictation just doesn't work".
+    let zeroFillStart = tapBufferCount
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        guard currentSessionId == sessionId,
+              tapBufferCount != zeroFillStart,
+              sessionPeakSample == 0 else { return }
+        emit("status", "audio_engine_zero_fill", sessionId: sessionId)
+        emitError(
+            "macOS is delivering silent audio to o8 (permission attribution). Toggle o8 OFF and back ON in System Settings → Privacy & Security → Microphone, then relaunch o8.",
+            sessionId: sessionId
+        )
+    }
 }
 
 // MARK: - Main
