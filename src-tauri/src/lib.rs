@@ -3033,10 +3033,35 @@ mod stt_engine {
         active_session().load(Ordering::SeqCst)
     }
 
+    /// App handle for re-installing the event router after a daemon respawn.
+    /// Without it, `start()`'s auto-respawn produced a daemon whose events
+    /// flowed into a dropped Receiver — the dock showed "listening" forever
+    /// and nothing ever finalized or pasted (live incident 2026-07-10; this
+    /// also matches the historical "restart o8 and dictation works once"
+    /// reports: any quiet daemon death bricked dictation until app restart).
+    fn router_app() -> &'static OnceLock<AppHandle> {
+        static APP: OnceLock<AppHandle> = OnceLock::new();
+        &APP
+    }
+
+    /// Install the stdout→webview router thread for a daemon receiver.
+    fn install_event_router(
+        app: AppHandle,
+        rx: std::sync::mpsc::Receiver<crate::stt::TranscriptEvent>,
+    ) {
+        std::thread::spawn(move || {
+            for event in rx {
+                forward_event(&app, event);
+            }
+            log::info!("[stt] event router thread exiting (daemon stopped)");
+        });
+    }
+
     /// Spawn the daemon once and install the stdout→webview router thread.
     /// Safe to call once from setup(); a second call is a no-op (the daemon
     /// reports "already running").
     pub fn spawn(app: AppHandle) {
+        let _ = router_app().set(app.clone());
         let rx = {
             let mut guard = match recognizer().lock() {
                 Ok(g) => g,
@@ -3056,12 +3081,7 @@ mod stt_engine {
             }
         };
 
-        std::thread::spawn(move || {
-            for event in rx {
-                forward_event(&app, event);
-            }
-            log::info!("[stt] event router thread exiting (daemon stopped)");
-        });
+        install_event_router(app, rx);
 
         // Warm the Gemini TLS handshake in the background so the first polish
         // call doesn't pay the cold-start cost.
@@ -3538,7 +3558,39 @@ mod stt_engine {
                         app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
-                    let paste_outcome = crate::paste::paste_text_with_status(&polished);
+                    // In-app delivery (#1542 slim-down + composer-focus fix):
+                    // when o8 itself is frontmost, a synthetic Cmd+V into our
+                    // own webview is fragile — the partials/dock windows can
+                    // shuffle first responder mid-session and the paste lands
+                    // nowhere (live incident 2026-07-10). Deliver through the
+                    // SAME fill path the in-window dictation uses instead:
+                    // DictationHost fills the sticky-registered composer, else
+                    // inserts at the focused editable, and only falls back to
+                    // a real Cmd+V (o8_debug_paste) if it has nowhere to put
+                    // the text. Fake keystrokes to ourselves are now a last
+                    // resort, not the default.
+                    let paste_outcome = if crate::paste::frontmost_is_o8() {
+                        let fill = serde_json::json!({
+                            "type": "system-fill",
+                            "origin": "system",
+                            "text": polished.clone(),
+                        });
+                        match app.emit("o8:stt-event", fill) {
+                            Ok(()) => {
+                                log::info!(
+                                    "[paste] outcome=filled-in-app chars={} (o8 frontmost — delivered via composer fill path)",
+                                    polished.len()
+                                );
+                                crate::paste::PasteOutcome::Pasted
+                            }
+                            Err(e) => {
+                                log::warn!("[paste] in-app fill emit failed ({e}); falling back to synthetic paste");
+                                crate::paste::paste_text_with_status(&polished)
+                            }
+                        }
+                    } else {
+                        crate::paste::paste_text_with_status(&polished)
+                    };
                     let paste_error = match &paste_outcome {
                         crate::paste::PasteOutcome::Failed(message) => Some(message.clone()),
                         crate::paste::PasteOutcome::ClipboardOnly => Some(
@@ -3626,10 +3678,26 @@ mod stt_engine {
         let mut guard = recognizer()
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
-        // Respawn if the daemon died between sessions.
+        // Respawn if the daemon died between sessions — and REWIRE the event
+        // router to the new receiver. Discarding it (the old `let _ =`) left
+        // the fresh daemon's final/audio_file/complete events flowing into a
+        // dropped channel: "listening" forever, no finalize, no paste, until
+        // an app restart.
         if !guard.is_running() {
             log::warn!("[stt] daemon not running on start; respawning");
-            let _ = guard.respawn();
+            match guard.respawn() {
+                Ok(rx) => {
+                    if let Some(app) = router_app().get().cloned() {
+                        install_event_router(app, rx);
+                        log::info!("[stt] daemon respawned + event router reinstalled");
+                    } else {
+                        log::warn!(
+                            "[stt] daemon respawned but no app handle — events will be DROPPED"
+                        );
+                    }
+                }
+                Err(e) => log::warn!("[stt] daemon respawn failed: {e}"),
+            }
         }
         // Apply the saved microphone choice (Settings → Input). set_input_device
         // early-returns when unchanged, so this is cheap; "default"/empty → system

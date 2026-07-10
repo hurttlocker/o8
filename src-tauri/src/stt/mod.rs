@@ -20,6 +20,7 @@
 // stay faithful to the source; allow dead_code rather than deleting API.
 #![allow(dead_code)]
 
+pub mod capture;
 pub mod keys;
 pub mod polish;
 pub mod whisper;
@@ -303,6 +304,12 @@ impl DaemonChild {
 pub struct LiveRecognizer {
     child: Option<DaemonChild>,
     stdin: Option<Box<dyn Write + Send>>,
+    /// Main-process capture pump (#1540) — present when `main_process_capture`
+    /// is enabled: the APP owns the mic and streams PCM to the helper's
+    /// `--audio-fifo`, because macOS 15.7.8 broke helper-process capture on
+    /// Intel Sequoia while main-process capture kept working (the composer
+    /// path is the existence proof).
+    pump: Option<capture::AudioPump>,
     locale: Option<String>,
     on_device: Option<bool>,
     input_device_uid: Option<String>,
@@ -366,7 +373,34 @@ impl LiveRecognizer {
             ));
         }
 
-        let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper)?;
+        // Main-process capture (#1540): create the FIFO + pump handle BEFORE
+        // the helper spawns so its reader finds the node at boot. Pump failure
+        // falls back to legacy helper-side capture — never a dead daemon.
+        let mut fifo_arg: Option<std::path::PathBuf> = None;
+        if keys::config_bool("main_process_capture", Self::default_main_process_capture()) {
+            let fifo_path = std::env::temp_dir().join(format!(
+                "o8-stt-audio-{}.fifo",
+                unsafe { libc::getuid() }
+            ));
+            match capture::AudioPump::new(fifo_path) {
+                Ok(pump) => {
+                    fifo_arg = Some(pump.fifo_path().to_path_buf());
+                    self.pump = Some(pump);
+                }
+                Err(e) => {
+                    log::warn!("[stt] main-process capture unavailable ({e}); falling back to helper-side capture");
+                }
+            }
+        }
+
+        // #1539: kill stale helpers BEFORE spawning ours. A zombie from a dead
+        // or replaced app instance holds the microphone open and garbles every
+        // capture the new helper makes (live incident 2026-07-10: one zombie
+        // survived two app swaps and poisoned 5h of testing). We have no child
+        // yet (guarded above), so any live speech_recognizer is a stray.
+        Self::kill_stale_helpers();
+
+        let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper, fifo_arg.as_deref())?;
 
         // Read stderr in background for diagnostics
         {
@@ -402,14 +436,26 @@ impl LiveRecognizer {
                                 text: evt.text,
                             },
                             "status" => {
-                                // Engine-health statuses must reach the PROD log
+                                // Diagnostic statuses must reach the PROD log
                                 // file (`log::` → tauri_plugin_log → o8.log);
                                 // `tracing::` goes to stdout, which a bundled
                                 // .app discards — #1534 was undiagnosable in the
                                 // field because every capture/paste breadcrumb
-                                // was tracing-only.
-                                if evt.text.starts_with("audio_engine") {
-                                    log::warn!("[stt] helper audio-engine health: {}", evt.text);
+                                // was tracing-only, and the 0.1.578 regression
+                                // hid again because the helper's boot-time
+                                // microphone:/speech_recognition: statuses were
+                                // never logged. Log every diagnostic prefix;
+                                // only the high-frequency session chatter
+                                // (listening/locale/on_device/input_device)
+                                // stays UI-only.
+                                const LOGGED_PREFIXES: [&str; 4] = [
+                                    "audio_engine",
+                                    "microphone:",
+                                    "speech_recognition:",
+                                    "recognizer",
+                                ];
+                                if LOGGED_PREFIXES.iter().any(|p| evt.text.starts_with(p)) {
+                                    log::warn!("[stt] helper health: {}", evt.text);
                                 }
                                 TranscriptEvent::Status {
                                     session_id: evt.session_id,
@@ -466,6 +512,89 @@ impl LiveRecognizer {
         Ok(rx)
     }
 
+    /// Whether main-process capture (#1540) defaults ON for this machine.
+    ///
+    /// macOS Sequoia 15.7.8 broke audio delivery to app-spawned helpers on
+    /// INTEL Macs (2018 MBPs and friends cannot upgrade past Sequoia, so the
+    /// breakage is permanent for that class). Apple Silicon and macOS 26+
+    /// keep the proven helper-side capture by default — no behavior change on
+    /// healthy machines. `main_process_capture` in ~/.o8/dictation.json
+    /// overrides in either direction.
+    fn default_main_process_capture() -> bool {
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        {
+            static DEFAULT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            return *DEFAULT.get_or_init(|| {
+                let major = std::process::Command::new("sysctl")
+                    .args(["-n", "kern.osproductversion"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .and_then(|v| {
+                        v.trim().split('.').next().and_then(|m| m.parse::<u32>().ok())
+                    })
+                    .unwrap_or(0);
+                // 15.x (Sequoia) and unknown-on-Intel default to the pump;
+                // macOS 26+ Intel (the iMac class) keeps helper capture.
+                let default_on = major > 0 && major < 26;
+                if default_on {
+                    log::info!(
+                        "[stt] Intel + macOS {major}.x — main-process capture defaults ON (#1540)"
+                    );
+                }
+                default_on
+            });
+        }
+        #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+        {
+            false
+        }
+    }
+
+    /// SIGKILL ORPHANED `speech_recognizer` processes (#1539). Orphaned means
+    /// reparented to launchd (ppid == 1) — the parent app is gone, so the
+    /// helper is a true zombie holding the microphone open. The ppid check is
+    /// load-bearing: killing every helper by name is FRATRICIDE when two app
+    /// instances overlap (live incident 2026-07-10: a dev build and the
+    /// installed build each executed the other's healthy helper on boot).
+    /// Best-effort: a failure here must never block the spawn.
+    fn kill_stale_helpers() {
+        #[cfg(unix)]
+        {
+            // -f with an end-anchored regex, NOT -x with the bare name: the
+            // kernel truncates p_comm to 16 chars ("speech_recognize"), so an
+            // -x match on the full 17-char name silently finds nothing. The
+            // anchor also covers the dev build's target-triple-suffixed helper
+            // while excluding unrelated argv mentions of the word.
+            let Ok(out) = Command::new("pgrep")
+                .args(["-f", r"[/]speech_recognizer(-[a-z0-9_-]+)?( |$)"])
+                .output()
+            else {
+                return;
+            };
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let Ok(pid) = line.trim().parse::<i32>() else {
+                    continue;
+                };
+                let orphaned = Command::new("ps")
+                    .args(["-o", "ppid=", "-p", &pid.to_string()])
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+                    .unwrap_or(false);
+                if !orphaned {
+                    continue;
+                }
+                log::warn!(
+                    "[stt] killing orphaned speech_recognizer helper (pid={pid}, ppid=1) before spawn (#1539)"
+                );
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+
     /// Spawn the helper, preferring the DISCLAIMED path on macOS.
     ///
     /// Why (#1534, the clean-install Intel killer): a helper spawned normally
@@ -487,6 +616,7 @@ impl LiveRecognizer {
     #[allow(clippy::type_complexity)]
     fn spawn_helper(
         helper: &std::path::Path,
+        audio_fifo: Option<&std::path::Path>,
     ) -> Result<
         (
             DaemonChild,
@@ -497,7 +627,7 @@ impl LiveRecognizer {
         String,
     > {
         #[cfg(target_os = "macos")]
-        match Self::spawn_disclaimed(helper) {
+        match Self::spawn_disclaimed(helper, audio_fifo) {
             Ok((child, stdin, stdout, stderr)) => {
                 log::info!(
                     "[stt] helper spawned with disclaimed TCC responsibility (pid={})",
@@ -517,7 +647,11 @@ impl LiveRecognizer {
             }
         }
 
-        let mut child = Command::new(helper)
+        let mut command = Command::new(helper);
+        if let Some(fifo) = audio_fifo {
+            command.arg("--audio-fifo").arg(fifo);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -550,6 +684,7 @@ impl LiveRecognizer {
     #[cfg(target_os = "macos")]
     fn spawn_disclaimed(
         helper: &std::path::Path,
+        audio_fifo: Option<&std::path::Path>,
     ) -> Result<(DisclaimedChild, std::fs::File, std::fs::File, std::fs::File), String> {
         use std::os::fd::FromRawFd;
         use std::os::unix::ffi::OsStrExt;
@@ -613,7 +748,19 @@ impl LiveRecognizer {
                 libc::posix_spawn_file_actions_addclose(&mut fa, fd);
             }
 
-            let argv: [*mut libc::c_char; 2] = [path.as_ptr() as *mut _, std::ptr::null_mut()];
+            // Optional --audio-fifo <path> args (#1540). CStrings owned in this
+            // scope so the argv pointers stay valid through posix_spawn.
+            let fifo_flag = std::ffi::CString::new("--audio-fifo").unwrap();
+            let fifo_path_c = audio_fifo
+                .map(|p| std::ffi::CString::new(p.as_os_str().as_bytes()))
+                .transpose()
+                .map_err(|_| "audio fifo path contains NUL".to_string())?;
+            let mut argv: Vec<*mut libc::c_char> = vec![path.as_ptr() as *mut _];
+            if let Some(ref fifo_c) = fifo_path_c {
+                argv.push(fifo_flag.as_ptr() as *mut _);
+                argv.push(fifo_c.as_ptr() as *mut _);
+            }
+            argv.push(std::ptr::null_mut());
             let envp = *_NSGetEnviron();
 
             let mut pid: libc::pid_t = 0;
@@ -644,6 +791,13 @@ impl LiveRecognizer {
     /// Begin a new dictation session by writing `start\n` to the daemon.
     /// Cheap — no spawn, no allocation beyond the line.
     pub fn start(&mut self, session_id: u64) -> Result<(), String> {
+        // Main-process capture: the mic opens per-session (push-to-talk
+        // shaped). A pump failure is a hard error — a session with no audio
+        // source must never start silently (#1534 lesson).
+        if let Some(pump) = self.pump.as_mut() {
+            pump.start()
+                .map_err(|e| format!("microphone capture failed to start: {e}"))?;
+        }
         let stdin = self
             .stdin
             .as_mut()
@@ -727,6 +881,11 @@ impl LiveRecognizer {
     /// Best-effort: if the daemon has died or stdin is gone, logs and moves on.
     /// Signature matches the pre-refactor version (`pub fn stop(&mut self)`).
     pub fn stop(&mut self, session_id: u64) {
+        // Release the mic promptly (indicator off at key-up); the helper's
+        // FIFO reader sees EOF and reopens for the next session.
+        if let Some(pump) = self.pump.as_mut() {
+            pump.stop();
+        }
         if let Some(stdin) = self.stdin.as_mut() {
             let cmd = format!("stop:{session_id}\n");
             if let Err(e) = stdin.write_all(cmd.as_bytes()) {
