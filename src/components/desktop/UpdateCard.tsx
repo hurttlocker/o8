@@ -138,6 +138,24 @@ export function UpdateCard() {
     } catch { /* ignore */ }
   }, [update?.version]);
 
+  // Manual "Check for updates" (Settings drawer) found one — show the card
+  // NOW, expanded, even if this version was previously dismissed. An explicit
+  // check is the operator asking to see it.
+  useEffect(() => {
+    const onFound = (event: Event) => {
+      const next = normalizeUpdateInfo((event as CustomEvent<unknown>).detail);
+      if (!next) return;
+      try {
+        window.localStorage.removeItem(SESSION_DISMISS_KEY);
+      } catch { /* ignore */ }
+      setDismissed(null);
+      setUpdate(next);
+      setExpanded(true);
+    };
+    window.addEventListener('o8:update-found', onFound);
+    return () => window.removeEventListener('o8:update-found', onFound);
+  }, []);
+
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => {
       const next = !prev;

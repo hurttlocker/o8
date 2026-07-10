@@ -518,7 +518,16 @@ export function SettingsQuickDrawer({
       const update = await check();
       if (update) {
         setUpdateStatus('available');
-        openExternalUrl(RELEASE_URL);
+        // Surface the IN-APP update card (version + release note + install
+        // button) instead of bouncing the operator to GitHub — the card is
+        // the product surface for updates (operator report 2026-07-10).
+        window.dispatchEvent(new CustomEvent('o8:update-found', {
+          detail: {
+            version: update.version,
+            notes: update.body ?? undefined,
+            date: update.date ?? undefined,
+          },
+        }));
       } else {
         setUpdateStatus('current');
         window.setTimeout(() => setUpdateStatus('idle'), 2600);
