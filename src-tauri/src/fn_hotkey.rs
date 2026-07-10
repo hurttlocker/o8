@@ -420,7 +420,7 @@ fn begin_system_dictation() {
     // `hud: true` so the /agent-partials page latches (it otherwise only latches
     // on `lane: agent`), deliver the start DIRECTLY to the HUD webview, and
     // re-assert/re-anchor the HUD — mirrors the agent-dictation start path.
-    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", false);
+    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", true);
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
@@ -580,7 +580,7 @@ fn begin_long_form_dictation() {
     // the user sees the waveform). Emit DIRECTLY to the dock window. The Fn
     // partials HUD is opt-in (`fn_hud_partials`, default OFF) — same treatment
     // as push-to-talk so long-form Fn dictation shows the bar when enabled.
-    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", false);
+    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", true);
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
@@ -1106,6 +1106,15 @@ pub fn start(app: tauri::AppHandle) {
                     let flags = event.get_flags().bits();
                     let fn_is_down = (flags & FN_FLAG) != 0;
 
+                    // TEMP #1534 gesture debug — every Fn-relevant FlagsChanged,
+                    // raw. log:: so it reaches the log file in any build.
+                    if fn_is_down || fn_held_cb.load(Ordering::SeqCst) {
+                        log::info!(
+                            "[fn-edge] FlagsChanged fn={fn_is_down} raw_flags={flags:#x} latch={}",
+                            fn_held_cb.load(Ordering::SeqCst)
+                        );
+                    }
+
                     // Edge-latch with compare-exchange so duplicate FlagsChanged
                     // events (macOS delivers them 2-3x on some keyboards) don't
                     // double-fire start/stop.
@@ -1134,16 +1143,19 @@ pub fn start(app: tauri::AppHandle) {
                             // Clear toggle + edge latch synchronously so this tap's
                             // impending Fn-up CAS fails (no brush/end) and the poll
                             // skips. The recognizer stop + paste run off-tap.
+                            log::info!("[fn-edge] down → finish long-form");
                             LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
                             fn_held_cb.store(false, Ordering::SeqCst);
                             std::thread::spawn(finish_long_form_dictation);
                         } else if consume_double_tap_brush() {
                             // Promote to long-form. Set the toggle + clear the edge
                             // latch synchronously so THIS tap's Fn-up no-ops.
+                            log::info!("[fn-edge] down → double-tap promote to long-form");
                             LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
                             fn_held_cb.store(false, Ordering::SeqCst);
                             std::thread::spawn(begin_long_form_dictation);
                         } else {
+                            log::info!("[fn-edge] down → begin system dictation (push-to-talk)");
                             std::thread::spawn(begin_system_dictation);
                         }
                     } else if up_edge {
@@ -1161,11 +1173,19 @@ pub fn start(app: tauri::AppHandle) {
                                 // Sub-threshold brush — tear down silently, no paste,
                                 // and STAMP the brush so a quick second tap is read
                                 // as a double-tap (long-form start).
+                                log::info!(
+                                    "[fn-edge] up after {}ms → BRUSH (< {FN_TAP_PRIMER_MAX_MS}ms) — discard + prime double-tap",
+                                    hold.as_millis()
+                                );
                                 if let Ok(mut g) = LAST_FN_BRUSH.lock() {
                                     *g = Some(std::time::Instant::now());
                                 }
                                 std::thread::spawn(discard_brush);
                             } else {
+                                log::info!(
+                                    "[fn-edge] up after {}ms → end system dictation (finalize+paste)",
+                                    hold.as_millis()
+                                );
                                 std::thread::spawn(end_system_dictation);
                             }
                         }
