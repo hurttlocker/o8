@@ -23,6 +23,7 @@ import {
 import { DictationPill } from './DictationPill';
 import { useDictation } from './useDictation';
 import { isNativeDictationAvailable, useNativeDictation } from './useNativeDictation';
+import { isTauri } from '@/lib/tauri/bridge';
 import { useSymonEditBridge } from './useSymonEditBridge';
 import type { DictationStartOptions } from './types';
 
@@ -87,6 +88,56 @@ export function DictationHost({ children }: DictationHostProps) {
     if (available) {
       console.log('[dictation] native on-device engine active (Apple-Speech sidecar)');
     }
+  }, []);
+
+  // In-app delivery for SYSTEM (Fn) dictation while o8 is frontmost
+  // (#1542 composer-focus fix): Rust emits `system-fill` instead of posting a
+  // synthetic Cmd+V at our own webview (which lost a first-responder race and
+  // pasted nowhere — live incident 2026-07-10). Delivery ladder: the
+  // sticky-registered composer's fill → insertText at the focused editable →
+  // ask Rust for a real synthetic paste as the LAST resort.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlistenFn: (() => void) | null = null;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<{ type?: string; text?: string }>('o8:stt-event', (e) => {
+          if (e.payload?.type !== 'system-fill') return;
+          const text = e.payload.text ?? '';
+          if (!text) return;
+          if (fillRef.current) {
+            fillRef.current(text);
+            return;
+          }
+          const el = document.activeElement as HTMLElement | null;
+          const editable = !!el && (
+            el.tagName === 'TEXTAREA' ||
+            el.tagName === 'INPUT' ||
+            el.isContentEditable
+          );
+          if (editable) {
+            document.execCommand('insertText', false, text);
+            return;
+          }
+          // Nowhere in-app to put it — fall back to the real synthetic paste.
+          import('@tauri-apps/api/core')
+            .then(({ invoke }) => invoke('o8_debug_paste', { text }))
+            .catch((err) => console.warn('[dictation] system-fill fallback paste failed', err));
+        }),
+      )
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        unlistenFn = unlisten;
+      })
+      .catch((err) => console.warn('[dictation] system-fill listener failed', err));
+    return () => {
+      disposed = true;
+      unlistenFn?.();
+    };
   }, []);
 
   const engine = nativeAvailable ? nativeDictation : webDictation;
