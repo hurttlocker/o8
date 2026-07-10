@@ -129,6 +129,22 @@ Thread.detachNewThread {
     }
 }
 
+// ── Main-process capture mode (#1540) ───────────────────────────────────────
+// macOS 15.7.8 broke audio delivery to app-SPAWNED helpers on Intel Sequoia:
+// this process's own AVAudioEngine receives silence/garbage regardless of TCC
+// state, while capture in the MAIN app process still works (the composer
+// path never broke). With `--audio-fifo <path>` the parent app owns the mic
+// and streams 16kHz mono f32 PCM down the FIFO; this helper keeps
+// SFSpeechRecognizer + the Whisper WAV, fed from the pipe. No AVAudioEngine
+// is created in this mode — the entire stall/rebuild/zero-fill class is
+// unreachable.
+let audioFifoPath: String? = {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--audio-fifo"), i + 1 < args.count else { return nil }
+    return args[i + 1]
+}()
+var audioFifoMode: Bool { audioFifoPath != nil }
+
 // MARK: - Output helpers
 
 /// Write a line to stdout using POSIX write() to bypass all buffering.
@@ -1105,6 +1121,87 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
 /// Prepare the audio engine + recognizer + converter + recording buffer.
 /// Does NOT start the engine or start recognition — those happen in
 /// handleStart() when the parent sends "start".
+/// FIFO-mode boot (#1540): no engine, no taps, no observers. Marks ingest
+/// ready (handleStart's guards check these), starts the pipe reader, emits
+/// ready. The parent pump opens the write end per-session; between sessions
+/// the reader just waits.
+func prepareFifoIngest(path: String) {
+    guard configureRecognizer(localeIdentifier: currentLocaleIdentifier) else {
+        exit(1)
+    }
+    nativeFormat = whisperFormat
+    audioTapInstalled = true
+    startFifoReader(path: path)
+    emitReady()
+}
+
+/// Read 16kHz mono f32 chunks from the FIFO and run the SAME ingestion the
+/// engine tap performed: liveness counter, session gate, recognition append,
+/// Whisper sample accumulation, level/peak emission. Audio arrives already in
+/// whisperFormat, so no converter is involved.
+func startFifoReader(path: String) {
+    Thread.detachNewThread {
+        // O_NONBLOCK so boot never deadlocks waiting for a writer; the read
+        // loop tolerates EAGAIN/empty (no session running) with a short sleep.
+        let fd = open(path, O_RDONLY | O_NONBLOCK)
+        guard fd >= 0 else {
+            emitError("Audio pipe open failed: \(String(cString: strerror(errno)))")
+            return
+        }
+        let chunkFrames = 1024
+        let chunkBytes = chunkFrames * MemoryLayout<Float>.size
+        var raw = Data()
+        var buf = [UInt8](repeating: 0, count: chunkBytes)
+        var chunkCounter = 0
+
+        while true {
+            let n = read(fd, &buf, chunkBytes)
+            if n <= 0 {
+                if n < 0 && errno != EAGAIN && errno != EINTR {
+                    emitError("Audio pipe read failed: \(String(cString: strerror(errno)))")
+                    return
+                }
+                usleep(20_000)
+                continue
+            }
+            raw.append(contentsOf: buf[0..<n])
+
+            while raw.count >= chunkBytes {
+                let chunk = raw.prefix(chunkBytes)
+                raw.removeFirst(chunkBytes)
+                tapBufferCount &+= 1
+                if currentSessionId == 0 { continue }
+
+                guard let pcm = AVAudioPCMBuffer(pcmFormat: whisperFormat, frameCapacity: AVAudioFrameCount(chunkFrames)),
+                      let dst = pcm.floatChannelData?[0] else { continue }
+                chunk.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
+                    dst.update(from: src.bindMemory(to: Float.self).baseAddress!, count: chunkFrames)
+                }
+                pcm.frameLength = AVAudioFrameCount(chunkFrames)
+
+                currentRequest?.append(pcm)
+                recordedSamples.append(contentsOf: UnsafeBufferPointer(start: dst, count: chunkFrames))
+
+                chunkCounter += 1
+                if chunkCounter % 3 == 0 {
+                    var sumOfSquares: Float = 0
+                    var peak: Float = 0
+                    for i in 0..<chunkFrames {
+                        let sample = dst[i]
+                        sumOfSquares += sample * sample
+                        peak = max(peak, abs(sample))
+                    }
+                    if peak > sessionPeakSample {
+                        sessionPeakSample = peak
+                    }
+                    let rms = sqrt(sumOfSquares / Float(chunkFrames))
+                    emitLevel(min(1.0, rms / 0.12), sessionId: currentSessionId)
+                }
+            }
+        }
+    }
+}
+
 func prepareAudioEngine() {
     guard configureRecognizer(localeIdentifier: currentLocaleIdentifier),
           configureAudioInputGraph() else {
@@ -1204,7 +1301,7 @@ func handleStart(sessionId: UInt64) {
     // stopped one — a restarted engine's AUHAL stalls for whole sessions on
     // Intel (#1534, see rebuildAudioEngine). A warm lingering engine is left
     // untouched: buffers are already flowing, restart would only add latency.
-    if engineNeedsRebuild || !audioEngine.isRunning {
+    if !audioFifoMode, engineNeedsRebuild || !audioEngine.isRunning {
         guard rebuildAudioEngine(sessionId: sessionId) else {
             emitError("Audio engine rebuild failed.", sessionId: sessionId)
             return
@@ -1235,6 +1332,21 @@ func handleStart(sessionId: UInt64) {
     // at most the watchdog window instead of the whole dictation). If the
     // REBUILT engine is also silent after a further second, tell the user
     // instead of silently finalizing an empty transcript.
+    if audioFifoMode {
+        // FIFO-mode liveness (#1540): the parent pump should be delivering
+        // chunks within ~1s of session start. If the counter never moves the
+        // pump/pipe is dead — say so instead of finalizing empty.
+        let fifoBaseline = tapBufferCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard currentSessionId == sessionId, tapBufferCount == fifoBaseline else { return }
+            emitError("No audio is arriving from the app's microphone stream. Quit and reopen o8.", sessionId: sessionId)
+        }
+        // Session + "listening" already started above this block — this path
+        // adds ONLY the liveness check; the engine watchdogs below are
+        // meaningless here (no engine exists in this mode).
+        return
+    }
+
     let watchdogBaseline = tapBufferCount
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
         guard currentSessionId == sessionId, tapBufferCount == watchdogBaseline else { return }
@@ -1325,16 +1437,28 @@ func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
     }
 }
 
-requestMicrophoneAccess { micGranted in
-    // Even without the mic we keep booting: the daemon still answers
-    // status/permission queries, and the zero-fill watchdog + the error above
-    // tell the operator exactly what to fix — a hard exit here would just
-    // read as "dictation does nothing" again.
-    _ = micGranted
+if let fifoPath = audioFifoPath {
+    // Main-process capture (#1540): the PARENT owns the mic (its TCC identity
+    // is the one 15.7.8 still honors) — this helper needs no mic access at
+    // all. Speech Recognition auth is still ours.
     requestAuthorization { authorized in
         guard authorized else { exit(1) }
         DispatchQueue.main.async {
-            prepareAudioEngine()
+            prepareFifoIngest(path: fifoPath)
+        }
+    }
+} else {
+    requestMicrophoneAccess { micGranted in
+        // Even without the mic we keep booting: the daemon still answers
+        // status/permission queries, and the zero-fill watchdog + the error above
+        // tell the operator exactly what to fix — a hard exit here would just
+        // read as "dictation does nothing" again.
+        _ = micGranted
+        requestAuthorization { authorized in
+            guard authorized else { exit(1) }
+            DispatchQueue.main.async {
+                prepareAudioEngine()
+            }
         }
     }
 }

@@ -20,6 +20,7 @@
 // stay faithful to the source; allow dead_code rather than deleting API.
 #![allow(dead_code)]
 
+pub mod capture;
 pub mod keys;
 pub mod polish;
 pub mod whisper;
@@ -303,6 +304,12 @@ impl DaemonChild {
 pub struct LiveRecognizer {
     child: Option<DaemonChild>,
     stdin: Option<Box<dyn Write + Send>>,
+    /// Main-process capture pump (#1540) — present when `main_process_capture`
+    /// is enabled: the APP owns the mic and streams PCM to the helper's
+    /// `--audio-fifo`, because macOS 15.7.8 broke helper-process capture on
+    /// Intel Sequoia while main-process capture kept working (the composer
+    /// path is the existence proof).
+    pump: Option<capture::AudioPump>,
     locale: Option<String>,
     on_device: Option<bool>,
     input_device_uid: Option<String>,
@@ -366,6 +373,26 @@ impl LiveRecognizer {
             ));
         }
 
+        // Main-process capture (#1540): create the FIFO + pump handle BEFORE
+        // the helper spawns so its reader finds the node at boot. Pump failure
+        // falls back to legacy helper-side capture — never a dead daemon.
+        let mut fifo_arg: Option<std::path::PathBuf> = None;
+        if keys::config_bool("main_process_capture", false) {
+            let fifo_path = std::env::temp_dir().join(format!(
+                "o8-stt-audio-{}.fifo",
+                unsafe { libc::getuid() }
+            ));
+            match capture::AudioPump::new(fifo_path) {
+                Ok(pump) => {
+                    fifo_arg = Some(pump.fifo_path().to_path_buf());
+                    self.pump = Some(pump);
+                }
+                Err(e) => {
+                    log::warn!("[stt] main-process capture unavailable ({e}); falling back to helper-side capture");
+                }
+            }
+        }
+
         // #1539: kill stale helpers BEFORE spawning ours. A zombie from a dead
         // or replaced app instance holds the microphone open and garbles every
         // capture the new helper makes (live incident 2026-07-10: one zombie
@@ -373,7 +400,7 @@ impl LiveRecognizer {
         // yet (guarded above), so any live speech_recognizer is a stray.
         Self::kill_stale_helpers();
 
-        let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper)?;
+        let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper, fifo_arg.as_deref())?;
 
         // Read stderr in background for diagnostics
         {
@@ -501,7 +528,7 @@ impl LiveRecognizer {
             // anchor also covers the dev build's target-triple-suffixed helper
             // while excluding unrelated argv mentions of the word.
             let Ok(out) = Command::new("pgrep")
-                .args(["-f", r"speech_recognizer(-[a-z0-9_-]+)?$"])
+                .args(["-f", r"[/]speech_recognizer(-[a-z0-9_-]+)?( |$)"])
                 .output()
             else {
                 return;
@@ -550,6 +577,7 @@ impl LiveRecognizer {
     #[allow(clippy::type_complexity)]
     fn spawn_helper(
         helper: &std::path::Path,
+        audio_fifo: Option<&std::path::Path>,
     ) -> Result<
         (
             DaemonChild,
@@ -560,7 +588,7 @@ impl LiveRecognizer {
         String,
     > {
         #[cfg(target_os = "macos")]
-        match Self::spawn_disclaimed(helper) {
+        match Self::spawn_disclaimed(helper, audio_fifo) {
             Ok((child, stdin, stdout, stderr)) => {
                 log::info!(
                     "[stt] helper spawned with disclaimed TCC responsibility (pid={})",
@@ -580,7 +608,11 @@ impl LiveRecognizer {
             }
         }
 
-        let mut child = Command::new(helper)
+        let mut command = Command::new(helper);
+        if let Some(fifo) = audio_fifo {
+            command.arg("--audio-fifo").arg(fifo);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -613,6 +645,7 @@ impl LiveRecognizer {
     #[cfg(target_os = "macos")]
     fn spawn_disclaimed(
         helper: &std::path::Path,
+        audio_fifo: Option<&std::path::Path>,
     ) -> Result<(DisclaimedChild, std::fs::File, std::fs::File, std::fs::File), String> {
         use std::os::fd::FromRawFd;
         use std::os::unix::ffi::OsStrExt;
@@ -676,7 +709,19 @@ impl LiveRecognizer {
                 libc::posix_spawn_file_actions_addclose(&mut fa, fd);
             }
 
-            let argv: [*mut libc::c_char; 2] = [path.as_ptr() as *mut _, std::ptr::null_mut()];
+            // Optional --audio-fifo <path> args (#1540). CStrings owned in this
+            // scope so the argv pointers stay valid through posix_spawn.
+            let fifo_flag = std::ffi::CString::new("--audio-fifo").unwrap();
+            let fifo_path_c = audio_fifo
+                .map(|p| std::ffi::CString::new(p.as_os_str().as_bytes()))
+                .transpose()
+                .map_err(|_| "audio fifo path contains NUL".to_string())?;
+            let mut argv: Vec<*mut libc::c_char> = vec![path.as_ptr() as *mut _];
+            if let Some(ref fifo_c) = fifo_path_c {
+                argv.push(fifo_flag.as_ptr() as *mut _);
+                argv.push(fifo_c.as_ptr() as *mut _);
+            }
+            argv.push(std::ptr::null_mut());
             let envp = *_NSGetEnviron();
 
             let mut pid: libc::pid_t = 0;
@@ -707,6 +752,13 @@ impl LiveRecognizer {
     /// Begin a new dictation session by writing `start\n` to the daemon.
     /// Cheap — no spawn, no allocation beyond the line.
     pub fn start(&mut self, session_id: u64) -> Result<(), String> {
+        // Main-process capture: the mic opens per-session (push-to-talk
+        // shaped). A pump failure is a hard error — a session with no audio
+        // source must never start silently (#1534 lesson).
+        if let Some(pump) = self.pump.as_mut() {
+            pump.start()
+                .map_err(|e| format!("microphone capture failed to start: {e}"))?;
+        }
         let stdin = self
             .stdin
             .as_mut()
@@ -790,6 +842,11 @@ impl LiveRecognizer {
     /// Best-effort: if the daemon has died or stdin is gone, logs and moves on.
     /// Signature matches the pre-refactor version (`pub fn stop(&mut self)`).
     pub fn stop(&mut self, session_id: u64) {
+        // Release the mic promptly (indicator off at key-up); the helper's
+        // FIFO reader sees EOF and reopens for the next session.
+        if let Some(pump) = self.pump.as_mut() {
+            pump.stop();
+        }
         if let Some(stdin) = self.stdin.as_mut() {
             let cmd = format!("stop:{session_id}\n");
             if let Err(e) = stdin.write_all(cmd.as_bytes()) {
