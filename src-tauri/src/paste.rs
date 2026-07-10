@@ -1323,8 +1323,16 @@ extern "C" {
 fn wait_for_chord_release() {
     // kCGEventFlagMaskControl (1<<18) | kCGEventFlagMaskShift (1<<17).
     const CHORD_MASK: u64 = 0x40000 | 0x20000;
-    // kCGEventSourceStateCombinedSessionState = 1.
-    const CG_STATE_COMBINED_SESSION: i32 = 1;
+    // kCGEventSourceStateCombinedSessionState is 0, NOT 1 — the old constant
+    // here said "combined = 1", but 1 is kCGEventSourceStateHIDSystemState:
+    // HARDWARE-only modifier state. A chord typed through a remote-control
+    // session (Chrome Remote Desktop injects synthetic events) never registers
+    // in hardware state, so this poll returned "released" instantly, the
+    // synthetic Cmd+C merged with the still-held Ctrl+Shift, and
+    // speak-selection read "no selection to speak" every time the operator
+    // drove the machine remotely (#1534 field evidence, 2026-07-10 04:40).
+    // The COMBINED state covers both hardware and synthetic sources.
+    const CG_STATE_COMBINED_SESSION: i32 = 0;
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(700);
     while std::time::Instant::now() < deadline {
         let held = unsafe { CGEventSourceFlagsState(CG_STATE_COMBINED_SESSION) } & CHORD_MASK;
