@@ -1,49 +1,26 @@
-> **⚠️ HOLD MERGE — read this first (updated after 0.1.578 shipped).**
-> 0.1.578 (disclaimed spawn) did NOT fix capture: the helper still records
-> -91 dB silence and no permission prompt appears. Worse, my permission
-> diagnosis was WRONG. tccd receipts on the affected machine show the
-> disclaimed helper's `kTCCServiceMicrophone` resolves **Allowed**, and the
-> `kTCCServiceAudioCapture: Unknown (None)` verdict I flagged as the smoking
-> gun is **normal** — a Terminal-run ffmpeg capturing real audio at -28.8 dB
-> gets the identical verdict (control run, 2026-07-10 10:04Z).
+> **✅ SHIP THIS BRANCH — verified end-to-end on the Intel MacBook (2026-07-10 16:00Z).**
+> Branch HEAD ran on the affected laptop in BOTH launch contexts (terminal and
+> LaunchServices): operator's real voice, real Fn holds (3.9s/8.3s/9.1s/9.3s),
+> clean gesture edges, real capture (whisper transcribed), and
+> `[paste] outcome=pasted` into **com.apple.Terminal and com.google.Chrome** —
+> text landed outside the app, content-verified by the operator live.
 >
-> **The zero-fill is therefore NOT a TCC permission problem.** Root cause is
-> still OPEN. My earlier "disclaim spawn = real audio" validation was
-> confounded: it was spawned from python under Terminal (a responsible
-> process with healthy capture), not from o8.app.
+> **The 0.1.578 regression explained:** the disclaim commit (5ee9bbac) made the
+> helper its own TCC client but nothing ever REQUESTED mic access for that new
+> identity → notDetermined → CoreAudio zero-fills → every Fn/Option dictation
+> silent. The fix is a23d3162 (explicit `AVCaptureDevice.requestAccess` at
+> daemon boot) — already on this branch. 0.1.578 shipped WITHOUT it.
 >
-> What is safe to merge here: the honest error message + the zero-fill/stall
-> watchdogs (they make the failure loud), and the speak-selection chord fix
-> (independent, verified reasoning). The disclaimed spawn itself is
-> behavior-neutral-with-fallback but is NOT the cure — do not ship it as one.
+> **Why the composer mic button kept working:** it records via the webview's
+> `getUserMedia` (`useDictation.ts`), a different capture path attributed to
+> the app itself. It was never evidence about the daemon.
 >
-> **A/B evidence (2026-07-10 10:20Z, Intel MacBook, back-to-back):**
-> | Helper | Spawned by | Result |
-> |---|---|---|
-> | shipped 0.1.576 (pre-fix) | Terminal | **no WAV at all** — the cold-start stall |
-> | this branch's helper | Terminal | **-17.9 dB, perfect transcript**, zero health events |
-> | this branch's helper | **o8.app** | **-91 dB zeros** + rebuild churn |
->
-> So: the helper is correct, the mic is correct, TCC is correct. Capture only
-> dies when **o8.app is the parent**. The engine-recreation fix genuinely
-> repairs the stall (row 1 → row 2). The zero-fill is an APP-PROCESS
-> phenomenon and it predates this branch (a -91 dB WAV was captured from the
-> stock 0.1.576 app before any helper swap).
->
-> **Next experiment (decisive, not yet run — needs a build):** boot o8 with
-> `sound::spawn_worker()` and TTS init disabled, and with whatever opens an
-> audio INPUT client in the app process (tccd shows `ai.o8.desktop` itself
-> requesting kTCCServiceMicrophone at 09:49:13Z — why does the APP need the
-> mic if the helper does the capture?). Measure the helper's WAV level. If
-> levels come back, the app's own CoreAudio client is starving the helper's
-> input AUHAL on Intel — the fix is to stop opening it, or to move capture
-> fully into one process.
->
-> **Also note:** the config-change observer this branch adds fires during its
-> own rebuild in-app (`config_changed_rebuilding` → `stalled_rebuilding` →
-> `zero_fill` inside 2s, 13:54:42-44Z). It does not reproduce standalone, but
-> it should be fenced (ignore notifications while a rebuild is in flight)
-> before this lands, regardless of the root cause.
+> **Ship notes:** (1) First dictation after update prompts ONCE for
+> "o8 Speech Helper" microphone — user must click Allow; add a release note.
+> (2) The `[fn-edge]` gesture logging is deliberate — low-volume, and #1534
+> was undiagnosable without exactly this; keep it. (3) Rapid Fn TAPS are
+> brush/double-tap/long-form semantics by design — only holds push-to-talk;
+> consider onboarding copy.
 
 # fix(voice): spawn speech helper with disclaimed TCC responsibility — cures zero-filled Intel capture (#1534 follow-up)
 
