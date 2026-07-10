@@ -377,7 +377,7 @@ impl LiveRecognizer {
         // the helper spawns so its reader finds the node at boot. Pump failure
         // falls back to legacy helper-side capture — never a dead daemon.
         let mut fifo_arg: Option<std::path::PathBuf> = None;
-        if keys::config_bool("main_process_capture", false) {
+        if keys::config_bool("main_process_capture", Self::default_main_process_capture()) {
             let fifo_path = std::env::temp_dir().join(format!(
                 "o8-stt-audio-{}.fifo",
                 unsafe { libc::getuid() }
@@ -510,6 +510,45 @@ impl LiveRecognizer {
         );
 
         Ok(rx)
+    }
+
+    /// Whether main-process capture (#1540) defaults ON for this machine.
+    ///
+    /// macOS Sequoia 15.7.8 broke audio delivery to app-spawned helpers on
+    /// INTEL Macs (2018 MBPs and friends cannot upgrade past Sequoia, so the
+    /// breakage is permanent for that class). Apple Silicon and macOS 26+
+    /// keep the proven helper-side capture by default — no behavior change on
+    /// healthy machines. `main_process_capture` in ~/.o8/dictation.json
+    /// overrides in either direction.
+    fn default_main_process_capture() -> bool {
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        {
+            static DEFAULT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            return *DEFAULT.get_or_init(|| {
+                let major = std::process::Command::new("sysctl")
+                    .args(["-n", "kern.osproductversion"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .and_then(|v| {
+                        v.trim().split('.').next().and_then(|m| m.parse::<u32>().ok())
+                    })
+                    .unwrap_or(0);
+                // 15.x (Sequoia) and unknown-on-Intel default to the pump;
+                // macOS 26+ Intel (the iMac class) keeps helper capture.
+                let default_on = major > 0 && major < 26;
+                if default_on {
+                    log::info!(
+                        "[stt] Intel + macOS {major}.x — main-process capture defaults ON (#1540)"
+                    );
+                }
+                default_on
+            });
+        }
+        #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+        {
+            false
+        }
     }
 
     /// SIGKILL ORPHANED `speech_recognizer` processes (#1539). Orphaned means
