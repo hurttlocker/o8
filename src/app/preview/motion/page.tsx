@@ -20,7 +20,7 @@ const STATUS_STATES: Array<{
 }> = [
   { state: 'idle', label: 'Idle', meaning: 'Present, not working. No claim on attention.', color: 'var(--t-text-faint)', motion: 'static ring', where: 'queued / archived rows' },
   { state: 'running', label: 'Working', meaning: 'Actively working. Pulses; orbits once long-running.', color: 'var(--t-accent)', motion: 'pulse → orbit', where: 'live agents, streaming turns' },
-  { state: 'review', label: 'Awaiting review', meaning: 'Finished, waiting for your yes. Cool = your turn.', color: '#6366F1', motion: 'pulse', where: 'needs-review packets' },
+  { state: 'review', label: 'Awaiting review', meaning: 'Paused, parked waiting on you. Neutral — the sweep says "for you", not the color.', color: '#94a3b8', motion: 'grey sweep', where: 'needs-review packets' },
   { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. A settled no — your call.', color: '#E0446A', motion: 'static (solid)', where: 'rejected packets' },
   { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed.', color: 'var(--t-success)', motion: 'static (solid)', where: 'released packets' },
   { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Needs recovery.', color: '#ef4444', motion: 'static (solid)', where: 'failed / blocked lanes' },
@@ -35,6 +35,15 @@ export default function MotionPreviewPage() {
   return (
     <div
       style={{
+        // The raw /preview route isn't wrapped in ThemeProvider, so var(--t-*)
+        // tokens resolve to nothing and theme-token dots (working/merged/idle)
+        // render blank. Seed the light-palette values here so the board shows
+        // TRUE colors — otherwise it lies about the palette. (Q, 2026-07-11.)
+        '--t-text-faint': '#94a3b8',
+        '--t-accent': '#2563eb',
+        '--t-success': '#16a34a',
+        '--t-bg-card': '#ffffff',
+        '--t-divider': '#e5e7eb',
         minHeight: '100vh',
         background: 'var(--t-bg, #f8f8f6)',
         color: 'var(--t-text, #111827)',
@@ -43,7 +52,7 @@ export default function MotionPreviewPage() {
         paddingBottom: 80,
         paddingLeft: 40,
         paddingRight: 40,
-      }}
+      } as CSSProperties}
     >
       <header style={{ maxWidth: 920, margin: '0 auto', marginBottom: 28 }}>
         <h1 style={{ fontSize: 22, fontWeight: 440, letterSpacing: '-0.4px', margin: 0 }}>
