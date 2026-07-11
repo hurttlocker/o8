@@ -17,7 +17,7 @@
  * agents, live sessions, the LLM-chat + orchestrator working indicators.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 export type AgentDotState = 'idle' | 'running' | 'review' | 'rejected' | 'merged' | 'failed';
 
@@ -76,9 +76,15 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
 // the orange working orb. Awaiting-review → cool indigo ("your turn"); rejected
 // → rose (a firm no, distinct from failed's alarm red). Keep these in sync with
 // the /preview/motion Status-vocabulary board + repo-focus packetStatusColor.
+// Status palette (Q ruling 2026-07-11). Awaiting-review is a PAUSED state — it's
+// parked waiting on the human, nothing actively happening — so it carries NO
+// color (neutral grey); the sweep MOTION says "for you", not a loud hue. That
+// also dodges a collision with the blue working orb (--t-accent === blue). The
+// loud colors are reserved for outcomes: rejected → rose, failed → red, merged →
+// green. Keep in sync with the /preview/motion board + repo-focus packetStatusColor.
 const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
   running: 'var(--t-accent)',
-  review: '#6366F1',
+  review: '#94a3b8',
   rejected: '#E0446A',
   failed: '#ef4444',
 };
@@ -163,10 +169,13 @@ export function AgentStatusDot({
   }
 
   if (state === 'review') {
+    // Awaiting review = a solid blue circle with a light band SWEEPING across it
+    // ("your turn"). The circle holds (stable state); the sweep carries the
+    // motion. Base color drives the derived highlight. (Q ruling 2026-07-11.)
     return (
       <span
-        className="o8-pulse-circle"
-        style={{ background: color ?? ACCENT.review }}
+        className="o8-sweep-circle"
+        style={{ ['--sweep-base']: color ?? ACCENT.review } as CSSProperties}
         aria-label={dotLabel}
         title={dotLabel}
       />
