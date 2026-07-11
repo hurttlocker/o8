@@ -743,6 +743,24 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["kind"]
             }
         }),
+        json!({
+            "name": "terminal_list",
+            "description": "List only live PTY sessions that o8 itself hosts — use for 'what terminals are running?', 'what is o8 hosting?', or before terminal_send. Returns each exact session name plus cwd/repo, command hint, and creation time when o8 knows them. Do NOT use for Terminal.app, iTerm, or any terminal outside o8; use term_list for those.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "terminal_send",
+            "description": "Send text to ONE named o8-hosted PTY — 'tell the Claude session to run the tests', 'send npm test to cortex-dash-ab12cd34'. Call terminal_list first and pass its name exactly. Normal text submits with Enter; set raw true only for literal control bytes such as Ctrl+C, which must NOT get an extra Enter. This never controls Terminal.app, iTerm, or any foreign terminal. The user confirms before input is delivered.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_name": { "type": "string", "description": "Exact name from terminal_list." },
+                    "text": { "type": "string", "description": "Text to write; normal mode submits it with Enter." },
+                    "raw": { "type": "boolean", "description": "False by default. True writes literal bytes with no appended Enter; use only for control sequences." }
+                },
+                "required": ["session_name", "text"]
+            }
+        }),
         // ── Terminal control (the dev frontier) — Terminal.app AND iTerm2 ─────
         json!({
             "name": "term_list",
@@ -1075,6 +1093,8 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_panel_read" => o8_bridge::panel_read(args).await,
         "o8_recap" => o8_bridge::recap(args).await,
         "o8_usage" => o8_bridge::usage(args).await,
+        "terminal_list" => o8_bridge::terminal_list(args).await,
+        "terminal_send" => o8_bridge::terminal_send(args).await,
         "term_list" => terminal_ctl::list(args).await,
         "term_read" => terminal_ctl::read(args).await,
         "term_send" => terminal_ctl::send(args).await,
