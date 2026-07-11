@@ -3591,7 +3591,23 @@ function DashboardInner() {
     }
     return closed;
   }, [thoughtsMissionState.packets]);
-  const parkedLanes = useMemo(() => deriveParkedLanes(domainLanes, closedPacketIds, approvals), [approvals, domainLanes, closedPacketIds]);
+  // Best-effort governance hygiene packets (decompose fan-outs from the
+  // 800-line ceiling scan) are NOT merge gates — their own brief says so. Keep
+  // them out of the operator review beacon so they don't demand an amber dot;
+  // they still surface in the left packet list. (Q ruling 2026-07-11.)
+  const nonGatingPacketIds = useMemo(() => {
+    const nonGating = new Set<string>();
+    for (const packet of thoughtsMissionState.packets) {
+      if (packet.packetType === 'decompose') {
+        nonGating.add(packet.id);
+      }
+    }
+    return nonGating;
+  }, [thoughtsMissionState.packets]);
+  const parkedLanes = useMemo(
+    () => deriveParkedLanes(domainLanes, closedPacketIds, approvals, nonGatingPacketIds),
+    [approvals, domainLanes, closedPacketIds, nonGatingPacketIds],
+  );
 
   const handleOpenReviewLane = useCallback((lane: ParkedLane) => {
     if (lane.repoPath) {
