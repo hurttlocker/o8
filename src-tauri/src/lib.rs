@@ -4528,6 +4528,43 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
 /// mirror `CANVAS_GLASS_MATERIALS` in lib/canvas-mode/glass-settings.ts.
 /// `"default"` restores the HudWindow chrome material (follows-window
 /// state, matching the boot-time application).
+/// The chrome vibrancy material for THIS macOS version (#1543).
+///
+/// Apple degraded `HudWindow` twice in 2026: the 15.7.8 security update
+/// (2026-06-27) and the Tahoe 26.x line both stopped rendering it for our
+/// window shape — chrome fell back to raw transparency (sharp desktop, no
+/// blur). `UnderWindowBackground` renders correct glass on both, verified
+/// live on the operator iMac (26.6b3, operator-approved look) with the
+/// laptop (15.7.8) verified via bench build. 15.7.7-and-earlier keeps the
+/// original HudWindow (proven on 15.7.1 — Sydney's control machine).
+#[cfg(target_os = "macos")]
+fn chrome_vibrancy_material() -> window_vibrancy::NSVisualEffectMaterial {
+    use window_vibrancy::NSVisualEffectMaterial as M;
+    static MATERIAL: std::sync::OnceLock<window_vibrancy::NSVisualEffectMaterial> =
+        std::sync::OnceLock::new();
+    *MATERIAL.get_or_init(|| {
+        let version = std::process::Command::new("sysctl")
+            .args(["-n", "kern.osproductversion"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .unwrap_or_default();
+        let mut parts = version.trim().split('.');
+        let major: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let minor: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let patch: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let hud_broken = major >= 26 || (major == 15 && minor == 7 && patch >= 8);
+        if hud_broken {
+            log::info!(
+                "[vibrancy] macOS {version} — HudWindow degraded on this OS; using UnderWindowBackground (#1543)"
+            );
+            M::UnderWindowBackground
+        } else {
+            M::HudWindow
+        }
+    })
+}
+
 #[tauri::command]
 fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -4558,7 +4595,7 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
                     "under-window" => M::UnderWindowBackground,
                     "fullscreen" => M::FullScreenUI,
                     "hud" => M::HudWindow,
-                    _ => M::HudWindow, // "default" and unknown ids → chrome material
+                    _ => chrome_vibrancy_material(), // "default"/unknown → per-OS chrome (#1543)
                 };
                 // ALWAYS Active — including "default". Boot applies the chrome
                 // HudWindow material with State::Active (#1267: stay glassy when
@@ -5297,7 +5334,7 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 if let Err(err) = apply_vibrancy(
                     &window,
-                    NSVisualEffectMaterial::HudWindow,
+                    chrome_vibrancy_material(),
                     // Active (not focus-following): keep the chrome glassy when the
                     // window loses key focus instead of flattening to grey (#1267).
                     // Mirrors what the canvas surface already does (set_canvas_material).
@@ -5305,6 +5342,32 @@ pub fn run() {
                     None,
                 ) {
                     log::warn!("Failed to apply macOS vibrancy: {}", err);
+                }
+
+                // Tahoe boot-timing belt-and-braces (#1543): the effect view
+                // applied during setup can silently fail to render on macOS 26
+                // (observed live — a runtime clear+re-apply always fixes it).
+                // Re-assert once, shortly after the window is fully up.
+                #[cfg(target_os = "macos")]
+                {
+                    let reassert = window.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(2_500));
+                        let target = reassert.clone();
+                        let _ = reassert.run_on_main_thread(move || {
+                            let _ = window_vibrancy::clear_vibrancy(&target);
+                            if let Err(e) = window_vibrancy::apply_vibrancy(
+                                &target,
+                                chrome_vibrancy_material(),
+                                Some(window_vibrancy::NSVisualEffectState::Active),
+                                None,
+                            ) {
+                                log::warn!("[vibrancy] boot re-assert failed: {e}");
+                            } else {
+                                log::info!("[vibrancy] boot re-assert applied");
+                            }
+                        });
+                    });
                 }
 
                 // Transparent windows lose macOS's automatic corner mask, so the
