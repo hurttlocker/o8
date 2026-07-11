@@ -4,6 +4,9 @@ import { useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
+import { useBranchPr } from './useBranchPr';
+import { usePrDetail } from './pr-panel/usePrDetail';
+import type { PrCheck } from './pr-panel/types';
 import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 
 const ROW_HEIGHT = 28;
@@ -65,10 +68,23 @@ export function BranchDetailsLauncher({ visible = true }: { visible?: boolean })
   const branch = activePacket?.branchTarget || activeTarget?.branch || 'main';
   const repoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? null;
   const changes = useWorkspaceChanges(repoPath);
+  // PR for the current branch, surfaced inline so the operator sees status
+  // without opening the PRs tab (Q ruling 2026-07-11). Keyed by repo NAME (the
+  // list API resolves slug/name, not a local path). Null on main/master or
+  // when no open PR points at the branch.
+  const prRepoIdent = activeTarget?.repoName
+    ?? (repoPath ? repoPath.split('/').filter(Boolean).pop() ?? null : null);
+  const branchPr = useBranchPr(prRepoIdent, branch);
+  const { detail: prDetail } = usePrDetail(branchPr?.number ?? null, branchPr?.repoSlug ?? null);
 
   // Coexists with the wide O8 panel now (Q ruling 2026-07-11) — no longer
   // self-hides when it's open; the caller's railFits gating handles space.
   if (!data || !visible) return null;
+
+  const prChecks = summarizePrChecks(prDetail?.statusCheckRollup ?? []);
+  const prCommentCount = prDetail
+    ? prDetail.issueComments.length + prDetail.reviewComments.length
+    : 0;
 
   const packetRuntime = activePacket?.runtime ?? data.agents.find((agent) => agent.status === 'running' || agent.currentTask)?.runtime;
   const subagentLabel = activePacket
@@ -134,6 +150,40 @@ export function BranchDetailsLauncher({ visible = true }: { visible?: boolean })
         ) : null}
       </Card>
 
+      {prDetail ? (
+        <Card>
+          <StaticHeader label="Pull request" />
+          <Row
+            icon={<GhIcon />}
+            label={`#${prDetail.number} ${prDetail.title}`}
+            onClick={() => open('prs')}
+          />
+          <Row
+            icon={<DiffIcon />}
+            label={`+${prDetail.additions} −${prDetail.deletions}`}
+            detail={`${prDetail.changedFiles} file${prDetail.changedFiles === 1 ? '' : 's'}`}
+            onClick={() => open('prs')}
+          />
+          {!prDetail.mergeable ? (
+            <Row icon={<ConflictIcon />} label="Conflicts with base" tone="danger" onClick={() => open('prs')} />
+          ) : null}
+          {prChecks ? (
+            prChecks.danger ? (
+              <Row icon={<ChecksIcon />} label={prChecks.label} tone="danger" onClick={() => open('prs')} />
+            ) : (
+              <StaticRow icon={<ChecksIcon />} label={prChecks.label} />
+            )
+          ) : null}
+          {prCommentCount > 0 ? (
+            <Row
+              icon={<CommentIcon />}
+              label={`${prCommentCount} comment${prCommentCount === 1 ? '' : 's'}`}
+              onClick={() => open('prs')}
+            />
+          ) : null}
+        </Card>
+      ) : null}
+
       <Card>
         <StaticHeader label="Subagents" />
         {subagentLabel ? (
@@ -186,6 +236,15 @@ function buildProgressRows(
     { label: activePacket.status.replace(/_/g, ' '), done: activePacket.status !== 'blocked' && activePacket.status !== 'failed', muted: false },
     { label: activePacket.lastEventLabel || `Branch ${branch}`, done: true, muted: !activePacket.lastEventLabel },
   ];
+}
+
+function summarizePrChecks(rollup: PrCheck[]): { label: string; danger: boolean } | null {
+  if (!rollup || rollup.length === 0) return null;
+  const failing = rollup.filter((c) => ['failure', 'error', 'cancelled', 'timed_out', 'action_required'].includes((c.conclusion ?? '').toLowerCase())).length;
+  if (failing > 0) return { label: `${failing} check${failing === 1 ? '' : 's'} failing`, danger: true };
+  const pending = rollup.some((c) => ['in_progress', 'queued', 'pending', 'waiting', 'requested'].includes((c.status ?? '').toLowerCase()));
+  if (pending) return { label: 'Checks running', danger: false };
+  return { label: 'All checks passed', danger: false };
 }
 
 function Card({ children }: { children: ReactNode }) {
@@ -532,6 +591,33 @@ function GlobeIcon() {
     <svg {...svgProps()}>
       <circle cx="12" cy="12" r="9" />
       <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  );
+}
+
+function ChecksIcon() {
+  return (
+    <svg {...svgProps()}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.5 12 2.5 2.5 4.5-5" />
+    </svg>
+  );
+}
+
+function ConflictIcon() {
+  return (
+    <svg {...svgProps()}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v4" />
+      <path d="M12 16h.01" />
+    </svg>
+  );
+}
+
+function CommentIcon() {
+  return (
+    <svg {...svgProps()}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
