@@ -79,7 +79,51 @@ export interface RealtimeMintInputs {
    * PASS for Agent mode so the phone gets transcription without knowing it.
    */
   inputTranscriptionModel?: string;
+  /**
+   * Mic noise profile — picks the pre-VAD noise_reduction + server_vad tuning.
+   * OMIT to keep OpenAI defaults (the desk mint omits it — Q: "the desk mic was
+   * fine"); the Agent-mode mint passes `near_field` (the phone over-triggered
+   * on ambient noise, 2026-07-11).
+   */
+  micProfile?: RealtimeMicProfile;
 }
+
+/**
+ * Noise gate per mic profile (Q, 2026-07-11: PHONE Symon triggered on ambient
+ * noise — OpenAI's default server_vad threshold 0.5 is too hot and
+ * noise_reduction defaults to OFF; the desk mic was explicitly FINE, so the
+ * desk mint stays gate-free/byte-identical). `noise_reduction` filters audio
+ * BEFORE VAD sees it; the raised `threshold` is the gate; the longer
+ * `silence_duration_ms` stops noise blips ending turns mid-thought.
+ * semantic_vad was evaluated and rejected — it tunes turn-ENDS on clean audio,
+ * not noise wake-ups. Ref: developers.openai.com/api/docs/guides/realtime-vad.
+ * NOTE: noise_reduction must be an OBJECT `{ type }` — a bare string 400s.
+ * far_field is defined for a future desk/room profile; nothing passes it yet.
+ */
+export type RealtimeMicProfile = 'far_field' | 'near_field';
+export const MIC_PROFILE_AUDIO_INPUT: Record<
+  RealtimeMicProfile,
+  { turn_detection: Record<string, unknown>; noise_reduction: { type: string } }
+> = {
+  far_field: {
+    turn_detection: {
+      type: 'server_vad',
+      threshold: 0.8,
+      prefix_padding_ms: 300,
+      silence_duration_ms: 800,
+    },
+    noise_reduction: { type: 'far_field' },
+  },
+  near_field: {
+    turn_detection: {
+      type: 'server_vad',
+      threshold: 0.75,
+      prefix_padding_ms: 300,
+      silence_duration_ms: 700,
+    },
+    noise_reduction: { type: 'near_field' },
+  },
+};
 
 /**
  * Assemble the `session` object for `POST /v1/realtime/client_secrets`. Pure +
@@ -87,16 +131,25 @@ export interface RealtimeMintInputs {
  * exactly what the parity unit test asserts across the desk and mobile callers.
  *
  * Desk callers pass `{ model, voice }` → the legacy minimal shape
- * (`{ type:'realtime', model, audio:{ output:{ voice } } }`), so desk behavior is
- * byte-identical to before this refactor. Agent-mode callers additionally pass
- * `instructions`, `tools`, and `inputTranscriptionModel`.
+ * (`{ type:'realtime', model, audio:{ output:{ voice } } }`), byte-identical to
+ * before — the desk mic is deliberately untouched. Agent-mode callers
+ * additionally pass `instructions`, `tools`, `inputTranscriptionModel`, and
+ * `micProfile: 'near_field'` (the phone noise gate, 2026-07-11).
  */
 export function buildRealtimeMintSession(inputs: RealtimeMintInputs): Record<string, unknown> {
   const { model, voice, instructions, tools, inputTranscriptionModel } = inputs;
 
-  const audio: Record<string, unknown> = { output: { voice } };
+  // The noise gate ships ONLY when a micProfile is passed (the phone mint);
+  // desk mints omit it and stay byte-identical to the pre-gate shape.
+  const input: Record<string, unknown> = inputs.micProfile
+    ? { ...MIC_PROFILE_AUDIO_INPUT[inputs.micProfile] }
+    : {};
   if (inputTranscriptionModel) {
-    audio.input = { transcription: { model: inputTranscriptionModel } };
+    input.transcription = { model: inputTranscriptionModel };
+  }
+  const audio: Record<string, unknown> = { output: { voice } };
+  if (Object.keys(input).length > 0) {
+    audio.input = input;
   }
 
   const session: Record<string, unknown> = { type: 'realtime', model, audio };
