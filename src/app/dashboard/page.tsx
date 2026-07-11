@@ -3595,6 +3595,13 @@ function DashboardInner() {
   // 800-line ceiling scan) are NOT merge gates — their own brief says so. Keep
   // them out of the operator review beacon so they don't demand an amber dot;
   // they still surface in the left packet list. (Q ruling 2026-07-11.)
+  //
+  // Two sources, because a completed hygiene lane often DETACHES from the live
+  // mission state (its packet is no longer in thoughtsMissionState.packets), so
+  // the packetType tag alone misses it. The decomposition pipeline stamps its
+  // packets with a `decompose-` id prefix and uses that same prefix as its own
+  // identity check — so a parked lane whose packetId carries the prefix is a
+  // decompose packet even when the packet object is gone.
   const nonGatingPacketIds = useMemo(() => {
     const nonGating = new Set<string>();
     for (const packet of thoughtsMissionState.packets) {
@@ -3602,8 +3609,13 @@ function DashboardInner() {
         nonGating.add(packet.id);
       }
     }
+    for (const lane of domainLanes) {
+      if (lane.packetId.startsWith('decompose-')) {
+        nonGating.add(lane.packetId);
+      }
+    }
     return nonGating;
-  }, [thoughtsMissionState.packets]);
+  }, [thoughtsMissionState.packets, domainLanes]);
   const parkedLanes = useMemo(
     () => deriveParkedLanes(domainLanes, closedPacketIds, approvals, nonGatingPacketIds),
     [approvals, domainLanes, closedPacketIds, nonGatingPacketIds],
