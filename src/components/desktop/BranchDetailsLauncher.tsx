@@ -12,6 +12,11 @@ import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarg
 const ROW_HEIGHT = 28;
 const CHECK_ROW_HEIGHT = 24;
 
+function normalizePath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  return path.replace(/\/+$/, '');
+}
+
 function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId: string | null | undefined): OrchestratorPacket | null {
   if (!packets || packets.length === 0) return null;
   if (selectedId) {
@@ -31,6 +36,29 @@ function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId:
   return top;
 }
 
+/**
+ * Repo-scoped picker (#cross-repo-rail): the rail is mounted inside EVERY
+ * orchestrator tab, and each tab hosts a session in a specific repo. Without
+ * scoping, `pickActivePacket` returned the highest-priority packet anywhere in
+ * the fleet, so tabs in different repos all rendered the same (foreign) branch,
+ * Changes count, worker, and PR. Filter to this tab's repo BEFORE picking so a
+ * `selectedPacketId` is only honored when the selected packet belongs here, and
+ * the fallback priority pick stays within the repo. No `repoPath` (defensive)
+ * → legacy global behavior.
+ */
+export function pickActivePacketForRepo(
+  packets: OrchestratorPacket[] | undefined,
+  selectedId: string | null | undefined,
+  repoPath: string | null | undefined,
+): OrchestratorPacket | null {
+  if (!packets || packets.length === 0) return null;
+  const normRepo = normalizePath(repoPath);
+  if (!normRepo) return pickActivePacket(packets, selectedId);
+  const scoped = packets.filter((p) => normalizePath(p.workspaceTargetPath) === normRepo);
+  if (scoped.length === 0) return null;
+  return pickActivePacket(scoped, selectedId);
+}
+
 function runtimeLabel(runtime: OrchestratorRuntime | string | undefined) {
   if (!runtime) return 'Codex';
   if (runtime === 'claude-code') return 'Claude';
@@ -41,8 +69,16 @@ function runtimeLabel(runtime: OrchestratorRuntime | string | undefined) {
 function pickTarget(
   activePacket: OrchestratorPacket | null,
   targets: OrchestratorWorkspaceTarget[] | undefined,
+  repoPath: string | null | undefined,
 ): OrchestratorWorkspaceTarget | null {
   if (!targets || targets.length === 0) return null;
+  const normRepo = normalizePath(repoPath);
+  if (normRepo) {
+    // Repo-scoped: only ever resolve a target that belongs to this tab's repo —
+    // never fall back to another repo's target (the global `targets[0]`).
+    return targets.find((target) => normalizePath(target.localPath) === normRepo) ?? null;
+  }
+  // Legacy global behavior (no repoPath prop).
   if (activePacket?.workspaceTargetPath) {
     const hit = targets.find((target) => target.localPath === activePacket.workspaceTargetPath);
     if (hit) return hit;
@@ -50,30 +86,33 @@ function pickTarget(
   return targets[0] ?? null;
 }
 
-export function BranchDetailsLauncher({ visible = true }: { visible?: boolean }) {
+export function BranchDetailsLauncher({ visible = true, repoPath = null }: { visible?: boolean; repoPath?: string | null }) {
   const data = useOrchestratorData();
   const [progressOpen, setProgressOpen] = useState(false);
   const [environmentOpen, setEnvironmentOpen] = useState(true);
 
   const activePacket = useMemo(
-    () => pickActivePacket(data?.missionState?.packets, data?.selectedPacketId),
-    [data?.missionState?.packets, data?.selectedPacketId],
+    () => pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath),
+    [data?.missionState?.packets, data?.selectedPacketId, repoPath],
   );
 
   const activeTarget = useMemo(
-    () => pickTarget(activePacket, data?.workspaceTargets ?? []),
-    [activePacket, data?.workspaceTargets],
+    () => pickTarget(activePacket, data?.workspaceTargets ?? [], repoPath),
+    [activePacket, data?.workspaceTargets, repoPath],
   );
 
   const branch = activePacket?.branchTarget || activeTarget?.branch || 'main';
-  const repoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? null;
-  const changes = useWorkspaceChanges(repoPath);
+  // Fall back to the tab's own repoPath (the prop) when there's no active packet
+  // or matching target, so the hooks below stay scoped to THIS repo's local
+  // state instead of resolving nothing (or, pre-scoping, a foreign repo).
+  const resolvedRepoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? repoPath ?? null;
+  const changes = useWorkspaceChanges(resolvedRepoPath);
   // PR for the current branch, surfaced inline so the operator sees status
   // without opening the PRs tab (Q ruling 2026-07-11). Keyed by repo NAME (the
   // list API resolves slug/name, not a local path). Null on main/master or
   // when no open PR points at the branch.
   const prRepoIdent = activeTarget?.repoName
-    ?? (repoPath ? repoPath.split('/').filter(Boolean).pop() ?? null : null);
+    ?? (resolvedRepoPath ? resolvedRepoPath.split('/').filter(Boolean).pop() ?? null : null);
   const branchPr = useBranchPr(prRepoIdent, branch);
   const { detail: prDetail } = usePrDetail(branchPr?.number ?? null, branchPr?.repoSlug ?? null);
 
@@ -94,7 +133,7 @@ export function BranchDetailsLauncher({ visible = true }: { visible?: boolean })
   const hasDiff = changes.totalAdditions > 0 || changes.totalDeletions > 0;
 
   const open = (tab: NonNullable<Parameters<NonNullable<typeof data.onOpenO8Panel>>[0]['tab']>) => {
-    data.onOpenO8Panel?.({ repoPath, tab });
+    data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
   };
 
   return (

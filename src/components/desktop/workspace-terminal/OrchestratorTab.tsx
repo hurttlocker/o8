@@ -993,7 +993,7 @@ function OrchestratorTabInner({
         transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
-      <BranchDetailsLauncher visible={projectContextRailVisible && railFits} />
+      <BranchDetailsLauncher visible={projectContextRailVisible && railFits} repoPath={repoPath ?? null} />
     </div>
   );
 
