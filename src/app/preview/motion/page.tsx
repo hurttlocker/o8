@@ -21,7 +21,7 @@ const STATUS_STATES: Array<{
   { state: 'idle', label: 'Idle', meaning: 'Present, not working. No claim on attention.', color: 'var(--t-text-faint)', motion: 'static ring', where: 'queued / archived rows' },
   { state: 'running', label: 'Working', meaning: 'Actively working. Pulses; orbits once long-running.', color: 'var(--t-accent)', motion: 'pulse → orbit', where: 'live agents, streaming turns' },
   { state: 'review', label: 'Awaiting review', meaning: 'Paused, parked waiting on you. Neutral — the sweep says "for you", not the color.', color: '#94a3b8', motion: 'grey sweep', where: 'needs-review packets' },
-  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. A settled no — your call.', color: '#E0446A', motion: 'static (solid)', where: 'rejected packets' },
+  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. Orange o8 dual-pulse — the o8 mark, distinct from failed’s single red pulse.', color: '#F97316', motion: 'o8 dual pulse', where: 'rejected packets' },
   { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed.', color: 'var(--t-success)', motion: 'static (solid)', where: 'released packets' },
   { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. A live alarm — pulses to take precedence over the static rose of a declined review.', color: '#ef4444', motion: 'pulse (red orb)', where: 'failed / blocked lanes' },
 ];
