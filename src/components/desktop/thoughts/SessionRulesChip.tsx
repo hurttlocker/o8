@@ -208,7 +208,7 @@ function CollapsibleDirectiveTier({ badgeLabel, nounLabel, rows, expanded, onTog
 }
 
 export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) {
-  const anchorRef = useRef<HTMLButtonElement | null>(null);
+  const anchorRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [sessionRules, setSessionRules] = useState<SessionRule[]>([]);
   const [directives, setDirectives] = useState<DirectiveRow[]>([]);
@@ -262,6 +262,19 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
     void loadSessionRules();
     void loadDirectives();
   }, [open, loadSessionRules, loadDirectives]);
+  // Slash-command hooks (Q ruling 2026-07-11): `/rules` opens this manager even
+  // when the chip is hidden (no rules yet); `/rule <text>` posts a rule then
+  // fires 'changed' so the count + visibility refresh.
+  useEffect(() => {
+    const openManager = () => setOpen(true);
+    const reload = () => { void loadSessionRules(); };
+    window.addEventListener('o8:open-session-rules', openManager);
+    window.addEventListener('o8:session-rules-changed', reload);
+    return () => {
+      window.removeEventListener('o8:open-session-rules', openManager);
+      window.removeEventListener('o8:session-rules-changed', reload);
+    };
+  }, [loadSessionRules]);
 
   const handleAdd = useCallback(async () => {
     const text = draft.trim();
@@ -322,45 +335,53 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
 
   return (
     <>
-      <button
-        ref={anchorRef}
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-label={`Session rules — ${sessionCount} session, ${repoDirectives.length} repo, ${globalDirectives.length} global`}
-        aria-expanded={open}
-        title="Rules governing this session — session rules are pinned into every turn and inherited by dispatched agents."
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 4,
-          height: 24,
-          paddingLeft: 6,
-          paddingRight: 6,
-          borderRadius: 6,
-          borderWidth: 0,
-          background: lit ? 'var(--t-accent-soft)' : 'transparent',
-          color: lit ? 'var(--t-accent)' : hovered ? 'var(--t-text)' : 'var(--t-text-faint)',
-          cursor: 'pointer',
-          transition: 'color 120ms, background 120ms',
-          fontSize: 11,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          fontFamily: 'var(--font-sans-system)',
-          flexShrink: 0,
-        }}
-      >
-        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-          <path d="M8 6h13" />
-          <path d="M8 12h13" />
-          <path d="M8 18h13" />
-          <path d="m3 6 1 1 2-2" />
-          <path d="m3 12 1 1 2-2" />
-          <path d="m3 18 1 1 2-2" />
-        </svg>
-        <span>{sessionCount > 0 ? `Rules · ${sessionCount}` : 'Rules'}</span>
-      </button>
+      {/* Only surfaces once the operator has session rules (Q ruling
+          2026-07-11) — a clean composer otherwise. When hidden, the anchor
+          stays as a 0-width span so `/rules` can still open the manager
+          against a stable position. Add the first rule via `/rule <text>`. */}
+      {sessionCount > 0 ? (
+        <button
+          ref={anchorRef as React.RefObject<HTMLButtonElement>}
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          aria-label={`Session rules — ${sessionCount} session, ${repoDirectives.length} repo, ${globalDirectives.length} global`}
+          aria-expanded={open}
+          title="Rules governing this session — session rules are pinned into every turn and inherited by dispatched agents."
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            height: 24,
+            paddingLeft: 6,
+            paddingRight: 6,
+            borderRadius: 6,
+            borderWidth: 0,
+            background: lit ? 'var(--t-accent-soft)' : 'transparent',
+            color: lit ? 'var(--t-accent)' : hovered ? 'var(--t-text)' : 'var(--t-text-faint)',
+            cursor: 'pointer',
+            transition: 'color 120ms, background 120ms',
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            fontFamily: 'var(--font-sans-system)',
+            flexShrink: 0,
+          }}
+        >
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+            <path d="M8 6h13" />
+            <path d="M8 12h13" />
+            <path d="M8 18h13" />
+            <path d="m3 6 1 1 2-2" />
+            <path d="m3 12 1 1 2-2" />
+            <path d="m3 18 1 1 2-2" />
+          </svg>
+          <span>{`Rules · ${sessionCount}`}</span>
+        </button>
+      ) : (
+        <span ref={anchorRef as React.RefObject<HTMLSpanElement>} aria-hidden style={{ display: 'inline-block', width: 0, height: 24, flexShrink: 0 }} />
+      )}
 
       <ComposerPopover anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} align="start">
         <div

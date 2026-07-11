@@ -9,7 +9,9 @@ export type OrchestratorSlashCommandName =
   | 'focus'
   | 'status'
   | 'recall'
-  | 'handoff';
+  | 'handoff'
+  | 'rule'
+  | 'rules';
 
 export interface OrchestratorSlashCommandDefinition {
   command: `/${string}`;
@@ -76,6 +78,12 @@ export interface SlashCommandContext {
   }>;
   startOrchestration?: (request: SlashOrchestrationRequest) => Promise<void>;
   clearThread: () => Promise<void>;
+  /** Add a session rule to the active thread (POST + refresh). Returns false
+   *  when there's no thread yet or the add is rejected. `/rule` uses this. */
+  addSessionRule?: (text: string) => Promise<boolean>;
+  /** Open the session-rules manager popover. `/rules` uses this — the add-path
+   *  when the composer chip is hidden because no rules exist yet. */
+  openRulesManager?: () => void;
 }
 
 export interface SlashCommandExecutionResult {
