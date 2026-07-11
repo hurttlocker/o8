@@ -1,14 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { buildOrchestratorSystemPrompt } from './orchestrator-system-prompt';
 
-describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489)', () => {
-  const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo');
+describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489, silent since 2026-07-11)', () => {
+  // firstRunClarify pinned per-test so assertions don't depend on the
+  // machine's real lanes table.
+  const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: false });
 
-  it('renders the clarify-first doctrine section', () => {
+  it('renders the clarify-first doctrine section with the ambiguity trigger', () => {
     expect(prompt).toContain('Clarify-first — interview before dispatch');
-    // The directive trigger + the ambiguity trigger both codified.
-    expect(prompt).toContain('[CLARIFY-FIRST DIRECTIVE]');
     expect(prompt).toMatch(/materially ambiguous/i);
+    // The old composer-injected directive block is gone — the trigger is
+    // doctrine + first-run note only, never a transcript-visible block.
+    expect(prompt).not.toContain('[CLARIFY-FIRST DIRECTIVE]');
   });
 
   it('codifies one-question-at-a-time ordered by blast radius, capped, with an escape', () => {
@@ -25,5 +28,16 @@ describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489)', () 
 
   it('keeps the escape valve for trivially-scoped prompts (zero friction when clear)', () => {
     expect(prompt).toMatch(/Skip it entirely/i);
+  });
+
+  it('injects the first-mission note when the repo has no dispatch history', () => {
+    const first = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: true });
+    expect(first).toMatch(/first mission on this repo/i);
+    expect(first).toMatch(/materially ambiguous by default/i);
+  });
+
+  it('omits the note (and never leaks the template var) for repos with history', () => {
+    expect(prompt).not.toMatch(/first mission on this repo/i);
+    expect(prompt).not.toContain('{{CLARIFY_FIRST_RUN_NOTE}}');
   });
 });

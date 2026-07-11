@@ -1,49 +1,37 @@
 /**
- * Clarify-first interview directive (#1489).
+ * Clarify-first interview (#1489, reworked 2026-07-11).
  *
- * A per-send composer affordance ("Clarify first") prepends this directive block
- * to the operator's message. It instructs the orchestrator to run an interview —
- * one question at a time, ordered by architectural blast radius — BEFORE it
- * writes any brief or calls create_mission/dispatch, then fold the resolved Q&A
- * into the briefs it writes so workers inherit the answers.
+ * The interview doctrine (one question at a time, ordered by blast radius,
+ * capped, escapable) lives in `orchestrator.md` and reaches every backend
+ * through buildOrchestratorSystemPrompt. It arms on two SILENT triggers:
  *
- * The block is a pure string prefix so the toggle stays zero-friction: off →
- * the outgoing message is byte-identical to today; on → the directive leads and
- * the operator's own text follows verbatim. The transcript still shows only the
- * operator's text (the send path passes it as `displayMessage`).
+ *   1. The request is dispatch-worthy AND materially ambiguous (standing
+ *      doctrine — the model judges).
+ *   2. The repo has no dispatch history in o8 yet (first mission) — the
+ *      system-prompt builder detects this from the lanes table and injects
+ *      the note built here via the {{CLARIFY_FIRST_RUN_NOTE}} template var.
  *
- * The standing doctrine that governs HOW the interview runs lives in
- * `orchestrator.md` (see buildOrchestratorSystemPrompt) — this block is the
- * per-turn trigger that also fires when the operator wants it on an otherwise
- * unambiguous prompt.
+ * The old per-send composer toggle that PREPENDED a visible directive block
+ * to the operator's message was removed (Q ruling 2026-07-11): the directive
+ * leaked into the transcript bubble, and a governance behavior like this
+ * belongs to o8 itself — silent, backend-agnostic — not to composer chrome.
  */
-
-/** Heading that opens the directive block; also the assertion anchor in tests. */
-export const CLARIFY_DIRECTIVE_HEADING = '[CLARIFY-FIRST DIRECTIVE]';
 
 /** The heading resolved Q&A MUST be filed under in every brief/packet the
  *  orchestrator writes, so buildPacketPrompt carries it to workers. */
 export const RESOLVED_UNKNOWNS_HEADING = 'Resolved unknowns';
 
-/** Build the clarify-first directive block (no trailing operator message). */
-export function buildClarifyDirectiveBlock(): string {
-  return [
-    CLARIFY_DIRECTIVE_HEADING,
-    'Before you create_mission, dispatch, or write ANY brief for the request below, run the clarify-first interview:',
-    '- Surface the unknowns that would change the architecture, and ask the operator to resolve them ONE question at a time.',
-    '- Order the questions by blast radius: data model > type/interface contracts > UX flow > mechanical detail. Ask the highest-blast-radius unknown first.',
-    '- Ask at most ~5 questions, and stop as soon as the only unknowns left are mechanical detail.',
-    '- The operator may reply "skip, dispatch now" at any point — honor it immediately and proceed with what you have.',
-    `- When the interview resolves (or is skipped), embed the resolved Q&A under a "${RESOLVED_UNKNOWNS_HEADING}" heading in every mission/packet description you write, so the workers inherit the answers. Then proceed.`,
-    'Do not dispatch before the interview is resolved or explicitly skipped.',
-    `[END ${CLARIFY_DIRECTIVE_HEADING.slice(1)}`,
-  ].join('\n');
-}
-
 /**
- * Prepend the clarify-first directive to an operator message. Returns the block
- * followed by a blank line and the original message verbatim.
+ * System-prompt note injected when the repo has no dispatch history yet.
+ * Silent: lives in the system prompt, never in the transcript.
  */
-export function prependClarifyDirective(message: string): string {
-  return `${buildClarifyDirectiveBlock()}\n\n${message}`;
+export function buildFirstRunClarifyNote(): string {
+  return [
+    '**First mission on this repo.** o8 has no dispatch history for this repo yet,',
+    'so you have no organizational memory to lean on. Treat the first',
+    'dispatch-worthy request in this session as materially ambiguous by default:',
+    'run the clarify-first interview before the first create_mission/dispatch,',
+    'unless the operator explicitly skips ("skip, dispatch now") or the request',
+    'is trivially scoped.',
+  ].join(' ');
 }
