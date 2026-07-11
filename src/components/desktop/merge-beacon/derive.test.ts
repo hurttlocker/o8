@@ -108,4 +108,56 @@ describe('deriveParkedLanes', () => {
     expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['a']);
     expect(deriveParkedLanes(lanes, new Set()).map((p) => p.laneId)).toEqual(['a']);
   });
+
+  it('buckets a reviewing lane whose latest review is rejected as `rejected`, not `needs-review`', () => {
+    const lanes = [lane({ laneId: 'rej', status: 'reviewing', packetId: 'pkt-rej' })];
+    const reviews: ReviewApprovalSummary[] = [
+      { status: 'rejected', toolName: 'orchestrator_review', metadata: { Packet: 'pkt-rej' }, createdAt: 100 },
+    ];
+    const buckets = deriveParkedLaneBuckets(lanes, reviews);
+    expect(buckets.rejected.map((p) => p.laneId)).toEqual(['rej']);
+    expect(buckets.needsReview).toEqual([]);
+    expect(buckets.all.map((p) => p.reviewState)).toEqual(['rejected']);
+  });
+
+  it('takes the LATEST review decision by createdAt (rejected then re-approved → awaiting-merge)', () => {
+    const lanes = [lane({ laneId: 'flip', status: 'reviewing', packetId: 'pkt-flip' })];
+    const reviews: ReviewApprovalSummary[] = [
+      { status: 'rejected', toolName: 'orchestrator_review', metadata: { Packet: 'pkt-flip' }, createdAt: 100 },
+      { status: 'approved', toolName: 'orchestrator_review', metadata: { Packet: 'pkt-flip' }, createdAt: 200 },
+    ];
+    const buckets = deriveParkedLaneBuckets(lanes, reviews);
+    expect(buckets.awaitingMerge.map((p) => p.laneId)).toEqual(['flip']);
+    expect(buckets.rejected).toEqual([]);
+  });
+
+  it('a later pending re-review after a rejection reads as needs-review (not a stale rejection)', () => {
+    const lanes = [lane({ laneId: 'rereview', status: 'reviewing', packetId: 'pkt-rr' })];
+    const reviews: ReviewApprovalSummary[] = [
+      { status: 'rejected', toolName: 'orchestrator_review', metadata: { Packet: 'pkt-rr' }, createdAt: 100 },
+      { status: 'pending', toolName: 'orchestrator_review', metadata: { Packet: 'pkt-rr' }, createdAt: 200 },
+    ];
+    const buckets = deriveParkedLaneBuckets(lanes, reviews);
+    expect(buckets.needsReview.map((p) => p.laneId)).toEqual(['rereview']);
+    expect(buckets.rejected).toEqual([]);
+  });
+
+  it('drops non-gating (decompose hygiene) packets from the beacon entirely', () => {
+    const lanes = [
+      lane({ laneId: 'hygiene', status: 'reviewing', packetId: 'decompose-123' }),
+      lane({ laneId: 'real', status: 'reviewing', packetId: 'pkt-real' }),
+    ];
+    const nonGating = new Set(['decompose-123']);
+    const parked = deriveParkedLanes(lanes, undefined, [], nonGating);
+    expect(parked.map((p) => p.laneId)).toEqual(['real']); // the hygiene lane never parks the gate
+  });
+
+  it('a rejected non-gating packet also stays out of the beacon', () => {
+    const lanes = [lane({ laneId: 'hygiene-rej', status: 'reviewing', packetId: 'decompose-9' })];
+    const reviews: ReviewApprovalSummary[] = [
+      { status: 'rejected', toolName: 'orchestrator_review', metadata: { Packet: 'decompose-9' }, createdAt: 100 },
+    ];
+    const parked = deriveParkedLanes(lanes, undefined, reviews, new Set(['decompose-9']));
+    expect(parked).toEqual([]);
+  });
 });
