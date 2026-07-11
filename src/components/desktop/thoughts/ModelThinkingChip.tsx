@@ -305,7 +305,7 @@ export function ModelThinkingChip({
   // 2026-07-11) — the label follows it, not a hardcoded house.
   const shortModelLabel = (activeModelOption?.triggerLabel ?? modelLabel).replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
   const decideLabel = `${shortModelLabel} decides`;
-  const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Ultracode' : 'Solo';
+  const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Ultracode' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<'claude' | 'codex'>(
@@ -603,7 +603,7 @@ export function ModelThinkingChip({
               </div>
               {[
                 { key: 'solo', active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator driving the fleet', hint: 'One orchestrator plans, dispatches, and reviews the whole worker fleet. Still many agents working — one brain directing them.' },
-                { key: 'collide', active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}`, hint: `Claude and Codex propose independently, then your chosen model (${shortModelLabel}) synthesizes and does the work — a built-in second opinion for hard problems.` },
+                { key: 'collide', active: collideActive, label: 'Mixture of Agents', detail: `Claude + Codex propose · ${decideLabel}`, hint: `Mixture of Agents (Collide): Claude and Codex propose independently, then your chosen model (${shortModelLabel}) synthesizes and does the work — a built-in second opinion for hard problems.` },
               ].map((mode) => (
                 <button
                   key={mode.key}
