@@ -20,17 +20,53 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 const TARGET_RATE: f64 = 16_000.0;
 /// Frames per FIFO chunk — matches the helper's reader (1024 × f32 = 4096 B).
 const CHUNK_FRAMES: usize = 1024;
-/// Discard the first slice of captured audio after the device opens (#1544):
-/// the first buffers off a freshly-opened input carry device-warmup garbage and
-/// the tail of whatever was playing before the duck landed, which would
-/// otherwise bleed into the start of the message. Measured at the SOURCE rate.
-const WARMUP_DISCARD_MS: f64 = 200.0;
+/// Device-warmup floor (#1544): the first buffers off a freshly-opened input
+/// carry device-warmup garbage, so we always drop this much captured audio
+/// before anything reaches the FIFO. Measured at the SOURCE rate. The *tail of
+/// whatever was playing before the duck landed* used to be lumped in here too
+/// (hence the old 200ms); that concern now belongs to the duck-settle gate
+/// below, so the pure device-warmup floor can be smaller.
+const WARMUP_DISCARD_MS: f64 = 120.0;
+
+/// Lets the capture pump hold the start of a message until the audio duck has
+/// actually lowered system volume — so playing audio can't bleed in before the
+/// mic is effectively clear. The pump opens the device IMMEDIATELY (overlapping
+/// the duck's osascript) and discards captured audio until BOTH the warmup floor
+/// passes AND `settled` flips (or `cap` elapses). When nothing needs ducking the
+/// caller flips `settled` right away, collapsing the gate to just the floor.
+pub struct DuckGate {
+    /// Shared flag the caller flips once the duck's first volume-set lands (or
+    /// on any duck early-exit: nothing playing / ducking disabled).
+    pub settled: Arc<AtomicBool>,
+    /// Hard bound on how long the gate waits for `settled` before opening anyway.
+    pub cap: Duration,
+}
+
+/// Whether the duck-settle half of the capture gate is open: settled already,
+/// or its cap has elapsed. Pure for unit testing.
+fn duck_gate_open(settled: bool, elapsed: Duration, cap: Duration) -> bool {
+    settled || elapsed >= cap
+}
+
+/// Leading SOURCE frames to discard from one captured buffer given how many
+/// warmup frames are still owed and whether the duck gate is open. Returns
+/// `buffer_len` to drop the whole buffer (still waiting on the duck). Pure for
+/// unit testing.
+fn gate_discard(buffer_len: usize, warmup_frames_left: usize, duck_ready: bool) -> usize {
+    let warmup_drop = warmup_frames_left.min(buffer_len);
+    if duck_ready {
+        warmup_drop
+    } else {
+        buffer_len
+    }
+}
 
 pub struct AudioPump {
     fifo_path: PathBuf,
@@ -56,7 +92,11 @@ impl AudioPump {
     /// Open the default input device and start streaming to the FIFO.
     /// No-op if already running. Errors are returned, not logged-and-lost —
     /// the caller surfaces them so a dead mic is never silent (#1534 lesson).
-    pub fn start(&mut self) -> Result<(), String> {
+    ///
+    /// `duck_gate` (when present) holds the start of the message until the audio
+    /// duck has landed; `None` opens the gate immediately (only the warmup floor
+    /// is paid). The device opens right away either way, overlapping the duck.
+    pub fn start(&mut self, duck_gate: Option<DuckGate>) -> Result<(), String> {
         if self.running.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -71,7 +111,7 @@ impl AudioPump {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let worker = std::thread::Builder::new()
             .name("stt-capture-pump".into())
-            .spawn(move || pump_thread(fifo_path, running, ready_tx))
+            .spawn(move || pump_thread(fifo_path, running, ready_tx, duck_gate))
             .map_err(|e| format!("capture pump thread spawn failed: {e}"))?;
         self.worker = Some(worker);
 
@@ -131,6 +171,7 @@ fn pump_thread(
     fifo_path: PathBuf,
     running: Arc<AtomicBool>,
     ready_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    duck_gate: Option<DuckGate>,
 ) {
     let host = cpal::default_host();
     let Some(device) = host.default_input_device() else {
@@ -227,9 +268,20 @@ fn pump_thread(
     let mut src_pos = 0f64;
     let mut out_chunk: Vec<f32> = Vec::with_capacity(CHUNK_FRAMES);
 
-    // Source-rate frames of device warmup to drop before any audio reaches the
-    // FIFO (#1544). Counted down as callback buffers arrive, ahead of resampling.
-    let mut warmup_discard_left = (src_rate * WARMUP_DISCARD_MS / 1000.0) as usize;
+    // Capture gate (#1544 overlap): discard captured audio until BOTH the
+    // device-warmup floor has passed (measured in source frames) AND the audio
+    // duck has settled (or its cap elapsed / nothing needed ducking). The device
+    // opened above without waiting on the duck, so the duck's osascript has been
+    // running in parallel — in the common no-music case the gate flips ready
+    // before the first buffer even arrives and only the warmup floor is paid.
+    // Total discard is bounded by warmup-floor + duck-cap worth of audio.
+    let warmup_floor_frames = (src_rate * WARMUP_DISCARD_MS / 1000.0) as usize;
+    let mut warmup_frames_left = warmup_floor_frames;
+    let duck_cap = duck_gate.as_ref().map_or(Duration::ZERO, |g| g.cap);
+    let duck_settled = duck_gate.map(|g| g.settled);
+    let gate_start = Instant::now();
+    let mut discarded_frames: usize = 0;
+    let mut gate_open_logged = false;
 
     while running.load(Ordering::SeqCst) && !err_flag.load(Ordering::SeqCst) {
         let mut mono = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
@@ -237,13 +289,28 @@ fn pump_thread(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        if warmup_discard_left > 0 {
-            let drop_n = warmup_discard_left.min(mono.len());
-            mono.drain(..drop_n);
-            warmup_discard_left -= drop_n;
-            if mono.is_empty() {
-                continue;
+        if warmup_frames_left > 0 || !gate_open_logged {
+            // `None` gate → duck half is open from the start (warmup floor only).
+            let duck_ready = duck_settled.as_ref().map_or(true, |flag| {
+                duck_gate_open(flag.load(Ordering::SeqCst), gate_start.elapsed(), duck_cap)
+            });
+            let drop_n = gate_discard(mono.len(), warmup_frames_left, duck_ready);
+            warmup_frames_left -= warmup_frames_left.min(mono.len());
+            if drop_n > 0 {
+                discarded_frames += drop_n;
+                mono.drain(..drop_n);
+                if mono.is_empty() {
+                    continue;
+                }
             }
+            // First audio past the gate — report how much we dropped and why.
+            gate_open_logged = true;
+            let discarded_ms = discarded_frames as f64 / src_rate * 1000.0;
+            let warmup_ms = warmup_floor_frames as f64 / src_rate * 1000.0;
+            let duck_wait_ms = (discarded_ms - warmup_ms).max(0.0);
+            log::info!(
+                "[voice] capture gate open: discarded {discarded_ms:.0}ms ({warmup_ms:.0}ms warmup + {duck_wait_ms:.0}ms duck-wait)"
+            );
         }
         src_buf.extend_from_slice(&mono);
 
@@ -280,4 +347,47 @@ fn pump_thread(
     drop(stream); // release the device — mic indicator off
     let _ = fifo.flush();
     log::info!("[stt-capture] pump stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{duck_gate_open, gate_discard};
+    use std::time::Duration;
+
+    #[test]
+    fn duck_gate_opens_when_settled() {
+        // Settled flips the gate open regardless of elapsed time.
+        assert!(duck_gate_open(
+            true,
+            Duration::from_millis(0),
+            Duration::from_millis(450)
+        ));
+    }
+
+    #[test]
+    fn duck_gate_waits_until_cap() {
+        let cap = Duration::from_millis(450);
+        // Not settled and under the cap → still closed.
+        assert!(!duck_gate_open(false, Duration::from_millis(100), cap));
+        // Not settled but cap reached / exceeded → open anyway (bounded wait).
+        assert!(duck_gate_open(false, Duration::from_millis(450), cap));
+        assert!(duck_gate_open(false, Duration::from_millis(600), cap));
+    }
+
+    #[test]
+    fn gate_discard_pays_only_warmup_when_duck_ready() {
+        // Warmup smaller than the buffer → drop just the warmup, keep the rest.
+        assert_eq!(gate_discard(100, 30, true), 30);
+        // Warmup larger than the buffer → drop the whole buffer (clamped).
+        assert_eq!(gate_discard(50, 100, true), 50);
+        // Fully warmed + duck ready → keep everything.
+        assert_eq!(gate_discard(100, 0, true), 0);
+    }
+
+    #[test]
+    fn gate_discard_drops_whole_buffer_while_duck_pending() {
+        // Duck not ready → drop the whole buffer regardless of warmup left.
+        assert_eq!(gate_discard(100, 0, false), 100);
+        assert_eq!(gate_discard(100, 30, false), 100);
+    }
 }

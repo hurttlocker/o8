@@ -791,12 +791,18 @@ impl LiveRecognizer {
 
     /// Begin a new dictation session by writing `start\n` to the daemon.
     /// Cheap — no spawn, no allocation beyond the line.
-    pub fn start(&mut self, session_id: u64) -> Result<(), String> {
+    pub fn start(
+        &mut self,
+        session_id: u64,
+        duck_gate: Option<capture::DuckGate>,
+    ) -> Result<(), String> {
         // Main-process capture: the mic opens per-session (push-to-talk
         // shaped). A pump failure is a hard error — a session with no audio
-        // source must never start silently (#1534 lesson).
+        // source must never start silently (#1534 lesson). The optional
+        // `duck_gate` overlaps the audio duck with the device open instead of
+        // waiting on it first (#1544 overlap).
         if let Some(pump) = self.pump.as_mut() {
-            pump.start()
+            pump.start(duck_gate)
                 .map_err(|e| format!("microphone capture failed to start: {e}"))?;
         }
         let stdin = self

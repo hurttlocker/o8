@@ -3747,6 +3747,17 @@ mod stt_engine {
     /// Begin a dictation. Returns the new session id so the JS side can match
     /// subsequent `o8:stt-event` payloads.
     pub fn start() -> Result<u64, String> {
+        start_with_gate(None)
+    }
+
+    /// Like [`start`], but hands the capture pump a duck-settle gate so the mic
+    /// opens immediately and the start of the message is held (bounded) until
+    /// the audio duck lands — instead of serializing the duck wait ahead of the
+    /// device open (#1544 overlap). Fn dictation passes `Some`; every other
+    /// entry point (in-window mic, agent/ask lanes) passes `None`.
+    pub fn start_with_gate(
+        duck_gate: Option<crate::stt::capture::DuckGate>,
+    ) -> Result<u64, String> {
         let sid = next_session_id();
         active_session().store(sid, Ordering::SeqCst);
         let mut guard = recognizer()
@@ -3778,7 +3789,7 @@ mod stt_engine {
         // default. Read per-start so the choice survives an app restart.
         let mic = crate::stt::keys::config_string("dictation_microphone_uid");
         let _ = guard.set_input_device(mic.as_deref().filter(|s| !s.is_empty() && *s != "default"));
-        guard.start(sid)?;
+        guard.start(sid, duck_gate)?;
         Ok(sid)
     }
 
