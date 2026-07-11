@@ -29,24 +29,6 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
 
   const [messages, setMessages] = useState<LLMMessage[]>([]), [input, setInput] = useState(''), [model, setModel] = useState<ModelOption>(API_MODELS[0]), [isStreaming, setIsStreaming] = useState(false), [streamContent, setStreamContent] = useState(''), [modelResolved, setModelResolved] = useState(false);
   const [liveFallbackNotice, setLiveFallbackNotice] = useState<string | null>(null);
-  const [permissionMode, setPermissionMode] = useState<'full' | 'plan'>(() => {
-    if (typeof window === 'undefined') return 'full';
-    try {
-      const raw = window.localStorage.getItem(`cortex-ide:llm-permission:tab:${tabId}`);
-      return raw === 'plan' ? 'plan' : 'full';
-    } catch {
-      return 'full';
-    }
-  });
-  const handleTogglePermission = useCallback(() => {
-    setPermissionMode((current) => {
-      const next = current === 'full' ? 'plan' : 'full';
-      try {
-        window.localStorage.setItem(`cortex-ide:llm-permission:tab:${tabId}`, next);
-      } catch {}
-      return next;
-    });
-  }, [tabId]);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]), [showFilePicker, setShowFilePicker] = useState(false), [attachedFiles, setAttachedFiles] = useState<string[]>([]), [filePickerIndex, setFilePickerIndex] = useState(0);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]), [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]), [activeThinking, setActiveThinking] = useState<ActiveThinkingState | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]), [followUpsLoading, setFollowUpsLoading] = useState(false), [showSlashPicker, setShowSlashPicker] = useState(false), [slashIndex, setSlashIndex] = useState(0);
@@ -391,7 +373,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       const { assistantMessage, fullContent } = await streamAssistantResponse({
         approvedToolsSet,
         controller,
-        disableTools: permissionMode === 'plan',
+        disableTools: false,
         linkedIssue,
         messageForModel,
         messages,
@@ -479,7 +461,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       setShowTypingIndicator(false);
       abortRef.current = null;
     }
-  }, [approvedToolsSet, attachedFiles, attachedImages, input, isStreaming, linkedIssue, messages, model, permissionMode, preferredRepo, queuedContextCards, streamContent, tabId]);
+  }, [approvedToolsSet, attachedFiles, attachedImages, input, isStreaming, linkedIssue, messages, model, preferredRepo, queuedContextCards, streamContent, tabId]);
 
   const {
     deleteHistory,
@@ -907,8 +889,6 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       slashIndex={slashIndex}
       streamContent={streamContent}
       liveFallbackNotice={liveFallbackNotice}
-      permissionMode={permissionMode}
-      onTogglePermission={handleTogglePermission}
       toggleStar={toggleStar}
     />
   );

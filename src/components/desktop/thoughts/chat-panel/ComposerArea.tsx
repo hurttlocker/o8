@@ -6,7 +6,6 @@ import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
 import { ComposerStatusBar } from './ComposerStatusBar';
-import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
@@ -50,8 +49,6 @@ interface ComposerAreaProps {
   /** Clarify-first (#1489) — per-send interview-before-dispatch toggle. */
   clarifyFirst?: boolean;
   onToggleClarifyFirst?: () => void;
-  permissionMode: ThoughtsChatPermissionMode;
-  onTogglePermission?: () => void;
   /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
   sessionRulesThreadId?: string | null;
   repoLabel?: string | null;
@@ -116,8 +113,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSetCollide,
   clarifyFirst,
   onToggleClarifyFirst,
-  permissionMode,
-  onTogglePermission,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount,
@@ -694,8 +689,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
             clarifyFirst={isOrchestratorMode ? clarifyFirst : false}
             onToggleClarifyFirst={isOrchestratorMode ? onToggleClarifyFirst : undefined}
-            permissionMode={permissionMode}
-            onTogglePermission={onTogglePermission}
             sessionRulesThreadId={sessionRulesThreadId}
             repoLabel={showReasoningControls ? repoLabel : null}
             displayMessagesCount={displayMessagesCount}

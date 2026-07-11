@@ -419,8 +419,6 @@ export function InputButtons({
   onSetCollide,
   clarifyFirst = false,
   onToggleClarifyFirst,
-  permissionMode,
-  onTogglePermission,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount = 0,
@@ -466,8 +464,6 @@ export function InputButtons({
    */
   clarifyFirst?: boolean;
   onToggleClarifyFirst?: () => void;
-  permissionMode?: 'full' | 'plan';
-  onTogglePermission?: () => void;
   /**
    * Session rules (#1329). `undefined` = surface doesn't carry session rules
    * (CLI lanes) → chip hidden. `null` = orchestrator surface, thread not yet
@@ -611,48 +607,13 @@ export function InputButtons({
         </button>
       ) : null}
 
-      {/* Permission toggle — always rendered, icon-only */}
-      <button
-        type="button"
-        onClick={onTogglePermission}
-        title={permissionMode === 'full' ? 'Full access — click to switch to read-only' : 'Read-only — click to arm full access'}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 6,
-          borderWidth: 0,
-          background: 'transparent',
-          // Ink at rest — a red slashed shield on the idle composer reads as
-          // an ERROR, not "full access". Danger red appears on hover only.
-          color: 'var(--t-text-faint)',
-          cursor: 'pointer',
-          transition: 'color 120ms',
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.color = permissionMode === 'full' ? 'var(--t-brand-red, #ef4444)' : 'var(--t-text)';
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.color = 'var(--t-text-faint)';
-        }}
-      >
-        {permissionMode === 'full' ? (
-          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            <path d="m2 2 20 20" />
-          </svg>
-        ) : (
-          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-        )}
-      </button>
+      {/* Permission (shield) toggle removed 2026-07-11 (Q ruling): the
+          orchestrator + worker composers always run full access — a
+          read-only mode chip was chrome nobody used. */}
 
-      {/* Session rules (#1329) — "Rules · N" chip, sibling to the permission
-          chip. Lists the merged Session/Repo/Global rule set; session tier is
-          editable inline. Only on orchestrator surfaces (undefined = hidden). */}
+      {/* Session rules (#1329) — "Rules · N" chip. Lists the merged
+          Session/Repo/Global rule set; session tier is editable inline.
+          Only on orchestrator surfaces (undefined = hidden). */}
       {sessionRulesThreadId !== undefined ? (
         <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
       ) : null}
