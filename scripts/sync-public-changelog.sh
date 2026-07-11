@@ -12,7 +12,7 @@ OUT_STATS="$WORK_DIR/STATS.md"
 PUBLIC_CLONE="$WORK_DIR/o8"
 SINCE="180 days ago"
 
-rm -rf "$WORK_DIR"
+rm -rf "$WORK_DIR" "$PUBLIC_CLONE"
 mkdir -p "$WORK_DIR"
 
 cat > "$OUT_CHANGELOG" << 'HEADER'
