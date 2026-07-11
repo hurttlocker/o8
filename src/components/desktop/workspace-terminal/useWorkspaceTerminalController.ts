@@ -454,7 +454,7 @@ export function useWorkspaceTerminalController(
     // Fix 1: a caller can override the repo (focused-lane binding for new
     // spawns); otherwise fall back to the global preferredRepo as before.
     const repo = options?.repoOverride ?? preferredRepoRef.current ?? undefined;
-    const savedTitle = fresh ? null : readLastOrchestratorThreadTitle();
+    const savedTitle = fresh ? null : readLastOrchestratorThreadTitle(repo?.localPath ?? null);
     return {
       id: createWorkspaceTabId('orchestrator'),
       label: savedTitle ?? 'Orchestrator',
