@@ -24,7 +24,7 @@ import { MergeBeacon } from './merge-beacon/MergeBeacon';
 import type { ParkedLane } from './merge-beacon/derive';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
-import { CanvasModeIcon, DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
+import { CanvasModeIcon, DeviceMobileIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
@@ -57,7 +57,8 @@ interface DesktopStatusBarProps {
   onOpenReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
   onOpenSettings: () => void;
-  onAddRepo: () => void;
+  /** Retained for API compatibility — add-repo now lives on the Projects row in AgentPanel. */
+  onAddRepo?: () => void;
   /** Open the full-screen mobile-pairing QR view (a canvas tab). */
   onOpenMobilePairing: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
@@ -97,15 +98,12 @@ function DesktopStatusBarBase({
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
   const experimentalCanvas = useExperimentalCanvasFlag();
   const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
-  // Width tiers for the left footer cluster (Q's clipped-corner screenshot,
+  // Width tier for the left footer cluster (Q's clipped-corner screenshot,
   // 2026-07-10): the row is centered with overflow:visible, so once content
-  // exceeds the sidebar width it bleeds off BOTH rounded corners. The sidebar
-  // drags down to 160px but the full row needs ~190-215px. Shed the
+  // exceeds the sidebar width it bleeds off BOTH rounded corners. Shed the
   // mid-priority buttons instead of clipping — Settings and the ports/inbox
   // cluster (the live signal) always stay.
-  const leftFooterTierWidth = leftColumnWidth ?? 0;
-  const showFooterSecondary = compact || leftFooterTierWidth >= 240; // Pair mobile + Canvas
-  const showFooterAddRepo = compact || leftFooterTierWidth >= 190;
+  const showFooterSecondary = compact || (leftColumnWidth ?? 0) >= 220; // Pair mobile + Canvas
   // Drop the footer's paper card when collapsed OR in glass mode — glass wants
   // the panel above to float as its own Lisse card with the icons on vibrancy.
   // Icon spacing (gap/padding) still keys off leftFooterCollapsed so the glass
@@ -339,15 +337,8 @@ function DesktopStatusBarBase({
                   radius={6}
                 />
               ) : null}
-              {showFooterAddRepo ? (
-                <ChromeButton
-                  icon={<FolderPlusIcon size={14} color="var(--t-text)" />}
-                  label="Add repository"
-                  onClick={onAddRepo}
-                  size={22}
-                  radius={6}
-                />
-              ) : null}
+              {/* Add-repo moved to the Projects row in AgentPanel
+                  (Q ruling 2026-07-11) — contextual beats chrome. */}
               {experimentalCanvas && showFooterSecondary ? (
                 <ChromeButton
                   icon={<CanvasModeIcon size={14} color="var(--t-text)" />}
