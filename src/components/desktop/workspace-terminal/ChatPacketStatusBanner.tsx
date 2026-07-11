@@ -22,7 +22,7 @@
  *   - Review diff    → onReview() (opens the wide review surface)
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 import type { PacketReviewState } from '@/lib/orchestrator/derive-review-state';
@@ -110,6 +110,7 @@ interface ReviewStateResponse {
   lane?: string | null;
   packetId?: string | null;
   title?: string | null;
+  orchestratorReview?: { verdict?: string; summary?: string } | null;
 }
 
 export function ChatPacketStatusBanner({
@@ -134,6 +135,8 @@ export function ChatPacketStatusBanner({
   const [resolvedLaneId, setResolvedLaneId] = useState<string | null>(null);
   const [resolvedPacketId, setResolvedPacketId] = useState<string | null>(null);
   const [resolvedTitle, setResolvedTitle] = useState<string | null>(null);
+  const [reviewReason, setReviewReason] = useState<string | null>(null);
+  const [reasonExpanded, setReasonExpanded] = useState(false);
 
   // Self-fetch the durable review-state so the banner works even when the packet
   // has detached from live mission state (the whole point — see file header).
@@ -158,6 +161,9 @@ export function ChatPacketStatusBanner({
         setResolvedLaneId(data.lane ?? null);
         setResolvedPacketId(data.packetId ?? null);
         setResolvedTitle(data.title ?? null);
+        // The rejection reason lives on the durable review summary — show it so
+        // "declined" isn't a dead-end that forces you to open the diff to guess why.
+        setReviewReason(data.orchestratorReview?.verdict === 'rejected' ? (data.orchestratorReview?.summary ?? null) : null);
       } catch {
         if (active) setReviewState(null);
       }
@@ -411,6 +417,50 @@ export function ChatPacketStatusBanner({
               ? 'PR-only mode is active. Create a PR so a human can merge.'
               : p.detail}
           </div>
+          {p.key === 'rejected' && reviewReason ? (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setReasonExpanded((v) => !v)}
+              title={reasonExpanded ? 'Collapse reason' : 'Expand full reason'}
+              style={{
+                marginTop: 8,
+                paddingTop: 6,
+                paddingBottom: 6,
+                paddingLeft: 10,
+                paddingRight: 10,
+                borderTopWidth: 0,
+                borderRightWidth: 0,
+                borderBottomWidth: 0,
+                borderLeftWidth: 2,
+                borderStyle: 'solid',
+                borderColor: p.color,
+                borderTopRightRadius: 6,
+                borderBottomRightRadius: 6,
+                background: p.background,
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: p.color }}>Why declined</span>
+                <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)' }}>{reasonExpanded ? 'less' : 'more'}</span>
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 300,
+                  color: 'var(--t-text-secondary)',
+                  lineHeight: 1.5,
+                  marginTop: 3,
+                  ...(reasonExpanded
+                    ? {}
+                    : { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }),
+                } as CSSProperties}
+              >
+                {reviewReason}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
