@@ -15,7 +15,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
-import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, findLaneBySession } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import {
@@ -90,9 +90,19 @@ export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  const packetId = request.nextUrl.searchParams.get('packetId')?.trim() ?? '';
+  let packetId = request.nextUrl.searchParams.get('packetId')?.trim() ?? '';
+  // sessionKey fallback — a detached packet (dropped from mission state after its
+  // worker finished) has no client-resolvable packetId, but the tab always knows
+  // its lane sessionKey. Resolve packetId server-side so the decision banner works
+  // for detached/parked packets (Q ruling 2026-07-11). Same fallback pattern as
+  // packet-transcript (#1389).
+  const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim() ?? '';
+  if (!packetId && sessionKey) {
+    const laneBySession = findLaneBySession(sessionKey);
+    if (laneBySession?.packetId) packetId = laneBySession.packetId;
+  }
   if (!packetId) {
-    return errorResponse('invalid_request', 'packetId query parameter is required.', 400);
+    return errorResponse('invalid_request', 'packetId or sessionKey query parameter is required.', 400);
   }
 
   try {
@@ -147,6 +157,9 @@ export async function GET(request: NextRequest) {
       mergeGate,
       lane: lane?.id ?? null,
       branch: lane?.branch ?? packet.branchTarget ?? null,
+      // Title so a detached packet's decision banner can name itself instead of
+      // falling back to a generic "Dispatched packet".
+      title: packet.title ?? lane?.label ?? null,
     }, { headers: JSON_HEADERS });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to read review state.';
