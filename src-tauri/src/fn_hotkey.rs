@@ -411,6 +411,22 @@ fn begin_system_dictation() {
     // the `std::thread::spawn(begin_system_dictation)` call site), never the
     // CGEvent tap, so a short blocking wait here is safe.
     let duck = crate::audio_ducker::duck();
+    // Kick the mic open IMMEDIATELY below — do NOT block on the duck first
+    // (#1544 overlap). The duck's osascript runs on its own detached thread; we
+    // hand the capture pump a shared "duck settled" flag and let it discard
+    // captured audio until BOTH the warmup floor passes AND the duck lands (or
+    // its cap expires), rather than serializing a fixed wait ahead of the device
+    // open. A tiny waiter flips the flag when the handle resolves — which is
+    // immediate when nothing needs ducking (SendOnDrop fires on every duck
+    // early-exit), so the no-music case pays ZERO added latency.
+    let duck_settled = Arc::new(AtomicBool::new(false));
+    {
+        let flag = Arc::clone(&duck_settled);
+        std::thread::spawn(move || {
+            duck.wait(std::time::Duration::from_millis(DUCK_SETTLE_CAP_MS));
+            flag.store(true, Ordering::SeqCst);
+        });
+    }
     crate::sound::play_sound("Tink"); // start-listening cue (#1208)
     // Save the paste target BEFORE any focus could shift. Crucially this also
     // happens BEFORE the dock pill is ordered front — the dock window is
@@ -474,15 +490,15 @@ fn begin_system_dictation() {
         });
     }
 
-    // Let the duck's first volume-set land before the mic opens, so playing
-    // audio can't bleed into the message start (#1544). Hard-capped so a slow
-    // osascript can never delay dictation start noticeably — if it hasn't
-    // landed in time we proceed anyway (the duck completes a beat later, which
-    // is harmless). The dock-morph above was dispatched async to the main
-    // thread, so it overlaps this wait rather than serializing behind it.
-    duck.wait(std::time::Duration::from_millis(DUCK_SETTLE_CAP_MS));
-
-    match crate::stt_engine::start() {
+    // Open the mic NOW, overlapping the duck. The pump discards captured audio
+    // until the duck-settle gate opens (or its cap expires), so playing audio
+    // still can't bleed into the message start (#1544) — but the device open no
+    // longer waits behind a fixed duck delay, so the first words aren't lost.
+    let duck_gate = crate::stt::capture::DuckGate {
+        settled: duck_settled,
+        cap: std::time::Duration::from_millis(DUCK_SETTLE_CAP_MS),
+    };
+    match crate::stt_engine::start_with_gate(Some(duck_gate)) {
         Ok(sid) => {
             CURRENT_PTT_SESSION_ID.store(sid, Ordering::SeqCst);
             tracing::info!("[fn-hotkey] system dictation started (session={sid})");
