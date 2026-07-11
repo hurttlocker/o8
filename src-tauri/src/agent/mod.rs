@@ -25,6 +25,7 @@ pub mod router;
 pub mod safety;
 pub mod screen;
 pub mod store;
+pub mod symon_task_bridge;
 pub mod term_watch;
 pub mod tools;
 pub mod worker_pulse;
@@ -918,6 +919,7 @@ async fn run_agent_inner(
         return Err("Empty request".into());
     }
 
+    let is_background_claude_task = task_prefix == Some("claude-task");
     let task_id = match task_prefix {
         Some(prefix) => next_task_id_with_prefix(prefix),
         None => next_task_id(),
@@ -1107,6 +1109,9 @@ async fn run_agent_inner(
                 done_payload["sources"] = json!(result.brain_sources);
             }
             emit_agent_event(&app, done_payload);
+            if is_background_claude_task {
+                symon_task_bridge::send_task_complete(&task_id, "done", &prompt, &clean_text).await;
+            }
             if let Some(glint) = glint_for(&result.tool_calls_json) {
                 emit_agent_event(
                     &app,
@@ -1125,6 +1130,9 @@ async fn run_agent_inner(
                 &app,
                 json!({ "taskId": task_id, "kind": "status", "status": "failed", "result": e }),
             );
+            if is_background_claude_task {
+                symon_task_bridge::send_task_complete(&task_id, "failed", &prompt, &e).await;
+            }
             Err(e)
         }
     }

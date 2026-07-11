@@ -84,6 +84,9 @@ All messages are JSON with `channel: "symon"`. DURABLE semantics (queued under b
 |---|---|---|
 | `symon-tool-result` | `{ sessionId, callId, ok, result }` | `result` = JSON value to hand back to the model as the function output; on failure `ok:false` and `result` = `{ "error": "<code>", "detail"?: "<human text>" }` |
 | `symon-agent-status` | `{ sessionId, status: "idle" \| "connecting" \| "live" \| "acting" \| "error", detail? }` | authoritative session state; `acting` is emitted while a tool executes, then back to `live` |
+| `symon-task-complete` | `{ taskId, status: "done" \| "failed", intentText, resultText, truncated }` | additive background-Claude completion; emitted after the full result is persisted in `agent_tasks`, only to active Agent-mode sessions. `resultText` is capped at 600 Unicode characters plus `…`; `truncated:true` means the phone must treat it as a spoken summary, not the complete record. |
+
+Mobile-lane contract-change note: forward `symon-task-complete` into the live WebRTC data channel as a conversation item so the model speaks it. Preserve all fields verbatim; the full result remains Mac-local in `agent_tasks`.
 
 ### Tool relay semantics
 
