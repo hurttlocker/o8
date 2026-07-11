@@ -119,6 +119,11 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "o8_panel_read" => SafetyClass::ReadOnly,
         "o8_recap" => SafetyClass::ReadOnly,
         "o8_usage" => SafetyClass::ReadOnly,
+        // o8-hosted PTYs only. Listing is observational; writing can execute a
+        // shell/agent command, so it uses the same always-carded posture as
+        // term_send even though the target is never a foreign terminal app.
+        "terminal_list" => SafetyClass::ReadOnly,
+        "terminal_send" => SafetyClass::Reversible,
         // Terminal control (dev frontier). Surveying is harmless; term_send
         // EXECUTES a line in a live shell → Reversible so it ALWAYS shows the
         // spoken proposal + confirm card in V1. NOTE: if blanket consent ever
