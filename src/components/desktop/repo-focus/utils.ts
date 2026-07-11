@@ -24,6 +24,12 @@ export function packetBelongsToRepo(packet: OrchestratorPacket, repoPath: string
 export function packetVisualState(packet: OrchestratorPacket): RepoFocusPacketState {
   if (isPacketReleased(packet)) return 'merged';
   if (isPacketFailed(packet)) return 'failed';
+  // A reviewed-and-declined packet is its OWN state — not a fresh "review me"
+  // (Q ruling 2026-07-11). A rejection lives on the review verdict, not the
+  // status string, so the status can still read 'awaiting_review'/'reviewing'
+  // while the verdict is a hard no. Surface it distinctly so the dot stops
+  // lying about what's waiting.
+  if (packet.review && packet.review.approved === false) return 'rejected';
   if (packet.status === 'awaiting_review') return 'awaiting_review';
   if (packet.status === 'running' || packet.status === 'launching' || packet.status === 'idle' || packet.status === 'recovering') {
     return 'running';
@@ -42,6 +48,8 @@ export function packetStatusColor(packet: OrchestratorPacket): string {
       return 'var(--t-success)';
     case 'failed':
       return '#ef4444';
+    case 'rejected':
+      return '#E8912B';
     case 'awaiting_review':
       return 'var(--t-brand-orange, #FF5A1F)';
     case 'running':

@@ -19,7 +19,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-export type AgentDotState = 'idle' | 'running' | 'review' | 'merged' | 'failed';
+export type AgentDotState = 'idle' | 'running' | 'review' | 'rejected' | 'merged' | 'failed';
 
 export const LONG_RUNNING_MS = 1 * 60 * 1000; // 1 min — pulse → orbit (was 7 min; lowered so the long-run orbit is observable)
 
@@ -51,6 +51,13 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
     case 'approval':
     case 'pending':
       return 'review';
+    // Reviewed and declined — a settled "no", distinct from a fresh "review me"
+    // (which pulses) and a crash ('failed', red). Amber, static.
+    case 'rejected':
+    case 'needs-revision':
+    case 'changes-requested':
+    case 'changes_requested':
+      return 'rejected';
     case 'blocked':
     case 'failed':
     case 'error':
@@ -64,9 +71,10 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
   }
 }
 
-const ACCENT: Record<'running' | 'review' | 'failed', string> = {
+const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
   running: 'var(--t-accent)',
   review: '#FF5A1F',
+  rejected: '#E8912B',
   failed: '#ef4444',
 };
 
@@ -136,6 +144,19 @@ export function AgentStatusDot({
     );
   }
 
+  if (state === 'rejected') {
+    // Reviewed & declined: amber, solid, STATIC (not pulsing) — a settled "no"
+    // that reads apart from the orange review pulse and the red crash. Placeholder
+    // palette; higher-fidelity treatment to follow (Q, 2026-07-11).
+    return (
+      <span
+        aria-label={dotLabel}
+        title={dotLabel}
+        style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color ?? ACCENT.rejected, flexShrink: 0 }}
+      />
+    );
+  }
+
   if (state === 'review') {
     return (
       <span
@@ -175,6 +196,8 @@ function defaultDotLabel(state: AgentDotState): string {
       return 'running';
     case 'review':
       return 'review ready';
+    case 'rejected':
+      return 'review declined';
     case 'merged':
       return 'merged';
     case 'failed':
