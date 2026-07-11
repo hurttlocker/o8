@@ -283,35 +283,27 @@ export function ChatPacketStatusBanner({
     }
   }, [actionPacketId, onDiscarded]);
 
-  const submitFeedback = useCallback(async () => {
-    const trimmed = feedback.trim();
-    if (!actionPacketId || !trimmed) return;
-    setPending('reject');
-    setActionError(null);
-    setActionNote(null);
-    try {
-      const response = await fetch('/api/orchestrator/rerun-with-feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: actionPacketId, feedback: trimmed }),
-      });
-      const payload = await response.json().catch(() => null) as {
-        ok?: boolean;
-        result?: { note?: string };
-        error?: { message?: string };
-      } | null;
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error?.message ?? 'Unable to request changes.');
-      }
-      setActionNote(payload.result?.note ?? 'Sent back to the agent with your feedback.');
-      setFeedback('');
-      setFeedbackOpen(false);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Unable to request changes.');
-    } finally {
-      setPending(null);
-    }
-  }, [feedback, actionPacketId]);
+  // Request changes HANDS THE PACKET TO THE ORCHESTRATOR (Q ruling 2026-07-11) —
+  // a declined packet's recovery is a decision (rebase / re-dispatch / fix / drop),
+  // so it goes to the brain that owns recovery, not blindly back to a fresh worker.
+  // We compose the reason + optional operator note and pre-fill the orchestrator
+  // composer (via the dashboard 'o8:orchestrator-inject' listener), focusing that
+  // tab so the operator can review and send.
+  const submitFeedback = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const note = feedback.trim();
+    const title = packetTitle ?? resolvedTitle ?? actionPacketId ?? 'the dispatched packet';
+    const lines = [
+      `The review DECLINED "${title}" and it needs recovery — your call (rebase & re-dispatch, fix it directly, or drop it).`,
+    ];
+    if (reviewReason) lines.push('', 'Why it was declined:', reviewReason);
+    if (note) lines.push('', `My note: ${note}`);
+    if (actionPacketId) lines.push('', `Packet: ${actionPacketId}`);
+    window.dispatchEvent(new CustomEvent('o8:orchestrator-inject', { detail: { text: lines.join('\n') } }));
+    setActionNote('Handed to the orchestrator — review the message in its composer and send.');
+    setFeedback('');
+    setFeedbackOpen(false);
+  }, [feedback, packetTitle, resolvedTitle, actionPacketId, reviewReason]);
 
   if (!presentation) return null;
   const p = presentation;
@@ -469,8 +461,7 @@ export function ChatPacketStatusBanner({
           <textarea
             value={feedback}
             onChange={(event) => setFeedback(event.target.value)}
-            placeholder="What needs to change? Be specific — this prepends to the original prompt."
-            disabled={pending === 'reject'}
+            placeholder="Add a note for the orchestrator (optional) — the decline reason is already included."
             style={{
               width: '100%',
               minHeight: 64,
@@ -492,7 +483,7 @@ export function ChatPacketStatusBanner({
             }}
           />
           <div style={{ display: 'flex', gap: 6 }}>
-            {pill(pending === 'reject' ? 'Sending…' : 'Send back', () => { void submitFeedback(); }, 'secondary', pending === 'reject')}
+            {pill('Send to orchestrator', () => { submitFeedback(); }, 'secondary')}
             {pill('Cancel', () => { setFeedbackOpen(false); setFeedback(''); }, 'danger')}
           </div>
         </div>
