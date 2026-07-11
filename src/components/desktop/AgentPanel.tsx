@@ -564,6 +564,49 @@ function MiniAgentPanelHeader({
             setSessionMenuOpen(false);
             onProjectsOpenChange(!projectsOpen);
           }}
+          // Add-repo lives here now (moved out of the status-bar footer,
+          // Q ruling 2026-07-11) — contextual to Projects, left of the
+          // filter disclosure. Span-not-button: the row itself is a button.
+          trailing={
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Add repository"
+              title="Add repository"
+              onClick={(event) => {
+                event.stopPropagation();
+                onAddRepo();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.stopPropagation();
+                  event.preventDefault();
+                  onAddRepo();
+                }
+              }}
+              style={{
+                flexShrink: 0,
+                width: 17,
+                height: 17,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 5,
+                color: 'var(--t-text-faint)',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
+                event.currentTarget.style.color = 'var(--t-text)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = 'transparent';
+                event.currentTarget.style.color = 'var(--t-text-faint)';
+              }}
+            >
+              <Plus size={13} strokeWidth={2} />
+            </span>
+          }
         />
         {projectsOpen ? (
           <MiniProjectsMenu
@@ -748,6 +791,7 @@ function MiniAgentPanelAction({
   disabled = false,
   disclosure,
   onClick,
+  trailing,
 }: {
   icon: LucideIcon;
   label: string;
@@ -755,6 +799,10 @@ function MiniAgentPanelAction({
   disabled?: boolean;
   disclosure?: 'menu' | 'filter';
   onClick?: () => void;
+  /** Extra control rendered between the label and the disclosure glyph
+      (e.g. Projects row's add-repo). Must NOT be a <button> — the row
+      itself is one; use a span with role="button" + stopPropagation. */
+  trailing?: React.ReactNode;
 }) {
   return (
     <button
@@ -826,6 +874,7 @@ function MiniAgentPanelAction({
           {label}
         </span>
       </span>
+      {trailing ?? null}
       {disclosure ? (
         <span
           aria-hidden
