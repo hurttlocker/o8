@@ -33,6 +33,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Folder as IconoirFolder } from 'iconoir-react';
 import { ChevronDown, ChevronRight } from '@/components/desktop/lucide-shims';
+import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
 import {
   ExtraAgentActionMenu,
   ExtraAgentRowView,
@@ -161,6 +162,7 @@ function mapRepoPathToRegistered(
 function buildRows(
   lanes: LaneSummary[],
   agents: AgentSummary[],
+  rejectedPacketIds: ReadonlySet<string>,
 ): ExtraAgentRow[] {
   const rows: ExtraAgentRow[] = [];
   const seenSessionKeys = new Set<string>();
@@ -188,6 +190,7 @@ function buildRows(
       laneId: lane.id,
       laneStatus: lane.status,
       lastEventLabel: lane.lastEventLabel,
+      rejected: lane.packetId ? rejectedPacketIds.has(lane.packetId) : false,
     });
   }
 
@@ -383,6 +386,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
+  const [rejectedPacketIds, setRejectedPacketIds] = useState<Set<string>>(() => new Set());
   const [actionMenu, setActionMenu] = useState<ExtraAgentActionMenuState | null>(null);
   const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set());
   const [hoverCard, setHoverCard] = useState<{ row: ExtraAgentRow; rect: DOMRect } | null>(null);
@@ -458,20 +462,41 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
     abortRef.current = controller;
 
     try {
-      const [lanesRes, snapshotRes, reposRes] = await Promise.allSettled([
+      const [lanesRes, snapshotRes, reposRes, approvalsRes] = await Promise.allSettled([
         // No `active=true` filter — operator wants every spawned agent
         // visible regardless of state (reviewing / awaiting_input / idle /
         // failed). Was hiding the entire backlog of MCP-dispatched packets.
         fetch('/api/lanes', { signal: controller.signal }),
         fetch('/api/command-center/snapshot', { signal: controller.signal }),
         fetch('/api/panel/repos', { signal: controller.signal }),
+        // Approvals feed the 'rejected' dot — the durable review verdict the
+        // lane status alone can't tell us (a rejected lane still reads
+        // 'reviewing'). Same source the merge beacon + banner use.
+        fetch('/api/panel/approvals?status=all', { signal: controller.signal }),
       ]);
 
       if (controller.signal.aborted) return;
 
+      let laneList: LaneSummary[] = [];
       if (lanesRes.status === 'fulfilled' && lanesRes.value.ok) {
         const json = await lanesRes.value.json() as { lanes?: LaneSummary[] };
-        setLanes(json.lanes ?? []);
+        laneList = json.lanes ?? [];
+        setLanes(laneList);
+      }
+
+      if (approvalsRes.status === 'fulfilled' && approvalsRes.value.ok) {
+        const json = await approvalsRes.value.json() as { approvals?: ReviewApprovalSummary[] };
+        const domainLanes = laneList
+          .filter((lane) => lane.packetId)
+          .map((lane) => ({
+            laneId: lane.id,
+            packetId: lane.packetId as string,
+            status: lane.status,
+            sessionKey: lane.sessionKey,
+            lastEventLabel: lane.lastEventLabel,
+          }));
+        const rejected = deriveParkedLaneBuckets(domainLanes, json.approvals ?? []).rejected;
+        setRejectedPacketIds(new Set(rejected.map((entry) => entry.packetId)));
       }
       if (snapshotRes.status === 'fulfilled' && snapshotRes.value.ok) {
         const json = await snapshotRes.value.json() as { agents?: AgentSummary[] };
@@ -531,7 +556,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
     };
   }, [cancelHoverClose, fetchData]);
 
-  const rows = useMemo(() => buildRows(lanes, agents), [lanes, agents]);
+  const rows = useMemo(() => buildRows(lanes, agents, rejectedPacketIds), [lanes, agents, rejectedPacketIds]);
   const visibleRows = useMemo(
     () => rows.filter((row) => !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))),
     [rows, archivedSessionKeys],

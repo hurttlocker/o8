@@ -22,6 +22,10 @@ export interface ExtraAgentRow {
   laneId: string | null;
   laneStatus: LaneStatus | null;
   lastEventLabel: string | null;
+  /** Latest review verdict was a rejection — drives the 'rejected' dot so the
+   *  sidebar agrees with the decision banner (which reads the same verdict).
+   *  Detachment-proof: derived from durable approvals, not the lane status. */
+  rejected?: boolean;
 }
 
 export interface ExtraAgentActionMenuState {
@@ -67,6 +71,10 @@ function rowDotState(row: ExtraAgentRow): AgentDotState {
   if (lane === 'completed') return 'merged';
   if (lane === 'failed' || lane === 'recovering') return 'failed';
   if (lane === 'archived') return 'idle';
+  // A declined review reads as 'rejected' — checked before the generic review
+  // dot so a reviewing lane whose verdict came back NO shows the rejected mark,
+  // matching the banner instead of a fresh awaiting-review sweep.
+  if (row.rejected) return 'rejected';
   if (row.status === 'running') return 'running';
   if (row.status === 'waiting') return 'review';
   if (row.status === 'error') return 'failed';
@@ -75,6 +83,7 @@ function rowDotState(row: ExtraAgentRow): AgentDotState {
 
 function rowStatusLabel(row: ExtraAgentRow): string {
   const lane = row.laneStatus;
+  if (row.rejected) return 'declined';
   if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
   if (lane === 'awaiting_input') return 'needs input';
   if (lane === 'awaiting_human') return 'needs you';
