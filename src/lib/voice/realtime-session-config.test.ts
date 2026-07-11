@@ -15,17 +15,27 @@ import {
   DEFAULT_INSTRUCTIONS,
   buildRealtimeMintSession,
   buildClientSecretsBody,
+  MIC_PROFILE_AUDIO_INPUT,
 } from './realtime-session-config';
 
 describe('realtime-session-config — shared assembler', () => {
-  it('desk inputs (model + voice) produce the exact legacy minimal shape', () => {
-    // This is byte-identical to what the desk mint sent before the extraction —
-    // instructions/tools/transcription are applied client-side on desk.
+  it('desk inputs (model + voice) produce the exact legacy minimal shape — NO gate', () => {
+    // The desk mic was explicitly fine (Q 2026-07-11): no micProfile → no
+    // audio.input → byte-identical to the pre-gate desk mint.
     expect(buildRealtimeMintSession({ model: 'm', voice: 'v' })).toEqual({
       type: 'realtime',
       model: 'm',
       audio: { output: { voice: 'v' } },
     });
+  });
+
+  it('micProfile near_field adds the phone gate; noise_reduction is an OBJECT (a bare string 400s)', () => {
+    const session = buildRealtimeMintSession({ model: 'm', voice: 'v', micProfile: 'near_field' });
+    const input = (session.audio as { input: Record<string, unknown> }).input;
+    expect(input.noise_reduction).toEqual({ type: 'near_field' });
+    expect(input.turn_detection).toEqual(MIC_PROFILE_AUDIO_INPUT.near_field.turn_detection);
+    // The gate is a real gate: threshold raised above OpenAI's 0.5 default.
+    expect((MIC_PROFILE_AUDIO_INPUT.near_field.turn_detection as { threshold: number }).threshold).toBeGreaterThan(0.5);
   });
 
   it('is deterministic — identical inputs deep-equal (no hidden state / order drift)', () => {
@@ -62,6 +72,7 @@ describe('realtime-session-config — shared assembler', () => {
       instructions: DEFAULT_INSTRUCTIONS,
       tools,
       inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
+      micProfile: 'near_field',
     });
     expect(session).toEqual({
       type: 'realtime',
@@ -69,7 +80,10 @@ describe('realtime-session-config — shared assembler', () => {
       instructions: DEFAULT_INSTRUCTIONS,
       audio: {
         output: { voice: DEFAULT_VOICE },
-        input: { transcription: { model: REALTIME_INPUT_TRANSCRIPTION_MODEL } },
+        input: {
+          ...MIC_PROFILE_AUDIO_INPUT.near_field,
+          transcription: { model: REALTIME_INPUT_TRANSCRIPTION_MODEL },
+        },
       },
       tools,
       tool_choice: 'auto',
