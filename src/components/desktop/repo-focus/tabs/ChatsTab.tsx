@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import {
+  readLastOrchestratorThreadId,
+  writeLastOrchestratorThread,
+} from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
+import {
   normalizeRepoPath,
   packetBelongsToRepo,
   packetVisualState,
@@ -229,6 +233,18 @@ export function ChatsTab({
             throw new Error(payload?.error ?? `Delete failed (${response.status})`);
           }
         });
+        // Notify any open workspace tab bound to this thread so it resets to the
+        // fresh new-chat state instead of showing the dead transcript — the row
+        // dropped from this rail, but the center tab had no signal until now
+        // (operator reports v0.1.557/560/580).
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId: item.tabId } }));
+          // And clear the last-active restore keys if they point at the deleted
+          // thread, so a reload can't resurrect it into a workspace tab.
+          if (readLastOrchestratorThreadId() === item.tabId) {
+            writeLastOrchestratorThread(null, null);
+          }
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Delete failed';
         toast(`Couldn't delete "${item.title}": ${message}. Try again — if Codex was busy on this thread the file may have been locked.`);

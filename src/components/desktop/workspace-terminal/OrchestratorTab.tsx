@@ -356,6 +356,27 @@ function OrchestratorTabInner({
     }));
   }, [active, publishWorkspaceThread, tabId, chatChromeState.threadId]);
 
+  // If the conversation this tab is showing gets deleted from the left rail
+  // (ChatsTab → DELETE /api/v2/chat-history), the row vanishes on the left but
+  // the center tab kept rendering the now-dead transcript ("gone on the agent
+  // panel on left but still in the workspace not ready for a new chat", operator
+  // reports v0.1.557/560/580). Reset THIS tab to the fresh new-chat empty state
+  // instead. Matches the loaded thread by its live chat-history id, so it covers
+  // orchestrator AND llm-chat tabs (both render through this component). The
+  // restore-key cleanup lives at the delete site so a reload can't resurrect it.
+  const loadedThreadId = chatChromeState.threadId;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const deletedTabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
+      if (!deletedTabId || !loadedThreadId) return;
+      if (deletedTabId !== loadedThreadId) return;
+      chatPanelRef.current?.reset();
+    };
+    window.addEventListener('o8:chat-history-deleted', handler as EventListener);
+    return () => window.removeEventListener('o8:chat-history-deleted', handler as EventListener);
+  }, [loadedThreadId]);
+
   // When the loaded thread changes, fetch the chat-history record and
   // sync its title into the workspace tab's label so the header strip
   // reads the operator's chosen name (e.g. "o8.v1") instead of the
