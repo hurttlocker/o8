@@ -3351,6 +3351,7 @@ function DashboardInner() {
     const startW = leftWidth;
     const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
     const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
+    const shadowEl = document.querySelector<HTMLElement>('[data-o8-left-card-shadow]');
     const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
     let frame = 0;
     let lastX = startX;
@@ -3362,6 +3363,7 @@ function DashboardInner() {
         const w = widthAt(lastX);
         if (colEl) colEl.style.width = `${w}px`;
         if (footEl) footEl.style.width = `${w}px`;
+        if (shadowEl) shadowEl.style.width = `${w - 10}px`;
       });
     };
     const onUp = () => {
@@ -4643,7 +4645,12 @@ function DashboardInner() {
                 borderBottomLeftRadius: 0,
                 borderBottomRightRadius: 0,
                 background: 'var(--t-panel-solid)',
-                boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+                // No shadow here — a per-half shadow visibly dies at the
+                // footer seam (the 31px footer card can't develop the same
+                // lateral penumbra as this 700px+ panel). The merged card's
+                // single continuous shadow is cast by the fixed-position
+                // caster in DesktopStatusBar (data-o8-left-card-shadow),
+                // which spans panel + footer as one box. Q report 2026-07-11.
               } as React.CSSProperties}
             >
               {leftHeader}

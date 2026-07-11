@@ -219,6 +219,32 @@ function DesktopStatusBarBase({
           above. Flat top corners (meet the panel card flush), rounded
           bottom corners. A thin top border draws the divider between
           panel content and footer buttons. */}
+      {/* Continuous shadow for the merged sidebar-panel + footer card.
+          The two halves live in different subtrees (column vs status bar),
+          so neither can cast the union's shadow itself — a shadow on each
+          half visibly breaks at the seam because the 31px footer never
+          develops the 700px panel's lateral penumbra. This fixed-position
+          box spans the whole merged card (top 5 = panel top, bottom 5 =
+          footer bottom, both viewport-anchored) and casts the ONE shadow;
+          both halves paint shadowless on top. Interior is transparent —
+          box-shadow paints outside the box regardless of background. */}
+      {!compact && !footerCardHidden && typeof leftFooterWidth === 'number' && leftFooterWidth > 0 ? (
+        <div
+          aria-hidden
+          data-o8-left-card-shadow=""
+          style={{
+            position: 'fixed',
+            top: 5,
+            bottom: 5,
+            left: 5,
+            width: leftFooterWidth - 10,
+            borderRadius: 14,
+            boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+            pointerEvents: 'none',
+            zIndex: -1,
+          }}
+        />
+      ) : null}
       <div
         // Tagged so the dashboard's left-drag handler can width-sync this
         // card per-frame via direct DOM (drags bypass React — see
@@ -275,7 +301,11 @@ function DesktopStatusBarBase({
             // above (squircle bottom / flat top) — a plain borderRadius here
             // would be a circle, not the "list corners" squircle.
             borderTop: footerCardHidden ? 'none' : '0.5px solid var(--t-divider-subtle)',
-            boxShadow: footerCardHidden ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+            // No own shadow — the merged panel+footer card's continuous
+            // shadow comes from the data-o8-left-card-shadow caster below.
+            // A shadow on this 31px box alone reads as a broken seam where
+            // the panel's shadow stops (Q report 2026-07-11).
+            boxShadow: 'none',
             ['--t-chrome-btn-bg' as string]: 'transparent',
             ['--t-chrome-btn-shadow' as string]: 'none',
             ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
