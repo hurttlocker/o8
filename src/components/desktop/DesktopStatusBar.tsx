@@ -97,6 +97,15 @@ function DesktopStatusBarBase({
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
   const experimentalCanvas = useExperimentalCanvasFlag();
   const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
+  // Width tiers for the left footer cluster (Q's clipped-corner screenshot,
+  // 2026-07-10): the row is centered with overflow:visible, so once content
+  // exceeds the sidebar width it bleeds off BOTH rounded corners. The sidebar
+  // drags down to 160px but the full row needs ~190-215px. Shed the
+  // mid-priority buttons instead of clipping — Settings and the ports/inbox
+  // cluster (the live signal) always stay.
+  const leftFooterTierWidth = leftColumnWidth ?? 0;
+  const showFooterSecondary = compact || leftFooterTierWidth >= 240; // Pair mobile + Canvas
+  const showFooterAddRepo = compact || leftFooterTierWidth >= 190;
   // Drop the footer's paper card when collapsed OR in glass mode — glass wants
   // the panel above to float as its own Lisse card with the icons on vibrancy.
   // Icon spacing (gap/padding) still keys off leftFooterCollapsed so the glass
@@ -211,6 +220,10 @@ function DesktopStatusBarBase({
           bottom corners. A thin top border draws the divider between
           panel content and footer buttons. */}
       <div
+        // Tagged so the dashboard's left-drag handler can width-sync this
+        // card per-frame via direct DOM (drags bypass React — see
+        // startLeftDrag in dashboard/page.tsx).
+        data-o8-left-footer=""
         style={{
           width: leftFooterWidth,
           flexShrink: 0,
@@ -287,21 +300,25 @@ function DesktopStatusBarBase({
           />
           {!compact && !leftFooterCollapsed ? (
             <>
-              <ChromeButton
-                icon={<DeviceMobileIcon size={14} />}
-                label="Pair mobile device"
-                onClick={onOpenMobilePairing}
-                size={22}
-                radius={6}
-              />
-              <ChromeButton
-                icon={<FolderPlusIcon size={14} color="var(--t-text)" />}
-                label="Add repository"
-                onClick={onAddRepo}
-                size={22}
-                radius={6}
-              />
-              {experimentalCanvas ? (
+              {showFooterSecondary ? (
+                <ChromeButton
+                  icon={<DeviceMobileIcon size={14} />}
+                  label="Pair mobile device"
+                  onClick={onOpenMobilePairing}
+                  size={22}
+                  radius={6}
+                />
+              ) : null}
+              {showFooterAddRepo ? (
+                <ChromeButton
+                  icon={<FolderPlusIcon size={14} color="var(--t-text)" />}
+                  label="Add repository"
+                  onClick={onAddRepo}
+                  size={22}
+                  radius={6}
+                />
+              ) : null}
+              {experimentalCanvas && showFooterSecondary ? (
                 <ChromeButton
                   icon={<CanvasModeIcon size={14} color="var(--t-text)" />}
                   label="Canvas mode"
