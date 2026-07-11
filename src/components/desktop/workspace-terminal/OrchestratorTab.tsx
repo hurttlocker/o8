@@ -955,9 +955,26 @@ function OrchestratorTabInner({
     );
   }
 
+  // Branch-details rail rendered to the RIGHT of the transcript (inside the
+  // panel) so the composer spans full width even when the rail is up (Q ruling
+  // 2026-07-11). Same width-animation + railFits gating as before.
+  const branchRail = (
+    <div
+      style={{
+        width: (projectContextRailVisible && railFits && !data.o8PanelVisible) ? 256 : 0,
+        flexShrink: 0,
+        overflow: 'hidden',
+        transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+    >
+      <BranchDetailsLauncher visible={projectContextRailVisible && railFits} />
+    </div>
+  );
+
   const thoughtsChatPanel = (
     <ThoughtsChatPanel
       ref={chatPanelRef}
+      transcriptSideRail={branchRail}
       open={active}
       draftInjection={effectiveDraftInjection}
       imageInjection={data?.imageInjection ?? null}
@@ -1084,23 +1101,8 @@ function OrchestratorTabInner({
             />
           ) : thoughtsChatPanel}
         </div>
-
-        {/* Right: Branch details launcher (Codex pattern). Self-hides when
-            the wide O8 right panel is open and when no packet is selected.
-            Wrapped in a width-animating column so toggling the workspace-detail
-            rail PUSHES the chat (its flex:1 sibling) smoothly in lockstep — the
-            Codex drawer motion — instead of snapping in/out. The rail content
-            stays mounted and is clipped (never faded) as the width collapses. */}
-        <div
-          style={{
-            width: (projectContextRailVisible && railFits && !data.o8PanelVisible) ? 256 : 0,
-            flexShrink: 0,
-            overflow: 'hidden',
-            transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-        >
-          <BranchDetailsLauncher visible={projectContextRailVisible && railFits} />
-        </div>
+        {/* Branch-details rail moved INSIDE the panel (transcriptSideRail) so
+            it sits beside the transcript, not the composer — see branchRail. */}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <QuickActionPalette
