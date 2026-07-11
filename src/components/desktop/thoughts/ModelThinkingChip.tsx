@@ -105,6 +105,7 @@ export function ModelThinkingChip({
   collideEnabled = false,
   onSetCollide,
   compact = false,
+  split = false,
 }: {
   modelLabel: string;
   modelId?: string;
@@ -119,11 +120,16 @@ export function ModelThinkingChip({
   collideEnabled?: boolean;
   onSetCollide?: (enabled: boolean) => void;
   compact?: boolean;
+  /** Claude Code-style presentation (Q ruling 2026-07-11): model and thinking
+      level render as two separate quiet-text triggers ("Fable 5" · "High")
+      instead of one bordered chip with bars. Both open the shared menu. */
+  split?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const splitRef = useRef<HTMLSpanElement>(null);
   const baseEffortOptions = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   // 'ultra' (codex gpt-5.6-sol's internal-fan-out tier) is only selectable on the
   // codex backend, whose composer model is always Sol. Every other backend caps
@@ -141,9 +147,73 @@ export function ModelThinkingChip({
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
   const decideLabel = isCodexBackend ? 'Codex decides' : 'Claude decides';
   const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Swarm' : 'Solo';
+  // Thinking levels are only KNOWN for the Claude-family and Codex backends
+  // ('auto' resolves to one of them). Every other runtime uses its default
+  // effort and the thinking trigger stays hidden — no bespoke picker for
+  // levels we can't actually steer (Q ruling 2026-07-11).
+  const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
+    || activeBackend === 'codex' || activeBackend === 'auto';
+  const useSplit = split && !compact;
+
+  const quietTriggerStyle = (active: boolean): React.CSSProperties => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    height: 22,
+    maxWidth: 180,
+    paddingTop: 0,
+    paddingRight: 5,
+    paddingBottom: 0,
+    paddingLeft: 5,
+    borderWidth: 0,
+    borderRadius: 6,
+    background: active ? 'var(--t-hover)' : 'transparent',
+    color: active ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-sans-system)',
+    fontSize: 11,
+    fontWeight: 300,
+    letterSpacing: '0',
+    whiteSpace: 'nowrap',
+    transition: 'color 140ms, background 140ms',
+  });
 
   return (
     <>
+      {useSplit ? (
+        // Claude Code-style right cluster: "Fable 5   High" — two quiet text
+        // triggers, no border/bars/chevron at rest. Both open the shared menu.
+        <span ref={splitRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
+          <button
+            type="button"
+            onClick={() => { if (canOpen) setOpen((current) => !current); }}
+            disabled={!canOpen}
+            title={`${modelLabel} · ${modeLabel}`}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            style={quietTriggerStyle(open)}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</span>
+          </button>
+          {thinkingKnown && onEffortChange ? (
+            <button
+              type="button"
+              onClick={() => setOpen((current) => !current)}
+              title={`${effortSectionLabel}: ${selectedLabel}`}
+              aria-haspopup="menu"
+              aria-expanded={open}
+              style={quietTriggerStyle(open)}
+              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
+            >
+              {selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1)}
+            </button>
+          ) : null}
+        </span>
+      ) : (
       <button
         ref={buttonRef}
         type="button"
@@ -190,8 +260,9 @@ export function ModelThinkingChip({
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
+      )}
 
-      <ComposerPopover anchorRef={buttonRef} open={open} onClose={() => setOpen(false)} align="start">
+      <ComposerPopover anchorRef={useSplit ? splitRef : buttonRef} open={open} onClose={() => setOpen(false)} align={useSplit ? 'end' : 'start'}>
         <div
           role="menu"
           aria-label="Model and thinking"
