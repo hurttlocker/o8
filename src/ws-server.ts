@@ -832,6 +832,8 @@ interface TerminalAttachment {
   orphanTimer: ReturnType<typeof setTimeout> | null;
   scrollbackChunks: string[];
   scrollbackBytes: number;
+  cwd?: string;
+  commandHint?: string;
 }
 
 interface InternalTerminalSpawnPayload {
@@ -4947,6 +4949,8 @@ const httpServer = createServer((req, res) => {
           orphanTimer: null,
           scrollbackChunks: [],
           scrollbackBytes: 0,
+          cwd,
+          commandHint: shellCommand,
         };
         terminalAttachments.set(sessionName, attachment);
         registerTerminalAttachment(attachment);
@@ -4979,6 +4983,68 @@ const httpServer = createServer((req, res) => {
       : inMemory;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ sessions }));
+    return;
+  }
+
+  // Native Symon tools use this o8-internal-only inventory rather than
+  // automating Terminal.app/iTerm. Keep `/terminal-sessions` unchanged for
+  // existing dashboard restore clients.
+  if (req.url === '/terminal-voice-sessions' && req.method === 'GET') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const sessions = [...terminalAttachments.values()].map((attachment) => ({
+      name: attachment.sessionName,
+      cwd: attachment.cwd ?? null,
+      commandHint: attachment.commandHint ?? null,
+      createdAt: new Date(attachment.createdAt).toISOString(),
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessions }));
+    return;
+  }
+
+  if (req.url === '/terminal-voice-input' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: { sessionName?: string; text?: string; raw?: boolean } | null = null;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { sessionName?: string; text?: string; raw?: boolean };
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+      const sessionName = payload?.sessionName?.trim();
+      const text = payload?.text;
+      if (!sessionName || typeof text !== 'string' || !text) {
+        res.writeHead(400);
+        res.end('sessionName and text required');
+        return;
+      }
+      const attachment = terminalAttachments.get(sessionName);
+      if (!attachment) {
+        res.writeHead(404);
+        res.end('session not found');
+        return;
+      }
+      try {
+        attachment.ptyProcess.write(payload.raw ? text : `${text}\r`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to write to terminal' }));
+      }
+    });
     return;
   }
 

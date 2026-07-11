@@ -1,5 +1,7 @@
 ## Deviations
 
+- Symon o8-hosted PTYs: added a separate authenticated WS-bridge endpoint because the existing panel proxy intentionally exposes names only and always appends Enter, which cannot support metadata or raw control sequences.
+
 - Pi permission-gate bridge: reused `src/lib/pi/permission-bridge.ts` from the existing packet commit and rewired `owned.ts` to it so `owned.ts` stays below the 800-line ceiling; no behavior deviation.
 - Port-identity phase B (#1520): `scripts/dev.mjs` did not exist, so it was added and the
   package dev scripts rewired to call it.

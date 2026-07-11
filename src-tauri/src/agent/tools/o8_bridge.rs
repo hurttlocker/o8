@@ -13,6 +13,53 @@
 use crate::agent::o8_http;
 use serde_json::{json, Value};
 
+async fn terminal_host_request(path: &str, body: Option<Value>) -> Result<Value, String> {
+    let port = std::env::var("O8_WS_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .or_else(|| {
+            std::fs::read_to_string(crate::agent::agent_data_dir().join("ws-port"))
+                .ok()
+                .and_then(|value| value.trim().parse::<u16>().ok())
+        })
+        .unwrap_or(47105);
+    let token = std::fs::read_to_string(crate::agent::agent_data_dir().join("ws-token"))
+        .unwrap_or_default();
+    let client = reqwest::Client::new();
+    let request = match body {
+        Some(body) => client.post(format!("http://127.0.0.1:{port}{path}")).json(&body),
+        None => client.get(format!("http://127.0.0.1:{port}{path}")),
+    }
+    .bearer_auth(token.trim());
+    let response = request.send().await.map_err(|error| format!("o8 terminal bridge {path} failed: {error}"))?;
+    let status = response.status();
+    let text = response.text().await.map_err(|error| format!("o8 terminal bridge {path} read failed: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("o8 terminal bridge {path} error ({status}): {}", crate::utf8_head(&text, 300)));
+    }
+    serde_json::from_str(&text).map_err(|error| format!("o8 terminal bridge {path} returned bad JSON: {error}"))
+}
+
+/// List live PTYs hosted by o8 itself. Never surveys or controls foreign apps.
+pub async fn terminal_list(_args: Value) -> Result<Value, String> {
+    terminal_host_request("/terminal-voice-sessions", None).await
+}
+
+/// Write one payload to a named o8-hosted PTY; ordinary text submits by default.
+pub async fn terminal_send(args: Value) -> Result<Value, String> {
+    let session_name = args.get("session_name").and_then(|value| value.as_str()).unwrap_or("").trim();
+    let text = args.get("text").and_then(|value| value.as_str()).unwrap_or("");
+    if session_name.is_empty() || text.is_empty() {
+        return Err("terminal_send requires a session_name and non-empty text".to_string());
+    }
+    let raw = args.get("raw").and_then(|value| value.as_bool()).unwrap_or(false);
+    terminal_host_request("/terminal-voice-input", Some(json!({
+        "sessionName": session_name,
+        "text": text,
+        "raw": raw,
+    }))).await
+}
+
 /// `o8_status` — what's shipping / in progress across the fleet right now.
 ///
 /// Reads the active lanes (the same data the tray + AgentPanel use) and projects
