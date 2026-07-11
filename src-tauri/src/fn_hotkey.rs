@@ -119,6 +119,13 @@ const FN_TAP_PRIMER_MAX_MS: u64 = 220;
 #[cfg(target_os = "macos")]
 const LONG_FORM_FN_DOUBLE_TAP_MS: u64 = 480;
 
+/// Hard cap on how long `begin_system_dictation` waits for the audio duck's
+/// first volume-set before opening the mic (#1544). Long enough for a normal
+/// osascript volume-set to land, short enough that a slow one can't delay the
+/// felt start of dictation.
+#[cfg(target_os = "macos")]
+const DUCK_SETTLE_CAP_MS: u64 = 450;
+
 /// macOS Escape key virtual keycode — cancels an active long-form dictation.
 #[cfg(target_os = "macos")]
 const ESCAPE_KEYCODE: i64 = 53;
@@ -398,7 +405,12 @@ extern "C" {
 fn begin_system_dictation() {
     // Duck system audio so the mic hears over playing audio — including o8's
     // own TTS, so the user can talk back while it's still speaking (#1207).
-    crate::audio_ducker::duck();
+    // Keep the handle: we wait (bounded) for the first volume-set to land
+    // before opening the mic below, so playing audio can't bleed into the
+    // start of the message (#1544). This runs on a spawned worker thread (see
+    // the `std::thread::spawn(begin_system_dictation)` call site), never the
+    // CGEvent tap, so a short blocking wait here is safe.
+    let duck = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink"); // start-listening cue (#1208)
     // Save the paste target BEFORE any focus could shift. Crucially this also
     // happens BEFORE the dock pill is ordered front — the dock window is
@@ -461,6 +473,14 @@ fn begin_system_dictation() {
             }
         });
     }
+
+    // Let the duck's first volume-set land before the mic opens, so playing
+    // audio can't bleed into the message start (#1544). Hard-capped so a slow
+    // osascript can never delay dictation start noticeably — if it hasn't
+    // landed in time we proceed anyway (the duck completes a beat later, which
+    // is harmless). The dock-morph above was dispatched async to the main
+    // thread, so it overlaps this wait rather than serializing behind it.
+    duck.wait(std::time::Duration::from_millis(DUCK_SETTLE_CAP_MS));
 
     match crate::stt_engine::start() {
         Ok(sid) => {
@@ -571,7 +591,7 @@ fn discard_brush() {
 /// `LONG_FORM_ACTIVE` is already set true synchronously by the tap callback.
 #[cfg(target_os = "macos")]
 fn begin_long_form_dictation() {
-    crate::audio_ducker::duck();
+    let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     crate::paste::save_frontmost_app();
     set_system_origin(true);
@@ -696,7 +716,7 @@ fn cancel_long_form_dictation() {
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Ask lane unbound from keys (both Options = agent); kept for a future initiator.
 fn begin_ask_dictation() {
-    crate::audio_ducker::duck();
+    let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     // Ask takes the mic: the three voice modes (push-to-talk, long-form, ask)
     // share ONE recognizer + active_session, so abandon any in-flight session
@@ -808,7 +828,7 @@ fn begin_agent_dictation() {
     // booted and waiting, killing the turn-1 wait (#1252 speed pass). No-op when
     // the front brain isn't a Claude model.
     crate::agent::claude_pool::prewarm_agent();
-    crate::audio_ducker::duck();
+    let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     // The three voice modes share ONE recognizer — abandon any in-flight session.
     LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
