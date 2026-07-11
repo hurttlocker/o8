@@ -2,10 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
-import {
-  readLastOrchestratorThreadId,
-  writeLastOrchestratorThread,
-} from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
+import { clearLastOrchestratorThreadForId } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import {
   normalizeRepoPath,
   packetBelongsToRepo,
@@ -239,11 +236,10 @@ export function ChatsTab({
         // (operator reports v0.1.557/560/580).
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId: item.tabId } }));
-          // And clear the last-active restore keys if they point at the deleted
-          // thread, so a reload can't resurrect it into a workspace tab.
-          if (readLastOrchestratorThreadId() === item.tabId) {
-            writeLastOrchestratorThread(null, null);
-          }
+          // And clear the last-active restore keys — in any repo bucket — that
+          // point at the deleted thread, so a reload can't resurrect it into a
+          // workspace tab.
+          clearLastOrchestratorThreadForId(item.tabId);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Delete failed';
