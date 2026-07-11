@@ -2545,15 +2545,42 @@ function DashboardInner() {
     handleSelectSession(sessionKey);
   }, [handleSelectSession]);
 
-  // Opens a file path as a tab in the workspace. Shared by (a) agent-chat file
-  // clicks routed through O8Panel's `o8:open-file` → onOpenFile, and (b) Finder
-  // "Open With → o8" opens on the default IDE surface (FileOpenBridge). Prefers a
-  // live WorkspaceTerminal target; falls back to a center canvas tab when none
-  // is ready yet (waitForWorkspaceTerminalTarget resolves after hydration, so a
-  // cold-launch open lands once the workspace exists — never before).
+  // Opens a file path. Shared by (a) agent-chat file clicks routed through
+  // O8Panel's `o8:open-file` → onOpenFile, and (b) Finder "Open With → o8"
+  // (FileOpenBridge). Surface-aware (Q ruling 2026-07-11): open the file where
+  // you're already working. If you're on the CANVAS side (the center is showing a
+  // canvas) open it there; otherwise you're on the default IDE side, so open it
+  // in the right-panel Files view instead of hijacking you into a canvas tab.
   const handleOpenFileInWorkspace = useCallback((filePath: string) => {
     const path = filePath.trim();
     if (!path) return;
+
+    const onCanvasSide = activeWorkspaceTabKind === 'canvas' || activeWorkspaceTabKind === 'fleet-canvas';
+    if (!onCanvasSide) {
+      // Default IDE side → surface the file in the right-panel Files view.
+      setRightPanelKind('o8');
+      openRightPanelFromUser();
+      setO8ActiveTab('files');
+      // The Files viewer wants a repo-relative path (absolute paths are
+      // allowlist-gated). Resolve the registered repo that contains this file,
+      // point the panel at it, and select the file relative to it.
+      const containingRepo = globalRepoEntries.find((entry) => entry.localPath
+        && (path === entry.localPath || path.startsWith(`${entry.localPath}/`)));
+      if (containingRepo?.localPath) {
+        const relative = path.slice(containingRepo.localPath.length + 1) || path;
+        setO8RepoPathOverride(containingRepo.localPath);
+        setO8SelectedFile(relative);
+        setO8SelectedFileRepoPath(containingRepo.localPath);
+      } else {
+        // Not inside a known repo — hand the absolute path through as-is.
+        handleO8SelectedFileChange(path);
+      }
+      return;
+    }
+
+    // Canvas side → open the file as a canvas/inspector tab (prior behavior).
+    // Prefers a live WorkspaceTerminal target; falls back to a center canvas tab
+    // when none is ready yet (target resolves after hydration).
     const ext = path.split('.').pop()?.toLowerCase() ?? '';
     const kind = (WORKSPACE_IMAGE_EXTENSIONS.has(ext) ? 'image' : 'file') as 'image' | 'file';
     const tab = { id: `${kind}:${path}`, kind, label: path.split('/').pop() ?? path, resourceId: path };
@@ -2562,7 +2589,7 @@ function DashboardInner() {
       if (target) target.handle.openInspectorTab(tab);
       else openCanvasTab(tab);
     })();
-  }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
+  }, [activeWorkspaceTabKind, setRightPanelKind, openRightPanelFromUser, setO8ActiveTab, handleO8SelectedFileChange, globalRepoEntries, setO8RepoPathOverride, openCanvasTab, waitForWorkspaceTerminalTarget]);
 
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
     setRightPanelKind('review');
