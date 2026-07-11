@@ -79,6 +79,126 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
   );
 }
 
+type EffortStop =
+  | { kind: 'effort'; effort: ThinkingEffort; label: string; sub: string }
+  | { kind: 'ultracode'; label: string; sub: string };
+
+/**
+ * Effort slider (Claude Code reference, Q ruling 2026-07-11). A horizontal
+ * track of discrete stops — one per selectable effort — with a final purple
+ * "Ultracode" notch that arms Swarm mode. The live title above updates as the
+ * handle moves; click a stop or drag the handle to pick.
+ *
+ * (The animated glitch-fill inside the track that the reference shows at the
+ * Ultracode tier is a deliberate follow-up pass — slider first.)
+ */
+function EffortSlider({
+  stops,
+  index,
+  onPick,
+}: {
+  stops: EffortStop[];
+  index: number;
+  onPick: (index: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const last = stops.length - 1;
+  const clamped = Math.max(0, Math.min(last, index));
+  const active = stops[clamped];
+  const atUltracode = active?.kind === 'ultracode';
+  const accent = atUltracode ? SWARM_ACCENT : 'var(--t-accent)';
+
+  const pickFromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el || last <= 0) return;
+    const rect = el.getBoundingClientRect();
+    const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onPick(Math.round(t * last));
+  };
+
+  const pct = last <= 0 ? 0 : (clamped / last) * 100;
+
+  return (
+    <div style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 2, paddingBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 9 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: atUltracode ? SWARM_ACCENT : 'var(--t-text)' }}>
+          {active?.label}
+        </span>
+        <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.2 }}>
+          {active?.sub}
+        </span>
+      </div>
+      {/* Track — 8px inset each side so the handle centers on the end stops
+          without clipping. Pointer-drag + click-to-stop. */}
+      <div
+        role="slider"
+        aria-valuemin={0}
+        aria-valuemax={last}
+        aria-valuenow={clamped}
+        aria-valuetext={active?.label}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowRight' || event.key === 'ArrowUp') { event.preventDefault(); onPick(Math.min(last, clamped + 1)); }
+          else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') { event.preventDefault(); onPick(Math.max(0, clamped - 1)); }
+        }}
+        style={{ position: 'relative', height: 22, marginLeft: 8, marginRight: 8, cursor: 'pointer', outline: 'none', touchAction: 'none' }}
+        onPointerDown={(event) => {
+          (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+          setDragging(true);
+          pickFromClientX(event.clientX);
+        }}
+        onPointerMove={(event) => { if (dragging) pickFromClientX(event.clientX); }}
+        onPointerUp={() => setDragging(false)}
+        onPointerCancel={() => setDragging(false)}
+      >
+        {/* Rail */}
+        <div ref={trackRef} style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 3, transform: 'translateY(-50%)', borderRadius: 999, background: 'color-mix(in srgb, var(--t-text-faint) 22%, transparent)' }} />
+        {/* Filled portion */}
+        <div style={{ position: 'absolute', top: '50%', left: 0, width: `${pct}%`, height: 3, transform: 'translateY(-50%)', borderRadius: 999, background: accent, transition: dragging ? 'none' : 'width 140ms cubic-bezier(0.22, 1, 0.36, 1)' }} />
+        {/* Stops */}
+        {stops.map((stop, i) => {
+          const on = i <= clamped;
+          const isUltra = stop.kind === 'ultracode';
+          return (
+            <span
+              key={i}
+              aria-hidden
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: `${last <= 0 ? 0 : (i / last) * 100}%`,
+                width: isUltra ? 6 : 5,
+                height: isUltra ? 6 : 5,
+                borderRadius: 999,
+                transform: 'translate(-50%, -50%)',
+                background: on ? (isUltra ? SWARM_ACCENT : accent) : 'color-mix(in srgb, var(--t-text-faint) 40%, transparent)',
+              }}
+            />
+          );
+        })}
+        {/* Handle */}
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: `${pct}%`,
+            width: 13,
+            height: 13,
+            borderRadius: 999,
+            transform: 'translate(-50%, -50%)',
+            background: 'var(--t-panel-solid, #fff)',
+            border: `2px solid ${accent}`,
+            boxShadow: '0 1px 3px rgba(15, 23, 42, 0.18)',
+            transition: dragging ? 'none' : 'left 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SwarmGlyph({ size = 12, color = SWARM_ACCENT }: { size?: number; color?: string }) {
   return (
     <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', width: size, height: size, flexShrink: 0 }}>
@@ -155,6 +275,34 @@ export function ModelThinkingChip({
     || activeBackend === 'codex' || activeBackend === 'auto';
   const useSplit = split && !compact;
 
+  // Effort slider stops (Q ruling 2026-07-11): one per selectable effort, then
+  // a final "Ultracode" notch that arms Swarm mode. Swarm is no longer a
+  // separate Mode row — it's the top of the slider.
+  const effortStops: EffortStop[] = [
+    ...options.map((option): EffortStop => ({
+      kind: 'effort',
+      effort: option,
+      label: EFFORT_LABELS[option].charAt(0).toUpperCase() + EFFORT_LABELS[option].slice(1),
+      sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
+    })),
+    ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Ultracode', sub: 'sub-agents + workers in parallel' }] : []),
+  ];
+  const currentEffortIndex = ultraActive
+    ? effortStops.length - 1
+    : Math.max(0, options.indexOf(effort));
+  const handleEffortPick = (idx: number) => {
+    const stop = effortStops[idx];
+    if (!stop) return;
+    if (stop.kind === 'ultracode') {
+      onSetSwarm?.(true);
+      onSetCollide?.(false);
+      onEffortChange?.('xhigh');
+    } else {
+      onEffortChange?.(stop.effort);
+      onSetSwarm?.(false);
+    }
+  };
+
   const quietTriggerStyle = (active: boolean): React.CSSProperties => ({
     display: 'inline-flex',
     alignItems: 'center',
@@ -198,20 +346,27 @@ export function ModelThinkingChip({
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</span>
           </button>
-          {thinkingKnown && onEffortChange ? (
-            <button
-              type="button"
-              onClick={() => setOpen((current) => !current)}
-              title={`${effortSectionLabel}: ${selectedLabel}`}
-              aria-haspopup="menu"
-              aria-expanded={open}
-              style={quietTriggerStyle(open)}
-              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
-              onMouseLeave={(event) => { event.currentTarget.style.color = open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
-            >
-              {selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1)}
-            </button>
-          ) : null}
+          {thinkingKnown && onEffortChange ? (() => {
+            // When swarm is armed the effort tier reads "Ultracode" (the
+            // slider's top notch), not the raw base effort underneath it.
+            const tierLabel = ultraActive
+              ? 'Ultracode'
+              : selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1);
+            return (
+              <button
+                type="button"
+                onClick={() => setOpen((current) => !current)}
+                title={`${effortSectionLabel}: ${tierLabel}`}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                style={{ ...quietTriggerStyle(open), color: ultraActive ? SWARM_ACCENT : (open ? 'var(--t-text-muted)' : 'var(--t-text-faint)') }}
+                onMouseEnter={(event) => { event.currentTarget.style.color = ultraActive ? SWARM_ACCENT : 'var(--t-text)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.color = ultraActive ? SWARM_ACCENT : (open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'); }}
+              >
+                {tierLabel}
+              </button>
+            );
+          })() : null}
         </span>
       ) : (
       <button
@@ -351,67 +506,21 @@ export function ModelThinkingChip({
               <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {options.map((option) => {
-              const active = option === effort;
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={active}
-                  onClick={() => {
-                    onEffortChange?.(option);
-                    setOpen(false);
-                  }}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 1fr) auto',
-                    alignItems: 'center',
-                    gap: 6,
-                    minHeight: 23,
-                    paddingTop: 2,
-                    paddingRight: 6,
-                    paddingBottom: 2,
-                    paddingLeft: 7,
-                    borderWidth: 0,
-                    borderRadius: 8,
-                    background: active ? 'var(--t-accent-soft)' : 'transparent',
-                    color: active ? 'var(--t-accent)' : 'var(--t-text)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: 'var(--font-sans-system)',
-                  }}
-                  onMouseEnter={(event) => {
-                    if (!active) event.currentTarget.style.background = 'var(--t-hover)';
-                  }}
-                  onMouseLeave={(event) => {
-                    if (!active) event.currentTarget.style.background = 'transparent';
-                  }}
-                >
-                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.25 }}>{EFFORT_LABELS[option]}</span>
-                    <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0', color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', lineHeight: 1.25 }}>
-                      {option === 'adaptive' ? 'auto' : option === 'ultra' ? 'burns tokens fast' : `${EFFORT_LEVEL[option]}/6`}
-                    </span>
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <ThinkingBars effort={option} active={active} />
-                    <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? (option === 'max' || option === 'ultra' ? SWARM_ACCENT : 'var(--t-accent)') : 'transparent', flexShrink: 0 }} />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {onEffortChange ? (
+            <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
+          ) : null}
 
-          {onSetSwarm || onSetCollide ? (
+          {/* Mode — Solo vs Collide. Swarm/Ultracode moved to the effort
+              slider's top notch (Q ruling 2026-07-11), so it's no longer a
+              row here. */}
+          {onSetCollide ? (
             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <div style={{ paddingLeft: 7, paddingRight: 7, paddingBottom: 2 }}>
                 <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Mode</div>
               </div>
               {[
-                { key: 'solo', order: 1, active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator driving the fleet', hint: 'One orchestrator plans, dispatches, and reviews the whole worker fleet. Still many agents working — one brain directing them.' },
-                { key: 'collide', order: 3, active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}`, hint: 'Claude and Codex propose independently, then one synthesizes and does the work — a built-in second opinion for hard problems.' },
+                { key: 'solo', active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator driving the fleet', hint: 'One orchestrator plans, dispatches, and reviews the whole worker fleet. Still many agents working — one brain directing them.' },
+                { key: 'collide', active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}`, hint: 'Claude and Codex propose independently, then one synthesizes and does the work — a built-in second opinion for hard problems.' },
               ].map((mode) => (
                 <button
                   key={mode.key}
@@ -441,7 +550,6 @@ export function ModelThinkingChip({
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontFamily: 'var(--font-sans-system)',
-                    order: mode.order,
                   }}
                   onMouseEnter={(event) => { if (!mode.active) event.currentTarget.style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(event) => { if (!mode.active) event.currentTarget.style.background = 'transparent'; }}
@@ -454,47 +562,6 @@ export function ModelThinkingChip({
                   <span style={{ width: 6, height: 6, borderRadius: 999, background: mode.active ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
                 </button>
               ))}
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={ultraActive}
-                title="The orchestrator fans out its own parallel sub-agents alongside the Codex workers — maximum throughput for big jobs."
-                onClick={() => {
-                  const next = !ultraActive;
-                  onSetSwarm?.(next);
-                  onSetCollide?.(false);
-                  if (next) onEffortChange?.('xhigh');
-                  setOpen(false);
-                }}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-                  alignItems: 'center',
-                  gap: 8,
-                  minHeight: 30,
-                  paddingTop: 4,
-                  paddingRight: 6,
-                  paddingBottom: 4,
-                  paddingLeft: 7,
-                  borderWidth: 0,
-                  borderRadius: 8,
-                  background: ultraActive ? `color-mix(in srgb, ${SWARM_ACCENT} 10%, transparent)` : 'transparent',
-                  color: 'var(--t-text)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: 'var(--font-sans-system)',
-                  order: 2,
-                }}
-                onMouseEnter={(event) => { if (!ultraActive) event.currentTarget.style.background = 'var(--t-hover)'; }}
-                onMouseLeave={(event) => { if (!ultraActive) event.currentTarget.style.background = 'transparent'; }}
-              >
-                <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Swarm</span>
-                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.3, color: 'var(--t-text-faint)' }}>sub-agents + Codex workers in parallel</span>
-                </span>
-                <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
-              </button>
             </div>
           ) : null}
         </div>
