@@ -621,7 +621,16 @@ export async function deleteProject(projectId: string): Promise<ProjectsLedger> 
     let stillUsed = new Set<string>();
     try {
       stillUsed = new Set(
-        listSqliteProjects().flatMap((project) => project.repos.map((link) => link.repoId)),
+        listSqliteProjects()
+          // The synthetic `workspace` project is the unassigned-repo pool, not a
+          // real user project — `syncProjectStoreFromPanelLedger` materializes it
+          // from the default "Workspace" ledger row and links every loose repo to
+          // it. Counting it as "still using" a repo made EVERY repo look shared,
+          // so a deleted project never removed anything and its repos visibly
+          // "went to the Workspace" (operator report, 0.1.580). Exclude it so a
+          // repo whose only other home is the pool is still treated as exclusive.
+          .filter((project) => project.slug !== 'workspace')
+          .flatMap((project) => project.repos.map((link) => link.repoId)),
       );
     } catch {
       // If membership can't be read, err on the side of keeping repos.
