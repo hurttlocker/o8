@@ -172,6 +172,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Worktree / Branch / Kind chip row (Antigravity / Cortex pattern).
   // Disappears once the first message renders (handled in caller).
   composerBelowSlot?: React.ReactNode;
+  // Rail rendered to the RIGHT of the transcript (not the composer), so the
+  // composer spans the full panel width even when the rail is up (Q ruling
+  // 2026-07-11). The caller owns the rail's own width/animation wrapper.
+  transcriptSideRail?: React.ReactNode;
   showInlineExport?: boolean;
   footerMeterSlot?: React.ReactNode;
   composerLeadingExtras?: React.ReactNode;
@@ -235,6 +239,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   repoLabel,
   emptyStateOverride,
   composerBelowSlot,
+  transcriptSideRail,
   showInlineExport = true,
   footerMeterSlot,
   composerLeadingExtras,
@@ -2178,37 +2183,42 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           outlineOffset: -2,
         }}
       >
-        <ChatMessageList
-          ref={chatEndRef}
-          displayMessages={displayMessages}
-          displayWaiting={displayWaiting}
-          repoPath={resolvedRepoPath}
-          activeTargetLabel={activeTargetLabel}
-          activeTargetColor={activeTargetColor}
-          thoughtsBodyBackground={thoughtsBodyBackground}
-          thoughtsMutedGlass={thoughtsMutedGlass}
-          thoughtsElevatedBorder={thoughtsElevatedBorder}
-          thoughtsElevatedShadow={thoughtsElevatedShadow}
-          emptyStateOverride={emptyStateOverride}
-          emptyStateFallback={fallbackEmptyState}
-          topContent={transcriptTopContent}
-          bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
-            <SwarmStatusCard
-              packets={missionState?.packets ?? []}
-              scouts={orchestratorScouts}
-              onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
-            />
-          ) : null}
-          isOrchestratorMode={isOrchestratorMode}
-          suggestedReplyMessageId={suggestedReplyMessageId}
-          suggestedReplies={chipsForLastAssistant}
-          suggestedRepliesCollapsed={suggestedRepliesCollapsed}
-          suggestedRepliesPending={suggestedRepliesPending}
-          onSelectSuggestion={(chip) => { sendNow(chip); }}
-          onDismissSuggestions={dismissSuggestedReplies}
-          onRestoreSuggestions={restoreSuggestedReplies}
-          turnSummary={turnSummary}
-        />
+        {/* Transcript fills; the optional side rail sits to its RIGHT so the
+            composer below spans the full panel width (Q ruling 2026-07-11). */}
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <ChatMessageList
+            ref={chatEndRef}
+            displayMessages={displayMessages}
+            displayWaiting={displayWaiting}
+            repoPath={resolvedRepoPath}
+            activeTargetLabel={activeTargetLabel}
+            activeTargetColor={activeTargetColor}
+            thoughtsBodyBackground={thoughtsBodyBackground}
+            thoughtsMutedGlass={thoughtsMutedGlass}
+            thoughtsElevatedBorder={thoughtsElevatedBorder}
+            thoughtsElevatedShadow={thoughtsElevatedShadow}
+            emptyStateOverride={emptyStateOverride}
+            emptyStateFallback={fallbackEmptyState}
+            topContent={transcriptTopContent}
+            bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
+              <SwarmStatusCard
+                packets={missionState?.packets ?? []}
+                scouts={orchestratorScouts}
+                onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
+              />
+            ) : null}
+            isOrchestratorMode={isOrchestratorMode}
+            suggestedReplyMessageId={suggestedReplyMessageId}
+            suggestedReplies={chipsForLastAssistant}
+            suggestedRepliesCollapsed={suggestedRepliesCollapsed}
+            suggestedRepliesPending={suggestedRepliesPending}
+            onSelectSuggestion={(chip) => { sendNow(chip); }}
+            onDismissSuggestions={dismissSuggestedReplies}
+            onRestoreSuggestions={restoreSuggestedReplies}
+            turnSummary={turnSummary}
+          />
+        </div>
+        {transcriptSideRail ?? null}
       </div>
 
       <ChatToastStack
