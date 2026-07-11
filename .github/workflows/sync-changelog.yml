@@ -1,8 +1,13 @@
 name: Sync Public Changelog
 
+# Manual-only since 2026-07-11 (Actions-billing discipline). The push trigger
+# was burning 2-5 min of billed runner per signal push and had been FAILING at
+# the final step — PUBLIC_CHANGELOG_TOKEN expired, so every run was paid
+# waste. The changelog now syncs LOCALLY via scripts/sync-public-changelog.sh
+# (same logic, local git creds, $0), run after ship. Keep this as a
+# dispatch-only fallback; if ever re-enabling push, rotate
+# PUBLIC_CHANGELOG_TOKEN first.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
