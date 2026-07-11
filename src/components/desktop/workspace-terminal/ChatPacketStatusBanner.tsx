@@ -37,7 +37,6 @@ interface ChatPacketStatusBannerProps {
   packetTitle: string | null;
   mergeMode?: LaneMergeMode | null;
   mergeModeNote?: string | null;
-  onOpenInActivity?: () => void;
   /** Open the wide review surface for this packet's diff. */
   onReview?: () => void;
   /** Fired after a successful discard so the host can retire/close the tab. */
@@ -121,7 +120,6 @@ export function ChatPacketStatusBanner({
   packetTitle,
   mergeMode,
   mergeModeNote,
-  onOpenInActivity,
   onReview,
   onDiscarded,
 }: ChatPacketStatusBannerProps) {
@@ -452,11 +450,11 @@ export function ChatPacketStatusBanner({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {canReview && onReview ? pill('Review diff', onReview, 'secondary') : null}
           {canMerge ? pill(pending === 'merge' ? 'Merging…' : 'Approve & merge', () => { void runMerge(false); }, 'primary', pending === 'merge') : null}
-          {canOverrideMerge ? pill(pending === 'merge' ? 'Merging…' : 'Approve & merge', () => { void runMerge(true); }, 'primary', pending === 'merge') : null}
+          {/* On a DECLINED packet, merging silently overrides the rejection — label it so. */}
+          {canOverrideMerge ? pill(pending === 'merge' ? 'Merging…' : 'Override & merge', () => { void runMerge(true); }, 'primary', pending === 'merge') : null}
           {canCreatePr ? pill(pending === 'create_pr' ? 'Creating PR…' : 'Create PR', () => { void createPr(); }, prOnlyMode ? 'primary' : 'secondary', pending === 'create_pr') : null}
           {canRequestChanges ? pill('Request changes', () => setFeedbackOpen(true), 'secondary') : null}
           {canDiscard ? pill(pending === 'discard' ? 'Discarding…' : 'Discard', () => { void discard(); }, 'danger', pending === 'discard') : null}
-          {onOpenInActivity ? pill('Open in Activity', onOpenInActivity, 'ghost') : null}
         </div>
       ) : null}
 
