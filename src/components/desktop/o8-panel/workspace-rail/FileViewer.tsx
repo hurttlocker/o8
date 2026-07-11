@@ -262,16 +262,26 @@ export function FileViewer({
     setSaving(true);
     setError(null);
     try {
-      const body = repoPath
-        ? { path: selectedFile, content: editContent, workspace: repoPath }
-        : { path: selectedFile, content: editContent };
-      const response = await fetch('/api/v2/files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await response.json().catch(() => ({})) as FileResponse;
-      if (!response.ok) throw new Error(data.error || 'Unable to save file');
+      if (isAbsolutePath) {
+        // An arbitrary on-disk file — save through the operator file-io endpoint
+        // (PUT), the same worker-confined operator-trust path the read uses. The
+        // repo-scoped /api/v2/files would reject the absolute path.
+        const response = await fetch('/api/panel/file-io', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: selectedFile, content: editContent }),
+        });
+        const data = await response.json().catch(() => ({})) as { ok?: boolean; error?: string };
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to save file');
+      } else {
+        const response = await fetch('/api/v2/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: selectedFile, content: editContent, workspace: repoPath }),
+        });
+        const data = await response.json().catch(() => ({})) as FileResponse;
+        if (!response.ok) throw new Error(data.error || 'Unable to save file');
+      }
       setFileContent(editContent);
       setDirty(false);
     } catch (err) {
