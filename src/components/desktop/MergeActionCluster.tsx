@@ -95,13 +95,8 @@ function repoSlugFromRemote(remoteUrl: string | null | undefined): string | null
   return match?.[1] ?? null;
 }
 
-function isProtectedBranch(branch: string | null): boolean {
-  if (!branch) return false;
-  return branch === 'main' || branch === 'master' || branch === 'develop';
-}
-
 interface Derived {
-  variant: 'merge' | 'view' | 'open' | 'idle';
+  variant: 'merge' | 'view' | 'idle';
   statusText: string | null;
   statusTone: 'success' | 'pending' | 'fail' | 'muted';
   pr: PrSummary | null;
@@ -147,11 +142,12 @@ function derive(
     };
   }
 
-  if (isProtectedBranch(branch)) {
-    return { variant: 'idle', statusText: null, statusTone: 'muted', pr: null, primaryLabel: '', primaryIcon: 'branch', disabled: true };
-  }
-
-  return { variant: 'open', statusText: 'No open PR', statusTone: 'muted', pr: null, primaryLabel: 'Open PR', primaryIcon: 'external', disabled: false };
+  // No open PR → render nothing but the branch chip. Absence of a PR isn't a
+  // status worth announcing, and o8-dispatched work merges via the review
+  // beacon's Merge, not a GitHub PR. The rare "open a GitHub PR" path lives as
+  // "Create pull request" in the workspace panel. (Q ruling 2026-07-11 — no
+  // state is the state.)
+  return { variant: 'idle', statusText: null, statusTone: 'muted', pr: null, primaryLabel: '', primaryIcon: 'branch', disabled: true };
 }
 
 function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact = false }: MergeActionClusterProps) {
@@ -248,15 +244,10 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
       openInBrowser(derived.pr.url);
       return;
     }
-    if (derived.variant === 'open' && repoSlug && branchName) {
-      const compareUrl = `https://github.com/${repoSlug}/pull/new/${encodeURIComponent(branchName)}`;
-      openInBrowser(compareUrl);
-      return;
-    }
     if (derived.variant === 'merge') {
       void performMerge(mergeMethod);
     }
-  }, [branchName, derived, mergeMethod, openInBrowser, performMerge, repoSlug]);
+  }, [derived, mergeMethod, openInBrowser, performMerge]);
 
   useEffect(() => {
     if (!toast) return;
@@ -410,39 +401,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
         </span>
       ) : null}
 
-      {derived.variant === 'open' ? (
-        // #bottom-bar-merge (Q ruling 2026-07-11) — for an o8 worktree branch
-        // with no GitHub PR, the daily merge is the worktree Merge on the
-        // MergeBeacon to our left; opening a GitHub PR is the exception. So
-        // "Open PR" is demoted from a bordered primary button to a quiet
-        // secondary link, matching the #123 link vocabulary.
-        <button
-          type="button"
-          onClick={handlePrimary}
-          aria-label="Open a GitHub pull request for this branch"
-          title="Open a GitHub pull request for this branch"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--t-text-faint)',
-            cursor: 'pointer',
-            padding: 0,
-            fontSize: 11,
-            fontWeight: 440,
-            letterSpacing: 0,
-            fontFamily: 'inherit',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
-          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; }}
-        >
-          Open PR
-          <ExternalLink size={9} strokeWidth={2} />
-        </button>
-      ) : derived.variant === 'view' || derived.variant === 'merge' ? (
+      {derived.variant === 'view' || derived.variant === 'merge' ? (
         <div ref={menuAnchorRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
           <button
             type="button"
