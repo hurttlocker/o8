@@ -85,7 +85,7 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
 const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
   running: 'var(--t-accent)',
   review: '#94a3b8',
-  rejected: '#E0446A',
+  rejected: '#F97316',
   failed: '#ef4444',
 };
 
@@ -161,15 +161,19 @@ export function AgentStatusDot({
   }
 
   if (state === 'rejected') {
-    // Reviewed & declined: amber, solid, STATIC (not pulsing) — a settled "no"
-    // that reads apart from the orange review pulse and the red crash. Placeholder
-    // palette; higher-fidelity treatment to follow (Q, 2026-07-11).
+    // Reviewed & declined: the o8 dual-pulse (small + large circle, offset) in
+    // orange. The o8 mark + motion make it distinct from failed's single red
+    // pulse and from the calm outcome states. (Q trial 2026-07-11.)
     return (
       <span
+        className="o8-dual-pulse"
+        style={{ ['--dp-color']: color ?? ACCENT.rejected } as CSSProperties}
         aria-label={dotLabel}
         title={dotLabel}
-        style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color ?? ACCENT.rejected, flexShrink: 0 }}
-      />
+      >
+        <i />
+        <i />
+      </span>
     );
   }
 
