@@ -66,4 +66,20 @@ export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
     description: 'Prepare a compacted handoff prelude for a fresh session.',
     group: 'thread',
   },
+  {
+    command: '/rule',
+    name: 'rule',
+    title: 'Add a rule',
+    description: 'Pin a session rule — inherited by every turn and dispatched agent.',
+    argHint: '<rule text>',
+    requiresArgument: true,
+    group: 'context',
+  },
+  {
+    command: '/rules',
+    name: 'rules',
+    title: 'Manage rules',
+    description: 'Open the rules governing this session.',
+    group: 'context',
+  },
 ];

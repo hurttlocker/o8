@@ -5,6 +5,7 @@ import { handleFocusSlashCommand } from './focus';
 import { handleHandoffSlashCommand } from './handoff';
 import { handleOrchestrateSlashCommand } from './orchestrate';
 import { handleRecallSlashCommand } from './recall';
+import { handleRuleSlashCommand, handleRulesSlashCommand } from './rules';
 import { parseOrchestratorSlashCommand } from './shared';
 import { handleStatusSlashCommand } from './status';
 import type { ParsedOrchestratorSlashCommand, SlashCommandContext, SlashCommandExecutionResult } from './types';
@@ -38,6 +39,8 @@ const HANDLERS: Record<ParsedOrchestratorSlashCommand['command']['name'], (
   handoff: handleHandoffSlashCommand,
   orchestrate: handleOrchestrateSlashCommand,
   recall: handleRecallSlashCommand,
+  rule: handleRuleSlashCommand,
+  rules: handleRulesSlashCommand,
   status: handleStatusSlashCommand,
 };
 
