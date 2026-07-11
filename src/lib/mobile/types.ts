@@ -106,6 +106,8 @@ export interface MobileFleetSession {
   actions: MobileFleetAction[];
   lastEventAt?: string | null;
   lastActivityAt?: number | null;
+  /** Worker-posted implementation plan while status is `huddling`. */
+  huddlePlan?: string;
 }
 
 export interface MobileReviewFocus {

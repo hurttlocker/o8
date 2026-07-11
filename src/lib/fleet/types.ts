@@ -94,6 +94,8 @@ export interface AgentSummary {
   heartbeatModel?: string;
   status: AgentStatus;
   currentTask: string;
+  /** Worker-posted implementation plan while the lane is huddling. */
+  huddlePlan?: string;
   workspace: string;
   branch: string;
   sessionKey: string;
