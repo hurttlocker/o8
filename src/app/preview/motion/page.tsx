@@ -20,8 +20,8 @@ const STATUS_STATES: Array<{
 }> = [
   { state: 'idle', label: 'Idle', meaning: 'Present, not working. No claim on attention.', color: 'var(--t-text-faint)', motion: 'static ring', where: 'queued / archived rows' },
   { state: 'running', label: 'Working', meaning: 'Actively working. Pulses; orbits once long-running.', color: 'var(--t-accent)', motion: 'pulse → orbit', where: 'live agents, streaming turns' },
-  { state: 'review', label: 'Awaiting review', meaning: 'Finished, waiting for your yes. A fresh ask.', color: '#FF5A1F', motion: 'pulse', where: 'needs-review packets' },
-  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. A settled no — your call.', color: '#E8912B', motion: 'static (solid)', where: 'rejected packets' },
+  { state: 'review', label: 'Awaiting review', meaning: 'Finished, waiting for your yes. Cool = your turn.', color: '#6366F1', motion: 'pulse', where: 'needs-review packets' },
+  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. A settled no — your call.', color: '#E0446A', motion: 'static (solid)', where: 'rejected packets' },
   { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed.', color: 'var(--t-success)', motion: 'static (solid)', where: 'released packets' },
   { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Needs recovery.', color: '#ef4444', motion: 'static (solid)', where: 'failed / blocked lanes' },
 ];

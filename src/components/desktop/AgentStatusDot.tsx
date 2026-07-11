@@ -71,10 +71,15 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
   }
 }
 
+// Status palette (Q ruling 2026-07-11 — "cool the human states"): the decision
+// states that wait on a human move OFF the warm band so they stop colliding with
+// the orange working orb. Awaiting-review → cool indigo ("your turn"); rejected
+// → rose (a firm no, distinct from failed's alarm red). Keep these in sync with
+// the /preview/motion Status-vocabulary board + repo-focus packetStatusColor.
 const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
   running: 'var(--t-accent)',
-  review: '#FF5A1F',
-  rejected: '#E8912B',
+  review: '#6366F1',
+  rejected: '#E0446A',
   failed: '#ef4444',
 };
 

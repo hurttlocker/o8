@@ -49,9 +49,10 @@ export function packetStatusColor(packet: OrchestratorPacket): string {
     case 'failed':
       return '#ef4444';
     case 'rejected':
-      return '#E8912B';
+      return '#E0446A';
     case 'awaiting_review':
-      return 'var(--t-brand-orange, #FF5A1F)';
+      // Cooled to indigo ("your turn") — see AgentStatusDot ACCENT (2026-07-11).
+      return '#6366F1';
     case 'running':
       return 'var(--t-accent)';
     default:
