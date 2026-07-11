@@ -36,6 +36,26 @@ export function isAgentRuntimeTab(
     );
 }
 
+/**
+ * Fix 1 — focused-lane-aware repo default for newly-spawned orchestrator tabs.
+ * When the operator opens a "+ New session" orchestrator while a worker-lane
+ * tab (any non-orchestrator center tile bound to a repo) is the focused one,
+ * the new orchestrator should adopt THAT lane's repo instead of the stale
+ * global pick. Returns the focused tab's repo, or null when the focused tab is
+ * an orchestrator / repo-less — in which case callers fall back to the global
+ * preferredRepo and behavior is unchanged.
+ */
+export function deriveFocusedLaneRepo(
+  tabs: TerminalTab[],
+  activeTabId: string,
+): RegisteredRepo | null {
+  const active = tabs.find((tab) => tab.id === activeTabId);
+  if (active && active.kind !== 'orchestrator' && active.repo?.localPath) {
+    return active.repo;
+  }
+  return null;
+}
+
 export function shortenPath(value: string) {
   const userPath = value.replace(/^\/Users\/[^/]+/, '~');
   if (userPath !== value) return userPath;

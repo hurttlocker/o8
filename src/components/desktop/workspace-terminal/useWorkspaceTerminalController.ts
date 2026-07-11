@@ -26,6 +26,7 @@ import type {
 import {
   buildWorkspaceLaneState,
   createWorkspaceTabId,
+  deriveFocusedLaneRepo,
   generateLlmChatTabId,
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
@@ -187,6 +188,14 @@ export function useWorkspaceTerminalController(
     () => visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null,
     [effectiveActiveTabId, visibleTabs],
   );
+  // Mirror the focused tab id into a ref so the (event-driven) orchestrator
+  // spawn callbacks can read the CURRENT focus at click time without taking
+  // effectiveActiveTabId as a dep (which would churn the imperative handle on
+  // every tab switch). Backs deriveFocusedLaneRepo — Fix 1.
+  const effectiveActiveTabIdRef = useRef(effectiveActiveTabId);
+  useEffect(() => {
+    effectiveActiveTabIdRef.current = effectiveActiveTabId;
+  }, [effectiveActiveTabId]);
   const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
   const activeRepo = activeTab?.repo ?? visibleTabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
   const activeLaneState = useMemo(
@@ -432,7 +441,7 @@ export function useWorkspaceTerminalController(
     chatModelId: 'o8-default',
   }), []);
 
-  const createDefaultOrchestratorTab = useCallback((options?: { fresh?: boolean }): TerminalTab => {
+  const createDefaultOrchestratorTab = useCallback((options?: { fresh?: boolean; repoOverride?: RegisteredRepo | null }): TerminalTab => {
     // For the boot-restore path: pre-set tab.label from the saved last-
     // active orchestrator title when one exists in localStorage. Without
     // this the header reads "Orchestrator" for 1-2s on cold reload before
@@ -442,13 +451,16 @@ export function useWorkspaceTerminalController(
     // operator gets a true blank tab labeled "Orchestrator" — clicking
     // New session twice shouldn't duplicate the previous thread's name.
     const fresh = options?.fresh ?? false;
+    // Fix 1: a caller can override the repo (focused-lane binding for new
+    // spawns); otherwise fall back to the global preferredRepo as before.
+    const repo = options?.repoOverride ?? preferredRepoRef.current ?? undefined;
     const savedTitle = fresh ? null : readLastOrchestratorThreadTitle();
     return {
       id: createWorkspaceTabId('orchestrator'),
       label: savedTitle ?? 'Orchestrator',
       kind: 'orchestrator',
       tmuxSession: null,
-      repo: preferredRepoRef.current ?? undefined,
+      repo,
       createdAt: Date.now(),
       lastActivity: Date.now(),
       mode: 'fleet',
@@ -473,7 +485,10 @@ export function useWorkspaceTerminalController(
       label: orchestratorRuntimeTone(runtime).label,
       kind: 'orchestrator',
       tmuxSession: null,
-      repo: preferredRepoRef.current ?? undefined,
+      // Fix 1: prefer the focused worker-lane's repo over the stale global pick.
+      repo: deriveFocusedLaneRepo(tabsRef.current, effectiveActiveTabIdRef.current)
+        ?? preferredRepoRef.current
+        ?? undefined,
       createdAt: Date.now(),
       lastActivity: Date.now(),
       mode: 'single',
@@ -514,7 +529,13 @@ export function useWorkspaceTerminalController(
     // User-initiated spawn via + New session — pass fresh=true so the
     // tab gets a clean 'Orchestrator' label and skips the boot-time
     // last-thread restore (see createDefaultOrchestratorTab comments).
-    const newTab = createDefaultOrchestratorTab({ fresh: true });
+    // Fix 1: bind to the focused worker-lane's repo when one is open, so
+    // opening a fresh orchestrator while watching a lane from repo X doesn't
+    // snap to whatever the stale global selection points at.
+    const newTab = createDefaultOrchestratorTab({
+      fresh: true,
+      repoOverride: deriveFocusedLaneRepo(tabsRef.current, effectiveActiveTabIdRef.current),
+    });
     const nextTabs = [...tabsRef.current, newTab];
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
