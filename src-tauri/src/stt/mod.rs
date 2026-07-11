@@ -21,6 +21,7 @@
 #![allow(dead_code)]
 
 pub mod capture;
+pub mod gate;
 pub mod keys;
 pub mod polish;
 pub mod whisper;
