@@ -185,6 +185,18 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
   // follow-up will toggle the macOS material itself for GPU savings).
   let vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
   if (inTauri && theme.surface === 'glass') {
+    // Webview-driven vibrancy re-assert (#1543): the Rust boot-time
+    // apply_vibrancy can silently fail to render on macOS 26 / 15.7.8 (the
+    // effect view attaches before the window is truly ready and never
+    // paints — a runtime clear+re-apply always cures it). The frontend
+    // mounting IS the proof the window is fully live, so re-assert from
+    // here: 'default' maps to the per-OS chrome material on the Rust side.
+    // Idempotent, and re-running on theme changes is desirable.
+    const internals = (window as unknown as {
+      __TAURI_INTERNALS__?: { invoke?: (cmd: string, args: unknown) => Promise<unknown> };
+    }).__TAURI_INTERNALS__;
+    internals?.invoke?.('set_canvas_material', { material: 'default' })
+      ?.catch((err: unknown) => console.warn('[theme] vibrancy re-assert failed', err));
     root.style.setProperty('--t-chrome', 'transparent');
     root.style.setProperty('--t-bg-gradient', 'transparent');
     root.style.setProperty('--t-chrome-nav', 'transparent');
