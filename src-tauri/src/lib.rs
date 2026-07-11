@@ -5277,6 +5277,11 @@ pub fn run() {
                 // even when the main window is hidden.
                 fn_hotkey::start(app.handle().clone());
 
+                // Drive the Microphone permission prompt deterministically at
+                // setup (once per run, only when notDetermined) rather than
+                // hoping the first mic capture triggers it (#1537-adjacent).
+                mac_perms::request_mic_access_once();
+
                 // ── Voice P3 global shortcuts ──
                 // OS-global chords (fire even when o8 is unfocused). The Fn /
                 // double-tap-Fn gestures stay on the CGEventTap above (modifier-

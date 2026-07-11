@@ -494,10 +494,79 @@ fn begin_system_dictation() {
             // here — a failed start has no live session to stop, and a later
             // release that loads the stale id will simply no-op in stop_session
             // (active_session() has already moved past it). Safe by the fence.
-            // The session never started — morph the always-on dock back to its
-            // idle capsule (do NOT hide; the dock is always-on).
-            morph_dock_idle();
+            // The session never started — surface WHY in the dock (mic permission
+            // denied vs device open failed vs engine dead) instead of silently
+            // morphing to idle, so a dead mic is never a mystery (#1537-adjacent).
+            surface_dictation_start_error(&e);
         }
+    }
+}
+
+/// Turn a raw `stt_engine::start()` failure string into a human-readable failure
+/// class for the dock. Distinguishes the three things that actually go wrong at
+/// capture start: Microphone permission, opening the input device, and the STT
+/// engine/helper being unavailable.
+#[cfg(target_os = "macos")]
+fn classify_start_error(raw: &str) -> String {
+    // Permission is the most common and most actionable — check TCC directly
+    // rather than string-matching, since a denied grant surfaces as a generic
+    // device-open failure downstream.
+    match crate::mac_perms::mic_permission_granted() {
+        Some(false) => {
+            return "Microphone access is off. Turn on o8 under System Settings → Privacy & Security → Microphone.".to_string();
+        }
+        None => {
+            return "Microphone access hasn't been granted yet. Allow o8 to use the microphone when macOS asks, then try again.".to_string();
+        }
+        Some(true) => {}
+    }
+    let lower = raw.to_lowercase();
+    if lower.contains("input device")
+        || lower.contains("input config")
+        || lower.contains("input stream")
+        || lower.contains("did not become ready")
+        || lower.contains("sample format")
+    {
+        return "Couldn't open the microphone. Check your input device in Settings → Voice.".to_string();
+    }
+    if lower.contains("daemon")
+        || lower.contains("not initialized")
+        || lower.contains("recognizer unavailable")
+        || lower.contains("respawn")
+    {
+        return "The dictation engine isn't responding. Try again, or restart o8.".to_string();
+    }
+    format!("Dictation couldn't start: {raw}")
+}
+
+/// Restore any ducked volume and morph the always-on dock into its error
+/// capsule with a human failure message (the `/dictation-pill` route returns to
+/// idle after its ERROR_FLASH). Reuses the existing `type:"error"` dock event so
+/// no new surface is invented.
+#[cfg(target_os = "macos")]
+fn surface_dictation_start_error(raw: &str) {
+    // Session never started — restore any ducked system volume (idempotent).
+    crate::audio_ducker::restore();
+    let message = classify_start_error(raw);
+    log::warn!("[fn-hotkey] dictation start failed → dock error: {message}");
+    if let Some(app) = APP_HANDLE.get() {
+        let app = app.clone();
+        let _ = app.run_on_main_thread({
+            let app = app.clone();
+            move || {
+                let payload = serde_json::json!({
+                    "type": "error",
+                    "origin": "system",
+                    "text": message,
+                });
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
+                    "o8:stt-event",
+                    payload.clone(),
+                );
+                let _ = app.emit("o8:stt-event", payload);
+            }
+        });
     }
 }
 
