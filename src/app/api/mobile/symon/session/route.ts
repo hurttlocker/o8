@@ -181,6 +181,7 @@ export async function POST(request: NextRequest) {
             instructions: DEFAULT_INSTRUCTIONS,
             tools: bridge.tools,
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
+            micProfile: 'near_field',
           },
           REALTIME_TOKEN_TTL_SECONDS,
         ),
