@@ -129,7 +129,8 @@ function WorkspaceChatComposerBase({
         // steer composer is the same width, not thinner (Q ruling 2026-07-11).
         paddingLeft: 12,
         paddingRight: 12,
-        borderTop: isLaneArchived ? 'none' : '1px solid var(--t-divider)',
+        // No divider line above the composer — matches the orchestrator/chat
+        // composer, which floats with no top border (Q ruling 2026-07-11).
         background: 'transparent',
         opacity: isLaneArchived ? 0.5 : 1,
         pointerEvents: isLaneArchived ? 'none' : 'auto',
@@ -320,7 +321,10 @@ function WorkspaceChatComposerBase({
           </div>
         ) : null}
 
-        <div style={{ paddingTop: attachments.attachedImages.length > 0 ? 2 : 11, paddingBottom: 4, paddingLeft: 14, paddingRight: 14 }}>
+        {/* Padding lives ON the textarea (border-box, inside minHeight 52) so
+            the composer is the SAME height as the orchestrator/chat composer —
+            the wrapper adds none (Q ruling 2026-07-11). */}
+        <div style={{ paddingTop: attachments.attachedImages.length > 0 ? 2 : 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }}>
           <textarea
             ref={chat.composeRef}
             name="workspaceComposeMessage"
@@ -345,6 +349,10 @@ function WorkspaceChatComposerBase({
               width: '100%',
               minHeight: 52,
               maxHeight: 200,
+              paddingTop: 11,
+              paddingRight: 14,
+              paddingBottom: 4,
+              paddingLeft: 14,
               border: 'none',
               outline: 'none',
               background: 'transparent',
