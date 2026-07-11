@@ -958,10 +958,15 @@ function OrchestratorTabInner({
   // Branch-details rail rendered to the RIGHT of the transcript (inside the
   // panel) so the composer spans full width even when the rail is up (Q ruling
   // 2026-07-11). Same width-animation + railFits gating as before.
+  // The rail now coexists with the wide O8 panel (Q ruling 2026-07-11) — both
+  // can be open, or the user closes either. railFits (measured against the
+  // panel-relative body width, which already excludes the O8 panel) folds the
+  // rail smoothly via the 240ms width transition when the window gets too
+  // small, and restores it when there's room again.
   const branchRail = (
     <div
       style={{
-        width: (projectContextRailVisible && railFits && !data.o8PanelVisible) ? 256 : 0,
+        width: (projectContextRailVisible && railFits) ? 256 : 0,
         flexShrink: 0,
         overflow: 'hidden',
         transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',

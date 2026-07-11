@@ -66,7 +66,9 @@ export function BranchDetailsLauncher({ visible = true }: { visible?: boolean })
   const repoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? null;
   const changes = useWorkspaceChanges(repoPath);
 
-  if (!data || data.o8PanelVisible || !visible) return null;
+  // Coexists with the wide O8 panel now (Q ruling 2026-07-11) — no longer
+  // self-hides when it's open; the caller's railFits gating handles space.
+  if (!data || !visible) return null;
 
   const packetRuntime = activePacket?.runtime ?? data.agents.find((agent) => agent.status === 'running' || agent.currentTask)?.runtime;
   const subagentLabel = activePacket
