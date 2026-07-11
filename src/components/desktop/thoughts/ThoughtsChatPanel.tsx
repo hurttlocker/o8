@@ -156,7 +156,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedShadow: string;
   thoughtsMutedGlass: string;
   permissionMode?: ThoughtsChatPermissionMode;
-  onTogglePermission?: () => void;
   /**
    * UltraCode / swarm tier (per-tab). When on, the orchestrator turn carries a
    * hint to fan work out in parallel — native Claude sub-agents via a workflow
@@ -230,7 +229,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
   permissionMode = 'full',
-  onTogglePermission,
   swarmEnabled = false,
   onSetSwarm,
   collideEnabled = false,
@@ -2280,8 +2278,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSetCollide={onSetCollide}
         clarifyFirst={clarifyFirst}
         onToggleClarifyFirst={() => setClarifyFirst((prev) => !prev)}
-        permissionMode={permissionMode}
-        onTogglePermission={onTogglePermission}
         // Session rules (#1329) — orchestrator threads only. null (not yet
         // minted) still shows the read-only Repo/Global tiers in the chip.
         sessionRulesThreadId={isOrchestratorMode && !isChatMode ? threadId : undefined}
