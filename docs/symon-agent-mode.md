@@ -70,6 +70,8 @@ Not called by the phone. Body `{ sessionId, callId, tool, args }` → executes v
 
 All messages are JSON with `channel: "symon"`. DURABLE semantics (queued under backpressure, like `agent-lifecycle`). No audio ever transits this channel in Architecture A.
 
+**Wire shape (contract-critical, clarified 2026-07-10):** symon frames are **FLAT and `type`-keyed in BOTH directions** — `{ "channel": "symon", "type": "symon-…", …fields at top level }`. There is **no** `{event, data}` envelope on this channel (unlike `terminal`/`chat` server pushes). The desktop reads inbound fields off the top level (`handleSymonToolCall` et al.) and its pushers send the same way. The mobile client originally spoke `{event, data}` on this channel and NEVER matched — voice conversations masked it because audio is phone↔OpenAI direct; only tools/status ride this channel. Mobile corrected 2026-07-10 (hurttlocker/o8-mobile). Any future frame added here MUST be flat `type`-keyed.
+
 ### Phone → server
 
 | event | payload | semantics |
