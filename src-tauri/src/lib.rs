@@ -5344,29 +5344,43 @@ pub fn run() {
                     log::warn!("Failed to apply macOS vibrancy: {}", err);
                 }
 
-                // Tahoe boot-timing belt-and-braces (#1543): the effect view
-                // applied during setup can silently fail to render on macOS 26
-                // (observed live — a runtime clear+re-apply always fixes it).
-                // Re-assert once, shortly after the window is fully up.
+                // Boot-timing belt-and-braces (#1543): the effect view applied
+                // during setup can silently fail to render on macOS 26 AND
+                // 15.7.8 (observed live on both operator machines — a runtime
+                // clear+re-apply always cures it). Primary re-assert is
+                // webview-driven (ThemeProvider invokes set_canvas_material
+                // 'default' on mount — the frontend being alive proves the
+                // window is ready); this Rust retry loop is the fallback for
+                // boots where the webview never mounts. v0.1.582's version of
+                // this silently never ran because the dispatch error was
+                // swallowed — every failure logs now.
                 #[cfg(target_os = "macos")]
                 {
                     let reassert = window.clone();
                     std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(2_500));
-                        let target = reassert.clone();
-                        let _ = reassert.run_on_main_thread(move || {
-                            let _ = window_vibrancy::clear_vibrancy(&target);
-                            if let Err(e) = window_vibrancy::apply_vibrancy(
-                                &target,
-                                chrome_vibrancy_material(),
-                                Some(window_vibrancy::NSVisualEffectState::Active),
-                                None,
-                            ) {
-                                log::warn!("[vibrancy] boot re-assert failed: {e}");
-                            } else {
-                                log::info!("[vibrancy] boot re-assert applied");
+                        for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
+                            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                            let target = reassert.clone();
+                            let dispatched = reassert.run_on_main_thread(move || {
+                                let _ = window_vibrancy::clear_vibrancy(&target);
+                                if let Err(e) = window_vibrancy::apply_vibrancy(
+                                    &target,
+                                    chrome_vibrancy_material(),
+                                    Some(window_vibrancy::NSVisualEffectState::Active),
+                                    None,
+                                ) {
+                                    log::warn!("[vibrancy] boot re-assert apply failed: {e}");
+                                } else {
+                                    log::info!("[vibrancy] boot re-assert applied");
+                                }
+                            });
+                            match dispatched {
+                                Ok(()) => break,
+                                Err(e) => log::warn!(
+                                    "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
+                                ),
                             }
-                        });
+                        }
                     });
                 }
 
