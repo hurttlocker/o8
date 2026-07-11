@@ -23,7 +23,7 @@ const STATUS_STATES: Array<{
   { state: 'review', label: 'Awaiting review', meaning: 'Paused, parked waiting on you. Neutral — the sweep says "for you", not the color.', color: '#94a3b8', motion: 'grey sweep', where: 'needs-review packets' },
   { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. A settled no — your call.', color: '#E0446A', motion: 'static (solid)', where: 'rejected packets' },
   { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed.', color: 'var(--t-success)', motion: 'static (solid)', where: 'released packets' },
-  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Needs recovery.', color: '#ef4444', motion: 'static (solid)', where: 'failed / blocked lanes' },
+  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. A live alarm — pulses to take precedence over the static rose of a declined review.', color: '#ef4444', motion: 'pulse (red orb)', where: 'failed / blocked lanes' },
 ];
 
 const SAMPLE_ROW_TITLE = 'Ingest spec files to improve retrieval awareness';

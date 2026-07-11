@@ -146,11 +146,16 @@ export function AgentStatusDot({
   }
 
   if (state === 'failed') {
+    // Failed = the working orb, in red: it MOVES (pulses) so it takes precedence
+    // as an active alarm — "look now" — and reads clearly apart from rejected's
+    // STATIC rose, even though both are red-ish. Motion is the separator; a
+    // crash is live and loud, a declined review is settled and calm. (Q, 2026-07-11.)
     return (
       <span
+        className="o8-pulse-circle"
+        style={{ background: color ?? ACCENT.failed }}
         aria-label={dotLabel}
         title={dotLabel}
-        style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color ?? ACCENT.failed, flexShrink: 0 }}
       />
     );
   }
