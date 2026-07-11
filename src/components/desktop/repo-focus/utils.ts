@@ -49,7 +49,7 @@ export function packetStatusColor(packet: OrchestratorPacket): string {
     case 'failed':
       return '#ef4444';
     case 'rejected':
-      return '#E0446A';
+      return '#F97316';
     case 'awaiting_review':
       // Paused state — neutral grey, the sweep motion carries it (2026-07-11).
       return '#94a3b8';

@@ -1875,6 +1875,24 @@ button.workflow-file-item.workflow-file-item-active {
   animation: o8-pulse-circle 1.4s ease-in-out infinite;
 }
 
+/* o8 dual pulse — a small + large circle pulsing offset, an "o8" mark. Ported
+   from the motion lab (framer) to CSS so AgentStatusDot can use it. Color via
+   --dp-color. Used for review-declined in orange (Q trial 2026-07-11). */
+.o8-dual-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.o8-dual-pulse > i {
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--dp-color, #F97316);
+  animation: o8-pulse-circle 1.4s ease-in-out infinite;
+}
+.o8-dual-pulse > i:first-child { width: 5px; height: 5px; }
+.o8-dual-pulse > i:last-child { width: 7px; height: 7px; animation-delay: 0.35s; }
+
 /* Sweep circle — a SOLID dot whose color holds while a light band scans across
    it (the "scan" motion from the thinking-states reference, at dot scale). Used
    for awaiting-review: the circle stays put (a stable state) but the sweep says
