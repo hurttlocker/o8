@@ -219,9 +219,18 @@ export function FileViewer({
     setFileContent(null);
     setEditContent('');
     setDirty(false);
-    const params = new URLSearchParams({ path: selectedFile });
-    if (repoPath) params.set('workspace', repoPath);
-    fetch(`/api/v2/files?${params.toString()}`)
+    // Absolute paths (a file opened from anywhere on disk, e.g. Finder → Open in
+    // o8) read through the operator file-io endpoint — it serves ANY absolute
+    // path with operator trust, while confining worker tokens to registered
+    // repos (§HIGH-6). Repo-relative paths keep the repo-scoped /api/v2/files.
+    const url = isAbsolutePath
+      ? `/api/panel/file-io?path=${encodeURIComponent(selectedFile)}`
+      : (() => {
+          const params = new URLSearchParams({ path: selectedFile });
+          if (repoPath) params.set('workspace', repoPath);
+          return `/api/v2/files?${params.toString()}`;
+        })();
+    fetch(url)
       .then((response) => response.json() as Promise<FileResponse>)
       .then((data) => {
         if (cancelled) return;
