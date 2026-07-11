@@ -141,14 +141,17 @@ function WorkspaceChatComposerBase({
         onDragLeave={attachments.dragHandlers.onDragLeave}
         onDrop={attachments.dragHandlers.onDrop}
         style={{
-          // No 720 cap — the worker composer now fills its column to match the
-          // orchestrator/chat composer width (Q ruling 2026-07-11).
+          // Identical to the orchestrator/chat composer (Q ruling 2026-07-11):
+          // full column width, no border, the same soft floating shadow, and a
+          // drag-over accent outline. No 720 cap.
           width: '100%',
-          border: `1px solid ${attachments.dragOver ? 'var(--t-accent, #2563eb)' : 'var(--t-input-border)'}`,
           borderRadius: 14,
+          border: 'none',
           background: 'var(--t-input-bg)',
+          boxShadow: '0 1px 3px rgba(40,30,20,0.05), 0 6px 20px rgba(40,30,20,0.07)',
           overflow: 'hidden',
-          transition: 'border-color 140ms ease',
+          outline: attachments.dragOver ? '2px solid var(--t-accent)' : 'none',
+          outlineOffset: -2,
         }}
       >
         {chat.queuedContextCards.length > 0 ? (
