@@ -48,7 +48,6 @@ import {
   ThoughtsChatPanel,
   type ThoughtsChatPanelChromeState,
   type ThoughtsChatPanelHandle,
-  type ThoughtsChatPermissionMode,
 } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
@@ -90,10 +89,6 @@ interface OrchestratorTabProps {
   persistLastThread?: boolean;
 }
 
-function permissionStorageKey(tabId: string): string {
-  return `cortex-ide:orchestrator-permission:tab:${tabId}`;
-}
-
 function swarmStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-swarm:tab:${tabId}`;
 }
@@ -116,25 +111,6 @@ let globalLastThreadRestoreClaimed = false;
 // Persistence helpers for the cross-reload thread restore live in a
 // shared module so the workspace controller can read the same values
 // at tab-creation time (pre-set tab.label) without re-implementing.
-
-function readStoredPermissionMode(tabId: string): ThoughtsChatPermissionMode {
-  if (typeof window === 'undefined') return 'full';
-  try {
-    const raw = window.localStorage.getItem(permissionStorageKey(tabId));
-    return raw === 'plan' ? 'plan' : 'full';
-  } catch {
-    return 'full';
-  }
-}
-
-function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(permissionStorageKey(tabId), mode);
-  } catch {
-    // ignore
-  }
-}
 
 function readStoredSwarm(tabId: string): boolean {
   if (typeof window === 'undefined') return false;
@@ -306,9 +282,6 @@ function OrchestratorTabInner({
     spawnHandlers?.updateTabMode(tabId, { chatOpenrouterModel: slug });
   }, [spawnHandlers, tabId]);
 
-  const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(
-    () => readStoredPermissionMode(tabId),
-  );
   // Context-rail width awareness (Sydney's minimized-workspace report,
   // 2026-07-10): the 256px branch-details rail is flexShrink:0, so in a
   // narrow window it crushed the chat column to unusability. Measure the
@@ -611,14 +584,6 @@ function OrchestratorTabInner({
   // hook, so it's stable as long as its own deps don't change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comparisonGroups, sessionTiles.autoTileSessions]);
-
-  const handleTogglePermission = useCallback(() => {
-    setPermissionMode((current) => {
-      const next: ThoughtsChatPermissionMode = current === 'full' ? 'plan' : 'full';
-      persistPermissionMode(tabId, next);
-      return next;
-    });
-  }, [tabId]);
 
   const handleSetSwarm = useCallback((enabled: boolean) => {
     setSwarmEnabled(enabled);
@@ -971,7 +936,6 @@ function OrchestratorTabInner({
     />
   ) : null;
 
-  const isFullAccess = permissionMode === 'full';
 
   if (!data) {
     return (
@@ -1009,8 +973,6 @@ function OrchestratorTabInner({
       thoughtsElevatedBorder={thoughtsElevatedBorder}
       thoughtsElevatedShadow={thoughtsElevatedShadow}
       thoughtsMutedGlass={thoughtsMutedGlass}
-      permissionMode={permissionMode}
-      onTogglePermission={handleTogglePermission}
       swarmEnabled={swarmEnabled}
       onSetSwarm={handleSetSwarm}
       collideEnabled={collideEnabled}
@@ -1056,37 +1018,6 @@ function OrchestratorTabInner({
       }}
     >
 
-      {/* Plan-mode banner */}
-      {!isFullAccess ? (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 6,
-            paddingRight: 14,
-            paddingBottom: 6,
-            paddingLeft: 14,
-            borderBottomWidth: '0.5px',
-            borderBottomStyle: 'solid',
-            borderBottomColor: 'var(--t-divider-subtle)',
-            background: 'var(--t-panel-hover)',
-            color: 'var(--t-text-faint)',
-            fontSize: 11,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            lineHeight: 1.35,
-            flexShrink: 0,
-          }}
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-          </svg>
-          <span style={{ color: 'var(--t-text-muted)' }}>Read-only mode</span>
-          <span> — Claude will inspect but cannot modify files or run side-effecting commands.</span>
-        </div>
-      ) : null}
 
       {readyComparisonGroups.length > 0 ? (
         <div
