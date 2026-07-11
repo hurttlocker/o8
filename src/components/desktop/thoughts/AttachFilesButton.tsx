@@ -8,6 +8,31 @@ interface FileSuggestion {
   name?: string;
 }
 
+/** Split a relative path into its directory and filename halves. */
+function splitPath(path: string, name?: string): { dir: string; file: string } {
+  const idx = path.lastIndexOf('/');
+  const file = name?.trim() || (idx >= 0 ? path.slice(idx + 1) : path);
+  const dir = idx >= 0 ? path.slice(0, idx) : '';
+  return { dir, file };
+}
+
+/** Case-insensitive highlight of the matched query run inside a filename. */
+function highlightMatch(text: string, query: string): React.ReactNode {
+  const q = query.trim();
+  if (!q) return text;
+  const lower = text.toLowerCase();
+  const start = lower.indexOf(q.toLowerCase());
+  if (start < 0) return text;
+  const end = start + q.length;
+  return (
+    <>
+      {text.slice(0, start)}
+      <span style={{ color: 'var(--t-accent)', fontWeight: 500 }}>{text.slice(start, end)}</span>
+      {text.slice(end)}
+    </>
+  );
+}
+
 interface AttachFilesButtonProps {
   onFileReferenceSelect?: (path: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
@@ -185,8 +210,9 @@ export function AttachFilesButton({
                 background: 'var(--t-input-bg)',
                 color: 'var(--t-text)',
                 cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: 650,
+                fontSize: 12.5,
+                fontWeight: 500,
+                letterSpacing: '-0.1px',
                 fontFamily: 'var(--font-sans-system)',
               }}
               onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-card)'; }}
@@ -229,7 +255,9 @@ export function AttachFilesButton({
                   outline: 'none',
                   background: 'transparent',
                   color: 'var(--t-text)',
-                  fontSize: 12,
+                  fontSize: 12.5,
+                  fontWeight: 400,
+                  letterSpacing: '-0.1px',
                   fontFamily: 'var(--font-sans-system)',
                 }}
               />
@@ -249,37 +277,71 @@ export function AttachFilesButton({
                   {loading ? 'Searching...' : 'No files found'}
                 </div>
               ) : null}
-              {suggestions.map((file) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  onClick={() => selectFileReference(file.path)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    paddingTop: 7,
-                    paddingRight: 8,
-                    paddingBottom: 7,
-                    paddingLeft: 8,
-                    borderWidth: 0,
-                    borderRadius: 8,
-                    background: 'transparent',
-                    color: 'var(--t-text)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontSize: 11,
-                    lineHeight: 1.35,
-                    fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-card)'; }}
-                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-                >
-                  {file.path}
-                </button>
-              ))}
+              {suggestions.map((file) => {
+                const { dir, file: fileName } = splitPath(file.path, file.name);
+                return (
+                  <button
+                    key={file.path}
+                    type="button"
+                    onClick={() => selectFileReference(file.path)}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1,
+                      width: '100%',
+                      paddingTop: 6,
+                      paddingRight: 8,
+                      paddingBottom: 6,
+                      paddingLeft: 8,
+                      borderWidth: 0,
+                      borderRadius: 8,
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      overflow: 'hidden',
+                    }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-card)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                  >
+                    {/* Filename primary — sans, the thing you actually searched. */}
+                    <span style={{
+                      fontSize: 12.5,
+                      fontWeight: 400,
+                      letterSpacing: '-0.1px',
+                      lineHeight: 1.3,
+                      color: 'var(--t-text)',
+                      fontFamily: 'var(--font-sans-system)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '100%',
+                    }}>
+                      {highlightMatch(fileName, query)}
+                    </span>
+                    {/* Directory secondary — dimmed mono, left-truncated so the
+                        deepest (most relevant) folders stay visible. */}
+                    {dir ? (
+                      <span style={{
+                        fontSize: 9.5,
+                        fontWeight: 300,
+                        lineHeight: 1.3,
+                        color: 'var(--t-text-faint)',
+                        fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '100%',
+                        direction: 'rtl',
+                        textAlign: 'left',
+                      }}>
+                        {/* bidi isolate keeps the slashes reading left-to-right
+                            while rtl puts the ellipsis at the START of the path. */}
+                        <bdi>{dir}/</bdi>
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
