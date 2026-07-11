@@ -381,4 +381,4 @@ export function makeMoaBackend(
 }
 
 /** The shipping Collide backend — config resolved lazily per turn from settings. */
-export const collideBackend: OrchestratorBackend = makeMoaBackend((options) => resolveCollideConfig(options?.collideBaseBackend));
+export const collideBackend: OrchestratorBackend = makeMoaBackend((options) => resolveCollideConfig(options?.collideBaseBackend, options?.model));
