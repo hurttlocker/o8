@@ -20,6 +20,7 @@ jobs:
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,6 +38,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,6 +56,7 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -71,6 +74,11 @@ jobs:
   governance-smoke:
     name: Governance Smoke
     runs-on: ubuntu-latest
+    # timeout is load-bearing: this job hung at the 6h GitHub ceiling 3x on
+    # 2026-07-11 (open handle keeps node alive after the smoke passes) —
+    # ~360 billed min per hang. The step-level `timeout` fails fast; the
+    # job-level cap is the backstop.
+    timeout-minutes: 10
     needs: typecheck
     steps:
       - uses: actions/checkout@v4
@@ -85,11 +93,12 @@ jobs:
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
       - name: Merge-requires-review governance gate
-        run: CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS=--conditions=react-server npx tsx scripts/smoke-merge-requires-review.ts
+        run: timeout --signal=KILL 300 env CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS=--conditions=react-server npx tsx scripts/smoke-merge-requires-review.ts
 
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: [typecheck]
     steps:
       - uses: actions/checkout@v4
