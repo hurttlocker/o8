@@ -146,3 +146,33 @@ describe('project delete removes exclusive repos (no resurrection)', () => {
     expect((await listRepos()).find((r) => r.id === repo.id)).toBeUndefined();
   });
 });
+
+describe('project delete ignores the synthetic Workspace pool for exclusivity', () => {
+  // Operator report (0.1.580): "i deleted projects and then they just went to
+  // the workspace? how do i delete the repos from o8 entirely?" Root cause:
+  // syncProjectStoreFromPanelLedger (run on every Settings GET) materializes the
+  // default "Workspace" ledger row into a real SQLite project (slug `workspace`)
+  // and links every loose repo to it. That made deleteProject's exclusivity
+  // check see EVERY repo as "still used" by Workspace, so no repo was ever
+  // removed — the repos visibly stayed under the Workspace pool.
+  it('a repo also linked to the synthetic `workspace` project is still removed with its real project', async () => {
+    const repoPath = makeGitRepo('pooled');
+    const repo = await addRepo(repoPath);
+    // Reproduce exactly what the sync produces: the loose repo linked to a
+    // materialized synthetic `workspace` SQLite project (the unassigned pool)...
+    const workspace = createSqliteProject({ name: 'Workspace', slug: 'workspace', description: null });
+    addRepoToProject(workspace.id, repo.id, null, 'manual');
+    // ...then the operator groups it into a real project and deletes that.
+    const realId = await createPanelProject('grouped');
+    await setProjectRepos(realId, [repo.localPath]);
+
+    const res = await deleteViaPanel(realId);
+    expect(res.status).toBe(200);
+
+    // Repo left the pool entirely — NOT kept alive by the synthetic Workspace,
+    // and no same-named virtual single-repo row resurrects it.
+    expect((await listRepos()).find((r) => r.id === repo.id)).toBeUndefined();
+    const after = await getProjectsLedger();
+    expect(after.projects.find((p) => p.id === `repo:${repo.id}`)).toBeUndefined();
+  });
+});
