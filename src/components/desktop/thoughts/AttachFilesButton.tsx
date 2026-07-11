@@ -263,7 +263,7 @@ export function AttachFilesButton({
               />
             </div>
 
-            <div style={{ marginTop: 8, maxHeight: 180, overflowY: 'auto' }}>
+            <div style={{ marginTop: 8, maxHeight: 180, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--t-text-faint) transparent' } as React.CSSProperties}>
               {query.trim() && suggestions.length === 0 ? (
                 <div style={{
                   paddingTop: 8,

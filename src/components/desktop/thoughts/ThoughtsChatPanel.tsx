@@ -1556,6 +1556,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       startOrchestration: startSlashOrchestration,
       appendEntries: suppressCommandEntries ? () => {} : orchStream.appendLocalEntries,
       clearThread: handleClearCommand,
+      // Session-rules add-path (Q ruling 2026-07-11) — `/rule` POSTs directly,
+      // `/rules` opens the manager. Both reach the chip via window events so
+      // there's no prop-drilling through the composer tree.
+      addSessionRule: async (text: string) => {
+        const threadId = threadIdRef.current;
+        if (!threadId) return false;
+        try {
+          const res = await fetch('/api/orchestrator/session-rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ threadId, text }),
+          });
+          const data = await res.json().catch(() => null) as { ok?: boolean } | null;
+          if (data?.ok) {
+            window.dispatchEvent(new CustomEvent('o8:session-rules-changed'));
+            return true;
+          }
+        } catch { /* ignore */ }
+        return false;
+      },
+      openRulesManager: () => window.dispatchEvent(new CustomEvent('o8:open-session-rules')),
     });
     if (!handled.handled) return false;
     latestInputRef.current = '';
