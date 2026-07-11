@@ -2,8 +2,29 @@
 
 import { useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
+import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 
 const FONT = 'var(--font-sans-system)';
+
+// The canonical status vocabulary — one row per state the app actually uses,
+// so colors + motion can be locked in one place and rolled out everywhere
+// (dots, banners, pills). Colors mirror AgentStatusDot; edit here + there
+// together when tuning. (Q, 2026-07-11.)
+const STATUS_STATES: Array<{
+  state: AgentDotState;
+  label: string;
+  meaning: string;
+  color: string;
+  motion: string;
+  where: string;
+}> = [
+  { state: 'idle', label: 'Idle', meaning: 'Present, not working. No claim on attention.', color: 'var(--t-text-faint)', motion: 'static ring', where: 'queued / archived rows' },
+  { state: 'running', label: 'Working', meaning: 'Actively working. Pulses; orbits once long-running.', color: 'var(--t-accent)', motion: 'pulse → orbit', where: 'live agents, streaming turns' },
+  { state: 'review', label: 'Awaiting review', meaning: 'Finished, waiting for your yes. A fresh ask.', color: '#FF5A1F', motion: 'pulse', where: 'needs-review packets' },
+  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. A settled no — your call.', color: '#E8912B', motion: 'static (solid)', where: 'rejected packets' },
+  { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed.', color: 'var(--t-success)', motion: 'static (solid)', where: 'released packets' },
+  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Needs recovery.', color: '#ef4444', motion: 'static (solid)', where: 'failed / blocked lanes' },
+];
 
 const SAMPLE_ROW_TITLE = 'Ingest spec files to improve retrieval awareness';
 const SAMPLE_ROW_META = 'main · automation · idle';
@@ -54,6 +75,67 @@ export default function MotionPreviewPage() {
           {showFocused ? 'Hide' : 'Show'} focused row example
         </button>
       </header>
+
+      {/* Status vocabulary — every state's color + motion in one board. This is
+          the canonical reference to lock the palette across the app. */}
+      <section style={{ maxWidth: 920, margin: '0 auto 40px auto' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 440, letterSpacing: '-0.2px', margin: 0, marginBottom: 6 }}>
+          Status vocabulary — colors &amp; states
+        </h2>
+        <p style={{ fontSize: 12.5, color: 'var(--t-text-muted)', margin: 0, marginBottom: 16, lineHeight: 1.5, maxWidth: 640 }}>
+          Every status the app renders, at real size and enlarged. One place to lock the color + motion per state, then roll it out to dots, banners, and pills. Working is the orb; the rest are the ones to sharpen.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {STATUS_STATES.map((s) => (
+            <div
+              key={s.state}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                padding: 16,
+                borderRadius: 12,
+                border: '1px solid var(--t-divider, #e5e7eb)',
+                background: 'var(--t-bg-card, #ffffff)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                {/* enlarged preview (3×) so motion + hue read clearly */}
+                <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ transform: 'scale(3)', transformOrigin: 'center' }}>
+                    <AgentStatusDot state={s.state} />
+                  </div>
+                </div>
+                {/* real size (7px), how it actually appears in a row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <AgentStatusDot state={s.state} />
+                  <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', letterSpacing: '-0.2px' }}>real</span>
+                </div>
+                <span
+                  style={{
+                    marginLeft: 'auto',
+                    width: 14,
+                    height: 14,
+                    borderRadius: 4,
+                    background: s.color,
+                    flexShrink: 0,
+                    border: '1px solid rgba(0,0,0,0.08)',
+                  }}
+                  title={s.color}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.1px' }}>{s.label}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 2, fontFamily: 'var(--font-mono, monospace)' }}>
+                  {s.state} · {s.motion} · {s.color}
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{s.meaning}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 'auto', paddingTop: 4 }}>{s.where}</div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* Applied vocabulary — each motion in its proposed surface */}
       <section style={{ maxWidth: 920, margin: '0 auto 36px auto' }}>
