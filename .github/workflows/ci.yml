@@ -95,8 +95,14 @@ jobs:
       - name: Merge-requires-review governance gate
         run: timeout --signal=KILL 300 env CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS=--conditions=react-server npx tsx scripts/smoke-merge-requires-review.ts
 
+  # Build removed from the PR lane 2026-07-11 (Q ruling: "runs through money
+  # too quick for no reason") — at ~9 billed min/run x ~100 PR runs/week it was
+  # the most expensive green job, re-verifying what the real signed build does
+  # at ship time anyway. Run on-demand via workflow_dispatch when a remote
+  # build check is genuinely wanted.
   build:
     name: Build
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [typecheck]

@@ -208,5 +208,16 @@ try {
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
 }
 
+// Public changelog sync — LOCAL is the primary path since 2026-07-11: the
+// Actions push-trigger burned billed minutes on a dead token, so the ship
+// flow owns it now. Non-fatal: a failed sync never blocks a release.
+try {
+  execFileSync('bash', ['scripts/sync-public-changelog.sh'], { stdio: 'inherit' });
+  console.log('[release] public changelog synced (local path)');
+} catch (err) {
+  console.error('[release] changelog sync failed (non-fatal):', err?.message ?? err);
+  console.error('[release] re-run manually: bash scripts/sync-public-changelog.sh');
+}
+
 console.log(`[release] the installed o8.app will pick up the update on next launch`);
 console.log(`[release] (or within 30 min via the UpdateBanner poll).`);
