@@ -1881,7 +1881,7 @@ button.workflow-file-item.workflow-file-item-active {
 .o8-dual-pulse {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1.5px;
   flex-shrink: 0;
 }
 .o8-dual-pulse > i {
@@ -1890,8 +1890,10 @@ button.workflow-file-item.workflow-file-item-active {
   background: var(--dp-color, #F97316);
   animation: o8-pulse-circle 1.4s ease-in-out infinite;
 }
-.o8-dual-pulse > i:first-child { width: 5px; height: 5px; }
-.o8-dual-pulse > i:last-child { width: 7px; height: 7px; animation-delay: 0.35s; }
+/* Shrunk (~3+5px ≈ 9.5px total) so the o8 mark fits a row's dot slot without
+   shoving the title far right vs single-dot states. (Q ruling 2026-07-11.) */
+.o8-dual-pulse > i:first-child { width: 3px; height: 3px; }
+.o8-dual-pulse > i:last-child { width: 5px; height: 5px; animation-delay: 0.35s; }
 
 /* Sweep circle — a SOLID dot whose color holds while a light band scans across
    it (the "scan" motion from the thinking-states reference, at dot scale). Used
