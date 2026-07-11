@@ -410,7 +410,39 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
         </span>
       ) : null}
 
-      {derived.variant !== 'idle' ? (
+      {derived.variant === 'open' ? (
+        // #bottom-bar-merge (Q ruling 2026-07-11) — for an o8 worktree branch
+        // with no GitHub PR, the daily merge is the worktree Merge on the
+        // MergeBeacon to our left; opening a GitHub PR is the exception. So
+        // "Open PR" is demoted from a bordered primary button to a quiet
+        // secondary link, matching the #123 link vocabulary.
+        <button
+          type="button"
+          onClick={handlePrimary}
+          aria-label="Open a GitHub pull request for this branch"
+          title="Open a GitHub pull request for this branch"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--t-text-faint)',
+            cursor: 'pointer',
+            padding: 0,
+            fontSize: 11,
+            fontWeight: 440,
+            letterSpacing: 0,
+            fontFamily: 'inherit',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; }}
+        >
+          Open PR
+          <ExternalLink size={9} strokeWidth={2} />
+        </button>
+      ) : derived.variant === 'view' || derived.variant === 'merge' ? (
         <div ref={menuAnchorRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
           <button
             type="button"
