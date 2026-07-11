@@ -1,36 +1,51 @@
 'use client';
 
 /**
- * ChatPacketStatusBanner — inline status card for the bottom of a
- * dispatched packet's workspace chat thread.
+ * ChatPacketStatusBanner — inline decision card at the bottom of a dispatched
+ * packet's workspace chat thread. It answers "what's the next step?" right where
+ * the transcript ends, so a finished packet never dead-ends on the agent's last
+ * message with no call to action (Q ruling 2026-07-11).
  *
- * Renders when the live packet status moves out of the in-flight zone
- * (awaiting_review / released / failed / recovering) so the operator
- * always sees the next step inline with the transcript, not just in
- * the tab header pill or the O8 Activity tab.
+ * It self-fetches the packet's review-state (GET /api/orchestrator/review-state)
+ * by packetId, which is DETACHMENT-PROOF: a completed packet drops out of the
+ * in-memory mission state, but the route synthesizes from the durable lane +
+ * approval rows. That's what lets a rejected/parked packet still show its status
+ * and actions after the mission that spawned it is gone.
  *
- * Action buttons (Approve & Merge / Create PR) wire directly to
- * /api/lanes — same verbs the Activity tab's full PacketReviewCard
- * uses. The banner is intentionally narrower than that card; for a
- * full review surface (review snapshot, file list, conflict log) the
- * "Open in Activity" link bounces the operator to the wide panel.
+ * States it surfaces: needs-revision (review declined), ready-to-merge
+ * (approved), awaiting_review (agent finished), plus merged / failed /
+ * recovering. Actions route through the governed control plane:
+ *   - Merge          → POST /api/orchestrator/merge      (packetId, governed)
+ *   - Approve & merge → submit approving review, then merge (rejection override)
+ *   - Request changes → POST /api/orchestrator/rerun-with-feedback
+ *   - Discard        → POST /api/orchestrator/discard-packet (archive + cleanup)
+ *   - Review diff    → onReview() (opens the wide review surface)
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import type { PacketReviewState } from '@/lib/orchestrator/derive-review-state';
 
 interface ChatPacketStatusBannerProps {
   status: OrchestratorPacketStatus | null;
   laneId: string | null;
   packetId: string | null;
+  /** Lane sessionKey — the fallback identity when a detached packet has no
+   *  client-resolvable packetId. review-state resolves the real packetId from it. */
+  sessionKey?: string | null;
   packetTitle: string | null;
   mergeMode?: LaneMergeMode | null;
   mergeModeNote?: string | null;
   onOpenInActivity?: () => void;
+  /** Open the wide review surface for this packet's diff. */
+  onReview?: () => void;
+  /** Fired after a successful discard so the host can retire/close the tab. */
+  onDiscarded?: () => void;
 }
 
-type Tone = {
+type Presentation = {
+  key: 'rejected' | 'ready' | 'awaiting' | 'merged' | 'failed' | 'recovering';
   label: string;
   detail: string;
   color: string;
@@ -38,8 +53,27 @@ type Tone = {
   border: string;
 };
 
-const TONE_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Tone>> = {
+const REJECTED: Presentation = {
+  key: 'rejected',
+  label: 'Review declined',
+  detail: 'The review found issues. Send it back with feedback, override and merge anyway, or discard it.',
+  color: '#b45309',
+  background: 'rgba(232, 145, 43, 0.12)',
+  border: 'rgba(232, 145, 43, 0.34)',
+};
+
+const READY: Presentation = {
+  key: 'ready',
+  label: 'Approved',
+  detail: 'Review passed and the merge gate is clean. Merge it into main.',
+  color: '#15803d',
+  background: 'rgba(22, 163, 74, 0.1)',
+  border: 'rgba(22, 163, 74, 0.28)',
+};
+
+const PRESENTATION_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Presentation>> = {
   awaiting_review: {
+    key: 'awaiting',
     label: 'Ready for review',
     detail: 'Agent finished. Approve to merge into main, or open the diff first.',
     color: '#b45309',
@@ -47,6 +81,7 @@ const TONE_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Tone>> = {
     border: 'rgba(245, 158, 11, 0.28)',
   },
   released: {
+    key: 'merged',
     label: 'Merged',
     detail: 'Branch merged into main. The packet is closed.',
     color: '#15803d',
@@ -54,13 +89,15 @@ const TONE_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Tone>> = {
     border: 'rgba(22, 163, 74, 0.28)',
   },
   failed: {
+    key: 'failed',
     label: 'Failed',
-    detail: 'The agent could not complete this packet. Open the Activity tab to retry or reset.',
+    detail: 'The agent could not complete this packet. Send it back, or discard it.',
     color: '#b91c1c',
     background: 'rgba(239, 68, 68, 0.1)',
     border: 'rgba(239, 68, 68, 0.28)',
   },
   recovering: {
+    key: 'recovering',
     label: 'Recovering',
     detail: 'The session was lost — re-attaching. No action needed yet.',
     color: '#1d4ed8',
@@ -69,59 +106,182 @@ const TONE_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Tone>> = {
   },
 };
 
+interface ReviewStateResponse {
+  state?: PacketReviewState;
+  lane?: string | null;
+  packetId?: string | null;
+  title?: string | null;
+}
+
 export function ChatPacketStatusBanner({
   status,
   laneId,
   packetId,
+  sessionKey,
   packetTitle,
   mergeMode,
   mergeModeNote,
   onOpenInActivity,
+  onReview,
+  onDiscarded,
 }: ChatPacketStatusBannerProps) {
-  const tone = status ? TONE_BY_STATUS[status] : undefined;
   const prOnlyMode = mergeMode === 'pr_only';
   const prOnlyCaption = mergeModeNote ?? 'PR-only mode is active. Create a PR for human merge.';
-  const [pending, setPending] = useState<'merge' | 'create_pr' | 'reject' | null>(null);
+  const [pending, setPending] = useState<'merge' | 'create_pr' | 'reject' | 'discard' | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [reviewState, setReviewState] = useState<PacketReviewState | null>(null);
+  const [resolvedLaneId, setResolvedLaneId] = useState<string | null>(null);
+  const [resolvedPacketId, setResolvedPacketId] = useState<string | null>(null);
+  const [resolvedTitle, setResolvedTitle] = useState<string | null>(null);
 
-  const callLaneAction = useCallback(async (verb: 'merge' | 'create_pr') => {
-    if (!laneId) return;
-    setPending(verb);
+  // Self-fetch the durable review-state so the banner works even when the packet
+  // has detached from live mission state (the whole point — see file header).
+  // Resolve by packetId when we have it, else by the lane sessionKey — a detached
+  // packet has no client packetId, so sessionKey is the only handle, and the
+  // route hands back the real packetId for our actions.
+  useEffect(() => {
+    const query = packetId
+      ? `packetId=${encodeURIComponent(packetId)}`
+      : sessionKey
+        ? `sessionKey=${encodeURIComponent(sessionKey)}`
+        : null;
+    if (!query) { setReviewState(null); return; }
+    let active = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/orchestrator/review-state?${query}`);
+        if (!res.ok) { if (active) setReviewState(null); return; }
+        const data = await res.json() as ReviewStateResponse;
+        if (!active) return;
+        setReviewState(data.state ?? null);
+        setResolvedLaneId(data.lane ?? null);
+        setResolvedPacketId(data.packetId ?? null);
+        setResolvedTitle(data.title ?? null);
+      } catch {
+        if (active) setReviewState(null);
+      }
+    })();
+    return () => { active = false; };
+  }, [packetId, sessionKey]);
+
+  const effectiveLaneId = laneId ?? resolvedLaneId;
+  // The id our actions (merge / discard / review / rerun) operate on — the
+  // prop packetId when present, else the one review-state resolved from sessionKey.
+  const actionPacketId = packetId ?? resolvedPacketId;
+
+  // Verdict-based state wins over the raw packet status: needs-revision and
+  // ready-to-merge are derived from the actual review + merge gate, so they're
+  // more truthful than a status string that lags.
+  const presentation: Presentation | undefined =
+    reviewState === 'needs-revision' ? REJECTED
+    : reviewState === 'ready-to-merge' ? READY
+    : reviewState === 'merged' ? PRESENTATION_BY_STATUS.released
+    : (status ? PRESENTATION_BY_STATUS[status] : undefined);
+
+  const runMerge = useCallback(async (override: boolean) => {
+    if (!actionPacketId) return;
+    setPending('merge');
+    setActionError(null);
+    setActionNote(null);
+    try {
+      // Override path: a declined review blocks merge, so record an approving
+      // operator review first, then merge through the governed packet route.
+      if (override) {
+        const reviewRes = await fetch('/api/orchestrator/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packetId: actionPacketId, approved: true, findings: [] }),
+        });
+        if (!reviewRes.ok) {
+          const rb = await reviewRes.json().catch(() => null) as { error?: { message?: string } } | null;
+          throw new Error(rb?.error?.message ?? 'Unable to override the review.');
+        }
+      }
+      const res = await fetch('/api/orchestrator/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId: actionPacketId }),
+      });
+      const payload = await res.json().catch(() => null) as {
+        ok?: boolean;
+        result?: { merged?: boolean; status?: string; note?: string } | null;
+        error?: { message?: string } | null;
+      } | null;
+      if (!res.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? 'Unable to merge.');
+      }
+      const result = payload.result ?? null;
+      if (result?.status === 'pending_operator_approval') {
+        setActionNote('Approval raised — clear it from the inbox to merge.');
+      } else if (result?.merged) {
+        setActionNote('Merged into main.');
+      } else {
+        throw new Error(result?.note ?? 'Merge was blocked.');
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Merge failed.');
+    } finally {
+      setPending(null);
+    }
+  }, [actionPacketId]);
+
+  const createPr = useCallback(async () => {
+    if (!effectiveLaneId) return;
+    setPending('create_pr');
     setActionError(null);
     setActionNote(null);
     try {
       const response = await fetch('/api/lanes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          verb,
-          laneId,
-          commitMessage: verb === 'create_pr' ? 'Auto-commit from lane' : `Merge lane: ${packetTitle ?? 'packet'}`,
-        }),
+        body: JSON.stringify({ verb: 'create_pr', laneId: effectiveLaneId, commitMessage: 'Auto-commit from lane' }),
       });
       const payload = await response.json().catch(() => null) as { ok?: boolean; note?: string } | null;
-      const note = payload?.note ?? (verb === 'create_pr' ? 'Unable to create PR.' : 'Unable to merge.');
       if (!response.ok || !payload?.ok) {
-        throw new Error(verb === 'merge' && /conflict/i.test(note) ? `${note} Try Create PR instead.` : note);
+        throw new Error(payload?.note ?? 'Unable to create PR.');
       }
-      setActionNote(note);
+      setActionNote(payload.note ?? 'PR created.');
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Lane action failed.');
+      setActionError(error instanceof Error ? error.message : 'Unable to create PR.');
     } finally {
       setPending(null);
     }
-  }, [laneId, packetTitle]);
+  }, [effectiveLaneId]);
 
-  // #1293 FIX 2 — request changes / reject. Sends the packet back to the agent
-  // with operator feedback via /api/orchestrator/rerun-with-feedback (mirrors
-  // ReviewPane's respec wiring). Keyed on packetId (not laneId) so it works
-  // whenever a packet is bound, even before a lane rebinds.
+  const discard = useCallback(async () => {
+    if (!actionPacketId) return;
+    setPending('discard');
+    setActionError(null);
+    setActionNote(null);
+    try {
+      const response = await fetch('/api/orchestrator/discard-packet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId: actionPacketId }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        result?: { note?: string } | null;
+        error?: { message?: string } | null;
+      } | null;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? 'Unable to discard.');
+      }
+      setActionNote(payload.result?.note ?? 'Discarded.');
+      onDiscarded?.();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to discard.');
+    } finally {
+      setPending(null);
+    }
+  }, [actionPacketId, onDiscarded]);
+
   const submitFeedback = useCallback(async () => {
     const trimmed = feedback.trim();
-    if (!packetId || !trimmed) return;
+    if (!actionPacketId || !trimmed) return;
     setPending('reject');
     setActionError(null);
     setActionNote(null);
@@ -129,7 +289,7 @@ export function ChatPacketStatusBanner({
       const response = await fetch('/api/orchestrator/rerun-with-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId, feedback: trimmed }),
+        body: JSON.stringify({ packetId: actionPacketId, feedback: trimmed }),
       });
       const payload = await response.json().catch(() => null) as {
         ok?: boolean;
@@ -147,9 +307,61 @@ export function ChatPacketStatusBanner({
     } finally {
       setPending(null);
     }
-  }, [feedback, packetId]);
+  }, [feedback, actionPacketId]);
 
-  if (!tone) return null;
+  if (!presentation) return null;
+  const p = presentation;
+  const busy = pending !== null;
+  // Which action buttons this presentation offers.
+  const canMerge = (p.key === 'ready' || p.key === 'awaiting') && !prOnlyMode;
+  const canOverrideMerge = p.key === 'rejected' && !prOnlyMode;
+  const canRequestChanges = p.key === 'rejected' || p.key === 'awaiting' || p.key === 'failed';
+  const canReview = Boolean(onReview) && (p.key === 'rejected' || p.key === 'ready' || p.key === 'awaiting');
+  const canCreatePr = Boolean(effectiveLaneId) && (p.key === 'awaiting' || p.key === 'ready' || prOnlyMode);
+  const canDiscard = p.key !== 'merged' && p.key !== 'recovering';
+  const showActions = canMerge || canOverrideMerge || canRequestChanges || canReview || canCreatePr || canDiscard;
+
+  const pill = (
+    label: string,
+    onClick: () => void,
+    variant: 'primary' | 'secondary' | 'ghost' | 'danger',
+    isBusy?: boolean,
+  ) => {
+    const styles: Record<typeof variant, { bg: string; color: string; border: string }> = {
+      primary: { bg: p.color, color: '#fff', border: p.color },
+      secondary: { bg: 'transparent', color: p.color, border: p.border },
+      ghost: { bg: 'transparent', color: 'var(--t-text-muted)', border: 'transparent' },
+      danger: { bg: 'transparent', color: 'var(--t-text-muted)', border: 'var(--t-panel-border)' },
+    };
+    const s = styles[variant];
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        style={{
+          paddingTop: 4,
+          paddingRight: 10,
+          paddingBottom: 4,
+          paddingLeft: 10,
+          borderRadius: 8,
+          borderWidth: variant === 'ghost' ? 0 : 1,
+          borderStyle: 'solid',
+          borderColor: s.border,
+          background: isBusy ? 'var(--t-panel-hover)' : s.bg,
+          color: s.color,
+          fontSize: 11,
+          fontWeight: 400,
+          cursor: busy ? 'wait' : 'pointer',
+          opacity: busy && !isBusy ? 0.6 : 1,
+          fontFamily: 'var(--font-sans-system)',
+          letterSpacing: '-0.1px',
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div
@@ -164,8 +376,8 @@ export function ChatPacketStatusBanner({
         borderRadius: 12,
         borderWidth: 1,
         borderStyle: 'solid',
-        borderColor: tone.border,
-        background: tone.background,
+        borderColor: p.border,
+        background: p.background,
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
@@ -180,7 +392,7 @@ export function ChatPacketStatusBanner({
             paddingBottom: 1,
             paddingLeft: 7,
             borderRadius: 999,
-            background: tone.color,
+            background: p.color,
             color: '#fff',
             fontSize: 9,
             fontWeight: 400,
@@ -190,210 +402,72 @@ export function ChatPacketStatusBanner({
             marginTop: 1,
           }}
         >
-          {tone.label}
+          {p.label}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 400, color: tone.color, letterSpacing: '-0.1px' }}>
-            {packetTitle ?? 'Dispatched packet'}
+          <div style={{ fontSize: 12, fontWeight: 400, color: p.color, letterSpacing: '-0.1px' }}>
+            {packetTitle ?? resolvedTitle ?? 'Dispatched packet'}
           </div>
           <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
-            {status === 'awaiting_review' && prOnlyMode
+            {p.key === 'awaiting' && prOnlyMode
               ? 'PR-only mode is active. Create a PR so a human can merge.'
-              : tone.detail}
+              : p.detail}
           </div>
         </div>
       </div>
 
-      {status === 'awaiting_review' && (laneId || packetId) ? (
-        feedbackOpen ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <textarea
-              value={feedback}
-              onChange={(event) => setFeedback(event.target.value)}
-              placeholder="What needs to change? Be specific — this prepends to the original prompt."
-              disabled={pending === 'reject'}
-              style={{
-                width: '100%',
-                minHeight: 64,
-                maxHeight: 160,
-                resize: 'vertical',
-                borderRadius: 8,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'var(--t-panel-border)',
-                background: 'var(--t-input-bg, var(--t-panel))',
-                color: 'var(--t-text)',
-                paddingTop: 6,
-                paddingRight: 8,
-                paddingBottom: 6,
-                paddingLeft: 8,
-                fontSize: 11,
-                fontFamily: 'var(--font-sans-system)',
-                outline: 'none',
-              }}
-            />
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => { void submitFeedback(); }}
-                disabled={!feedback.trim() || pending === 'reject'}
-                style={{
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: tone.border,
-                  background: tone.background,
-                  color: tone.color,
-                  fontSize: 11,
-                  fontWeight: 400,
-                  cursor: !feedback.trim() || pending === 'reject' ? 'not-allowed' : 'pointer',
-                  opacity: !feedback.trim() || pending === 'reject' ? 0.5 : 1,
-                  fontFamily: 'var(--font-sans-system)',
-                }}
-              >
-                {pending === 'reject' ? 'Sending…' : 'Send back'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFeedbackOpen(false); setFeedback(''); }}
-                disabled={pending === 'reject'}
-                style={{
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: 'var(--t-panel-border)',
-                  background: 'transparent',
-                  color: 'var(--t-text-muted)',
-                  fontSize: 11,
-                  fontWeight: 400,
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+      {feedbackOpen ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <textarea
+            value={feedback}
+            onChange={(event) => setFeedback(event.target.value)}
+            placeholder="What needs to change? Be specific — this prepends to the original prompt."
+            disabled={pending === 'reject'}
+            style={{
+              width: '100%',
+              minHeight: 64,
+              maxHeight: 160,
+              resize: 'vertical',
+              borderRadius: 8,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-panel-border)',
+              background: 'var(--t-input-bg, var(--t-panel))',
+              color: 'var(--t-text)',
+              paddingTop: 6,
+              paddingRight: 8,
+              paddingBottom: 6,
+              paddingLeft: 8,
+              fontSize: 11,
+              fontFamily: 'var(--font-sans-system)',
+              outline: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            {pill(pending === 'reject' ? 'Sending…' : 'Send back', () => { void submitFeedback(); }, 'secondary', pending === 'reject')}
+            {pill('Cancel', () => { setFeedbackOpen(false); setFeedback(''); }, 'danger')}
           </div>
-        ) : (
-          <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {laneId && !prOnlyMode ? (
-              <button
-                type="button"
-                onClick={() => { void callLaneAction('merge'); }}
-                disabled={pending !== null}
-                style={{
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 8,
-                  borderWidth: 0,
-                  background: pending === 'merge' ? 'rgba(22, 163, 74, 0.6)' : '#16a34a',
-                  color: '#fff',
-                  fontSize: 11,
-                  fontWeight: 400,
-                  cursor: pending !== null ? 'wait' : 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
-                  letterSpacing: '-0.1px',
-                }}
-              >
-                {pending === 'merge' ? 'Merging…' : 'Approve & merge'}
-              </button>
-            ) : null}
-            {laneId ? (
-              <button
-                type="button"
-                onClick={() => { void callLaneAction('create_pr'); }}
-                disabled={pending !== null}
-                style={{
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 8,
-                  borderWidth: prOnlyMode ? 0 : 1,
-                  borderStyle: 'solid',
-                  borderColor: prOnlyMode ? 'transparent' : tone.border,
-                  background: prOnlyMode ? 'var(--t-accent)' : 'transparent',
-                  color: prOnlyMode ? '#fff' : tone.color,
-                  fontSize: 11,
-                  fontWeight: 400,
-                  cursor: pending !== null ? 'wait' : 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
-                  letterSpacing: prOnlyMode ? '-0.1px' : undefined,
-                }}
-              >
-                {pending === 'create_pr' ? 'Creating PR…' : 'Create PR'}
-              </button>
-            ) : null}
-            {packetId ? (
-              <button
-                type="button"
-                onClick={() => setFeedbackOpen(true)}
-                disabled={pending !== null}
-                style={{
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: tone.border,
-                  background: 'transparent',
-                  color: tone.color,
-                  fontSize: 11,
-                  fontWeight: 400,
-                  cursor: pending !== null ? 'wait' : 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
-                }}
-              >
-                Request changes
-              </button>
-            ) : null}
-            {onOpenInActivity ? (
-              <button
-                type="button"
-                onClick={onOpenInActivity}
-                style={{
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 8,
-                  borderWidth: 0,
-                  background: 'transparent',
-                  color: 'var(--t-text-muted)',
-                  fontSize: 11,
-                  fontWeight: 400,
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
-                }}
-              >
-                Open in Activity
-              </button>
-            ) : null}
-          </div>
-          {prOnlyMode ? (
-            <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.4 }}>
-              {prOnlyCaption}
-            </div>
-          ) : null}
-          </>
-        )
+        </div>
+      ) : showActions ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {canReview && onReview ? pill('Review diff', onReview, 'secondary') : null}
+          {canMerge ? pill(pending === 'merge' ? 'Merging…' : 'Approve & merge', () => { void runMerge(false); }, 'primary', pending === 'merge') : null}
+          {canOverrideMerge ? pill(pending === 'merge' ? 'Merging…' : 'Approve & merge', () => { void runMerge(true); }, 'primary', pending === 'merge') : null}
+          {canCreatePr ? pill(pending === 'create_pr' ? 'Creating PR…' : 'Create PR', () => { void createPr(); }, prOnlyMode ? 'primary' : 'secondary', pending === 'create_pr') : null}
+          {canRequestChanges ? pill('Request changes', () => setFeedbackOpen(true), 'secondary') : null}
+          {canDiscard ? pill(pending === 'discard' ? 'Discarding…' : 'Discard', () => { void discard(); }, 'danger', pending === 'discard') : null}
+          {onOpenInActivity ? pill('Open in Activity', onOpenInActivity, 'ghost') : null}
+        </div>
+      ) : null}
+
+      {prOnlyMode && p.key === 'awaiting' ? (
+        <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.4 }}>
+          {prOnlyCaption}
+        </div>
       ) : null}
 
       {actionNote ? (
-        <div style={{ fontSize: 11, color: tone.color, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 11, color: p.color, lineHeight: 1.4 }}>
           {actionNote}
         </div>
       ) : null}

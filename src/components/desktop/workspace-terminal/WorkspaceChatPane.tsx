@@ -281,9 +281,6 @@ function WorkspaceChatPaneBase({
               // waiting for transcript". (#1293)
               (() => {
                 const awaitingReview = liveStatus === 'awaiting_review';
-                const showBanner = liveStatus === 'awaiting_review'
-                  || liveStatus === 'failed'
-                  || liveStatus === 'recovering';
                 const stillWorking = liveStatus === 'running'
                   || liveStatus === 'recovering'
                   || liveStatus === 'launching'
@@ -299,28 +296,45 @@ function WorkspaceChatPaneBase({
                 // Review affordances shared by the hero + transcript layouts:
                 // the inline diff (FIX 2 — so "Ready for review" shows WHAT to
                 // review) and the status banner (merge / PR / request-changes).
+                // #decision-banner (Q ruling 2026-07-11) — the banner self-fetches
+                // the packet's durable review-state, so it renders for parked,
+                // rejected, and DETACHED packets (whose livePacket is gone from
+                // mission state), not only the narrow live-status set. Feed it a
+                // packetId from whatever survives (livePacket → tab) and let the
+                // banner return null when there's nothing to decide. This is what
+                // gives a rejected packet the same gorgeous card the merged one gets.
+                const bannerPacketId = livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null;
+                // A detached packet has no client packetId — fall back to the lane
+                // sessionKey, which review-state resolves to the real packet.
+                const bannerIdentity = bannerPacketId ?? tabSessionKey;
                 const reviewAffordances = (
                   <>
                     {awaitingReview && livePacket ? (
                       <ChatPacketReviewDiff packet={livePacket} />
                     ) : null}
-                    {tab.orchestrationPacket && livePacket && showBanner ? (
+                    {bannerIdentity ? (
                       <div style={{ width: '100%', maxWidth: 440 }}>
                         <ChatPacketStatusBanner
                           status={liveStatus}
-                          laneId={livePacket.lane?.laneId ?? null}
-                          packetId={livePacket.id}
-                          packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
-                          mergeMode={livePacket.lane?.mergeMode ?? null}
-                          mergeModeNote={livePacket.lane?.mergeModeNote ?? null}
+                          laneId={livePacket?.lane?.laneId ?? null}
+                          packetId={bannerPacketId}
+                          sessionKey={tabSessionKey}
+                          packetTitle={livePacket?.title ?? tab.orchestrationPacket?.title ?? null}
+                          mergeMode={livePacket?.lane?.mergeMode ?? null}
+                          mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
                           onOpenInActivity={
                             orchestratorData?.onOpenO8Panel
                               ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
                               : undefined
                           }
+                          onReview={
+                            orchestratorData?.onOpenO8Panel
+                              ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
+                              : undefined
+                          }
                         />
                       </div>
-                    ) : orchestratorData?.onOpenO8Panel ? (
+                    ) : !bannerIdentity && orchestratorData?.onOpenO8Panel ? (
                       <button
                         type="button"
                         onClick={() => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })}
@@ -622,17 +636,23 @@ function WorkspaceChatPaneBase({
                   fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
                 />
               ) : null}
-              {tab.orchestrationPacket && livePacket ? (
+              {(livePacket?.id ?? tab.orchestrationPacket?.packetId ?? tabSessionKey) ? (
                 <ChatPacketStatusBanner
                   status={liveStatus}
-                  laneId={livePacket.lane?.laneId ?? null}
-                  packetId={livePacket.id}
-                  packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
-                  mergeMode={livePacket.lane?.mergeMode ?? null}
-                  mergeModeNote={livePacket.lane?.mergeModeNote ?? null}
+                  laneId={livePacket?.lane?.laneId ?? null}
+                  packetId={livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null}
+                  sessionKey={tabSessionKey}
+                  packetTitle={livePacket?.title ?? tab.orchestrationPacket?.title ?? null}
+                  mergeMode={livePacket?.lane?.mergeMode ?? null}
+                  mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
                   onOpenInActivity={
                     orchestratorData?.onOpenO8Panel
                       ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
+                      : undefined
+                  }
+                  onReview={
+                    orchestratorData?.onOpenO8Panel
+                      ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
                       : undefined
                   }
                 />

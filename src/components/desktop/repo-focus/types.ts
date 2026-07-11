@@ -9,7 +9,7 @@ import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 
 export type RepoFocusTabId = 'control' | 'chats';
-export type RepoFocusPacketState = 'queued' | 'running' | 'awaiting_review' | 'merged' | 'failed';
+export type RepoFocusPacketState = 'queued' | 'running' | 'awaiting_review' | 'rejected' | 'merged' | 'failed';
 export type IdeWorkspaceSession = MobileInboxSnapshot['sessions'][number];
 
 export interface RepoFocusRepo {
