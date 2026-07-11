@@ -66,16 +66,29 @@ function MergeBeaconBase({
   }, [toast]);
 
   const escalated = parked.filter((lane) => lane.reviewState === 'escalated');
+  const rejected = parked.filter((lane) => lane.reviewState === 'rejected');
   const needsReview = parked.filter((lane) => lane.reviewState === 'needs-review');
   const awaitingMerge = parked.filter((lane) => lane.reviewState === 'awaiting-merge');
   if (compact || parked.length === 0) return null;
 
   const escalatedCount = escalated.length;
+  const rejectedCount = rejected.length;
   const needsReviewCount = needsReview.length;
   const awaitingMergeCount = awaitingMerge.length;
-  const urgent = escalatedCount > 0 || needsReviewCount > 0;
+  const urgent = escalatedCount > 0 || rejectedCount > 0 || needsReviewCount > 0;
   const canMerge = awaitingMergeCount > 0 && !merging;
-  const title = `Escalated: ${escalatedCount}. Needs review: ${needsReviewCount}. Approved awaiting merge: ${awaitingMergeCount}.`;
+  const title = `Escalated: ${escalatedCount}. Rejected: ${rejectedCount}. Needs review: ${needsReviewCount}. Approved awaiting merge: ${awaitingMergeCount}.`;
+
+  // Non-zero attention segments only — a rejected packet reads as "rejected"
+  // (a review happened and came back bad), distinct from a fresh "review". The
+  // awaiting-merge count trails as a faint informational tail; the Merge button
+  // is the action for it.
+  const segments: Array<{ key: string; text: string; faint?: boolean }> = [];
+  if (escalatedCount > 0) segments.push({ key: 'escalated', text: `${escalatedCount} escalated` });
+  if (rejectedCount > 0) segments.push({ key: 'rejected', text: `${rejectedCount} rejected` });
+  if (needsReviewCount > 0) segments.push({ key: 'review', text: `${needsReviewCount} review` });
+  if (awaitingMergeCount > 0) segments.push({ key: 'merge', text: `${awaitingMergeCount} merge`, faint: true });
+  if (segments.length === 0) return null;
 
   const focusLane = (lane: ParkedLane) => {
     if (typeof window === 'undefined') return;
@@ -92,7 +105,7 @@ function MergeBeaconBase({
   };
 
   const handleView = () => {
-    const lane = escalated[0] ?? needsReview[0];
+    const lane = escalated[0] ?? rejected[0] ?? needsReview[0];
     if (lane) {
       focusLane(lane);
       onOpenNeedsReviewLane?.(lane);
@@ -172,19 +185,14 @@ function MergeBeaconBase({
         }}
       >
         <span style={{ width: 7, height: 7, borderRadius: 999, background: urgent ? 'var(--t-brand-orange)' : 'var(--t-text-faint)', flexShrink: 0 }} />
-        {escalatedCount > 0 ? (
-          <>
-            <span>{escalatedCount} escalated</span>
-            <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-          </>
-        ) : null}
-        <span>{needsReviewCount} review</span>
-        {awaitingMergeCount > 0 ? (
-          <>
-            <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-            <span style={{ color: urgent ? 'var(--t-text-muted)' : 'var(--t-text-faint)' }}>{awaitingMergeCount} merge</span>
-          </>
-        ) : null}
+        {segments.map((segment, index) => (
+          <span key={segment.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {index > 0 ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
+            <span style={segment.faint ? { color: urgent ? 'var(--t-text-muted)' : 'var(--t-text-faint)' } : undefined}>
+              {segment.text}
+            </span>
+          </span>
+        ))}
       </button>
 
       <button
