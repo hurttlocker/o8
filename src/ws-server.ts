@@ -3038,6 +3038,23 @@ function pushSymonToolResult(
   send(client, { channel: 'symon', type: 'symon-tool-result', sessionId, callId, ok, result });
 }
 
+type SymonTaskCompletePayload = {
+  taskId: string;
+  status: 'done' | 'failed';
+  intentText: string;
+  resultText: string;
+  truncated: boolean;
+};
+
+function pushSymonTaskComplete(payload: SymonTaskCompletePayload): number {
+  const clientIds = new Set([...symonSessions.values()].map((route) => route.clientId));
+  for (const clientId of clientIds) {
+    const client = clients.get(clientId);
+    if (client) send(client, { channel: 'symon', type: 'symon-task-complete', ...payload });
+  }
+  return clientIds.size;
+}
+
 /** Last-start-wins: idle-push + drop every symon session EXCEPT the one to keep. */
 function preemptOtherSymonSessions(keepSessionId: string, detail: string): void {
   for (const [sid, route] of Array.from(symonSessions.entries())) {
@@ -5044,6 +5061,43 @@ const httpServer = createServer((req, res) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to write to terminal' }));
       }
+    });
+    return;
+  }
+
+  // Background Claude tasks call this loopback-only bridge after their existing
+  // dock event and task-ledger write. No active phone session means no-op fanout.
+  if (req.url === '/symon-task-complete' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: Partial<SymonTaskCompletePayload>;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as Partial<SymonTaskCompletePayload>;
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+      if (
+        typeof payload.taskId !== 'string' ||
+        (payload.status !== 'done' && payload.status !== 'failed') ||
+        typeof payload.intentText !== 'string' ||
+        typeof payload.resultText !== 'string' ||
+        typeof payload.truncated !== 'boolean'
+      ) {
+        res.writeHead(400);
+        res.end('invalid task completion payload');
+        return;
+      }
+      const delivered = pushSymonTaskComplete(payload as SymonTaskCompletePayload);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, delivered }));
     });
     return;
   }
