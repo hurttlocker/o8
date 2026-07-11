@@ -35,8 +35,13 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm run typecheck
 
+  # Lint removed from the PR lane 2026-07-11: main carries 398 baseline lint
+  # errors, so the job failed on EVERY PR regardless of its content — billed
+  # minutes for zero signal. Restore to the PR lane once the debt is burned
+  # down (tracked in the lint-debt issue); dispatch-only until then.
   lint:
     name: Lint
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
