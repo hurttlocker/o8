@@ -3308,6 +3308,40 @@ mod stt_engine {
         });
     }
 
+    /// Terminal teardown when a dictation resolves to nothing worth pasting —
+    /// the silence gate tripped or the whole transcript was a Whisper silence
+    /// artifact (#1544-adjacent). Removes the WAV and emits the
+    /// origin-appropriate terminal event so no surface hangs waiting: the
+    /// always-on dock morphs back to idle on the system paths (Fn / Ask /
+    /// Agent all run system-origin), and the in-window composer path gets an
+    /// empty `polished` so its pill settles without inserting anything.
+    fn finalize_bail_empty(app: &AppHandle, session_id: u64, audio_file: &str, apple_text: &str) {
+        if !audio_file.is_empty() {
+            let _ = std::fs::remove_file(audio_file);
+        }
+        if crate::fn_hotkey::is_system_origin() {
+            crate::fn_hotkey::set_system_origin(false);
+            #[cfg(target_os = "macos")]
+            crate::spatial_ink_window::disarm(app);
+            let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
+            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+            let _ = app.emit("o8:stt-event", idle);
+        } else {
+            let _ = app.emit(
+                "o8:stt-event",
+                serde_json::json!({
+                    "type": "polished",
+                    "origin": "in-window",
+                    "sessionId": session_id,
+                    "text": "",
+                    "rawText": "",
+                    "appleText": apple_text,
+                    "whisperUsed": false,
+                }),
+            );
+        }
+    }
+
     /// Run the finalize chain on a background thread: Whisper re-transcribe
     /// (default-on, OpenRouter) → Gemini polish (audio-grounded). The polished
     /// result is emitted as `o8:stt-event` type `polished`. On any failure we
@@ -3334,6 +3368,29 @@ mod stt_engine {
             // Same for the Right-Option agent flag — routed at the bottom to the
             // Symon voice agent. Always false off the macOS agent path.
             let is_agent = crate::fn_hotkey::take_agent_mode();
+
+            // ── Silence gate (net 1, BEFORE transcription) — #1544-adjacent ──
+            // Parse the recorded WAV, compute RMS + duration; if it's below the
+            // noise floor or shorter than a deliberate press, skip the entire
+            // transcribe/polish/paste chain. Silence must never round-trip to
+            // Whisper and paste a "Thank you." hallucination. Fail-open: an
+            // unparseable/absent WAV falls through to normal transcription.
+            if !audio_file.is_empty() {
+                if let Some(stats) = std::fs::read(&audio_file)
+                    .ok()
+                    .and_then(|bytes| crate::stt::gate::analyze_wav(&bytes))
+                {
+                    if crate::stt::gate::is_silence(&stats) {
+                        log::info!(
+                            "[voice] silence gate tripped: rms={:.1}dBFS duration={}ms — no transcribe, no paste",
+                            stats.rms_dbfs,
+                            stats.duration_ms
+                        );
+                        finalize_bail_empty(&app, session_id, &audio_file, &apple_text);
+                        return;
+                    }
+                }
+            }
 
             // Whisper re-transcribes the recorded WAV BEFORE polish; on
             // failure/empty it falls back to Apple's transcript. SHORT
@@ -3374,6 +3431,23 @@ mod stt_engine {
                 }
                 _ => (apple_text.clone(), false),
             };
+
+            // ── Hallucination denylist (net 2, AFTER transcription) — #1544 ──
+            // Whether the transcript came from Whisper or Apple's live pass
+            // (the skip_whisper_short path), drop it when the WHOLE normalized
+            // transcript is one of Whisper's canonical silence artifacts. This
+            // is the shared chokepoint the RMS gate can't cover — low-level
+            // room tone above the floor that Whisper still turns into "thank
+            // you". Whole-transcript only: real speech is never substring-cut.
+            if crate::stt::gate::is_silence_artifact(&raw_text) {
+                log::info!(
+                    "[voice] hallucination denylist dropped whole transcript ({} chars, whisper_used={})",
+                    raw_text.chars().count(),
+                    whisper_used
+                );
+                finalize_bail_empty(&app, session_id, &audio_file, &apple_text);
+                return;
+            }
 
             // ── Voice commands (system-Fn path ONLY) ──
             // Deterministic command phrases at the END of the transcript, run on
