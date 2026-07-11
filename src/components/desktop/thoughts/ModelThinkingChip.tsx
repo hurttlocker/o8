@@ -42,6 +42,8 @@ type ComposerModelOption = {
   backend: OrchestratorBackendSetting;
   model?: string;
   sub?: string;
+  /** Compact name for the composer trigger (defaults to `label`). */
+  triggerLabel?: string;
 };
 
 type ComposerModelGroup = {
@@ -68,8 +70,8 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     key: 'codex',
     label: 'Codex',
     options: [
-      { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
-      { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
+      { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: 'Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
+      { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
     ],
   },
 ];
@@ -291,9 +293,17 @@ export function ModelThinkingChip({
   const effortSectionLabel = isCodexBackend ? 'Reasoning' : 'Thinking';
   const effortTitle = isCodexBackend ? 'reasoning' : 'thinking';
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
+  // The composer trigger should name the actual MODEL, not the provider
+  // (Q ruling 2026-07-11 — "you might need to know what model you're on").
+  // Resolve it from the picked (backend, modelId); fall back to the provider
+  // label only when nothing matches (e.g. a fresh 'auto' session before a pick).
+  const activeModelOption = COMPOSER_MODEL_GROUPS
+    .flatMap((g) => g.options)
+    .find((o) => activeBackend === o.backend && normalizedModelId === o.model);
+  const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? modelLabel;
   // Collide's aggregator is now the model you actually picked (Q ruling
   // 2026-07-11) — the label follows it, not a hardcoded house.
-  const shortModelLabel = modelLabel.replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
+  const shortModelLabel = (activeModelOption?.triggerLabel ?? modelLabel).replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
   const decideLabel = `${shortModelLabel} decides`;
   const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Ultracode' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
@@ -378,7 +388,7 @@ export function ModelThinkingChip({
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
           >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{triggerModelLabel}</span>
           </button>
           {thinkingKnown && onEffortChange ? (() => {
             // When swarm is armed the effort tier reads "Ultracode" (the
