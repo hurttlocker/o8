@@ -555,15 +555,18 @@ export function InputButtons({
         <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
       ) : null}
 
-      {/* Attach + mic live LEFT with the mode chips (Claude Code layout,
-          Q ruling 2026-07-11) — the right side is reserved for the quiet
-          model · thinking · meter cluster. */}
+      {/* Attach + context meter live LEFT near the file input (Q ruling
+          2026-07-11). Mic moved RIGHT next to Send — see the right cluster. */}
       <AttachFilesButton
         onUploadDiskFiles={onUploadDiskFiles}
         onFileReferenceSelect={onFileReferenceSelect}
         repoPath={repoPath}
       />
-      <MicButton />
+      {inlineMeterSlot ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {inlineMeterSlot}
+        </span>
+      ) : null}
 
       </div>
 
@@ -589,11 +592,9 @@ export function InputButtons({
         />
       ) : null}
 
-      {inlineMeterSlot ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {inlineMeterSlot}
-        </span>
-      ) : null}
+      {/* Mic sits next to Send — mic-then-send is the natural flow (Q ruling
+          2026-07-11, swapped from the left cluster). */}
+      <MicButton />
 
       {/* Send — ↵ enter key when idle, square stop while working
           (Claude Code reference, Q ruling 2026-07-11). */}
