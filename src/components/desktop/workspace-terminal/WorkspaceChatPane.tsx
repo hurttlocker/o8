@@ -322,11 +322,6 @@ function WorkspaceChatPaneBase({
                           packetTitle={livePacket?.title ?? tab.orchestrationPacket?.title ?? null}
                           mergeMode={livePacket?.lane?.mergeMode ?? null}
                           mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
-                          onOpenInActivity={
-                            orchestratorData?.onOpenO8Panel
-                              ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
-                              : undefined
-                          }
                           onReview={
                             orchestratorData?.onOpenO8Panel
                               ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
@@ -645,11 +640,6 @@ function WorkspaceChatPaneBase({
                   packetTitle={livePacket?.title ?? tab.orchestrationPacket?.title ?? null}
                   mergeMode={livePacket?.lane?.mergeMode ?? null}
                   mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
-                  onOpenInActivity={
-                    orchestratorData?.onOpenO8Panel
-                      ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
-                      : undefined
-                  }
                   onReview={
                     orchestratorData?.onOpenO8Panel
                       ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
