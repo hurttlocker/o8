@@ -564,7 +564,10 @@ export function InputButtons({
       {inlineLeadingExtras ? (
         <>
           {!compact && (modelLabel || showRepoChip) ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
-          <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
+          {/* overflow:hidden is load-bearing — without it a nowrap child that
+              can't shrink spills out of this minWidth:0 span and paints under
+              the clarify/permission icons that follow in the row. */}
+          <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
             {inlineLeadingExtras}
           </span>
         </>
