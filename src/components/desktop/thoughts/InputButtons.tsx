@@ -515,22 +515,13 @@ export function InputButtons({
           The right action cluster stays pinned, so Send/mic/attach are never
           pushed off the clipped right edge — the bug this fixes. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
-      {modelLabel ? (
-        <ModelThinkingChip
-          compact={compact}
-          modelLabel={modelLabel}
-          modelId={modelId}
-          onModelChange={onModelChange}
-          activeBackend={activeBackend}
-          onBackendChange={onBackendChange}
-          effort={effort}
-          adaptiveEnabled={adaptiveEnabled}
-          onEffortChange={onEffortChange}
-          swarmEnabled={swarmEnabled}
-          onSetSwarm={onSetSwarm}
-          collideEnabled={collideEnabled}
-          onSetCollide={onSetCollide}
-        />
+      {inlineLeadingExtras ? (
+        // overflow:hidden is load-bearing — without it a nowrap child that
+        // can't shrink spills out of this minWidth:0 span and paints under
+        // the row siblings that follow.
+        <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+          {inlineLeadingExtras}
+        </span>
       ) : null}
 
       {/* Repo / workspace target — only on the empty state. Once a chat
@@ -538,25 +529,13 @@ export function InputButtons({
           (Codex behavior) and the chip becomes redundant noise. */}
       {showRepoChip ? (
         <>
-          {compact ? null : <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
+          {compact || !inlineLeadingExtras ? null : <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
           <RepoTargetChip
             repoLabel={repoLabel}
             workspaceTargets={workspaceTargets}
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
           />
-        </>
-      ) : null}
-
-      {inlineLeadingExtras ? (
-        <>
-          {!compact && (modelLabel || showRepoChip) ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
-          {/* overflow:hidden is load-bearing — without it a nowrap child that
-              can't shrink spills out of this minWidth:0 span and paints under
-              the clarify/permission icons that follow in the row. */}
-          <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
-            {inlineLeadingExtras}
-          </span>
         </>
       ) : null}
 
@@ -576,30 +555,48 @@ export function InputButtons({
         <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
       ) : null}
 
+      {/* Attach + mic live LEFT with the mode chips (Claude Code layout,
+          Q ruling 2026-07-11) — the right side is reserved for the quiet
+          model · thinking · meter cluster. */}
+      <AttachFilesButton
+        onUploadDiskFiles={onUploadDiskFiles}
+        onFileReferenceSelect={onFileReferenceSelect}
+        repoPath={repoPath}
+      />
+      <MicButton />
+
       </div>
 
-      {/* Right action cluster — pinned, never shrinks or clips. */}
+      {/* Right cluster — Claude Code style: model · thinking level · context
+          meter as quiet text, then send/stop. Pinned, never shrinks or clips. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      {modelLabel ? (
+        <ModelThinkingChip
+          split
+          compact={compact}
+          modelLabel={modelLabel}
+          modelId={modelId}
+          onModelChange={onModelChange}
+          activeBackend={activeBackend}
+          onBackendChange={onBackendChange}
+          effort={effort}
+          adaptiveEnabled={adaptiveEnabled}
+          onEffortChange={onEffortChange}
+          swarmEnabled={swarmEnabled}
+          onSetSwarm={onSetSwarm}
+          collideEnabled={collideEnabled}
+          onSetCollide={onSetCollide}
+        />
+      ) : null}
+
       {inlineMeterSlot ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {inlineMeterSlot}
         </span>
       ) : null}
 
-      <AttachFilesButton
-        onUploadDiskFiles={onUploadDiskFiles}
-        onFileReferenceSelect={onFileReferenceSelect}
-        repoPath={repoPath}
-      />
-
-      {/* Dictation — hold to record. Sits adjacent to Send because
-          mic-then-send is the natural flow. */}
-      <MicButton />
-
-      {/* Send — Rams pill matching ContextMeter/ThinkingChip aesthetic.
-          Three states with 180ms morph: idle (hairline faint) → armed
-          (accent border + soft bg + dot) → working (orange hairline +
-          pulsing dot + "stop" if onStop provided, else "working"). */}
+      {/* Send — ↵ enter key when idle, square stop while working
+          (Claude Code reference, Q ruling 2026-07-11). */}
       <SendPill
         canSubmit={canSubmit}
         working={working}
@@ -669,16 +666,16 @@ function SendPill({
       }}
     >
       {working ? (
-        // Pause glyph — two vertical bars. Click stops (canStop) or shows
-        // "working" indicator otherwise.
+        // Stop glyph — solid square (Claude Code reference). Click stops
+        // (canStop) or shows "working" indicator otherwise.
         <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }}>
-          <rect x="4" y="3" width="3" height="10" rx="1" />
-          <rect x="9" y="3" width="3" height="10" rx="1" />
+          <rect x="4" y="4" width="8" height="8" rx="1.5" />
         </svg>
       ) : (
-        // Play glyph — right-pointing triangle.
-        <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }}>
-          <path d="M5 3l8 5-8 5V3z" />
+        // Enter-key glyph — ↵ (Claude Code reference).
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          <polyline points="9 10 4 15 9 20" />
+          <path d="M20 4v7a4 4 0 0 1-4 4H4" />
         </svg>
       )}
       <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
