@@ -10,7 +10,7 @@ import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
-import { getAllEvents, listLanes } from '@/lib/lane/registry';
+import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
@@ -92,6 +92,14 @@ function isHuddleLane(lane: Lane): boolean {
     && (lane.lastEventLabel === 'huddle' || lane.lastEventLabel === 'huddle_ready');
 }
 
+function huddlePlan(lane: Lane): string | undefined {
+  const event = [...getLaneEvents(lane.id, 100)]
+    .reverse()
+    .find((candidate) => candidate.verb === 'agent_report' && candidate.payload.event === 'huddle');
+  const message = event?.payload.message;
+  return typeof message === 'string' && message.trim() ? message.trim() : undefined;
+}
+
 function applyHuddleLaneStatus(agents: AgentSummary[]): AgentSummary[] {
   let huddleBySessionKey: Map<string, Lane>;
   try {
@@ -112,6 +120,7 @@ function applyHuddleLaneStatus(agents: AgentSummary[]): AgentSummary[] {
       ...agent,
       status: 'huddling',
       currentTask: agent.currentTask || 'Huddling — awaiting orchestrator alignment',
+      huddlePlan: huddlePlan(lane),
       alerts: Math.max(0, agent.alerts - Number(agent.status === 'failed' || agent.status === 'blocked')),
       lastEventAt: lane.lastEventAt ? relativeAge(new Date(lane.lastEventAt)) : agent.lastEventAt,
     };
