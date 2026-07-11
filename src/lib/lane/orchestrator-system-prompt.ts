@@ -2,6 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
+
+import { buildFirstRunClarifyNote } from './clarify-first';
 
 /**
  * Shared o8 orchestrator system prompt assembly.
@@ -23,7 +26,33 @@ function resolvePromptFilePath(): string {
   return join(here, PROMPT_FILE_NAME);
 }
 
-export function buildOrchestratorSystemPrompt(repoPath: string): string {
+/**
+ * True when at least one lane (dispatched packet) exists for the repo.
+ * Read-only direct open of the main DB — this module stays a lightweight
+ * string builder (no @/lib/db import chain), and a missing DB file is a
+ * fresh install, which IS a first run.
+ */
+function repoHasDispatchHistory(repoPath: string): boolean {
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR ?? join(homedir(), '.o8');
+    const db = new Database(join(dataDir, 'cortex-ide.db'), { readonly: true, fileMustExist: true });
+    try {
+      return db.prepare('SELECT 1 FROM lanes WHERE repo_path = ? LIMIT 1').get(repoPath) !== undefined;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
+export function buildOrchestratorSystemPrompt(
+  repoPath: string,
+  opts?: {
+    /** Test override — production callers omit and it's computed from the lanes table. */
+    firstRunClarify?: boolean;
+  },
+): string {
   const repoName = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
 
   let allRepos: Array<{ name: string; localPath: string }> = [];
@@ -54,8 +83,13 @@ export function buildOrchestratorSystemPrompt(repoPath: string): string {
     template = FALLBACK_PROMPT;
   }
 
+  // Clarify-first, first-mission trigger (silent — system prompt only, never
+  // the transcript): a repo with no dispatch history gets the interview note.
+  const firstRun = opts?.firstRunClarify ?? !repoHasDispatchHistory(repoPath);
+
   return template
     .replaceAll('{{REPO_NAME}}', repoName)
     .replaceAll('{{REPO_PATH}}', repoPath)
-    .replaceAll('{{REPO_LIST}}', repoList);
+    .replaceAll('{{REPO_LIST}}', repoList)
+    .replaceAll('{{CLARIFY_FIRST_RUN_NOTE}}', firstRun ? buildFirstRunClarifyNote() : '');
 }

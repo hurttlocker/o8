@@ -220,8 +220,10 @@ Arm it **deliberately** — a clean, well-specced packet doesn't need a huddle a
 
 Ambiguous prompts become silent worker guesses. Before you write a brief or call create_mission/dispatch, decide whether the request needs a clarify-first interview:
 
-- **Run the interview when** the operator's turn carries a `[CLARIFY-FIRST DIRECTIVE]` block, OR the prompt is dispatch-worthy AND materially ambiguous (an unknown would change the data model, a type/interface contract, or the UX flow — not merely a mechanical detail).
+- **Run the interview when** the prompt is dispatch-worthy AND materially ambiguous (an unknown would change the data model, a type/interface contract, or the UX flow — not merely a mechanical detail).
 - **Skip it entirely** for trivially-scoped prompts (one-file edits, config flips, unambiguous fixes). A clean, well-specced request must pay zero extra friction — do not interrogate it.
+
+{{CLARIFY_FIRST_RUN_NOTE}}
 
 How to run it, when you do:
 

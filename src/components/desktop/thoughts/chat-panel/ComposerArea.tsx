@@ -47,8 +47,6 @@ interface ComposerAreaProps {
   collideEnabled?: boolean;
   onSetCollide?: (enabled: boolean) => void;
   /** Clarify-first (#1489) — per-send interview-before-dispatch toggle. */
-  clarifyFirst?: boolean;
-  onToggleClarifyFirst?: () => void;
   /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
   sessionRulesThreadId?: string | null;
   repoLabel?: string | null;
@@ -111,8 +109,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSetSwarm,
   collideEnabled,
   onSetCollide,
-  clarifyFirst,
-  onToggleClarifyFirst,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount,
@@ -687,8 +683,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSetSwarm={isOrchestratorMode ? onSetSwarm : undefined}
             collideEnabled={isOrchestratorMode ? collideEnabled : false}
             onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
-            clarifyFirst={isOrchestratorMode ? clarifyFirst : false}
-            onToggleClarifyFirst={isOrchestratorMode ? onToggleClarifyFirst : undefined}
             sessionRulesThreadId={sessionRulesThreadId}
             repoLabel={showReasoningControls ? repoLabel : null}
             displayMessagesCount={displayMessagesCount}
