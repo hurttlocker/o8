@@ -309,6 +309,23 @@ function OrchestratorTabInner({
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(
     () => readStoredPermissionMode(tabId),
   );
+  // Context-rail width awareness (Sydney's minimized-workspace report,
+  // 2026-07-10): the 256px branch-details rail is flexShrink:0, so in a
+  // narrow window it crushed the chat column to unusability. Measure the
+  // body row and fold the rail whenever showing it would leave the chat
+  // less than ~480px (the composer's own compact threshold is 440).
+  const bodyRowRef = useRef<HTMLDivElement | null>(null);
+  const [railFits, setRailFits] = useState(true);
+  useEffect(() => {
+    const el = bodyRowRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setRailFits(w >= 256 + 480);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // UltraCode / swarm tier (per-tab). Picking "UltraCode" in the composer's
   // thinking dropdown flips this on; the orchestrator then fans work out to a
   // parallel crew — native Claude sub-agents + Codex workers via o8.
@@ -1107,6 +1124,7 @@ function OrchestratorTabInner({
       {/* Body: chat (flex) | branch details (self-hides). Threads/Archive
           moved into LeftPanelProjectFocus → Chats + Agents tabs. */}
       <div
+        ref={bodyRowRef}
         style={{
           flex: 1,
           minHeight: 0,
@@ -1144,13 +1162,13 @@ function OrchestratorTabInner({
             stays mounted and is clipped (never faded) as the width collapses. */}
         <div
           style={{
-            width: (projectContextRailVisible && !data.o8PanelVisible) ? 256 : 0,
+            width: (projectContextRailVisible && railFits && !data.o8PanelVisible) ? 256 : 0,
             flexShrink: 0,
             overflow: 'hidden',
             transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
-          <BranchDetailsLauncher visible={projectContextRailVisible} />
+          <BranchDetailsLauncher visible={projectContextRailVisible && railFits} />
         </div>
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />

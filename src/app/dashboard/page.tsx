@@ -691,6 +691,13 @@ function DashboardInner() {
   } = session;
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
+  // True while the operator is actively dragging any panel-resize handle.
+  // Panel widths are framer-animated for open/close/focus transitions, but a
+  // live drag must apply instantly — routing per-mousemove targets through an
+  // eased (or even 1ms) animation makes framer's rAF loop chase the cursor
+  // and visibly oscillate between stale and current widths (Q's jitter
+  // recording, 2026-07-10).
+  const [panelDragActive, setPanelDragActive] = useState(false);
 
   // ── Sidebar hover-preview state ──
   // When the AgentPanel is collapsed (sidebarVisible === false), hovering the
@@ -3331,12 +3338,14 @@ function DashboardInner() {
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setPanelDragActive(true);
     const startX = e.clientX;
     const startW = leftWidth;
     const onMove = (ev: MouseEvent) => {
       setLeftWidth(Math.min(Math.max(startW + (ev.clientX - startX), 160), 500));
     };
     const onUp = () => {
+      setPanelDragActive(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -3411,12 +3420,14 @@ function DashboardInner() {
   // ── Right drag handle ──
   const startRightDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setPanelDragActive(true);
     const startX = e.clientX;
     const startW = rightWidth;
     const onMove = (ev: MouseEvent) => {
       setRightWidth(Math.min(Math.max(startW + (startX - ev.clientX), MIN_RIGHT_PANEL_WIDTH), MAX_RIGHT_PANEL_WIDTH));
     };
     const onUp = () => {
+      setPanelDragActive(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -3427,12 +3438,14 @@ function DashboardInner() {
   // ── O8 panel drag handle ──
   const startO8Drag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setPanelDragActive(true);
     const startX = e.clientX;
     const startW = o8Width;
     const onMove = (ev: MouseEvent) => {
       setO8Width(Math.min(Math.max(startW + (startX - ev.clientX), MIN_O8_PANEL_WIDTH), MAX_O8_PANEL_WIDTH));
     };
     const onUp = () => {
+      setPanelDragActive(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -4525,7 +4538,10 @@ function DashboardInner() {
               ? { type: 'spring', stiffness: 360, damping: 32 }
               : showAgentPanelFtux
                 ? FTUX_SPRING_TRANSITION
-                : { duration: 0.001 }
+                // type:false = instant set. The old duration:0.001 still ran a
+                // rAF animation per width change, which fought the style width
+                // during drags and oscillated (jitter recording 2026-07-10).
+                : { type: false }
           }
           data-mcp-scope="agent-panel"
           // No data-chrome-surface here anymore — the inner card paints a
@@ -4771,7 +4787,10 @@ function DashboardInner() {
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth), opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            // Instant while the operator drags the resize handle — easing a
+            // per-mousemove target makes the panel rubber-band behind the
+            // cursor. The 260ms ease stays for open/close mount/unmount.
+            transition={panelDragActive ? { type: false } : { duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
             style={{
               display: 'flex',
               height: '100%',
@@ -4807,7 +4826,7 @@ function DashboardInner() {
               data-mcp-scope="chat-panel"
               initial={false}
               animate={{ width: rightPanelKind === 'o8' ? o8Width : rightWidth }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              transition={panelDragActive ? { type: false } : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               style={{
                 flexShrink: 0,
                 alignSelf: 'stretch',

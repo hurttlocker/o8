@@ -85,6 +85,14 @@ export function ModeChip({
           alignItems: 'center',
           gap: 4,
           height: 18,
+          // Squeeze-band behavior: the composer row shrinks this chip via its
+          // minWidth:0 wrapper. Without these the nowrap label spills past the
+          // shrunken box and paints UNDER the clarify/permission icons that
+          // follow (Sydney's minimized-workspace report, 2026-07-10). Clip and
+          // ellipsize instead.
+          minWidth: 0,
+          maxWidth: '100%',
+          overflow: 'hidden',
           paddingTop: 0,
           paddingRight: 6,
           paddingBottom: 0,
@@ -112,7 +120,7 @@ export function ModeChip({
           event.currentTarget.style.background = 'transparent';
         }}
       >
-        <span aria-hidden style={{ display: 'inline-flex', color: 'var(--t-brand-orange, #FF5A1F)', marginRight: 1 }}>
+        <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--t-brand-orange, #FF5A1F)', marginRight: 1 }}>
           <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="6" r="2" />
             <circle cx="6" cy="18" r="2" />
@@ -122,8 +130,8 @@ export function ModeChip({
             <path d="m12 12 6 4" />
           </svg>
         </span>
-        {compact ? null : <span>{label}</span>}
-        <svg width={8} height={8} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
+        {compact ? null : <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
+        <svg width={8} height={8} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0, opacity: 0.7 }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
