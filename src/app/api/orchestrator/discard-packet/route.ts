@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
@@ -7,19 +9,24 @@ import { removeMergedWorktree } from '@/lib/orchestrator/worktree-cleanup';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
+const execFileAsync = promisify(execFile);
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/orchestrator/discard-packet — operator-only "kill it" for a parked
+ * POST /api/orchestrator/discard-packet — operator-only "dismiss it" for a parked
  * packet with nowhere to go (a rejected best-effort hygiene lane, a stale
- * zombie). Archives the lane so it leaves the active set + review beacon, then
- * cleans up its isolated worktree. This is the recovery step that was missing
- * (Q ruling 2026-07-11): reset requeues (re-runs the work), merge needs an
- * approval — neither DISCARDS. A worker cannot call this (§HIGH-4).
+ * zombie). This is a SOFT dismiss (Q ruling 2026-07-11), not a hard delete:
+ *   1. Preserve the committed work as a branch ref in the MAIN repo (imported
+ *      from the worktree clone) so the orchestrator can re-adopt it later.
+ *   2. Remove the worktree clone to free disk.
+ *   3. Archive the lane so it leaves the active set + review beacon.
+ * The recovery step that was missing: reset requeues (re-runs the work), merge
+ * needs an approval — neither DISMISSES. A worker cannot call this (§HIGH-4).
  *
  * Unlike merge, discard is intentionally NOT gated on review verdict — the
- * point is to clear something the operator has decided is dead.
+ * point is to clear something the operator has decided isn't going forward now.
  */
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -46,13 +53,30 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Step 1 — preserve the committed work as a branch ref in the MAIN repo,
+    // imported from the worktree clone, BEFORE we remove the clone. Best-effort:
+    // a preservation miss must not block the dismiss (the operator wants it
+    // cleared), but when it succeeds the work is recoverable via `lane.branch`.
+    let preservedBranch: string | null = null;
+    if (lane.worktreePath && lane.branch && lane.repoPath) {
+      try {
+        await execFileAsync('git', ['fetch', lane.worktreePath, `${lane.branch}:refs/heads/${lane.branch}`], {
+          cwd: lane.repoPath,
+          timeout: 30_000,
+        });
+        preservedBranch = lane.branch;
+      } catch (preserveError) {
+        console.warn(`[discard-packet] branch preservation failed for lane ${lane.id} (${lane.branch}):`, preserveError);
+      }
+    }
+
     const result = await dispatch({ verb: 'archive', laneId: lane.id, actor: 'user' });
     if (!result.ok) {
       return operatorError('discard_failed', result.note ?? 'Unable to archive the lane.', 422);
     }
 
-    // Best-effort worktree cleanup — a cleanup miss must NOT fail the discard;
-    // the worktree reaper sweeps detached worktrees on its own cadence.
+    // Step 2 — free the worktree clone's disk. The commits already live on the
+    // preserved branch ref (step 1), so removing the clone doesn't lose the work.
     let worktreeRemoved = false;
     try {
       const cleanup = await removeMergedWorktree(lane);
@@ -72,7 +96,10 @@ export async function POST(request: NextRequest) {
       laneId: lane.id,
       packetId,
       worktreeRemoved,
-      note: `Discarded packet ${packetId} — lane archived${worktreeRemoved ? ' and worktree removed' : ''}.`,
+      preservedBranch,
+      note: preservedBranch
+        ? `Dismissed packet ${packetId} — work preserved on branch ${preservedBranch}; the orchestrator can re-adopt it.`
+        : `Dismissed packet ${packetId} — lane archived${worktreeRemoved ? ' and worktree removed' : ''}.`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to discard packet.';

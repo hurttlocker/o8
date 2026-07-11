@@ -2813,6 +2813,33 @@ function DashboardInner() {
     setThoughtsDraftInjection(draft);
   }, [setThoughtsDraftInjection]);
 
+  // Request-changes from a rejected packet's banner HANDS THE PACKET TO THE
+  // ORCHESTRATOR (Q ruling 2026-07-11): a declined packet's recovery is a
+  // decision (rebase / re-dispatch / fix directly / drop), not a blind worker
+  // re-run — so it belongs with the one brain that owns recovery. We focus the
+  // orchestrator tab and pre-fill its composer with the reason + operator note,
+  // ready for the operator to review and send.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { text?: string } | undefined;
+      const text = detail?.text?.trim();
+      if (!text) return;
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        const snap = handle.getTabsSnapshot();
+        const orchTab = snap.tabs.find((tab) => tab.kind === 'orchestrator');
+        if (orchTab) {
+          handle.focusTab(orchTab.id);
+          window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: orchTab.id } }));
+          break;
+        }
+      }
+      setThoughtsDraftInjection({ id: `req-changes-${Date.now()}`, text });
+    };
+    window.addEventListener('o8:orchestrator-inject', handler as EventListener);
+    return () => window.removeEventListener('o8:orchestrator-inject', handler as EventListener);
+  }, [setThoughtsDraftInjection]);
+
   const injectPayloadIntoRepoChat = useCallback((payload: AgentPanelChatInjectionPayload, repoOverride?: WorkspaceSidePanelRepo | null) => {
     const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
