@@ -125,8 +125,10 @@ function WorkspaceChatComposerBase({
       style={{
         paddingTop: 12,
         paddingBottom: 16,
-        paddingLeft: 24,
-        paddingRight: 24,
+        // Match the orchestrator/chat composer's 12px side inset so the worker
+        // steer composer is the same width, not thinner (Q ruling 2026-07-11).
+        paddingLeft: 12,
+        paddingRight: 12,
         borderTop: isLaneArchived ? 'none' : '1px solid var(--t-divider)',
         background: 'transparent',
         opacity: isLaneArchived ? 0.5 : 1,
@@ -139,9 +141,9 @@ function WorkspaceChatComposerBase({
         onDragLeave={attachments.dragHandlers.onDragLeave}
         onDrop={attachments.dragHandlers.onDrop}
         style={{
-          maxWidth: 720,
-          marginLeft: 'auto',
-          marginRight: 'auto',
+          // No 720 cap — the worker composer now fills its column to match the
+          // orchestrator/chat composer width (Q ruling 2026-07-11).
+          width: '100%',
           border: `1px solid ${attachments.dragOver ? 'var(--t-accent, #2563eb)' : 'var(--t-input-border)'}`,
           borderRadius: 14,
           background: 'var(--t-input-bg)',
