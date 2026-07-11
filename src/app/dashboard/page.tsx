@@ -3336,16 +3336,38 @@ function DashboardInner() {
   }, []);
 
   // ── Left drag handle ──
+  // Live drags bypass React entirely: a dashboard commit costs ~40ms in dev
+  // (measured 2026-07-10, ~24fps webview during drag), so routing every
+  // mousemove through setState makes the content reflow in chunky steps
+  // behind the cursor (Q's retest recording). During the drag we write the
+  // width straight onto the column + footer DOM nodes — the browser reflows
+  // the flex layout natively at frame rate — and commit state ONCE on
+  // mouseup. The flag is released a frame after the commit so the framer
+  // transitions never see the width jump as something to animate.
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setPanelDragActive(true);
     const startX = e.clientX;
     const startW = leftWidth;
+    const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
+    const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
+    const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
+    let frame = 0;
+    let lastX = startX;
     const onMove = (ev: MouseEvent) => {
-      setLeftWidth(Math.min(Math.max(startW + (ev.clientX - startX), 160), 500));
+      lastX = ev.clientX;
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const w = widthAt(lastX);
+        if (colEl) colEl.style.width = `${w}px`;
+        if (footEl) footEl.style.width = `${w}px`;
+      });
     };
     const onUp = () => {
-      setPanelDragActive(false);
+      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
+      setLeftWidth(widthAt(lastX));
+      window.requestAnimationFrame(() => setPanelDragActive(false));
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -3418,40 +3440,52 @@ function DashboardInner() {
   }, [sidebarVisible, sidebarPreviewOpen, cancelSidebarPreviewClose]);
 
   // ── Right drag handle ──
-  const startRightDrag = useCallback((e: React.MouseEvent) => {
+  // Right/O8 drags share the left handle's direct-DOM pattern. The right
+  // column is two nested motion.divs — the inner (chat-panel) holds the
+  // panel width, its parent shell holds width+10 (drag handle + margin).
+  const startRightColumnDrag = useCallback((
+    e: React.MouseEvent,
+    startW: number,
+    min: number,
+    max: number,
+    commit: (w: number) => void,
+  ) => {
     e.preventDefault();
     setPanelDragActive(true);
     const startX = e.clientX;
-    const startW = rightWidth;
+    const innerEl = document.querySelector<HTMLElement>('[data-mcp-scope="chat-panel"]');
+    const shellEl = innerEl?.parentElement ?? null;
+    const widthAt = (x: number) => Math.min(Math.max(startW + (startX - x), min), max);
+    let frame = 0;
+    let lastX = startX;
     const onMove = (ev: MouseEvent) => {
-      setRightWidth(Math.min(Math.max(startW + (startX - ev.clientX), MIN_RIGHT_PANEL_WIDTH), MAX_RIGHT_PANEL_WIDTH));
+      lastX = ev.clientX;
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const w = widthAt(lastX);
+        if (innerEl) innerEl.style.width = `${w}px`;
+        if (shellEl) shellEl.style.width = `${w + 10}px`;
+      });
     };
     const onUp = () => {
-      setPanelDragActive(false);
+      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
+      commit(widthAt(lastX));
+      window.requestAnimationFrame(() => setPanelDragActive(false));
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-  }, [rightWidth]);
+  }, []);
+  const startRightDrag = useCallback((e: React.MouseEvent) => {
+    startRightColumnDrag(e, rightWidth, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH, setRightWidth);
+  }, [rightWidth, startRightColumnDrag]);
 
   // ── O8 panel drag handle ──
   const startO8Drag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const startW = o8Width;
-    const onMove = (ev: MouseEvent) => {
-      setO8Width(Math.min(Math.max(startW + (startX - ev.clientX), MIN_O8_PANEL_WIDTH), MAX_O8_PANEL_WIDTH));
-    };
-    const onUp = () => {
-      setPanelDragActive(false);
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [o8Width]);
+    startRightColumnDrag(e, o8Width, MIN_O8_PANEL_WIDTH, MAX_O8_PANEL_WIDTH, setO8Width);
+  }, [o8Width, startRightColumnDrag]);
 
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
