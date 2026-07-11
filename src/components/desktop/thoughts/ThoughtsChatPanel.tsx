@@ -57,7 +57,7 @@ import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
-import { ModeChip } from '@/components/desktop/orchestrator/ModeChip';
+import { useReadyRuntimeCount } from './use-ready-runtimes';
 import {
   consumePendingComposerDraft,
   parseModeRoutingPrefix,
@@ -262,6 +262,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [orchestrationMode, setOrchestrationMode] = useState<OrchestrationMode>(
     () => lockedMode ?? initialMode ?? 'fleet',
   );
+  // Installed runtime count → silent solo/fleet decision (see soloOrchestrator).
+  const readyRuntimeCount = useReadyRuntimeCount();
   const [singleRuntime, setSingleRuntime] = useState<OrchestratorRuntime>(
     () => initialSingleRuntime ?? 'codex',
   );
@@ -423,8 +425,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Picking Single must never silently swap the orchestrator for a raw Codex
   // session (that was the stuck-on-Codex trap).
   const isSingleMode = lockedMode === 'single';
-  const soloOrchestrator = orchestrationMode === 'single' && lockedMode !== 'single';
   const isChatMode = orchestrationMode === 'chat';
+  // Solo vs fleet is now decided SILENTLY by installed runtime count (Q ruling
+  // 2026-07-11) — the manual Fleet/Solo chip was removed. One usable runtime →
+  // the orchestrator runs lean/inline (solo); two or more → fleet orchestration
+  // (dispatch). While the one-time probe is loading (null), default to fleet —
+  // dispatch is the thesis, and never gate the orchestrator's tools on a
+  // pending fetch.
+  const soloOrchestrator = readyRuntimeCount === 1 && lockedMode !== 'single' && !isChatMode;
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
@@ -2297,21 +2305,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
-        composerLeadingExtras={
-          lockedMode ? composerLeadingExtras : (
-            <>
-              <ModeChip
-                selectedMode={orchestrationMode}
-                selectedSingleRuntime={singleRuntime}
-                onSelectFleet={() => handleSelectOrchestrationMode('fleet')}
-                onSelectSingle={() => handleSelectOrchestrationMode('single')}
-                onSpawnSingleTab={onSpawnSingleTab}
-                onSpawnChatTab={onSpawnChatTab}
-              />
-              {composerLeadingExtras}
-            </>
-          )
-        }
+        composerLeadingExtras={composerLeadingExtras}
         attachedImages={attachedImages}
         attachedFiles={attachedFiles}
         dragOver={attachmentDragOver}
