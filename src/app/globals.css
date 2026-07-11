@@ -1875,6 +1875,34 @@ button.workflow-file-item.workflow-file-item-active {
   animation: o8-pulse-circle 1.4s ease-in-out infinite;
 }
 
+/* Sweep circle — a SOLID dot whose color holds while a light band scans across
+   it (the "scan" motion from the thinking-states reference, at dot scale). Used
+   for awaiting-review: the circle stays put (a stable state) but the sweep says
+   "waiting on you". Base color via --sweep-base; the highlight is derived from
+   it so any base gets a matching band. (Q ruling 2026-07-11.) */
+@keyframes o8-sweep-circle {
+  0%   { background-position: 190% 0; }
+  100% { background-position: -90% 0; }
+}
+.o8-sweep-circle {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-image: linear-gradient(
+    105deg,
+    var(--sweep-base, #6366F1) 0%,
+    var(--sweep-base, #6366F1) 38%,
+    color-mix(in srgb, var(--sweep-base, #6366F1) 42%, white) 50%,
+    var(--sweep-base, #6366F1) 62%,
+    var(--sweep-base, #6366F1) 100%
+  );
+  background-size: 260% 100%;
+  background-repeat: no-repeat;
+  animation: o8-sweep-circle 1.5s ease-in-out infinite;
+}
+
 /* Motion vocabulary A — static outline ring. Hollow, no animation.
    Says "session alive, no work right now." */
 .o8-static-ring {
