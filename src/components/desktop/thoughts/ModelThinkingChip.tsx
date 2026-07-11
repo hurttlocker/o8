@@ -10,7 +10,9 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   medium: 'medium',
   high: 'high',
   max: 'max',
-  xhigh: 'xhigh',
+  // "Extra" reads cleaner than "Xhigh" on the slider (Q ruling 2026-07-11,
+  // matching the Claude Code reference).
+  xhigh: 'extra',
   ultra: 'ultra',
 };
 
@@ -32,20 +34,44 @@ const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
 };
 
 const SWARM_ACCENT = 'var(--t-brand-orange, #FF5A1F)';
-const MODEL_THINKING_MENU_WIDTH = 172;
+const MODEL_THINKING_MENU_WIDTH = 200;
 
 type ComposerModelOption = {
   value: string;
   label: string;
   backend: OrchestratorBackendSetting;
   model?: string;
+  sub?: string;
 };
 
-const COMPOSER_MODEL_OPTIONS: ComposerModelOption[] = [
-  { value: 'codex-gpt-5-6', label: 'Codex GPT-5.6', backend: 'codex' },
-  { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5', backend: 'fable', model: MODEL_IDS.fableDefault },
-  { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.orchestratorDefault },
-  { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', backend: 'claude', model: MODEL_IDS.claudeQaDefault },
+type ComposerModelGroup = {
+  key: 'claude' | 'codex';
+  label: string;
+  options: ComposerModelOption[];
+};
+
+// Grouped by house (Q ruling 2026-07-11): a Claude drawer and a Codex drawer,
+// models nested under each. Codex exposes Sol (flagship, Opus-class) AND Terra
+// (Sonnet-class) as orchestrator-worthy picks — both run as the codex
+// orchestrator model via resolveOrchestratorModelSync.
+const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
+  {
+    key: 'claude',
+    label: 'Claude',
+    options: [
+      { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5', backend: 'fable', model: MODEL_IDS.fableDefault, sub: 'flagship' },
+      { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.orchestratorDefault, sub: 'deep reasoning' },
+      { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', backend: 'claude', model: MODEL_IDS.claudeQaDefault, sub: 'everyday' },
+    ],
+  },
+  {
+    key: 'codex',
+    label: 'Codex',
+    options: [
+      { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
+      { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
+    ],
+  },
 ];
 
 function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; active?: boolean }) {
@@ -265,8 +291,16 @@ export function ModelThinkingChip({
   const effortSectionLabel = isCodexBackend ? 'Reasoning' : 'Thinking';
   const effortTitle = isCodexBackend ? 'reasoning' : 'thinking';
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
-  const decideLabel = isCodexBackend ? 'Codex decides' : 'Claude decides';
-  const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Swarm' : 'Solo';
+  // Collide's aggregator is now the model you actually picked (Q ruling
+  // 2026-07-11) — the label follows it, not a hardcoded house.
+  const shortModelLabel = modelLabel.replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
+  const decideLabel = `${shortModelLabel} decides`;
+  const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Ultracode' : 'Solo';
+  // Which house drawer is open in the model picker. Defaults to the active
+  // backend's house so the current model is visible on open.
+  const [openHouse, setOpenHouse] = useState<'claude' | 'codex'>(
+    activeBackend === 'codex' ? 'codex' : 'claude',
+  );
   // Thinking levels are only KNOWN for the Claude-family and Codex backends
   // ('auto' resolves to one of them). Every other runtime uses its default
   // effort and the thinking trigger stays hidden — no bespoke picker for
@@ -285,7 +319,7 @@ export function ModelThinkingChip({
       label: EFFORT_LABELS[option].charAt(0).toUpperCase() + EFFORT_LABELS[option].slice(1),
       sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
     })),
-    ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Ultracode', sub: 'sub-agents + workers in parallel' }] : []),
+    ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Ultracode', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),
   ];
   const currentEffortIndex = ultraActive
     ? effortStops.length - 1
@@ -446,53 +480,92 @@ export function ModelThinkingChip({
                 <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Model</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {COMPOSER_MODEL_OPTIONS.map((option) => {
-                  const active = option.backend === 'codex'
-                    ? activeBackend === 'codex'
-                    : activeBackend === option.backend && normalizedModelId === option.model;
+                {COMPOSER_MODEL_GROUPS.map((group) => {
+                  const houseOpen = openHouse === group.key;
+                  const houseHasActive = group.options.some((o) => activeBackend === o.backend && normalizedModelId === o.model);
                   return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      onClick={() => {
-                        if (option.model) onModelChange?.(option.model);
-                        if (!active) onBackendChange?.(option.backend);
-                        if (option.backend === 'codex') onEffortChange?.('xhigh');
-                        // 'ultra' is codex-Sol-only — drop a stale selection when
-                        // switching to a Claude/Fable backend that can't run it.
-                        else if (effort === 'ultra') onEffortChange?.('max');
-                        setOpen(false);
-                      }}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'minmax(0, 1fr) auto',
-                        alignItems: 'center',
-                        gap: 6,
-                        minHeight: 23,
-                        paddingTop: 2,
-                        paddingRight: 6,
-                        paddingBottom: 2,
-                        paddingLeft: 7,
-                        borderWidth: 0,
-                        borderRadius: 8,
-                        background: active ? 'var(--t-accent-soft)' : 'transparent',
-                        color: active ? 'var(--t-accent)' : 'var(--t-text)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        fontFamily: 'var(--font-sans-system)',
-                      }}
-                      onMouseEnter={(event) => {
-                        if (!active) event.currentTarget.style.background = 'var(--t-hover)';
-                      }}
-                      onMouseLeave={(event) => {
-                        if (!active) event.currentTarget.style.background = 'transparent';
-                      }}
-                    >
-                      <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.label}</span>
-                      <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? 'var(--t-accent)' : 'transparent', flexShrink: 0 }} />
-                    </button>
+                    <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {/* Drawer header — click to expand this house. */}
+                      <button
+                        type="button"
+                        aria-expanded={houseOpen}
+                        onClick={() => setOpenHouse(group.key)}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0, 1fr) auto',
+                          alignItems: 'center',
+                          gap: 6,
+                          minHeight: 24,
+                          paddingTop: 2,
+                          paddingRight: 6,
+                          paddingBottom: 2,
+                          paddingLeft: 7,
+                          borderWidth: 0,
+                          borderRadius: 8,
+                          background: 'transparent',
+                          color: 'var(--t-text)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontFamily: 'var(--font-sans-system)',
+                        }}
+                        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+                        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}</span>
+                          {!houseOpen && houseHasActive ? <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--t-accent)', flexShrink: 0 }} /> : null}
+                        </span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.6, transform: houseOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                      {/* Models nested under the open house. */}
+                      {houseOpen ? group.options.map((option) => {
+                        const active = activeBackend === option.backend && normalizedModelId === option.model;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={active}
+                            onClick={() => {
+                              if (option.model) onModelChange?.(option.model);
+                              if (!active) onBackendChange?.(option.backend);
+                              // Codex/Sol keeps ultra available; Terra + any Claude
+                              // model cap at max — drop a stale ultra selection.
+                              if (option.model !== MODEL_IDS.raw.openAiGpt56Sol && effort === 'ultra') onEffortChange?.('max');
+                              setOpen(false);
+                            }}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'minmax(0, 1fr) auto',
+                              alignItems: 'center',
+                              gap: 6,
+                              minHeight: 26,
+                              paddingTop: 3,
+                              paddingRight: 6,
+                              paddingBottom: 3,
+                              paddingLeft: 18,
+                              borderWidth: 0,
+                              borderRadius: 8,
+                              background: active ? 'var(--t-accent-soft)' : 'transparent',
+                              color: active ? 'var(--t-accent)' : 'var(--t-text)',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              fontFamily: 'var(--font-sans-system)',
+                            }}
+                            onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--t-hover)'; }}
+                            onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: 13, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.label}</span>
+                              {option.sub ? <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.sub}</span> : null}
+                            </span>
+                            <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? 'var(--t-accent)' : 'transparent', flexShrink: 0 }} />
+                          </button>
+                        );
+                      }) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -520,7 +593,7 @@ export function ModelThinkingChip({
               </div>
               {[
                 { key: 'solo', active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator driving the fleet', hint: 'One orchestrator plans, dispatches, and reviews the whole worker fleet. Still many agents working — one brain directing them.' },
-                { key: 'collide', active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}`, hint: 'Claude and Codex propose independently, then one synthesizes and does the work — a built-in second opinion for hard problems.' },
+                { key: 'collide', active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}`, hint: `Claude and Codex propose independently, then your chosen model (${shortModelLabel}) synthesizes and does the work — a built-in second opinion for hard problems.` },
               ].map((mode) => (
                 <button
                   key={mode.key}

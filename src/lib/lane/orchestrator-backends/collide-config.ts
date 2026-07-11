@@ -59,22 +59,46 @@ function parseAggregatorEnv(raw: string | undefined): MoaParticipant | null {
   }
 }
 
-function aggregatorFor(defaultSetting: CollideAggregator, activeBackend?: OrchestratorBackendId): MoaParticipant {
-  const backend = defaultSetting === 'auto'
-    ? activeBackend === 'codex' ? 'codex' : 'claude'
+/** A `fable` composer backend collides as Claude (Fable is a Claude model). */
+function collideBackendFamily(backend?: OrchestratorBackendId): 'codex' | 'claude' {
+  return backend === 'codex' ? 'codex' : 'claude';
+}
+
+/** Which family a raw model id belongs to (gpt-* → codex, else claude). */
+function modelFamily(model: string): 'codex' | 'claude' {
+  return /^gpt/i.test(model) ? 'codex' : 'claude';
+}
+
+function aggregatorFor(
+  defaultSetting: CollideAggregator,
+  activeBackend?: OrchestratorBackendId,
+  baseModel?: string,
+): MoaParticipant {
+  const backend: 'codex' | 'claude' = defaultSetting === 'auto'
+    ? collideBackendFamily(activeBackend)
     : defaultSetting;
-  const fallback = DEFAULT_COLLIDE_CONFIG.proposers.find((p) => p.backend === backend);
-  return fallback ?? { backend };
+  const fallback = DEFAULT_COLLIDE_CONFIG.proposers.find((p) => p.backend === backend) ?? { backend };
+  // Q ruling 2026-07-11: Collide's aggregator is the model the operator actually
+  // picked in the composer — not the house default. When the chosen model
+  // belongs to the aggregator's family, run it as the aggregator (Fable, Terra,
+  // Sol, Opus, Sonnet all reach the decider chair). Cross-family picks keep the
+  // family default so we never hand codex a claude id (or vice-versa).
+  if (baseModel && modelFamily(baseModel) === backend) {
+    return { ...fallback, backend, model: baseModel };
+  }
+  return fallback;
 }
 
 /**
  * Resolve the active Collide config. Pure-ish: reads env each call so an
  * override applies on the next turn. Always returns a valid config (falls back
- * to the code default piece-by-piece).
+ * to the code default piece-by-piece). `baseModel` is the composer-selected
+ * orchestrator model for the turn — it becomes the aggregator when it belongs
+ * to the aggregator's family.
  */
-export function resolveCollideConfig(activeBackend?: OrchestratorBackendId): MoaConfig {
+export function resolveCollideConfig(activeBackend?: OrchestratorBackendId, baseModel?: string): MoaConfig {
   const proposers = parseProposersEnv(process.env.O8_COLLIDE_PROPOSERS) ?? DEFAULT_COLLIDE_CONFIG.proposers;
   const aggregator = parseAggregatorEnv(process.env.O8_COLLIDE_AGGREGATOR)
-    ?? aggregatorFor(resolveCollideAggregatorSync(), activeBackend);
+    ?? aggregatorFor(resolveCollideAggregatorSync(), activeBackend, baseModel);
   return { id: 'collide', label: 'Collide', proposers, aggregator };
 }
