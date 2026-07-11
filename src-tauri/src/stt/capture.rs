@@ -26,6 +26,11 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 const TARGET_RATE: f64 = 16_000.0;
 /// Frames per FIFO chunk — matches the helper's reader (1024 × f32 = 4096 B).
 const CHUNK_FRAMES: usize = 1024;
+/// Discard the first slice of captured audio after the device opens (#1544):
+/// the first buffers off a freshly-opened input carry device-warmup garbage and
+/// the tail of whatever was playing before the duck landed, which would
+/// otherwise bleed into the start of the message. Measured at the SOURCE rate.
+const WARMUP_DISCARD_MS: f64 = 200.0;
 
 pub struct AudioPump {
     fifo_path: PathBuf,
@@ -222,12 +227,24 @@ fn pump_thread(
     let mut src_pos = 0f64;
     let mut out_chunk: Vec<f32> = Vec::with_capacity(CHUNK_FRAMES);
 
+    // Source-rate frames of device warmup to drop before any audio reaches the
+    // FIFO (#1544). Counted down as callback buffers arrive, ahead of resampling.
+    let mut warmup_discard_left = (src_rate * WARMUP_DISCARD_MS / 1000.0) as usize;
+
     while running.load(Ordering::SeqCst) && !err_flag.load(Ordering::SeqCst) {
-        let mono = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+        let mut mono = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
             Ok(m) => m,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
+        if warmup_discard_left > 0 {
+            let drop_n = warmup_discard_left.min(mono.len());
+            mono.drain(..drop_n);
+            warmup_discard_left -= drop_n;
+            if mono.is_empty() {
+                continue;
+            }
+        }
         src_buf.extend_from_slice(&mono);
 
         while (src_pos as usize) + 1 < src_buf.len() {

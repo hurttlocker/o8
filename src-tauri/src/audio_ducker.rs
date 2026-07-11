@@ -9,7 +9,9 @@
 //! pulls in an FFI dependency for what is a 2-line shell-out. Ported from
 //! aqua/Symon `audio_ducker.rs`.
 
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
+use std::time::Duration;
 
 /// The lower bound we clamp the system volume to while dictating, as a fraction
 /// of the user's pre-duck volume.
@@ -45,40 +47,86 @@ fn set_output_volume(v: u32) {
         .output();
 }
 
+/// Handle returned by [`duck`] that lets a caller wait for the first
+/// volume-set to actually land before opening the mic. Dropping it without
+/// waiting keeps the old fire-and-forget behavior.
+pub struct DuckHandle {
+    done: Receiver<()>,
+}
+
+impl DuckHandle {
+    /// Block until the duck's first volume-set completes, capped at `max` so a
+    /// slow `osascript` can never delay dictation start noticeably. Safe only
+    /// from a worker thread — never the CGEvent tap callback. Returns whether
+    /// the set landed within the cap (`false` = timed out; the duck may still
+    /// complete a beat later, which is harmless).
+    pub fn wait(self, max: Duration) -> bool {
+        self.done.recv_timeout(max).is_ok()
+    }
+}
+
 /// Lower the system volume so dictation audio is clearer. Safe to call
 /// repeatedly; only the first call since the last `restore()` takes effect.
 ///
-/// Fire-and-forget on a detached thread — the two `osascript` shell-outs cost
-/// hundreds of ms (process spawn + AppleScript compile + IPC to the volume
-/// server), and ducking is comfort, not correctness, so the Fn press path must
-/// not block on it before STT can start.
-pub fn duck() {
+/// Runs the two `osascript` shell-outs (each hundreds of ms: process spawn +
+/// AppleScript compile + IPC to the volume server) on a detached thread so the
+/// Fn press path never blocks. The returned [`DuckHandle`] signals when the
+/// first volume-set has landed — `begin_system_dictation` waits on it (bounded)
+/// so playing audio can't bleed into the start of the message before the mic
+/// opens (#1544). Callers that don't need the ordering just drop the handle.
+#[must_use = "drop the DuckHandle to keep fire-and-forget ducking, or call wait() to gate on it"]
+pub fn duck() -> DuckHandle {
+    let (tx, rx) = channel::<()>();
     #[cfg(target_os = "macos")]
     {
-        // Gated by the `ducking_enabled` voice pref (default on).
+        // Gated by the `ducking_enabled` voice pref (default on). When off,
+        // signal immediately so a waiter doesn't sit out the full cap.
         if !crate::stt::keys::config_bool("ducking_enabled", true) {
-            return;
+            let _ = tx.send(());
+            return DuckHandle { done: rx };
         }
-        std::thread::spawn(|| {
-        let mut saved = match SAVED_VOLUME.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
-        if saved.is_some() {
-            return; // already ducked
-        }
-        let Some(current) = read_output_volume() else {
-            return;
-        };
-        // If the system is already silent, nothing to duck — don't save a zero
-        // that would prevent future restores from ever raising it back up.
-        if current == 0 {
-            return;
-        }
-        let target = (current as f32 * DUCK_SCALAR).round() as u32;
-        set_output_volume(target);
-        *saved = Some(current);
+        std::thread::spawn(move || {
+            // Signal on EVERY exit path (early returns included) so a waiter is
+            // never stranded for the full cap when there's nothing to duck.
+            let _guard = SendOnDrop(Some(tx));
+            let mut saved = match SAVED_VOLUME.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            if saved.is_some() {
+                return; // already ducked
+            }
+            let Some(current) = read_output_volume() else {
+                return;
+            };
+            // If the system is already silent, nothing to duck — don't save a
+            // zero that would prevent future restores from ever raising it back.
+            if current == 0 {
+                return;
+            }
+            let target = (current as f32 * DUCK_SCALAR).round() as u32;
+            set_output_volume(target);
+            *saved = Some(current);
         });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = tx.send(());
+    }
+    DuckHandle { done: rx }
+}
+
+/// Fires its channel on drop so the duck worker signals completion no matter
+/// which early return it takes.
+#[cfg(target_os = "macos")]
+struct SendOnDrop(Option<std::sync::mpsc::Sender<()>>);
+
+#[cfg(target_os = "macos")]
+impl Drop for SendOnDrop {
+    fn drop(&mut self) {
+        if let Some(tx) = self.0.take() {
+            let _ = tx.send(());
+        }
     }
 }
 
