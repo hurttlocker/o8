@@ -160,6 +160,59 @@ pub(crate) fn mic_permission_granted() -> Option<bool> {
     Some(true)
 }
 
+/// Explicitly drive the macOS Microphone permission prompt via
+/// `AVCaptureDevice requestAccessForMediaType:completionHandler:`, so the OS
+/// dialog is deterministic instead of relying on the first mic capture to
+/// trigger it (#1537-adjacent). Call from the dictation setup path at boot.
+///
+/// Guarded two ways: it runs at most ONCE per app run (a `Once`), and it only
+/// prompts when the status is `notDetermined` — an already-authorized or
+/// already-denied grant short-circuits (re-requesting a denial is a silent
+/// no-op; re-requesting an authorization is wasted work). The completion
+/// handler just logs the outcome; the dictation path re-checks status when it
+/// actually captures.
+#[cfg(target_os = "macos")]
+pub(crate) fn request_mic_access_once() {
+    use std::sync::Once;
+    static REQUESTED: Once = Once::new();
+    REQUESTED.call_once(|| {
+        // Only prompt when the user was never asked (None == notDetermined).
+        if mic_permission_granted().is_some() {
+            return;
+        }
+        use block2::RcBlock;
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, Bool};
+        use objc2_foundation::NSString;
+
+        // Force-link AVFoundation so AVCaptureDevice exists in the runtime.
+        #[link(name = "AVFoundation", kind = "framework")]
+        extern "C" {}
+
+        let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+            return;
+        };
+        // AVMediaTypeAudio == "soun".
+        let media = NSString::from_str("soun");
+        // The completion handler fires on an arbitrary queue after the user
+        // answers. RcBlock is retained by AVFoundation for the call, so it
+        // outlives this function; our reference drops here harmlessly.
+        let handler = RcBlock::new(|granted: Bool| {
+            log::info!(
+                "[voice] microphone access request resolved: granted={}",
+                granted.as_bool()
+            );
+        });
+        let _: () = unsafe {
+            msg_send![cls, requestAccessForMediaType: &*media, completionHandler: &*handler]
+        };
+        log::info!("[voice] requested microphone access (status was notDetermined)");
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn request_mic_access_once() {}
+
 // ── Tauri commands (frontend onboarding / permission-recovery surface) ──
 
 /// Whether o8 has macOS Accessibility permission. Non-prompting — safe to poll.
