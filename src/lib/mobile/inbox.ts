@@ -209,6 +209,7 @@ export function toMobileFleetSession(agent: AgentSummary, approval?: ApprovalRec
     actions: mobileFleetActions(agent, approval),
     lastEventAt: agent.lastEventAt,
     lastActivityAt: agent.lastActivityAt ?? null,
+    huddlePlan: agent.huddlePlan,
   };
 }
 
