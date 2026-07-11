@@ -412,7 +412,7 @@ function OrchestratorTabInner({
           // Persist the title alongside the threadId so the next reload
           // can pre-set tab.label at tab-creation time (no "Orchestrator"
           // flash before the chat-history fetch completes).
-          if (active && persistLastThread) writeLastOrchestratorThread(threadId, title);
+          if (active && persistLastThread) writeLastOrchestratorThread(repoPath ?? null, threadId, title);
           window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
             detail: { tabId, threadId, title },
           }));
@@ -431,7 +431,7 @@ function OrchestratorTabInner({
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
-  }, [active, persistLastThread, tabId, chatChromeState.threadId, lockedMode]);
+  }, [active, persistLastThread, tabId, chatChromeState.threadId, lockedMode, repoPath]);
 
   // Persist the last-active orchestrator thread id globally so dev
   // reloads drop the operator back into their last conversation. Only
@@ -447,9 +447,9 @@ function OrchestratorTabInner({
       // Don't clear the title here — only the threadId update fires this
       // effect. The title-sync effect above handles the (threadId, title)
       // tuple write. Pass `undefined` to leave the stored title alone.
-      writeLastOrchestratorThread(chatChromeState.threadId);
+      writeLastOrchestratorThread(repoPath ?? null, chatChromeState.threadId);
     }
-  }, [active, persistLastThread, chatChromeState.threadId, chatChromeState.hasMessages]);
+  }, [active, persistLastThread, chatChromeState.threadId, chatChromeState.hasMessages, repoPath]);
 
   // (First-message side-effects useEffect is declared further down,
   // AFTER worktreeMode / pickedBranch / activeWorkspaceTarget so the
@@ -479,13 +479,13 @@ function OrchestratorTabInner({
     // Another orchestrator tab already adopted the global last-thread this
     // session — this one stays fresh, so don't flash the restore shimmer.
     if (globalLastThreadRestoreClaimed) return false;
-    return Boolean(readLastOrchestratorThreadId());
+    return Boolean(readLastOrchestratorThreadId(repoPath ?? null));
   });
   useEffect(() => {
     if (!active) return;
     if (!restoreLastThread) return;
     if (initialThreadId) return; // explicit thread wins
-    const restored = readLastOrchestratorThreadId();
+    const restored = readLastOrchestratorThreadId(repoPath ?? null);
     if (!restored) return;
     if (restoredThreadRef.current === restored) return; // already loaded
     // At most ONE orchestrator tab per app load adopts the global last-active
@@ -514,7 +514,7 @@ function OrchestratorTabInner({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [active, initialThreadId, restoreLastThread]);
+  }, [active, initialThreadId, restoreLastThread, repoPath]);
 
   // Drop the restoring flag once messages arrive (hasMessages flips
   // true). Also bail out if the restore has been running for ~3s —
