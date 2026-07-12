@@ -3439,14 +3439,32 @@ mod stt_engine {
                     .ok()
                     .and_then(|bytes| crate::stt::gate::analyze_wav(&bytes))
                 {
+                    // The gate exists to stop SILENCE from hallucinating a paste —
+                    // but RMS alone can't tell silence from a quiet microphone. A
+                    // laptop mic at low input gain measures under the floor while
+                    // carrying perfectly real speech (live-hit 2026-07-12: free-tier
+                    // MacBook transcribed fine in the HUD, then the gate ate the
+                    // paste). Apple's live recognizer is the tiebreaker: if it heard
+                    // words, it wasn't silence — deliver. Only bail when BOTH the
+                    // energy floor trips AND the live pass heard nothing; the
+                    // post-transcription denylist still catches Apple's own silence
+                    // artifacts ("thank you") independently of this branch.
                     if crate::stt::gate::is_silence(&stats) {
+                        if apple_text.trim().is_empty() {
+                            log::info!(
+                                "[voice] silence gate tripped: rms={:.1}dBFS duration={}ms apple_text=empty — no transcribe, no paste",
+                                stats.rms_dbfs,
+                                stats.duration_ms
+                            );
+                            finalize_bail_empty(&app, session_id, &audio_file, &apple_text);
+                            return;
+                        }
                         log::info!(
-                            "[voice] silence gate tripped: rms={:.1}dBFS duration={}ms — no transcribe, no paste",
+                            "[voice] silence gate DEFERRED to live transcript: rms={:.1}dBFS duration={}ms apple_text={} chars — quiet mic, not silence",
                             stats.rms_dbfs,
-                            stats.duration_ms
+                            stats.duration_ms,
+                            apple_text.trim().chars().count()
                         );
-                        finalize_bail_empty(&app, session_id, &audio_file, &apple_text);
-                        return;
                     }
                 }
             }
