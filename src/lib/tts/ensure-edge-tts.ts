@@ -38,19 +38,24 @@ function importsEdgeTts(): Promise<boolean> {
   });
 }
 
-function pipInstall(breakSystem: boolean): Promise<{ ok: boolean; stderr: string }> {
+function pipInstall(opts: { breakSystem?: boolean; user?: boolean }): Promise<{ ok: boolean; detail: string }> {
   return new Promise((resolve) => {
     const args = ['-m', 'pip', 'install', '--quiet'];
-    if (breakSystem) args.push('--break-system-packages');
+    if (opts.breakSystem) args.push('--break-system-packages');
+    if (opts.user) args.push('--user');
     args.push('edge-tts');
     try {
-      const proc = spawn(PYTHON, args, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 120_000 });
-      let stderr = '';
-      proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-      proc.on('close', (code) => resolve({ ok: code === 0, stderr }));
-      proc.on('error', (err) => resolve({ ok: false, stderr: err.message }));
+      // Capture stdout too — pip writes some failures there, and the old
+      // stderr-only capture produced the useless "failed. stderr:" (empty)
+      // log that hid the free laptop's real failure (2026-07-12).
+      const proc = spawn(PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 });
+      let out = '';
+      proc.stdout?.on('data', (chunk: Buffer) => { out += chunk.toString(); });
+      proc.stderr?.on('data', (chunk: Buffer) => { out += chunk.toString(); });
+      proc.on('close', (code, signal) => resolve({ ok: code === 0, detail: `exit=${code ?? `signal:${signal}`} ${out.trim()}` }));
+      proc.on('error', (err) => resolve({ ok: false, detail: err.message }));
     } catch (err) {
-      resolve({ ok: false, stderr: err instanceof Error ? err.message : String(err) });
+      resolve({ ok: false, detail: err instanceof Error ? err.message : String(err) });
     }
   });
 }
@@ -62,14 +67,18 @@ export async function ensureEdgeTtsInstalled(): Promise<void> {
   try {
     if (await importsEdgeTts()) return; // already good — the common case, ~100ms
     console.log('[tts] edge-tts missing — installing the Steffan play voice in the background…');
-    let result = await pipInstall(false);
-    if (!result.ok && /externally-managed-environment|break-system-packages/i.test(result.stderr)) {
-      result = await pipInstall(true);
+    let result = await pipInstall({});
+    if (!result.ok && /externally-managed-environment|break-system-packages/i.test(result.detail)) {
+      result = await pipInstall({ breakSystem: true });
+    }
+    if (!result.ok && /permission denied|not writeable|errno 13/i.test(result.detail)) {
+      // System-python site-packages unwritable → per-user install.
+      result = await pipInstall({ user: true });
     }
     if (result.ok && (await importsEdgeTts())) {
       console.log('[tts] edge-tts installed — play voice ready');
     } else {
-      console.warn('[tts] edge-tts auto-install failed; play falls back to the system voice. stderr:', result.stderr.slice(0, 300));
+      console.warn('[tts] edge-tts auto-install failed; play falls back to the system voice.', result.detail.slice(0, 400));
     }
   } catch (err) {
     console.warn('[tts] edge-tts ensure errored (non-fatal):', err);
