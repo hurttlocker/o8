@@ -16,7 +16,7 @@
  * messaging). This one is read-only data.
  */
 
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { FleetAgent, ThoughtsCardProps } from './thoughts/types';
 
 export interface OrchestratorDataValue {
@@ -79,8 +79,78 @@ interface OrchestratorDataProviderProps extends OrchestratorDataValue {
 
 export function OrchestratorDataProvider({
   children,
-  ...value
+  agents,
+  missionState,
+  workspaceTargets,
+  onMissionStateChange,
+  onLaunchPacket,
+  draftInjection,
+  imageInjection,
+  onImageInjectionConsumed,
+  onSelectSession,
+  latestDispatchedTabId,
+  latestDispatchedAt,
+  onAcceptDirectiveProposal,
+  selectedPacketId,
+  onSelectedPacketChange,
+  onOpenO8Panel,
+  o8PanelVisible,
+  projectContextRailVisible,
 }: OrchestratorDataProviderProps) {
+  // The value used to be a rest-spread — `{ children, ...value }` — which
+  // allocates a BRAND NEW object on every render of the dashboard. React
+  // compares context values by identity, so a fresh object re-renders every
+  // consumer unconditionally, whether or not anything it reads actually changed.
+  //
+  // There are 12 consumers, including ThoughtsChatPanel (2.3k lines) and a
+  // memo()'d TabBar that could therefore never bail out — the un-memoized
+  // context defeated its own memo. Every other provider in the dashboard
+  // (Theme, Alert, Entitlement, DesktopWs) already memoizes; this was the outlier.
+  //
+  // The call sites pass stable identities (page.tsx carries 82 useCallbacks), so
+  // memoizing on the individual fields means consumers now re-render only when a
+  // field they depend on genuinely changed.
+  const value = useMemo<OrchestratorDataValue>(
+    () => ({
+      agents,
+      missionState,
+      workspaceTargets,
+      onMissionStateChange,
+      onLaunchPacket,
+      draftInjection,
+      imageInjection,
+      onImageInjectionConsumed,
+      onSelectSession,
+      latestDispatchedTabId,
+      latestDispatchedAt,
+      onAcceptDirectiveProposal,
+      selectedPacketId,
+      onSelectedPacketChange,
+      onOpenO8Panel,
+      o8PanelVisible,
+      projectContextRailVisible,
+    }),
+    [
+      agents,
+      missionState,
+      workspaceTargets,
+      onMissionStateChange,
+      onLaunchPacket,
+      draftInjection,
+      imageInjection,
+      onImageInjectionConsumed,
+      onSelectSession,
+      latestDispatchedTabId,
+      latestDispatchedAt,
+      onAcceptDirectiveProposal,
+      selectedPacketId,
+      onSelectedPacketChange,
+      onOpenO8Panel,
+      o8PanelVisible,
+      projectContextRailVisible,
+    ],
+  );
+
   return (
     <OrchestratorDataContext.Provider value={value}>
       {children}
