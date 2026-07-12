@@ -778,48 +778,72 @@ export class WorktreeManager {
   /**
    * List all worktrees (both managed and Claude-native).
    * Combines git worktree list with our metadata.
+   *
+   * ## Why `withDiskUsage` is opt-in
+   *
+   * `diskUsageBytes` costs a `du -sk` — a recursive stat of every inode under
+   * the worktree (189ms for one 38MB worktree, measured; worse as it grows).
+   * It used to be computed unconditionally, and the ws-server's 5-second
+   * conflict scan calls `list()`. So an IDLE o8 was recursively walking every
+   * worktree on disk twelve times a minute, forever — ~2.1s of pure disk walk
+   * per tick with 11 worktrees present, on a tick that fires every 5s.
+   *
+   * Exactly one caller in the codebase reads `diskUsageBytes`
+   * (`getWorktreeStats` in launch.ts). Everyone else — including the conflict
+   * report, which never touches the field — was paying for it. It is now off by
+   * default; ask for it explicitly if you actually render bytes.
+   *
+   * Both passes also run their per-worktree probes concurrently. They were
+   * serial `await`s in a `for` loop, so the wall time was the SUM of every
+   * worktree's git probes rather than the slowest one.
    */
-  async list(): Promise<WorktreeInfo[]> {
+  async list(opts: { withDiskUsage?: boolean } = {}): Promise<WorktreeInfo[]> {
     const [gitWorktrees, meta] = await Promise.all([
       this.gitWorktreeList(),
       this.loadAllMeta(),
     ]);
 
-    const results: WorktreeInfo[] = [];
+    const metaResults = await Promise.all(
+      Object.entries(meta).map(async ([id, entry]): Promise<WorktreeInfo | null> => {
+        const worktreePath = entry.claudeManaged
+          ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
+          : path.join(this.worktreeBase, id);
+        const gitWt = gitWorktrees.find((g) => g.path === worktreePath || g.branch?.includes(id));
 
-    for (const [id, entry] of Object.entries(meta)) {
-      const worktreePath = entry.claudeManaged
-        ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
-        : path.join(this.worktreeBase, id);
-      const gitWt = gitWorktrees.find((g) => g.path === worktreePath || g.branch?.includes(id));
+        // Check if directory actually exists
+        const exists = await this.pathExists(worktreePath);
+        if (!exists && !entry.claudeManaged) return null; // Cleaned up externally
 
-      // Check if directory actually exists
-      const exists = await this.pathExists(worktreePath);
-      if (!exists && !entry.claudeManaged) continue; // Cleaned up externally
+        const [dirtyFiles, lastActivity, diskUsageBytes] = await Promise.all([
+          exists ? this.getDirtyFiles(worktreePath, entry.baseBranch) : Promise.resolve([]),
+          exists ? this.getLastModified(worktreePath) : Promise.resolve(entry.createdAt),
+          exists && opts.withDiskUsage ? this.getDiskUsage(worktreePath) : Promise.resolve(0),
+        ]);
+        const status = this.inferStatus(lastActivity, dirtyFiles, entry);
+        const isolationKind = entry.isolationKind ?? 'git-worktree';
 
-      const dirtyFiles = exists ? await this.getDirtyFiles(worktreePath, entry.baseBranch) : [];
-      const lastActivity = exists ? await this.getLastModified(worktreePath) : entry.createdAt;
-      const status = this.inferStatus(lastActivity, dirtyFiles, entry);
-      const diskUsageBytes = exists ? await this.getDiskUsage(worktreePath) : 0;
-      const isolationKind = entry.isolationKind ?? 'git-worktree';
+        return {
+          id,
+          path: worktreePath,
+          branch: entry.branchName ?? gitWt?.branch ?? `worktree/${entry.agentType}/${id}`,
+          baseBranch: entry.baseBranch,
+          agentType: entry.agentType,
+          sessionKey: entry.sessionKey,
+          status,
+          createdAt: entry.createdAt,
+          lastActivityAt: lastActivity,
+          diskUsageBytes,
+          dirtyFiles,
+          claudeManaged: entry.claudeManaged,
+          isolationKind,
+          hydrationPaths: entry.hydrationPaths ?? [],
+        };
+      }),
+    );
 
-      results.push({
-        id,
-        path: worktreePath,
-        branch: entry.branchName ?? gitWt?.branch ?? `worktree/${entry.agentType}/${id}`,
-        baseBranch: entry.baseBranch,
-        agentType: entry.agentType,
-        sessionKey: entry.sessionKey,
-        status,
-        createdAt: entry.createdAt,
-        lastActivityAt: lastActivity,
-        diskUsageBytes,
-        dirtyFiles,
-        claudeManaged: entry.claudeManaged,
-        isolationKind,
-        hydrationPaths: entry.hydrationPaths ?? [],
-      });
-    }
+    const results: WorktreeInfo[] = metaResults.filter(
+      (entry): entry is WorktreeInfo => entry !== null,
+    );
 
     // Surface worktrees that exist in git but lost their metadata entry
     // (dev-server restart, accidental .meta deletion). Without this fallback,
@@ -827,39 +851,47 @@ export class WorktreeManager {
     // "Worktree not found on disk" even when the worktree is fully on disk
     // and registered with git.
     const knownPaths = new Set(results.map((r) => r.path));
-    for (const gitWt of gitWorktrees) {
-      if (knownPaths.has(gitWt.path)) continue;
-      if (await this.samePath(gitWt.path, this.repoRoot)) continue;
-      const exists = await this.pathExists(gitWt.path);
-      if (!exists) continue;
+    const orphanResults = await Promise.all(
+      gitWorktrees.map(async (gitWt): Promise<WorktreeInfo | null> => {
+        if (knownPaths.has(gitWt.path)) return null;
+        if (await this.samePath(gitWt.path, this.repoRoot)) return null;
+        const exists = await this.pathExists(gitWt.path);
+        if (!exists) return null;
 
-      const id = path.basename(gitWt.path);
-      const branch = gitWt.branch ?? `worktree/unknown/${id}`;
-      const agentType = branch.includes('/codex/') ? 'codex' : 'claude-code';
-      const lastActivity = await this.getLastModified(gitWt.path).catch(() => Date.now());
-      const dirtyFiles = await this.getDirtyFiles(gitWt.path, 'main').catch(() => []);
-      const ageMs = Date.now() - lastActivity;
-      const status: WorktreeStatus = ageMs > STALE_THRESHOLD_MS
-        ? 'stale'
-        : dirtyFiles.length > 0 && ageMs < 5 * 60_000
-          ? 'active'
-          : 'ready';
+        const id = path.basename(gitWt.path);
+        const branch = gitWt.branch ?? `worktree/unknown/${id}`;
+        const agentType = branch.includes('/codex/') ? 'codex' : 'claude-code';
+        const [lastActivity, dirtyFiles] = await Promise.all([
+          this.getLastModified(gitWt.path).catch(() => Date.now()),
+          this.getDirtyFiles(gitWt.path, 'main').catch(() => []),
+        ]);
+        const ageMs = Date.now() - lastActivity;
+        const status: WorktreeStatus = ageMs > STALE_THRESHOLD_MS
+          ? 'stale'
+          : dirtyFiles.length > 0 && ageMs < 5 * 60_000
+            ? 'active'
+            : 'ready';
 
-      results.push({
-        id,
-        path: gitWt.path,
-        branch,
-        baseBranch: 'main',
-        agentType,
-        sessionKey: undefined,
-        status,
-        createdAt: lastActivity,
-        lastActivityAt: lastActivity,
-        diskUsageBytes: 0,
-        dirtyFiles,
-        claudeManaged: false,
-        isolationKind: 'git-worktree',
-      });
+        return {
+          id,
+          path: gitWt.path,
+          branch,
+          baseBranch: 'main',
+          agentType,
+          sessionKey: undefined,
+          status,
+          createdAt: lastActivity,
+          lastActivityAt: lastActivity,
+          diskUsageBytes: 0,
+          dirtyFiles,
+          claudeManaged: false,
+          isolationKind: 'git-worktree',
+        };
+      }),
+    );
+
+    for (const entry of orphanResults) {
+      if (entry) results.push(entry);
     }
 
     // Sort by most recent activity
@@ -1521,29 +1553,43 @@ export class WorktreeManager {
 
   async getDirtyFiles(worktreePath: string, baseBranch?: string): Promise<string[]> {
     try {
-      // Uncommitted changes
-      const { stdout: uncommitted } = await execFileAsync('git', ['diff', '--name-only'], {
-        cwd: worktreePath,
-        timeout: 5000,
-      });
+      // Three independent git probes with no ordering dependency between them.
+      // They used to run SERIALLY — three full process-spawn round trips
+      // (~68ms each on the operator's Intel box, so ~204ms per worktree) to
+      // answer three questions that could have been asked at the same time.
+      // Concurrent: wall time becomes the slowest probe, not the sum.
+      //
+      // Deliberately NOT collapsed into a single `git diff --name-only HEAD`.
+      // That would miss a file that was staged and then reverted in the working
+      // tree (index differs from HEAD, working tree does not) — the union of the
+      // three probes is the correct definition of "dirty" and is preserved here
+      // exactly, including the failure semantics: if either of the first two
+      // probes throws, Promise.all rejects and the outer catch returns [], just
+      // as it did before. Only the base-branch probe swallows its own error,
+      // because the base branch may legitimately not be reachable.
+      const [uncommitted, staged, committed] = await Promise.all([
+        // Uncommitted changes (working tree vs index)
+        execFileAsync('git', ['diff', '--name-only'], {
+          cwd: worktreePath,
+          timeout: 5000,
+        }).then((r) => r.stdout),
 
-      // Staged changes
-      const { stdout: staged } = await execFileAsync('git', ['diff', '--name-only', '--cached'], {
-        cwd: worktreePath,
-        timeout: 5000,
-      });
+        // Staged changes (index vs HEAD)
+        execFileAsync('git', ['diff', '--name-only', '--cached'], {
+          cwd: worktreePath,
+          timeout: 5000,
+        }).then((r) => r.stdout),
 
-      // Committed changes since base (if base provided)
-      let committed = '';
-      if (baseBranch) {
-        try {
-          const { stdout } = await execFileAsync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
-            cwd: worktreePath,
-            timeout: 5000,
-          });
-          committed = stdout;
-        } catch { /* base branch may not be reachable */ }
-      }
+        // Committed changes since base (if base provided)
+        baseBranch
+          ? execFileAsync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
+              cwd: worktreePath,
+              timeout: 5000,
+            })
+              .then((r) => r.stdout)
+              .catch(() => '' /* base branch may not be reachable */)
+          : Promise.resolve(''),
+      ]);
 
       const allFiles = [...uncommitted.split('\n'), ...staged.split('\n'), ...committed.split('\n')]
         .map((f) => f.trim())
@@ -1555,9 +1601,20 @@ export class WorktreeManager {
     }
   }
 
+  /**
+   * Recursive disk walk. NOT cheap — `du -sk` stats every inode under the path,
+   * and a worktree carries node_modules / .next / target. Measured at 189ms for
+   * a single 38MB worktree on the operator's box, and it scales with the tree.
+   *
+   * The old comment here claimed "fast even for large dirs". It is not, and that
+   * claim cost real money: `list()` called this unconditionally, and the 5s
+   * conflict scan calls `list()`, so idle o8 was recursively walking every
+   * worktree on disk twelve times a minute, forever.
+   *
+   * Only ever call this behind `list({ withDiskUsage: true })`.
+   */
   private async getDiskUsage(dirPath: string): Promise<number> {
     try {
-      // du -sk returns kilobytes; fast even for large dirs
       const { stdout } = await execFileAsync('du', ['-sk', dirPath], { timeout: 5000 });
       const kb = parseInt(stdout.split('\t')[0] ?? '0', 10);
       return kb * 1024;
