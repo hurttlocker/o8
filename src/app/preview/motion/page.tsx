@@ -19,11 +19,11 @@ const STATUS_STATES: Array<{
   where: string;
 }> = [
   { state: 'idle', label: 'Idle', meaning: 'Present, not working. No claim on attention.', color: 'var(--t-text-faint)', motion: 'static ring', where: 'queued / archived rows' },
-  { state: 'running', label: 'Working', meaning: 'Actively working. Pulses; orbits once long-running.', color: 'var(--t-accent)', motion: 'pulse → orbit', where: 'live agents, streaming turns' },
-  { state: 'review', label: 'Awaiting review', meaning: 'Paused, parked waiting on you. Neutral — the sweep says "for you", not the color.', color: '#94a3b8', motion: 'grey sweep', where: 'needs-review packets' },
-  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. Orange o8 dual-pulse (shrunk to ~10px) — the o8 mark, distinct from failed’s single red pulse.', color: '#F97316', motion: 'o8 dual pulse ~10px', where: 'rejected packets' },
-  { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed.', color: 'var(--t-success)', motion: 'static (solid)', where: 'released packets' },
-  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. A live alarm — pulses to take precedence over the static rose of a declined review.', color: '#ef4444', motion: 'pulse (red orb)', where: 'failed / blocked lanes' },
+  { state: 'running', label: 'Working', meaning: 'Actively working. The 3×3 canvas breathes — center vs ring in anti-phase sine.', color: 'var(--t-accent)', motion: 'Breathe', where: 'live agents, streaming turns' },
+  { state: 'review', label: 'Awaiting review', meaning: 'Paused, parked waiting on you. Neutral — the grid holds dim, the lit center blinks off rarely ("your turn"), not the color.', color: '#94a3b8', motion: 'Hold-blink', where: 'needs-review packets' },
+  { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. Gravity in amber — the 8 outer cells fall and fade, then reassemble. Same mark as failed; color is severity.', color: '#F97316', motion: 'Gravity (amber)', where: 'rejected packets' },
+  { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed. Cells settle — pop in staggered and hold most of the cycle.', color: 'var(--t-success)', motion: 'Settle', where: 'released packets' },
+  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Gravity in red — same fall-and-reassemble mark as a declined review, color raised to alarm.', color: '#ef4444', motion: 'Gravity (red)', where: 'failed / blocked lanes' },
 ];
 
 const SAMPLE_ROW_TITLE = 'Ingest spec files to improve retrieval awareness';
