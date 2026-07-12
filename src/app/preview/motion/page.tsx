@@ -32,13 +32,12 @@ const SAMPLE_ROW_META = 'main · automation · idle';
 // Neo-retro pixel-grid loaders — bespoke o8 riff on the reference set's animated
 // loading-icon set. Each maps to one borrowed mechanic; CSS lives in
 // globals.css as .o8-loader-<kind>. (2026-07-11.)
-type LoaderKind = 'bitfield' | 'dispatch' | 'aurora' | 'mirror' | 'scan' | 'stack';
+type LoaderKind = 'bitfield' | 'dispatch' | 'aurora' | 'mirror' | 'stack';
 const LOADERS: Array<{ kind: LoaderKind; title: string; mechanic: string }> = [
   { kind: 'bitfield', title: 'Bitfield', mechanic: 'A lit pulse marches a 3×3 grid diagonally in hard steps(1) snaps — grid-based shape-shifting (cells on/off, not a rotating asset).' },
   { kind: 'dispatch', title: 'Dispatch', mechanic: 'A packed core spreads its 4 arms to a cross, then re-packs — the reference’s "posting" metaphor (data packed → data sent). Transform + opacity.' },
   { kind: 'aurora', title: 'Aurora', mechanic: 'A sharp stepping pixel quad over a soft drifting glow — the signature lo-fi/hi-fi contrast. Glow rasterizes once, only translates.' },
   { kind: 'mirror', title: 'Mirror', mechanic: 'Two diagonals of a 2×2 quad hard-swap opacity — the retro 2-frame "thinking" mirror/rotation, stepped.' },
-  { kind: 'scan', title: 'Scan', mechanic: 'A lit block steps across a pixel strip leaving a quantized steps(2) dim trail — retro pixel scanline.' },
   { kind: 'stack', title: 'Stack', mechanic: 'Four bar heights jump in quantized steps(4) scaleY — blocky frame-by-frame VU bounce, no smooth interpolation.' },
 ];
 
@@ -556,7 +555,6 @@ function PixelLoader({ kind }: { kind: LoaderKind }) {
     dispatch: 5,
     aurora: 4,
     mirror: 4,
-    scan: 5,
     stack: 4,
   };
   return (
