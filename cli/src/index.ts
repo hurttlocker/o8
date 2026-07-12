@@ -131,11 +131,11 @@ commands:
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   mission create       create a mission from an inline task (--title --body [--compare m1,m2])
-  mission dispatch     dispatch a created mission's packets to workers (async; --wait blocks for launch) [--mission <id>]
+  mission dispatch     dispatch packets to workers (async; --wait blocks for launch; --watch blocks until review/terminal — the spawner's notification) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
   mission stop         interrupt and hold every packet in a mission [--mission <id>]
-  mission wait         block until a packet hits a review/terminal state [--timeout --poll]
-  mission tail         stream packet status transitions until terminal [--timeout --poll]
+  mission wait         block until a packet hits a review/terminal state [--timeout 30m|2h --poll]
+  mission tail         stream packet status transitions until terminal [--timeout 30m|2h --poll]
   mcp install          install/print the o8 MCP config (--claude-code | --cursor | --print)
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
