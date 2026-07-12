@@ -4910,9 +4910,25 @@ fn boot_ms() -> u128 {
     BOOT_T0.get().map(|t0| t0.elapsed().as_millis()).unwrap_or(0)
 }
 
+/// Pre-log-plugin boot tracing, opt-in via `O8_BOOT_TRACE=1`.
+///
+/// The `log::info!` stamps below only work from `setup()` onward — the Tauri log
+/// plugin does not exist before `.build()`, so anything logged earlier goes
+/// nowhere. That blind spot is precisely why the largest single cost in cold
+/// launch went unnoticed: `generate_context!()` runs BEFORE the log plugin, and
+/// it costs 1.6s. This writes to stderr, which works from instruction one.
+///
+///   O8_BOOT_TRACE=1 /Applications/o8.app/Contents/MacOS/o8
+fn boot_trace(stage: &str) {
+    if std::env::var("O8_BOOT_TRACE").is_ok_and(|v| v == "1") {
+        eprintln!("[boot-trace] {} at {}ms", stage, boot_ms());
+    }
+}
+
 pub fn run() {
     // First statement in the process: everything else is measured against this.
     let _ = BOOT_T0.set(std::time::Instant::now());
+    boot_trace("run() entry");
 
     // Sentry (native shell). Dormant unless a RELEASE build baked a DSN; dev /
     // `tauri dev` stay silent. Init FIRST so panics during startup are captured;
@@ -4920,6 +4936,8 @@ pub fn run() {
     // the DSN so the Next server + ws-server children inherit it.
     let _sentry_guard = telemetry::init();
     telemetry::export_dsn_to_env();
+    log::info!("[boot] telemetry init at {}ms", boot_ms());
+    boot_trace("telemetry init");
 
     // Native crash capture (signals/faults the sentry panic hook can't see:
     // SIGSEGV/SIGABRT/SIGBUS/stack-overflow). MUST start HERE — right after
@@ -4966,6 +4984,7 @@ pub fn run() {
     // Wider net than default-port cleanup from #719: hits orphans on any port,
     // not just 3001/3002.
     sidecar_lifecycle::reap_o8_orphans();
+    boot_trace("orphan reap done");
 
     let dev_frontend = match dev_frontend::from_env() {
         Ok(dev_frontend) => dev_frontend,
@@ -4975,7 +4994,10 @@ pub fn run() {
         }
     };
 
+    boot_trace("BEFORE generate_context!");
     let mut context = tauri::generate_context!();
+    log::info!("[boot] tauri context at {}ms", boot_ms());
+    boot_trace("generate_context! DONE");
     if let Some(dev_frontend) = dev_frontend.as_ref() {
         if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
             eprintln!(
@@ -5261,6 +5283,8 @@ pub fn run() {
             background::open_system_settings,
         ])
         .setup(move |app| {
+            log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
+            boot_trace("setup() entered (plugins INITIALISED)");
             let boot_identity = boot_identity.clone();
             // Nudge the user to move o8 to /Applications when it's running
             // translocated / from a DMG — otherwise dictation paste, Accessibility,
@@ -5335,6 +5359,7 @@ pub fn run() {
             // Store the handle so background tasks (badge poller) and
             // frontend commands can mutate the tray's title / tooltip.
             store_tray(tray);
+            log::info!("[boot] tray built at {}ms", boot_ms());
 
             // ── Badge poller (issue #731) ──
             // 5s tick keeps the tray title in sync with awaiting_review
@@ -5391,12 +5416,15 @@ pub fn run() {
                 // the system caret (see the origin branch in run_finalize). Runs its
                 // own CGEventTap on a dedicated CFRunLoop thread, so it keeps working
                 // even when the main window is hidden.
+                log::info!("[boot] pre-hotkeys at {}ms", boot_ms());
                 fn_hotkey::start(app.handle().clone());
+                log::info!("[boot] fn_hotkey CGEventTap at {}ms", boot_ms());
 
                 // Drive the Microphone permission prompt deterministically at
                 // setup (once per run, only when notDetermined) rather than
                 // hoping the first mic capture triggers it (#1537-adjacent).
                 mac_perms::request_mic_access_once();
+                log::info!("[boot] mac_perms (TCC) at {}ms", boot_ms());
 
                 // ── Voice P3 global shortcuts ──
                 // OS-global chords (fire even when o8 is unfocused). The Fn /
@@ -5952,7 +5980,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(context)
+        .build({ boot_trace("builder chain constructed (plugins registered, not yet init)"); context })
         .expect("error while building Cortex IDE")
         .run(|_app_handle, event| match event {
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
