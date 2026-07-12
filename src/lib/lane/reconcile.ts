@@ -1,11 +1,14 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { promisify } from 'node:util';
 
 import { createApproval } from '@/lib/approvals/store';
 import { getLaneEvents, listLanes, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
+
+const execFileAsync = promisify(execFile);
 
 function isStuckLane(lane: Lane) {
   return lane.status === 'running' || lane.status === 'launching';
@@ -71,8 +74,11 @@ function createSessionLostApproval(lane: Lane) {
 // forever because setLaneStatus never fired. Solution: detect lanes whose
 // worktree path no longer exists on disk and auto-transition them to
 // 'completed'. Model-agnostic — works whether the agent used the merge verb,
-// raw bash, or any other path. Synchronous so it can run inside hot request
-// handlers without a round-trip to the event loop for each stat call.
+// raw bash, or any other path. The git probes below are ASYNC (execFile) — the
+// earlier execFileSync version blocked the ws-server event loop for up to 2s
+// per spawn on the 30s reconcile tick, chaining into multi-second wedges over
+// a large .cortex-worktrees clone farm (#1498). existsSync stays — it's a
+// single sub-millisecond stat per lane, not a walk.
 const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStatus>([
   'reviewing',
   'merging',
@@ -84,15 +90,14 @@ const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStat
 // push happens through an external tool), we need a second signal — branch
 // gone from the repo's ref list. Grouping by repoPath keeps this O(repos)
 // rather than O(lanes) on every reconcile tick.
-function getLocalBranchSetForRepo(repoPath: string): Set<string> | null {
+async function getLocalBranchSetForRepo(repoPath: string): Promise<Set<string> | null> {
   try {
-    const output = execFileSync('git', ['branch', '--format=%(refname:short)'], {
+    const { stdout } = await execFileAsync('git', ['branch', '--format=%(refname:short)'], {
       cwd: repoPath,
       encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2_000,
     });
-    const names = output
+    const names = stdout
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
@@ -108,47 +113,45 @@ function getLocalBranchSetForRepo(repoPath: string): Set<string> | null {
 // branch deleted, but the lane work landed on tmp-* and never made it to main.
 // We look for a "Merge lane <branch>" commit on the base branch's recent history
 // — that's the verb=merge / bash-merge canonical pattern.
-function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: string, branch: string): boolean {
+async function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: string, branch: string): Promise<boolean> {
   try {
-    const output = execFileSync(
+    const { stdout } = await execFileAsync(
       'git',
       ['log', '--format=%s', '-n', '50', baseBranch],
       {
         cwd: repoPath,
         encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 2_000,
       },
     );
     const branchToken = branch.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
     const pattern = new RegExp(`Merge\\s+(?:branch|lane)\\b.*\\b${branchToken}\\b`, 'i');
-    return output.split('\n').some((subject) => pattern.test(subject.trim()));
+    return stdout.split('\n').some((subject) => pattern.test(subject.trim()));
   } catch {
     return false;
   }
 }
 
-function readRefSha(repoPath: string, ref: string): string | null {
+async function readRefSha(repoPath: string, ref: string): Promise<string | null> {
   try {
-    const output = execFileSync('git', ['rev-parse', '--verify', ref], {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', ref], {
       cwd: repoPath,
       encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2_000,
-    }).trim();
+    });
+    const output = stdout.trim();
     return output || null;
   } catch {
     return null;
   }
 }
 
-function isAncestorCommit(repoPath: string, ancestorSha: string, descendantRef: string): boolean {
+async function isAncestorCommit(repoPath: string, ancestorSha: string, descendantRef: string): Promise<boolean> {
   try {
     // Direction matters: the lane head must be the ancestor and the base ref
     // must be the descendant. Swapping these args caused #1457-style lies.
-    execFileSync('git', ['merge-base', '--is-ancestor', ancestorSha, descendantRef], {
+    await execFileAsync('git', ['merge-base', '--is-ancestor', ancestorSha, descendantRef], {
       cwd: repoPath,
-      stdio: ['ignore', 'ignore', 'ignore'],
       timeout: 2_000,
     });
     return true;
@@ -166,8 +169,8 @@ function latestRecordedMergeHeadSha(lane: Lane): string | null {
     ?.trim() ?? null;
 }
 
-function laneMergeConfirmed(lane: Lane): boolean {
-  const laneHeadSha = readRefSha(lane.repoPath, lane.branch) ?? latestRecordedMergeHeadSha(lane);
+async function laneMergeConfirmed(lane: Lane): Promise<boolean> {
+  const laneHeadSha = (await readRefSha(lane.repoPath, lane.branch)) ?? latestRecordedMergeHeadSha(lane);
   if (laneHeadSha) {
     return isAncestorCommit(lane.repoPath, laneHeadSha, lane.baseBranch);
   }
@@ -177,7 +180,20 @@ function laneMergeConfirmed(lane: Lane): boolean {
   return recentMergeSubjectMentionsBranch(lane.repoPath, lane.baseBranch, lane.branch);
 }
 
-export function reconcileOrphanedWorktrees(): number {
+// Single-flight guard: the async reconcile can now be triggered concurrently
+// (30s ws-server tick + a /api/lanes GET). Overlapping runs would double-scan
+// and double-log; fold a concurrent call into the in-flight one.
+let reconcileInFlight: Promise<number> | null = null;
+
+export function reconcileOrphanedWorktrees(): Promise<number> {
+  if (reconcileInFlight) return reconcileInFlight;
+  reconcileInFlight = runReconcileOrphanedWorktrees().finally(() => {
+    reconcileInFlight = null;
+  });
+  return reconcileInFlight;
+}
+
+async function runReconcileOrphanedWorktrees(): Promise<number> {
   const reconcilableLanes = listLanes().filter(
     (lane) =>
       RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
@@ -200,18 +216,18 @@ export function reconcileOrphanedWorktrees(): number {
     if (!existsSync(lane.worktreePath!)) continue; // already caught by worktreeGone
     if (!lane.branch) continue;
     if (!branchSetsByRepo.has(lane.repoPath)) {
-      branchSetsByRepo.set(lane.repoPath, getLocalBranchSetForRepo(lane.repoPath));
+      branchSetsByRepo.set(lane.repoPath, await getLocalBranchSetForRepo(lane.repoPath));
     }
     const branches = branchSetsByRepo.get(lane.repoPath);
     if (!branches) continue; // probe failed — skip rather than false-positive
     if (branches.has(lane.branch)) continue;
-    if (!laneMergeConfirmed(lane)) continue;
+    if (!(await laneMergeConfirmed(lane))) continue;
     branchGone.push(lane);
   }
 
   const confirmedWorktreeGone: Lane[] = [];
   for (const lane of worktreeGone) {
-    if (laneMergeConfirmed(lane)) {
+    if (await laneMergeConfirmed(lane)) {
       confirmedWorktreeGone.push(lane);
       continue;
     }
