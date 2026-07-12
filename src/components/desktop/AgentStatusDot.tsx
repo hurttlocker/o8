@@ -4,24 +4,21 @@
  * AgentStatusDot — the canonical agent/run status indicator, one vocabulary for
  * every surface (the /preview/motion lab):
  *   - idle    → A3 static ring (quiet, no motion)
- *   - running → B pulse (accent) — or C binary orbit once the run has been
- *               active past LONG_RUNNING_MS (1 min). Dynamic: flips live.
+ *   - running → the orbit, always (Q ruling 2026-07-12: the pulse→orbit
+ *               long-running split retired; the orbit IS the running period)
  *   - review  → pulse in the review accent (awaiting you)
  *   - merged  → solid success dot
- *   - failed  → solid red dot
+ *   - failed  → the dispatch cross (alarm red)
  *
- * `startedAt` is when the current run started working (any parseable timestamp
- * or epoch ms); it drives the pulse→orbit switch. While running, a 30s tick
- * re-renders so a run crossing 7 min surfaces the orbit without an upstream
- * state change. Use this everywhere a run shows activity — chat rows, spawned
- * agents, live sessions, the LLM-chat + orchestrator working indicators.
+ * `startedAt` is accepted for API stability — callers still pass their run-start
+ * timestamp — but it no longer drives rendering (there's no elapsed→orbit switch
+ * anymore). Use this everywhere a run shows activity — chat rows, spawned agents,
+ * live sessions, the LLM-chat + orchestrator working indicators.
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { type CSSProperties } from 'react';
 
 export type AgentDotState = 'idle' | 'running' | 'review' | 'rejected' | 'merged' | 'failed';
-
-export const LONG_RUNNING_MS = 1 * 60 * 1000; // 1 min — pulse → orbit (was 7 min; lowered so the long-run orbit is observable)
 
 /**
  * Canonical status → dot-state map. Every agent/session/packet surface routes
@@ -89,16 +86,12 @@ const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
   failed: '#ef4444',
 };
 
-function toMs(value: string | number | null | undefined): number {
-  if (value == null) return NaN;
-  if (typeof value === 'number') return value;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
-
 export function AgentStatusDot({
   state,
-  startedAt,
+  // startedAt is accepted for API stability (callers still pass their run-start
+  // timestamp) but no longer drives rendering — the elapsed→orbit switch retired
+  // 2026-07-12. Kept in the signature so removing it doesn't ripple through callers.
+  startedAt: _startedAt,
   color,
   label,
 }: {
@@ -109,31 +102,6 @@ export function AgentStatusDot({
 }) {
   const running = state === 'running';
   const dotLabel = label ?? defaultDotLabel(state);
-  // Elapsed → orbit switch. Prefer an explicit `startedAt` (surfaces that know
-  // their real run-start, e.g. a streaming turn); otherwise fall back to when
-  // this dot was first observed running. All time math lives in the effect
-  // (Date.now is impure — can't run during render); render just reads the
-  // boolean. A 30s tick re-computes so a run crossing the threshold flips to
-  // the orbit live, no upstream state change required.
-  const observedStartRef = useRef<number | null>(null);
-  const [longRunning, setLongRunning] = useState(false);
-  useEffect(() => {
-    // Not running: clear the observed-start ref. No state reset needed — render
-    // ignores longRunning unless running, and a fresh run resets it below.
-    if (!running) { observedStartRef.current = null; return; }
-    if (observedStartRef.current == null) observedStartRef.current = Date.now();
-    const compute = () => {
-      const explicit = toMs(startedAt);
-      const startMs = Number.isFinite(explicit) ? explicit : observedStartRef.current;
-      // Timer-driven derived state: depends on wall-clock elapsed, which can't
-      // be computed during render (Date.now is impure there). Recomputed on the
-      // effect pass + every 30s; a fresh run resets it to false on its own pass.
-      setLongRunning(startMs != null && Number.isFinite(startMs) && Date.now() - startMs >= LONG_RUNNING_MS);
-    };
-    compute();
-    const id = window.setInterval(compute, 30_000);
-    return () => window.clearInterval(id);
-  }, [running, startedAt]);
 
   if (state === 'merged') {
     return (
@@ -168,16 +136,20 @@ export function AgentStatusDot({
   }
 
   if (state === 'rejected') {
-    // Reviewed & declined: the o8 dual-pulse (small + large circle, offset) in
-    // orange. The o8 mark + motion make it distinct from failed's single red
-    // pulse and from the calm outcome states. (Q trial 2026-07-11.)
+    // Reviewed & declined shares failed's dispatch-cross silhouette — both are
+    // stopped and need your click — with COLOR as the severity split: amber
+    // (reviewed-and-declined) vs failed's alarm red (crashed). Labels/titles
+    // still disambiguate for color-blind operators. (Q ruling 2026-07-12.)
     return (
       <span
-        className="o8-dual-pulse"
-        style={{ ['--dp-color']: color ?? ACCENT.rejected } as CSSProperties}
+        className="o8-loader-dispatch o8-status-size"
+        style={{ ['--t-loader']: color ?? ACCENT.rejected } as CSSProperties}
         aria-label={dotLabel}
         title={dotLabel}
       >
+        <i />
+        <i />
+        <i />
         <i />
         <i />
       </span>
@@ -199,17 +171,12 @@ export function AgentStatusDot({
   }
 
   if (running) {
-    return longRunning ? (
+    // Running is always the orbit (Q ruling 2026-07-12: the pulse→orbit
+    // long-running split retired — the orbit IS the running period).
+    return (
       <span
         className="o8-orbit"
         style={{ color: color ?? ACCENT.running }}
-        aria-label={`${dotLabel} — long-running`}
-        title={`${dotLabel} — long-running`}
-      />
-    ) : (
-      <span
-        className="o8-pulse-circle"
-        style={{ background: color ?? ACCENT.running }}
         aria-label={dotLabel}
         title={dotLabel}
       />
