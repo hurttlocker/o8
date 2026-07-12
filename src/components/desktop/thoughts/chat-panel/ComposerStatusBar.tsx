@@ -106,7 +106,10 @@ export function ComposerStatusBar({
         border: 'none',
       }}
     >
-      <AgentStatusDot state="running" startedAt={turnStart} color="var(--t-text-muted)" />
+      {/* No color override: in the one-canvas family COLOR IS THE STATE —
+          muted-grey Breathe read as review's grey Hold-blink (operator
+          report 2026-07-12, "reviewing indicator while it was working"). */}
+      <AgentStatusDot state="running" startedAt={turnStart} />
       <span style={{
         fontSize: 11.5,
         fontWeight: 500,
