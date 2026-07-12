@@ -1057,6 +1057,101 @@ fn classify_port_listener(port: u16) -> PortListener {
 /// The cache keys on file CONTENT, so a new build simply misses and repopulates
 /// — it cannot serve stale code across an update. It lives in the user data dir,
 /// never inside the read-only .app bundle.
+/// Boot-time orphan reap, moved off the pre-window path.
+///
+/// The reaper kills stale `next-server` / `ws-server` processes left by a
+/// previous crash. It costs ~73ms (three `pgrep` spawns, plus `ps`/`lsof` per
+/// candidate) and it used to run SYNCHRONOUSLY before the window existed, so the
+/// operator paid it staring at no window at all.
+///
+/// It does not need to be there. It needs to be done before we spawn a SIDECAR —
+/// those stale processes still hold the SQLite WAL, the microphone and our ports
+/// (#1539), and spawning before the reap completes risks two writers on the same
+/// WAL. So: reap runs concurrently with window creation, and is JOINED before the
+/// first sidecar spawn. The invariant is preserved; only the waiting moved.
+///
+/// The stale-MCP-socket cleanup is NOT deferred — `tauri-plugin-mcp` binds that
+/// socket during builder setup and throws if the file lingers, so it stays on the
+/// synchronous pre-builder path. It is a stat + unlink; it costs nothing.
+static ORPHAN_REAPER: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> =
+    std::sync::Mutex::new(None);
+
+fn start_orphan_reap() {
+    let handle = std::thread::spawn(|| {
+        sidecar_lifecycle::reap_o8_orphan_processes();
+        log::info!("[boot] orphan reap finished at {}ms (off the pre-window path)", boot_ms());
+    });
+    if let Ok(mut slot) = ORPHAN_REAPER.lock() {
+        *slot = Some(handle);
+    }
+}
+
+/// Block until the boot-time orphan reap has finished.
+///
+/// MUST be called before ANY sidecar spawn. See `start_orphan_reap`.
+fn join_orphan_reap() {
+    let handle = ORPHAN_REAPER.lock().ok().and_then(|mut slot| slot.take());
+    if let Some(handle) = handle {
+        let _ = handle.join();
+        log::info!("[boot] orphan reap joined at {}ms — safe to spawn sidecars", boot_ms());
+    }
+}
+
+/// Bound the V8 compile cache.
+///
+/// The cache is content-keyed, which is what makes it safe across updates — a new
+/// build simply misses and repopulates. But it also means it only ever GROWS:
+/// every ship rewrites the Next chunk hashes, so every ship adds a fresh ~5MB
+/// generation and nothing ever reclaims the old one. Left alone that is a slow
+/// leak in the user's data dir, measured in hundreds of MB after a year of ships.
+///
+/// So: cap it. If the directory exceeds the cap we delete it wholesale rather than
+/// trying to work out which generation is live — it is a CACHE, so the only cost
+/// of being wrong is one slower boot while it repopulates. Runs on a worker
+/// thread; it never touches the boot path.
+const COMPILE_CACHE_CAP_BYTES: u64 = 100 * 1024 * 1024; // ~20 ships' worth
+
+fn prune_compile_cache() {
+    std::thread::spawn(|| {
+        let dir = compile_cache_dir();
+        let path = std::path::Path::new(&dir);
+        if !path.is_dir() {
+            return;
+        }
+        let mut total: u64 = 0;
+        let mut stack = vec![path.to_path_buf()];
+        while let Some(next) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&next) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                match entry.file_type() {
+                    Ok(ft) if ft.is_dir() => stack.push(entry.path()),
+                    Ok(_) => {
+                        if let Ok(meta) = entry.metadata() {
+                            total = total.saturating_add(meta.len());
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+            // Bail early — we only need to know whether we are OVER the cap, and
+            // walking a runaway cache is itself work we should not be doing.
+            if total > COMPILE_CACHE_CAP_BYTES {
+                break;
+            }
+        }
+        if total > COMPILE_CACHE_CAP_BYTES {
+            log::info!(
+                "[compile-cache] {}MB exceeds the {}MB cap — clearing (it will repopulate on the next boot)",
+                total / (1024 * 1024),
+                COMPILE_CACHE_CAP_BYTES / (1024 * 1024)
+            );
+            let _ = std::fs::remove_dir_all(path);
+        }
+    });
+}
+
 fn compile_cache_dir() -> String {
     format!("{}/compile-cache", o8_data_dir())
 }
@@ -4794,6 +4889,12 @@ fn finish_bundled_bootstrap(
     ws_port: u16,
     boot_identity: BootIdentity,
 ) {
+    // ORDERING CONTRACT: the boot-time orphan reap must be DONE before we spawn a
+    // sidecar. Those stale processes still hold the SQLite WAL, the mic and our
+    // ports (#1539) — spawn-before-reap risks two writers on the same WAL. The
+    // reap ran concurrently with window creation; this is where we collect it.
+    join_orphan_reap();
+
     // Persist for child processes (MCP server, ws-server, etc.)
     std::env::set_var("O8_NODE_BIN", &node_bin);
 
@@ -5007,8 +5108,22 @@ pub fn run() {
     // binds the socket during builder setup and throws if the file lingers.
     // Wider net than default-port cleanup from #719: hits orphans on any port,
     // not just 3001/3002.
-    sidecar_lifecycle::reap_o8_orphans();
-    boot_trace("orphan reap done");
+    // Start the orphan reap (~73ms of pgrep/ps/lsof) NOW, on a worker, so it
+    // overlaps generate_context!() instead of being paid in front of it.
+    //
+    // It is collected below, BEFORE the Tauri builder — not merely before the
+    // sidecar spawn. The ordering is load-bearing in a way that is easy to miss:
+    // clean_stale_mcp_socket() decides whether the socket is stale by trying to
+    // CONNECT to it. If a stale next-server is still alive and holding that
+    // socket, the probe succeeds, the socket looks live, and it is left in place —
+    // and then tauri-plugin-mcp stalls binding it during builder setup. Measured:
+    // an 18.6-SECOND .build() when the socket clean ran before the reap.
+    //
+    // So the sequence is, and must remain: reap the processes, THEN clean the
+    // socket, THEN build. All this change does is overlap the reap with the 1.6s
+    // the macro was going to spend anyway.
+    start_orphan_reap();
+    boot_trace("orphan reap STARTED (async, overlaps generate_context!)");
 
     let dev_frontend = match dev_frontend::from_env() {
         Ok(dev_frontend) => dev_frontend,
@@ -5022,6 +5137,14 @@ pub fn run() {
     let mut context = tauri::generate_context!();
     log::info!("[boot] tauri context at {}ms", boot_ms());
     boot_trace("generate_context! DONE");
+
+    // Collect the reap BEFORE the builder. The 73ms it costs has already been
+    // spent inside generate_context!() above, so this join is free — but it must
+    // happen here, because the socket clean below depends on those stale
+    // processes being dead, and tauri-plugin-mcp binds the socket in .build().
+    join_orphan_reap();
+    sidecar_lifecycle::clean_stale_mcp_socket();
+    boot_trace("orphan reap joined + mcp socket cleaned (pre-builder)");
     if let Some(dev_frontend) = dev_frontend.as_ref() {
         if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
             eprintln!(
@@ -5900,6 +6023,9 @@ pub fn run() {
             }
             log::info!("[boot] main window created at {}ms — the loader can paint from here", boot_ms());
 
+            // Bound the V8 compile cache. Worker thread; never on the boot path.
+            prune_compile_cache();
+
             // ── Sidecar bootstrap: off the main thread ──
             //
             // The only genuinely blocking step is the login-shell probe (~690ms
@@ -5955,6 +6081,9 @@ pub fn run() {
                         };
                         let main_handle = app_handle.clone();
                         if let Err(e) = app_handle.run_on_main_thread(move || {
+                            // Same ordering contract as the bundled path: never spawn a
+                            // sidecar before the orphan reap has finished (#1539).
+                            join_orphan_reap();
                             std::env::set_var("O8_NODE_BIN", &node_bin);
 
                             let ws_log = open_child_log("ws-server.log");
