@@ -727,6 +727,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                           color: 'var(--t-text-faint)',
                           fontFamily: 'var(--font-sans-system)',
                           lineHeight: 1.25,
+                          minWidth: 0, overflow: 'hidden',
                         }}>
                           {itemSubline(item)}
                         </div>

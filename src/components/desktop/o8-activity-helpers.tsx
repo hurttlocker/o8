@@ -351,25 +351,26 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
   if (item.kind === 'pr') {
     return (
       <>
-        <span style={{ color: ACTIVITY_COLORS.add }}>+{item.additions}</span>
-        <span style={{ color: ACTIVITY_COLORS.delete }}>-{item.deletions}</span>
-        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-        <span>{item.branch}</span>
-        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-        <span>{item.age}</span>
+        <span style={{ color: ACTIVITY_COLORS.add, flexShrink: 0 }}>+{item.additions}</span>
+        <span style={{ color: ACTIVITY_COLORS.delete, flexShrink: 0 }}>-{item.deletions}</span>
+        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>·</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.branch}</span>
+        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>·</span>
+        <span style={{ flexShrink: 0 }}>{item.age}</span>
       </>
     );
   }
   if (item.kind === 'ci') {
     return (
       <>
-        <span>{item.workflow}</span>
-        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-        <span>{item.branch}</span>
-        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.workflow}</span>
+        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>·</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.branch}</span>
+        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>·</span>
         <span style={{
           color: item.conclusion === 'success' ? ACTIVITY_COLORS.success : item.conclusion === 'failure' ? ACTIVITY_COLORS.danger : ACTIVITY_COLORS.attention,
           fontWeight: 400,
+          flexShrink: 0,
         }}>
           {item.conclusion || item.status}
         </span>
