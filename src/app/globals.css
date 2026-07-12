@@ -2269,3 +2269,18 @@ button.workflow-file-item.workflow-file-item-active {
   }
   .o8-loader-stack > i { transform: scaleY(0.7) !important; }
 }
+
+/* Failed status mark — the dispatch loader at DOT scale (Q lock 2026-07-12).
+   Same keyframes as the 16px chrome loader; container + cells shrink so it
+   sits in the 7-10px status-dot slot without shifting row layout. Arms
+   intentionally overshoot the box a touch — absolute-positioned, harmless,
+   and the overshoot is what keeps the cross readable this small. */
+.o8-loader-dispatch.o8-status-size {
+  width: 11px;
+  height: 11px;
+}
+.o8-loader-dispatch.o8-status-size > i {
+  width: 3px;
+  height: 3px;
+  border-radius: 0.5px;
+}
