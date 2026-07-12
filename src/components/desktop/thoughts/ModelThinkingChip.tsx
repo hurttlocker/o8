@@ -36,6 +36,11 @@ const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
 const SWARM_ACCENT = 'var(--t-brand-orange, #FF5A1F)';
 const MODEL_THINKING_MENU_WIDTH = 200;
 
+// Synthetic model id for the free o8 backend — there is no underlying model name
+// exposed in the UI (monetization doctrine: we own the brand, hide the model).
+// This value is what `onModelChange` stores and what `activeModelOption` matches.
+const O8_FREE_MODEL_ID = 'o8-free';
+
 type ComposerModelOption = {
   value: string;
   label: string;
@@ -47,7 +52,7 @@ type ComposerModelOption = {
 };
 
 type ComposerModelGroup = {
-  key: 'claude' | 'codex';
+  key: 'claude' | 'codex' | 'o8';
   label: string;
   options: ComposerModelOption[];
 };
@@ -72,6 +77,17 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     options: [
       { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: 'Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
+    ],
+  },
+  // The free house (operator ruling 2026-07-12): one conversational model that
+  // streams with no subscription draw, so the operator can drive the full
+  // orchestrator UI without burning Claude/Codex usage. Named only 'o8' — the
+  // underlying model is never surfaced.
+  {
+    key: 'o8',
+    label: 'o8',
+    options: [
+      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
     ],
   },
 ];
@@ -308,8 +324,8 @@ export function ModelThinkingChip({
   const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Ultracode' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex'>(
-    activeBackend === 'codex' ? 'codex' : 'claude',
+  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'o8'>(
+    activeBackend === 'codex' ? 'codex' : activeBackend === 'o8' ? 'o8' : 'claude',
   );
   // Thinking levels are only KNOWN for the Claude-family and Codex backends
   // ('auto' resolves to one of them). Every other runtime uses its default
@@ -317,6 +333,11 @@ export function ModelThinkingChip({
   // levels we can't actually steer (Q ruling 2026-07-11).
   const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
     || activeBackend === 'codex' || activeBackend === 'auto';
+  // The free o8 model has no thinking-effort tiers and never fans out — hide the
+  // effort slider + the Solo/Collide mode rows so its menu is just the model
+  // picker (operator ruling 2026-07-12). The split thinking trigger is already
+  // hidden because o8 isn't in `thinkingKnown`.
+  const isO8Backend = activeBackend === 'o8';
   const useSplit = split && !compact;
 
   // Effort slider stops (Q ruling 2026-07-11): one per selectable effort, then
@@ -454,7 +475,7 @@ export function ModelThinkingChip({
           </span>
         )}
         {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
-        <ThinkingBars effort={effort} active={open || effort === 'max' || effort === 'ultra' || (isCodexBackend && effort === 'xhigh')} />
+        {isO8Backend ? null : <ThinkingBars effort={effort} active={open || effort === 'max' || effort === 'ultra' || (isCodexBackend && effort === 'xhigh')} />}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
@@ -544,6 +565,13 @@ export function ModelThinkingChip({
                               // Codex/Sol keeps ultra available; Terra + any Claude
                               // model cap at max — drop a stale ultra selection.
                               if (option.model !== MODEL_IDS.raw.openAiGpt56Sol && effort === 'ultra') onEffortChange?.('max');
+                              // The free o8 model has no fan-out: clear Collide/Swarm
+                              // so the turn actually routes to the o8 backend (a live
+                              // `collide` flag forces the collide backend downstream).
+                              if (option.backend === 'o8') {
+                                onSetCollide?.(false);
+                                onSetSwarm?.(false);
+                              }
                               setOpen(false);
                             }}
                             style={{
@@ -579,9 +607,11 @@ export function ModelThinkingChip({
                   );
                 })}
               </div>
-              <div style={{ marginTop: 4, paddingLeft: 7, paddingRight: 7, paddingTop: 6, paddingBottom: 2, borderTop: '1px solid var(--t-divider-subtle)' }}>
-                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
-              </div>
+              {isO8Backend ? null : (
+                <div style={{ marginTop: 4, paddingLeft: 7, paddingRight: 7, paddingTop: 6, paddingBottom: 2, borderTop: '1px solid var(--t-divider-subtle)' }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
+                </div>
+              )}
             </>
           ) : (
             <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 6, borderBottom: '1px solid var(--t-divider-subtle)' }}>
@@ -589,14 +619,14 @@ export function ModelThinkingChip({
               <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
             </div>
           )}
-          {onEffortChange ? (
+          {onEffortChange && !isO8Backend ? (
             <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
           ) : null}
 
           {/* Mode — Solo vs Collide. Swarm/Ultracode moved to the effort
               slider's top notch (Q ruling 2026-07-11), so it's no longer a
               row here. */}
-          {onSetCollide ? (
+          {onSetCollide && !isO8Backend ? (
             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <div style={{ paddingLeft: 7, paddingRight: 7, paddingBottom: 2 }}>
                 <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Mode</div>

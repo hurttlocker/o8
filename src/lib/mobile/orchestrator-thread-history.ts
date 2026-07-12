@@ -83,6 +83,28 @@ function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
   }
 }
 
+/**
+ * Read a thread's persisted transcript as an ordered user/assistant message
+ * array — the context the free `o8` orchestrator backend replays to the gateway
+ * each turn (it holds no session of its own). Empty (never null) when the thread
+ * has no file yet or no usable turns. Reads straight from disk so it reflects
+ * the user message ws-server persists just before calling the backend.
+ */
+export function readOrchestratorThreadMessages(
+  tabId: string | null | undefined,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (!tabId) return [];
+  const record = readHistoryRecord(tabId);
+  if (!record?.messages) return [];
+  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const message of record.messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    if (typeof message.content !== 'string' || message.content.trim().length === 0) continue;
+    out.push({ role: message.role, content: message.content });
+  }
+  return out;
+}
+
 function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   ensureHistoryDir();
   const filePath = safeOrchestratorHistoryPath(tabId);

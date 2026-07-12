@@ -33,6 +33,10 @@ export const ORCHESTRATOR_BACKEND_BILLING: Record<OrchestratorBackendId, Orchest
   acp: 'subscription',
   collide: 'subscription',
   fable: 'metered',
+  // The free conversational backend streams the Vercel AI Gateway free model —
+  // no subscription pool, no per-token operator billing. `free` = no
+  // metered-window policies apply (this is the first shipping `free` backend).
+  o8: 'free',
 };
 
 export function orchestratorBackendBillingClass(id: OrchestratorBackendId): OrchestratorBillingClass {

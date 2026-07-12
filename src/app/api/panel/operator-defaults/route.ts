@@ -211,7 +211,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     // Single-source guard from defaults.ts — a hand-rolled list here silently
     // rejected the fable backend when Slice 1 widened the union (dogfood 2026-07-02).
     if (!isOrchestratorBackendSetting(raw)) {
-      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable", "o8".');
     }
     update.orchestratorBackend = raw;
   }

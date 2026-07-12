@@ -267,6 +267,8 @@ export function orchestratorBackendDisplayLabel(input: {
       return 'Claude Code';
     case 'acp':
       return 'ACP';
+    case 'o8':
+      return 'o8';
     default:
       return null;
   }

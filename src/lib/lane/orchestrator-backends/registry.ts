@@ -20,6 +20,7 @@ import { openclawBackend } from './openclaw';
 import { acpBackend, hermesBackend } from './acp';
 import { collideBackend } from './moa';
 import { fableBackend } from './fable';
+import { o8Backend } from './o8';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
@@ -36,6 +37,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   acp: acpBackend,
   collide: collideBackend,
   fable: fableBackend,
+  o8: o8Backend,
 };
 
 /** The default backend — also the fallback for any unregistered id. */
