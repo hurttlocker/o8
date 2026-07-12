@@ -2633,7 +2633,7 @@ fn read_data_file(name: &str) -> Option<String> {
 /// Resolve the API port the Next server is bound to. Mirrors the precedence
 /// in `src/lib/panel/api-port.ts` — env var first, on-disk file second,
 /// production default last.
-fn resolve_api_port() -> u16 {
+pub(crate) fn resolve_api_port() -> u16 {
     if let Ok(p) = std::env::var("O8_API_PORT") {
         if let Ok(parsed) = p.parse() {
             return parsed;

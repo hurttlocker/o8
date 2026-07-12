@@ -7,7 +7,8 @@
 //! Playback runs on a dedicated OS thread (see `playback` — the `!Send` rodio
 //! constraint), so o8 can speak with no focused webview.
 
-pub mod elevenlabs;
+pub mod edge_local;
+mod elevenlabs;
 pub mod google;
 pub mod native_say;
 pub mod playback;
@@ -79,8 +80,22 @@ pub fn load_config() -> TtsConfig {
 /// Synthesize `text` → MP3 bytes via the configured provider. Errors are
 /// `String`; the `playback` layer falls back to `say` on error.
 pub async fn speak(text: &str, config: &TtsConfig) -> Result<Vec<u8>, String> {
-    match config.provider {
+    let primary = match config.provider {
         TtsProvider::ElevenLabs => elevenlabs::synthesize(text, config).await,
         TtsProvider::Google => google::synthesize(text, config).await,
+    };
+    match primary {
+        Ok(bytes) => Ok(bytes),
+        // Keyless / failed cloud synth → the FREE neural male voice (local
+        // edge-tts Steffan) before the `say` floor. A keyless free machine
+        // previously skipped every neural voice here and read back in the
+        // macOS system default — a woman's voice (2026-07-12).
+        Err(primary_err) => match edge_local::synthesize(text).await {
+            Ok(bytes) => {
+                log::info!("[tts] cloud synth unavailable ({primary_err}); using local Steffan voice");
+                Ok(bytes)
+            }
+            Err(local_err) => Err(format!("{primary_err}; edge-local: {local_err}")),
+        },
     }
 }
