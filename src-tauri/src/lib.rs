@@ -1084,7 +1084,6 @@ fn child_stdio(file: Option<&std::fs::File>) -> std::process::Stdio {
 fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
     std::thread::spawn(move || {
         let url = format!("http://127.0.0.1:{}/dashboard", api_port);
-        std::thread::sleep(std::time::Duration::from_millis(150));
 
         let client = match reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_millis(1500))
@@ -1098,10 +1097,20 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         // (system-wide Symon fold P3) is created only AFTER the server is
         // confirmed up — it navigates to /dictation-pill on the same port, so
         // it must not be built against a dead listener (same reason main waits
-        // via the loader before /dashboard). The longer cap here (vs the old
-        // 4-attempt warm-only loop) gives a cold next-server time to bind.
+        // via the loader before /dashboard).
+        //
+        // Cadence ramps tight -> relaxed rather than a flat 250ms grid. A
+        // connect to a port nothing is listening on fails immediately
+        // (ECONNREFUSED), so the early attempts cost almost nothing — and when
+        // the sidecar does bind we notice it right away instead of waiting out
+        // the remainder of a coarse tick. Same ~10s ceiling as the old
+        // 40 x 250ms, and no 150ms head start (the window is already painted by
+        // the time this runs, so that sleep was pure latency).
+        const BACKOFF_MS: [u64; 12] = [20, 20, 40, 40, 60, 80, 120, 160, 200, 250, 250, 250];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut server_up = false;
-        for attempt in 0..40 {
+        let mut attempt = 0usize;
+        while std::time::Instant::now() < deadline {
             if client
                 .get(&url)
                 .header("Connection", "close")
@@ -1111,9 +1120,10 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
                 server_up = true;
                 break;
             }
-            if attempt < 39 {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-            }
+            std::thread::sleep(std::time::Duration::from_millis(
+                BACKOFF_MS[attempt.min(BACKOFF_MS.len() - 1)],
+            ));
+            attempt += 1;
         }
 
         if !server_up {
@@ -4739,6 +4749,142 @@ fn take_pending_auth_callbacks() -> Vec<String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The tail of the bundled-server boot: everything that mutates this process's
+/// environment (PATH, `O8_NODE_BIN`, the AI keys) and spawns the sidecar
+/// children.
+///
+/// Runs on the MAIN thread, via `run_on_main_thread`, exactly where it ran
+/// before the boot reorder. Only the blocking login-shell probe moved to a
+/// worker thread — keeping the env mutation and the spawns on the main thread
+/// means the reorder introduces no new `set_var`/`getenv` race.
+///
+/// `Command::spawn` does not wait on the child, so this whole function is a few
+/// milliseconds of work; it will not stall a frame.
+#[allow(clippy::too_many_arguments)]
+fn finish_bundled_bootstrap(
+    app: &AppHandle,
+    shell: shell_env::LoginShellEnv,
+    node_bin: String,
+    server_dir: std::path::PathBuf,
+    server_js: std::path::PathBuf,
+    api_port: u16,
+    ws_port: u16,
+    boot_identity: BootIdentity,
+) {
+    // Persist for child processes (MCP server, ws-server, etc.)
+    std::env::set_var("O8_NODE_BIN", &node_bin);
+
+    // Widen PATH from the login shell so the Next server's setup detect
+    // (`which codex`), Codex dispatch spawn, and worktree `pnpm install` can
+    // find the user's CLIs — Finder's minimal PATH hides ~/.npm-global/bin,
+    // Homebrew, ~/.local/bin, etc.
+    augment_process_path(&shell.path);
+
+    // Tell the Next server where the bundled MCP scripts live so
+    // `/api/setup/mcp-config` and `orchestrator-session.ts` can emit
+    // `node <bundled>.mjs` commands instead of dev `tsx` paths.
+    let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
+    let has_bundled_mcp = bundled_operator_mcp.exists();
+    if has_bundled_mcp {
+        log::info!("Bundled MCP scripts at {:?}", server_dir);
+    }
+
+    // Issue #755: kick off the codebase-memory-mcp download in the background.
+    // On a cache hit (existing install) the env var lands before Next.js spawns.
+    // On a cold first launch the download runs concurrently with Next.js boot
+    // and the binary lands at the deterministic path
+    // `~/.o8/bin/codebase-memory-mcp` — #740's MCP registration resolves the
+    // path from the env var or re-checks the filesystem on session spawn.
+    ensure_codebase_memory_binary(app.clone());
+
+    // Open per-server log files before spawning so stdout/stderr can be wired
+    // directly. Rotated to .prev on each boot.
+    let next_log = open_child_log("next-server.log");
+    let ws_log = open_child_log("ws-server.log");
+
+    log::info!(
+        "Starting server: {} {:?} on :{}",
+        node_bin,
+        server_js,
+        api_port
+    );
+    let mut server_cmd = Command::new(&node_bin);
+    server_cmd
+        .arg(&server_js)
+        .current_dir(&server_dir)
+        .env("PORT", api_port.to_string())
+        .env("HOSTNAME", "0.0.0.0")
+        .env("NODE_ENV", "production")
+        .env("O8_PACKAGED_APP", "1")
+        .env("O8_NODE_BIN", &node_bin)
+        .env("O8_API_PORT", api_port.to_string())
+        .env("O8_WS_PORT", ws_port.to_string())
+        .env("O8_BOOT_ID", &boot_identity.boot_id)
+        .env("O8_INSTANCE_ID", &boot_identity.instance_id)
+        .env("WS_PORT", ws_port.to_string())
+        // Issue #776: marker so future sidecar boots can identify this child as
+        // an o8 sibling. macOS doesn't let us read env vars of other processes
+        // without root, so this is best-effort forward-compat for Linux/Windows
+        // /proc and human-readable in `ps -E` from the same user.
+        .env("O8_SIDECAR_PID", std::process::id().to_string());
+    if has_bundled_mcp {
+        server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
+        server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
+    }
+    // Issue #755: forward the codebase-memory-mcp path when it's already cached.
+    if let Ok(cmm_bin) = std::env::var("O8_CODEBASE_MEMORY_BIN") {
+        if !cmm_bin.is_empty() {
+            server_cmd.env("O8_CODEBASE_MEMORY_BIN", cmm_bin);
+        }
+    }
+    // Issue #935: forward AI provider keys from the user's login shell so
+    // Finder-launched builds aren't dead for Gemini / Anthropic / etc. features
+    // the user has keys for. These came from the single probe — no second shell.
+    let ai_keys = shell.keys;
+    for (k, v) in &ai_keys {
+        server_cmd.env(k, v);
+    }
+    if !ai_keys.is_empty() {
+        log::info!(
+            "Forwarded {} AI provider key(s) from login shell to next-server",
+            ai_keys.len()
+        );
+    }
+    match server_cmd
+        .stdout(child_stdio(next_log.as_ref()))
+        .stderr(child_stdio(next_log.as_ref()))
+        .spawn()
+    {
+        Ok(child) => {
+            let pid = child.id();
+            log::info!("Next.js server started (pid: {})", pid);
+            sidecar_lifecycle::register_child(pid);
+            prewarm_bundled_next_server(app.clone(), api_port);
+        }
+        Err(e) => {
+            log::error!("Failed to start server: {}", e);
+            show_node_error_and_exit(NodePreflightError::Missing);
+        }
+    }
+
+    // ── Start WebSocket server (terminals, chat, git watcher) ──
+    //
+    // If ws-server.mjs is missing the app boots into a degraded state — /ws
+    // requests rewrite to a dead upstream and Next.js can spiral into a
+    // CPU-pegged error loop. We no longer silently swallow that: it's a fatal
+    // startup error so the user sees the failure instead of a hung dashboard.
+    let next_origin = format!("http://127.0.0.1:{}", api_port);
+    spawn_bundled_ws_server(
+        &node_bin,
+        &server_dir,
+        ws_port,
+        &next_origin,
+        ws_log.as_ref(),
+        &ai_keys,
+        &boot_identity,
+    );
+}
+
 pub fn run() {
     // Sentry (native shell). Dormant unless a RELEASE build baked a DSN; dev /
     // `tauri dev` stay silent. Init FIRST so panics during startup are captured;
@@ -5561,103 +5707,48 @@ pub fn run() {
             let mut api_port: u16 = PROD_API_DEFAULT_PORT;
             let mut ws_port: u16 = PROD_WS_DEFAULT_PORT;
 
-            if let Some(dev_frontend) = dev_frontend.as_ref() {
-                api_port = dev_frontend.port();
+            // ── Boot ordering (perf) ──
+            //
+            // `setup()` runs BEFORE Tauri's event loop starts, so nothing paints
+            // until it RETURNS. Any blocking work in here is dead time where the
+            // user stares at no window at all — not an empty frame, no window.
+            //
+            // The window needs exactly two things: `api_port` and `boot_identity`.
+            // It does NOT need node, PATH, or the AI keys. Port resolution is
+            // cheap (TCP binds, sub-millisecond); the login-shell probe and the
+            // sidecar spawn are not.
+            //
+            // So: resolve ports → build the window → hand the whole sidecar
+            // bootstrap to a worker thread → return immediately. The loader
+            // (out/frontend/index.html) already polls /api/setup/identity and
+            // navigates to /dashboard once the sidecar binds, so it tolerates a
+            // not-yet-listening server by construction — that's the same
+            // contract it has always had.
+            enum BootMode {
+                DevFrontend,
+                DevServerRunning,
+                Bundled,
+                NoBundle,
+            }
+
+            let boot_mode = if let Some(df) = dev_frontend.as_ref() {
+                api_port = df.port();
                 ws_port = allocate_ws_port(api_port);
                 log::info!(
                     "[dev-frontend] {}={} — skipping bundled Next; ports api={} ws={}",
                     dev_frontend::ENV_VAR,
-                    dev_frontend.url().as_str(),
+                    df.url().as_str(),
                     api_port,
                     ws_port
                 );
-                let _ = write_port_file("api-port", api_port);
-                let _ = write_port_file("ws-port", ws_port);
-                std::env::set_var("O8_API_PORT", api_port.to_string());
-                std::env::set_var("O8_WS_PORT", ws_port.to_string());
-
-                // ONE login-shell probe — node + PATH + AI keys in a single
-                // `zsh -l -c`. See shell_env: the boot path used to source the
-                // user's profile three separate times.
-                let shell = shell_env::probe_login_shell();
-                let node_bin = match run_node_preflight(shell.node.as_deref()) {
-                    Ok(path) => path,
-                    Err(err) => show_node_error_and_exit(err),
-                };
-                std::env::set_var("O8_NODE_BIN", &node_bin);
-
-                let ws_log = open_child_log("ws-server.log");
-                let ai_keys = shell.keys;
-                if !ai_keys.is_empty() {
-                    // #935 follow-up: also apply the keys to THIS (Tauri/Rust)
-                    // process — the Rust-side Symon agent + Ask path read
-                    // GEMINI_API_KEY via std::env::var, and a Finder launch
-                    // doesn't inherit ~/.zshenv. Without this, voice features
-                    // failed with "Missing GEMINI_API_KEY" while the Node sidecar
-                    // (which gets the keys forwarded below) worked fine.
-                    for (k, v) in &ai_keys {
-                        std::env::set_var(k, v);
-                    }
-                    log::info!(
-                        "Applied {} AI provider key(s) from login shell to this process + ws-server",
-                        ai_keys.len()
-                    );
-                }
-                spawn_bundled_ws_server(
-                    &node_bin,
-                    &server_dir,
-                    ws_port,
-                    dev_frontend.origin(),
-                    ws_log.as_ref(),
-                    &ai_keys,
-                    &boot_identity,
-                );
-                // Dev-bridge: the bundled Next isn't spawned here, but the dev
-                // server IS up on `api_port` — create the dock pill against it.
-                // prewarm polls `:{api_port}/dashboard` (the dev server) then
-                // `dock_window::create` loads the dock from the dev origin. Without
-                // this the dock never appears in dev-bridge (prewarm was only wired
-                // into the bundled-spawn branch), so dock UI couldn't be iterated.
-                prewarm_bundled_next_server(app.handle().clone(), api_port);
+                BootMode::DevFrontend
             } else if dev_server_running {
                 log::info!(
                     "Dev server already running on :{} — skipping bundled servers",
                     PROD_API_DEFAULT_PORT
                 );
-                // Write the dev ports so MCP servers launched from this
-                // session agree with the dev backend.
-                let _ = write_port_file("api-port", api_port);
-                let _ = write_port_file("ws-port", ws_port);
-                std::env::set_var("O8_API_PORT", api_port.to_string());
-                std::env::set_var("O8_WS_PORT", ws_port.to_string());
+                BootMode::DevServerRunning
             } else if server_js.exists() {
-                // ── Login-shell probe (ONCE) ──
-                // Finder gives us a minimal PATH, so we ask a login shell for
-                // the user's real node, PATH, and AI keys. Sourcing a profile
-                // costs ~0.96s on the operator's machine — so we do it exactly
-                // once and reuse the answer for all three consumers below.
-                // (This block used to spawn three separate subprocesses: a
-                // `node --version`, a login zsh for PATH, and a second login
-                // zsh that re-sourced the same rc files just to read the keys.)
-                let shell = shell_env::probe_login_shell();
-
-                // ── Node.js pre-flight ──
-                // Verify the version (the #1032 better-sqlite3 ABI pin) and show
-                // a native dialog + exit on failure. Without this the app
-                // silently loader-spins forever.
-                let node_bin = match run_node_preflight(shell.node.as_deref()) {
-                    Ok(path) => path,
-                    Err(err) => show_node_error_and_exit(err),
-                };
-                // Persist for child processes (MCP server, ws-server, etc.)
-                std::env::set_var("O8_NODE_BIN", &node_bin);
-
-                // Widen PATH from the login shell so the Next server's setup
-                // detect (`which codex`), Codex dispatch spawn, and worktree
-                // `pnpm install` can find the user's CLIs — Finder's minimal
-                // PATH hides ~/.npm-global/bin, Homebrew, ~/.local/bin, etc.
-                augment_process_path(&shell.path);
-
                 if preship_gate {
                     // ── Pre-ship boot gate isolation ──
                     // This is a disposable 2nd instance launched alongside the
@@ -5675,7 +5766,11 @@ pub fn run() {
                         .ok()
                         .and_then(|p| p.parse().ok())
                         .unwrap_or(3061);
-                    log::info!("[preship-gate] forced isolated ports: api={} ws={}", api_port, ws_port);
+                    log::info!(
+                        "[preship-gate] forced isolated ports: api={} ws={}",
+                        api_port,
+                        ws_port
+                    );
                 } else {
                     // ── Port allocation ──
                     // Probe only inside the production blocks. Occupied foreign
@@ -5685,138 +5780,34 @@ pub fn run() {
                     ws_port = allocate_ws_port(api_port);
                     log::info!("Allocated ports: api={} ws={}", api_port, ws_port);
                 }
-                let _ = write_port_file("api-port", api_port);
-                let _ = write_port_file("ws-port", ws_port);
-                std::env::set_var("O8_API_PORT", api_port.to_string());
-                std::env::set_var("O8_WS_PORT", ws_port.to_string());
-
-                // Tell the Next server where the bundled MCP scripts live so
-                // `/api/setup/mcp-config` and `orchestrator-session.ts` can
-                // emit `node <bundled>.mjs` commands instead of dev `tsx` paths.
-                let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
-                let has_bundled_mcp = bundled_operator_mcp.exists();
-                if has_bundled_mcp {
-                    log::info!("Bundled MCP scripts at {:?}", server_dir);
-                }
-
-                // Issue #755: kick off the codebase-memory-mcp download in
-                // the background. On a cache hit (existing install) the
-                // env var lands synchronously before Next.js spawns. On a
-                // cold first launch the download runs concurrently with
-                // Next.js boot and the binary lands at the deterministic
-                // path `~/.o8/bin/codebase-memory-mcp` — #740's MCP
-                // registration resolves the path from the env var or
-                // re-checks the filesystem on session spawn.
-                ensure_codebase_memory_binary(app.handle().clone());
-
-                // Open per-server log files before spawning so stdout/stderr
-                // can be wired directly. Rotated to .prev on each boot.
-                let next_log = open_child_log("next-server.log");
-                let ws_log = open_child_log("ws-server.log");
-
-                log::info!("Starting server: {} {:?} on :{}", node_bin, server_js, api_port);
-                let mut server_cmd = Command::new(&node_bin);
-                server_cmd
-                    .arg(&server_js)
-                    .current_dir(&server_dir)
-                    .env("PORT", api_port.to_string())
-                    .env("HOSTNAME", "0.0.0.0")
-                    .env("NODE_ENV", "production")
-                    .env("O8_PACKAGED_APP", "1")
-                    .env("O8_NODE_BIN", &node_bin)
-                    .env("O8_API_PORT", api_port.to_string())
-                    .env("O8_WS_PORT", ws_port.to_string())
-                    .env("O8_BOOT_ID", &boot_identity.boot_id)
-                    .env("O8_INSTANCE_ID", &boot_identity.instance_id)
-                    .env("WS_PORT", ws_port.to_string())
-                    // Issue #776: marker so future sidecar boots can identify
-                    // this child as an o8 sibling. macOS doesn't let us read
-                    // env vars of other processes without root, so this is
-                    // best-effort forward-compat for Linux/Windows /proc and
-                    // human-readable in `ps -E` from the same user.
-                    .env("O8_SIDECAR_PID", std::process::id().to_string());
-                if has_bundled_mcp {
-                    server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
-                    server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
-                }
-                // Issue #755: forward the codebase-memory-mcp path. On a
-                // cache hit `ensure_codebase_memory_binary()` set this
-                // env var synchronously above; on a cold first launch
-                // it's empty here and the download populates it later
-                // (Next-spawned children re-resolve from the env or the
-                // deterministic path).
-                if let Ok(cmm_bin) = std::env::var("O8_CODEBASE_MEMORY_BIN") {
-                    if !cmm_bin.is_empty() {
-                        server_cmd.env("O8_CODEBASE_MEMORY_BIN", cmm_bin);
-                    }
-                }
-                // Issue #935: forward AI provider keys from the user's login
-                // shell so Finder-launched builds aren't dead for Gemini /
-                // Anthropic / etc. features the user has keys for. These came
-                // from the single probe above — no second shell.
-                let ai_keys = shell.keys;
-                for (k, v) in &ai_keys {
-                    server_cmd.env(k, v);
-                }
-                if !ai_keys.is_empty() {
-                    log::info!(
-                        "Forwarded {} AI provider key(s) from login shell to next-server",
-                        ai_keys.len()
-                    );
-                }
-                match server_cmd
-                    .stdout(child_stdio(next_log.as_ref()))
-                    .stderr(child_stdio(next_log.as_ref()))
-                    .spawn()
-                {
-                    Ok(child) => {
-                        let pid = child.id();
-                        log::info!("Next.js server started (pid: {})", pid);
-                        sidecar_lifecycle::register_child(pid);
-                        prewarm_bundled_next_server(app.handle().clone(), api_port);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to start server: {}", e);
-                        show_node_error_and_exit(NodePreflightError::Missing);
-                    }
-                }
-
-                // ── Start WebSocket server (terminals, chat, git watcher) ──
-                //
-                // If ws-server.mjs is missing the app boots into a degraded
-                // state — /ws requests rewrite to a dead upstream and Next.js
-                // can spiral into a CPU-pegged error loop. We no longer
-                // silently swallow that: it's a fatal startup error so the
-                // user sees the failure instead of a hung dashboard.
-                let next_origin = format!("http://127.0.0.1:{}", api_port);
-                spawn_bundled_ws_server(
-                    &node_bin,
-                    &server_dir,
-                    ws_port,
-                    &next_origin,
-                    ws_log.as_ref(),
-                    &ai_keys,
-                    &boot_identity,
-                );
+                BootMode::Bundled
             } else {
-                log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
-                let _ = write_port_file("api-port", api_port);
-                let _ = write_port_file("ws-port", ws_port);
-                std::env::set_var("O8_API_PORT", api_port.to_string());
-                std::env::set_var("O8_WS_PORT", ws_port.to_string());
-            }
+                log::warn!(
+                    "No bundled server found at {:?} — running in dev mode",
+                    server_js
+                );
+                BootMode::NoBundle
+            };
 
+            let _ = write_port_file("api-port", api_port);
+            let _ = write_port_file("ws-port", ws_port);
+            std::env::set_var("O8_API_PORT", api_port.to_string());
+            std::env::set_var("O8_WS_PORT", ws_port.to_string());
             // Expose the resolved ports to the frontend loader HTML so it
             // knows where to navigate.
             std::env::set_var("CORTEX_IDE_API_PORT", api_port.to_string());
             std::env::set_var("CORTEX_IDE_WS_PORT", ws_port.to_string());
 
+            // ── Window FIRST ──
+            // Built before any sidecar work so the loader paints the moment the
+            // event loop starts, rather than after the whole bootstrap has run.
             if app.get_webview_window("main").is_none() {
                 if let Some(config) = main_window_config.as_ref() {
                     let init_script = format!(
                         "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {};",
                         api_port,
-                        serde_json::to_string(&boot_identity.boot_id).unwrap_or_else(|_| "\"\"".into())
+                        serde_json::to_string(&boot_identity.boot_id)
+                            .unwrap_or_else(|_| "\"\"".into())
                     );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)
@@ -5824,6 +5815,104 @@ pub fn run() {
                 } else {
                     log::warn!("[main-window] config missing; could not create main webview");
                 }
+            }
+
+            // ── Sidecar bootstrap: off the main thread ──
+            //
+            // The only genuinely blocking step is the login-shell probe (~690ms
+            // on the operator's Intel box — it execs a shell that sources the
+            // user's profile). It runs on a worker; everything that mutates this
+            // process's environment or spawns a child is handed straight back to
+            // the main thread via `run_on_main_thread`, exactly where it ran
+            // before, so we introduce no new set_var/getenv race.
+            match boot_mode {
+                BootMode::Bundled => {
+                    let app_handle = app.handle().clone();
+                    let server_dir = server_dir.clone();
+                    let server_js = server_js.clone();
+                    let identity = boot_identity.clone();
+                    std::thread::spawn(move || {
+                        let shell = shell_env::probe_login_shell();
+                        let node_bin = match run_node_preflight(shell.node.as_deref()) {
+                            Ok(path) => path,
+                            Err(err) => show_node_error_and_exit(err),
+                        };
+                        let main_handle = app_handle.clone();
+                        if let Err(e) = app_handle.run_on_main_thread(move || {
+                            finish_bundled_bootstrap(
+                                &main_handle,
+                                shell,
+                                node_bin,
+                                server_dir,
+                                server_js,
+                                api_port,
+                                ws_port,
+                                identity,
+                            );
+                        }) {
+                            log::error!("[boot] bundled bootstrap never reached the main thread: {e}");
+                        }
+                    });
+                }
+                BootMode::DevFrontend => {
+                    let app_handle = app.handle().clone();
+                    let server_dir = server_dir.clone();
+                    let identity = boot_identity.clone();
+                    let origin = dev_frontend
+                        .as_ref()
+                        .map(|df| df.origin().to_string())
+                        .unwrap_or_default();
+                    std::thread::spawn(move || {
+                        let shell = shell_env::probe_login_shell();
+                        let node_bin = match run_node_preflight(shell.node.as_deref()) {
+                            Ok(path) => path,
+                            Err(err) => show_node_error_and_exit(err),
+                        };
+                        let main_handle = app_handle.clone();
+                        if let Err(e) = app_handle.run_on_main_thread(move || {
+                            std::env::set_var("O8_NODE_BIN", &node_bin);
+
+                            let ws_log = open_child_log("ws-server.log");
+                            let ai_keys = shell.keys;
+                            if !ai_keys.is_empty() {
+                                // #935 follow-up: also apply the keys to THIS
+                                // (Tauri/Rust) process — the Rust-side Symon agent
+                                // + Ask path read GEMINI_API_KEY via std::env::var,
+                                // and a Finder launch doesn't inherit ~/.zshenv.
+                                // Without this, voice features failed with
+                                // "Missing GEMINI_API_KEY" while the Node sidecar
+                                // (which gets the keys forwarded) worked fine.
+                                for (k, v) in &ai_keys {
+                                    std::env::set_var(k, v);
+                                }
+                                log::info!(
+                                    "Applied {} AI provider key(s) from login shell to this process + ws-server",
+                                    ai_keys.len()
+                                );
+                            }
+                            spawn_bundled_ws_server(
+                                &node_bin,
+                                &server_dir,
+                                ws_port,
+                                &origin,
+                                ws_log.as_ref(),
+                                &ai_keys,
+                                &identity,
+                            );
+                            // Dev-bridge: the bundled Next isn't spawned here, but
+                            // the dev server IS up on `api_port` — create the dock
+                            // pill against it. prewarm polls `:{api_port}/dashboard`
+                            // (the dev server) then `dock_window::create` loads the
+                            // dock from the dev origin.
+                            prewarm_bundled_next_server(main_handle, api_port);
+                        }) {
+                            log::error!(
+                                "[boot] dev-frontend bootstrap never reached the main thread: {e}"
+                            );
+                        }
+                    });
+                }
+                BootMode::DevServerRunning | BootMode::NoBundle => {}
             }
 
             log::info!("Cortex IDE desktop shell initialized");
