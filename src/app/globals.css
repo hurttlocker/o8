@@ -2254,3 +2254,42 @@ button.workflow-file-item.workflow-file-item-active {
   height: 3px;
   border-radius: 0.5px;
 }
+
+/* ── Awaiting-review candidates (Claude, 2026-07-12) — calm grey, patient
+      cadences (2.4-3.2s), compositor-only, retro stepped language. Lab-only
+      until the operator locks one; review's current sweep stays shipping. ── */
+.o8-rev-metronome{position:relative;display:inline-block;width:16px;height:16px}
+.o8-rev-metronome>i{position:absolute;top:6px;width:4px;height:4px;border-radius:1px;background:var(--rev,#94a3b8);animation-duration:2.4s;animation-timing-function:steps(1,end);animation-iteration-count:infinite}
+.o8-rev-metronome>i:nth-child(1){left:0;animation-name:o8-rev-metro-a}
+.o8-rev-metronome>i:nth-child(2){left:6px;animation-name:o8-rev-metro-b}
+.o8-rev-metronome>i:nth-child(3){left:12px;animation-name:o8-rev-metro-c}
+@keyframes o8-rev-metro-a{0%{opacity:1}25%{opacity:.22}100%{opacity:.22}}
+@keyframes o8-rev-metro-b{0%{opacity:.22}25%{opacity:1}50%{opacity:.22}75%{opacity:1}100%{opacity:.22}}
+@keyframes o8-rev-metro-c{0%{opacity:.22}50%{opacity:1}75%{opacity:.22}100%{opacity:.22}}
+.o8-rev-hourglass{position:relative;display:inline-block;width:16px;height:16px}
+.o8-rev-hourglass>i{position:absolute;width:5px;height:5px;border-radius:1px;background:var(--rev,#94a3b8);animation-duration:2.8s;animation-timing-function:steps(1,end);animation-iteration-count:infinite}
+.o8-rev-hourglass>i:nth-child(1){left:2px;top:2px;animation-name:o8-rev-hg-top}
+.o8-rev-hourglass>i:nth-child(2){left:9px;top:2px;animation-name:o8-rev-hg-top}
+.o8-rev-hourglass>i:nth-child(3){left:2px;top:9px;animation-name:o8-rev-hg-bot}
+.o8-rev-hourglass>i:nth-child(4){left:9px;top:9px;animation-name:o8-rev-hg-bot}
+@keyframes o8-rev-hg-top{0%{opacity:1}50%{opacity:.2}100%{opacity:.2}}
+@keyframes o8-rev-hg-bot{0%{opacity:.2}50%{opacity:1}100%{opacity:1}}
+.o8-rev-blink{position:relative;display:inline-block;width:12px;height:12px;border:1.5px solid var(--rev,#94a3b8);border-radius:3px;box-sizing:border-box}
+.o8-rev-blink>i{position:absolute;top:2px;left:2px;right:2px;bottom:2px;background:var(--rev,#94a3b8);border-radius:1.5px;animation:o8-rev-blink 3.2s steps(1,end) infinite}
+@keyframes o8-rev-blink{0%{opacity:1}80%{opacity:0}92%{opacity:1}100%{opacity:1}}
+.o8-rev-queue{display:inline-flex;gap:3px;align-items:center;height:16px}
+.o8-rev-queue>i{width:4px;height:4px;border-radius:50%;background:var(--rev,#94a3b8);animation-duration:2.7s;animation-timing-function:steps(1,end);animation-iteration-count:infinite}
+.o8-rev-queue>i:nth-child(1){animation-name:o8-rev-q1}
+.o8-rev-queue>i:nth-child(2){animation-name:o8-rev-q2}
+.o8-rev-queue>i:nth-child(3){animation-name:o8-rev-q3}
+@keyframes o8-rev-q1{0%{opacity:.22}50%{opacity:1}100%{opacity:1}}
+@keyframes o8-rev-q2{0%{opacity:.22}25%{opacity:1}50%{opacity:.22}100%{opacity:.22}}
+@keyframes o8-rev-q3{0%{opacity:1}25%{opacity:.22}100%{opacity:.22}}
+.o8-rev-frame{position:relative;display:inline-block;width:16px;height:16px}
+.o8-rev-frame>i:nth-child(2){position:absolute;left:50%;top:50%;width:4px;height:4px;margin-left:-2px;margin-top:-2px;border-radius:1px;background:var(--rev,#94a3b8)}
+.o8-rev-frame>i:nth-child(1),.o8-rev-frame>i:nth-child(3){position:absolute;top:3px;bottom:3px;width:1.5px;border-radius:1px;background:var(--rev,#94a3b8);opacity:.7;animation-duration:3s;animation-timing-function:ease-in-out;animation-iteration-count:infinite}
+.o8-rev-frame>i:nth-child(1){left:1px;animation-name:o8-rev-frame-l}
+.o8-rev-frame>i:nth-child(3){right:1px;animation-name:o8-rev-frame-r}
+@keyframes o8-rev-frame-l{0%,20%{transform:translateX(0)}45%,75%{transform:translateX(2.5px)}100%{transform:translateX(0)}}
+@keyframes o8-rev-frame-r{0%,20%{transform:translateX(0)}45%,75%{transform:translateX(-2.5px)}100%{transform:translateX(0)}}
+@media (prefers-reduced-motion: reduce){[class^="o8-rev-"]>i{animation:none}}
