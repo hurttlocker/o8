@@ -38,3 +38,19 @@ export function resolveCodexReasoningEffort(
   }
   return effort;
 }
+
+/**
+ * Whether the INSTALLED codex CLI understands the `max`/`ultra` reasoning
+ * tiers. They landed in codex-cli 0.144.x — 0.136.0 refuses to even load a
+ * config that mentions them (`unknown variant \`max\``) and the whole spawn
+ * dies exit-1 before the first token (#1551 walkdown, live-hit 2026-07-12 on
+ * an older laptop install). Unknown/unparseable version → false: xhigh is
+ * accepted by every codex we ship against, so clamping is always safe.
+ */
+export function codexCliSupportsUltraEfforts(version?: string | null): boolean {
+  const m = version?.match(/(\d+)\.(\d+)/);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  return major > 0 || minor >= 144;
+}
