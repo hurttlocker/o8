@@ -6248,7 +6248,7 @@ async function bootstrapWsServer() {
   try {
     const { reconcileStuckLanes, reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
     await reconcileStuckLanes();
-    reconcileOrphanedWorktrees();
+    await reconcileOrphanedWorktrees();
   } catch (error) {
     console.warn(
       `[reconcile] WS startup lane reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -6268,7 +6268,7 @@ async function bootstrapWsServer() {
         import('@/lib/lane/reconcile'),
         import('@/lib/orchestrator/merged-by-ancestry'),
       ]);
-      const healed = reconcileOrphanedWorktrees();
+      const healed = await reconcileOrphanedWorktrees();
       const merged = await sweepPacketsMergedByAncestry();
       if (healed > 0) {
         console.log(`[reconcile] Periodic sweep healed ${healed} orphaned lane(s)`);

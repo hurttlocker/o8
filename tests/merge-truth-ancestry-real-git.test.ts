@@ -67,7 +67,7 @@ describe('merge truth by git ancestry', () => {
     });
     setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
 
-    expect(reconcileOrphanedWorktrees()).toBeGreaterThanOrEqual(1);
+    expect(await reconcileOrphanedWorktrees()).toBeGreaterThanOrEqual(1);
     expect(getLane(lane.id)?.status).toBe('completed');
   });
 
@@ -96,11 +96,11 @@ describe('merge truth by git ancestry', () => {
     });
     setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
 
-    expect(reconcileOrphanedWorktrees()).toBe(0);
+    expect(await reconcileOrphanedWorktrees()).toBe(0);
     expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
 
-  it('treats squash-merged content as unconfirmed because the lane head is not in ancestry', () => {
+  it('treats squash-merged content as unconfirmed because the lane head is not in ancestry', async () => {
     const repo = makeRepo('o8-merge-truth-squash-');
     git(repo, ['checkout', '-b', 'inline/squash']);
     writeFileSync(join(repo, 'squash.txt'), 'squash\n');
@@ -121,11 +121,11 @@ describe('merge truth by git ancestry', () => {
 
     // Squash merge lands equivalent content in a new commit, so SHA ancestry
     // cannot prove the reviewed lane head landed. Keep it review-visible.
-    expect(reconcileOrphanedWorktrees()).toBe(0);
+    expect(await reconcileOrphanedWorktrees()).toBe(0);
     expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
 
-  it('keeps a missing-worktree lane review-visible when no lane-head evidence exists', () => {
+  it('keeps a missing-worktree lane review-visible when no lane-head evidence exists', async () => {
     const repo = makeRepo('o8-merge-truth-no-sha-');
     git(repo, ['checkout', '-b', 'inline/no-sha']);
     writeFileSync(join(repo, 'lost.txt'), 'lost\n');
@@ -143,7 +143,7 @@ describe('merge truth by git ancestry', () => {
     });
     setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
 
-    expect(reconcileOrphanedWorktrees()).toBe(0);
+    expect(await reconcileOrphanedWorktrees()).toBe(0);
     expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
 });

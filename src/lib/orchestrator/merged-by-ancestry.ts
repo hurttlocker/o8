@@ -8,6 +8,7 @@ import {
   readOrchestratorControlPlaneState,
   withLockedState,
 } from '@/lib/orchestrator/control-plane';
+import { MergedByAncestryBackoff } from '@/lib/orchestrator/merged-by-ancestry-backoff';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
@@ -61,6 +62,16 @@ export interface MergedByAncestrySweepResult {
   scanned: number;
   merged: number;
   skipped: number;
+}
+
+// #1498 — persists across sweeps so a lane whose detect() keeps timing out is
+// parked with exponential backoff instead of re-spawning its expensive git
+// pipeline every 30s tick.
+const detectBackoff = new MergedByAncestryBackoff();
+
+function candidateKey(candidate: Candidate): string {
+  return candidate.laneId
+    ?? (candidate.packet ? `packet:${candidate.packet.id}` : `repo:${candidate.repoPath}:${candidate.branch}`);
 }
 
 async function git(
@@ -435,9 +446,22 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
   let merged = 0;
   let skipped = 0;
 
+  // Drop parked entries for candidates that vanished (archived/merged out) so
+  // the negative cache can't grow unbounded across sweeps.
+  detectBackoff.prune(candidates.map(candidateKey));
+  const now = Date.now();
+
   for (const candidate of candidates) {
+    const key = candidateKey(candidate);
+    // A candidate whose detect() has been timing out is parked with growing
+    // backoff — skip re-spawning its git pipeline until the window opens.
+    if (detectBackoff.shouldSkip(key, now)) {
+      skipped += 1;
+      continue;
+    }
     try {
       const evidence = await detectMergedByAncestry(candidate);
+      detectBackoff.recordSuccess(key);
       if (!evidence) {
         skipped += 1;
         continue;
@@ -449,6 +473,7 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
       }
       merged += 1;
     } catch (error) {
+      detectBackoff.recordFailure(key, now);
       skipped += 1;
       console.warn(
         `[merged-by-ancestry] skipped ${candidate.packet ? `packet ${candidate.packet.id}` : `lane ${candidate.laneId}`}: ${error instanceof Error ? error.message : String(error)}`,
