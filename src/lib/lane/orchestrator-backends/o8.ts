@@ -25,6 +25,7 @@
  * on loopback, so the middleware passes it without a bearer token.
  */
 
+import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readOrchestratorThreadMessages } from '@/lib/mobile/orchestrator-thread-history';
 import { getApiBase } from '@/lib/panel/api-port';
@@ -36,18 +37,62 @@ import type {
 } from './types';
 
 /**
- * Conversational framing appended to the proxy's own chat system prompt (the
- * proxy folds any `role: 'system'` message into its system context). Keeps the
- * free model from claiming it can dispatch or run tools.
+ * Conversational framing sent as the system message (the proxy folds any
+ * `role: 'system'` message into its system context). Tier-specific per the
+ * prompt lab A/B (2026-07-12, scratchpad prompt-lab/): the recursive
+ * two-angle pass fixed the free model's hallucination trap outright (3.5 →
+ * 8.7) at zero latency cost, but the skills-fused principles layer only
+ * helps the STRONGER founders model — on the small model it nudged answers
+ * back toward overclaiming, and on Gemini the recursive pass alone caused
+ * confident fabricated NEGATIVES until the principles layer grounded it.
+ * So: Low (free rail) = base + recursive; High (founders rail) = base +
+ * recursive + principles. Don't merge them.
  */
-const O8_SYSTEM_PROMPT = [
-  'You are o8 — the free conversational model inside the o8 control plane.',
+const O8_PROMPT_BASE = [
   'Answer concisely and helpfully.',
   'You are a chat surface only in this mode: you cannot dispatch agents, run tools,',
   'edit files, or drive the repo. If the operator asks for real repo work, say plainly',
-  'that the free o8 model is conversational only and that they can switch the composer',
+  'that the o8 model is conversational only and that they can switch the composer',
   'to Claude or Codex to dispatch actual agents. Never claim you dispatched or ran anything.',
 ].join(' ');
+
+const O8_PROMPT_RECURSIVE = [
+  'Before answering anything non-trivial, make two silent passes from two different angles:',
+  'first as a builder (what is the direct answer / solution?), then as a skeptic (what did',
+  'the first pass miss, assume, or get wrong? what would break it?). Reconcile the two',
+  'passes into one answer. For any question about o8 itself, do a final accuracy pass:',
+  'every feature you name must come from the concepts you were given — if it isn\'t there,',
+  'say you\'re not certain instead of inventing it. Keep all of this reasoning silent;',
+  'deliver only the reconciled answer, concise and confident.',
+].join(' ');
+
+const O8_PROMPT_PRINCIPLES = [
+  'Working principles: Lead with the answer — the first sentence should resolve the',
+  'question, detail after. Simplicity first — recommend the minimum change that solves the',
+  'problem, never speculative flexibility. Be surgical — when suggesting changes, touch',
+  'only what the request requires. Verify the real path — a suggestion isn\'t done until',
+  'you\'ve explained how the user confirms it actually worked. Say plainly what you don\'t',
+  'know or can\'t do; never fake certainty or invent capabilities.',
+].join(' ');
+
+// Grounding block — the recursive accuracy pass needs real concepts to check
+// feature claims against, or it has nothing to be honest WITH.
+const O8_CONCEPTS = [
+  'o8 concepts: the operator dispatches MISSIONS which become PACKETS (units of agent',
+  'work) running in isolated git worktrees called LANES; every diff is REVIEWED by the',
+  'operator before APPROVE-AND-MERGE lands it on main. The composer\'s model picker',
+  'chooses which AI drives the orchestrator.',
+].join(' ');
+
+function o8SystemPrompt(tier: 'low' | 'high'): string {
+  const identity = tier === 'high'
+    ? 'You are o8 — the conversational model inside the o8 control plane.'
+    : 'You are o8 — the free conversational model inside the o8 control plane.';
+  const parts = tier === 'high'
+    ? [identity, O8_PROMPT_BASE, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES]
+    : [identity, O8_PROMPT_BASE, O8_PROMPT_RECURSIVE];
+  return `${parts.join(' ')}\n\n${O8_CONCEPTS}`;
+}
 
 type ProxyMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -75,7 +120,15 @@ async function sendToO8Orchestrator(
     prior.length > 0 && prior[prior.length - 1].role === 'user'
       ? prior
       : [...prior, { role: 'user', content: message }];
-  const messages: ProxyMessage[] = [{ role: 'system', content: O8_SYSTEM_PROMPT }, ...history];
+  // Tier mirrors the proxy's own gate: explicit effort wins, absent = plan
+  // auto (founders High, free Low). The prompt must match the rail the proxy
+  // will actually pick, so both resolve the same way.
+  const tier: 'low' | 'high' = options.thinkingEffort === 'high'
+    ? 'high'
+    : options.thinkingEffort === 'low'
+      ? 'low'
+      : getEntitlementSync().plan !== 'free' ? 'high' : 'low';
+  const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier) }, ...history];
 
   let response: Response;
   try {
