@@ -138,51 +138,6 @@ function toModelMessages(history: ChatHistoryMessage[], message: string): ModelM
   ] satisfies ModelMessage[];
 }
 
-const O8_ORCHESTRATOR_SYSTEM_PROMPT = [
-  'You are o8 — the free conversational model inside the o8 control plane.',
-  'Answer concisely and helpfully.',
-  'You are a chat surface only in this mode: you cannot dispatch agents, run tools,',
-  'edit files, or drive the repo. If the operator asks for real repo work, say plainly',
-  'that the free o8 model is conversational only and that they can switch the composer',
-  'to Claude or Codex to dispatch actual agents. Never claim you dispatched or ran anything.',
-].join(' ');
-
-function toOrchestratorModelMessages(messages: ChatHistoryMessage[]): ModelMessage[] {
-  return [
-    { role: 'system', content: O8_ORCHESTRATOR_SYSTEM_PROMPT },
-    ...messages
-      .filter((item) => item.content.trim().length > 0)
-      .map((item) => ({ role: item.role, content: item.content })),
-  ] satisfies ModelMessage[];
-}
-
-/**
- * Stream the FREE gateway model over a full message array (system + prior turns
- * + current user turn). Powers the `o8` orchestrator backend — a conversational
- * surface the operator can drive without spending any subscription pool. System
- * credential only (no BYOK), no tools: pure text streaming.
- */
-export function streamFreeOrchestratorChat(input: {
-  userId: string;
-  messages: ChatHistoryMessage[];
-  abortSignal?: AbortSignal;
-}): AsyncIterable<string> {
-  const gatewayApiKey = requiredEnv('VERCEL_AI_GATEWAY_API_KEY') ?? '';
-  const heliconeHeaders = buildHeliconeHeaders(input.userId, 'system');
-  const gateway = createGateway({
-    apiKey: gatewayApiKey,
-    headers: heliconeHeaders,
-  });
-  const result = streamText({
-    model: gateway(FREE_CHAT_MODEL_ID),
-    messages: toOrchestratorModelMessages(input.messages),
-    headers: heliconeHeaders,
-    abortSignal: input.abortSignal,
-  });
-
-  return result.textStream;
-}
-
 export function streamGatewayChat(input: StreamGatewayChatInput): AsyncIterable<string> {
   const gatewayApiKey = requiredEnv('VERCEL_AI_GATEWAY_API_KEY') ?? '';
   const credentialType = input.byokApiKey ? 'byok' : 'system';
