@@ -256,9 +256,28 @@ export function HistoryChatRow({
         // paddingLeft 12 + 17 icon + 8 gap = 37). Folder icon on repo
         // header sits at X=12, so chats nest visually under their group.
         paddingLeft: 37,
+        // Gutter dot needs an anchor; visual layout unchanged otherwise.
+        position: 'relative',
         transition: 'background 180ms ease, opacity 180ms ease',
       }}
     >
+      {/* Status dot leads the row in the 37px indent gutter (Q 2026-07-12,
+          Claude-style): you scan states down the LEFT edge before reading a
+          word. Title X stays exactly 37 — the hurttlocker indent is untouched;
+          the dot centers in the gutter beside it. */}
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: 14,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          display: 'inline-flex',
+          alignItems: 'center',
+        }}
+      >
+        <AgentStatusDot state={dotState} />
+      </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           className={active ? 'o8-text-shimmer' : undefined}
@@ -321,7 +340,6 @@ export function HistoryChatRow({
         {compact ? (
           <span>{formatElapsedAgo(item.modifiedAt)}</span>
         ) : null}
-        <AgentStatusDot state={dotState} />
       </span>
     </div>
   );
@@ -362,8 +380,16 @@ export function CompactSessionRow({
         paddingRight: 12,
         paddingBottom: 4,
         paddingLeft: 37,
+        position: 'relative',
       }}
     >
+      {/* Left-gutter status dot — same treatment as HistoryRow (Q 2026-07-12). */}
+      <span
+        aria-hidden
+        style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', alignItems: 'center' }}
+      >
+        <AgentStatusDot state={isRunning ? 'running' : 'idle'} />
+      </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
@@ -372,7 +398,6 @@ export function CompactSessionRow({
           {metaLabel}
         </span>
       </span>
-      <AgentStatusDot state={isRunning ? 'running' : 'idle'} />
     </button>
   );
 }

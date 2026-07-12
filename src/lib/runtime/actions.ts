@@ -243,9 +243,22 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     || runtimeId === 'opencode'
     || runtimeId === 'pi';
 
+  // A plain folder (never git-inited) can't host worktrees — and every launch
+  // died at `git rev-parse --show-toplevel` with NO surfaced error (#1551,
+  // live-hit 2026-07-12: a fresh laptop's first project folder, "hey" eaten
+  // silently, no agent could spawn at all). Degrade instead of dying: launch
+  // the runtime directly in the folder, no isolation, and say so in the note.
+  // `.git` may be a FILE in a linked worktree, so existsSync covers both.
+  const { existsSync: launchDirHasGit } = await import('node:fs');
+  const { join: joinLaunchPath } = await import('node:path');
+  const repoIsGit = launchDirHasGit(joinLaunchPath(repoPath, '.git'));
+  if (!repoIsGit) {
+    console.warn(`[runtime-launch] ${repoPath} is not a git repository — launching ${runtimeId} directly in the folder (no isolation, no branch)`);
+  }
+
   // Create a worktree when: explicitly requested via isolate flag, OR when not skipping setup.
   // This allows dispatch to request isolation (isolate: true) while skipping env setup (skipSetup: true).
-  const shouldCreateWorktree = supportsWorktrees && (payload.isolate || !payload.skipSetup);
+  const shouldCreateWorktree = supportsWorktrees && repoIsGit && (payload.isolate || !payload.skipSetup);
   if (shouldCreateWorktree) {
     const retryInSeconds = fetchCooldownRetrySeconds(repoPath);
     if (retryInSeconds != null) {
