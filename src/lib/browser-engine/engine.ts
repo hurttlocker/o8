@@ -106,7 +106,25 @@ class BrowserEngine {
       // Lazy — this is the ONLY place the playwright runtime is needed, and it
       // only runs when an agent actually asks for a browser. Keeping it out of
       // the module graph keeps it off the server's boot path.
-      const { chromium } = await import('playwright-core');
+      //
+      // The static import used to be resolved at BUILD time; this one resolves at
+      // RUNTIME, so a packaging regression (playwright-core missing from
+      // Resources/server/node_modules because Next's file tracing stopped
+      // following it) would no longer be a build error — it would be a failure the
+      // first time an agent asked for a browser, in production. Name the module in
+      // the error so that failure is loud and obvious instead of a mystery hang.
+      let chromium: typeof import('playwright-core').chromium;
+      try {
+        ({ chromium } = await import('playwright-core'));
+      } catch (cause) {
+        throw new Error(
+          '[browser-engine] could not load `playwright-core` at runtime. In a packaged '
+          + 'build it must exist at Resources/server/node_modules/playwright-core — if it '
+          + "is missing, Next's output file tracing has stopped following the dynamic "
+          + 'import in browser-engine/engine.ts. The browser engine is unavailable.',
+          { cause },
+        );
+      }
       this.browserPromise = chromium.launch({ channel: 'chrome', headless: true }).then((browser) => {
         browser.on('disconnected', () => {
           this.browserPromise = null;
