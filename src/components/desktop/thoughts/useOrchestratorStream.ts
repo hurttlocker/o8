@@ -47,6 +47,7 @@ import {
   formatTimestampLabel,
   getWsUrl,
   normalizeRepoPath,
+  refreshWsCredentials,
   sortTranscriptEntries,
   type OrchestratorPermissionMode,
   type OrchestratorStreamStatus,
@@ -573,8 +574,13 @@ export function useOrchestratorStream(
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    // Distinguishes "connection dropped" from "handshake never succeeded" —
+    // the latter means our baked credentials are stale (app restarted under
+    // this page) and the reconnect must refresh them first.
+    let everOpened = false;
 
     ws.onopen = () => {
+      everOpened = true;
       setConnected(true);
       // Don't clobber a live turn's "busy" on a mid-turn reconnect. Downgrading
       // to 'connecting' here made the working indicator (and the streaming reply,
@@ -643,11 +649,18 @@ export function useOrchestratorStream(
       wsRef.current = null;
       console.log('[orchestrator-stream] Disconnected');
 
-      // Auto-reconnect after 2s — but only if still mounted
+      // Auto-reconnect after 2s — but only if still mounted. A close WITHOUT a
+      // successful open means the handshake was rejected — the page's baked
+      // token/port are stale (app restarted underneath us, live-hit
+      // 2026-07-12) — so pull fresh credentials before the retry instead of
+      // failing identically forever until a manual reload.
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (!mountedRef.current) return;
+      const refresh = everOpened ? Promise.resolve(false) : refreshWsCredentials();
       reconnectTimerRef.current = setTimeout(() => {
-        if (repoPathRef.current && mountedRef.current) connect();
+        void refresh.then(() => {
+          if (repoPathRef.current && mountedRef.current) connect();
+        });
       }, 2000);
     };
 

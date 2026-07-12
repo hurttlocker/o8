@@ -53,15 +53,47 @@ export function normalizeRepoPath(value: string | null | undefined) {
   return (value ?? '').trim().replace(/\/+$/, '');
 }
 
+/**
+ * Fresh WS credentials fetched AFTER page load. The layout bakes token + port
+ * into the HTML at render time; a page that outlives an app restart (dev-bridge
+ * webview across a self-update, sidecar re-picking ports) holds stale values
+ * and every send dies until a manual reload (live-hit 2026-07-12). On a failed
+ * handshake, `refreshWsCredentials()` pulls the live values from
+ * /api/panel/ws-info (loopback passes the middleware) and getWsUrl prefers
+ * them over the baked snapshot from then on.
+ */
+let wsCredentialOverride: { port: number; token: string } | null = null;
+let wsCredentialRefreshInFlight: Promise<boolean> | null = null;
+
+export function refreshWsCredentials(): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (wsCredentialRefreshInFlight) return wsCredentialRefreshInFlight;
+  wsCredentialRefreshInFlight = fetch('/api/panel/ws-info')
+    .then(async (res) => {
+      if (!res.ok) return false;
+      const data = await res.json() as { wsPort?: unknown; wsToken?: unknown };
+      const port = typeof data.wsPort === 'number' && Number.isInteger(data.wsPort) && data.wsPort > 0 ? data.wsPort : null;
+      const token = typeof data.wsToken === 'string' && data.wsToken.length >= 16 ? data.wsToken : null;
+      if (!port || !token) return false;
+      wsCredentialOverride = { port, token };
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => { wsCredentialRefreshInFlight = null; });
+  return wsCredentialRefreshInFlight;
+}
+
 export function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, port, protocol } = window.location;
-  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  const token = wsCredentialOverride?.token
+    ?? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
   const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
 
   if (isLocal) {
-    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
+    const wsPort = wsCredentialOverride?.port ?? getBrowserWsPort();
+    return `ws://${hostname}:${wsPort}/ws?token=${encodeURIComponent(token)}`;
   }
 
   const wsPort = port ? `:${port}` : '';
