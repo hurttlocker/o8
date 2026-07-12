@@ -1,6 +1,16 @@
 import 'server-only';
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+// TYPE-ONLY import: erased at compile time, so it pulls nothing into the bundle.
+//
+// The runtime `chromium` value is loaded lazily in `browser()` below. It used to
+// be a static import, which dragged all of playwright-core onto the SERVER'S BOOT
+// PATH — a browser-automation library, fully required before the app would answer
+// its first HTTP request. It cost 126ms of self time in a CPU profile of the
+// boot, plus its share of the 491ms the CJS loader spent reading and compiling
+// modules off disk.
+//
+// Nothing here needs a browser until someone actually drives one.
+import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
 import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
@@ -93,6 +103,28 @@ class BrowserEngine {
 
   private async browser(): Promise<Browser> {
     if (!this.browserPromise) {
+      // Lazy — this is the ONLY place the playwright runtime is needed, and it
+      // only runs when an agent actually asks for a browser. Keeping it out of
+      // the module graph keeps it off the server's boot path.
+      //
+      // The static import used to be resolved at BUILD time; this one resolves at
+      // RUNTIME, so a packaging regression (playwright-core missing from
+      // Resources/server/node_modules because Next's file tracing stopped
+      // following it) would no longer be a build error — it would be a failure the
+      // first time an agent asked for a browser, in production. Name the module in
+      // the error so that failure is loud and obvious instead of a mystery hang.
+      let chromium: typeof import('playwright-core').chromium;
+      try {
+        ({ chromium } = await import('playwright-core'));
+      } catch (cause) {
+        throw new Error(
+          '[browser-engine] could not load `playwright-core` at runtime. In a packaged '
+          + 'build it must exist at Resources/server/node_modules/playwright-core — if it '
+          + "is missing, Next's output file tracing has stopped following the dynamic "
+          + 'import in browser-engine/engine.ts. The browser engine is unavailable.',
+          { cause },
+        );
+      }
       this.browserPromise = chromium.launch({ channel: 'chrome', headless: true }).then((browser) => {
         browser.on('disconnected', () => {
           this.browserPromise = null;
