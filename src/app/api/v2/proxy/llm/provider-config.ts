@@ -3,11 +3,20 @@ import { toolsForAnthropic, toolsForOpenAI } from '@/lib/llm/tools';
 
 export type Provider = 'anthropic' | 'openai' | 'google' | 'operator';
 
-/** o8 Operator backing model — Gemini Flash via the user's GOOGLE_AI_API_KEY. */
+/** o8 Operator backing model for FOUNDERS/paid — Gemini Flash via
+ *  GOOGLE_AI_API_KEY (tool-capable, fastest; not available to free users —
+ *  Q ruling 2026-07-12: "nemo for free, gemini for founders"). */
 export const OPERATOR_GEMINI_MODEL = 'gemini-2.5-flash';
 
-/** o8 Operator fallback — OpenRouter free model when Gemini quota is exhausted. */
-export const OPERATOR_OPENROUTER_MODEL = 'openai/gpt-oss-120b:free';
+/** o8 Operator FREE chain — $0 OpenRouter models, ordered. Bake-off
+ *  2026-07-12 (scratchpad bakeoff_results.json): nemotron passed tool-calling
+ *  and scored 5/5 on the o8 explainer with zero invented features;
+ *  gpt-oss-120b:free stays as the always-answers safety net (it fabricated
+ *  product mechanics and threw a 42s outlier, so it lost the primary slot). */
+export const OPERATOR_FREE_OPENROUTER_MODELS = [
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'openai/gpt-oss-120b:free',
+] as const;
 
 export interface Message {
   role: string;

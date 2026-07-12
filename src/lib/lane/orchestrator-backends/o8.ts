@@ -87,6 +87,12 @@ async function sendToO8Orchestrator(
         provider: 'operator',
         messages,
         disableTools: true,
+        // Tier gate (Q ruling 2026-07-12): High = founders rail, Low = free
+        // rail. Absent = server auto by plan. The proxy enforces the plan
+        // either way — this is a request, not an entitlement.
+        ...(options.thinkingEffort
+          ? { thinkingEffort: options.thinkingEffort === 'high' ? 'high' : 'low' }
+          : {}),
       }),
       signal: options.signal,
     });
