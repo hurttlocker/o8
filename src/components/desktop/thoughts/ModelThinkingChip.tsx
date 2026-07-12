@@ -3,6 +3,7 @@ import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
+import { useEntitlement } from '@/lib/entitlement/context';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -333,28 +334,40 @@ export function ModelThinkingChip({
   // levels we can't actually steer (Q ruling 2026-07-11).
   const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
     || activeBackend === 'codex' || activeBackend === 'auto';
-  // The free o8 model has no thinking-effort tiers and never fans out — hide the
-  // effort slider + the Solo/Collide mode rows so its menu is just the model
-  // picker (operator ruling 2026-07-12). The split thinking trigger is already
-  // hidden because o8 isn't in `thinkingKnown`.
+  // o8 tiers (Q ruling 2026-07-12): Low = the free rail, High = the founders
+  // rail. Founders default High, free defaults Low, and High never renders for
+  // the free plan — the proxy enforces the same gate server-side, this is
+  // just the honest UI for it. Mode rows (Solo/Collide) stay hidden for o8.
   const isO8Backend = activeBackend === 'o8';
+  const { plan: entitlementPlan } = useEntitlement();
+  const isFreePlan = entitlementPlan === 'free';
+  const hideEffortUi = isO8Backend && isFreePlan;
   const useSplit = split && !compact;
 
   // Effort slider stops (Q ruling 2026-07-11): one per selectable effort, then
   // a final "Ultracode" notch that arms Swarm mode. Swarm is no longer a
   // separate Mode row — it's the top of the slider.
-  const effortStops: EffortStop[] = [
-    ...options.map((option): EffortStop => ({
-      kind: 'effort',
-      effort: option,
-      label: EFFORT_LABELS[option].charAt(0).toUpperCase() + EFFORT_LABELS[option].slice(1),
-      sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
-    })),
-    ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Ultracode', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),
-  ];
-  const currentEffortIndex = ultraActive
-    ? effortStops.length - 1
-    : Math.max(0, options.indexOf(effort));
+  const effortStops: EffortStop[] = isO8Backend
+    ? [
+      { kind: 'effort', effort: 'low', label: 'Low', sub: 'free' },
+      ...(!isFreePlan
+        ? [{ kind: 'effort' as const, effort: 'high' as ThinkingEffort, label: 'High', sub: 'founders' }]
+        : []),
+    ]
+    : [
+      ...options.map((option): EffortStop => ({
+        kind: 'effort',
+        effort: option,
+        label: EFFORT_LABELS[option].charAt(0).toUpperCase() + EFFORT_LABELS[option].slice(1),
+        sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
+      })),
+      ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Ultracode', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),
+    ];
+  const currentEffortIndex = isO8Backend
+    ? (effort === 'high' && !isFreePlan ? 1 : 0)
+    : ultraActive
+      ? effortStops.length - 1
+      : Math.max(0, options.indexOf(effort));
   const handleEffortPick = (idx: number) => {
     const stop = effortStops[idx];
     if (!stop) return;
@@ -565,12 +578,16 @@ export function ModelThinkingChip({
                               // Codex/Sol keeps ultra available; Terra + any Claude
                               // model cap at max — drop a stale ultra selection.
                               if (option.model !== MODEL_IDS.raw.openAiGpt56Sol && effort === 'ultra') onEffortChange?.('max');
-                              // The free o8 model has no fan-out: clear Collide/Swarm
+                              // The o8 model has no fan-out: clear Collide/Swarm
                               // so the turn actually routes to the o8 backend (a live
                               // `collide` flag forces the collide backend downstream).
+                              // Auto tier (Q ruling 2026-07-12): founders land on
+                              // High, free lands on Low — the server enforces the
+                              // same gate regardless.
                               if (option.backend === 'o8') {
                                 onSetCollide?.(false);
                                 onSetSwarm?.(false);
+                                onEffortChange?.(isFreePlan ? 'low' : 'high');
                               }
                               setOpen(false);
                             }}
@@ -607,7 +624,7 @@ export function ModelThinkingChip({
                   );
                 })}
               </div>
-              {isO8Backend ? null : (
+              {hideEffortUi ? null : (
                 <div style={{ marginTop: 4, paddingLeft: 7, paddingRight: 7, paddingTop: 6, paddingBottom: 2, borderTop: '1px solid var(--t-divider-subtle)' }}>
                   <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
                 </div>
@@ -619,7 +636,7 @@ export function ModelThinkingChip({
               <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
             </div>
           )}
-          {onEffortChange && !isO8Backend ? (
+          {onEffortChange && !hideEffortUi ? (
             <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
           ) : null}
 

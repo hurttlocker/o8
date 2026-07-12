@@ -9,20 +9,28 @@ interface StreamOptions {
   messages: Message[];
   model: string;
   auth: AuthContext | null;
+  /** When set, the stream opens with a 'fallback' banner event (paid plan whose
+   *  Gemini quota died). Omit/null when this model IS the plan's primary — the
+   *  free plan rides this path by design and must not see a degradation banner. */
+  notice?: { originalModel: string; originalModelLabel: string; reason: string } | null;
 }
 
 /**
- * o8 Operator fallback path — streams an OpenAI-compatible response from OpenRouter
- * using a free model. This runs when the primary Gemini call hits quota.
+ * o8 Operator OpenRouter path — streams an OpenAI-compatible response from an
+ * OpenRouter model. This is the free plan's PRIMARY rail (nemotron, then
+ * gpt-oss-120b — Q ruling + bake-off 2026-07-12) and the paid plan's fallback
+ * when Gemini hits quota.
  *
- * Tools are disabled in the fallback path: free models often don't honor tool calls
- * reliably. The user gets text-only chat until Gemini quota resets.
+ * Tools are disabled on this path: tool support here is future work (nemotron
+ * passed tool-calling in the bake-off, but this stream doesn't carry a tools
+ * array yet). Text-only chat.
  */
 export async function streamOpenRouterFallback({
   apiKey,
   messages,
   model,
   auth: _auth,
+  notice,
 }: StreamOptions): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
@@ -77,15 +85,18 @@ export async function streamOpenRouterFallback({
         streamController.enqueue(encoder.encode(`data: ${data}\n\n`));
       };
 
-      // Notify the client that the operator is in fallback mode.
-      enqueue({
-        type: 'fallback',
-        originalModel: 'gemini-2.5-flash',
-        originalModelLabel: 'Gemini 2.5 Flash',
-        fallbackModel: model,
-        fallbackModelLabel: 'OpenRouter free tier',
-        reason: 'Gemini quota exhausted — using OpenRouter free tier',
-      });
+      // Degradation banner ONLY when this genuinely is a fallback (paid plan,
+      // Gemini quota dead). The free plan's primary ride stays banner-free.
+      if (notice) {
+        enqueue({
+          type: 'fallback',
+          originalModel: notice.originalModel,
+          originalModelLabel: notice.originalModelLabel,
+          fallbackModel: model,
+          fallbackModelLabel: 'OpenRouter free tier',
+          reason: notice.reason,
+        });
+      }
 
       const reader = upstream.body?.getReader();
       if (!reader) {

@@ -23,8 +23,8 @@ import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinki
 import {
   computeCost,
   isSupportedProvider,
+  OPERATOR_FREE_OPENROUTER_MODELS,
   OPERATOR_GEMINI_MODEL,
-  OPERATOR_OPENROUTER_MODEL,
   PROVIDERS,
   resolveApiKey,
   type Message,
@@ -49,6 +49,36 @@ function jsonError(message: string, status: number) {
     JSON.stringify({ error: message }),
     { status, headers: { 'Content-Type': 'application/json' } },
   );
+}
+
+// ── o8 Operator abuse limiter ────────────────────────────────────────────────
+// The operator rail is unmetered for every plan (Q ruling 2026-07-12:
+// "founders don't have any usage… but we should have rate limits for abuse").
+// This is an anti-runaway guard for the single-operator desktop, not
+// multi-tenant fairness: generous enough that no human conversation ever
+// trips it, tight enough that a looping script can't torch the OpenRouter
+// key's free-tier standing or the founder Gemini key. In-memory by design —
+// a process restart resetting the window is fine for an abuse guard.
+const OPERATOR_LIMIT_PER_MINUTE = 20;
+const OPERATOR_LIMIT_PER_DAY = 500;
+const operatorCallTimestamps: number[] = [];
+
+function checkOperatorAbuseLimit(): Response | null {
+  const now = Date.now();
+  const dayAgo = now - 24 * 60 * 60_000;
+  while (operatorCallTimestamps.length > 0 && operatorCallTimestamps[0] < dayAgo) {
+    operatorCallTimestamps.shift();
+  }
+  const minuteAgo = now - 60_000;
+  const lastMinute = operatorCallTimestamps.filter((t) => t >= minuteAgo).length;
+  if (lastMinute >= OPERATOR_LIMIT_PER_MINUTE) {
+    return jsonError('o8 model rate limit: too many requests this minute. Wait a moment and try again.', 429);
+  }
+  if (operatorCallTimestamps.length >= OPERATOR_LIMIT_PER_DAY) {
+    return jsonError('o8 model rate limit: daily request cap reached. Resets over the next 24 hours.', 429);
+  }
+  operatorCallTimestamps.push(now);
+  return null;
 }
 
 function approvalTitleForTool(toolName: string) {
@@ -370,11 +400,25 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     }
   }
 
-  // o8 Operator — try Gemini Flash with the user's Google key; if quota is exhausted,
-  // fall back to a free OpenRouter model. Uses the same plumbing as a regular google call.
+  // o8 Operator — the branded zero-setup model, plan-gated (Q ruling
+  // 2026-07-12): founders/paid auto-ride Gemini Flash ("High"); the free plan
+  // auto-rides the $0 OpenRouter chain ("Low" — nemotron won the bake-off,
+  // gpt-oss-120b:free is the safety net, so o8 ALWAYS has a model). The tier
+  // arrives as thinkingEffort but is SERVER-ENFORCED: a free client asking for
+  // high still gets the free chain (fail-closed). Founders draw no metered
+  // usage; the abuse limiter below guards the rail against runaway loops.
   if (provider === 'operator') {
+    const abuseError = checkOperatorAbuseLimit();
+    if (abuseError) return abuseError;
+
     const geminiKey = process.env.GOOGLE_AI_API_KEY ?? null;
-    if (geminiKey) {
+    const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
+    const paidPlan = getEntitlementSync().plan !== 'free';
+    // Absent tier = auto: founders default High (Gemini), free defaults Low.
+    const wantsLow = requestedThinkingEffort === 'low';
+    let geminiQuotaExhausted = false;
+
+    if (paidPlan && !wantsLow && geminiKey) {
       const geminiResponse = await createGoogleToolResponseStream({
         apiKey: geminiKey,
         auth,
@@ -389,21 +433,55 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       if (geminiResponse.ok || (status !== 429 && status !== 503 && status !== 402)) {
         return geminiResponse;
       }
-      // Drop the failed Gemini response; fall through to OpenRouter.
+      // Quota/exhaustion — drop into the free chain below.
+      geminiQuotaExhausted = true;
     }
-    const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
-    if (!openRouterKey) {
-      return jsonError(
-        'o8 Operator unavailable: Gemini quota exhausted and no OPENROUTER_API_KEY configured for fallback.',
-        503,
-      );
+
+    if (openRouterKey) {
+      let lastFailure: Response | null = null;
+      for (const freeModel of OPERATOR_FREE_OPENROUTER_MODELS) {
+        const response = await streamOpenRouterFallback({
+          apiKey: openRouterKey,
+          messages,
+          model: freeModel,
+          auth,
+          // Degradation banner only for a founder whose Gemini quota died —
+          // the free plan rides this chain by design, no banner.
+          notice: geminiQuotaExhausted
+            ? {
+              originalModel: OPERATOR_GEMINI_MODEL,
+              originalModelLabel: 'Gemini 2.5 Flash',
+              reason: 'Gemini quota exhausted — using the free chain',
+            }
+            : null,
+        });
+        if (response.ok) return response;
+        lastFailure = response;
+      }
+      if (!geminiKey) {
+        return lastFailure ?? jsonError('o8 Operator unavailable: every free model failed.', 503);
+      }
     }
-    return streamOpenRouterFallback({
-      apiKey: openRouterKey,
-      messages,
-      model: OPERATOR_OPENROUTER_MODEL,
-      auth,
-    });
+
+    // Last resort so o8 always answers when any key exists — a free install
+    // with only a Google key beats a dead composer.
+    if (geminiKey) {
+      return createGoogleToolResponseStream({
+        apiKey: geminiKey,
+        auth,
+        disableTools,
+        lastUserContent: lastUserMsg?.content,
+        messages,
+        model: OPERATOR_GEMINI_MODEL,
+        scopedRepoRoot: effectiveRepoRoot,
+        tabId,
+      });
+    }
+
+    return jsonError(
+      'o8 Operator unavailable: set OPENROUTER_API_KEY (free chain) or GOOGLE_AI_API_KEY.',
+      503,
+    );
   }
 
   const apiKey = resolveApiKey(provider);
