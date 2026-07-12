@@ -146,17 +146,24 @@ export function AgentStatusDot({
   }
 
   if (state === 'failed') {
-    // Failed = the working orb, in red: it MOVES (pulses) so it takes precedence
-    // as an active alarm — "look now" — and reads clearly apart from rejected's
-    // STATIC rose, even though both are red-ish. Motion is the separator; a
-    // crash is live and loud, a declined review is settled and calm. (Q, 2026-07-11.)
+    // Failed = the DISPATCH pixel mark (packed core spreads to a cross, re-packs)
+    // in alarm red — locked by Q 2026-07-12 from the neo-retro loader family.
+    // It MOVES so it takes precedence as an active alarm and reads apart from
+    // rejected's calmer dual-pulse; the cross-spread gives failed its own
+    // silhouette instead of another circle. Dot-scale via .o8-status-size.
     return (
       <span
-        className="o8-pulse-circle"
-        style={{ background: color ?? ACCENT.failed }}
+        className="o8-loader-dispatch o8-status-size"
+        style={{ ['--t-loader']: color ?? ACCENT.failed } as CSSProperties}
         aria-label={dotLabel}
         title={dotLabel}
-      />
+      >
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+      </span>
     );
   }
 
