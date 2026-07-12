@@ -2293,3 +2293,40 @@ button.workflow-file-item.workflow-file-item-active {
 @keyframes o8-rev-frame-l{0%,20%{transform:translateX(0)}45%,75%{transform:translateX(2.5px)}100%{transform:translateX(0)}}
 @keyframes o8-rev-frame-r{0%,20%{transform:translateX(0)}45%,75%{transform:translateX(-2.5px)}100%{transform:translateX(0)}}
 @media (prefers-reduced-motion: reduce){[class^="o8-rev-"]>i{animation:none}}
+
+/* ── Status family (Q lock 2026-07-12): every state on ONE 3×3 canvas.
+      Dot scale: 11px (3px cells, 1px gap) fits the 7-10px slot without
+      shifting rows. Opacity/transform only — no layout animation, no JS
+      timers. Chrome-size marks skip the bloom; banners may add it later. ── */
+.o8-fam{position:relative;display:inline-grid;grid-template-columns:repeat(3,3px);grid-auto-rows:3px;gap:1px;width:11px;height:11px;flex-shrink:0}
+.o8-fam>i{background:var(--fam-c,#94a3b8);border-radius:0.75px;opacity:.18;will-change:opacity,transform}
+@keyframes o8-fam-sine{0%{opacity:.15}50%{opacity:1}100%{opacity:.15}}
+.o8-fam.fam-working>i{animation:o8-fam-sine 1.9s ease-in-out infinite;animation-delay:-0.95s}
+.o8-fam.fam-working>i:nth-child(5){animation-delay:0s}
+@keyframes o8-fam-blinkoff{0%{opacity:1}78%{opacity:1}82%{opacity:0}92%{opacity:0}96%{opacity:1}100%{opacity:1}}
+.o8-fam.fam-review>i{opacity:.3}
+.o8-fam.fam-review>i:nth-child(5){opacity:1;animation:o8-fam-blinkoff 3.2s ease-in-out infinite}
+@keyframes o8-fam-settle{0%{opacity:.25}5%{opacity:1}94%{opacity:1}100%{opacity:.25}}
+.o8-fam.fam-merged>i{animation:o8-fam-settle 6s ease-out infinite}
+.o8-fam.fam-merged>i:nth-child(1){animation-delay:-0.09s}
+.o8-fam.fam-merged>i:nth-child(2){animation-delay:-0.18s}
+.o8-fam.fam-merged>i:nth-child(3){animation-delay:-0.27s}
+.o8-fam.fam-merged>i:nth-child(4){animation-delay:-0.36s}
+.o8-fam.fam-merged>i:nth-child(5){animation-delay:-0.45s}
+.o8-fam.fam-merged>i:nth-child(6){animation-delay:-0.54s}
+.o8-fam.fam-merged>i:nth-child(7){animation-delay:-0.63s}
+.o8-fam.fam-merged>i:nth-child(8){animation-delay:-0.72s}
+.o8-fam.fam-merged>i:nth-child(9){animation-delay:-0.81s}
+.o8-fam.fam-stopped>i:nth-child(5){opacity:1}
+.o8-fam.fam-stopped>i:nth-child(1){animation:o8-fam-grav-r0 2.4s ease-in infinite}
+.o8-fam.fam-stopped>i:nth-child(2){animation:o8-fam-grav-r0 2.4s ease-in infinite}
+.o8-fam.fam-stopped>i:nth-child(3){animation:o8-fam-grav-r0 2.4s ease-in infinite}
+.o8-fam.fam-stopped>i:nth-child(4){animation:o8-fam-grav-r1 2.4s ease-in infinite;animation-delay:-0.12s}
+.o8-fam.fam-stopped>i:nth-child(6){animation:o8-fam-grav-r1 2.4s ease-in infinite;animation-delay:-0.12s}
+.o8-fam.fam-stopped>i:nth-child(7){animation:o8-fam-grav-r2 2.4s ease-in infinite;animation-delay:-0.24s}
+.o8-fam.fam-stopped>i:nth-child(8){animation:o8-fam-grav-r2 2.4s ease-in infinite;animation-delay:-0.24s}
+.o8-fam.fam-stopped>i:nth-child(9){animation:o8-fam-grav-r2 2.4s ease-in infinite;animation-delay:-0.24s}
+@keyframes o8-fam-grav-r0{0%{opacity:1;transform:translateY(0)}20%{opacity:.1;transform:translateY(3px)}70%{opacity:.1;transform:translateY(3px)}85%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(0)}}
+@keyframes o8-fam-grav-r1{0%{opacity:1;transform:translateY(0)}20%{opacity:.1;transform:translateY(3.5px)}70%{opacity:.1;transform:translateY(3.5px)}85%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(0)}}
+@keyframes o8-fam-grav-r2{0%{opacity:1;transform:translateY(0)}20%{opacity:.1;transform:translateY(4px)}70%{opacity:.1;transform:translateY(4px)}85%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion: reduce){.o8-fam>i{animation:none!important}}
