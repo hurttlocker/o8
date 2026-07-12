@@ -5,8 +5,10 @@
  * every surface (the /preview/motion lab). Operator lock (Q, 2026-07-12): every
  * status mark now lives on ONE canvas — a 3×3 pixel grid (`.o8-fam`) — so the
  * whole family reads as a single object changing behavior, not five unrelated
- * glyphs. The lock retired the orbit / sweep / dual-pulse / dispatch vocabulary:
- *   - idle    → A3 static ring (quiet, no motion — the one non-grid mark)
+ * glyphs. The lock retired the orbit / sweep / dual-pulse / dispatch vocabulary.
+ * The family is now COMPLETE on one canvas — every state lives on the grid:
+ *   - idle    → "Drift": one faint spark wanders the 3×3 perimeter over 12s,
+ *               per-instance random phase so idle walls never pulse in lockstep
  *   - running → "Breathe": center vs ring pulse in anti-phase sine (accent blue)
  *   - review  → "Hold-blink": grid held dim, center cell lit, blinks OFF rarely (grey)
  *   - rejected→ "Gravity" in amber — the 8 outer cells fall + fade, then reassemble
@@ -21,7 +23,7 @@
  * LLM-chat + orchestrator working indicators.
  */
 
-import { type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 
 export type AgentDotState = 'idle' | 'running' | 'review' | 'rejected' | 'merged' | 'failed';
 
@@ -95,15 +97,17 @@ function FamilyMark({
   variant,
   famColor,
   dotLabel,
+  shift,
 }: {
-  variant: 'fam-working' | 'fam-review' | 'fam-merged' | 'fam-stopped';
+  variant: 'fam-working' | 'fam-review' | 'fam-merged' | 'fam-stopped' | 'fam-idle';
   famColor: string;
   dotLabel: string;
+  shift?: string;
 }) {
   return (
     <span
       className={'o8-fam ' + variant}
-      style={{ ['--fam-c']: famColor } as CSSProperties}
+      style={{ ['--fam-c']: famColor, ...(shift ? { ['--fam-shift']: shift } : {}) } as CSSProperties}
       aria-label={dotLabel}
       title={dotLabel}
     >
@@ -132,6 +136,13 @@ export function AgentStatusDot({
   label?: string;
 }) {
   const dotLabel = label ?? defaultDotLabel(state);
+  // Per-instance random phase for idle Drift. Lazy initializer so the impure
+  // Math.random runs exactly once per mount (never during a re-render — this
+  // repo bans impure calls in the render path; lazy state init is the sanctioned
+  // pattern). Fed to FamilyMark as --fam-shift so a wall of idle rows never
+  // lights the same perimeter cell in lockstep. Hook is unconditional (top of
+  // component) even though only the idle branch consumes it.
+  const [famShift] = useState(() => `-${(Math.random() * 12).toFixed(2)}s`);
 
   // running → "Breathe" (anti-phase sine, center vs ring).
   if (state === 'running') {
@@ -156,8 +167,10 @@ export function AgentStatusDot({
     return <FamilyMark variant="fam-merged" famColor={color ?? 'var(--t-success)'} dotLabel={dotLabel} />;
   }
 
-  // idle / default → A3 static ring (unchanged by the lock).
-  return <span className="o8-static-ring" aria-label={dotLabel} title={dotLabel} style={{ width: 5, height: 5 }} />;
+  // idle → "Drift" (one faint spark wanders the perimeter over 12s, per-instance
+  // desync so idle walls never pulse in lockstep). The family is complete on one
+  // canvas — every state now lives on the shared 3×3 grid.
+  return <FamilyMark variant="fam-idle" famColor={color ?? 'var(--t-text-faint, #94a3b8)'} dotLabel={dotLabel} shift={famShift} />;
 }
 
 function defaultDotLabel(state: AgentDotState): string {
