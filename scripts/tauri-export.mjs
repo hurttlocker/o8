@@ -396,7 +396,13 @@ writeFileSync(join(server, 'server.js'), `// o8 production entry — stamps the 
 // swallowed: this is an optimisation, never a requirement.
 try {
   const { enableCompileCache } = require('node:module');
-  if (typeof enableCompileCache === 'function') {
+  // If NODE_COMPILE_CACHE is already in the environment, Node has ALREADY enabled
+  // the cache before this file ran, and calling enableCompileCache() again would
+  // be a redundant second enable of the same thing. The Tauri shell sets that env
+  // var for every Node child (ws-server has no wrapper to hook, so it can only be
+  // reached that way), which means the packaged app takes the env path and this
+  // call is only for standalone runs -- dev, tests, \`node out/server/server.js\`.
+  if (typeof enableCompileCache === 'function' && !process.env.NODE_COMPILE_CACHE) {
     const nodePath = require('node:path');
     const nodeOs = require('node:os');
     const dataDir = process.env.O8_DATA_DIR
