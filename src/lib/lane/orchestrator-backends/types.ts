@@ -27,8 +27,11 @@ import type { OrchestratorCrashSurvivalMeta } from '@/lib/lane/orchestrator-cras
  * `fable` is a Claude-only variant (fable.ts) that forces the `claude-fable-5`
  * model, strips Claude's native read/write tools (the token lever) via the
  * `'fable'` ToolProfile, and injects the operator's BYO `ANTHROPIC_API_KEY`.
+ * `o8` is the FREE conversational backend (o8.ts) — it streams the Vercel AI
+ * Gateway free model so the operator can exercise the full orchestrator UI with
+ * no subscription draw; it has no tools and never dispatches (v1).
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -38,7 +41,7 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
   return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
-    || value === 'acp' || value === 'collide' || value === 'fable';
+    || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';

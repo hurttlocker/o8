@@ -8,7 +8,11 @@ export type DispatchDefaultOrchestratorBackend =
   | 'hermes'
   | 'collide'
   | 'fable'
-  | 'acp';
+  | 'acp'
+  // The free conversational backend never dispatches, but it's a valid
+  // orchestratorBackend setting, so the pairing fn must accept it (falls through
+  // to the codex default like any non-claude backend).
+  | 'o8';
 
 export interface ResolveDefaultDispatchRuntimeInput {
   explicitRuntime?: OrchestratorRuntime | null;
