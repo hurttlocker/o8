@@ -33,7 +33,7 @@ import {
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
 import { parseLocalModel } from '@/lib/codex/local-model';
-import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
@@ -430,7 +430,7 @@ export async function sendToCodexOrchestrator(
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
   const model = resolveOrchestratorModelSync(options.model);
   const isLocalModel = !!parseLocalModel(model);
-  const reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model);
+  let reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model);
 
   // Steer-Now / queue preempt: the ws-server aborts the prior turn's
   // controller before calling sendTurn, so a still-'busy' session here is a
@@ -479,6 +479,13 @@ export async function sendToCodexOrchestrator(
       extraEnvOverrides: ['CODEX_HOME'],
     });
     codexBin = resolved.path;
+    // The model-gated clamp (sol may use max/ultra) is not enough — the
+    // INSTALLED CLI must also understand the tier. An older codex refuses to
+    // load config mentioning `max` and exits 1 before the first token.
+    if ((reasoningEffort === 'max' || reasoningEffort === 'ultra') && !codexCliSupportsUltraEfforts(resolved.version)) {
+      console.warn(`[codex-orchestrator] installed codex ${resolved.version ?? '(unknown version)'} predates '${reasoningEffort}' — clamping to xhigh`);
+      reasoningEffort = 'xhigh';
+    }
   } catch (err) {
     session.status = 'dead';
     const note = err instanceof CliNotFoundError

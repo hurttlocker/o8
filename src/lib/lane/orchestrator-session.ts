@@ -49,6 +49,7 @@ import { MODEL_IDS } from '@/lib/models';
 import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
+import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import {
   consumeResetSignal,
   ensureRegisteredSession,
@@ -97,7 +98,26 @@ export interface OrchestratorSession {
 
 // ── Constants ──
 
-const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
+/**
+ * Resolve the claude binary at SPAWN time, not import time. The old constant
+ * hardcoded ~/.local/bin/claude (the native-installer location on exactly one
+ * machine) — every npm/brew/nvm install got `spawn … ENOENT` and a dead
+ * orchestrator (#1551 walkdown, live-hit 2026-07-12). Order: explicit env →
+ * the shared well-known-dirs scan (same list onboarding detect uses, so the
+ * two can never disagree) → the legacy default as a last resort. Cached after
+ * the first hit; scanForBinary is a handful of existsSync probes.
+ */
+let _claudeBinCache: string | null = null;
+function resolveClaudeBin(): string {
+  if (process.env.CLAUDE_BIN) return process.env.CLAUDE_BIN;
+  if (_claudeBinCache) return _claudeBinCache;
+  const scanned = scanForBinary('claude');
+  _claudeBinCache = scanned ?? join(homedir(), '.local', 'bin', 'claude');
+  if (!scanned) {
+    console.warn('[orchestrator] claude binary not found in any well-known dir — falling back to ~/.local/bin/claude (likely ENOENT)');
+  }
+  return _claudeBinCache;
+}
 const ORCHESTRATOR_STATE_DIR = orchestratorDataDir('orchestrator');
 
 const MCP_CONFIG_DIR = join(homedir(), '.o8', 'mcp');
@@ -852,7 +872,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     stderrFd = openAppendFile(crashRecord.stderrPath);
   }
 
-  const proc = spawn(CLAUDE_BIN, args, {
+  const proc = spawn(resolveClaudeBin(), args, {
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
     // subscription-billed backends aren't re-billed against an API key.
