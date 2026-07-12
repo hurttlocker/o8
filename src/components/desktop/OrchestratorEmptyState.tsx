@@ -35,31 +35,20 @@ interface QuickAction {
   prompt: string;
 }
 
+// Three prescriptive starting points (Cursor empty-state borrow, operator
+// 2026-07-12): fewer, bigger, clickable pills that teach the tool's core
+// verbs — plan, review, triage — instead of six whisper-weight text links
+// the eye skated past. Each pill sends a real prompt on click.
 const QUICK_ACTIONS: QuickAction[] = [
   {
+    id: 'plan',
+    label: 'Start with a plan',
+    prompt: 'Help me scope what to build next. Ask me what I want, then draft a tight plan we can dispatch as task packets.',
+  },
+  {
     id: 'review-pending',
-    label: 'Review pending agent changes',
+    label: 'Review pending changes',
     prompt: 'Walk me through every pending diff waiting for approval. For each one: what repo, what the agent changed, and whether it looks safe to merge.',
-  },
-  {
-    id: 'ship-status',
-    label: 'What did agents ship today?',
-    prompt: 'Summarize everything that merged into main today across all agents. Group by repo, highlight anything risky, and tell me the overall momentum.',
-  },
-  {
-    id: 'token-spend',
-    label: "Audit today's token spend",
-    prompt: "Audit today's token spend across every agent and model. Break down what spent the most, what looks unusual, and what I should change if anything is wasteful.",
-  },
-  {
-    id: 'dispatch',
-    label: 'Dispatch a task',
-    prompt: 'Help me scope a task to dispatch. Ask me what repo and what needs to happen, then draft a tight, one-paragraph task packet I can send.',
-  },
-  {
-    id: 'recent-changes',
-    label: 'Review the most recent changes',
-    prompt: 'Review the most recent changes across the active repos. Summarize the commits, call out possible issues, and tell me what should be checked before merging more work.',
   },
   {
     id: 'attention',
@@ -209,51 +198,53 @@ function QuickActionPills({ onActionClick }: { onActionClick: (prompt: string) =
         display: 'flex',
         flexWrap: 'wrap',
         justifyContent: 'center',
-        columnGap: 11,
-        rowGap: 5,
+        gap: 8,
         maxWidth: 640,
         marginTop: 6,
       }}
     >
-      {QUICK_ACTIONS.map((action, index) => (
-        <span
-          key={action.id}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            // Hurttlocker meta weight — quieter than the chip row so
-            // the eye flows title → suggestions → composer cleanly.
-            fontSize: 10,
-            fontWeight: 320,
-            letterSpacing: '-0.005em',
-            color: 'var(--t-text-muted)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => onActionClick(action.prompt)}
-            style={{
-              background: 'transparent',
-              borderWidth: 0,
-              padding: 0,
-              fontFamily: 'inherit',
-              fontSize: 'inherit',
-              color: 'var(--t-text-secondary)',
-              cursor: 'pointer',
-              letterSpacing: '-0.005em',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
-          >
-            {action.label}
-          </button>
-          {index < QUICK_ACTIONS.length - 1 ? (
-            <span aria-hidden style={{ color: 'var(--t-text-faint)' }}>·</span>
-          ) : null}
-        </span>
+      {QUICK_ACTIONS.map((action) => (
+        <QuickActionPill key={action.id} label={action.label} onClick={() => onActionClick(action.prompt)} />
       ))}
     </div>
+  );
+}
+
+// Pill-shaped suggestion button — same chip vocabulary as ChipShell below
+// (hairline border, full radius, hover fill) but a step larger so it reads
+// as an action, not run-context.
+function QuickActionPill({ label, onClick }: { label: string; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        paddingTop: 7,
+        paddingBottom: 7,
+        paddingLeft: 14,
+        paddingRight: 14,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-divider-subtle)',
+        borderRadius: 999,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 12,
+        fontWeight: 400,
+        letterSpacing: '-0.005em',
+        whiteSpace: 'nowrap',
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
