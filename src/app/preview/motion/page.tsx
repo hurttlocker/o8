@@ -41,6 +41,18 @@ const LOADERS: Array<{ kind: LoaderKind; title: string; mechanic: string }> = [
   { kind: 'stack', title: 'Stack', mechanic: 'Four bar heights jump in quantized steps(4) scaleY — blocky frame-by-frame VU bounce, no smooth interpolation.' },
 ];
 
+// Awaiting-review candidates — calm grey, patient cadences (2.4-3.2s), meant to
+// replace the shipping grey sweep. CSS lives in globals.css as .o8-rev-<kind>.
+// Lab-only until the operator locks one. (Claude, 2026-07-12.)
+type ReviewKind = 'metronome' | 'hourglass' | 'blink' | 'queue' | 'frame';
+const REVIEW_CANDIDATES: Array<{ kind: ReviewKind; cells: number; title: string; mechanic: string }> = [
+  { kind: 'metronome', cells: 3, title: 'Metronome', mechanic: 'A lit cell ping-pongs across three — a patient tick' },
+  { kind: 'hourglass', cells: 4, title: 'Hourglass', mechanic: 'Weight transfers top row → bottom row in hard steps' },
+  { kind: 'blink', cells: 1, title: 'Blink', mechanic: 'Filled square holds, blinks off once, refills — an eye watching' },
+  { kind: 'queue', cells: 3, title: 'Queue', mechanic: 'A marker advances to the front and dwells — you are next' },
+  { kind: 'frame', cells: 3, title: 'Frame', mechanic: 'Brackets nudge in around a held dot — under review, framed' },
+];
+
 export default function MotionPreviewPage() {
   const [showFocused, setShowFocused] = useState(true);
 
@@ -210,6 +222,59 @@ export default function MotionPreviewPage() {
                 </div>
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{l.mechanic}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Awaiting review — 5 candidates to replace the shipping grey sweep.
+          Calm, patient, stepped grey. Lab-only until the operator locks one. */}
+      <section style={{ maxWidth: 920, margin: '0 auto 40px auto' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 440, letterSpacing: '-0.2px', margin: 0, marginBottom: 6 }}>
+          Awaiting review — 5 candidates
+        </h2>
+        <p style={{ fontSize: 12.5, color: 'var(--t-text-muted)', margin: 0, marginBottom: 16, lineHeight: 1.5, maxWidth: 660 }}>
+          Candidates to replace the grey sweep — calm, patient, waiting on a human. Current sweep keeps shipping until one is locked.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          {REVIEW_CANDIDATES.map((c) => (
+            <div
+              key={c.kind}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                padding: 16,
+                borderRadius: 12,
+                border: '1px solid var(--t-divider, #e5e7eb)',
+                background: 'var(--t-bg-card, #ffffff)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, minHeight: 52 }}>
+                {/* enlarged 3× so the cadence reads clearly */}
+                <div style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ transform: 'scale(3)', transformOrigin: 'center' }}>
+                    <ReviewCandidate kind={c.kind} cells={c.cells} />
+                  </div>
+                </div>
+                {/* chrome size (~16px), how it actually appears in a row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ReviewCandidate kind={c.kind} cells={c.cells} />
+                  <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', letterSpacing: '-0.2px' }}>chrome</span>
+                </div>
+                {/* in a live row — mark + review label */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <ReviewCandidate kind={c.kind} cells={c.cells} />
+                  <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--t-text)', whiteSpace: 'nowrap' }}>review ready</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.1px' }}>{c.title}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 2, fontFamily: 'var(--font-mono, monospace)' }}>
+                  .o8-rev-{c.kind}
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{c.mechanic}</div>
             </div>
           ))}
         </div>
@@ -560,6 +625,18 @@ function PixelLoader({ kind }: { kind: LoaderKind }) {
   return (
     <span className={`o8-loader-${kind}`} aria-hidden>
       {Array.from({ length: cells[kind] }, (_, i) => (
+        <i key={i} />
+      ))}
+    </span>
+  );
+}
+
+// Renders one awaiting-review candidate by kind. Cell counts match the CSS
+// nth-child rules in globals.css (.o8-rev-<kind>).
+function ReviewCandidate({ kind, cells }: { kind: ReviewKind; cells: number }) {
+  return (
+    <span className={`o8-rev-${kind}`} aria-hidden>
+      {Array.from({ length: cells }, (_, i) => (
         <i key={i} />
       ))}
     </span>
