@@ -1130,6 +1130,7 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
             log::warn!("[dock-window] bundled Next server never answered; skipping dock pill");
             return;
         }
+        log::info!("[boot] sidecar answering at {}ms — the dashboard can load", boot_ms());
 
         // Window creation must run on the main thread.
         let app_main = app.clone();
@@ -4858,6 +4859,11 @@ fn finish_bundled_bootstrap(
         Ok(child) => {
             let pid = child.id();
             log::info!("Next.js server started (pid: {})", pid);
+            // THE comparison line. Before the boot reorder the main window was
+            // built here, at the END of the bootstrap — so this stamp is, to a
+            // very close approximation, what cold-launch-to-first-window used to
+            // cost. Diff it against `[boot] main window created`.
+            log::info!("[boot] next-server spawned at {}ms — the OLD code created the window here", boot_ms());
             sidecar_lifecycle::register_child(pid);
             prewarm_bundled_next_server(app.clone(), api_port);
         }
@@ -4885,7 +4891,29 @@ fn finish_bundled_bootstrap(
     );
 }
 
+// ── Boot timing (perf regression harness) ──
+//
+// Cold launch was the one number nobody could quote, because nothing recorded
+// it. These stamps make the boot path auditable from the log: if a future change
+// puts blocking work back in FRONT of the window, it shows up here as a regressed
+// number instead of being felt, vaguely, six months later.
+//
+//   grep '\[boot\]' ~/Library/Logs/ai.o8.desktop/o8.log
+//
+// The line that matters is `main window created` versus `next-server spawned`.
+// Before the boot reorder the window was built AFTER the sidecar spawn, so the
+// gap between those two stamps is what the operator used to spend staring at no
+// window at all.
+static BOOT_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+fn boot_ms() -> u128 {
+    BOOT_T0.get().map(|t0| t0.elapsed().as_millis()).unwrap_or(0)
+}
+
 pub fn run() {
+    // First statement in the process: everything else is measured against this.
+    let _ = BOOT_T0.set(std::time::Instant::now());
+
     // Sentry (native shell). Dormant unless a RELEASE build baked a DSN; dev /
     // `tauri dev` stay silent. Init FIRST so panics during startup are captured;
     // hold the guard for the whole program so events flush on exit. Then export
@@ -5798,6 +5826,8 @@ pub fn run() {
             std::env::set_var("CORTEX_IDE_API_PORT", api_port.to_string());
             std::env::set_var("CORTEX_IDE_WS_PORT", ws_port.to_string());
 
+            log::info!("[boot] ports resolved at {}ms (api={} ws={})", boot_ms(), api_port, ws_port);
+
             // ── Window FIRST ──
             // Built before any sidecar work so the loader paints the moment the
             // event loop starts, rather than after the whole bootstrap has run.
@@ -5816,6 +5846,7 @@ pub fn run() {
                     log::warn!("[main-window] config missing; could not create main webview");
                 }
             }
+            log::info!("[boot] main window created at {}ms — the loader can paint from here", boot_ms());
 
             // ── Sidecar bootstrap: off the main thread ──
             //
@@ -5833,10 +5864,12 @@ pub fn run() {
                     let identity = boot_identity.clone();
                     std::thread::spawn(move || {
                         let shell = shell_env::probe_login_shell();
+                        log::info!("[boot] login-shell probe done at {}ms (off the main thread)", boot_ms());
                         let node_bin = match run_node_preflight(shell.node.as_deref()) {
                             Ok(path) => path,
                             Err(err) => show_node_error_and_exit(err),
                         };
+                        log::info!("[boot] node pre-flight done at {}ms", boot_ms());
                         let main_handle = app_handle.clone();
                         if let Err(e) = app_handle.run_on_main_thread(move || {
                             finish_bundled_bootstrap(
