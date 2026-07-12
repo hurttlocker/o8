@@ -699,6 +699,22 @@ function DashboardInner() {
   // recording, 2026-07-10).
   const [panelDragActive, setPanelDragActive] = useState(false);
 
+  // PANEL-DIVIDER DRAG → occlude the native browser. The native browser is a
+  // separate OS window that composites ABOVE o8's web content, so the DOM
+  // drag-shield below can't cover it; a divider drag whose cursor crosses the
+  // native rect gets swallowed by that window and the drag sticks (report
+  // 0.1.575). Hide the native window for the duration of the drag; the
+  // geometric occlusion poll (~500ms) re-asserts any legitimately-open overlay
+  // after release.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!panelDragActive) return;
+    window.dispatchEvent(new CustomEvent('o8:native-browser-occlude', { detail: { occlude: true } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('o8:native-browser-occlude', { detail: { occlude: false } }));
+    };
+  }, [panelDragActive]);
+
   // ── Sidebar hover-preview state ──
   // When the AgentPanel is collapsed (sidebarVisible === false), hovering the
   // left-edge rail drops a detail panel down from the top of the screen
@@ -5245,6 +5261,28 @@ function DashboardInner() {
           <LazyOnboarding onComplete={handleSetupComplete} completionError={setupCompleteError} />
         </Suspense>
       )}
+
+      {/* ── Panel-drag shield ──
+          While a panel-resize divider is being dragged, an embedded browser
+          iframe (or engine webview) inside the O8 panel would swallow the
+          mousemove/mouseup the moment the cursor crossed it — the drag sticks
+          and the inner page can even be resized by the gesture (report
+          0.1.575). A transparent full-viewport capture layer keeps every
+          pointer event flowing to the document-level drag listeners so no
+          iframe/webview ever sees them. (The native browser is a separate OS
+          window handled by the occlude effect above.) */}
+      {panelDragActive ? (
+        <div
+          aria-hidden
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 300,
+            cursor: 'col-resize',
+            background: 'transparent',
+          }}
+        />
+      ) : null}
 
     </div>
     </DictationHost>
