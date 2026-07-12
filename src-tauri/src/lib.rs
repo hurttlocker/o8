@@ -1043,6 +1043,24 @@ fn classify_port_listener(port: u16) -> PortListener {
 /// Open a truncating log file at `~/.cortex-ide/logs/<name>`, rotating any
 /// prior run to `<name>.prev` first. Returns `None` if the filesystem is
 /// unwritable (we prefer to keep the app bootable rather than failing loud).
+/// Directory for Node's V8 compile cache (Node 22+).
+///
+/// The Node sidecars spend a large share of their boot simply COMPILING
+/// JavaScript. CPU-profiled at boot on the operator's Intel box:
+///
+///     compile cache OFF   CPU 1401ms   CJS loader 398ms
+///     compile cache ON    CPU 1103ms   CJS loader 147ms   (-298ms, 1.27x)
+///
+/// That is the phase the loader spins in front of, so it is time the operator
+/// spends watching a spinner on every launch.
+///
+/// The cache keys on file CONTENT, so a new build simply misses and repopulates
+/// — it cannot serve stale code across an update. It lives in the user data dir,
+/// never inside the read-only .app bundle.
+fn compile_cache_dir() -> String {
+    format!("{}/compile-cache", o8_data_dir())
+}
+
 fn open_child_log(name: &str) -> Option<std::fs::File> {
     let dir = format!("{}/logs", o8_data_dir());
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -1221,7 +1239,11 @@ fn spawn_bundled_ws_server(
             .env("O8_BOOT_ID", &identity.boot_id)
             .env("O8_INSTANCE_ID", &identity.instance_id)
             // Issue #776: same sidecar marker as the next-server child.
-            .env("O8_SIDECAR_PID", std::process::id().to_string());
+            .env("O8_SIDECAR_PID", std::process::id().to_string())
+            // V8 bytecode cache — see compile_cache_dir(). ws-server has no
+            // generated wrapper to call enableCompileCache() from, so it gets the
+            // cache the only way it can: through the environment.
+            .env("NODE_COMPILE_CACHE", compile_cache_dir());
         // Issue #935: same AI key forward for ws-server children.
         for (k, v) in ai_keys {
             ws_cmd.env(k, v);
@@ -4827,7 +4849,9 @@ fn finish_bundled_bootstrap(
         // an o8 sibling. macOS doesn't let us read env vars of other processes
         // without root, so this is best-effort forward-compat for Linux/Windows
         // /proc and human-readable in `ps -E` from the same user.
-        .env("O8_SIDECAR_PID", std::process::id().to_string());
+        .env("O8_SIDECAR_PID", std::process::id().to_string())
+        // V8 bytecode cache — see compile_cache_dir(). Every Node child inherits it.
+        .env("NODE_COMPILE_CACHE", compile_cache_dir());
     if has_bundled_mcp {
         server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
         server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
