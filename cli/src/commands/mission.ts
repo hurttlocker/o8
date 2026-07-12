@@ -73,6 +73,26 @@ interface MissionStopResult {
 // bundle that cannot import from `@/lib`.
 const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived']);
 
+/**
+ * Duration flag parser — accepts `90s` / `45m` / `2h` suffixes, or a bare
+ * number in MILLISECONDS (backward compat). The bare-ms contract silently ate
+ * watchers (live-hit 2026-07-12: `--timeout 3600` read as 3.6 SECONDS, the
+ * watch died instantly, and the spawning agent never heard the packet hit
+ * review). Cap 6h — long worker runs must be watchable end to end.
+ */
+const DURATION_CAP_MS = 6 * 60 * 60 * 1000;
+function parseDurationMs(raw: string | null | undefined, defaultMs: number): number {
+  const trimmed = raw?.trim() ?? '';
+  if (!trimmed) return defaultMs;
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)?$/i);
+  if (!match) return defaultMs;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return defaultMs;
+  const unit = (match[2] ?? 'ms').toLowerCase();
+  const ms = unit === 'h' ? value * 3_600_000 : unit === 'm' ? value * 60_000 : unit === 's' ? value * 1000 : value;
+  return Math.max(1000, Math.min(DURATION_CAP_MS, ms));
+}
+
 function flag(rest: string[], name: string): string | null {
   for (let i = 0; i < rest.length; i++) {
     const tok = rest[i];
@@ -227,6 +247,40 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   } else {
     printJson(payload);
   }
+
+  // --watch: dispatch-and-notify in ONE command (Q ruling 2026-07-12: the
+  // spawner must hear the packet hit review INSTANTLY, not via hand-rolled
+  // pollers). Blocks until any packet reaches a terminal/review status, then
+  // exits — a backgrounded `dispatch --watch` becomes the notification. Long
+  // default (2h) so a real worker run can't outlive its watcher silently.
+  if (hasFlag(rest, 'watch')) {
+    const watchMs = parseDurationMs(flag(rest, 'timeout'), 2 * 60 * 60 * 1000);
+    const pollMs = Math.max(1000, Number(flag(rest, 'poll')) || 5000);
+    const deadline = Date.now() + watchMs;
+    let terminal: { id: string; status?: string; title?: string } | null = null;
+    while (Date.now() < deadline) {
+      const snapshot = await fetchStatus(missionId, false);
+      terminal = (snapshot.packets ?? []).find(
+        (p) => typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
+      ) ?? null;
+      if (terminal) break;
+      await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+    }
+    const watchPayload = {
+      schema: 'o8/cli/mission.dispatch.watch/v1',
+      wakeReason: terminal ? 'packet-terminal' : 'timeout',
+      packetId: terminal?.id ?? null,
+      status: terminal?.status ?? null,
+      title: terminal?.title ?? null,
+    };
+    if (mode.human) {
+      printHumanKv([
+        ['watch', terminal ? `${terminal.id} → ${terminal.status}` : 'timeout — still running'],
+      ]);
+    } else {
+      printJson(watchPayload);
+    }
+  }
   return 0;
 }
 
@@ -284,7 +338,7 @@ async function runMissionStop(mode: OutputMode, rest: string[]): Promise<number>
 async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number> {
   const missionId = flag(rest, 'mission')?.trim() || undefined;
   const packetFilter = flag(rest, 'packet')?.trim() || null;
-  const timeoutMs = Math.max(1000, Math.min(30 * 60 * 1000, Number(flag(rest, 'timeout')) || 10 * 60 * 1000));
+  const timeoutMs = parseDurationMs(flag(rest, 'timeout'), 10 * 60 * 1000);
   const pollMs = Math.max(1000, Number(flag(rest, 'poll')) || 3000);
 
   const terminalOf = (s: MissionStatusResult) => (s.packets ?? []).find(
@@ -337,7 +391,7 @@ async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number>
 
 async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number> {
   const missionId = flag(rest, 'mission')?.trim() || undefined;
-  const timeoutMs = Math.max(1000, Math.min(30 * 60 * 1000, Number(flag(rest, 'timeout')) || 10 * 60 * 1000));
+  const timeoutMs = parseDurationMs(flag(rest, 'timeout'), 10 * 60 * 1000);
   const pollMs = Math.max(1000, Number(flag(rest, 'poll')) || 3000);
 
   const deadline = Date.now() + timeoutMs;
