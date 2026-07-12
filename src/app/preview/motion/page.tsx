@@ -29,6 +29,19 @@ const STATUS_STATES: Array<{
 const SAMPLE_ROW_TITLE = 'Ingest spec files to improve retrieval awareness';
 const SAMPLE_ROW_META = 'main · automation · idle';
 
+// Neo-retro pixel-grid loaders — bespoke o8 riff on the reference set's animated
+// loading-icon set. Each maps to one borrowed mechanic; CSS lives in
+// globals.css as .o8-loader-<kind>. (2026-07-11.)
+type LoaderKind = 'bitfield' | 'dispatch' | 'aurora' | 'mirror' | 'scan' | 'stack';
+const LOADERS: Array<{ kind: LoaderKind; title: string; mechanic: string }> = [
+  { kind: 'bitfield', title: 'Bitfield', mechanic: 'A lit pulse marches a 3×3 grid diagonally in hard steps(1) snaps — grid-based shape-shifting (cells on/off, not a rotating asset).' },
+  { kind: 'dispatch', title: 'Dispatch', mechanic: 'A packed core spreads its 4 arms to a cross, then re-packs — the reference’s "posting" metaphor (data packed → data sent). Transform + opacity.' },
+  { kind: 'aurora', title: 'Aurora', mechanic: 'A sharp stepping pixel quad over a soft drifting glow — the signature lo-fi/hi-fi contrast. Glow rasterizes once, only translates.' },
+  { kind: 'mirror', title: 'Mirror', mechanic: 'Two diagonals of a 2×2 quad hard-swap opacity — the retro 2-frame "thinking" mirror/rotation, stepped.' },
+  { kind: 'scan', title: 'Scan', mechanic: 'A lit block steps across a pixel strip leaving a quantized steps(2) dim trail — retro pixel scanline.' },
+  { kind: 'stack', title: 'Stack', mechanic: 'Four bar heights jump in quantized steps(4) scaleY — blocky frame-by-frame VU bounce, no smooth interpolation.' },
+];
+
 export default function MotionPreviewPage() {
   const [showFocused, setShowFocused] = useState(true);
 
@@ -41,6 +54,8 @@ export default function MotionPreviewPage() {
         // TRUE colors — otherwise it lies about the palette. (Q, 2026-07-11.)
         '--t-text-faint': '#94a3b8',
         '--t-accent': '#2563eb',
+        // o8's single orange accent — the loaders below use it for lit pixels.
+        '--t-loader': '#F97316',
         '--t-success': '#16a34a',
         '--t-bg-card': '#ffffff',
         '--t-divider': '#e5e7eb',
@@ -141,6 +156,61 @@ export default function MotionPreviewPage() {
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{s.meaning}</div>
               <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 'auto', paddingTop: 4 }}>{s.where}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Loaders — neo-retro pixel grid. Bespoke o8 riff on the reference set's
+          animated loading-icon set (reference video):
+          low-fi cells flicking on/off in discrete steps(), one variant paired
+          with a smooth hi-fi glow. All compositor-only (transform/opacity). */}
+      <section style={{ maxWidth: 920, margin: '0 auto 40px auto' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 440, letterSpacing: '-0.2px', margin: 0, marginBottom: 6 }}>
+          Loaders — neo-retro pixel grid
+        </h2>
+        <p style={{ fontSize: 12.5, color: 'var(--t-text-muted)', margin: 0, marginBottom: 16, lineHeight: 1.5, maxWidth: 660 }}>
+          Bespoke o8 riff on a creator&apos;s animated loading-icon set — blocky pixel cells that flick on/off in discrete <code>steps()</code>, one paired with the lo-fi/hi-fi glow contrast that made the reference read premium. o8 geometry + the single orange accent. Each is shown at its <strong>chrome size</strong> (~16px, where it&apos;d live in a row/composer) and enlarged 3×. Compositor-only — transform + opacity, no per-frame raster.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          {LOADERS.map((l) => (
+            <div
+              key={l.kind}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                padding: 16,
+                borderRadius: 12,
+                border: '1px solid var(--t-divider, #e5e7eb)',
+                background: 'var(--t-bg-card, #ffffff)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, minHeight: 52 }}>
+                {/* enlarged 3× so the mechanic reads clearly */}
+                <div style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ transform: 'scale(3)', transformOrigin: 'center' }}>
+                    <PixelLoader kind={l.kind} />
+                  </div>
+                </div>
+                {/* chrome size (~16px), how it actually appears in a row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <PixelLoader kind={l.kind} />
+                  <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', letterSpacing: '-0.2px' }}>chrome</span>
+                </div>
+                {/* in a live row — pixel + working title */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <PixelLoader kind={l.kind} />
+                  <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--t-text)', whiteSpace: 'nowrap' }}>working…</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.1px' }}>{l.title}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 2, fontFamily: 'var(--font-mono, monospace)' }}>
+                  .o8-loader-{l.kind}
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{l.mechanic}</div>
             </div>
           ))}
         </div>
@@ -474,6 +544,26 @@ function SampleText({ children, muted = false }: { children: React.ReactNode; mu
       }}
     >
       {children}
+    </span>
+  );
+}
+
+// Renders one neo-retro pixel loader by kind. Cell counts match the CSS
+// nth-child rules in globals.css (.o8-loader-<kind>).
+function PixelLoader({ kind }: { kind: LoaderKind }) {
+  const cells: Record<LoaderKind, number> = {
+    bitfield: 9,
+    dispatch: 5,
+    aurora: 4,
+    mirror: 4,
+    scan: 5,
+    stack: 4,
+  };
+  return (
+    <span className={`o8-loader-${kind}`} aria-hidden>
+      {Array.from({ length: cells[kind] }, (_, i) => (
+        <i key={i} />
+      ))}
     </span>
   );
 }
