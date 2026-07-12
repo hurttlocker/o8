@@ -38,6 +38,7 @@ import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
+import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { handleCodexJsonLine } from './codex-orchestrator-events';
 import {
   ensureRegisteredSession,
@@ -542,6 +543,8 @@ export async function sendToCodexOrchestrator(
       cwd: session.repoPath,
       env: {
         ...process.env,
+        // codex is a node shim — the server's own runtime must be on PATH (#1551).
+        PATH: pathWithNodeRuntime(),
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         O8_MANAGED_SESSION: '1',

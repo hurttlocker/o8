@@ -48,6 +48,7 @@ import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { MODEL_IDS } from '@/lib/models';
 import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
+import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import {
   consumeResetSignal,
   ensureRegisteredSession,
@@ -857,6 +858,8 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     // subscription-billed backends aren't re-billed against an API key.
     env: {
       ...process.env,
+      // claude is a node shim on some installs — server's runtime on PATH (#1551).
+      PATH: pathWithNodeRuntime(),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       O8_MANAGED_SESSION: '1',
