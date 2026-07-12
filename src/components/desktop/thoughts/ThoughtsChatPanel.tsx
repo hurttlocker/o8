@@ -131,6 +131,7 @@ function formatComposerBackendLabel(backend: OrchestratorBackendSetting, model: 
   if (backend === 'openclaw') return 'OpenClaw';
   if (backend === 'hermes') return 'Hermes';
   if (backend === 'collide') return 'Collide';
+  if (backend === 'o8') return 'o8';
   return formatModelLabel(model);
 }
 
