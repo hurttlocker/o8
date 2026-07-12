@@ -18,8 +18,9 @@ export async function GET(req: NextRequest) {
 
   // #534 follow-up — reconcile lanes whose worktrees were deleted out-of-band
   // (orchestrator bash-merge bypasses the merge verb) so the sidebar doesn't
-  // keep showing stale 'reviewing' rows.
-  reconcileOrphanedWorktrees();
+  // keep showing stale 'reviewing' rows. Awaited (async git probes since #1498)
+  // so the response below reflects the reconciled lane state.
+  await reconcileOrphanedWorktrees();
 
   const url = new URL(req.url);
   const activeOnly = url.searchParams.get('active') !== 'false';
