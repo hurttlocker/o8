@@ -70,6 +70,46 @@ interface SharedWsContextValue extends SharedWsState, SharedWsCommands {
   addSessionSubscription: (sessionKey: string) => () => void;
 }
 
+// ── WS lifecycle → window event bridge ──
+//
+// The ws-server broadcasts `agent-lifecycle` / `lane-lifecycle` on every agent
+// state change, and six surfaces listen for the matching WINDOW event. Nothing
+// ever connected the two: that window event was dispatched only by two local
+// kill-buttons, so every one of those surfaces was poll-only for any change that
+// did not originate from a click in this window. That missing wire is the reason
+// they poll at all.
+//
+// Coalesced, because a fleet coming up fires a burst of lifecycle messages and
+// each listener refetches on every one — a raw 1:1 bridge would turn "10 agents
+// started" into 10 refetches per surface. Leading edge (so the first change is
+// instant) plus one trailing emit (so the final state is never dropped).
+const LIFECYCLE_COALESCE_MS = 250;
+const lifecycleLastEmit = new Map<string, number>();
+const lifecycleTrailing = new Map<string, ReturnType<typeof setTimeout>>();
+
+function emitWindowLifecycle(name: 'o8:agent-lifecycle' | 'o8:lane-lifecycle') {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  const sinceLast = now - (lifecycleLastEmit.get(name) ?? 0);
+
+  if (sinceLast >= LIFECYCLE_COALESCE_MS) {
+    lifecycleLastEmit.set(name, now);
+    window.dispatchEvent(new Event(name));
+    return;
+  }
+  // Inside the coalesce window. Schedule exactly one trailing emit so a burst
+  // still settles on the final state instead of being swallowed.
+  if (lifecycleTrailing.has(name)) return;
+  lifecycleTrailing.set(
+    name,
+    setTimeout(() => {
+      lifecycleTrailing.delete(name);
+      lifecycleLastEmit.set(name, Date.now());
+      window.dispatchEvent(new Event(name));
+    }, LIFECYCLE_COALESCE_MS - sinceLast),
+  );
+}
+
 const SharedWsContext = createContext<SharedWsContextValue | null>(null);
 
 /** Lightweight hook for components that only need WS connection state (e.g. approval polling). */
@@ -265,9 +305,18 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           break;
         case 'agent-lifecycle':
           if (data) dispatch('onAgentLifecycle', data.sessionName as string, data.state as string, data.exitCode as number | undefined);
+          // The ws-server has always broadcast this. Six surfaces have always
+          // listened for the matching WINDOW event (useAgentPanelState x3,
+          // AgentPanelExtraAgents, footer-ports, OrchestratorRunStrip) — but
+          // nothing ever bridged the two, so that window event was only fired by
+          // two local kill-buttons. Every one of those surfaces was therefore
+          // poll-only for any lifecycle change that did not originate from a
+          // click in this window, which is exactly why they poll at all.
+          emitWindowLifecycle('o8:agent-lifecycle');
           break;
         case 'lane-lifecycle':
           if (data) dispatch('onLaneLifecycle', data);
+          emitWindowLifecycle('o8:lane-lifecycle');
           break;
         case 'pong':
           break;
