@@ -9,6 +9,19 @@ import { TitleBarButton } from '../title-bar/TitleBarButton';
 
 interface O8SpecPaneProps {
   repoPath?: string | null;
+  /**
+   * Is this pane the visible tab?
+   *
+   * O8Panel keeps every pane MOUNTED and toggles `display: none` rather than
+   * unmounting, so without this the background o8.md poll and the relative-time
+   * clock tick run forever for a surface nobody is looking at. Measured on the
+   * idle app, `/api/repo-spec` was the single busiest endpoint at ~15 req/min —
+   * from a pane that was not even on screen.
+   *
+   * Defaults to true for the canvas/embedded mounts, which only exist while
+   * they are visible.
+   */
+  active?: boolean;
   /** Slot for the Ask-o8 chat trigger so it sits IN the toolbar next to
    *  Ask-to-review + Settings rather than floating below the header. */
   toolbarSlot?: ReactNode;
@@ -68,7 +81,7 @@ function countChangedLines(base: string, next: string) {
   };
 }
 
-export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps) {
+export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O8SpecPaneProps) {
   const [content, setContent] = useState('');
   const [loadedContent, setLoadedContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -140,9 +153,13 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
   }, [repoPath]);
 
   useEffect(() => {
+    // Only tick the relative-time labels while the pane is actually on screen.
+    // It stays mounted behind display:none otherwise, and a hidden clock is a
+    // re-render every 5s for nobody.
+    if (!active) return;
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [active]);
 
   const pickColor = useCallback((c: string) => {
     setCustomColor(c);
@@ -238,28 +255,43 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
   // seed for the eventual one-shot review lane (loading state + fade-in).
   const pollStateRef = useRef({ repoPath, content, loading, savePending });
   pollStateRef.current = { repoPath, content, loading, savePending };
+
+  // Pull o8.md from the server if it moved underneath us. Shared by the
+  // background poll and by the moment the pane becomes visible.
+  const adoptServerContent = useCallback(() => {
+    const s = pollStateRef.current;
+    if (!s.repoPath || s.loading || s.savePending) return;
+    if (s.content !== serverContentRef.current) return; // unsaved local edits — leave them be
+    if (typeof document !== 'undefined' && document.hidden) return;
+    fetch(`/api/repo-spec?repoPath=${encodeURIComponent(s.repoPath)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const next = data?.ok && typeof data.content === 'string' ? data.content : null;
+        if (next == null || next === serverContentRef.current) return;
+        const cur = pollStateRef.current;
+        if (cur.savePending || cur.content !== serverContentRef.current) return; // raced a local edit
+        serverContentRef.current = next;
+        setContent(next);
+        setLoadedContent(next);
+      })
+      .catch(() => { /* transient */ });
+  }, []);
+
   useEffect(() => {
-    if (!repoPath) return;
-    const id = window.setInterval(() => {
-      const s = pollStateRef.current;
-      if (!s.repoPath || s.loading || s.savePending) return;
-      if (s.content !== serverContentRef.current) return; // unsaved local edits — leave them be
-      if (typeof document !== 'undefined' && document.hidden) return;
-      fetch(`/api/repo-spec?repoPath=${encodeURIComponent(s.repoPath)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          const next = data?.ok && typeof data.content === 'string' ? data.content : null;
-          if (next == null || next === serverContentRef.current) return;
-          const cur = pollStateRef.current;
-          if (cur.savePending || cur.content !== serverContentRef.current) return; // raced a local edit
-          serverContentRef.current = next;
-          setContent(next);
-          setLoadedContent(next);
-        })
-        .catch(() => { /* transient */ });
-    }, 4000);
+    // PERF: this pane stays MOUNTED when its tab is not selected — O8Panel hides
+    // it with display:none rather than unmounting — so an un-gated interval polls
+    // the server forever for a surface nobody is looking at. On the idle app this
+    // was the single busiest endpoint, ~15 requests/minute, entirely invisible.
+    //
+    // `document.hidden` (checked inside adoptServerContent) only catches the whole
+    // WINDOW being hidden. It says nothing about whether this pane is on screen.
+    if (!repoPath || !active) return;
+    // Adopt any external edit immediately on open, so gating the poll costs the
+    // operator nothing: the content is fresh the moment they can actually see it.
+    adoptServerContent();
+    const id = window.setInterval(adoptServerContent, 4000);
     return () => window.clearInterval(id);
-  }, [repoPath]);
+  }, [repoPath, active, adoptServerContent]);
 
   useEffect(() => () => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);

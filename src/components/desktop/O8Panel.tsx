@@ -767,6 +767,7 @@ export function O8Panel({
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8SpecPane
           repoPath={repoPath}
+          active={activeTab === 'spec'}
           toolbarSlot={(
             <O8ScratchChat
               repoPath={repoPath}

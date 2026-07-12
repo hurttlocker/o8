@@ -239,15 +239,34 @@ fn listening_pids(port: u16) -> Vec<u32> {
 /// Boot-time orphan reaper for stale bundled children on any allocated port.
 /// Called once from `pub fn run()` before the Tauri builder is constructed.
 /// No-ops on non-unix platforms.
-pub(crate) fn reap_o8_orphans() {
+/// Kill stale next-server / ws-server processes left by a previous crash.
+///
+/// SLOW (~73ms: three `pgrep` spawns, plus `ps`/`lsof` per candidate), and it
+/// does NOT need to run before the Tauri builder — so it is started on a worker
+/// thread and joined before the first sidecar spawn. See `start_orphan_reap` /
+/// `join_orphan_reap` in lib.rs for the ordering contract.
+pub(crate) fn reap_o8_orphan_processes() {
     #[cfg(unix)]
     {
-        reap_o8_orphans_unix();
+        reap_o8_orphan_processes_unix();
+    }
+}
+
+/// Remove a stale `/tmp/tauri-mcp-o8-<user>.sock`.
+///
+/// This one CANNOT be deferred: `tauri-plugin-mcp` binds the socket during
+/// builder setup and throws if the file lingers, so it must happen before
+/// `Builder::build()`. It is only a stat + unlink — microseconds — so keeping it
+/// on the synchronous path costs nothing.
+pub(crate) fn clean_stale_mcp_socket() {
+    #[cfg(unix)]
+    {
+        clean_stale_tauri_mcp_socket();
     }
 }
 
 #[cfg(unix)]
-fn reap_o8_orphans_unix() {
+fn reap_o8_orphan_processes_unix() {
     // Patterns chosen to catch every shape o8 spawns its node children as.
     // `next-server` is what Next.js renames the process title to after boot.
     // `ws-server.mjs` and `ws-server.ts` cover the bundled and dev forms of
@@ -308,8 +327,6 @@ fn reap_o8_orphans_unix() {
         );
         term_then_kill(pid);
     }
-
-    clean_stale_tauri_mcp_socket();
 }
 
 /// Fast PID enumeration via `pgrep -f <pattern>`. Returns Vec<u32> on success,
