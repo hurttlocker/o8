@@ -294,15 +294,29 @@ export const Canvas = memo(function Canvas({
         </>
       ) : null}
 
+      {/*
+        PERF (not a design change): both tab-transition variants below used to
+        animate `filter: blur(4px)` -> `blur(0px)` on a spring. framer-motion
+        drives that per frame, so WebKit re-ran a full gaussian over the ENTIRE
+        tab subtree — diffs, transcripts, file viewers — on every one of ~25
+        frames, every time a tab changed. On WKWebView/Intel that is about the
+        most expensive thing you can animate.
+
+        This was CONTENT blur on the transition, not the glass chrome — the glass
+        is untouched. opacity + y + scale already carry the motion and are
+        compositor-only properties, so the transition still reads the same; it
+        just stops rasterizing a blurred snapshot of the whole canvas 25 times
+        per tab switch.
+      */}
       <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <AnimatePresence mode="wait" initial={false}>
           {activeTab ? (
             <motion.div
               key={activeTab.id}
               style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-              initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, y: 10, scale: 0.992 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.992 }}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             >
               <TabContent
@@ -317,9 +331,9 @@ export const Canvas = memo(function Canvas({
             <motion.div
               key="canvas-empty"
               style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-              initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, y: 10, scale: 0.992 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.992 }}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             >
               <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />
