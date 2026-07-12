@@ -1,26 +1,38 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 
-// Mock the two seams the o8 backend depends on: the free gateway stream and the
-// thread-transcript reader. Everything else (event mapping, ordering) is the
-// backend's own logic and is what these tests exercise.
-const mockStream = vi.fn();
-const mockMissing = vi.fn();
+// The o8 backend streams the desktop free-chat rail (`/api/v2/proxy/llm`). Mock
+// the two impure seams it touches — the loopback API base and the thread
+// transcript reader — and stub global fetch to feed it fake proxy responses.
+// Everything else (SSE parsing, event mapping, ordering) is the backend's own
+// logic and is what these tests exercise.
 const mockReadMessages = vi.fn();
+const mockFetch = vi.fn();
 
-vi.mock('@/lib/chat/gateway-client', () => ({
-  streamFreeOrchestratorChat: (...args: unknown[]) => mockStream(...args),
-  missingChatGatewayEnv: () => mockMissing(),
+vi.mock('@/lib/panel/api-port', () => ({
+  getApiBase: () => 'http://127.0.0.1:3001',
 }));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
   readOrchestratorThreadMessages: (...args: unknown[]) => mockReadMessages(...args),
 }));
 
-// Imported after the mocks so the backend binds the mocked modules.
+// Imported after the mocks so the backend binds them.
 import { o8Backend } from './o8';
 
-async function* fromChunks(chunks: string[]): AsyncGenerator<string> {
-  for (const chunk of chunks) yield chunk;
+/** A fake SSE proxy response streaming the given `data: …\n\n` frames. */
+function sseResponse(frames: string[]): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(encoder.encode(frame));
+      controller.close();
+    },
+  });
+  return { ok: true, body } as unknown as Response;
+}
+
+function contentFrame(text: string): string {
+  return `data: ${JSON.stringify({ type: 'content', text })}\n\n`;
 }
 
 function collect(): { events: OrchestratorEvent[]; onEvent: (e: OrchestratorEvent) => void } {
@@ -29,14 +41,22 @@ function collect(): { events: OrchestratorEvent[]; onEvent: (e: OrchestratorEven
 }
 
 beforeEach(() => {
-  mockStream.mockReset();
-  mockMissing.mockReset().mockReturnValue([]);
   mockReadMessages.mockReset().mockReturnValue([{ role: 'user', content: 'hi' }]);
+  mockFetch.mockReset();
+  vi.stubGlobal('fetch', mockFetch);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('o8 backend event mapping', () => {
-  it('streams each chunk as a text event, then a terminal done', async () => {
-    mockStream.mockReturnValue(fromChunks(['Hel', 'lo']));
+  it('maps proxy content frames to text events, then a terminal done', async () => {
+    mockFetch.mockResolvedValue(sseResponse([
+      contentFrame('Hel'),
+      contentFrame('lo'),
+      'data: [DONE]\n\n',
+    ]));
     const { events, onEvent } = collect();
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
@@ -48,26 +68,24 @@ describe('o8 backend event mapping', () => {
     ]);
   });
 
-  it('surfaces a gateway failure as an error line, then done', async () => {
-    mockStream.mockReturnValue((async function* () {
-      throw new Error('gateway down');
-    })());
+  it('surfaces an in-stream proxy error frame as an error event, then done', async () => {
+    mockFetch.mockResolvedValue(sseResponse([
+      contentFrame('partial'),
+      `data: ${JSON.stringify({ type: 'error', message: 'model exploded' })}\n\n`,
+    ]));
     const { events, onEvent } = collect();
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events).toHaveLength(2);
-    expect(events[0].type).toBe('error');
-    expect((events[0] as { error: string }).error).toContain('gateway down');
-    expect(events[1].type).toBe('done');
+    expect(events[0]).toEqual({ type: 'text', text: 'partial' });
+    expect(events[1]).toEqual({ type: 'error', error: 'model exploded' });
+    expect(events[events.length - 1].type).toBe('done');
   });
 
   it('emits only done on a user abort (a stop is not an error)', async () => {
     const controller = new AbortController();
     controller.abort();
-    mockStream.mockReturnValue((async function* () {
-      throw new Error('aborted');
-    })());
+    mockFetch.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
     const { events, onEvent } = collect();
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', signal: controller.signal });
@@ -75,15 +93,20 @@ describe('o8 backend event mapping', () => {
     expect(events).toEqual([{ type: 'done', sessionId: expect.any(String), cost: 0 }]);
   });
 
-  it('errors without touching the gateway when env is unconfigured', async () => {
-    mockMissing.mockReturnValue(['VERCEL_AI_GATEWAY_API_KEY']);
+  it('surfaces a non-200 proxy response (JSON error body) as an error line, then done', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      body: null,
+      json: async () => ({ error: 'Gemini quota exhausted and no fallback configured.' }),
+    } as unknown as Response);
     const { events, onEvent } = collect();
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(mockStream).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(events[0].type).toBe('error');
-    expect((events[0] as { error: string }).error).toContain('VERCEL_AI_GATEWAY_API_KEY');
+    expect((events[0] as { error: string }).error).toContain('Gemini quota exhausted');
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -94,22 +117,33 @@ describe('o8 backend event mapping', () => {
       { role: 'user', content: 'second' },
     ];
     mockReadMessages.mockReturnValue(transcript);
-    mockStream.mockReturnValue(fromChunks(['ok']));
+    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
     const { onEvent } = collect();
 
     await o8Backend.sendTurn('/repo', 'second-with-session-rules', onEvent, { threadId: 'thoughts-1' });
 
-    expect(mockStream).toHaveBeenCalledTimes(1);
-    expect(mockStream.mock.calls[0][0].messages).toEqual(transcript);
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body) as {
+      model: string; provider: string; disableTools: boolean; messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.model).toBe('o8-operator');
+    expect(body.provider).toBe('operator');
+    expect(body.disableTools).toBe(true);
+    // System prompt first, then the transcript verbatim (no appended duplicate turn).
+    expect(body.messages[0].role).toBe('system');
+    expect(body.messages.slice(1)).toEqual(transcript);
   });
 
   it('falls back to the raw message param when there is no persisted transcript', async () => {
     mockReadMessages.mockReturnValue([]);
-    mockStream.mockReturnValue(fromChunks(['ok']));
+    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
     const { onEvent } = collect();
 
     await o8Backend.sendTurn('/repo', 'lone message', onEvent, { threadId: null });
 
-    expect(mockStream.mock.calls[0][0].messages).toEqual([{ role: 'user', content: 'lone message' }]);
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.messages[0].role).toBe('system');
+    expect(body.messages.slice(1)).toEqual([{ role: 'user', content: 'lone message' }]);
   });
 });
