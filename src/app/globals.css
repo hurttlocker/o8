@@ -1899,10 +1899,43 @@ button.workflow-file-item.workflow-file-item-active {
    it (the "scan" motion from the thinking-states reference, at dot scale). Used
    for awaiting-review: the circle stays put (a stable state) but the sweep says
    "waiting on you". Base color via --sweep-base; the highlight is derived from
-   it so any base gets a matching band. (Q ruling 2026-07-11.) */
+   it so any base gets a matching band. (Q ruling 2026-07-11.)
+
+   ── PERF (2026-07-11): identical pixels, driven by the compositor ──
+
+   This animation used to move `background-position`. That is a PAINT property:
+   WebKit re-rasterizes the gradient (which contains a color-mix()) on every
+   frame, for every dot. Measured on the operator's Intel box with the app idle
+   and eight of these dots on screen:
+
+     background-position sweep .......... 9.5% CPU   (WebKit main process)
+     layer promotion only ............... 8.6%       (doesn't help — it's the
+                                                      raster, not the parent)
+     transform sweep (this) ............. 2.2%
+     animation disabled entirely ........ 1.8%       (the floor)
+
+   So the dots alone were burning ~7.7 points of a core, forever, on an idle app.
+   Moving the sweep to `transform` on a child element makes it compositor-only:
+   the gradient rasterizes ONCE into a layer texture and is then just translated.
+   Cost drops to ~0.4 points — a 19x reduction — with the motion unchanged.
+
+   The look does NOT change. The mapping is exact and scale-independent. With
+   `background-size: 260%`, an element of width W has an image of width 2.6W, and
+   the CSS spec puts the image's left edge at:
+
+       offset(P) = P/100 * (W - 2.6W) = -1.6W * P/100
+
+   A translateX percentage resolves against the child's OWN width (2.6W), so:
+
+       P = 190%  ->  -3.04W / 2.6W  =  -116.923%
+       P = -90%  ->  +1.44W / 2.6W  =   +55.385%
+
+   Verified live in the running app at five frozen phases: the old
+   background-position offset and the new transform translateX agree to within
+   0.001px. Same pixels, 4.3x less CPU. */
 @keyframes o8-sweep-circle {
-  0%   { background-position: 190% 0; }
-  100% { background-position: -90% 0; }
+  0%   { transform: translateX(-116.923%); }
+  100% { transform: translateX(55.385%); }
 }
 .o8-sweep-circle {
   display: inline-block;
@@ -1910,6 +1943,19 @@ button.workflow-file-item.workflow-file-item-active {
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
+  /* Clips the sweeping child to the circle, exactly as border-radius clipped the
+     background box before. The dot itself stays transparent — the child paints it. */
+  position: relative;
+  overflow: hidden;
+}
+.o8-sweep-circle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Same geometry the old `background-size: 260% 100%` produced. */
+  width: 260%;
+  height: 100%;
   background-image: linear-gradient(
     105deg,
     var(--sweep-base, #6366F1) 0%,
@@ -1918,9 +1964,8 @@ button.workflow-file-item.workflow-file-item-active {
     var(--sweep-base, #6366F1) 62%,
     var(--sweep-base, #6366F1) 100%
   );
-  background-size: 260% 100%;
-  background-repeat: no-repeat;
   animation: o8-sweep-circle 1.5s ease-in-out infinite;
+  will-change: transform;
 }
 
 /* Motion vocabulary A — static outline ring. Hollow, no animation.
@@ -1964,6 +2009,244 @@ button.workflow-file-item.workflow-file-item-active {
 .o8-orbit::before { top: 0; }
 .o8-orbit::after { bottom: 0; opacity: 0.55; }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Loader family — "neo-retro pixel grid" (motion lab, 2026-07-11)
+
+   Bespoke o8 riff on Alex Socoloff's animated loading-icon set: low-fidelity
+   pixel cells that flick on/off in discrete steps(), paired (in one variant)
+   with a smooth hi-fi glow — the lo-fi/hi-fi contrast that made the reference
+   read premium. o8's own geometry + the single orange accent, not a clone.
+
+   PERF: every variant animates transform or opacity ONLY, so the compositor
+   drives them with no per-frame raster (the lesson the sweep-dot taught us —
+   see the o8-sweep-circle note above). The one blurred glow (aurora) is a
+   STATIC gradient that rasterizes once into its layer; only transform moves
+   it, so blur never re-rasterizes.
+
+   Sized at a ~16px chrome base (where a loader sits in a row/composer); the
+   lab scales the whole element up for the display size. Lit cells use the
+   orange accent via --t-loader (orange fallback); resting cells are ink-faint.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* 1. bitfield — a 3×3 pixel grid; a lit pulse marches the diagonal in hard
+      steps(1) snaps. Borrow: abstract grid-based shape-shifting (cells on/off,
+      not a rotating/scaling asset). */
+@keyframes o8-loader-bitfield {
+  0%, 100% { opacity: 0.16; }
+  12%, 26% { opacity: 1; }
+}
+.o8-loader-bitfield {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.o8-loader-bitfield > i {
+  display: block;
+  border-radius: 1px;
+  background: var(--t-loader, #F97316);
+  opacity: 0.16;
+  animation: o8-loader-bitfield 1.25s steps(1, end) infinite;
+}
+/* diagonal wave — delay by (row + col) so a lit band sweeps corner to corner */
+.o8-loader-bitfield > i:nth-child(1) { animation-delay: 0s; }
+.o8-loader-bitfield > i:nth-child(2),
+.o8-loader-bitfield > i:nth-child(4) { animation-delay: 0.15s; }
+.o8-loader-bitfield > i:nth-child(3),
+.o8-loader-bitfield > i:nth-child(5),
+.o8-loader-bitfield > i:nth-child(7) { animation-delay: 0.3s; }
+.o8-loader-bitfield > i:nth-child(6),
+.o8-loader-bitfield > i:nth-child(8) { animation-delay: 0.45s; }
+.o8-loader-bitfield > i:nth-child(9) { animation-delay: 0.6s; }
+
+/* 2. dispatch — a packed core spreads its 4 arms out to a cross, then re-packs.
+      Borrow: the "posting" metaphor (dense block = data packed → open cross =
+      data sent). Pure transform translate + opacity. */
+@keyframes o8-loader-dispatch-n {
+  0%, 100% { transform: translate(-50%, -50%); opacity: 0.28; }
+  50%      { transform: translate(-50%, -185%); opacity: 1; }
+}
+@keyframes o8-loader-dispatch-s {
+  0%, 100% { transform: translate(-50%, -50%); opacity: 0.28; }
+  50%      { transform: translate(-50%, 85%); opacity: 1; }
+}
+@keyframes o8-loader-dispatch-e {
+  0%, 100% { transform: translate(-50%, -50%); opacity: 0.28; }
+  50%      { transform: translate(85%, -50%); opacity: 1; }
+}
+@keyframes o8-loader-dispatch-w {
+  0%, 100% { transform: translate(-50%, -50%); opacity: 0.28; }
+  50%      { transform: translate(-185%, -50%); opacity: 1; }
+}
+@keyframes o8-loader-dispatch-core {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(0.62); }
+}
+.o8-loader-dispatch {
+  position: relative;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.o8-loader-dispatch > i {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--t-loader, #F97316);
+  transform: translate(-50%, -50%);
+  animation-duration: 1.5s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.o8-loader-dispatch > i:nth-child(1) { animation-name: o8-loader-dispatch-core; }
+.o8-loader-dispatch > i:nth-child(2) { animation-name: o8-loader-dispatch-n; }
+.o8-loader-dispatch > i:nth-child(3) { animation-name: o8-loader-dispatch-e; }
+.o8-loader-dispatch > i:nth-child(4) { animation-name: o8-loader-dispatch-s; }
+.o8-loader-dispatch > i:nth-child(5) { animation-name: o8-loader-dispatch-w; }
+
+/* 3. aurora — the signature lo-fi/hi-fi contrast: a sharp stepping pixel quad
+      over a soft drifting glow. Glow = a static blurred gradient that only
+      TRANSLATES (rasterized once); pixels flick in steps(1). Borrow #1. */
+@keyframes o8-loader-aurora-glow {
+  0%, 100% { transform: translate(-2px, 1px) scale(1); }
+  50%      { transform: translate(2px, -1px) scale(1.18); }
+}
+@keyframes o8-loader-aurora-pix {
+  0%, 100% { opacity: 0.2; }
+  20%, 40% { opacity: 1; }
+}
+.o8-loader-aurora {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 3px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+.o8-loader-aurora::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--t-loader, #F97316) 0%, transparent 70%);
+  filter: blur(4px);
+  opacity: 0.55;
+  animation: o8-loader-aurora-glow 2.8s ease-in-out infinite;
+  will-change: transform;
+  z-index: 0;
+}
+.o8-loader-aurora > i {
+  position: relative;
+  z-index: 1;
+  display: block;
+  border-radius: 1px;
+  background: var(--t-loader, #F97316);
+  opacity: 0.2;
+  animation: o8-loader-aurora-pix 1.05s steps(1, end) infinite;
+}
+.o8-loader-aurora > i:nth-child(2) { animation-delay: 0.26s; }
+.o8-loader-aurora > i:nth-child(4) { animation-delay: 0.52s; }
+.o8-loader-aurora > i:nth-child(3) { animation-delay: 0.78s; }
+
+/* 4. mirror — a 2×2 quad whose two diagonals hard-swap opacity. Borrow: the
+      reference's 2-frame "thinking" mirroring / rotation, done with steps. */
+@keyframes o8-loader-mirror-a {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.14; }
+}
+@keyframes o8-loader-mirror-b {
+  0%, 49%   { opacity: 0.14; }
+  50%, 100% { opacity: 1; }
+}
+.o8-loader-mirror {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.o8-loader-mirror > i {
+  display: block;
+  border-radius: 1px;
+  background: var(--t-loader, #F97316);
+}
+.o8-loader-mirror > i:nth-child(1),
+.o8-loader-mirror > i:nth-child(4) { animation: o8-loader-mirror-a 0.9s steps(1, end) infinite; }
+.o8-loader-mirror > i:nth-child(2),
+.o8-loader-mirror > i:nth-child(3) { animation: o8-loader-mirror-b 0.9s steps(1, end) infinite; }
+
+/* 5. scan — a horizontal pixel strip; a lit block steps across leaving a 1-step
+      dim trail (steps(2) quantizes the fade). Borrow: retro pixel scanline. */
+@keyframes o8-loader-scan {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.45; }
+  100% { opacity: 0.14; }
+}
+.o8-loader-scan {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.o8-loader-scan > i {
+  display: block;
+  width: 2.5px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--t-loader, #F97316);
+  opacity: 0.14;
+  animation: o8-loader-scan 1.1s steps(2, end) infinite;
+}
+.o8-loader-scan > i:nth-child(2) { animation-delay: 0.22s; }
+.o8-loader-scan > i:nth-child(3) { animation-delay: 0.44s; }
+.o8-loader-scan > i:nth-child(4) { animation-delay: 0.66s; }
+.o8-loader-scan > i:nth-child(5) { animation-delay: 0.88s; }
+
+/* 6. stack — 4 bars whose heights jump in quantized steps(4) scaleY, a pixel-VU
+      bounce. Borrow: blocky frame-by-frame motion (no smooth interpolation). */
+@keyframes o8-loader-stack {
+  0%, 100% { transform: scaleY(0.28); }
+  50%      { transform: scaleY(1); }
+}
+.o8-loader-stack {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.o8-loader-stack > i {
+  display: block;
+  width: 2.5px;
+  height: 16px;
+  border-radius: 1px;
+  background: var(--t-loader, #F97316);
+  transform-origin: bottom center;
+  transform: scaleY(0.28);
+  animation: o8-loader-stack 1s steps(4, end) infinite;
+}
+.o8-loader-stack > i:nth-child(2) { animation-delay: 0.12s; }
+.o8-loader-stack > i:nth-child(3) { animation-delay: 0.24s; }
+.o8-loader-stack > i:nth-child(4) { animation-delay: 0.36s; }
+
 @media (prefers-reduced-motion: reduce) {
   .o8-text-shimmer,
   .o8-dot-shimmer > span,
@@ -1973,4 +2256,16 @@ button.workflow-file-item.workflow-file-item-active {
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
   .o8-orbit { animation: none !important; }
+  /* Loaders freeze to a legible resting frame — no motion, cells still read. */
+  .o8-loader-bitfield > i,
+  .o8-loader-dispatch > i,
+  .o8-loader-aurora::before,
+  .o8-loader-aurora > i,
+  .o8-loader-mirror > i,
+  .o8-loader-scan > i,
+  .o8-loader-stack > i {
+    animation: none !important;
+    opacity: 0.7 !important;
+  }
+  .o8-loader-stack > i { transform: scaleY(0.7) !important; }
 }
