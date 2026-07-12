@@ -47,7 +47,9 @@ export function packetStatusColor(packet: OrchestratorPacket): string {
     case 'merged':
       return 'var(--t-success)';
     case 'failed':
-      return '#ef4444';
+      // Brand orange, same as rejected (Q final lock 2026-07-12) — one orange;
+      // the label carries the failed/rejected distinction.
+      return '#F97316';
     case 'rejected':
       return '#F97316';
     case 'awaiting_review':
