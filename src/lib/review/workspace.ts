@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,23 @@ import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 const execFileAsync = promisify(execFile);
 const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const REVIEW_REPO_SLUG = process.env.CORTEX_IDE_REVIEW_REPO || '';
+// In the PACKAGED app, `process.cwd()` is the bundled server directory inside
+// /Applications/o8.app — not a git repo. Without this guard the review-snapshot
+// pollers spent 2-10s per cycle git-scanning the app's own bundle (node_modules
+// included) for zero files, forever (prod-perf audit 2026-07-11). `.git` may be
+// a file (linked worktree), so existsSync covers both shapes. Checked once.
+let _defaultRootIsRepoCache: boolean | null = null;
+function defaultReviewRootIsRepo(): boolean {
+  if (_defaultRootIsRepoCache === null) {
+    _defaultRootIsRepoCache = existsSync(path.join(REVIEW_REPO_ROOT, '.git'));
+    if (!_defaultRootIsRepoCache) {
+      console.log(
+        `[workspace-perf] default review root is not a git repo — snapshots disabled for ${REVIEW_REPO_ROOT} (pass workspacePath explicitly to scan a repo)`,
+      );
+    }
+  }
+  return _defaultRootIsRepoCache;
+}
 // No numeric fallback — the old value `18` was a personal dogfood issue.
 // Callers that need an active review must set CORTEX_IDE_ACTIVE_REVIEW_ISSUE.
 const FALLBACK_ACTIVE_ISSUE_NUMBER_RAW = process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE;
@@ -614,6 +632,29 @@ export async function getWorkspaceReviewSnapshot(options: WorkspaceReviewSnapsho
 
 async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOptions = {}): Promise<WorkflowReviewSnapshot> {
   const repoRoot = path.resolve(options.workspacePath || REVIEW_REPO_ROOT);
+  // No explicit workspace + the default root isn't a repo (packaged-app cwd) →
+  // return an empty snapshot instantly instead of git-walking the app bundle.
+  if (!options.workspacePath && !defaultReviewRootIsRepo()) {
+    return {
+      generatedAt: new Date().toISOString(),
+      repoSlug: REVIEW_REPO_SLUG,
+      repoPath: shortenPath(repoRoot),
+      branch: '',
+      headSha: undefined,
+      upstream: undefined,
+      ahead: 0,
+      behind: 0,
+      dirty: false,
+      changedFiles: [],
+      diffStat: '',
+      recentCommits: [],
+      worktrees: [],
+      pullRequests: [],
+      activeIssue: undefined,
+      activeIssues: [],
+      warnings: [],
+    };
+  }
   const allowFallbackPullRequests = options.allowFallbackPullRequests !== false;
   const changesOnly = options.changesOnly === true;
   const startedAt = Date.now();
