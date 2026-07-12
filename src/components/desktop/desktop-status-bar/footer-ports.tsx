@@ -7,6 +7,7 @@ import { Internet, Terminal as TerminalIcon, Database } from 'iconoir-react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
+import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 
 type PortCategory = 'agent' | 'browser' | 'noise';
 
@@ -123,6 +124,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
   const longPressFiredRef = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const wsConnected = useWsConnectionState() === 'connected';
 
   useEffect(() => {
     let cancelled = false;
@@ -160,7 +162,13 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     }, 1500);
     const handler = () => fetchAll();
     window.addEventListener('o8:agent-lifecycle', handler);
-    const fallback = setInterval(fetchAll, 20_000);
+    // PERF: the WS now bridges agent-lifecycle to this window event
+    // (DesktopWebSocketContext) — before, that event only fired when the operator
+    // killed a run from this window, so this interval WAS the signal rather than
+    // a fallback. With the socket live it is a genuine safety net; with the
+    // socket down we have no signal, so we keep the old cadence rather than go
+    // blind. Reconnecting also refetches immediately (wsConnected in deps).
+    const fallback = setInterval(fetchAll, wsConnected ? 60_000 : 20_000);
     return () => {
       cancelled = true;
       if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
@@ -168,7 +176,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
       clearInterval(fallback);
       window.removeEventListener('o8:agent-lifecycle', handler);
     };
-  }, []);
+  }, [wsConnected]);
 
   useEffect(() => {
     return () => {

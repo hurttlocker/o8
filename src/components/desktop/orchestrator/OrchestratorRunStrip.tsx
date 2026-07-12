@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { Terminal as TerminalIcon } from 'iconoir-react';
 import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
+import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 
 interface ManagedRun {
   id: string;
@@ -26,6 +27,7 @@ interface ManagedRun {
 
 export function OrchestratorRunStrip({ active }: { active: boolean }) {
   const [runs, setRuns] = useState<ManagedRun[]>([]);
+  const wsConnected = useWsConnectionState() === 'connected';
 
   useEffect(() => {
     if (!active) return;
@@ -42,13 +44,30 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
     fetchRuns();
     const handler = () => fetchRuns();
     window.addEventListener('o8:agent-lifecycle', handler);
-    const timer = setInterval(fetchRuns, 8_000);
+
+    // PERF: this strip renders NOTHING when no run is active, yet it polled every
+    // 8s to find out whether one had started — the busiest idle endpoint after
+    // the spec pane. It could not gate on visibility, because its visibility is
+    // what the poll determines.
+    //
+    // The real problem was a missing wire: the ws-server has always broadcast
+    // agent-lifecycle, but nothing bridged it to the window event this listener
+    // is already waiting on, so the poll WAS the signal. That bridge now exists
+    // (DesktopWebSocketContext), so a run starting or stopping anywhere — CLI, an
+    // agent, another surface — reaches us immediately instead of up to 8s later.
+    //
+    // The interval is therefore a safety net, not the signal. When the socket is
+    // down we genuinely have no signal, so we fall back to the old cadence rather
+    // than go blind.
+    const timer = setInterval(fetchRuns, wsConnected ? 60_000 : 8_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
       window.removeEventListener('o8:agent-lifecycle', handler);
     };
-  }, [active]);
+    // wsConnected in deps: reconnecting re-establishes the slow cadence AND
+    // refetches immediately, resyncing anything missed while the socket was down.
+  }, [active, wsConnected]);
 
   if (runs.length === 0) return null;
 
