@@ -128,20 +128,32 @@ const loaderHtml = `<!DOCTYPE html>
       } catch { return false; }
     }
 
+    // Poll cadence: ramp tight -> relaxed instead of a flat 500ms grid.
+    // A probe against a port nothing is listening on fails instantly
+    // (ECONNREFUSED), so the early attempts are nearly free — and the moment the
+    // sidecar binds we want to SEE it, not sit dark waiting out the rest of a
+    // 500ms tick. Same ~15s ceiling as the old 30 x 500ms.
+    const BACKOFF_MS = [25, 25, 50, 50, 75, 100, 150, 200, 250, 350, 500];
+    const DEADLINE_MS = 15000;
+    const startedAt = Date.now();
+
     async function tick() {
-      attempts++;
       for (let i = 0; i < CANDIDATES.length; i++) {
         const port = CANDIDATES[i];
         if (await probe(port)) return;
       }
-      if (attempts < 30) {
-        setTimeout(tick, 500);
+      if (Date.now() - startedAt < DEADLINE_MS) {
+        const delay = BACKOFF_MS[Math.min(attempts, BACKOFF_MS.length - 1)];
+        attempts++;
+        setTimeout(tick, delay);
       } else {
         const fail = document.getElementById('stage');
         if (fail) fail.innerHTML = '<span style="color:#FF5A1F">server failed to start — install node 22+ at <span style="color:#111">nodejs.org</span></span>';
       }
     }
-    setTimeout(tick, 500);
+    // Probe immediately. The window now paints before the sidecar is spawned, so
+    // a 500ms head start is pure dead time on the critical path.
+    tick();
   </script>
 </head>
 <body>
