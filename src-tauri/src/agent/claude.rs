@@ -78,8 +78,48 @@ pub(crate) fn claude_bin() -> String {
             return b;
         }
     }
+    // Scan the well-known install dirs instead of assuming the native
+    // installer's ~/.local/bin — that hardcoded fallback was iMac-only and
+    // Symon died "spawn failed" on every npm/brew install (#1551 walkdown,
+    // round 5, 2026-07-12). ~/.o8/bin first: o8 symlinks detected CLIs there
+    // itself, so it is the freshest pointer when present. Mirrors the TS
+    // scanForBinary order; last resort keeps the legacy default so the error
+    // message still names a concrete path.
     let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        format!("{home}/.o8/bin/claude"),
+        format!("{home}/.local/bin/claude"),
+        format!("{home}/.npm-global/bin/claude"),
+        "/usr/local/bin/claude".to_string(),
+        "/opt/homebrew/bin/claude".to_string(),
+        format!("{home}/.claude/local/claude"),
+    ];
+    for c in candidates {
+        if std::path::Path::new(&c).exists() {
+            return c;
+        }
+    }
     format!("{home}/.local/bin/claude")
+}
+
+/// PATH with the sidecar-resolved node runtime guaranteed present. The claude
+/// binary is a `#!/usr/bin/env node` shim on npm installs — on an nvm-only
+/// machine the ambient PATH has no node and the shim dies instantly even when
+/// the path to it is right (same class as the TS-side fix in 0.1.588). The
+/// sidecar already resolved a working node into O8_NODE_BIN at boot.
+pub(crate) fn path_with_node_runtime() -> String {
+    let base = std::env::var("PATH").unwrap_or_default();
+    let Ok(node_bin) = std::env::var("O8_NODE_BIN") else {
+        return base;
+    };
+    let Some(dir) = std::path::Path::new(&node_bin).parent() else {
+        return base;
+    };
+    let dir = dir.to_string_lossy();
+    if base.split(':').any(|p| p == dir) {
+        return base;
+    }
+    format!("{dir}:{base}")
 }
 
 /// Write (once) an empty MCP config so `--strict-mcp-config` gives Claude NO
@@ -233,6 +273,8 @@ impl ClaudeSession {
             ])
             .env("FORCE_COLOR", "0")
             .env("NO_COLOR", "1")
+            // npm-installed claude is a node shim — see path_with_node_runtime.
+            .env("PATH", path_with_node_runtime())
             // No `--print` → draws the user's Claude subscription pool, not the
             // metered SDK pool. Scrub ANTHROPIC_API_KEY so an env key can't flip
             // billing to the API pool (it takes precedence over the sub).
