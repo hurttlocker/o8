@@ -182,7 +182,10 @@ export async function getActiveWorktreeSummary(repoRoot: string): Promise<{
 }> {
   const mgr = getManager(repoRoot);
   const [worktrees, conflicts] = await Promise.all([
-    mgr.list(),
+    // The ONLY caller in the codebase that reads diskUsageBytes, so it is the
+    // only one that pays for the `du -sk` recursive walk. Everyone else — most
+    // importantly the ws-server's 5s conflict scan — gets the cheap list.
+    mgr.list({ withDiskUsage: true }),
     mgr.detectConflicts(),
   ]);
 
