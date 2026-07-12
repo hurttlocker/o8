@@ -131,10 +131,22 @@ export async function validateWorkspace(targetCwd: string) {
     throw new Error('Owned runtime launch is restricted to paths under the home directory.');
   }
 
-  const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
-    maxBuffer: 256 * 1024,
-  });
-  return path.resolve(stdout.trim());
+  // Git-toplevel resolution is path NORMALIZATION, not the security boundary —
+  // the home-dir check above is. A plain folder that was never git-inited made
+  // this throw `Command failed: git -C … rev-parse --show-toplevel`, which
+  // killed EVERY runtime launch on the machine with no surfaced error (#1551,
+  // live-hit 2026-07-12: fresh laptop, first project folder, nothing could
+  // spawn). Fall back to the resolved folder itself — the CLIs run fine in a
+  // non-git directory; isolation/worktrees are separately gated on git.
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
+      maxBuffer: 256 * 1024,
+    });
+    return path.resolve(stdout.trim());
+  } catch {
+    console.warn(`[runtime-launch] ${real} is not a git repository — using the folder as the workspace root (no isolation)`);
+    return real;
+  }
 }
 
 export async function gitValue(repoPath: string, args: string[]) {

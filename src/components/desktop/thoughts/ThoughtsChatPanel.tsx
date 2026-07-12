@@ -617,11 +617,39 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             skipSetup: true,
           }),
         });
-        const data = await launchRes.json() as { ok?: boolean; surfaceId?: string };
-        if (!data.ok || !data.surfaceId) return null;
+        const data = await launchRes.json() as { ok?: boolean; surfaceId?: string; error?: string; note?: string };
+        if (!data.ok || !data.surfaceId) {
+          // A dead launch must SAY SO — on a plain non-git folder every spawn
+          // failed and the chat just sat silent (#1551). Surface the server's
+          // actual reason as a system line so the operator is never guessing.
+          const reason = (data.error || data.note || '').trim();
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              id: `local-error-${Date.now()}`,
+              role: 'system',
+              text: reason
+                ? `Couldn't start the ${orchestratorRuntimeTone(singleRuntime).label} session: ${reason}`
+                : `Couldn't start the ${orchestratorRuntimeTone(singleRuntime).label} session — the launch failed with no reason given. Check the runtime is installed and try again.`,
+              timestamp: Date.now(),
+              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          return null;
+        }
         singleRuntimeSessionRef.current = data.surfaceId;
         return data.surfaceId;
-      } catch {
+      } catch (err) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `local-error-${Date.now()}`,
+            role: 'system',
+            text: `Couldn't start the ${orchestratorRuntimeTone(singleRuntime).label} session: ${err instanceof Error ? err.message : 'network error'}`,
+            timestamp: Date.now(),
+            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
         return null;
       } finally {
         setSingleRuntimeSpawning(false);
