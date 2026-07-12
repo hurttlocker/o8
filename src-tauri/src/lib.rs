@@ -18,6 +18,7 @@ mod mac_perms;
 mod models;
 mod paste;
 mod point_overlay;
+mod shell_env;
 mod sidecar_lifecycle;
 mod sound;
 mod speech_text;
@@ -1340,31 +1341,6 @@ fn resolve_node_via_login_shell() -> Option<String> {
     None
 }
 
-/// Finder-launched apps inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
-/// that omits the user's CLI dirs (`~/.npm-global/bin`, Homebrew, `~/.local/bin`,
-/// pnpm/volta shims). The bundled Next server then can't find `codex`/`claude`/
-/// `gh`/`pnpm`: setup detect shows "No tools detected", Codex dispatch spawn
-/// ENOENTs, and worktree `pnpm install` fails. Mirror the node/key login-shell
-/// resolution — ask a login shell for its PATH.
-fn resolve_login_shell_path() -> Option<String> {
-    let shells: [(&str, &[&str]); 3] = [
-        ("zsh", &["-l", "-c", "printf %s \"$PATH\""]),
-        ("bash", &["-l", "-c", "printf %s \"$PATH\""]),
-        ("sh", &["-l", "-c", "printf %s \"$PATH\""]),
-    ];
-    for (shell, args) in shells {
-        if let Ok(out) = Command::new(shell).args(args).output() {
-            if out.status.success() {
-                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Some(path);
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Directories runtime CLIs (claude / codex / gemini / opencode / gh) are known
 /// to land in but that a NON-INTERACTIVE login shell (`zsh -l -c`) often can't
 /// see: nvm / fnm / the Claude native installer (~/.local/bin) all add their
@@ -1423,14 +1399,16 @@ fn well_known_cli_bin_dirs() -> Vec<String> {
 /// on the explicit Node 22 binary (`O8_NODE_BIN`), so this never disturbs the
 /// better-sqlite3 ABI pin — it only widens what children can find. Dedup'd;
 /// minimal PATH kept as fallback.
-fn augment_process_path_from_login_shell() {
-    let login_path = resolve_login_shell_path().unwrap_or_else(|| {
+///
+/// `login_path` comes from the single `shell_env::probe_login_shell()` call the
+/// boot path already made — we do NOT re-source the user's profile to ask again.
+fn augment_process_path(login_path: &str) {
+    if login_path.is_empty() {
         log::warn!(
             "Could not resolve login-shell PATH; falling back to the well-known \
              CLI dirs + minimal Finder PATH for sidecar children"
         );
-        String::new()
-    });
+    }
     let current = std::env::var("PATH").unwrap_or_default();
     let well_known = well_known_cli_bin_dirs();
     let mut merged: Vec<String> = Vec::new();
@@ -1452,71 +1430,15 @@ fn augment_process_path_from_login_shell() {
     std::env::set_var("PATH", merged);
 }
 
-/// Pulls AI provider API keys from the user's login shell (~/.zshenv etc.)
-/// so Finder-launched packaged builds inherit keys the user already has.
-/// Returns a Vec of (KEY, VALUE) pairs for whichever known AI vars exist.
-/// Issue #935: Gemini-backed features (Suggest Projects, classifier) were
-/// dead in the installed app because GUI launches don't read .zshenv.
-fn load_ai_keys_from_login_shell() -> Vec<(String, String)> {
-    const KEYS: &[&str] = &[
-        "GOOGLE_AI_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-        "GEMINI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "XAI_API_KEY",
-        // Read-only token for the founder usage-analytics dashboard (epic #1249).
-        // Only present in the founder's login shell — a normal user's shell has
-        // none, so nothing is forwarded and the dashboard stays hidden.
-        "O8_ANALYTICS_TOKEN",
-    ];
-    // Shell-print the keys we care about; absent vars print as empty so we
-    // can skip them. Wrapped in `:;` so a missing var doesn't make the
-    // shell exit with non-zero.
-    let script = KEYS
-        .iter()
-        .map(|k| format!("printf '%s=%s\\n' {} \"${{{}:-}}\"", k, k))
-        .collect::<Vec<_>>()
-        .join("; ");
-    let shells: [(&str, &[&str]); 3] = [
-        ("zsh", &["-l", "-c", &script]),
-        ("bash", &["-l", "-c", &script]),
-        ("sh", &["-l", "-c", &script]),
-    ];
-    for (shell, _args) in shells {
-        if let Ok(out) = Command::new(shell).args(["-l", "-c", &script]).output() {
-            if out.status.success() {
-                let mut pairs = Vec::new();
-                for line in String::from_utf8_lossy(&out.stdout).lines() {
-                    if let Some(eq) = line.find('=') {
-                        let (k, v) = line.split_at(eq);
-                        let v = &v[1..]; // strip leading '='
-                        if !v.is_empty() && KEYS.contains(&k) {
-                            pairs.push((k.to_string(), v.to_string()));
-                        }
-                    }
-                }
-                if !pairs.is_empty() {
-                    return pairs;
-                }
-            }
-        }
-    }
-    Vec::new()
-}
-
 /// Returns Some((major, raw_version)) on success, None on failure.
+///
+/// Served from `~/.o8/node-abi-cache` when the binary hasn't changed since we
+/// last checked it: exec'ing `node --version` costs ~0.49s on the operator's
+/// machine, and it re-derives an answer that only moves when node itself does.
+/// The cache is stamped with the binary's (mtime, size), so a node upgrade
+/// invalidates the entry and we re-exec — the #1032 ABI pin is preserved.
 fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
-    let out = Command::new(node_bin).arg("--version").output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let trimmed = raw.trim_start_matches('v');
-    let major_str = trimmed.split('.').next()?;
-    let major = major_str.parse::<u32>().ok()?;
-    Some((major, raw))
+    shell_env::check_node_version_cached(node_bin)
 }
 
 fn supports_native_node_major(major: u32) -> bool {
@@ -1643,7 +1565,13 @@ enum NodePreflightError {
 
 /// Full pre-flight: returns the resolved node path on success, or an error
 /// describing what to tell the user.
-fn run_node_preflight() -> Result<String, NodePreflightError> {
+///
+/// `shell_node` is whatever `shell_env::probe_login_shell()` already found —
+/// the boot path sources the user's profile exactly once, so we reuse that
+/// answer instead of spawning another login shell here. Only when the probe
+/// came back empty (no shell answered at all) do we fall back to asking
+/// directly.
+fn run_node_preflight(shell_node: Option<&str>) -> Result<String, NodePreflightError> {
     // F40 (#1032): prefer Node 22.x specifically when available. Avoids
     // silent better-sqlite3 ABI failures when the user's login-shell default
     // is Node 23+. Sydney's MacBook hit this with nvm default = 25.
@@ -1659,7 +1587,10 @@ fn run_node_preflight() -> Result<String, NodePreflightError> {
         }
     }
 
-    let node_bin = resolve_node_via_login_shell().ok_or(NodePreflightError::Missing)?;
+    let node_bin = shell_node
+        .map(str::to_string)
+        .or_else(resolve_node_via_login_shell)
+        .ok_or(NodePreflightError::Missing)?;
     let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
     if major < MIN_NODE_MAJOR {
         return Err(NodePreflightError::TooOld { raw });
@@ -5645,14 +5576,18 @@ pub fn run() {
                 std::env::set_var("O8_API_PORT", api_port.to_string());
                 std::env::set_var("O8_WS_PORT", ws_port.to_string());
 
-                let node_bin = match run_node_preflight() {
+                // ONE login-shell probe — node + PATH + AI keys in a single
+                // `zsh -l -c`. See shell_env: the boot path used to source the
+                // user's profile three separate times.
+                let shell = shell_env::probe_login_shell();
+                let node_bin = match run_node_preflight(shell.node.as_deref()) {
                     Ok(path) => path,
                     Err(err) => show_node_error_and_exit(err),
                 };
                 std::env::set_var("O8_NODE_BIN", &node_bin);
 
                 let ws_log = open_child_log("ws-server.log");
-                let ai_keys = load_ai_keys_from_login_shell();
+                let ai_keys = shell.keys;
                 if !ai_keys.is_empty() {
                     // #935 follow-up: also apply the keys to THIS (Tauri/Rust)
                     // process — the Rust-side Symon agent + Ask path read
@@ -5696,11 +5631,21 @@ pub fn run() {
                 std::env::set_var("O8_API_PORT", api_port.to_string());
                 std::env::set_var("O8_WS_PORT", ws_port.to_string());
             } else if server_js.exists() {
+                // ── Login-shell probe (ONCE) ──
+                // Finder gives us a minimal PATH, so we ask a login shell for
+                // the user's real node, PATH, and AI keys. Sourcing a profile
+                // costs ~0.96s on the operator's machine — so we do it exactly
+                // once and reuse the answer for all three consumers below.
+                // (This block used to spawn three separate subprocesses: a
+                // `node --version`, a login zsh for PATH, and a second login
+                // zsh that re-sourced the same rc files just to read the keys.)
+                let shell = shell_env::probe_login_shell();
+
                 // ── Node.js pre-flight ──
-                // Resolve node via a login shell (handles nvm/fnm/volta),
-                // verify version, and show a native dialog + exit on failure.
-                // Without this the app silently loader-spins forever.
-                let node_bin = match run_node_preflight() {
+                // Verify the version (the #1032 better-sqlite3 ABI pin) and show
+                // a native dialog + exit on failure. Without this the app
+                // silently loader-spins forever.
+                let node_bin = match run_node_preflight(shell.node.as_deref()) {
                     Ok(path) => path,
                     Err(err) => show_node_error_and_exit(err),
                 };
@@ -5711,7 +5656,7 @@ pub fn run() {
                 // detect (`which codex`), Codex dispatch spawn, and worktree
                 // `pnpm install` can find the user's CLIs — Finder's minimal
                 // PATH hides ~/.npm-global/bin, Homebrew, ~/.local/bin, etc.
-                augment_process_path_from_login_shell();
+                augment_process_path(&shell.path);
 
                 if preship_gate {
                     // ── Pre-ship boot gate isolation ──
@@ -5807,8 +5752,9 @@ pub fn run() {
                 }
                 // Issue #935: forward AI provider keys from the user's login
                 // shell so Finder-launched builds aren't dead for Gemini /
-                // Anthropic / etc. features the user has keys for.
-                let ai_keys = load_ai_keys_from_login_shell();
+                // Anthropic / etc. features the user has keys for. These came
+                // from the single probe above — no second shell.
+                let ai_keys = shell.keys;
                 for (k, v) in &ai_keys {
                     server_cmd.env(k, v);
                 }
