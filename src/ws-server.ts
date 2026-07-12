@@ -176,6 +176,7 @@ import {
   recordRealtimeBridgeFailure,
   recordRealtimeBridgeSuccess,
 } from './lib/realtime/bridge-backoff';
+import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
 import {
   sanitizePtyEnv,
@@ -4239,6 +4240,36 @@ function pushHistoryForSession(sessionKey: string) {
 
 const CONFLICT_SCAN_MS = 5_000; // 5s conflict scan interval
 
+// ── Conflict scan: event-driven, with a slow safety net ──
+//
+// The scan used to run the FULL worktree probe every 5 seconds regardless of
+// whether anything had changed, then throw the result away when the hash matched
+// — which, on an idle app, is every single time. On the operator's Intel box
+// that was ~519ms of git subprocesses per tick (~10% of a core, forever) to
+// re-derive an answer nobody asked for.
+//
+// The expensive probe now runs only when something could actually have changed:
+// a git ref/index write, a worktree HEAD/index write, or a file written inside
+// any worktree. That last one matters — agents edit files long before they stage
+// them, so watching .git alone would miss work in progress.
+//
+// Event-driven detection is also STRICTLY FASTER than the old poll: a change is
+// noticed within the debounce rather than up to 5s later.
+//
+// `conflictWatchersActive` is the safety valve. If the watchers can't be
+// established (EMFILE, a platform without recursive fs.watch), we fall back to
+// the old unconditional 5s scan — never worse than before. And even with the
+// watchers live, a slow full rescan runs regardless every
+// CONFLICT_SAFETY_NET_MS, so a missed event can't strand the report forever.
+const CONFLICT_SAFETY_NET_MS = 60_000;
+let conflictsDirty = true; // always scan once on boot
+let conflictWatchersActive = false;
+let lastFullConflictScan = 0;
+
+function markConflictsDirty() {
+  conflictsDirty = true;
+}
+
 function startPollingLoops() {
   // Safety-net inbox poll — reduced frequency since event-driven push handles most updates
   setInterval(() => {
@@ -4284,6 +4315,22 @@ function startPollingLoops() {
   setInterval(async () => {
     const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
     if (activeClients.length === 0) return;
+
+    // Nothing has changed since the last scan — skip the expensive probe
+    // entirely. The gate fails toward scanning in every ambiguous case; see
+    // lib/ws-server/conflict-gate.ts.
+    if (!shouldRunConflictScan({
+      watchersActive: conflictWatchersActive,
+      dirty: conflictsDirty,
+      msSinceFullScan: Date.now() - lastFullConflictScan,
+      safetyNetMs: CONFLICT_SAFETY_NET_MS,
+    })) {
+      return;
+    }
+    // Clear BEFORE the probe, not after: a write that lands while the probe is
+    // in flight must re-arm the next tick rather than be swallowed by it.
+    conflictsDirty = false;
+    lastFullConflictScan = Date.now();
 
     try {
       const res = await fetchWithRetry(buildNextUrl('/api/worktrees/conflicts', new URLSearchParams({
@@ -6095,6 +6142,45 @@ function scheduleReviewRefresh(delayMs = 500) {
   }, delayMs);
 }
 
+// Worktree working trees. Agents write files long before they stage them, so
+// the .git refs/index watchers alone would miss work in progress — this is the
+// signal that lets the conflict probe be event-driven instead of polled.
+//
+// Recursive fs.watch is FSEvents-backed on macOS (the shipping platform):
+// kernel-coalesced, O(1) to establish, and it does not walk the tree. Idempotent
+// and re-runnable, because worktree base dirs are created lazily on first
+// dispatch and may not exist at boot.
+const watchedWorktreeBases = new Set<string>();
+
+function ensureWorktreeWatchers() {
+  for (const base of [
+    resolve(REPO_ROOT, '.cortex-worktrees'),
+    resolve(REPO_ROOT, '.claude', 'worktrees'),
+  ]) {
+    if (watchedWorktreeBases.has(base) || !existsSync(base)) continue;
+    try {
+      watch(base, { recursive: true }, (_event, filename) => {
+        // A known-noisy path (node_modules, .next, target...) tells us nothing.
+        // An UNKNOWN path is treated as real — fail safe, never fail silent.
+        if (isWorktreeNoise(filename)) return;
+        markConflictsDirty();
+      }).on('error', (err) => {
+        // Lost the signal — fall back to unconditional polling rather than go
+        // blind. Never worse than the behaviour this replaced.
+        console.warn('[ws-server] worktree watcher error, reverting to polling:', err);
+        conflictWatchersActive = false;
+        watchedWorktreeBases.delete(base);
+      });
+      watchedWorktreeBases.add(base);
+      conflictWatchersActive = true;
+      console.log(`[ws-server] Watching worktrees at ${base} for conflict changes`);
+    } catch (err) {
+      console.warn(`[ws-server] could not watch ${base}, reverting to polling:`, err);
+      conflictWatchersActive = false;
+    }
+  }
+}
+
 // Watch .git directory for changes (commits, merges, rebases)
 if (existsSync(GIT_DIR)) {
   // Watch refs (branch tips change on commit/push)
@@ -6102,22 +6188,46 @@ if (existsSync(GIT_DIR)) {
   if (existsSync(refsDir)) {
     // An unhandled FSWatcher 'error' (refs pruned during rebase/gc) crashes the process.
     watch(refsDir, { recursive: true }, () => {
+      markConflictsDirty();
       scheduleReviewRefresh();
     }).on('error', (err) => {
       console.warn('[ws-server] git refs watcher error:', err);
+      conflictWatchersActive = false;
     });
+    conflictWatchersActive = true;
   }
   // Watch index (staged files change)
   const indexFile = resolve(GIT_DIR, 'index');
   if (existsSync(indexFile)) {
     watch(indexFile, () => {
+      markConflictsDirty();
       scheduleReviewRefresh();
     }).on('error', (err) => {
       console.warn('[ws-server] git index watcher error:', err);
+      conflictWatchersActive = false;
+    });
+  }
+  // Worktree metadata: HEAD/index writes for each linked worktree, plus the
+  // add/remove of the worktrees themselves. Small directory, cheap to watch —
+  // and a new worktree appearing is what tells us to attach its tree watcher.
+  const gitWorktreesDir = resolve(GIT_DIR, 'worktrees');
+  if (existsSync(gitWorktreesDir)) {
+    watch(gitWorktreesDir, { recursive: true }, () => {
+      markConflictsDirty();
+      ensureWorktreeWatchers();
+    }).on('error', (err) => {
+      console.warn('[ws-server] git worktrees watcher error:', err);
+      conflictWatchersActive = false;
     });
   }
   console.log(`[ws-server] Watching git at ${GIT_DIR} for diff changes`);
 }
+
+ensureWorktreeWatchers();
+// A worktree base dir created after boot (first dispatch of the session) has no
+// watcher yet. Re-attaching is idempotent and costs a couple of stat()s, so a
+// slow re-check closes that gap without any hot-path work.
+setInterval(ensureWorktreeWatchers, 30_000).unref?.();
 
 reviewPollTimer = setInterval(() => {
   scheduleReviewRefresh(0);
