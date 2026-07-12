@@ -87,6 +87,7 @@ import { stageMissingCliRun } from './missing-cli';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
+import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
@@ -640,6 +641,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     const adapterEnv = adapter.extraSpawnEnv ? adapter.extraSpawnEnv() : {};
     const spawnEnv = {
       ...adapterEnv,
+      // The CLIs are `#!/usr/bin/env node` shims — guarantee the server's own
+      // node runtime is on the child PATH (nvm-only machines have none, #1551).
+      PATH: pathWithNodeRuntime(),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       // Mark the dispatched worker's identity. Its `o8` CLI sends this as the
