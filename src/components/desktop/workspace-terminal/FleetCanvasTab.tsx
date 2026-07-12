@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { UpdateCard } from '@/components/desktop/UpdateCard';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { STATUS_COLORS } from '@/components/desktop/SessionVisualizer';
 import {
@@ -235,6 +236,24 @@ export function FleetCanvasTab({ active, repoPath }: FleetCanvasTabProps) {
       })}
 
       {settledCards.length > 0 ? <SettledStack packets={settledCards} onView={diveIn} /> : null}
+
+      {/* Update slot — the canvas route never mounted the dashboard's UpdateCard,
+          so a pending update was invisible here (report 0.1.580). Reuse the same
+          self-contained card (renders null when no update); top-right keeps it
+          clear of the bottom-right SettledStack. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          width: 300,
+          display: 'flex',
+          flexDirection: 'column',
+          zIndex: 5,
+        }}
+      >
+        <UpdateCard />
+      </div>
     </div>
   );
 }
