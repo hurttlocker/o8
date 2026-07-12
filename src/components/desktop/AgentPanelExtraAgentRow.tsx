@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
-import { shimmerTextStyle } from './repo-focus/tabs/chats/helpers';
+import { formatElapsedAgo, shimmerTextStyle } from './repo-focus/tabs/chats/helpers';
 
 export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
@@ -161,6 +161,10 @@ export function ExtraAgentRowView({
         cursor: canInteract ? 'pointer' : 'default',
         opacity: row.status === 'archived' ? 0.58 : 1,
         fontFamily: FONT,
+        // Anchor for the left-gutter status dot below — same treatment as
+        // HistoryRow/CompactSessionRow (Q ruling 2026-07-12: status icons
+        // sit LEFT of every sidebar row, like Claude's panel).
+        position: 'relative',
       }}
       onMouseEnter={(event) => {
         setHovered(true);
@@ -173,6 +177,14 @@ export function ExtraAgentRowView({
         event.currentTarget.style.background = active ? 'var(--t-input-bg)' : 'transparent';
       }}
     >
+      {/* Status dot in the absolute left gutter — matches HistoryRows so the
+          whole sidebar reads one vocabulary: state left, metadata right. */}
+      <span
+        aria-hidden
+        style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', alignItems: 'center' }}
+      >
+        <AgentStatusDot state={dotState} label={dotLabel} />
+      </span>
       <span
         style={{
           flex: 1,
@@ -247,7 +259,22 @@ export function ExtraAgentRowView({
           {busy ? 'Retrying' : 'Retry'}
         </span>
       ) : null}
-      <AgentStatusDot state={dotState} label={dotLabel} />
+      {/* Trailing relative age — same meta treatment as the chat history
+          rows above (Q ruling 2026-07-12: spawned agents carry the time
+          too). Hidden while hovered so it never fights the Retry action. */}
+      {row.lastActivityAt > 0 && !(canRetry && hovered) ? (
+        <span
+          style={{
+            flexShrink: 0,
+            color: 'var(--t-text-faint)',
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
+          }}
+        >
+          {formatElapsedAgo(new Date(row.lastActivityAt).toISOString())}
+        </span>
+      ) : null}
     </button>
   );
 }
