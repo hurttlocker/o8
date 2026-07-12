@@ -215,7 +215,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   if (isWorkingLocked) {
     composerPlaceholder = 'Queue for next turn';
   } else if (isOrchestratorMode) {
-    composerPlaceholder = 'Ask anything · / for commands';
+    composerPlaceholder = 'Plan, build, ask · / for commands';
   } else if (displayWaiting) {
     composerPlaceholder = `${activeTargetLabel} is thinking...`;
   }

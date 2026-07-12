@@ -4732,8 +4732,8 @@ function DashboardInner() {
       {/* ── Left drag handle ── */}
       {showSidebarColumn && <div
         onMouseDown={startLeftDrag}
-        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
-        onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
+        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-text-faint)'; }}
+        onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
         style={{
           width: 6,
           cursor: 'col-resize',
@@ -4744,13 +4744,17 @@ function DashboardInner() {
           zIndex: 10,
         }}
       >
+        {/* Divider pill is ALWAYS visible (Q ruling 2026-07-12) — a
+            hidden-until-hover handle reads as no affordance at all. Rest
+            paints the drag-handle token at full strength; hover glows by
+            swapping to the stronger text-faint color, NOT by opacity (the
+            token's low alpha over glass made any opacity dance invisible). */}
         <div style={{
           width: 3,
           height: 40,
           borderRadius: 2,
           backgroundColor: 'var(--t-drag-handle)',
-          opacity: 0,
-          transition: 'opacity 150ms',
+          transition: 'background-color 150ms',
         }} />
       </div>}
 
@@ -4909,8 +4913,8 @@ function DashboardInner() {
           >
             <div
               onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
-              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
-              onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
+              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-text-faint)'; }}
+              onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
               style={{
                 width: 6,
                 cursor: 'col-resize',
@@ -4921,13 +4925,14 @@ function DashboardInner() {
                 zIndex: 10,
               }}
             >
+              {/* Always-visible divider pill, color-glow on hover — same
+                  Q ruling as the left handle above. */}
               <div style={{
                 width: 3,
                 height: 40,
                 borderRadius: 2,
                 backgroundColor: 'var(--t-drag-handle)',
-                opacity: 0,
-                transition: 'opacity 150ms',
+                transition: 'background-color 150ms',
               }} />
             </div>
 
