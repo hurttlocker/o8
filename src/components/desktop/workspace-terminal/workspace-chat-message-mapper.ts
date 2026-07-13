@@ -15,7 +15,9 @@ export function mapWorkspaceTranscriptMessages(
     costUsd: message.costUsd,
     toolCalls: message.toolCalls?.map((tool) => ({
       name: tool.name,
-      status: tool.status ?? 'done',
+      // The workspace chat pane keeps a 3-status model; the transcript's newer
+      // 'error' status collapses to 'done' here (this surface has no error badge).
+      status: tool.status === 'error' ? 'done' as const : (tool.status ?? 'done'),
       args: tool.args,
       preview: tool.preview,
     })),

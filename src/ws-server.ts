@@ -1093,7 +1093,7 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'tool-result',
-        data: { name: event.name, args: event.input, output: event.output, toolUseId: event.id ?? null, repoPath, threadId, backend },
+        data: { name: event.name, args: event.input, output: event.output, toolUseId: event.id ?? null, repoPath, threadId, backend, ...(event.isError ? { isError: true } : {}) },
       });
       break;
     case 'done':
@@ -1202,6 +1202,7 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
               toolUseId: event.id ?? null,
               repoPath: next.repoPath,
               backend: backend.id,
+              ...(event.isError ? { isError: true } : {}),
             },
           });
           break;
@@ -3792,6 +3793,7 @@ async function handleOrchestratorSendMsgOnce(
                 threadId,
                 backend: turnBackend.id,
                 agent: turnAgentTag,
+                ...(event.isError ? { isError: true } : {}),
               },
             });
             break;

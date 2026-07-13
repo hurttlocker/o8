@@ -2,7 +2,7 @@ export type OrchestratorEvent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; id?: string | null; name: string; input: unknown }
-  | { type: 'tool_result'; id?: string | null; name: string; input?: unknown; output: string }
+  | { type: 'tool_result'; id?: string | null; name: string; input?: unknown; output: string; isError?: boolean }
   | { type: 'done'; sessionId: string | null; cost: number | null }
   | { type: 'error'; error: string }
   // ── Collide (MoA) — emitted ONLY by the collide backend (moa.ts). Proposer
@@ -21,6 +21,7 @@ type ContentBlock = {
   input?: unknown;
   id?: string;
   tool_use_id?: string;
+  is_error?: boolean;
   content?: string | Array<{ type?: string; text?: string } | Record<string, unknown>>;
 };
 
@@ -214,6 +215,11 @@ export function processStreamEvent(
           name: matchedTool?.name ?? '',
           input: matchedTool?.input,
           output: stringifyToolResultContent(block.content),
+          // Anthropic tags a failed tool_result with `is_error`. Thread it through
+          // so the transcript can flip the chip to an error badge (deliverable 3,
+          // turn grammar). The Codex path carries no equivalent flag — its shell
+          // results stay statusless (running→done), an accepted gap.
+          ...(block.is_error === true ? { isError: true } : {}),
         });
       }
       break;

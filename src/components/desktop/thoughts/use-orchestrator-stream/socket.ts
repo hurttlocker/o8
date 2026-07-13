@@ -306,19 +306,51 @@ export function createOrchestratorMessageHandler(
       case 'tool-result': {
         // Brain→Fable transparency card (2026-07-02). The ws-server forwards
         // EVERY tool_result over this channel (`data.output` = the raw result
-        // string), but the transcript only consumes the cortex_ask payload:
-        // parse it onto the originating tool call so the metered-backend card
-        // can show what the Brain fed the orchestrator (question, titled
-        // citations, offload). Other tools' results stay ignored — their
-        // chips flip to done via the next tool-use / live 'ready' as before.
+        // string). The transcript consumes two slices of it:
+        //   1. `isError` (turn-grammar deliverable 3) — flip the originating
+        //      chip to an error badge + stash the output, for ANY tool. The
+        //      ToolCallChipCluster auto-expands an errored chip so the failure
+        //      is visible without a click.
+        //   2. cortex_ask payload — parse the Brain feed onto the chip so the
+        //      metered-backend card shows what the Brain fed the orchestrator.
+        // A SUCCESSFUL non-cortex result stays ignored — the chip flips
+        // running→done via the next tool-use / live 'ready' as before.
         const resultName = typeof msg.data?.name === 'string' ? msg.data.name : '';
-        if (!isCortexAskTool(resultName)) break;
+        const isError = msg.data?.isError === true;
         const output = typeof msg.data?.output === 'string' ? msg.data.output : '';
-        if (!output) break;
         const toolUseId = typeof msg.data?.toolUseId === 'string' ? msg.data.toolUseId : null;
         const backend = typeof msg.data?.backend === 'string' ? msg.data.backend : undefined;
         const current = options.currentAssistantRef.current;
         if (!current) break;
+
+        if (isError) {
+          setTranscriptMessages((prev) => {
+            const idx = prev.findIndex((message) => message.id === current.id);
+            if (idx < 0) return prev;
+            const tools = prev[idx].toolCalls ?? [];
+            // Match by toolUseId; fall back to the latest still-in-flight chip.
+            let toolIdx = toolUseId ? tools.findIndex((tool) => tool.id === toolUseId) : -1;
+            if (toolIdx < 0) {
+              for (let i = tools.length - 1; i >= 0; i -= 1) {
+                if (tools[i].status === 'running' || tools[i].status === 'calling') { toolIdx = i; break; }
+              }
+            }
+            if (toolIdx < 0) return prev;
+            const nextTools = [...tools];
+            nextTools[toolIdx] = {
+              ...nextTools[toolIdx],
+              status: 'error' as const,
+              ...(output ? { result: output } : {}),
+              ...(backend ? { backend } : {}),
+            };
+            const next = [...prev];
+            next[idx] = { ...prev[idx], toolCalls: nextTools };
+            return next;
+          });
+        }
+
+        if (!isCortexAskTool(resultName)) break;
+        if (!output) break;
         setTranscriptMessages((prev) => {
           const idx = prev.findIndex((message) => message.id === current.id);
           if (idx < 0) return prev;
@@ -337,7 +369,8 @@ export function createOrchestratorMessageHandler(
           const nextTools = [...tools];
           nextTools[toolIdx] = {
             ...tool,
-            status: 'done' as const,
+            // Preserve an error badge on a failed Brain call; otherwise done.
+            status: isError ? 'error' as const : 'done' as const,
             result: output,
             ...(backend ? { backend } : {}),
             ...(brainFeed ? { brainFeed } : {}),
