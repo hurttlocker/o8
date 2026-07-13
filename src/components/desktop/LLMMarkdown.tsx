@@ -653,6 +653,41 @@ export function renderInline(text: string): React.ReactNode {
             {match[4]}
           </button>
         );
+      } else if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?/i.test(url)) {
+        // Loopback links open o8's EMBEDDED browser (Cursor borrow, Q ruling
+        // 2026-07-12): a dev-server URL the agent just started belongs inside
+        // the workspace, not in an external Chrome bounce. Same event the
+        // o8_view_open_browser MCP tool uses.
+        parts.push(
+          <button
+            key={`lb-${match.index}`}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url } }));
+              }
+            }}
+            style={{
+              background: 'transparent',
+              borderWidth: 0,
+              padding: 0,
+              color: THEME_ACCENT,
+              cursor: 'pointer',
+              textAlign: 'inherit',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              fontWeight: 'inherit',
+              textDecoration: 'none',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+            title="Open in the o8 browser"
+          >
+            {match[4]}
+          </button>
+        );
       } else {
         parts.push(
           <a
