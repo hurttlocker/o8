@@ -39,11 +39,13 @@ import {
   CreditCardIcon,
   MicIcon,
   GitHubIcon,
+  BrainIcon,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { GeneralTab } from './settings/GeneralTab';
 import { GitHubTab } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
+import { IndexingTab } from './settings/IndexingTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
 import { ConnectionsTab } from './settings/ConnectionsTab';
@@ -509,6 +511,7 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
         <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
         <TabButton label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} onClick={() => setActiveTab('git-prs')} />
+        <TabButton label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} onClick={() => setActiveTab('indexing')} />
         <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} comingSoon />
         <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} comingSoon />
 
@@ -584,6 +587,9 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         )}
         {activeTab === 'git-prs' && (
           <GitPrsTab />
+        )}
+        {activeTab === 'indexing' && (
+          <IndexingTab />
         )}
         {activeTab === 'workers' && (
           <WorkersTab />
