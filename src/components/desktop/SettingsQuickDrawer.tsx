@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Gauge,
   Github,
+  Globe,
   LogOut,
   MessageSquare,
   RefreshCw,
@@ -64,8 +65,6 @@ interface SettingsQuickDrawerProps {
   /** When provided, the What's-new row opens the in-app Brain-summarized
    *  card instead of the external releases page. */
   onWhatsNew?: () => void;
-  /** When provided, renders an "MCP setup" row that jumps to Settings → MCP. */
-  onOpenMcpSetup?: () => void;
 }
 
 type UsageState =
@@ -497,11 +496,11 @@ export function SettingsQuickDrawer({
   onClose,
   onOpenSettings,
   onWhatsNew,
-  onOpenMcpSetup,
 }: SettingsQuickDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
   const auth = useO8Auth();
   const { paletteId, setPalette } = useTheme();
@@ -771,23 +770,28 @@ export function SettingsQuickDrawer({
             {onWhatsNew ? null : <ExternalLink size={11} color={FAINT} />}
           </RowButton>
 
-          <RowButton onClick={() => openExternalUrl(DOCS_URL)}>
+          <RowButton
+            ariaExpanded={helpOpen}
+            onClick={() => setHelpOpen((value) => !value)}
+          >
             <IconFrame><BookOpen size={13} /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Get help</span>
-            <ExternalLink size={11} color={FAINT} />
+            {helpOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
           </RowButton>
 
-          <RowButton onClick={() => openExternalUrl(DISCORD_URL)}>
-            <IconFrame><MessageSquare size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Community Discord</span>
-            <ExternalLink size={11} color={FAINT} />
-          </RowButton>
-
-          {onOpenMcpSetup ? (
-            <RowButton onClick={onOpenMcpSetup}>
-              <IconFrame><Settings2 size={13} /></IconFrame>
-              <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>MCP setup</span>
-            </RowButton>
+          {helpOpen ? (
+            <div style={{ display: 'grid', gap: 2, paddingTop: 0, paddingRight: 4, paddingBottom: 3, paddingLeft: 28 }}>
+              <RowButton onClick={() => openExternalUrl(DISCORD_URL)}>
+                <IconFrame><MessageSquare size={13} /></IconFrame>
+                <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Community Discord</span>
+                <ExternalLink size={11} color={FAINT} />
+              </RowButton>
+              <RowButton onClick={() => openExternalUrl(DOCS_URL)}>
+                <IconFrame><Globe size={13} /></IconFrame>
+                <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Documentation</span>
+                <ExternalLink size={11} color={FAINT} />
+              </RowButton>
+            </div>
           ) : null}
         </div>
       </div>
