@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { selectorFor } from '@/lib/browser/selector';
+import { reactComponentName } from '@/lib/browser/react-fiber';
 
 interface DesignModeOverlayProps {
   active: boolean;
@@ -20,8 +21,9 @@ export interface DesignDrawPrompt {
   text: string;
   rect: ScreenRect;
   points: Array<{ x: number; y: number }>;
-  /** Technical context under the drawing, collected silently at submit. */
-  elements: Array<{ selector: string; tag: string; text: string }>;
+  /** Technical context under the drawing, collected silently at submit.
+   *  `component` is the React component name (Cursor parity) when discoverable. */
+  elements: Array<{ selector: string; tag: string; text: string; component?: string | null }>;
 }
 
 /** Movement past this many px turns a press into a draw (filters accidental
@@ -131,6 +133,11 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
   const [composerFocused, setComposerFocused] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [hintShown, setHintShown] = useState(false);
+  // Pre-draw hover identity label (Cursor parity): names the React component +
+  // tag under the cursor while armed. Hidden during an active stroke / while the
+  // composer is open. rAF-throttled.
+  const [hoverLabel, setHoverLabel] = useState<{ x: number; y: number; text: string } | null>(null);
+  const hoverRafRef = useRef<number | null>(null);
   const reduceMotionRef = useRef<boolean>(
     typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -160,6 +167,8 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
       setComposerFocused(false);
       setExiting(false);
       setHintShown(false);
+      setHoverLabel(null);
+      if (hoverRafRef.current) { cancelAnimationFrame(hoverRafRef.current); hoverRafRef.current = null; }
       setSurfaceEl(null);
       surfaceRectRef.current = null;
       return;
@@ -210,6 +219,7 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
   const beginGesture = (event: React.MouseEvent) => {
     if (inComposer(event.target)) return;
     event.preventDefault();
+    setHoverLabel(null);
     if (pointsRef.current.length > 0 || composerAt) {
       suppressExitUntilRef.current = Date.now() + 800;
     }
@@ -286,6 +296,30 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
     }
   };
 
+  // Pre-draw hover: identify the element under the cursor (component + tag) and
+  // float a calm chip beside it. Suppressed during a stroke / while the composer
+  // is open; rAF-throttled so it costs at most one hit-test per frame.
+  const handleHoverMove = (event: React.MouseEvent) => {
+    if (drawingRef.current || composerAt || inComposer(event.target)) {
+      if (hoverLabel) setHoverLabel(null);
+      return;
+    }
+    const cx = event.clientX;
+    const cy = event.clientY;
+    if (hoverRafRef.current) return;
+    hoverRafRef.current = requestAnimationFrame(() => {
+      hoverRafRef.current = null;
+      if (drawingRef.current || composerAt) { setHoverLabel(null); return; }
+      const resolved = resolveTarget(cx, cy, overlayRef.current);
+      const el = resolved?.el;
+      if (!el) { setHoverLabel(null); return; }
+      let comp: string | null = null;
+      try { comp = reactComponentName(el); } catch { comp = null; }
+      const tag = el.tagName.toLowerCase();
+      setHoverLabel({ x: cx, y: cy, text: comp ? `${comp} · ${tag}` : tag });
+    });
+  };
+
   const submitDraw = () => {
     const text = draft.trim();
     if (!text || !composerAt || !onDrawPrompt) return;
@@ -305,8 +339,10 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
       if (el instanceof HTMLElement && el.closest('[data-design-composer]')) continue;
       seen.add(el);
       const textContent = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      let component: string | null = null;
+      try { component = reactComponentName(el); } catch { component = null; }
       try {
-        elements.push({ selector: selectorFor(el), tag: el.tagName.toLowerCase(), text: textContent });
+        elements.push({ selector: selectorFor(el), tag: el.tagName.toLowerCase(), text: textContent, component });
       } catch {
         // selector derivation failed — skip this element
       }
@@ -354,6 +390,7 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
       aria-hidden="true"
       data-design-mode-overlay="true"
       onMouseDown={beginGesture}
+      onMouseMove={handleHoverMove}
       onWheel={handleWheel}
       onClickCapture={(event) => {
         if (inComposer(event.target)) return;
@@ -419,6 +456,40 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
       >
         Draw on the page · double-click or Esc to exit
       </div>
+
+      {/* Pre-draw hover identity chip — names the React component + tag under the
+          cursor while armed, so the operator sees WHAT they're about to circle
+          (Cursor parity). Calm dark chip, follows with a slight offset. */}
+      {hoverLabel && !composerAt && stroke.length === 0 ? (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: Math.min(toLocalX(hoverLabel.x) + 14, (surfaceRect?.width ?? 0) - 8),
+            top: Math.min(toLocalY(hoverLabel.y) + 16, (surfaceRect?.height ?? 0) - 8),
+            zIndex: 9999,
+            maxWidth: 280,
+            paddingTop: 3,
+            paddingBottom: 3,
+            paddingLeft: 7,
+            paddingRight: 7,
+            borderRadius: 6,
+            backgroundColor: 'rgba(28, 28, 30, 0.92)',
+            color: '#f5f5f7',
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: '-0.01em',
+            lineHeight: 1.3,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            pointerEvents: 'none',
+            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.35)',
+          }}
+        >
+          {hoverLabel.text}
+        </div>
+      ) : null}
 
       {/* The freeform ink stroke — quadratic-smoothed brand-orange paint with a
           soft white halo underneath (dual-stroke) so it survives any page
