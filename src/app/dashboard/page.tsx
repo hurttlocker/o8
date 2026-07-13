@@ -1276,9 +1276,8 @@ function DashboardInner() {
 
   // ── Cmd+K command palette (#661) — full-screen overlay search across
   // issues, files, agents, with localStorage LRU recents. The keydown
-  // listener below skips when the user is typing in inputs/textarea/
-  // contentEditable so existing native shortcuts (Cmd+K text-link in
-  // markdown editors, etc.) don't break.
+  // listener below yields only to terminal surfaces; composer focus still
+  // opens the palette.
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const dashboardProjects = useProjects();
@@ -1759,10 +1758,8 @@ function DashboardInner() {
   }, [activeTileId, workspaceTerminalHandlesRef]);
 
   // ── Cmd+K command palette hotkey (#661) ──
-  // Toggles the full-screen palette overlay. Skips while the user is
-  // typing in <input>, <textarea>, or contentEditable so existing native
-  // shortcuts inside editors don't break. Esc closes the overlay (handled
-  // inside the CommandPalette component).
+  // Toggles the full-screen palette overlay from anywhere except xterm.
+  // Esc closes the overlay inside CommandPalette.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const isPaletteShortcut = (event.metaKey || event.ctrlKey)
@@ -1772,14 +1769,8 @@ function DashboardInner() {
       if (!isPaletteShortcut) return;
 
       const target = event.target as HTMLElement | null;
-      const tagName = target?.tagName;
-      const isEditable = Boolean(
-        target?.isContentEditable
-          || tagName === 'INPUT'
-          || tagName === 'TEXTAREA'
-          || tagName === 'SELECT',
-      );
-      if (isEditable) return;
+      const insideTerminal = Boolean(target?.closest('.xterm, .cortex-terminal-fade'));
+      if (insideTerminal) return;
 
       event.preventDefault();
       event.stopPropagation();
