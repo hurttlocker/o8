@@ -30,7 +30,6 @@ import {
   KeyIcon,
   MobileIcon,
   LayersIcon,
-  UsersIcon,
   UserIcon,
   PaletteIcon,
   ActivityIcon,
@@ -46,13 +45,12 @@ import { GeneralTab } from './settings/GeneralTab';
 import { GitHubTab } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
 import { IndexingTab } from './settings/IndexingTab';
+import { ModelsTab } from './settings/ModelsTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
 import { ConnectionsTab } from './settings/ConnectionsTab';
 import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
 import { ProjectsPanel } from './settings/ProjectsPanel';
-import { WorkersTab } from './settings/WorkersTab';
-import { CloudWorkersTab } from './settings/CloudWorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { VoiceTab } from './settings/VoiceTab';
 import { BillingTab } from './settings/BillingTab';
@@ -76,6 +74,16 @@ function GearNavIcon({ size = 16 }: { size?: number }) {
     <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function CpuNavIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <rect x="9" y="9" width="6" height="6" />
+      <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
     </svg>
   );
 }
@@ -495,29 +503,25 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <>
         <SectionHeader>General</SectionHeader>
         <TabButton label="General" icon={<GearNavIcon />} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
+        <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
+        <TabButton label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} onClick={() => setActiveTab('voice')} />
+
+        <SectionHeader>Agents</SectionHeader>
+        <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
+        <TabButton label="Models" icon={<CpuNavIcon />} active={activeTab === 'models'} onClick={() => setActiveTab('models')} />
+
+        <SectionHeader>Workspace</SectionHeader>
+        <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
+        <TabButton label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} onClick={() => setActiveTab('git-prs')} />
+        <TabButton label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} onClick={() => setActiveTab('indexing')} />
+
         <SectionHeader>Connections</SectionHeader>
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
-        {/* BYOK hidden by default (2026-06-16): the managed-inference proxy replaces it —
-            developers use their CLI subs, newcomers have no keys, so nobody's served by a
-            key-paste surface. Set NEXT_PUBLIC_O8_SHOW_BYOK=1 to restore it (the APIKeysTab +
-            /api/v2/keys route still exist; this only hides the nav entry). */}
         {process.env.NEXT_PUBLIC_O8_SHOW_BYOK === '1' && (
           <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         )}
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} onClick={() => setActiveTab('connections')} />
-
-        <SectionHeader>Work</SectionHeader>
-        <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
-        <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
-        <TabButton label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} onClick={() => setActiveTab('git-prs')} />
-        <TabButton label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} onClick={() => setActiveTab('indexing')} />
-        <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} comingSoon />
-        <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} comingSoon />
-
-        <SectionHeader>Presentation</SectionHeader>
-        <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
-        <TabButton label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} onClick={() => setActiveTab('voice')} />
 
         <SectionHeader>System</SectionHeader>
         <TabButton label="Account" icon={<UserIcon />} active={activeTab === 'account'} onClick={() => setActiveTab('account')} />
@@ -591,11 +595,8 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         {activeTab === 'indexing' && (
           <IndexingTab />
         )}
-        {activeTab === 'workers' && (
-          <WorkersTab />
-        )}
-        {activeTab === 'cloud-workers' && (
-          <CloudWorkersTab />
+        {activeTab === 'models' && (
+          <ModelsTab onNavigateTab={setActiveTab} />
         )}
         {activeTab === 'analytics' && (
           <AnalyticsPage embedded />
