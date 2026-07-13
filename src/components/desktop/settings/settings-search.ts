@@ -62,7 +62,8 @@ export function searchSettings(
 
 /** Registry population is generated from the tab inventory — see module doc. */
 export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
-  { tab: 'general', tabLabel: 'General', group: "Account", label: "o8 account", description: "Your signed-in identity, synced across desktop and web", keywords: ['sign in', 'login', 'identity', 'profile'] },
+  { tab: 'general', tabLabel: 'General', group: "Account", label: "o8 account", description: "Sign in with GitHub, manage the account, or sign out", keywords: ['sign in', 'sign out', 'login', 'identity', 'profile', 'github'] },
+  { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share usage data", description: "Coarse feature counts that help improve o8", keywords: ['telemetry', 'usage', 'analytics', 'privacy'] },
   { tab: 'general', tabLabel: 'General', group: "Account", label: "Plan", description: "Your current plan and founder status", keywords: ['founder', 'free', 'subscription'] },
   { tab: 'general', tabLabel: 'General', group: "Account", label: "Upgrade to Founders", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
   { tab: 'general', tabLabel: 'General', group: "Startup", label: "Launch at login", description: "Start o8 automatically when you sign in to your Mac", keywords: ['autostart', 'boot', 'startup'] },
@@ -83,11 +84,6 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'about', tabLabel: 'About', group: "Links", label: "GitHub", description: "hurttlocker/o8" },
   { tab: 'about', tabLabel: 'About', group: "Links", label: "Releases", description: "Changelog and downloads" },
   { tab: 'about', tabLabel: 'About', group: "Onboarding", label: "Replay onboarding", description: "Replays the welcome flow (intro, repos, runtimes)" },
-  { tab: 'account', tabLabel: 'Account', group: "Developer", label: "View as Free", description: "Preview the free experience on this machine", founders: true },
-  { tab: 'account', tabLabel: 'Account', group: "Identity", label: "Manage account", description: "Opens Clerk manage-account (shown when signed in)" },
-  { tab: 'account', tabLabel: 'Account', group: "Identity", label: "Sign in with GitHub", description: "Continue with GitHub to create or access your o8 account (shown when signed out)" },
-  { tab: 'account', tabLabel: 'Account', group: "Identity", label: "Sign out", description: "Sign out of the o8 account (shown when signed in)" },
-  { tab: 'account', tabLabel: 'Account', group: "Privacy", label: "Share usage data", description: "Helps us improve o8" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Interface", label: "Session timeline", description: "Activity strip below the title bar" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Interface", label: "Window chrome", description: "Glass follows your wallpaper; solid is opaque (System/Glass/Solid)" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Palette", label: "Palette", description: "Selectable theme preview cards; founders-only palettes hidden unless founders", founders: true },
