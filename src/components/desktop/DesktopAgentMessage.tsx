@@ -69,7 +69,7 @@ const MediaGrid = memo(function MediaGrid({
       flexDirection: 'column',
       gap: 10,
       width: '100%',
-      maxWidth: tint === 'user' ? '82%' : '92%',
+      maxWidth: tint === 'user' ? '100%' : '92%',
     }}>
       {images.length > 0 ? (
         <div style={{
@@ -87,9 +87,9 @@ const MediaGrid = memo(function MediaGrid({
                 display: 'block',
                 overflow: 'hidden',
                 borderRadius: 14,
-                border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid var(--t-divider)',
-                background: tint === 'user' ? 'rgba(255,255,255,0.10)' : 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-                boxShadow: tint === 'user' ? 'none' : 'var(--t-panel-shadow)',
+                border: '1px solid var(--t-divider)',
+                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
+                boxShadow: 'var(--t-panel-shadow)',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -118,9 +118,9 @@ const MediaGrid = memo(function MediaGrid({
             gap: 10,
             padding: '10px 12px',
             borderRadius: 12,
-            border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid var(--t-divider)',
-            background: tint === 'user' ? 'rgba(255,255,255,0.10)' : 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-            color: tint === 'user' ? '#ffffff' : 'var(--t-text)',
+            border: '1px solid var(--t-divider)',
+            background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
+            color: 'var(--t-text)',
           }}
         >
           <span style={{
@@ -130,8 +130,8 @@ const MediaGrid = memo(function MediaGrid({
             width: 30,
             height: 30,
             borderRadius: 10,
-            background: tint === 'user' ? 'rgba(255,255,255,0.14)' : 'var(--t-accent-soft)',
-            color: tint === 'user' ? '#ffffff' : 'var(--t-accent)',
+            background: 'var(--t-accent-soft)',
+            color: 'var(--t-accent)',
             flexShrink: 0,
           }}>
             <FileText size={16} strokeWidth={2} />
@@ -149,7 +149,7 @@ const MediaGrid = memo(function MediaGrid({
             </div>
             <div style={{
               fontSize: 10,
-              color: tint === 'user' ? 'rgba(255,255,255,0.78)' : 'var(--t-text-muted)',
+              color: 'var(--t-text-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
             }}>
@@ -163,7 +163,7 @@ const MediaGrid = memo(function MediaGrid({
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: tint === 'user' ? '#ffffff' : 'var(--t-accent)',
+              color: 'var(--t-accent)',
               textDecoration: 'none',
             }}
           >
@@ -244,12 +244,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
 
   // Pretext: pre-calculate user message height (plain text, pre-wrap).
   // The orchestrator chat tile is render-hot during streaming — avoiding
-  // reflows on every token matters. Width ~100% of panel minus padding
-  // (16px × 2 + 12px × 2 = 56px).
+  // reflows on every token matters. The user row is full-column-width now, so
+  // estimate against a conservative wide measure — an UNDER-estimate of height
+  // is safe (content grows), an over-estimate leaves blank space.
   const userTextHeight = usePretextHeight(
     isUser ? displayText : '',
-    'small', // 13px matches user bubble fontSize
-    340 - 32, // approximate max-width minus padding
+    'small', // 13px matches user row fontSize
+    640 - 28, // conservative column width minus card padding
     1.55,
     'pre-wrap',
   );
@@ -368,11 +369,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   }
 
   if (isUser) {
+    // Cursor-style user row: a full-width neutral card (no accent bubble) so
+    // operator prompts read as part of the document flow, not chat balloons.
     return (
       <div style={{
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'flex-end',
+        alignItems: 'stretch',
         gap: 8,
         opacity: evictedOpacity,
         transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -381,10 +384,16 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
         {hasText ? (
           <div style={{
-            maxWidth: '85%',
-            padding: '8px 14px',
-            borderRadius: '14px 14px 4px 14px',
-            background: 'rgba(99, 138, 255, 0.13)',
+            width: '100%',
+            paddingTop: 10,
+            paddingRight: 14,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            borderRadius: 10,
+            background: 'var(--t-input-bg)',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
             color: 'var(--t-text)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
@@ -422,11 +431,19 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   }
 
   const hasThinking = Boolean(entry.thinking?.trim());
-  // ThoughtBlock is "live" (shimmering, expanded) only during the pure reasoning
-  // phase: the turn is still streaming AND no answer text or tool call has landed
-  // yet. The first token or first tool ends reasoning → the block auto-collapses
-  // to "Thought for Ns" (turn-grammar deliverable 1).
-  const thinkingLive = isStreaming && !hasText && !hasToolCalls;
+  // Any reasoning signal renders the thought line: streamed reasoning text,
+  // a frozen duration, or the live `thinkingActive` marker (Claude 5-family
+  // thinking is signature-redacted, so the marker/duration are the only
+  // evidence reasoning happened — see ThoughtBlock).
+  const hasThinkingSignal = hasThinking
+    || typeof entry.thinkingDurationMs === 'number'
+    || entry.thinkingActive === true;
+  // ThoughtBlock is "live" (shimmering) only during the pure reasoning phase:
+  // the turn is still streaming AND no answer text or tool call has landed yet.
+  // The first token or first tool ends reasoning → it collapses to the
+  // "Thought for Ns" line.
+  const thinkingLive = (isStreaming && !hasText && !hasToolCalls)
+    || (entry.thinkingActive === true && !hasText && !hasToolCalls);
 
   return (
     <div ref={rootRef} style={{
@@ -439,10 +456,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
       {evictedEyebrow}
-      {hasThinking ? (
+      {hasThinkingSignal ? (
         <ThoughtBlock
           thinking={sanitizedThinking}
           live={thinkingLive}
+          durationMs={entry.thinkingDurationMs ?? null}
           style={{ maxWidth: '100%' }}
         />
       ) : null}

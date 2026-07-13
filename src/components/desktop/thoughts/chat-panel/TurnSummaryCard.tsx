@@ -3,11 +3,14 @@
 /**
  * TurnSummaryCard — rolled-up digest of a completed orchestrator turn.
  *
- * Fires on `busy → ready` transitions in the orchestrator stream. Sits inline
- * in the transcript right after the last assistant message of the turn and
- * collapses 40+ tool deltas into one digestible block. Wraps ChatActionCard
- * as the file-touched handle.
+ * Renders as a SLIM TEXT LINE at the TOP of the turn (operator ruling
+ * 2026-07-13, Cursor parity): "Worked for Ns ⌄" in muted text, no box —
+ * anchored above the turn's first assistant message, right under the operator
+ * prompt. The chevron expands an inline detail block: tools · files · tokens
+ * stats plus the ChatActionCard ("Edited N files" with Review/Undo) when the
+ * turn touched files.
  *
+ * Fires on `busy → ready` transitions in the orchestrator stream.
  * Issue: #1096 (Codex-borrow turn-summary cards). Pairs with #1095.
  */
 
@@ -15,8 +18,12 @@ import { useState } from 'react';
 import { ChatActionCard } from './ChatActionCard';
 
 export type TurnSummary = {
-  /** Anchor — the assistant message id this summary belongs to. */
+  /** Anchor — the LAST assistant message id of the turn (legacy anchor,
+   *  still used as a fallback when the first-message anchor is missing). */
   assistantMessageId: string;
+  /** Anchor — the FIRST assistant message id of the turn. The slim line
+   *  renders directly above this message (Cursor position). */
+  firstAssistantMessageId?: string | null;
   /** Elapsed turn time in ms. */
   elapsedMs: number;
   /** Total tool invocations in the turn. */
@@ -77,175 +84,135 @@ export function TurnSummaryCard({ summary }: Props) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-divider)',
-        background: 'var(--t-input-bg)',
-        overflow: 'hidden',
+        gap: expanded ? 6 : 0,
+        minWidth: 0,
+        maxWidth: '100%',
       }}
     >
-      <div
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Hide turn details' : 'Show turn details'}
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          paddingTop: 9,
-          paddingRight: 10,
-          paddingBottom: 9,
-          paddingLeft: 12,
+          gap: 6,
+          width: '100%',
+          border: 'none',
+          background: 'transparent',
+          padding: 0,
+          textAlign: 'left',
+          cursor: 'pointer',
+          color: 'var(--t-text-muted)',
+          WebkitTapHighlightColor: 'transparent',
         }}
       >
         <span
-          aria-hidden="true"
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 14,
-            height: 14,
-            color: 'var(--t-text-muted)',
             flexShrink: 0,
+            fontFamily: 'var(--font-sans-system)',
+            fontSize: 12,
+            fontWeight: 400,
+            letterSpacing: '-0.005em',
+            color: 'var(--t-text-muted)',
           }}
         >
-          <ClockIcon />
+          Worked for {elapsed}
         </span>
-
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span
-            style={{
-              color: 'var(--t-text)',
-              fontSize: 13.5,
-              fontWeight: 300,
-              letterSpacing: '-0.1px',
-              lineHeight: 1.25,
-            }}
-          >
-            Worked for {elapsed}
-          </span>
-          {toolPreview ? (
-            <span
-              style={{
-                color: 'var(--t-text-muted)',
-                fontSize: 9.5,
-                fontWeight: 260,
-                letterSpacing: '-0.4px',
-                lineHeight: 1.25,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {toolPreview}
-              {toolOverflow > 0 ? ` +${toolOverflow}` : ''}
-            </span>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            flexShrink: 0,
-            fontFamily: 'SF Mono, Menlo, Monaco, monospace',
-            fontSize: 10.5,
-            color: 'var(--t-text-muted)',
-            letterSpacing: '0.2px',
-          }}
-        >
-          {stats.map((stat, idx) => (
-            <span key={stat.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              {idx > 0 ? <span aria-hidden="true" style={{ opacity: 0.4 }}>·</span> : null}
-              <span>{stat.value}</span>
-            </span>
-          ))}
-        </div>
-
-        <DetailsToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
-      </div>
-
-      {summary.filesEditedCount > 0 ? (
-        <div
-          style={{
-            borderTopWidth: 1,
-            borderTopStyle: 'solid',
-            borderTopColor: 'var(--t-divider)',
-            background: 'transparent',
-          }}
-        >
-          <ChatActionCard
-            filesEditedCount={summary.filesEditedCount}
-            repoPath={summary.repoPath}
-            filePaths={summary.filePaths}
-            firstFilePath={summary.filePaths[0] ?? null}
-          />
-        </div>
-      ) : null}
+        <Chevron open={expanded} />
+      </button>
 
       {expanded ? (
         <div
           style={{
-            borderTopWidth: 1,
-            borderTopStyle: 'solid',
-            borderTopColor: 'var(--t-divider)',
-            paddingTop: 8,
-            paddingRight: 12,
-            paddingBottom: 10,
-            paddingLeft: 12,
-            color: 'var(--t-text-muted)',
-            fontSize: 11,
-            lineHeight: 1.4,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
           }}
         >
-          Scroll up to the tool deltas above this card to see the full turn detail.
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              fontFamily: 'SF Mono, Menlo, Monaco, monospace',
+              fontSize: 10.5,
+              color: 'var(--t-text-muted)',
+              letterSpacing: '0.2px',
+            }}
+          >
+            {stats.map((stat, idx) => (
+              <span key={stat.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {idx > 0 ? <span aria-hidden="true" style={{ opacity: 0.4 }}>·</span> : null}
+                <span>{stat.value}</span>
+              </span>
+            ))}
+            {toolPreview ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span aria-hidden="true" style={{ opacity: 0.4 }}>·</span>
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: 'var(--t-text-faint)',
+                  }}
+                >
+                  {toolPreview}
+                  {toolOverflow > 0 ? ` +${toolOverflow}` : ''}
+                </span>
+              </span>
+            ) : null}
+          </div>
+
+          {summary.filesEditedCount > 0 ? (
+            <div
+              style={{
+                borderRadius: 10,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-divider)',
+                background: 'var(--t-input-bg)',
+                overflow: 'hidden',
+              }}
+            >
+              <ChatActionCard
+                filesEditedCount={summary.filesEditedCount}
+                repoPath={summary.repoPath}
+                filePaths={summary.filePaths}
+                firstFilePath={summary.filePaths[0] ?? null}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-function DetailsToggle({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
-  const [hover, setHover] = useState(false);
+function Chevron({ open }: { open: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={expanded ? 'Hide details' : 'Show details'}
-      aria-label={expanded ? 'Hide details' : 'Show details'}
-      aria-expanded={expanded}
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: 22,
-        paddingTop: 0,
-        paddingRight: 8,
-        paddingBottom: 0,
-        paddingLeft: 8,
-        borderWidth: 0,
-        borderRadius: 7,
-        background: hover ? 'var(--t-hover)' : 'transparent',
-        color: 'var(--t-text-muted)',
-        cursor: 'pointer',
-        fontSize: 10.5,
-        letterSpacing: '0.2px',
+        display: 'block',
         flexShrink: 0,
-        transition: 'background 120ms ease',
+        color: 'var(--t-text-faint)',
+        transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
-      {expanded ? 'Hide' : 'Details'}
-    </button>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 5 V8 L10.5 9.5" />
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }

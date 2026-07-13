@@ -16,6 +16,13 @@ export interface CurrentAssistantStreamState {
   chunks: string[];
   thinkingChunks: string[];
   epoch: number;
+  /** Wall-clock start of the reasoning phase. Claude 5-family thinking is
+   *  signature-redacted (empty text), so the empty thinking marker is the only
+   *  start signal — the duration it yields drives the "Thought for Ns" line. */
+  thinkingStartedAt?: number | null;
+  /** Frozen reasoning duration — stamped once when the first answer token or
+   *  tool call ends the thinking phase. */
+  thinkingDurationMs?: number | null;
 }
 
 interface CreateOrchestratorMessageHandlerOptions {
@@ -160,8 +167,46 @@ export function createOrchestratorMessageHandler(
     switch (msg.event) {
       case 'output': {
         const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
-        if (!text) break;
-        const isThinking = msg.data?.thinking === true;
+        const isThinkingMarker = msg.data?.thinking === true;
+
+        // Empty thinking marker — Claude 5-family reasoning streams
+        // signature-only (content redacted at the API), so the block-start
+        // event with no text is the ONLY signal a reasoning phase began.
+        // Materialize the assistant entry with `thinkingActive` so the
+        // transcript shows a live "Thinking" line, and stamp the start time
+        // for the "Thought for Ns" duration once reasoning ends.
+        if (!text) {
+          if (!isThinkingMarker) break;
+          if (!options.currentAssistantRef.current) {
+            if (options.statusRef.current !== 'busy') {
+              options.statusRef.current = 'busy';
+              options.setStatus('busy');
+            }
+            options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId);
+          }
+          const thinkingState = options.currentAssistantRef.current;
+          if (thinkingState.thinkingStartedAt == null) {
+            thinkingState.thinkingStartedAt = Date.now();
+            setTranscriptMessages((prev) => {
+              const idx = prev.findIndex((message) => message.id === thinkingState.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = { ...next[idx], thinkingActive: true };
+                return next;
+              }
+              return [...prev, {
+                id: thinkingState.id,
+                role: 'assistant' as const,
+                text: '',
+                thinkingActive: true,
+                timestamp: Date.now(),
+                timestampLabel: formatTimestampLabel(Date.now()),
+              }];
+            });
+          }
+          break;
+        }
+        const isThinking = isThinkingMarker;
 
         if (!isThinking && options.captureFirstTurnPlanRef.current) {
           if (options.firstTurnPlanStartedRef.current || text.trim()) {
@@ -188,9 +233,16 @@ export function createOrchestratorMessageHandler(
         }
 
         if (isThinking) {
-          options.currentAssistantRef.current.thinkingChunks.push(text);
+          const state = options.currentAssistantRef.current;
+          if (state.thinkingStartedAt == null) state.thinkingStartedAt = Date.now();
+          state.thinkingChunks.push(text);
         } else {
-          options.currentAssistantRef.current.chunks.push(text);
+          const state = options.currentAssistantRef.current;
+          // First answer token ends the reasoning phase — freeze the duration.
+          if (state.thinkingStartedAt != null && state.thinkingDurationMs == null) {
+            state.thinkingDurationMs = Date.now() - state.thinkingStartedAt;
+          }
+          state.chunks.push(text);
         }
         // Coalesced rAF flush for streaming deltas (see useOrchestratorStream) —
         // one re-render per frame instead of one per token.
@@ -233,13 +285,30 @@ export function createOrchestratorMessageHandler(
 
           if (newStatus === 'ready' && options.currentAssistantRef.current) {
             options.finalizeFirstTurnPlanCapture();
+            const endedState = options.currentAssistantRef.current;
+            // Turn ended mid-reasoning (abort / thinking-only turn) — freeze
+            // the duration so the entry can't keep a live "Thinking" shimmer.
+            if (endedState.thinkingStartedAt != null && endedState.thinkingDurationMs == null) {
+              endedState.thinkingDurationMs = Date.now() - endedState.thinkingStartedAt;
+            }
+            const finalThinkingDurationMs = endedState.thinkingDurationMs ?? undefined;
             options.flushCurrentAssistant();
-            const finalId = options.currentAssistantRef.current.id;
-            setTranscriptMessages((prev) => prev.map((message) =>
-              message.id === finalId && message.toolCalls?.some((tool) => tool.status === 'running')
-                ? { ...message, toolCalls: message.toolCalls!.map((tool) => (tool.status === 'running' ? { ...tool, status: 'done' } : tool)) }
-                : message,
-            ));
+            const finalId = endedState.id;
+            setTranscriptMessages((prev) => prev.map((message) => {
+              if (message.id !== finalId) return message;
+              const needsToolSettle = message.toolCalls?.some((tool) => tool.status === 'running');
+              const needsThinkingSettle = message.thinkingActive === true;
+              if (!needsToolSettle && !needsThinkingSettle) return message;
+              return {
+                ...message,
+                ...(needsToolSettle
+                  ? { toolCalls: message.toolCalls!.map((tool) => (tool.status === 'running' ? { ...tool, status: 'done' as const } : tool)) }
+                  : {}),
+                ...(needsThinkingSettle
+                  ? { thinkingActive: false, ...(finalThinkingDurationMs !== undefined ? { thinkingDurationMs: finalThinkingDurationMs } : {}) }
+                  : {}),
+              };
+            }));
             options.currentAssistantRef.current = null;
           }
           if (newStatus === 'dead') {
@@ -267,6 +336,11 @@ export function createOrchestratorMessageHandler(
         }
 
         const current = options.currentAssistantRef.current;
+        // A tool call also ends the reasoning phase — freeze the duration.
+        if (current.thinkingStartedAt != null && current.thinkingDurationMs == null) {
+          current.thinkingDurationMs = Date.now() - current.thinkingStartedAt;
+        }
+        const thinkingDurationMs = current.thinkingDurationMs ?? undefined;
         // Capture args (the tool input — e.g. a Task scout's description/type)
         // and the tool id. The desktop handler used to drop both, which is why
         // native Claude scouts reached the transcript unlabeled. The SwarmStatusCard
@@ -286,7 +360,11 @@ export function createOrchestratorMessageHandler(
             const updatedTools = existingTools.map((tool) =>
               tool.status === 'running' ? { ...tool, status: 'done' as const } : tool,
             );
-            next[idx] = { ...existing, toolCalls: [...updatedTools, toolCall] };
+            next[idx] = {
+              ...existing,
+              toolCalls: [...updatedTools, toolCall],
+              ...(thinkingDurationMs !== undefined ? { thinkingDurationMs, thinkingActive: false } : {}),
+            };
             return next;
           }
           return [...prev, {
@@ -294,6 +372,7 @@ export function createOrchestratorMessageHandler(
             role: 'assistant' as const,
             text: '',
             toolCalls: [toolCall],
+            ...(thinkingDurationMs !== undefined ? { thinkingDurationMs, thinkingActive: false } : {}),
             timestamp: Date.now(),
             timestampLabel: formatTimestampLabel(Date.now()),
           }];
