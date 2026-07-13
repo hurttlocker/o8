@@ -93,6 +93,26 @@ function strokeBounds(points: Array<{ x: number; y: number }>): ScreenRect {
   return { top: minY, left: minX, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
 }
 
+/** Quadratic-smoothed SVG path through the raw pointer samples — each segment
+ *  curves through the MIDPOINT of adjacent points with the sample as the control
+ *  handle, so the ink reads as one fluid line instead of faceted polyline
+ *  segments (Apple Pencil feel). Points are already in local surface coords. */
+function smoothPathD(points: Array<{ x: number; y: number }>): string {
+  if (points.length < 2) return '';
+  if (points.length === 2) {
+    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+  }
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const mx = (points[i].x + points[i + 1].x) / 2;
+    const my = (points[i].y + points[i + 1].y) / 2;
+    d += ` Q ${points[i].x} ${points[i].y} ${mx} ${my}`;
+  }
+  const last = points[points.length - 1];
+  d += ` L ${last.x} ${last.y}`;
+  return d;
+}
+
 export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   // Draw state — pointsRef accumulates at mousemove rate; `stroke` mirrors it
@@ -105,6 +125,15 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
   const [composerAt, setComposerAt] = useState<ScreenRect | null>(null);
   const [draft, setDraft] = useState('');
   const composerInputRef = useRef<HTMLInputElement>(null);
+  // Craft-pass choreography (2026-07-12): the composer focus ring, the exit
+  // fade after send, and the auto-fading hint pill. All compositor-only
+  // (opacity/transform), and disabled under prefers-reduced-motion.
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const [hintShown, setHintShown] = useState(false);
+  const reduceMotionRef = useRef<boolean>(
+    typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
   /** A gesture that CLEARED existing ink/composer suppresses the double-click
    *  exit briefly — rapid re-draws were reading as double-clicks and dumping
    *  the operator out of the mode (Q live-hit 2026-07-12: "it just is always
@@ -128,6 +157,9 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
       setStroke([]);
       setComposerAt(null);
       setDraft('');
+      setComposerFocused(false);
+      setExiting(false);
+      setHintShown(false);
       setSurfaceEl(null);
       surfaceRectRef.current = null;
       return;
@@ -155,6 +187,18 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
       window.removeEventListener('resize', update);
     };
   }, [active]);
+
+  // Hint pill: fade in on arm, then auto-dismiss after ~4s (Cursor pattern) so it
+  // states the gesture without lingering as chrome once the operator gets it.
+  useEffect(() => {
+    if (!active || !surfaceEl) return;
+    const raf = requestAnimationFrame(() => setHintShown(true));
+    const timer = window.setTimeout(() => setHintShown(false), 4200);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [active, surfaceEl]);
 
   const inComposer = (target: EventTarget | null) => (
     target instanceof Element && Boolean(target.closest('[data-design-composer]'))
@@ -270,7 +314,14 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
     try {
       onDrawPrompt({ text, rect: composerAt, points: pointsRef.current, elements });
     } finally {
-      onClose();
+      // Let the ink + composer fade rather than pop out (they're the operator's
+      // last touch point) — then close. Reduced-motion closes immediately.
+      if (reduceMotionRef.current) {
+        onClose();
+      } else {
+        setExiting(true);
+        window.setTimeout(onClose, 150);
+      }
     }
   };
 
@@ -284,6 +335,9 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
   const surfaceRect = surfaceRectRef.current;
   const toLocalX = (x: number) => x - (surfaceRect?.left ?? 0);
   const toLocalY = (y: number) => y - (surfaceRect?.top ?? 0);
+  const strokePathD = stroke.length > 1
+    ? smoothPathD(stroke.map((p) => ({ x: toLocalX(p.x), y: toLocalY(p.y) })))
+    : '';
 
   // Composer anchor — bottom-center of the drawing, clamped to the pane.
   const composerWidth = Math.min(320, Math.max(200, (surfaceRect?.width ?? 320) - 16));
@@ -334,7 +388,9 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
           position: 'absolute',
           top: 10,
           left: '50%',
-          transform: 'translateX(-50%)',
+          transform: `translateX(-50%) translateY(${hintShown && !exiting ? 0 : -3}px)`,
+          opacity: hintShown && !exiting ? 1 : 0,
+          transition: reduceMotionRef.current ? 'none' : 'opacity 260ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
           maxWidth: 'calc(100% - 24px)',
           minHeight: 34,
           display: 'flex',
@@ -364,22 +420,41 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
         Draw on the page · double-click or Esc to exit
       </div>
 
-      {/* The freeform ink stroke — brand-orange paint over the page. */}
-      {stroke.length > 1 ? (
+      {/* The freeform ink stroke — quadratic-smoothed brand-orange paint with a
+          soft white halo underneath (dual-stroke) so it survives any page
+          background, Apple Pencil style. Fades on exit rather than popping. */}
+      {strokePathD ? (
         <svg
           width="100%"
           height="100%"
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            pointerEvents: 'none',
+            opacity: exiting ? 0 : 1,
+            transition: reduceMotionRef.current ? 'none' : 'opacity 150ms ease',
+          }}
           aria-hidden
         >
-          <polyline
-            points={stroke.map((p) => `${toLocalX(p.x)},${toLocalY(p.y)}`).join(' ')}
+          <path
+            d={strokePathD}
+            fill="none"
+            stroke="rgba(255, 255, 255, 0.55)"
+            strokeWidth={5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d={strokePathD}
             fill="none"
             stroke="var(--t-brand-orange, #FF5A1F)"
             strokeWidth={2.5}
             strokeLinecap="round"
             strokeLinejoin="round"
-            opacity={0.9}
+            opacity={0.92}
           />
         </svg>
       ) : null}
@@ -405,10 +480,18 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
             borderRadius: 12,
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
+            borderColor: composerFocused ? 'var(--t-accent)' : 'var(--t-divider)',
             background: 'var(--t-panel-solid, var(--t-panel))',
-            boxShadow: '0 12px 32px rgba(15, 23, 42, 0.28)',
+            boxShadow: composerFocused
+              ? '0 12px 32px rgba(15, 23, 42, 0.28), 0 0 0 2px var(--t-accent)'
+              : '0 12px 32px rgba(15, 23, 42, 0.28)',
             zIndex: 10000,
+            opacity: exiting ? 0 : 1,
+            transform: exiting ? 'translateY(4px) scale(0.96)' : undefined,
+            animation: reduceMotionRef.current || exiting ? undefined : 'o8DesignPopIn 150ms cubic-bezier(0.22, 1, 0.36, 1) both',
+            transition: reduceMotionRef.current
+              ? 'none'
+              : 'box-shadow 130ms ease, border-color 130ms ease, opacity 130ms ease, transform 130ms ease',
           }}
         >
           <input
@@ -416,6 +499,8 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
             type="text"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onFocus={() => setComposerFocused(true)}
+            onBlur={() => setComposerFocused(false)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
@@ -433,6 +518,7 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
               color: 'var(--t-text)',
               fontSize: 12.5,
               fontFamily: 'var(--font-sans-system)',
+              cursor: 'text',
             }}
           />
           <button
