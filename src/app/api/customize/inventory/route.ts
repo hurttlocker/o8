@@ -29,6 +29,8 @@ export interface CustomizeHookEntry {
   command: string;
   matcher: string | null;
   scope: 'user' | 'project';
+  /** The settings.json that declares this hook — lets the UI open it. */
+  file: string;
 }
 
 function parseAgentFrontmatter(raw: string): { name: string | null; description: string | null } {
@@ -88,6 +90,7 @@ function readHooksFile(settingsPath: string, scope: 'user' | 'project'): Customi
             command: hook.command.trim(),
             matcher: typeof group.matcher === 'string' && group.matcher.trim() ? group.matcher.trim() : null,
             scope,
+            file: settingsPath,
           });
         }
       }

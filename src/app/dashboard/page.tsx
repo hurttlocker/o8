@@ -128,7 +128,6 @@ import { useDesignMode } from '@/hooks/useDesignMode';
 import type { GrabbedElement } from '@/lib/browser/grab';
 import { cropRegionBase64 } from '@/lib/browser/region-crop';
 import { createTileRegistry } from './tileRegistry';
-import { SettingsOverlay } from './SettingsOverlay';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
@@ -2629,6 +2628,20 @@ function DashboardInner() {
     })();
   }, [activeWorkspaceTabKind, setRightPanelKind, openRightPanelFromUser, setO8ActiveTab, handleO8SelectedFileChange, globalRepoEntries, setO8RepoPathOverride, openCanvasTab, waitForWorkspaceTerminalTarget]);
 
+  // Dashboard-level o8:open-file listener. O8Panel carries its own, but it
+  // unmounts under a page takeover (Customize/Automations/Settings) — a file
+  // opened FROM one of those surfaces would race the workspace remount and
+  // silently drop. This listener is always mounted; the handler's state sets
+  // are idempotent when O8Panel's copy also fires.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path;
+      if (typeof path === 'string' && path) handleOpenFileInWorkspace(path);
+    };
+    window.addEventListener('o8:open-file', handler);
+    return () => window.removeEventListener('o8:open-file', handler);
+  }, [handleOpenFileInWorkspace]);
+
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
     setRightPanelKind('review');
     openRightPanelFromUser();
@@ -4950,7 +4963,19 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection !== 'automations' && activeNavSection !== 'customize' && (
+        {activeNavSection === 'settings' && (
+          // Settings renders INLINE (operator ruling 2026-07-13, pre-work for
+          // the settings pass) — same page-takeover as Automations/Customize,
+          // replacing the old floating SettingsOverlay portal. The panelRef
+          // keeps useSettingsOverlayDismiss's outside-click + Escape behavior.
+          <div ref={settingsPanelRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
+              <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
+            </Suspense>
+          </div>
+        )}
+
+        {activeNavSection !== 'automations' && activeNavSection !== 'customize' && activeNavSection !== 'settings' && (
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}
@@ -4978,14 +5003,6 @@ function DashboardInner() {
             />
             <DashboardHydrationMarker />
           </OrchestratorDataProvider>
-        )}
-
-        {activeNavSection === 'settings' && (
-          <SettingsOverlay panelRef={settingsPanelRef}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
-            <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
-            </Suspense>
-          </SettingsOverlay>
         )}
 
         </SmoothCorners>
