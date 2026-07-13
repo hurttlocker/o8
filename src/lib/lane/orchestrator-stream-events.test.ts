@@ -48,3 +48,24 @@ describe('processStreamEvent — assistant-replay dedup', () => {
     expect(textsOf(out)).toEqual(['Full answer']);
   });
 });
+
+describe('processStreamEvent — tool_result is_error threading (turn grammar)', () => {
+  it('carries is_error through to the emitted tool_result (real parser path)', () => {
+    const out = run([
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu-1', name: 'Bash', input: { command: 'npm run build' } } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu-1', is_error: true, content: 'exit 1: build failed' }] } },
+    ]);
+    const result = out.find((e) => e.type === 'tool_result');
+    expect(result).toMatchObject({ type: 'tool_result', name: 'Bash', isError: true, output: 'exit 1: build failed' });
+  });
+
+  it('omits isError for a successful tool_result', () => {
+    const out = run([
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu-2', name: 'Read', input: { file_path: 'a.ts' } } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu-2', content: 'ok' }] } },
+    ]);
+    const result = out.find((e) => e.type === 'tool_result') as { isError?: boolean } | undefined;
+    expect(result).toBeDefined();
+    expect(result?.isError).toBeUndefined();
+  });
+});

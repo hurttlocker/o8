@@ -279,6 +279,48 @@ describe('orchestrator socket — cortex_ask tool-result (Brain→Fable transpar
   });
 });
 
+describe('orchestrator socket — tool error status (turn grammar)', () => {
+  function reduceMessages(h: ReturnType<typeof makeHarness>, initial: MobileTranscriptEntry[] = []) {
+    return h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      initial,
+    );
+  }
+
+  it('flips an errored tool call to status "error" and stashes the output', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', args: { command: 'npm run build' }, toolUseId: 'tu-1' } });
+    h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'Bash', toolUseId: 'tu-1', output: 'exit 1: boom', isError: true } });
+
+    const messages = reduceMessages(h);
+    const tool = messages[messages.length - 1]?.toolCalls?.[0];
+    expect(tool?.status).toBe('error');
+    expect(tool?.result).toBe('exit 1: boom');
+  });
+
+  it('leaves a successful non-cortex tool-result untouched (no transcript write)', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', args: { command: 'ls' }, toolUseId: 'tu-2' } });
+    const callsAfterUse = h.setMessages.mock.calls.length;
+    h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'Bash', toolUseId: 'tu-2', output: 'ok' } });
+    expect(h.setMessages.mock.calls.length).toBe(callsAfterUse);
+  });
+
+  it('an errored call falls back to the latest in-flight chip when no toolUseId matches', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Edit', args: { file_path: 'a.ts' } } });
+    h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'Edit', output: 'patch did not apply', isError: true } });
+
+    const messages = reduceMessages(h);
+    const tool = messages[messages.length - 1]?.toolCalls?.[0];
+    expect(tool?.status).toBe('error');
+    expect(tool?.result).toBe('patch did not apply');
+  });
+});
+
 describe('orchestrator socket — backend tracking (Fable Slice 4)', () => {
   it('stamps lastBackendRef from any event carrying data.backend — snapshots and deduped replays included', () => {
     const h = makeHarness({ status: 'connecting', lastSeq: 5 });
