@@ -80,7 +80,6 @@ function DesktopStatusBarBase({
   const experimentalCanvas = useExperimentalCanvasFlag();
   const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
   const showFooterSecondary = compact || (leftColumnWidth ?? 0) >= 220;
-  const footerCardHidden = leftFooterCollapsed || glassSurface;
   const leftFooterWidth = compact
     ? 'auto'
     : leftFooterCollapsed

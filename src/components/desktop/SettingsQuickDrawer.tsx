@@ -59,6 +59,11 @@ interface SettingsQuickDrawerProps {
   anchorRect: DOMRect | null;
   onClose: () => void;
   onOpenSettings: () => void;
+  /** When provided, the What's-new row opens the in-app Brain-summarized
+   *  card instead of the external releases page. */
+  onWhatsNew?: () => void;
+  /** When provided, renders an "MCP setup" row that jumps to Settings → MCP. */
+  onOpenMcpSetup?: () => void;
 }
 
 type UsageState =
@@ -489,6 +494,8 @@ export function SettingsQuickDrawer({
   anchorRect,
   onClose,
   onOpenSettings,
+  onWhatsNew,
+  onOpenMcpSetup,
 }: SettingsQuickDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -756,10 +763,10 @@ export function SettingsQuickDrawer({
             </span>
           </RowButton>
 
-          <RowButton onClick={() => openExternalUrl(RELEASE_URL)}>
+          <RowButton onClick={onWhatsNew ?? (() => openExternalUrl(RELEASE_URL))}>
             <IconFrame><Sparkles size={13} /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>What&apos;s new</span>
-            <ExternalLink size={11} color={FAINT} />
+            {onWhatsNew ? null : <ExternalLink size={11} color={FAINT} />}
           </RowButton>
 
           <RowButton onClick={() => openExternalUrl(DOCS_URL)}>
@@ -767,6 +774,13 @@ export function SettingsQuickDrawer({
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Get help</span>
             <ExternalLink size={11} color={FAINT} />
           </RowButton>
+
+          {onOpenMcpSetup ? (
+            <RowButton onClick={onOpenMcpSetup}>
+              <IconFrame><Settings2 size={13} /></IconFrame>
+              <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>MCP setup</span>
+            </RowButton>
+          ) : null}
         </div>
       </div>
     </div>,

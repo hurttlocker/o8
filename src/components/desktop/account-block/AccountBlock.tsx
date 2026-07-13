@@ -6,7 +6,8 @@ import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { ChromeButton } from '../chrome/ChromeButton';
 import { GearSixIcon } from '../desktop-status-bar/status-bar-icons';
-import { AccountMenu } from './AccountMenu';
+import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
+import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { WhatsNewCard } from './WhatsNewCard';
 
 interface AccountBlockProps {
@@ -20,7 +21,7 @@ const NOOP = () => {};
 export function AccountBlock({
   onOpenSettings,
 }: AccountBlockProps) {
-  const { isLoaded, signedIn, user, signIn, signOut } = useO8Auth();
+  const { isLoaded, signedIn, user } = useO8Auth();
   const { plan, founder, actualPlan, actualFounder } = useEntitlement();
   const accountRowRef = useRef<HTMLDivElement | null>(null);
   const [popover, setPopover] = useState<AccountPopover>(null);
@@ -213,18 +214,26 @@ export function AccountBlock({
         ) : null}
       </div>
 
-      {popover === 'menu' && anchorRect ? (
-        <AccountMenu
-          anchorRect={anchorRect}
-          anchorElement={anchorElement}
-          signedIn={hasUser}
-          onClose={closePopover}
-          onOpenSettings={openSettings}
-          onOpenWhatsNew={openWhatsNew}
-          onSignIn={signIn}
-          onSignOut={signOut}
-        />
-      ) : null}
+      {/* The account click opens the FULL quick-settings drawer (operator
+          ruling 2026-07-13: "we still wanted our settings modal from old") —
+          account section, Settings ⌘,, theme, usage, updates, What's new,
+          Get help, MCP setup. The slimmer AccountMenu is retired in favor of
+          this superset; sign in/out live in the drawer's account section. */}
+      <SettingsQuickDrawer
+        open={popover === 'menu' && anchorRect !== null}
+        anchorRect={anchorRect}
+        onClose={closePopover}
+        onOpenSettings={() => {
+          closePopover();
+          openSettings();
+        }}
+        onWhatsNew={openWhatsNew}
+        onOpenMcpSetup={() => {
+          closePopover();
+          openSettings();
+          window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
+        }}
+      />
       {popover === 'whats-new' && anchorRect ? (
         <WhatsNewCard
           anchorRect={anchorRect}
