@@ -1,0 +1,317 @@
+'use client';
+
+/**
+ * GeneralTab — the General settings page (Cursor-parity pass).
+ *
+ * Collects the app-level, non-domain-specific settings that don't belong to
+ * Dispatch, Voice, or Account: launch-at-login (native autostart) and the
+ * crash/error-report privacy toggles. Both surfaces already had a real
+ * backend elsewhere; this tab is where an operator expects to find them.
+ *
+ * - Launch at login persists through the Tauri bridge (autostart_set), so the
+ *   Startup group only renders in the desktop shell.
+ * - The Privacy rows write to the same /api/panel/operator-defaults route as
+ *   the rest of operator defaults, with the same env-locked handling.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+
+import {
+  APP_FONT_STACK,
+  RamsButton,
+  TabBreadcrumb,
+  TabHeading,
+  SETTINGS_CONTENT_MAX_WIDTH,
+  type SettingsTab,
+} from './shared';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { autostartIsEnabled, autostartSet, isTauri } from '@/lib/tauri/bridge';
+import { useO8Auth } from '@/components/auth/O8AuthProvider';
+import { useEntitlement } from '@/lib/entitlement/context';
+import { openExternalUrl } from '@/lib/desktop/open-external';
+import {
+  ENV_LOCKED_REASON,
+  type OperatorDefaults,
+  type OperatorDefaultsResponse,
+} from './dispatch-shared';
+
+const FOUNDERS_URL = 'https://o8.run/pricing';
+
+// ── Minimal raw-SVG glyphs for row icon tiles (React icon libs don't render
+//    inside the Tauri webview — raw <svg> only, per repo rules). ──
+
+function PowerIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+      <line x1="12" y1="2" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 2l2.9 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3 5.8 20.9l1.6-6.8L2.2 9.5l6.9-.6z" />
+    </svg>
+  );
+}
+
+function ArrowUpIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <line x1="12" y1="19" x2="12" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </svg>
+  );
+}
+
+export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
+  const tauri = isTauri();
+
+  // ── Account (identity + plan) ──
+  // Identity is read from the same Clerk-backed hook the Account tab uses, and
+  // the plan/founder derivation mirrors AccountBlock so the number and label
+  // read identically wherever the account surfaces. o8 is free — the founders
+  // ladder is a supporter path, never a locked door.
+  const auth = useO8Auth();
+  const { plan, founder, actualPlan, actualFounder } = useEntitlement();
+  const hasUser = auth.signedIn && Boolean(auth.user);
+  const displayName = auth.user?.name?.trim() || auth.user?.email?.trim() || 'Signed in';
+  const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
+  const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
+  const founderNumber = (founder ?? actualFounder)?.operatorNumber;
+  const planLabel = isFounder
+    ? (typeof founderNumber === 'number' ? `Founder · ${String(founderNumber).padStart(2, '0')}` : 'Founder')
+    : isPaid
+      ? (plan === 'team' || actualPlan === 'team' ? 'Team' : 'Pro')
+      : 'Free Plan';
+
+  // ── Launch at login (native autostart via the Tauri bridge) ──
+  const [autostart, setAutostart] = useState(false);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+
+  useEffect(() => {
+    if (!tauri) return;
+    let alive = true;
+    autostartIsEnabled()
+      .then((v) => { if (alive) setAutostart(v); })
+      .catch(() => { /* leave default off */ });
+    return () => { alive = false; };
+  }, [tauri]);
+
+  const handleAutostart = useCallback((next: boolean) => {
+    setAutostart(next);
+    setAutostartBusy(true);
+    void autostartSet(next)
+      .then(setAutostart)
+      .finally(() => setAutostartBusy(false));
+  }, []);
+
+  // ── Operator defaults (crash-report privacy toggles) ──
+  const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
+
+  const loadDefaults = useCallback(async () => {
+    try {
+      const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load settings.');
+      }
+      setData(payload as OperatorDefaultsResponse);
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Failed to load settings.');
+    }
+  }, []);
+
+  useEffect(() => { void loadDefaults(); }, [loadDefaults]);
+
+  const updateField = useCallback(async <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => {
+    setBusyField(field);
+    setNotice(null);
+    try {
+      const response = await fetch('/api/panel/operator-defaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to update setting.');
+      }
+      setData(payload as OperatorDefaultsResponse);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Failed to update setting.');
+    } finally {
+      setBusyField(null);
+    }
+  }, []);
+
+  const values = data?.values;
+  const sources = data?.sources;
+  const envLocked = (field: keyof OperatorDefaults) => sources?.[field] === 'env';
+  const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
+    envLocked(field) ? ENV_LOCKED_REASON : normal;
+
+  return (
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabBreadcrumb tab="general" />
+      <TabHeading
+        title="general"
+        subtitle="App-level basics: whether o8 launches with your machine, and what leaves it when something breaks."
+      />
+
+      {notice ? (
+        <div style={{
+          marginBottom: 28,
+          paddingTop: 2,
+          paddingBottom: 2,
+          fontSize: 13,
+          color: 'var(--t-text)',
+          lineHeight: 1.55,
+        }}>
+          <span style={{
+            fontFamily: APP_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 400,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#ef4444',
+            marginRight: 8,
+          }}>
+            [error]
+          </span>
+          {notice}
+        </div>
+      ) : null}
+
+      <section style={{ marginBottom: 28 }}>
+        <SettingsGroup
+          header="Account"
+          footnote="Your o8 identity, plan, and founder status. Sign-in and licensing are managed in the Account tab."
+        >
+          <SettingsRow
+            icon={
+              hasUser && auth.user?.avatarUrl ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'block',
+                    width: 28,
+                    height: 28,
+                    borderRadius: 999,
+                    backgroundImage: `url("${auth.user.avatarUrl}")`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }}
+                />
+              ) : (
+                <UserIcon />
+              )
+            }
+            label={hasUser ? displayName : 'Sign in'}
+            subtitle={hasUser
+              ? 'Manage in the Account tab'
+              : 'Sign in to sync your identity across desktop and web'}
+            accessory={
+              <RamsButton variant="ghost" onClick={() => onNavigateTab?.('account')}>
+                {hasUser ? 'Open' : 'Sign in'}
+              </RamsButton>
+            }
+            divider
+          />
+          <SettingsRow
+            icon={<StarIcon />}
+            label="Plan"
+            accessory={<ValuePill tone={isFounder ? 'success' : 'default'}>{planLabel}</ValuePill>}
+            divider={!isFounder}
+          />
+          {!isFounder ? (
+            <SettingsRow
+              icon={<ArrowUpIcon />}
+              label="Upgrade to Founders"
+              subtitle="o8 is free forever — founders fund the build and get managed inference for life, early access to everything new, and the founder theme. One-time, the first 250."
+              accessory={
+                <RamsButton variant="primary" onClick={() => openExternalUrl(FOUNDERS_URL)}>
+                  Upgrade
+                </RamsButton>
+              }
+            />
+          ) : null}
+        </SettingsGroup>
+      </section>
+
+      {tauri ? (
+        <section>
+          <SettingsGroup
+            header="Startup"
+            footnote="Launch o8 automatically when you log in, so the fleet, dictation, and the menu-bar tray are ready the moment you sit down."
+          >
+            <SettingsRow
+              icon={<PowerIcon />}
+              label="Launch at login"
+              subtitle="Start o8 automatically when you sign in to your Mac"
+              checked={autostart}
+              disabled={autostartBusy}
+              onToggle={handleAutostart}
+            />
+          </SettingsGroup>
+        </section>
+      ) : null}
+
+      {values && sources ? (
+        <section style={{ marginTop: tauri ? 28 : 0 }}>
+          <SettingsGroup
+            header="Privacy"
+            footnote="Crash reports carry the error stack trace and the app version — never your code, prompts, or files. Home paths, query strings, and identity are scrubbed before anything leaves your machine. A native (non-JS) crash also attaches a memory snapshot of the moment it failed so we can diagnose it. Turning reports off is respected within seconds across the app, server, and native shell; turning native crash capture back on takes effect on the next launch."
+          >
+            <SettingsRow
+              icon={<ShieldIcon />}
+              label="Crash & error reports"
+              subtitle={lockedSub('crashReportsEnabled', 'Send anonymous crash reports to help fix issues faster. Never includes your code, file paths, or identity.')}
+              checked={values.crashReportsEnabled}
+              disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}
+              onToggle={(next) => { void updateField('crashReportsEnabled', next); }}
+              divider
+            />
+            <SettingsRow
+              icon={<ShieldIcon />}
+              label="Send local crash log to the o8 team"
+              subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log — stack traces + app version only')}
+              checked={values.telemetryOptIn}
+              disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
+              onToggle={(next) => { void updateField('telemetryOptIn', next); }}
+            />
+          </SettingsGroup>
+        </section>
+      ) : null}
+    </div>
+  );
+}

@@ -120,14 +120,6 @@ function UpdateIcon() {
   );
 }
 
-function ShieldIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  );
-}
-
 function CpuIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -564,31 +556,6 @@ export function OperatorDefaultsTab() {
               />
             }
             disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
-          />
-        </SettingsGroup>
-      </section>
-
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Privacy"
-          footnote="Crash reports carry the error stack trace and the app version — never your code, prompts, or files. Home paths, query strings, and identity are scrubbed before anything leaves your machine. A native (non-JS) crash also attaches a memory snapshot of the moment it failed so we can diagnose it. Turning reports off is respected within seconds across the app, server, and native shell; turning native crash capture back on takes effect on the next launch."
-        >
-          <SettingsRow
-            icon={<ShieldIcon />}
-            label="Crash & error reports"
-            subtitle={lockedSub('crashReportsEnabled', 'Send anonymous crash reports to help fix issues faster. Never includes your code, file paths, or identity.')}
-            checked={values.crashReportsEnabled}
-            disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}
-            onToggle={(next) => { updateField('crashReportsEnabled', next); }}
-            divider
-          />
-          <SettingsRow
-            icon={<ShieldIcon />}
-            label="Send local crash log to the o8 team"
-            subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log — stack traces + app version only')}
-            checked={values.telemetryOptIn}
-            disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
-            onToggle={(next) => { updateField('telemetryOptIn', next); }}
           />
         </SettingsGroup>
       </section>
