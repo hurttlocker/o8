@@ -1,0 +1,155 @@
+import 'server-only';
+
+/**
+ * The in-app receipt: "your report was fixed in this version."
+ *
+ * #fixed only reaches people who joined the Discord. This reaches everyone who
+ * ever filed a report — which is the whole point of a receipt.
+ *
+ * How it costs nothing and leaks nothing:
+ *   - We DOWNLOAD a public manifest (fixed.json) that release.mjs ships next to
+ *     latest.json on the public o8-releases mirror. Same anonymous GitHub asset
+ *     the updater already fetches: no server, no auth, no bill.
+ *   - We UPLOAD nothing. The join happens locally, against this machine's own
+ *     ledger (~/.o8/feedback/reports.jsonl). No report ids leave the box, no
+ *     telemetry, no identity. The manifest carries no reporter handles either.
+ *
+ * So the receipt works even for an operator with crash reporting turned off.
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { feedbackDir, readReports } from './report-ledger';
+
+const MANIFEST_URL = 'https://github.com/hurttlocker/o8-releases/releases/latest/download/fixed.json';
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // the manifest only changes on release
+const FETCH_TIMEOUT_MS = 8000;
+
+export interface FixedEntry {
+  id: string;
+  title: string;
+  version: string;
+}
+
+/** A fix for a report THIS machine filed, that the operator hasn't seen yet. */
+export interface FixReceipt extends FixedEntry {
+  /** When they filed it — lets the UI say "you reported this 3 weeks ago". */
+  reportedAt: number;
+}
+
+interface CachedManifest {
+  entries: FixedEntry[];
+  fetchedAt: number;
+}
+
+let cache: CachedManifest | null = null;
+
+function seenPath(): string {
+  return path.join(feedbackDir(), 'seen-fixed.json');
+}
+
+/** Ids the operator has already been shown. Never throws. */
+export function readSeen(): Set<string> {
+  try {
+    const file = seenPath();
+    if (!existsSync(file)) return new Set();
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { ids?: unknown };
+    return new Set(Array.isArray(parsed.ids) ? parsed.ids.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Mark receipts as shown so they don't nag. Never throws. */
+export function markSeen(ids: string[]): void {
+  try {
+    const dir = feedbackDir();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const merged = readSeen();
+    for (const id of ids) merged.add(id.trim().toUpperCase());
+    writeFileSync(seenPath(), `${JSON.stringify({ ids: [...merged] }, null, 2)}\n`, 'utf8');
+  } catch {
+    /* a failed ack just means we ask again next launch — harmless */
+  }
+}
+
+function parseManifest(payload: unknown): FixedEntry[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const raw = (payload as { fixed?: unknown }).fixed;
+  if (!Array.isArray(raw)) return [];
+
+  const out: FixedEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { id, title, version } = item as Record<string, unknown>;
+    if (typeof id === 'string' && typeof title === 'string' && typeof version === 'string' && id && title) {
+      out.push({ id: id.toUpperCase(), title, version });
+    }
+  }
+  return out;
+}
+
+/**
+ * Fetch the public manifest. Cached for 6h — it only changes on release, and an
+ * update check must never become a hot loop against GitHub. Never throws: a
+ * missing receipt is invisible, a crashing dashboard is not.
+ */
+export async function fetchFixedManifest(now: number = Date.now()): Promise<FixedEntry[]> {
+  if (cache && now - cache.fetchedAt < CACHE_TTL_MS) return cache.entries;
+
+  try {
+    const response = await fetch(MANIFEST_URL, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    // 404 is expected until the first release that ships a manifest.
+    if (!response.ok) {
+      cache = { entries: cache?.entries ?? [], fetchedAt: now };
+      return cache.entries;
+    }
+    const entries = parseManifest(await response.json());
+    cache = { entries, fetchedAt: now };
+    return entries;
+  } catch {
+    // Offline, timeout, malformed — serve whatever we had, or nothing.
+    cache = { entries: cache?.entries ?? [], fetchedAt: now };
+    return cache.entries;
+  }
+}
+
+/**
+ * Pure: which of MY reports are fixed and unseen. Newest fix first.
+ * Split out from the fetch so the join is testable without a network.
+ */
+export function matchReceipts(
+  manifest: FixedEntry[],
+  reports: { id: string; ts: number }[],
+  seen: Set<string>,
+): FixReceipt[] {
+  const mine = new Map(reports.map((r) => [r.id.toUpperCase(), r.ts]));
+
+  const receipts: FixReceipt[] = [];
+  for (const entry of manifest) {
+    if (seen.has(entry.id)) continue;
+    const reportedAt = mine.get(entry.id);
+    if (reportedAt === undefined) continue; // somebody else's report
+    receipts.push({ ...entry, reportedAt });
+  }
+  // Most recently filed first — the freshest one is the one they remember.
+  return receipts.sort((a, b) => b.reportedAt - a.reportedAt);
+}
+
+/** The receipts to show right now. Never throws. */
+export async function collectReceipts(): Promise<FixReceipt[]> {
+  try {
+    const [manifest, reports] = [await fetchFixedManifest(), readReports()];
+    return matchReceipts(manifest, reports, readSeen());
+  } catch {
+    return [];
+  }
+}
+
+/** Test seam — the module caches the manifest fetch. */
+export function __resetFixedFeedCache(): void {
+  cache = null;
+}
