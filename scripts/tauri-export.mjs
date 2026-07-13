@@ -7,6 +7,7 @@
 import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { prepareBetterSqlite3Bundle } from './native-bundle.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -17,6 +18,7 @@ const standalone = join(root, '.next', 'standalone');
 const staticDir = join(root, '.next', 'static');
 const pub = join(root, 'public');
 const loaderVerifyPath = join(root, 'scripts', 'loader-verify.mjs');
+const nativeAddonRuntimePath = join(root, 'scripts', 'native-addon-runtime.cjs');
 
 // Clean previous build
 if (existsSync(out)) rmSync(out, { recursive: true });
@@ -433,6 +435,11 @@ try {
   }
 } catch { /* never let a cache failure stop the server booting */ }
 
+// Select the better-sqlite3 binary for the user's Node architecture before any
+// database code loads. The helper redirects the native require to prebuilds if
+// an installed app bundle is read-only and build/Release cannot be replaced.
+require('./native-addon-runtime.cjs').prepareBetterSqlite3(__dirname);
+
 const http = require('node:http');
 const https = require('node:https');
 
@@ -470,6 +477,8 @@ process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
 console.log('📦 Wrote server.js wrapper (socket-addr stamping) + server-impl.js');
+cpSync(nativeAddonRuntimePath, join(server, 'native-addon-runtime.cjs'));
+console.log('📦 Copied native addon runtime selector');
 
 // node_modules
 const mods = join(standalone, 'node_modules');
@@ -497,10 +506,21 @@ const nativeModules = ['better-sqlite3', 'node-pty'];
 for (const mod of nativeModules) {
   const src = join(root, 'node_modules', mod);
   const dest = join(server, 'node_modules', mod);
-  if (existsSync(src) && !existsSync(dest)) {
+  if (existsSync(src)) {
+    rmSync(dest, { recursive: true, force: true });
     cpSync(src, dest, { recursive: true });
     console.log(`📦 Copied native module: ${mod}`);
   }
+}
+
+try {
+  const nativeBundle = await prepareBetterSqlite3Bundle({ projectRoot: root, serverRoot: server });
+  console.log(`📦 Bundled better-sqlite3 x64 + arm64 (${nativeBundle.version}, node-v127)`);
+  console.log(`   asset: ${nativeBundle.assetUrl}`);
+  console.log(`   ${nativeBundle.cacheSource === 'cache' ? 'cache' : 'cached download'}: ${nativeBundle.cachePath}`);
+} catch (error) {
+  console.error(`❌ better-sqlite3 dual-architecture export failed: ${error.message}`);
+  process.exit(1);
 }
 
 // ── Compile WS server ──
@@ -556,11 +576,13 @@ const SHARED_ESBUILD_ARGS = [
 // fail, fail the whole prebuild — don't warn-and-ship a broken bundle.
 function compileServerBundle(label, entry, extraArgs = '') {
   try {
+    const implementation = `${label}-impl.mjs`;
     execSync(
-      `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${label}.mjs ${extraArgs}`,
+      `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${implementation} ${extraArgs}`,
       { cwd: root, stdio: 'inherit' },
     );
-    console.log(`📦 Compiled ${label}.mjs`);
+    writeFileSync(join(server, `${label}.mjs`), `// Generated architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\nrequire('./native-addon-runtime.cjs').prepareBetterSqlite3(dirname(fileURLToPath(import.meta.url)));\nawait import('./${implementation}');\n`);
+    console.log(`📦 Compiled ${label}.mjs + ${implementation}`);
   } catch (e) {
     console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);
     console.error(`   ${e.message}`);
@@ -684,10 +706,12 @@ exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
 // Belt-and-braces guard against future compile failures slipping through.
 const REQUIRED_BUNDLES = ['ws-server.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
 for (const bundle of REQUIRED_BUNDLES) {
-  const bundlePath = join(server, bundle);
-  if (!existsSync(bundlePath)) {
-    console.error(`❌ Missing required server bundle: ${bundle}`);
-    process.exit(1);
+  for (const required of [bundle, bundle.replace(/\.mjs$/, '-impl.mjs')]) {
+    const bundlePath = join(server, required);
+    if (!existsSync(bundlePath)) {
+      console.error(`❌ Missing required server bundle: ${required}`);
+      process.exit(1);
+    }
   }
 }
 
