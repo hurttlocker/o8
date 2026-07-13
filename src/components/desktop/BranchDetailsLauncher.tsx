@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { CollapsedRailIcon, ChevronsLeftIcon, ChevronsRightIcon } from './branch-rail-collapse';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
 import { useBranchPr } from './useBranchPr';
@@ -86,7 +87,13 @@ function pickTarget(
   return targets[0] ?? null;
 }
 
-export function BranchDetailsLauncher({ visible = true, repoPath = null }: { visible?: boolean; repoPath?: string | null }) {
+export function BranchDetailsLauncher({ visible = true, repoPath = null, collapsed = false, onToggleCollapsed }: {
+  visible?: boolean;
+  repoPath?: string | null;
+  /** Codex-style fold: 44px icon column instead of the full 256px card stack. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+}) {
   const data = useOrchestratorData();
   const [progressOpen, setProgressOpen] = useState(false);
   const [environmentOpen, setEnvironmentOpen] = useState(true);
@@ -136,13 +143,66 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null }: { vis
     data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
   };
 
+  // Collapsed — a 44px icon column (Codex parity, Q 2026-07-13): one icon per
+  // card, « to expand below the stack. Icons act as jump-ins: browser opens
+  // the Browser tab directly; the rest expand the rail.
+  if (collapsed) {
+    return (
+      <aside
+        className="hide-scrollbar"
+        style={{
+          width: 44,
+          height: '100%',
+          flexShrink: 0,
+          paddingTop: 8,
+          paddingBottom: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          minHeight: 0,
+          overflowY: 'auto',
+          scrollbarWidth: 'none',
+        }}
+      >
+        {/* Codex parity: the collapsed icons sit on a rounded drawer capsule. */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 0,
+          paddingTop: 5,
+          paddingBottom: 5,
+          paddingLeft: 4,
+          paddingRight: 4,
+          borderRadius: 18,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-divider-subtle)',
+          background: 'var(--t-bg-card)',
+          flexShrink: 0,
+        }}>
+        <CollapsedRailIcon title="Expand" onClick={() => onToggleCollapsed?.()}><ChevronsLeftIcon /></CollapsedRailIcon>
+        <CollapsedRailIcon title="Progress" onClick={() => onToggleCollapsed?.()}><ChecksIcon /></CollapsedRailIcon>
+        <CollapsedRailIcon title="Environment" onClick={() => onToggleCollapsed?.()}><DiffIcon /></CollapsedRailIcon>
+        {prDetail ? (
+          <CollapsedRailIcon title={`Pull request #${prDetail.number}`} onClick={() => open('prs')}><GhIcon /></CollapsedRailIcon>
+        ) : null}
+        <CollapsedRailIcon title="Subagents" onClick={() => onToggleCollapsed?.()}><WorkerIcon /></CollapsedRailIcon>
+        <CollapsedRailIcon title="Browser" onClick={() => open('browser')}><GlobeIcon /></CollapsedRailIcon>
+        <CollapsedRailIcon title="Sources" onClick={() => onToggleCollapsed?.()}><SquaresIcon /></CollapsedRailIcon>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside
       className="hide-scrollbar"
       style={{
         width: 256,
+        height: '100%',
         flexShrink: 0,
-        paddingTop: 12,
+        paddingTop: 8,
         paddingRight: 14,
         paddingBottom: 14,
         paddingLeft: 6,
@@ -154,6 +214,13 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null }: { vis
         scrollbarWidth: 'none',
       }}
     >
+      {/* Collapse control sits below the window header, right-aligned — the
+          » folds the rail to the icon column (Codex parity, Q video). */}
+      {onToggleCollapsed ? (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+          <CollapsedRailIcon title="Collapse" onClick={onToggleCollapsed}><ChevronsRightIcon /></CollapsedRailIcon>
+        </div>
+      ) : null}
       <Card>
         <SectionHeader
           label="Progress"
