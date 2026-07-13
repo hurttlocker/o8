@@ -12,8 +12,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Terminal as TerminalIcon } from 'iconoir-react';
 import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
+import { ShimmerLine, TURN_LINE_FONT_SIZE } from '../thoughts/chat-panel/turn-line';
 import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 
 interface ManagedRun {
@@ -88,51 +88,40 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
       .finally(() => window.dispatchEvent(new Event('o8:agent-lifecycle')));
   };
 
+  // Slim-line grammar (2026-07-13 redesign): live runs render as shimmering
+  // TEXT LINES in the turn vocabulary — no boxed pills, no accent chrome, no
+  // uppercase chip. Click the line to watch the live terminal; a small stop
+  // square reveals on hover only.
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        flexWrap: 'wrap',
-        paddingTop: 7,
+        flexDirection: 'column',
+        paddingTop: 6,
         paddingRight: 14,
-        paddingBottom: 7,
+        paddingBottom: 6,
         paddingLeft: 14,
-        borderBottomWidth: '0.5px',
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
         background: 'var(--t-chat-surface-bg, #ffffff)',
         flexShrink: 0,
       }}
     >
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 600,
-          letterSpacing: '0.5px',
-          textTransform: 'uppercase',
-          color: 'var(--t-text-faint)',
-          flexShrink: 0,
-        }}
-      >
-        Running
-      </span>
       {runs.map((run) => (
-        <span
+        <div
           key={run.session}
           style={{
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
-            height: 24,
-            borderRadius: 7,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-accent-border)',
-            background: 'var(--t-accent-soft)',
-            maxWidth: 340,
-            flexShrink: 0,
-            overflow: 'hidden',
+            gap: 8,
+            minHeight: 22,
+            minWidth: 0,
+          }}
+          onMouseEnter={(e) => {
+            const stopBtn = e.currentTarget.querySelector('[data-run-stop]') as HTMLElement | null;
+            if (stopBtn) stopBtn.style.opacity = '1';
+          }}
+          onMouseLeave={(e) => {
+            const stopBtn = e.currentTarget.querySelector('[data-run-stop]') as HTMLElement | null;
+            if (stopBtn) stopBtn.style.opacity = '0';
           }}
         >
           <button
@@ -142,30 +131,30 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
-              height: '100%',
+              minWidth: 0,
               paddingTop: 0,
-              paddingRight: 8,
+              paddingRight: 0,
               paddingBottom: 0,
-              paddingLeft: 8,
+              paddingLeft: 0,
               borderWidth: 0,
               background: 'transparent',
-              color: 'var(--t-accent)',
               cursor: 'pointer',
-              fontSize: 11.5,
-              fontWeight: 500,
-              letterSpacing: '-0.005em',
+              textAlign: 'left',
               fontFamily: 'var(--font-sans-system)',
-              minWidth: 0,
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
           >
-            <TerminalIcon width={12} height={12} color="var(--t-accent)" strokeWidth={2} style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {deriveManagedRunLabel(run)}
-            </span>
+            <ShimmerLine>
+              {'Running '}
+              <span style={{ fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: TURN_LINE_FONT_SIZE - 1 }}>
+                {deriveManagedRunLabel(run)}
+              </span>
+            </ShimmerLine>
           </button>
           <button
             type="button"
+            data-run-stop=""
             onClick={() => stop(run.session)}
             title={`Stop run: ${run.command}`}
             aria-label="Stop run"
@@ -173,25 +162,29 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: 22,
-              height: '100%',
+              width: 18,
+              height: 18,
               flexShrink: 0,
+              paddingTop: 0,
+              paddingRight: 0,
+              paddingBottom: 0,
+              paddingLeft: 0,
               borderWidth: 0,
-              borderLeftWidth: 1,
-              borderLeftStyle: 'solid',
-              borderLeftColor: 'var(--t-accent-border)',
+              borderRadius: 5,
               background: 'transparent',
-              color: 'var(--t-accent)',
+              color: 'var(--t-text-muted)',
               cursor: 'pointer',
+              opacity: 0,
+              transition: 'opacity 120ms ease',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-danger-soft, var(--t-accent-soft-strong))'; e.currentTarget.style.color = 'var(--t-danger)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-accent)'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-danger)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; }}
           >
             <svg width={8} height={8} viewBox="0 0 24 24" style={{ display: 'block' }} aria-hidden="true">
               <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
             </svg>
           </button>
-        </span>
+        </div>
       ))}
     </div>
   );
