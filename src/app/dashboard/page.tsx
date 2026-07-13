@@ -4541,7 +4541,6 @@ function DashboardInner() {
             repo={globalRepo ?? null}
             actionItems={(() => {
               const ledger = dashboardProjects.ledger;
-              if (!ledger) return [];
               const items: CommandPaletteActionItem[] = [];
               const activeRepoPath = globalRepoEntry?.localPath
                 ?? workspaceTerminalPreferredRepo?.localPath
@@ -4550,20 +4549,31 @@ function DashboardInner() {
                 ?? workspaceTerminalPreferredRepo?.name
                 ?? null;
 
-              // Switch-to entries for every project that isn't the active one.
-              for (const project of ledger.projects) {
-                if (project.id === ledger.activeProjectId) continue;
+              for (const repoEntry of globalRepoEntries) {
                 items.push({
-                  id: `project:switch:${project.id}`,
-                  title: `Switch to ${project.name}`,
-                  detail: `${project.repoPaths.length} repo${project.repoPaths.length === 1 ? '' : 's'}`,
-                  swatchColor: project.color,
-                  onActivate: () => { void dashboardProjects.switchActive(project.id); },
+                  id: `repo:focus:${repoEntry.id}`,
+                  title: `Focus ${repoEntry.name}`,
+                  detail: repoEntry.localPath,
+                  onActivate: () => handleAlignToRepo(repoEntry.id),
                 });
               }
 
+              // Switch-to entries for every project that isn't the active one.
+              if (ledger) {
+                for (const project of ledger.projects) {
+                  if (project.id === ledger.activeProjectId || project.repoPaths.length === 0) continue;
+                  items.push({
+                    id: `project:switch:${project.id}`,
+                    title: `Switch to ${project.name}`,
+                    detail: `${project.repoPaths.length} repo${project.repoPaths.length === 1 ? '' : 's'}`,
+                    swatchColor: project.color,
+                    onActivate: () => { void dashboardProjects.switchActive(project.id); },
+                  });
+                }
+              }
+
               // Move-active-repo entries — only when there's a focused repo.
-              if (activeRepoPath && activeRepoName) {
+              if (ledger && activeRepoPath && activeRepoName) {
                 const currentOwner = ledger.projects.find((p) => p.repoPaths.includes(activeRepoPath));
                 for (const project of ledger.projects) {
                   if (project.id === currentOwner?.id) continue;
