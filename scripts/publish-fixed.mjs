@@ -27,7 +27,9 @@
  *   node scripts/publish-fixed.mjs --range v0.1.590..HEAD
  *   node scripts/publish-fixed.mjs --dry-run       # print, post nothing
  *
- * Env: O8_FIXED_WEBHOOK_URL — the #fixed channel webhook. Absent → no-op, loudly.
+ * Webhook: O8_FIXED_WEBHOOK_URL, else `fixedWebhookUrl` in o8.release.json (the
+ * gitignored release config that already holds the Sentry DSN). Absent → refuses
+ * to run, rather than silently dropping somebody's credit.
  *
  * Idempotent: every published id is recorded in ~/.o8/feedback/published.json, so
  * re-running on an overlapping range will not double-post.
@@ -51,6 +53,19 @@ const PUBLISHED = path.join(FEEDBACK_DIR, 'published.json');
 
 function git(args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
+}
+
+/** env wins; else the gitignored o8.release.json — never a literal in source. */
+function resolveFixedWebhook() {
+  const fromEnv = process.env.O8_FIXED_WEBHOOK_URL?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const cfg = JSON.parse(readFileSync(path.join(process.cwd(), 'o8.release.json'), 'utf8'));
+    const url = typeof cfg.fixedWebhookUrl === 'string' ? cfg.fixedWebhookUrl.trim() : '';
+    return url || null;
+  } catch {
+    return null;
+  }
 }
 
 function defaultRange() {
@@ -154,11 +169,11 @@ async function postFixed(webhookUrl, report, commit, version) {
 
 async function main() {
   const range = rangeFlag >= 0 ? process.argv[rangeFlag + 1] : defaultRange();
-  const webhookUrl = process.env.O8_FIXED_WEBHOOK_URL?.trim();
+  const webhookUrl = resolveFixedWebhook();
 
   if (!webhookUrl && !DRY_RUN) {
-    console.error('✗ O8_FIXED_WEBHOOK_URL is not set — nothing published.');
-    console.error('  Create the #fixed channel webhook and export it, or pass --dry-run.');
+    console.error('✗ No #fixed webhook — nothing published.');
+    console.error('  Set O8_FIXED_WEBHOOK_URL, or add "fixedWebhookUrl" to o8.release.json. Or pass --dry-run.');
     process.exit(1);
   }
 
