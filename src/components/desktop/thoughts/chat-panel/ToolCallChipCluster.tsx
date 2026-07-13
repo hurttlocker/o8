@@ -38,6 +38,14 @@ function compact(text: string, max = 84) {
   return `${singleLine.slice(0, max - 1)}…`;
 }
 
+/** Trim an error payload for the inline error card. Keeps newlines (so a
+ *  stack/tsc dump stays legible under pre-wrap) but caps total length. */
+function truncateError(text: string, max = 600) {
+  const cleaned = sanitizeTranscriptText(text).trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, max - 1)}…`;
+}
+
 function shellCommandOf(tool: MobileTranscriptToolCall): string | null {
   const name = tool.name.toLowerCase();
   if (name !== 'exec' && name !== 'exec_command' && name !== 'bash' && name !== 'shell') return null;
@@ -88,12 +96,14 @@ function toolArgument(tool: MobileTranscriptToolCall) {
 }
 
 function chipStatus(tool: MobileTranscriptToolCall): ToolCallChipStatus {
+  if (tool.status === 'error') return 'error';
   return tool.status === 'running' || tool.status === 'calling' ? 'running' : 'done';
 }
 
 function toolStatusLabel(tool: MobileTranscriptToolCall) {
   if (tool.status === 'calling') return 'calling';
   if (tool.status === 'running') return 'running';
+  if (tool.status === 'error') return 'error';
   return 'done';
 }
 
@@ -131,15 +141,24 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
     return toolCalls.find((tool, index) => toolKey(tool, index) === expandedToolId) ?? null;
   }, [expandedToolId, toolCalls]);
 
-  // Collapsed-state pick: prefer an actively-running tool so the user sees
-  // *what* is in flight. Falls back to the latest call when everything's done.
-  // Hook must live above the early-return below to keep hook order stable
-  // across renders where toolCalls toggles between empty and non-empty.
+  // Collapsed-state pick: surface a FAILED call first (an error must never hide
+  // behind a "+N more"), then an actively-running one so the user sees what is
+  // in flight, falling back to the latest call when everything's done. Hook must
+  // live above the early-return below to keep hook order stable across renders
+  // where toolCalls toggles between empty and non-empty.
   const summaryTool = useMemo(() => {
     if (toolCalls.length === 0) return null;
+    const errored = toolCalls.find((tool) => chipStatus(tool) === 'error');
     const running = toolCalls.find((tool) => chipStatus(tool) === 'running');
-    return running ?? toolCalls[toolCalls.length - 1];
+    return errored ?? running ?? toolCalls[toolCalls.length - 1];
   }, [toolCalls]);
+
+  // Errored calls render their output inline, always visible (no click) — an
+  // agent failure should be legible at a glance in the turn (deliverable 3).
+  const erroredTools = useMemo(
+    () => toolCalls.filter((tool) => tool.status === 'error'),
+    [toolCalls],
+  );
 
   useEffect(() => {
     if (!selectedTool) return;
@@ -274,6 +293,55 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
           ) : null}
         </>
       )}
+
+      {erroredTools.map((tool, index) => {
+        const errorText = truncateError(tool.result ?? tool.preview ?? 'Tool call failed');
+        return (
+          <div
+            key={`err-${toolKey(tool, index)}`}
+            role="alert"
+            style={{
+              flexBasis: '100%',
+              marginTop: 6,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 5,
+              paddingTop: 8,
+              paddingRight: 10,
+              paddingBottom: 8,
+              paddingLeft: 10,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'color-mix(in srgb, var(--t-brand-red, #ef4444) 42%, transparent)',
+              borderRadius: 10,
+              background: 'color-mix(in srgb, var(--t-brand-red, #ef4444) 8%, var(--t-bg-card))',
+              color: 'var(--t-text-secondary)',
+              fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+              maxWidth: '100%',
+              overflow: 'hidden',
+            }}
+          >
+            <span style={{
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              color: 'var(--t-brand-red, #ef4444)',
+            }}>
+              {`${tool.name} failed`}
+            </span>
+            <span style={{
+              fontSize: 10.5,
+              lineHeight: 1.45,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              {errorText}
+            </span>
+          </div>
+        );
+      })}
 
       {selectedTool ? (
         <div

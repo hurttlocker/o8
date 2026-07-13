@@ -92,14 +92,14 @@ function ToolCallChipBase({ verb, argument, kind = 'generic', status = 'done', o
       <span
         style={{
           fontWeight: 600,
-          color: status === 'running' ? accent : 'var(--t-text-muted)',
+          color: status === 'running' || status === 'error' ? accent : 'var(--t-text-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
           fontSize: 9,
           flexShrink: 0,
         }}
       >
-        {verb}
+        {status === 'error' ? `${verb} · failed` : verb}
       </span>
       {argument ? (
         <span
