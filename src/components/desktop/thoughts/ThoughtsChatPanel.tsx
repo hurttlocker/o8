@@ -1270,7 +1270,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       };
       let res = await fetchHistoryOnce();
       if (!res || !res.ok) res = await fetchHistoryOnce();
-      if (!res || !res.ok) return;
+      if (!res || !res.ok) {
+        // Loud on purpose: a silent return here leaves the tab wearing the
+        // thread's TITLE over an empty transcript (stale-header class).
+        console.warn(`[orchestrator] loadThread ${tabId} — history fetch failed twice (server booting?)`);
+        return;
+      }
       const data = await res.json() as {
         messages?: ThoughtsHistoryMessage[];
         planText?: string | null;
@@ -1278,6 +1283,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         agent?: string | null;
       };
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? []);
+      console.log(`[orchestrator] loadThread ${tabId} — applying ${msgs.length} messages`);
       const isSameOpenThread = threadIdRef.current === tabId;
       const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
       const mergedLoad = isSameOpenThread
