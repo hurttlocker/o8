@@ -20,20 +20,24 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { readdirSync, readFileSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, basename } from 'node:path';
-import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
+import { join, basename, dirname } from 'node:path';
+import { promisify } from 'node:util';
+import { ensureGitHubIssues, normalizeRepoSlug, resolveRepoSlug } from '@/lib/github-broker';
+import { listLanes } from '@/lib/lane/registry';
+import { agentDisplayLabel } from '@/lib/orchestrator/display';
 import { listRepos } from '@/lib/repos/registry';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { parseDirectiveFile } from '@/lib/cortex/directives/parse';
 
 const HOME = process.env.HOME || os.homedir();
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const CHAT_HISTORY_DIR = join(HOME, '.o8', 'chat-history');
+const execFileAsync = promisify(execFile);
 
 type SearchKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive';
 
@@ -66,8 +70,7 @@ interface SearchResponse {
   error?: string;
 }
 
-function safeRoot(workspace: string | null): string {
-  if (!workspace) return DEFAULT_ROOT;
+function safeRoot(workspace: string): string {
   return workspace.startsWith('~') ? workspace.replace('~', HOME) : workspace;
 }
 
@@ -76,16 +79,21 @@ function safeRoot(workspace: string | null): string {
 async function searchIssuesForRepo(
   query: string,
   repoSlug: string,
+  browse = false,
 ): Promise<SearchResult[]> {
   const result = await ensureGitHubIssues(repoSlug).catch(() => null);
   if (!result) return [];
 
   const lowered = query.toLowerCase();
-  return result.issues
+  const issues = result.issues
     .filter((issue) => {
+      if (browse) return issue.state === 'open';
       const haystack = `${issue.title}\n${issue.body ?? ''}\n#${issue.number}`.toLowerCase();
       return haystack.includes(lowered);
     })
+    .sort((left, right) => browse
+      ? Date.parse(right.updatedAt || right.createdAt) - Date.parse(left.updatedAt || left.createdAt)
+      : 0)
     .slice(0, 8)
     .map<SearchResult>((issue) => {
       const titleStarts = issue.title.toLowerCase().startsWith(lowered) ? 30 : 0;
@@ -97,34 +105,70 @@ async function searchIssuesForRepo(
         title: `#${issue.number} ${issue.title}`,
         detail: `${repoSlug} · ${issue.state}${(issue.body ?? '').trim() ? ` · ${(issue.body ?? '').slice(0, 80)}` : ''}`,
         target: { issueNumber: issue.number, repo: repoSlug },
-        score: 70 + titleStarts + numberHit + stateBonus,
+        score: browse
+          ? Date.parse(issue.updatedAt || issue.createdAt)
+          : 70 + titleStarts + numberHit + stateBonus,
       };
     });
+  return issues;
+}
+
+async function registeredRepoSlug(
+  repo: RepoRegistryEntry,
+  cache: Map<string, string | null>,
+): Promise<string | null> {
+  const cached = cache.get(repo.localPath);
+  if (cached !== undefined) return cached;
+
+  let slug = normalizeRepoSlug(repo.remoteUrl);
+  if (!slug && repo.isGitRepo !== false) {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['-C', repo.localPath, 'config', '--get', 'remote.origin.url'],
+        { encoding: 'utf-8', timeout: 2_500, maxBuffer: 128 * 1024 },
+      );
+      slug = normalizeRepoSlug(stdout.trim());
+    } catch {
+      slug = null;
+    }
+  }
+  cache.set(repo.localPath, slug);
+  return slug;
+}
+
+async function resolveIssueRepoSlugs(repoLike: string | null, cap: number): Promise<string[]> {
+  if (repoLike && /^[\w.-]+\/[\w.-]+$/.test(repoLike)) return [repoLike];
+
+  const repos = await listRepos().catch(() => []);
+  const cache = new Map<string, string | null>();
+
+  if (repoLike) {
+    const resolved = await resolveRepoSlug(repoLike, '');
+    if (resolved) return [resolved];
+    const normalized = repoLike.toLowerCase();
+    const match = repos.find((repo) => (
+      repo.name.toLowerCase() === normalized
+      || repo.localPath.toLowerCase() === normalized
+    ));
+    if (!match) return [];
+    const slug = await registeredRepoSlug(match, cache);
+    return slug ? [slug] : [];
+  }
+
+  const resolvedSlugs = await Promise.all(
+    repos
+      .slice(0, 6)
+      .map((repo) => registeredRepoSlug(repo, cache)),
+  );
+  return Array.from(new Set(resolvedSlugs.filter((slug): slug is string => Boolean(slug)))).slice(0, cap);
 }
 
 async function searchIssues(
   query: string,
   repoLike: string | null,
 ): Promise<SearchResult[]> {
-  // If a specific repo is requested, search only that one.
-  if (repoLike) {
-    const slug = await resolveRepoSlug(repoLike, '');
-    if (!slug) return [];
-    return searchIssuesForRepo(query, slug);
-  }
-
-  // Otherwise fan out across registered repos. Cap parallelism — large
-  // operator fleets can have 10+ repos and we don't want to thrash the
-  // GitHub broker on every keystroke.
-  const repos = await listRepos().catch(() => []);
-  const resolvedSlugs = await Promise.all(
-    repos
-      .slice(0, 6)
-      .map((entry) => resolveRepoSlug(entry.remoteUrl ?? null, '').catch(() => null)),
-  );
-  const slugs = Array.from(
-    new Set(resolvedSlugs.filter((s): s is string => Boolean(s))),
-  ).slice(0, 4);
+  const slugs = await resolveIssueRepoSlugs(repoLike, repoLike ? 1 : 4);
 
   if (slugs.length === 0) return [];
 
@@ -139,92 +183,227 @@ async function searchIssues(
   return out;
 }
 
-// ── Files (server-side fs glob via find) ───────────────────────────────────
+async function browseIssues(repoLike: string | null): Promise<SearchResult[]> {
+  if (!repoLike) return [];
+  const [slug] = await resolveIssueRepoSlugs(repoLike, 1);
+  return slug ? searchIssuesForRepo('', slug, true) : [];
+}
 
-function searchFiles(query: string, workspace: string | null): SearchResult[] {
-  const root = safeRoot(workspace);
-  const needle = query.toLowerCase();
+// ── Files (server-side filename search via find) ───────────────────────────
+
+interface FileSearchRoot {
+  localPath: string;
+  repoName: string | null;
+}
+
+function sanitizeFilenameNeedle(query: string): string {
+  return query
+    .replace(/[\\/'"`*?\[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function searchFilesInRoot(query: string, root: FileSearchRoot): Promise<SearchResult[]> {
+  const needle = sanitizeFilenameNeedle(query);
   if (!needle) return [];
 
   try {
-    const stdout = execFileSync(
+    const { stdout } = await execFileAsync(
       'find',
       [
-        '.', '-maxdepth', '5', '-type', 'f',
-        '-not', '-path', '*/.git/*',
-        '-not', '-path', '*/node_modules/*',
-        '-not', '-path', '*/.next/*',
-        '-not', '-path', '*/target/*',
-        '-not', '-path', '*/dist/*',
-        '-not', '-path', '*/out/*',
+        '.', '-maxdepth', '5',
+        '(',
+        '-path', '*/.git',
+        '-o', '-path', '*/node_modules',
+        '-o', '-path', '*/.next',
+        '-o', '-path', '*/target',
+        '-o', '-path', '*/dist',
+        '-o', '-path', '*/out',
+        '-o', '-path', '*/build',
+        '-o', '-path', '*/.cortex-worktrees',
+        '-o', '-path', '*/.agents',
+        '-o', '-path', '*/.codex',
+        '-o', '-path', '*/.claude/worktrees',
+        ')', '-prune', '-o',
+        '-type', 'f',
+        '(', '-iname', `*${needle}*`, '-o', '-ipath', `*${needle}*`, ')',
+        '-print',
       ],
-      { cwd: root, encoding: 'utf-8', timeout: 2500, maxBuffer: 256 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
-    ).trim();
+      {
+        cwd: root.localPath,
+        encoding: 'utf-8',
+        timeout: 2_500,
+        maxBuffer: 1024 * 1024,
+      },
+    );
 
     return stdout
+      .trim()
       .split('\n')
-      .filter((line) => line && line.toLowerCase().includes(needle))
-      .slice(0, 10)
+      .filter(Boolean)
       .map<SearchResult>((line, index) => {
         const cleaned = line.startsWith('./') ? line.slice(2) : line;
-        const basename = cleaned.split('/').pop() ?? cleaned;
-        const lowered = query.toLowerCase();
-        const exact = basename.toLowerCase() === lowered ? 60 : 0;
-        const starts = basename.toLowerCase().startsWith(lowered) ? 25 : 0;
+        const filename = cleaned.split('/').pop() ?? cleaned;
+        const lowered = needle.toLowerCase();
+        const pathParts = cleaned.split('/');
+        const exact = filename.toLowerCase() === lowered ? 60 : 0;
+        const starts = filename.toLowerCase().startsWith(lowered) ? 25 : 0;
+        const directoryMatch = dirname(cleaned).toLowerCase().includes(lowered) ? 30 : 0;
+        const exactDirectoryMatch = pathParts
+          .slice(0, -1)
+          .some((part) => part.toLowerCase() === lowered) ? 20 : 0;
+        const detail = root.repoName ? `${root.repoName} · ${cleaned}` : cleaned;
         return {
           kind: 'file',
-          id: `file:${cleaned}`,
-          title: basename,
-          detail: cleaned,
-          target: { filePath: cleaned },
-          score: 50 + exact + starts - index, // slight ranking by find order
+          id: `file:${root.localPath}:${cleaned}`,
+          title: filename,
+          detail,
+          target: { filePath: root.repoName ? join(root.localPath, cleaned) : cleaned },
+          score: 50 + exact + starts + directoryMatch + exactDirectoryMatch
+            - (pathParts.length / 10) - (index / 10_000),
         };
-      });
+      })
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 10);
   } catch {
     return [];
   }
 }
 
+async function searchFiles(query: string, workspace: string | null): Promise<SearchResult[]> {
+  const roots: FileSearchRoot[] = workspace
+    ? [{ localPath: safeRoot(workspace), repoName: null }]
+    : (await listRepos().catch(() => [])).slice(0, 3).map((repo) => ({
+        localPath: repo.localPath,
+        repoName: repo.name,
+      }));
+  if (roots.length === 0) return [];
+
+  const matches = await Promise.all(roots.map((root) => searchFilesInRoot(query, root)));
+  return matches.flat().sort((left, right) => right.score - left.score).slice(0, 10);
+}
+
 // ── Agents ─────────────────────────────────────────────────────────────────
 
-async function searchAgents(query: string): Promise<SearchResult[]> {
+function parseAgentTimestamp(value: string | null | undefined): number {
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+async function searchAgents(query: string, browse = false): Promise<SearchResult[]> {
+  const lowered = query.toLowerCase();
+  const out: SearchResult[] = [];
+  const seenSessionKeys = new Set<string>();
+
   try {
     const snapshot = await getRuntimeInventorySnapshot();
-    const lowered = query.toLowerCase();
-    const out: SearchResult[] = [];
     for (const agent of snapshot.agents) {
-      const name = (agent.name ?? '').toLowerCase();
-      const task = (agent.currentTask ?? '').toLowerCase();
-      const model = (agent.model ?? '').toLowerCase();
-      const branch = (agent.branch ?? '').toLowerCase();
-      const matchedName = name.includes(lowered);
-      const matchedTask = task.includes(lowered);
-      const matchedModel = model.includes(lowered);
-      const matchedBranch = branch.includes(lowered);
-      if (!matchedName && !matchedTask && !matchedModel && !matchedBranch) continue;
-      const score = 40
-        + (matchedName ? 30 : 0)
-        + (matchedTask ? 12 : 0)
-        + (matchedBranch ? 8 : 0)
-        + (matchedModel ? 4 : 0);
-      const detailParts: string[] = [];
-      if (agent.status) detailParts.push(String(agent.status));
-      if (agent.runtime) detailParts.push(String(agent.runtime));
-      if (agent.branch) detailParts.push(agent.branch);
+      const sessionKey = agent.sessionKey || agent.id;
+      if (!sessionKey) continue;
+      const name = agentDisplayLabel({
+        name: agent.name,
+        sessionKey,
+        runtime: agent.runtime,
+      });
+      const matchedName = name.toLowerCase().includes(lowered);
+      const matchedTask = (agent.currentTask ?? '').toLowerCase().includes(lowered);
+      const matchedModel = (agent.model ?? '').toLowerCase().includes(lowered);
+      const matchedBranch = (agent.branch ?? '').toLowerCase().includes(lowered);
+      const matchedWorkspace = (agent.workspace ?? '').toLowerCase().includes(lowered);
+      const matchedStatus = String(agent.status ?? '').toLowerCase().includes(lowered);
+      const strongRetiredMatch = matchedName || (agent.workspace ?? '').toLowerCase() === lowered;
+      if (!browse && (
+        (!matchedName && !matchedTask && !matchedModel && !matchedBranch && !matchedWorkspace && !matchedStatus)
+        || (agent.status === 'completed' && !strongRetiredMatch)
+      )) continue;
+
+      const detailParts = [agent.status, agent.runtime, agent.branch].filter(Boolean).map(String);
       out.push({
         kind: 'agent',
-        id: `agent:${agent.sessionKey || agent.id}`,
-        title: agent.name || 'Session',
+        id: `agent:${sessionKey}`,
+        title: name,
         detail: detailParts.join(' · ') || (agent.currentTask ?? '').slice(0, 80),
-        target: { sessionKey: agent.sessionKey || agent.id },
-        score,
+        target: { sessionKey },
+        score: browse
+          ? 1_000_000 + (agent.lastActivityAt ?? 0)
+          : 40
+            + (matchedName ? 30 : 0)
+            + (matchedTask ? 12 : 0)
+            + (matchedBranch ? 8 : 0)
+            + (matchedWorkspace ? 6 : 0)
+            + (matchedModel ? 4 : 0)
+            + (matchedStatus ? 2 : 0),
       });
-      if (out.length >= 10) break;
+      seenSessionKeys.add(sessionKey);
     }
-    return out;
   } catch {
-    return [];
+    // The durable lanes below still make the palette useful when discovery is down.
   }
+
+  let laneList: ReturnType<typeof listLanes> = [];
+  try {
+    laneList = listLanes()
+      .filter((lane) => Boolean(lane.sessionKey))
+      .sort((left, right) => (
+        parseAgentTimestamp(right.lastEventAt ?? right.updatedAt ?? right.createdAt)
+        - parseAgentTimestamp(left.lastEventAt ?? left.updatedAt ?? left.createdAt)
+      ));
+  } catch {
+    return out;
+  }
+
+  const activeLanes = laneList.filter((lane) => (
+    lane.status !== 'archived' && lane.status !== 'completed' && lane.status !== 'failed'
+  ));
+  const browseLanes = activeLanes.length > 0
+    ? activeLanes.slice(0, 8)
+    : out.length === 0 ? laneList.slice(0, 8) : [];
+  const candidates = browse ? browseLanes : laneList;
+
+  for (const lane of candidates) {
+    const sessionKey = lane.sessionKey;
+    if (!sessionKey || seenSessionKeys.has(sessionKey)) continue;
+    const repoName = basename(lane.repoPath);
+    const label = agentDisplayLabel({
+      name: lane.label,
+      sessionKey,
+      runtime: lane.runtime,
+    });
+    const labelMatch = label.toLowerCase().includes(lowered);
+    const repoMatch = repoName.toLowerCase().includes(lowered) || lane.repoPath.toLowerCase().includes(lowered);
+    const branchMatch = lane.branch.toLowerCase().includes(lowered);
+    const runtimeMatch = lane.runtime.toLowerCase().includes(lowered);
+    const statusMatch = lane.status.toLowerCase().includes(lowered);
+    const eventMatch = (lane.lastEventLabel ?? '').toLowerCase().includes(lowered);
+    const matches = labelMatch || repoMatch || branchMatch || runtimeMatch || statusMatch || eventMatch;
+    const retired = lane.status === 'archived' || lane.status === 'completed';
+    const strongRetiredMatch = labelMatch
+      || repoName.toLowerCase() === lowered
+      || lane.branch.toLowerCase() === lowered;
+    if (!browse && (!matches || (retired && !strongRetiredMatch))) continue;
+
+    out.push({
+      kind: 'agent',
+      id: `agent:${sessionKey}`,
+      title: label,
+      detail: [lane.status, repoName, lane.runtime].join(' · '),
+      target: { sessionKey },
+      score: browse
+        ? parseAgentTimestamp(lane.lastEventAt ?? lane.updatedAt ?? lane.createdAt)
+        : 35
+          + (labelMatch ? 35 : 0)
+          + (repoMatch ? 10 : 0)
+          + (branchMatch ? 8 : 0)
+          + (runtimeMatch ? 5 : 0)
+          + (eventMatch ? 3 : 0)
+          - (retired ? 20 : 0),
+    });
+    seenSessionKeys.add(sessionKey);
+    if (!browse && out.length >= 12) break;
+  }
+
+  return out.sort((left, right) => right.score - left.score);
 }
 
 // ── Chat history (#984) ────────────────────────────────────────────────────
@@ -257,7 +436,7 @@ async function mapWithConcurrency<T, R>(
  *  (mtime-sorted, capped, only the first user message + last message).
  *  Async + bounded-concurrency so a slow disk never blocks the request handler;
  *  results/ordering are identical to the former sync scan. */
-async function searchChatHistory(query: string): Promise<SearchResult[]> {
+async function searchChatHistory(query: string, browse = false): Promise<SearchResult[]> {
   let files: string[];
   try {
     files = (await readdir(CHAT_HISTORY_DIR)).filter((f) => f.endsWith('.json'));
@@ -309,7 +488,7 @@ async function searchChatHistory(query: string): Promise<SearchResult[]> {
         const preview = (lastMsg?.content ?? '').slice(0, 120).replace(/\n/g, ' ');
 
         const haystack = `${title}\n${preview}\n${data.repoName ?? ''}`.toLowerCase();
-        if (!haystack.includes(lowered)) return null;
+        if (!browse && !haystack.includes(lowered)) return null;
 
         const titleMatch = title.toLowerCase().includes(lowered) ? 30 : 0;
         const startsWith = title.toLowerCase().startsWith(lowered) ? 25 : 0;
@@ -322,7 +501,7 @@ async function searchChatHistory(query: string): Promise<SearchResult[]> {
           title,
           detail: `${repoTag}${preview}`.trim().slice(0, 140),
           target: { chatTabId: tabId },
-          score: 45 + titleMatch + startsWith + archivedPenalty,
+          score: browse ? entry.mtimeMs : 45 + titleMatch + startsWith + archivedPenalty,
         };
       } catch {
         // skip unreadable JSON files
@@ -343,7 +522,7 @@ async function searchChatHistory(query: string): Promise<SearchResult[]> {
 
 /** Scan `<dataDir>/directives/*.md` for entries whose title, scope, or body
  *  contains the query. Uses the same parser as the directive load pipeline. */
-function searchDirectives(query: string): SearchResult[] {
+function searchDirectives(query: string, browse = false): SearchResult[] {
   const directivesDir = join(getDataDir(), 'directives');
   let files: string[];
   try {
@@ -367,7 +546,7 @@ function searchDirectives(query: string): SearchResult[] {
       const scope = parsed.scope || '';
       const body = parsed.body || '';
       const haystack = `${title}\n${scope}\n${parsed.repoName ?? ''}\n${body}`.toLowerCase();
-      if (!haystack.includes(lowered)) continue;
+      if (!browse && !haystack.includes(lowered)) continue;
 
       const titleMatch = title.toLowerCase().includes(lowered) ? 30 : 0;
       const startsWith = title.toLowerCase().startsWith(lowered) ? 20 : 0;
@@ -383,14 +562,16 @@ function searchDirectives(query: string): SearchResult[] {
         title,
         detail: detailParts.join(' · ').slice(0, 140),
         target: { directiveId: parsed.id },
-        score: 42 + titleMatch + startsWith,
+        score: browse ? parsed.priority ?? 0 : 42 + titleMatch + startsWith,
       });
-      if (out.length >= 8) break;
+      if (!browse && out.length >= 8) break;
     } catch {
       // skip unparseable files
     }
   }
-  return out;
+  return out
+    .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
+    .slice(0, browse ? 10 : 8);
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
@@ -400,6 +581,7 @@ export async function GET(request: Request): Promise<NextResponse<SearchResponse
   const query = (searchParams.get('q') ?? '').trim();
   const workspace = searchParams.get('workspace');
   const repoParam = searchParams.get('repo');
+  const scopeParam = searchParams.get('scope');
 
   const emptyGroups: Record<SearchKind, SearchResult[]> = {
     issue: [],
@@ -409,17 +591,36 @@ export async function GET(request: Request): Promise<NextResponse<SearchResponse
     directive: [],
   };
 
-  if (!query || query.length < 2) {
-    return NextResponse.json({ query, results: [], groups: emptyGroups });
-  }
-
   try {
+    if (query.length < 2) {
+      const browseKind = scopeParam === 'agent'
+        || scopeParam === 'chat'
+        || scopeParam === 'directive'
+        || scopeParam === 'issue'
+        || scopeParam === 'file'
+        ? scopeParam
+        : null;
+      if (!browseKind) return NextResponse.json({ query, results: [], groups: emptyGroups });
+
+      const browseResults = browseKind === 'agent'
+        ? await searchAgents('', true)
+        : browseKind === 'chat'
+          ? await searchChatHistory('', true)
+          : browseKind === 'directive'
+            ? searchDirectives('', true)
+            : browseKind === 'issue'
+              ? await browseIssues(repoParam)
+              : [];
+      const groups = { ...emptyGroups, [browseKind]: browseResults };
+      return NextResponse.json({ query, results: browseResults, groups });
+    }
+
     const [issues, files, agents, chats, directives] = await Promise.all([
       searchIssues(query, repoParam),
-      Promise.resolve(searchFiles(query, workspace)),
+      searchFiles(query, workspace),
       searchAgents(query),
       searchChatHistory(query),
-      Promise.resolve(searchDirectives(query)),
+      searchDirectives(query),
     ]);
 
     const groups: Record<SearchKind, SearchResult[]> = {

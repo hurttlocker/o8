@@ -209,9 +209,30 @@ function dirname(path: string): string {
 }
 
 function resultMeta(result: CommandPaletteSearchResult): string {
-  if (result.kind === 'file') return dirname(result.target?.filePath ?? result.detail);
+  if (result.kind === 'file') {
+    const separatorIndex = result.detail.indexOf(' · ');
+    if (separatorIndex >= 0) {
+      const repoName = result.detail.slice(0, separatorIndex);
+      const relativePath = result.detail.slice(separatorIndex + 3);
+      return `${repoName} · ${dirname(relativePath)}`;
+    }
+    return dirname(result.target?.filePath ?? result.detail);
+  }
   if (result.kind === 'chat') return relativeTimestamp(chatTimestamp(result)) || result.detail;
   return result.detail;
+}
+
+function paletteItemForResult(result: CommandPaletteSearchResult): PaletteItem {
+  return {
+    id: result.id,
+    groupKey: result.kind,
+    scope: result.kind,
+    title: result.title,
+    detail: result.detail,
+    meta: resultMeta(result),
+    iconKind: KIND_ICON[result.kind],
+    result,
+  };
 }
 
 export const CommandPalette = memo(function CommandPalette({
@@ -265,7 +286,14 @@ export const CommandPalette = memo(function CommandPalette({
     }
 
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    const browseScope = scope === 'agent'
+      || scope === 'file'
+      || scope === 'issue'
+      || scope === 'chat'
+      || scope === 'directive'
+      ? scope
+      : null;
+    if (trimmed.length < 2 && !browseScope) {
       setGroups(EMPTY_GROUPS);
       setError(null);
       setLoading(false);
@@ -280,6 +308,7 @@ export const CommandPalette = memo(function CommandPalette({
         const params = new URLSearchParams({ q: trimmed });
         if (workspace) params.set('workspace', workspace);
         if (repo) params.set('repo', repo);
+        if (browseScope) params.set('scope', browseScope);
         const response = await fetch(`/api/panel/search?${params.toString()}`, { signal: controller.signal });
         if (!response.ok) {
           setError('Search is unavailable.');
@@ -301,13 +330,13 @@ export const CommandPalette = memo(function CommandPalette({
       } finally {
         setLoading(false);
       }
-    }, DEBOUNCE_MS);
+    }, trimmed.length < 2 ? 0 : DEBOUNCE_MS);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [open, query, repo, workspace]);
+  }, [open, query, repo, scope, workspace]);
 
   const filteredActionItems = useMemo<PaletteItem[]>(() => {
     if (!actionItems?.length) return [];
@@ -333,6 +362,9 @@ export const CommandPalette = memo(function CommandPalette({
 
   const unscopedItems = useMemo<PaletteItem[]>(() => {
     if (query.trim().length < 2) {
+      if (scope !== 'all' && scope !== 'action') {
+        return groups[scope].map(paletteItemForResult);
+      }
       const recentItems = recents.map<PaletteItem>((entry) => ({
         id: `recent:${entry.id}`,
         groupKey: 'recent',
@@ -350,22 +382,13 @@ export const CommandPalette = memo(function CommandPalette({
           score: 0,
         },
       }));
-      return [...recentItems, ...filteredActionItems];
+      return scope === 'action' ? filteredActionItems : [...recentItems, ...filteredActionItems];
     }
 
     const ordered: PaletteItem[] = [...filteredActionItems];
     const appendGroup = (kind: CommandPaletteSearchKind) => {
       for (const result of groups[kind]) {
-        ordered.push({
-          id: result.id,
-          groupKey: kind,
-          scope: kind,
-          title: result.title,
-          detail: result.detail,
-          meta: resultMeta(result),
-          iconKind: KIND_ICON[kind],
-          result,
-        });
+        ordered.push(paletteItemForResult(result));
       }
     };
     appendGroup('agent');
@@ -374,7 +397,7 @@ export const CommandPalette = memo(function CommandPalette({
     appendGroup('chat');
     appendGroup('directive');
     return ordered;
-  }, [filteredActionItems, groups, query, recents]);
+  }, [filteredActionItems, groups, query, recents, scope]);
 
   const items = useMemo(
     () => scope === 'all' ? unscopedItems : unscopedItems.filter((item) => item.scope === scope),
@@ -565,7 +588,11 @@ export const CommandPalette = memo(function CommandPalette({
             {showEmpty ? (
               <div style={statusRowStyle}>
                 {trimmed.length < 2
-                  ? scope === 'all' ? 'No recent items or available actions.' : `No recent ${SCOPE_TABS.find((tab) => tab.id === scope)?.label.toLowerCase() ?? 'items'}.`
+                  ? scope === 'file'
+                    ? 'Type to search files.'
+                    : scope === 'all'
+                      ? 'No recent items or available actions.'
+                      : `No ${SCOPE_TABS.find((tab) => tab.id === scope)?.label.toLowerCase() ?? 'items'} yet.`
                   : `No ${scope === 'all' ? 'results' : SCOPE_TABS.find((tab) => tab.id === scope)?.label.toLowerCase()} for “${trimmed}”.`}
               </div>
             ) : null}
