@@ -203,6 +203,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
                 outline: 'none',
                 background: 'transparent',
                 fontSize: 12.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
                 fontFamily: UI_FONT,
                 color: 'var(--t-text)',
               }}
@@ -218,6 +220,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
                 background: 'transparent',
                 color: 'var(--t-text-muted)',
                 fontSize: 12,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
                 cursor: 'pointer',
                 paddingTop: 6,
                 paddingBottom: 6,
@@ -241,17 +245,18 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              paddingTop: 4,
-              paddingBottom: 4,
+              height: 26,
               paddingLeft: 10,
               paddingRight: 8,
-              borderRadius: 8,
+              borderRadius: 7,
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'var(--t-divider)',
               background: 'transparent',
               color: 'var(--t-text)',
               fontSize: 12,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
               fontFamily: UI_FONT,
               cursor: 'pointer',
             }}
@@ -293,7 +298,9 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
                     border: 'none',
                     background: 'transparent',
                     color: 'var(--t-text)',
-                    fontSize: 12.5,
+                    fontSize: 13.5,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
                     fontFamily: UI_FONT,
                     textAlign: 'left',
                     cursor: 'pointer',
@@ -317,16 +324,19 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
               onClick={() => { setTab(item.id); setExpandedRow(null); }}
               aria-pressed={tab === item.id}
               style={{
-                paddingTop: 4,
-                paddingBottom: 4,
+                height: 26,
+                display: 'inline-flex',
+                alignItems: 'center',
                 paddingLeft: 10,
                 paddingRight: 10,
-                borderRadius: 8,
+                borderRadius: 7,
                 border: 'none',
-                background: tab === item.id ? 'var(--t-hover, var(--t-bg-card))' : 'transparent',
+                background: tab === item.id ? 'var(--t-input-bg)' : 'transparent',
                 color: tab === item.id ? 'var(--t-text)' : 'var(--t-text-muted)',
                 fontSize: 12,
-                fontWeight: tab === item.id ? 460 : 400,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                lineHeight: 1.25,
                 fontFamily: UI_FONT,
                 cursor: 'pointer',
                 transition: 'background 120ms ease, color 120ms ease',
@@ -339,7 +349,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
 
         {/* Content — instant swap, no transitions (Cursor hybrid-motion rule) */}
         {loading ? (
-          <div style={{ paddingTop: 32, fontSize: 12, color: 'var(--t-text-muted)' }}>Loading…</div>
+          <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : tab === 'rules' ? (
           <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'connections' ? (
@@ -361,8 +371,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
 function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, paddingTop: 14, paddingBottom: 4 }}>
-      <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text)' }}>{label}</span>
-      <span style={{ fontSize: 11.5, color: 'var(--t-text-faint)' }}>{count}</span>
+      <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>{label}</span>
+      <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{count}</span>
     </div>
   );
 }
@@ -409,10 +419,12 @@ function Row({ title, titleMono = false, subtitle, pill, expanded, onClick, chil
           transition: 'background 100ms ease',
         }}
       >
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{
-            fontSize: 12.5,
-            fontWeight: 460,
+            fontSize: titleMono ? 12 : 13.5,
+            fontWeight: titleMono ? 400 : 300,
+            letterSpacing: '-0.1px',
+            lineHeight: 1.25,
             color: 'var(--t-text)',
             fontFamily: titleMono ? MONO_FONT : UI_FONT,
             overflow: 'hidden',
@@ -423,7 +435,10 @@ function Row({ title, titleMono = false, subtitle, pill, expanded, onClick, chil
           </span>
           {subtitle ? (
             <span style={{
-              fontSize: 11.5,
+              fontSize: 9.5,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
+              lineHeight: 1.25,
               color: 'var(--t-text-muted)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -437,6 +452,8 @@ function Row({ title, titleMono = false, subtitle, pill, expanded, onClick, chil
           <span style={{
             flexShrink: 0,
             fontSize: 10,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             color: 'var(--t-text-muted)',
             borderWidth: 1,
             borderStyle: 'solid',
@@ -494,8 +511,8 @@ function EmptyState({ title, body, actionLabel, onAction }: {
       gap: 6,
       textAlign: 'center',
     }}>
-      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'var(--t-text-muted)', maxWidth: 420, lineHeight: 1.5 }}>{body}</span>
+      <span style={{ fontSize: 13.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</span>
+      <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-muted)', maxWidth: 420, lineHeight: 1.5 }}>{body}</span>
       {actionLabel && onAction ? (
         <button
           type="button"
@@ -513,6 +530,8 @@ function EmptyState({ title, body, actionLabel, onAction }: {
             background: 'var(--t-input-bg)',
             color: 'var(--t-text)',
             fontSize: 12,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             fontFamily: UI_FONT,
             cursor: 'pointer',
           }}
@@ -555,7 +574,7 @@ function RulesTab({ directives, expandedRow, onToggleRow }: {
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
-              <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {d.body}
               </div>
             </Row>
@@ -574,7 +593,7 @@ function RulesTab({ directives, expandedRow, onToggleRow }: {
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
-              <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {d.body}
               </div>
             </Row>
@@ -632,6 +651,8 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
                 background: 'transparent',
                 padding: 0,
                 fontSize: 12,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
                 color: 'var(--t-accent, #2563eb)',
                 cursor: 'pointer',
                 fontFamily: UI_FONT,
@@ -649,11 +670,13 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
 function DetailLine({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 8, minWidth: 0 }}>
-      <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--t-text-faint)', width: 68, flexShrink: 0, paddingTop: 1 }}>
+      <span style={{ fontSize: 9, fontWeight: 300, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--t-text-faint)', width: 68, flexShrink: 0, paddingTop: 1 }}>
         {label}
       </span>
       <span style={{
-        fontSize: 11.5,
+        fontSize: 11,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
         color: 'var(--t-text-secondary)',
         fontFamily: mono ? MONO_FONT : UI_FONT,
         wordBreak: 'break-all',
@@ -730,7 +753,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow }: {
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {agent.description ? (
-                <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>{agent.description}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>{agent.description}</div>
               ) : null}
               <DetailLine label="File" value={agent.file} mono />
             </div>
@@ -776,7 +799,7 @@ function HooksTab({ hooks }: { hooks: HookEntry[] }) {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 460, color: 'var(--t-text)', fontFamily: MONO_FONT }}>{hook.event}</span>
+              <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)', fontFamily: MONO_FONT }}>{hook.event}</span>
               {hook.matcher ? (
                 <span style={{ fontSize: 10.5, color: 'var(--t-text-faint)', fontFamily: MONO_FONT }}>{hook.matcher}</span>
               ) : null}
