@@ -10,19 +10,19 @@
  */
 
 import { RamsButton } from '../shared';
-import { RowDivider, SettingsGroup, SettingsRow, ValuePill } from '../grouped';
+import { RowDivider, SettingsGroup, SettingsRow } from '../grouped';
 import { useState } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  FolderGlyph,
   PlusGlyph,
   type ProjectContextApiResponse,
   type ProjectLockView,
 } from './shared';
 import { ProjectForm, type FormState } from './ProjectForm';
+import { ProjectRepoRows } from './ProjectRepoRows';
 import type { ProjectWithRepos } from '@/lib/projects/types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 
@@ -55,10 +55,15 @@ function oneLine(text: string, max = 96): string {
 export function ProjectCard({
   project,
   reposById,
+  availableRepos,
+  repoBusyKey,
   locks,
   onEdit,
   onDelete,
   onArchiveLock,
+  onSetMainRepo,
+  onRemoveRepo,
+  onAddRepo,
   isEditing,
   isDeleting,
   archivingLaneId,
@@ -69,10 +74,15 @@ export function ProjectCard({
 }: {
   project: ProjectWithRepos;
   reposById: Map<string, RepoRegistryEntry>;
+  availableRepos: RepoRegistryEntry[];
+  repoBusyKey: string | null;
   locks: ProjectLockView[];
   onEdit: () => void;
   onDelete: () => void;
   onArchiveLock: (laneId: string) => void;
+  onSetMainRepo: (repoId: string) => void;
+  onRemoveRepo: (repoId: string) => void;
+  onAddRepo: (repoId: string) => void;
   isEditing: boolean;
   isDeleting: boolean;
   archivingLaneId: string | null;
@@ -199,36 +209,17 @@ export function ProjectCard({
         divider
       />
 
-      {/* Repositories — one row each */}
-      {project.repos.length > 0 ? (
-        project.repos.map((link, index) => {
-          const isMain = project.mainRepoId === link.repoId;
-          return (
-            <SettingsRow
-              key={link.repoId}
-              icon={<FolderGlyph size={15} />}
-              label={reposById.get(link.repoId)?.name ?? link.repoId}
-              accessory={
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  {isMain ? <ValuePill tone="success">Main</ValuePill> : null}
-                  <ValuePill>{link.role ? link.role : 'No role'}</ValuePill>
-                </span>
-              }
-              onPress={!isEditing ? onEdit : undefined}
-              chevron={!isEditing}
-              divider={index < project.repos.length - 1}
-            />
-          );
-        })
-      ) : (
-        <SettingsRow
-          icon={<FolderGlyph size={15} />}
-          label="Repositories"
-          subtitle="None linked yet"
-          onPress={!isEditing ? onEdit : undefined}
-          chevron={!isEditing}
-        />
-      )}
+      {/* Repositories — one row each, inline set-main / remove / add */}
+      <ProjectRepoRows
+        project={project}
+        reposById={reposById}
+        availableRepos={availableRepos}
+        interactive={!isEditing}
+        busyKey={repoBusyKey}
+        onSetMain={onSetMainRepo}
+        onRemoveRepo={onRemoveRepo}
+        onAddRepo={onAddRepo}
+      />
       <RowDivider />
 
       {/* Locks — expands only when there are locks */}
