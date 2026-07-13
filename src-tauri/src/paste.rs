@@ -1364,6 +1364,25 @@ pub(crate) fn grab_selection() -> Option<String> {
         return Some(text);
     }
 
+    // ── Terminal no-selection gate (#1545, the "boop") ──
+    // Terminal.app and iTerm2 expose real selections through AXSelectedText,
+    // so Strategy 1 returning nothing means there genuinely IS no selection —
+    // and a synthetic Cmd+C on an empty terminal selection rings the system
+    // bell (audible on every read-chord press inside a Claude Code TUI, where
+    // mouse reporting eats drag-select so a selection rarely exists). Skip the
+    // beeping fallback for those AX-authoritative terminals; every other app
+    // keeps the Cmd+C path (real selections there copy silently).
+    if let Some(bundle_id) = get_current_frontmost_bundle_id() {
+        const AX_AUTHORITATIVE_TERMINALS: [&str; 2] =
+            ["com.apple.Terminal", "com.googlecode.iterm2"];
+        if AX_AUTHORITATIVE_TERMINALS.contains(&bundle_id.as_str()) {
+            log::info!(
+                "[tts] grab_selection: {bundle_id} has no AX selection — skipping Cmd+C fallback (terminal bell)"
+            );
+            return None;
+        }
+    }
+
     // ── Strategy 2: simulate Cmd+C → poll clipboard → restore ──
     // Wait for the Ctrl+Shift+S chord to release first so the synthetic Cmd+C
     // isn't polluted by still-held modifiers (the held-modifier bug that left

@@ -11,6 +11,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
+import { registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 
 interface InlineImage {
   id: string;
@@ -176,8 +177,15 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
 
     const cleanupPromise = init();
 
+    // Speak-selection bridge (Ctrl+Shift+R) — xterm selections aren't DOM
+    // selections; register a getter so the dashboard handler can read them.
+    const unregisterSelection = registerXtermSelectionSource(
+      () => termRef.current?.getSelection?.() ?? '',
+    );
+
     return () => {
       disposed = true;
+      unregisterSelection();
       sendTerminalDetach(tmuxSession);
       cleanupPromise?.then(cleanup => cleanup?.());
       if (termRef.current) { termRef.current.dispose(); termRef.current = null; }

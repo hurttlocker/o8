@@ -10,6 +10,7 @@ import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } fr
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
 import { mergeTranscriptEntries } from '@/components/desktop/workspace-terminal/utils';
+import { readAnyXtermSelection } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
@@ -4323,7 +4324,11 @@ function DashboardInner() {
     let disposed = false;
     import('@tauri-apps/api/event')
       .then(({ listen }) => listen('o8:speak-selection', () => {
-        const text = window.getSelection()?.toString().trim();
+        // xterm selections are NOT DOM selections — when the DOM has nothing,
+        // fall back to any live terminal's own selection so the read chord
+        // works inside terminal tabs (Claude Code TUIs included).
+        const text = window.getSelection()?.toString().trim()
+          || readAnyXtermSelection().trim();
         if (!text) return;
         import('@tauri-apps/api/core')
           .then(({ invoke }) => invoke('tts_speak', { text }))
