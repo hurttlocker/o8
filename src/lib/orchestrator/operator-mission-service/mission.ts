@@ -4,6 +4,7 @@ import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestra
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
+import { resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -43,7 +44,7 @@ const INLINE_BRANCH_MAX_LENGTH = 60;
 
 function branchTargetForIssue(issue: LoadedIssue) {
   if (!isInlineIssue(issue)) {
-    return `issue/${issue.number}-${slugify(issue.title)}`;
+    return `${resolveBranchPrefixSync()}/${issue.number}-${slugify(issue.title)}`;
   }
 
   const prefix = `inline/${issue.number}-`;
