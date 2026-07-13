@@ -4,6 +4,7 @@ import {
   getOperatorDefaults,
   isCollideAggregator,
   isOrchestratorBackendSetting,
+  isPrLinkDestination,
   isReviewerBackendSetting,
   isSubscriptionProfile,
   updateOperatorDefaults,
@@ -280,6 +281,29 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('crashReportsEnabled must be boolean.');
     }
     update.crashReportsEnabled = body.crashReportsEnabled;
+  }
+
+  if (body.branchPrefix !== undefined) {
+    // Any string is accepted; the store sanitizes it to a branch-safe segment
+    // and rejects a value that cleans to empty.
+    if (typeof body.branchPrefix !== 'string') {
+      throw new Error('branchPrefix must be a string.');
+    }
+    update.branchPrefix = body.branchPrefix;
+  }
+
+  if (body.commitAttributionEnabled !== undefined) {
+    if (typeof body.commitAttributionEnabled !== 'boolean') {
+      throw new Error('commitAttributionEnabled must be boolean.');
+    }
+    update.commitAttributionEnabled = body.commitAttributionEnabled;
+  }
+
+  if (body.prLinkDestination !== undefined) {
+    if (!isPrLinkDestination(body.prLinkDestination)) {
+      throw new Error('prLinkDestination must be "in-app" or "browser".');
+    }
+    update.prLinkDestination = body.prLinkDestination;
   }
 
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {

@@ -78,6 +78,37 @@ export function isCollideAggregator(value: unknown): value is CollideAggregator 
   return value === 'auto' || value === 'claude' || value === 'codex';
 }
 
+/**
+ * Where a PR row opens (Git & PRs tab). 'in-app' (default) renders the embedded
+ * PrPanel; 'browser' hands the github.com/.../pull URL to the OS browser.
+ * Byte-identical to pre-setting behavior at the default. Env: `O8_PR_LINK_DESTINATION`.
+ */
+export type PrLinkDestination = 'in-app' | 'browser';
+
+export function isPrLinkDestination(value: unknown): value is PrLinkDestination {
+  return value === 'in-app' || value === 'browser';
+}
+
+/**
+ * Clean a stored/typed branch prefix into a safe leading branch segment
+ * (`[a-z0-9/_-]`, collapsed slashes/dashes, no leading/trailing separators).
+ * Returns null when nothing usable remains — callers validate-or-null so a junk
+ * value falls through to the current-behavior default rather than corrupting a
+ * branch name.
+ */
+export function sanitizeBranchPrefix(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]/g, '-')
+    .replace(/\/+/g, '/')
+    .replace(/-+/g, '-')
+    .replace(/^[-/.]+|[-/.]+$/g, '')
+    .slice(0, 40);
+  return cleaned || null;
+}
+
 
 // ── Env overrides ──
 
@@ -290,5 +321,22 @@ export function envCrashReports(): boolean | null {
   const raw = process.env.O8_CRASH_REPORTS;
   if (raw === '1') return true;
   if (raw === '0') return false;
+  return null;
+}
+
+export function envBranchPrefix(): string | null {
+  return sanitizeBranchPrefix(process.env.O8_BRANCH_PREFIX);
+}
+
+export function envCommitAttribution(): boolean | null {
+  const raw = process.env.O8_COMMIT_ATTRIBUTION;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
+export function envPrLinkDestination(): PrLinkDestination | null {
+  const raw = process.env.O8_PR_LINK_DESTINATION?.trim();
+  if (raw && isPrLinkDestination(raw)) return raw;
   return null;
 }

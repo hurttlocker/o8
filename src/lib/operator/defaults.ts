@@ -21,12 +21,15 @@ import { resolveWorkerEffortDefault } from './worker-effort-default';
 
 export { isSubscriptionProfile };
 
-import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator } from './defaults-env';
+import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, sanitizeBranchPrefix, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator, type PrLinkDestination } from './defaults-env';
 import {
   isDispatchRuntime,
   isClassAComposer,
   isWorkersUseBrain,
   envAutoApplyUpdates,
+  envBranchPrefix,
+  envCommitAttribution,
+  envPrLinkDestination,
   envBrainUseClaudeCli,
   envBuyinDocEnabled,
   envClassAComposer,
@@ -65,7 +68,7 @@ import {
   type WorkersUseBrain,
 } from './defaults-env';
 
-export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator } from './defaults-env';
+export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination } from './defaults-env';
 export type {
   OverlapGateMode,
   ClassAComposer,
@@ -73,6 +76,7 @@ export type {
   OrchestratorBackendSetting,
   ReviewerBackendSetting,
   CollideAggregator,
+  PrLinkDestination,
 } from './defaults-env';
 
 
@@ -315,6 +319,27 @@ export interface OperatorDefaults {
    * event (no wire) within ~30s. Env: `O8_CRASH_REPORTS` (1/0).
    */
   crashReportsEnabled: boolean;
+  /**
+   * Prefix for branches o8 opens from GitHub issues (`<prefix>/<n>-<slug>`).
+   * **Default `'issue'`** — byte-identical to the previous hardcoded literal.
+   * Consumed at the single mission branch-target chokepoint
+   * (`branchTargetForIssue`). Inline drafts keep their own `inline/` marker.
+   * Env: `O8_BRANCH_PREFIX`.
+   */
+  branchPrefix: string;
+  /**
+   * Tag commits o8's agents create with a `Co-Authored-By` trailer. **Off by
+   * default** — the agent worktree commit carries whatever message the caller
+   * supplied, exactly as before. On appends the trailer at the single agent
+   * commit site (`commitDirtyWorktree`). Env: `O8_COMMIT_ATTRIBUTION` (1/0).
+   */
+  commitAttributionEnabled: boolean;
+  /**
+   * Where clicking a PR row opens it. **Default `'in-app'`** — the embedded
+   * PrPanel, unchanged. `'browser'` hands the github.com/.../pull URL to the OS
+   * browser instead. Env: `O8_PR_LINK_DESTINATION`.
+   */
+  prLinkDestination: PrLinkDestination;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -380,6 +405,12 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Sentry crash/error reports ON by default — but dormant unless a packaged
   // build baked a DSN, so a fresh clone / dev run ships zero behavior change.
   crashReportsEnabled: true,
+  // Byte-identical to the previous hardcoded `issue/` branch literal.
+  branchPrefix: 'issue',
+  // Agent commit attribution OFF — commits carry the raw message as before.
+  commitAttributionEnabled: false,
+  // PR rows open the embedded PrPanel, as before.
+  prLinkDestination: 'in-app',
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -473,6 +504,9 @@ interface StoredOperatorDefaults {
   telemetryOptIn?: boolean;
   telemetryIngestUrl?: string;
   crashReportsEnabled?: boolean;
+  branchPrefix?: string;
+  commitAttributionEnabled?: boolean;
+  prLinkDestination?: PrLinkDestination;
 }
 
 type FileOperatorDefaults = Partial<OperatorDefaults> & {
@@ -604,6 +638,16 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.crashReportsEnabled === 'boolean') {
     result.crashReportsEnabled = stored.crashReportsEnabled;
   }
+  const cleanedBranchPrefix = sanitizeBranchPrefix(stored.branchPrefix);
+  if (cleanedBranchPrefix) {
+    result.branchPrefix = cleanedBranchPrefix;
+  }
+  if (typeof stored.commitAttributionEnabled === 'boolean') {
+    result.commitAttributionEnabled = stored.commitAttributionEnabled;
+  }
+  if (isPrLinkDestination(stored.prLinkDestination)) {
+    result.prLinkDestination = stored.prLinkDestination;
+  }
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -648,6 +692,9 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envTelemetry = envTelemetryOptIn();
   const envTelemetryUrl = envTelemetryIngestUrl();
   const envCrash = envCrashReports();
+  const envBranch = envBranchPrefix();
+  const envCommitAttrib = envCommitAttribution();
+  const envPrLink = envPrLinkDestination();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
   const subscriptionProfile =
@@ -712,6 +759,9 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
     telemetryIngestUrl: envTelemetryUrl ?? fileValues.telemetryIngestUrl ?? OPERATOR_DEFAULTS_FALLBACK.telemetryIngestUrl,
     crashReportsEnabled: envCrash ?? fileValues.crashReportsEnabled ?? OPERATOR_DEFAULTS_FALLBACK.crashReportsEnabled,
+    branchPrefix: envBranch ?? fileValues.branchPrefix ?? OPERATOR_DEFAULTS_FALLBACK.branchPrefix,
+    commitAttributionEnabled: envCommitAttrib ?? fileValues.commitAttributionEnabled ?? OPERATOR_DEFAULTS_FALLBACK.commitAttributionEnabled,
+    prLinkDestination: envPrLink ?? fileValues.prLinkDestination ?? OPERATOR_DEFAULTS_FALLBACK.prLinkDestination,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -758,6 +808,9 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
     telemetryIngestUrl: envTelemetryUrl !== null ? 'env' : fileValues.telemetryIngestUrl !== undefined ? 'file' : 'default',
     crashReportsEnabled: envCrash !== null ? 'env' : fileValues.crashReportsEnabled !== undefined ? 'file' : 'default',
+    branchPrefix: envBranch !== null ? 'env' : fileValues.branchPrefix !== undefined ? 'file' : 'default',
+    commitAttributionEnabled: envCommitAttrib !== null ? 'env' : fileValues.commitAttributionEnabled !== undefined ? 'file' : 'default',
+    prLinkDestination: envPrLink !== null ? 'env' : fileValues.prLinkDestination !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -965,6 +1018,22 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.telemetryIngestUrl = update.telemetryIngestUrl.trim();
   }
+  if (update.branchPrefix !== undefined) {
+    const cleaned = sanitizeBranchPrefix(update.branchPrefix);
+    if (!cleaned) {
+      throw new Error('branchPrefix must contain at least one branch-safe character.');
+    }
+    stored.branchPrefix = cleaned;
+  }
+  if (update.commitAttributionEnabled !== undefined) {
+    stored.commitAttributionEnabled = Boolean(update.commitAttributionEnabled);
+  }
+  if (update.prLinkDestination !== undefined) {
+    if (!isPrLinkDestination(update.prLinkDestination)) {
+      throw new Error('prLinkDestination must be "in-app" or "browser".');
+    }
+    stored.prLinkDestination = update.prLinkDestination;
+  }
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
@@ -1121,6 +1190,21 @@ export function resolveTelemetryIngestUrlSync(): string {
 /** Sentry "Crash & error reports" toggle (default ON; dormant without a DSN). */
 export function resolveCrashReportsEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.crashReportsEnabled;
+}
+
+/** Prefix for issue-derived packet branches (`<prefix>/<n>-<slug>`, default 'issue'). */
+export function resolveBranchPrefixSync(): string {
+  return getOperatorDefaultsSync().values.branchPrefix;
+}
+
+/** Whether agent worktree commits get a Co-Authored-By trailer (default off). */
+export function resolveCommitAttributionEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.commitAttributionEnabled;
+}
+
+/** Where a PR row opens — embedded panel or OS browser (default 'in-app'). */
+export function resolvePrLinkDestinationSync(): PrLinkDestination {
+  return getOperatorDefaultsSync().values.prLinkDestination;
 }
 
 /** The Targeting Machine's cheap triage/rationale tier (env > file > fallback). */
