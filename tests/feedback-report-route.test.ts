@@ -10,10 +10,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CrashRecord } from '@/lib/telemetry/crash-store';
 
 const crashRecords = vi.hoisted(() => ({ current: [] as CrashRecord[] }));
+const ledger = vi.hoisted(() => ({ written: [] as unknown[] }));
+const auth = vi.hoisted(() => ({ ghUser: null as string | null }));
 
 vi.mock('@/lib/telemetry/crash-store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/telemetry/crash-store')>()),
   readCrashRecords: () => crashRecords.current,
+}));
+// Real id + title logic; only the disk write is intercepted.
+vi.mock('@/lib/feedback/report-ledger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/feedback/report-ledger')>()),
+  recordReport: (record: unknown) => { ledger.written.push(record); return true; },
+}));
+vi.mock('@/lib/auth/jwt', () => ({
+  verifyToken: async (token: string) =>
+    (token === 'valid-token' && auth.ghUser ? { uid: 'u1', plan: 'free', ghUser: auth.ghUser } : null),
 }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: async () => null }));
 vi.mock('@/lib/repos/projects', () => ({
@@ -23,6 +34,7 @@ vi.mock('@/lib/runtime/ide-surface-state', () => ({
   readIdeSurfaceState: () => null,
 }));
 
+import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/feedback/report/route';
 
 interface DiscordEmbedField { name: string; value: string; inline?: boolean }
@@ -30,13 +42,21 @@ interface CapturedPost { form: FormData | null; json: unknown }
 
 const captured: CapturedPost = { form: null, json: null };
 
-function postReport(body: Record<string, unknown>) {
+/**
+ * A real NextRequest — not a bare Request. `request.cookies` is a NextRequest
+ * affordance, so a plain Request would silently yield no reporter and the
+ * attribution test would pass against a path prod never takes.
+ */
+function postReport(body: Record<string, unknown>, cookie?: string) {
   return POST(
-    new Request('http://127.0.0.1:3001/api/feedback/report', {
+    new NextRequest('http://127.0.0.1:3001/api/feedback/report', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
       body: JSON.stringify(body),
-    }) as never,
+    }),
   );
 }
 
@@ -47,6 +67,8 @@ async function embedOf(form: FormData): Promise<{ fields: DiscordEmbedField[] }>
 
 beforeEach(() => {
   crashRecords.current = [];
+  ledger.written = [];
+  auth.ghUser = null;
   captured.form = null;
   captured.json = null;
   vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
@@ -128,5 +150,64 @@ describe('POST /api/feedback/report', () => {
     expect(res.status).toBe(400);
     expect(captured.form).toBeNull();
     expect(captured.json).toBeNull();
+    expect(ledger.written).toHaveLength(0);
+  });
+});
+
+describe('report id + attribution (the #fixed loop)', () => {
+  it('hands the reporter an id and ledgers it under the same id', async () => {
+    const res = await postReport({ category: 'bug', message: 'diff panel went blank', route: '/dashboard' });
+    const body = (await res.json()) as { ok: boolean; reportId: string };
+
+    expect(body.ok).toBe(true);
+    expect(body.reportId).toMatch(/^[2-9A-HJ-NP-TV-Z]{6}$/); // no 0/O/1/I/L/U — it gets typed into commits
+
+    expect(ledger.written).toHaveLength(1);
+    const recorded = ledger.written[0] as { id: string; title: string; category: string };
+    expect(recorded.id, 'the id the user sees must be the id a fix looks up').toBe(body.reportId);
+    expect(recorded.title).toBe('diff panel went blank');
+    expect(recorded.category).toBe('bug');
+
+    // Same id on the Discord card, so triage and the ledger agree.
+    const payload = captured.json as { embeds: { title: string; footer: { text: string } }[] };
+    expect(payload.embeds[0].title).toContain(body.reportId);
+    expect(payload.embeds[0].footer.text).toContain(body.reportId);
+  });
+
+  it('credits the GitHub login from the auth cookie', async () => {
+    auth.ghUser = 'kleosr';
+
+    await postReport(
+      { category: 'bug', message: 'crash on merge', route: '/dashboard' },
+      'o8-token=valid-token',
+    );
+
+    const recorded = ledger.written[0] as { reporter: string | null };
+    expect(recorded.reporter, 'the #fixed post credits this').toBe('kleosr');
+
+    const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
+    expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')?.value).toBe('@kleosr');
+  });
+
+  it('files anonymously when GitHub is not connected', async () => {
+    await postReport({ category: 'bug', message: 'crash on merge', route: '/dashboard' });
+
+    const recorded = ledger.written[0] as { reporter: string | null };
+    expect(recorded.reporter).toBeNull();
+
+    const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
+    expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')?.value).toBe('anonymous');
+  });
+
+  it('does not ledger a report that never reached Discord', async () => {
+    vi.stubGlobal('fetch', async () => new Response('rate limited', { status: 429 }));
+
+    const res = await postReport({ category: 'bug', message: 'went nowhere', route: '/dashboard' });
+
+    expect(res.status).toBe(502);
+    // An id handed out for a post that never landed is an id no fix can ever cite.
+    expect(ledger.written).toHaveLength(0);
+    const body = (await res.json()) as { ok: boolean; reportId?: string };
+    expect(body.reportId).toBeUndefined();
   });
 });

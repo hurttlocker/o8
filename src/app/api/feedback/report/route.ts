@@ -6,6 +6,8 @@ import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-digest';
+import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
+import { verifyToken } from '@/lib/auth/jwt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,6 +48,24 @@ interface ReportDiagnostics {
   userAgent: string;
   projectLabel: string | null;
   timestamp: string;
+}
+
+/**
+ * The GitHub login of whoever filed this, when they've connected GitHub — the
+ * device flow already signs it into the `o8-token` cookie, so attribution costs
+ * nothing and needs no second prompt. Anonymous is a perfectly fine outcome; it
+ * only means the eventual #fixed post carries no credit line.
+ */
+async function resolveReporter(request: NextRequest): Promise<string | null> {
+  try {
+    const token = request.cookies.get('o8-token')?.value;
+    if (!token) return null;
+    const payload = await verifyToken(token);
+    const login = payload?.ghUser?.trim();
+    return login ? truncate(login, 64) : null;
+  } catch {
+    return null;
+  }
 }
 
 let cachedVersion: string | null = null;
@@ -215,10 +235,9 @@ async function buildDiagnostics(route: string, userAgent: string): Promise<Repor
   };
 }
 
-function shortTitle(category: FeedbackCategory, message: string): string {
-  const prefix = category === 'bug' ? '[BUG]' : '[REQUEST]';
-  const firstLine = message.replace(/\s+/g, ' ').trim();
-  return truncate(`${prefix} ${firstLine}`, DISCORD_TITLE_LIMIT);
+interface Report {
+  id: string;
+  reporter: string | null;
 }
 
 function field(name: string, value: string) {
@@ -229,13 +248,14 @@ function field(name: string, value: string) {
   };
 }
 
-function buildEmbed(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, crashes: CrashDigest) {
+function buildEmbed(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, crashes: CrashDigest, report: Report) {
   const fields = [
     field('Version', diagnostics.version),
     field('OS', diagnostics.osLabel),
     field('Node', diagnostics.nodeVersion),
     field('Route', diagnostics.route),
     ...(diagnostics.projectLabel ? [field('Project', diagnostics.projectLabel)] : []),
+    field('Reported by', report.reporter ? `@${report.reporter}` : 'anonymous'),
     field('Timestamp', diagnostics.timestamp),
     // Full-width: the summary carries a stack-trace head that reads badly in a
     // narrow inline column, and the traces themselves ride as crashes.txt.
@@ -244,14 +264,17 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
       : []),
   ];
 
-  const footer = { text: 'o8 beta · one-way intake' };
-  const baseTextLength = shortTitle(category, message).length
+  // The id is the handle a fix will reach back through: a commit carrying
+  // `Fixes-Report: <id>` is what publishes this to #fixed, credited.
+  const footer = { text: `o8 · report ${report.id} · private intake` };
+  const title = truncate(`${category === 'bug' ? '[BUG]' : '[REQUEST]'} ${report.id} · ${reportTitle(message)}`, DISCORD_TITLE_LIMIT);
+  const baseTextLength = title.length
     + footer.text.length
     + fields.reduce((sum, item) => sum + item.name.length + item.value.length, 0);
   const allowedDescription = Math.max(0, DISCORD_EMBED_TOTAL_LIMIT - baseTextLength);
 
   return {
-    title: shortTitle(category, message),
+    title,
     description: truncate(message, Math.min(DISCORD_DESCRIPTION_LIMIT, allowedDescription)),
     color: category === 'bug' ? 0xd94f3a : 0x1d4ed8,
     fields,
@@ -259,10 +282,10 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
   };
 }
 
-async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
   const webhookUrl = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim() || DEFAULT_WEBHOOK_URL;
   const embed = {
-    ...buildEmbed(category, message, diagnostics, crashes),
+    ...buildEmbed(category, message, diagnostics, crashes, report),
     // Render the first screenshot inline in the embed; the rest ride along as
     // additional attachments. The attachment:// URL must match a file below.
     ...(images[0] ? { image: { url: `attachment://${images[0].filename}` } } : {}),
@@ -334,9 +357,23 @@ export async function POST(request: NextRequest) {
     // Join the human's report to the machine's crashes — Sentry gets these too,
     // but only in packaged builds, and only the team ever sees them there.
     const crashes = collectCrashDigest();
-    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes);
+    const report: Report = { id: newReportId(), reporter: await resolveReporter(request) };
+
+    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, report);
     if (!posted.ok) return jsonError(posted.error, 502);
-    return NextResponse.json({ ok: true });
+
+    // Only ledger a report that actually reached Discord — an id we hand back for
+    // a post that never landed is an id that can never be fixed.
+    recordReport({
+      id: report.id,
+      ts: Date.now(),
+      category: validated.category,
+      title: reportTitle(validated.message),
+      reporter: report.reporter,
+      version: diagnostics.version,
+    });
+
+    return NextResponse.json({ ok: true, reportId: report.id });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to send report.', 500);
   }
