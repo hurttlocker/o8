@@ -6,7 +6,9 @@ import { ttsEngine, type TTSEngineState } from '@/lib/tts/engine';
 import { userScrolledRecently } from '@/lib/tts/scroll-follow';
 import { CommandStripNode } from '@/components/desktop/CommandStripNode';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
-import { ThinkingStrip } from '@/components/desktop/orchestrator/ThinkingStrip';
+import { ThoughtBlock } from '@/components/desktop/thoughts/chat-panel/ThoughtBlock';
+import { FileEditRowStack } from '@/components/desktop/thoughts/chat-panel/FileEditRow';
+import { deriveFileEdits, isFileEditCall } from '@/components/desktop/thoughts/chat-panel/file-edits';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
@@ -204,11 +206,15 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     () => (entry.toolCalls ?? []).filter(isMeteredBrainFeedCall),
     [entry.toolCalls],
   );
+  // Turn-grammar deliverable 2: write/edit tool calls with a real file path
+  // render as live FileEditRows (Editing → Edited +A −D), so they leave the
+  // generic chip cluster and stack as their own dense rows.
+  const fileEdits = useMemo(() => deriveFileEdits(entry.toolCalls), [entry.toolCalls]);
   const clusterToolCalls = useMemo(
-    () => brainFeedCalls.length > 0
-      ? (entry.toolCalls ?? []).filter((toolCall) => !isMeteredBrainFeedCall(toolCall))
-      : (entry.toolCalls ?? []),
-    [entry.toolCalls, brainFeedCalls.length],
+    () => (entry.toolCalls ?? []).filter(
+      (toolCall) => !isMeteredBrainFeedCall(toolCall) && !isFileEditCall(toolCall),
+    ),
+    [entry.toolCalls],
   );
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
@@ -416,10 +422,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   }
 
   const hasThinking = Boolean(entry.thinking?.trim());
-  const thinkingLive = (
-    !displayText.trim()
-    || entry.toolCalls?.some((toolCall) => toolCall.status === 'running' || toolCall.status === 'calling')
-  );
+  // ThoughtBlock is "live" (shimmering, expanded) only during the pure reasoning
+  // phase: the turn is still streaming AND no answer text or tool call has landed
+  // yet. The first token or first tool ends reasoning → the block auto-collapses
+  // to "Thought for Ns" (turn-grammar deliverable 1).
+  const thinkingLive = isStreaming && !hasText && !hasToolCalls;
 
   return (
     <div ref={rootRef} style={{
@@ -433,7 +440,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     }}>
       {evictedEyebrow}
       {hasThinking ? (
-        <ThinkingStrip
+        <ThoughtBlock
           thinking={sanitizedThinking}
           live={thinkingLive}
           style={{ maxWidth: '100%' }}
@@ -464,6 +471,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       ) : null}
 
       {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
+      {fileEdits.length > 0 ? <FileEditRowStack edits={fileEdits} /> : null}
       {clusterToolCalls.length > 0 ? <ToolCallChipCluster toolCalls={clusterToolCalls} /> : null}
       {brainFeedCalls.map((toolCall, index) => (
         <BrainFeedCard key={toolCall.id ?? `brain-feed-${index}`} toolCall={toolCall} />
