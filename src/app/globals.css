@@ -2343,3 +2343,15 @@ button.workflow-file-item.workflow-file-item-active {
 .o8-fam.fam-idle>i:nth-child(7){animation:o8-fam-drift 12s linear infinite;animation-delay:calc(var(--fam-shift,0s) - 9s)}
 .o8-fam.fam-idle>i:nth-child(4){animation:o8-fam-drift 12s linear infinite;animation-delay:calc(var(--fam-shift,0s) - 10.5s)}
 @media (prefers-reduced-motion: reduce){.o8-fam>i{animation:none!important}}
+
+/* ── Design Mode draw — composer entrance + composer placeholder (polish 2026-07-12).
+   Compositor-only (opacity + transform). The dashboard composer is absolutely
+   positioned by px (no translateX), so its pop keyframe carries no -50%. */
+@keyframes o8DesignPopIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+[data-design-composer] input::placeholder { color: var(--t-text-faint); }
+@media (prefers-reduced-motion: reduce) {
+  [data-design-composer] { animation: none !important; }
+}
