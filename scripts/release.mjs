@@ -24,6 +24,8 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { buildManifest, defaultRange, readPublished, resolveNewFixes } from './lib/fixed-reports.mjs';
+import { publishFixed } from './publish-fixed.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -122,6 +124,25 @@ const latestJsonPath = join(BUNDLE, 'macos', 'latest.json');
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 console.log(`[release] wrote ${latestJsonPath}`);
 
+// fixed.json — the receipt manifest, shipped next to latest.json.
+//
+// The reporter's own app downloads this (public, anonymous, same URL pattern the
+// updater already uses — no new infrastructure, no cost) and joins it against
+// its LOCAL ledger to tell them their bug is fixed. It never uploads anything.
+//
+// CUMULATIVE on purpose: a per-release list would lose a fix for anyone who skips
+// versions. Contains no reporter handles — the app only needs "was MY report
+// fixed, and in which version".
+const { entries: pendingFixes, missing: unknownFixes } = resolveNewFixes(defaultRange(), version);
+const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
+const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
+writeFileSync(fixedJsonPath, JSON.stringify(fixedManifest, null, 2));
+console.log(`[release] wrote ${fixedJsonPath} (${fixedManifest.fixed.length} fixed report${fixedManifest.fixed.length === 1 ? '' : 's'}, ${pendingFixes.length} new this release)`);
+if (unknownFixes.length > 0) {
+  console.warn(`[release] ⚠ ${unknownFixes.length} Fixes-Report trailer(s) name an id with no ledger entry — those reporters will NOT get a receipt:`);
+  for (const { id, commit } of unknownFixes) console.warn(`[release]   ${id} (${commit.sha})`);
+}
+
 try {
   execFileSync('git', ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`], { stdio: 'pipe' });
   console.log(`[release] tag ${tag} present on origin`);
@@ -136,7 +157,7 @@ try {
   releaseExists = true;
 } catch {}
 
-const uploadArgs = [DMG, APP_TAR, APP_SIG, latestJsonPath];
+const uploadArgs = [DMG, APP_TAR, APP_SIG, latestJsonPath, fixedJsonPath];
 
 if (releaseExists) {
   console.log(`[release] ${tag} already exists — replacing assets`);
@@ -203,6 +224,19 @@ try {
   }
 
   console.log(`[release-mirror] mirrored ${tag} to ${PUBLIC_MIRROR}`);
+
+  // Announce the fixes ONLY now — the mirror is what makes v${version} real, and
+  // "fixed in v0.1.592" is a lie until an operator can actually install it.
+  // Non-fatal: a Discord hiccup must never fail a shipped release. The next
+  // publish:fixed picks up anything missed (published.json is the dedupe).
+  if (pendingFixes.length > 0) {
+    try {
+      await publishFixed({ range: defaultRange() });
+    } catch (err) {
+      console.error(`[release] #fixed announce failed (release is fine):`, err?.message ?? err);
+      console.error(`[release] re-run later with: npm run publish:fixed`);
+    }
+  }
 } catch (err) {
   console.error(`[release-mirror] failed to mirror ${tag} to ${PUBLIC_MIRROR}:`, err?.message ?? err);
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
