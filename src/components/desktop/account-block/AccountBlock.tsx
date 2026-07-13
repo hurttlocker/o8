@@ -149,13 +149,14 @@ export function AccountBlock({
           <>
             <button
               type="button"
-              onClick={() => {
-                if (hasUser) toggleMenu();
-                else signIn();
-              }}
-              aria-label={hasUser ? `Open account menu for ${displayName}` : 'Sign in'}
-              aria-haspopup={hasUser ? 'menu' : undefined}
-              aria-expanded={hasUser ? popover === 'menu' : undefined}
+              // Cursor behavior (operator ruling 2026-07-13): clicking the
+              // account row opens the menu in EVERY auth state — the menu
+              // carries Sign in when signed out, so the drawer is always one
+              // click and sign-in stays reachable through it.
+              onClick={toggleMenu}
+              aria-label={hasUser ? `Open account menu for ${displayName}` : 'Open account menu'}
+              aria-haspopup="menu"
+              aria-expanded={popover === 'menu'}
               style={{
                 minWidth: 0,
                 height: 44,

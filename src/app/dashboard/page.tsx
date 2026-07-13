@@ -4827,7 +4827,9 @@ function DashboardInner() {
                 borderBottomLeftRadius: 14,
                 borderBottomRightRadius: 14,
                 background: 'var(--t-panel-solid)',
-                boxShadow: 'var(--t-panel-shadow)',
+                // Flat by operator ruling (2026-07-13) — the in-column rail is
+                // not a floating surface; a drop shadow read as a seam against
+                // the workspace. Elevation stays on true overlays only.
               } as React.CSSProperties}
             >
               {leftHeader}
