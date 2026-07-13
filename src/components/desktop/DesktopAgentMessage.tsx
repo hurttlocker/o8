@@ -471,7 +471,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       ) : null}
 
       {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
-      {fileEdits.length > 0 ? <FileEditRowStack edits={fileEdits} /> : null}
+      {fileEdits.length > 0 ? <FileEditRowStack edits={fileEdits} repoPath={repoPath} /> : null}
       {clusterToolCalls.length > 0 ? <ToolCallChipCluster toolCalls={clusterToolCalls} /> : null}
       {brainFeedCalls.map((toolCall, index) => (
         <BrainFeedCard key={toolCall.id ?? `brain-feed-${index}`} toolCall={toolCall} />

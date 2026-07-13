@@ -81,17 +81,22 @@ export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFil
     ? `Reverted ${filesEditedCount} ${filesEditedCount === 1 ? 'file' : 'files'}`
     : `Edited ${filesEditedCount} ${filesEditedCount === 1 ? 'file' : 'files'}`;
 
+  // Wave 2 — the card's per-file list gets the same filename→full-review
+  // handoff as FileEditRow (no inline peek here; the card is a rollup, not a
+  // live turn). Only renders when we actually have the paths + a repo scope.
+  const canReviewFiles = Boolean(repoPath?.trim()) && Array.isArray(filePaths) && filePaths.length > 0;
+
   return (
     <div
       role="group"
       aria-label="Turn action card"
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 10,
+        flexDirection: 'column',
+        gap: 0,
         paddingTop: 9,
         paddingRight: 8,
-        paddingBottom: 9,
+        paddingBottom: canReviewFiles ? 4 : 9,
         paddingLeft: 12,
         borderRadius: 12,
         borderWidth: 1,
@@ -100,6 +105,7 @@ export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFil
         background: 'var(--t-input-bg)',
       }}
     >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span
         aria-hidden="true"
         style={{
@@ -175,8 +181,126 @@ export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFil
             </ActionButton>
           </>
         ) : null}
+        </div>
       </div>
+
+      {canReviewFiles && state !== 'undone' ? (
+        <ChatActionFileList repoPath={repoPath!.trim()} filePaths={filePaths!} />
+      ) : null}
     </div>
+  );
+}
+
+function basenameOf(p: string): string {
+  const parts = p.split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : p;
+}
+
+/**
+ * The rollup card's per-file list (Wave 2). Truncated at INITIAL_SHOWN with a
+ * "Show N more" expander; each row's filename dispatches `o8:focus-review` —
+ * same full-fidelity handoff as FileEditRow, no inline peek (this is a rollup,
+ * not a live turn). Typography matches the card's mono file idiom.
+ */
+const INITIAL_SHOWN = 4;
+
+function ChatActionFileList({ repoPath, filePaths }: { repoPath: string; filePaths: string[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? filePaths : filePaths.slice(0, INITIAL_SHOWN);
+  const remaining = filePaths.length - shown.length;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 4, paddingBottom: 4 }}>
+      {shown.map((path, index) => (
+        <FileListRow key={`${path}-${index}`} path={path} repoPath={repoPath} />
+      ))}
+      {remaining > 0 && !showAll ? (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          style={{
+            alignSelf: 'flex-start',
+            borderWidth: 0,
+            background: 'transparent',
+            padding: 0,
+            marginTop: 2,
+            marginLeft: 22,
+            fontFamily: 'var(--font-sans-system)',
+            fontSize: 11,
+            color: 'var(--t-text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          {`Show ${remaining} more`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function FileListRow({ path, repoPath }: { path: string; repoPath: string }) {
+  const [hover, setHover] = useState(false);
+  const onOpen = (event: React.MouseEvent | React.KeyboardEvent) => {
+    event.stopPropagation();
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:focus-review', { detail: { repoPath, file: path } }));
+  };
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(event); }
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={`Open ${path} in Review`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        textAlign: 'left',
+        borderWidth: 0,
+        background: hover ? 'var(--t-hover)' : 'transparent',
+        borderRadius: 6,
+        paddingTop: 3,
+        paddingBottom: 3,
+        paddingLeft: 6,
+        paddingRight: 6,
+        cursor: 'pointer',
+        transition: 'background 120ms ease',
+      }}
+    >
+      <span aria-hidden="true" style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--t-text-faint)' }}>
+        <FileGlyph />
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+          fontSize: 11,
+          color: hover ? 'var(--t-text)' : 'var(--t-text-secondary)',
+          textDecoration: hover ? 'underline' : 'none',
+          textUnderlineOffset: 2,
+        }}
+      >
+        {basenameOf(path)}
+      </span>
+    </button>
+  );
+}
+
+function FileGlyph() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block' }}>
+      <path d="M9 2 H4 a1 1 0 0 0 -1 1 v10 a1 1 0 0 0 1 1 h8 a1 1 0 0 0 1 -1 V7" />
+      <path d="M9 2 V7 H13" />
+    </svg>
   );
 }
 
