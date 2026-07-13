@@ -14,11 +14,10 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
@@ -103,21 +102,12 @@ function argsForMcpServer(server: { command: string; path: string }): string[] {
   return server.command === 'npx' ? ['tsx', server.path] : [server.path];
 }
 
-function resolveWsPort(): string {
-  try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
-    const portFile = join(dataDir, 'ws-port');
-    if (existsSync(portFile)) {
-      const raw = readFileSync(portFile, 'utf-8').trim();
-      const n = parseInt(raw, 10);
-      if (Number.isInteger(n) && n > 0 && n < 65536) {
-        return String(n);
-      }
-    }
-  } catch {
-    /* fall through */
-  }
-  return process.env.O8_WS_PORT?.trim() || process.env.WS_PORT?.trim() || String(DEFAULT_WS_PORT);
+export function resolveToolSpineWsPort(): string {
+  // Keep the MCP child on the same port identity as this server process.
+  // The former file-first resolver let an unrelated sidecar rewrite of
+  // ~/.o8/ws-port override a pinned O8_WS_PORT/WS_PORT and rotate the warm-proc
+  // hash even though this process was still listening on its original port.
+  return String(resolvePortInfo().wsPort);
 }
 
 /**
@@ -221,7 +211,7 @@ export function buildToolRegistry(
         CORTEX_API_BASE: apiBase,
         CORTEX_REPO_PATH: repoPath,
         CORTEX_REPO_SLUG: repoSlug,
-        WS_PORT: resolveWsPort(),
+        WS_PORT: resolveToolSpineWsPort(),
         WS_TOKEN: getOrCreateWsToken(),
       },
     },
