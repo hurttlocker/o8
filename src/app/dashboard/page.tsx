@@ -185,6 +185,9 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const DEFAULT_LEFT_PANEL_WIDTH = 300;
+const SIDEBAR_PREVIEW_TOP = 35;
+const SIDEBAR_PREVIEW_BOTTOM_INSET = 5;
+const STATUS_BAR_FALLBACK_HEIGHT = 36;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
 const MIN_RIGHT_PANEL_WIDTH = 240;
@@ -733,6 +736,7 @@ function DashboardInner() {
   // overlay-only surface that auto-retracts on hover-leave (with a small
   // dismiss delay so brief mouse-outs don't flicker) or any outside click.
   const [sidebarPreviewOpen, setSidebarPreviewOpen] = useState(false);
+  const [sidebarPreviewMaxHeight, setSidebarPreviewMaxHeight] = useState(0);
   const sidebarPreviewLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarPreviewOverlayRef = useRef<HTMLDivElement | null>(null);
 
@@ -3514,10 +3518,29 @@ function DashboardInner() {
       sidebarPreviewLeaveTimerRef.current = null;
     }
   }, []);
+  const syncSidebarPreviewMaxHeight = useCallback(() => {
+    const rootStyle = window.getComputedStyle(document.documentElement);
+    const parsedZoom = Number.parseFloat(rootStyle.getPropertyValue('--ui-zoom'));
+    const uiZoom = Number.isFinite(parsedZoom) && parsedZoom > 0 ? parsedZoom : 1;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const layoutViewportHeight = viewportHeight / uiZoom;
+    const statusBarTop = document
+      .querySelector<HTMLElement>('[data-mcp-scope="desktop-status-bar"]')
+      ?.getBoundingClientRect().top;
+    const bottomBoundary = typeof statusBarTop === 'number' && statusBarTop > 0
+      ? statusBarTop
+      : layoutViewportHeight - STATUS_BAR_FALLBACK_HEIGHT;
+    const nextHeight = Math.max(
+      0,
+      bottomBoundary - SIDEBAR_PREVIEW_TOP - SIDEBAR_PREVIEW_BOTTOM_INSET,
+    );
+    setSidebarPreviewMaxHeight((current) => current === nextHeight ? current : nextHeight);
+  }, []);
   const openSidebarPreview = useCallback(() => {
     cancelSidebarPreviewClose();
+    syncSidebarPreviewMaxHeight();
     setSidebarPreviewOpen(true);
-  }, [cancelSidebarPreviewClose]);
+  }, [cancelSidebarPreviewClose, syncSidebarPreviewMaxHeight]);
   const scheduleSidebarPreviewClose = useCallback(() => {
     cancelSidebarPreviewClose();
     sidebarPreviewLeaveTimerRef.current = setTimeout(() => {
@@ -3552,6 +3575,20 @@ function DashboardInner() {
     window.addEventListener('mousedown', handleClick, true);
     return () => window.removeEventListener('mousedown', handleClick, true);
   }, [sidebarPreviewOpen]);
+  useEffect(() => {
+    if (!sidebarPreviewOpen) return;
+    const visualViewport = window.visualViewport;
+    const rootObserver = new MutationObserver(syncSidebarPreviewMaxHeight);
+    syncSidebarPreviewMaxHeight();
+    window.addEventListener('resize', syncSidebarPreviewMaxHeight);
+    visualViewport?.addEventListener('resize', syncSidebarPreviewMaxHeight);
+    rootObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    return () => {
+      window.removeEventListener('resize', syncSidebarPreviewMaxHeight);
+      visualViewport?.removeEventListener('resize', syncSidebarPreviewMaxHeight);
+      rootObserver.disconnect();
+    };
+  }, [sidebarPreviewOpen, syncSidebarPreviewMaxHeight]);
   useEffect(() => () => {
     if (sidebarPreviewLeaveTimerRef.current) {
       clearTimeout(sidebarPreviewLeaveTimerRef.current);
@@ -5256,22 +5293,26 @@ function DashboardInner() {
                   // onClick handler caught the press, so the operator
                   // had to double-click to pin (2026-05-28). Traffic
                   // lights end around y=30 — y=35 still clears them.
-                  top: 35,
+                  top: SIDEBAR_PREVIEW_TOP,
                   left: 8,
                   // Match the actual AgentPanel column width so the
                   // overlay is a 1:1 stand-in for the real panel — no
                   // condensed copy. Default 300px (DEFAULT_LEFT_PANEL_WIDTH).
                   width: leftWidth,
-                  // Explicit height — without it the overlay sizes to the
-                  // AgentPanel's intrinsic content height (which collapses
-                  // to ~48 px because AgentPanel's children use flex: 1).
-                  // Pin the rail to (viewport − top inset − bottom gutter)
-                  // so it matches the open AgentPanel column. top went
-                  // 44 → 35 to close the click-gap, so the height grew
-                  // proportionally (was 100vh - 90 from the old top).
-                  height: 'calc(100vh / var(--ui-zoom, 1) - 81px)',
+                  // The live measurement ends five pixels above the status
+                  // rail, matching the expanded sidebar's bottom inset. Both
+                  // height and maxHeight update on window/visual-viewport
+                  // resize, so the inner AgentPanel list owns constrained
+                  // scrolling instead of the overlay escaping the window.
+                  height: sidebarPreviewMaxHeight,
+                  maxHeight: sidebarPreviewMaxHeight,
+                  minHeight: 0,
                   display: 'flex',
                   flexDirection: 'column',
+                  borderTopLeftRadius: 14,
+                  borderTopRightRadius: 14,
+                  borderBottomLeftRadius: 14,
+                  borderBottomRightRadius: 14,
                   zIndex: 200,
                   fontFamily: 'var(--font-sans-system)',
                   // Ink vars live on the positioned container so they cascade
