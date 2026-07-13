@@ -20,7 +20,6 @@ import {
   RAMS_ACCENT,
   RAMS_INK_QUIET,
   SettingsSegmented,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -283,7 +282,6 @@ export function OperatorDefaultsTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="dispatch" />
       <TabHeading
         title="dispatch & supervision"
         subtitle="How the fleet runs: how many agents at once, what happens when work overlaps, and who the orchestrator brain is."

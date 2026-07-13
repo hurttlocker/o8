@@ -19,7 +19,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   APP_FONT_STACK,
   RamsButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
@@ -182,7 +181,6 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="general" />
       <TabHeading
         title="general"
         subtitle="App-level basics: whether o8 launches with your machine, and what leaves it when something breaks."

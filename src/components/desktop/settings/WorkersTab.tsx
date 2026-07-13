@@ -17,7 +17,6 @@ import {
   HairlineRule,
   SectionLabel,
   SettingsToggleButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -245,7 +244,6 @@ export function WorkersTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="workers" />
       <TabHeading
         title="workers"
         subtitle="Manage remote worker tokens, monitor fleet activity, and control the remote runtime flag used by desktop adapters."

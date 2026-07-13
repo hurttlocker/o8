@@ -11,7 +11,6 @@ import {
   ActivityIcon,
   PlugIcon,
   LayersIcon,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -187,7 +186,6 @@ export function DiagnosticsTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="diagnostics" />
       <TabHeading
         title="diagnostics"
         subtitle="Runtime and tool health. Quiet neutral dots when everything is fine; colored badges only when action is demanded."

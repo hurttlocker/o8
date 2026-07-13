@@ -22,7 +22,6 @@ import {
   GitHubIcon,
   GitHubAvatar,
   RamsButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -121,7 +120,6 @@ export function GitHubTab({
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="connectors" />
       <TabHeading
         title="connectors"
         subtitle="Connect GitHub so o8 can track your repositories, issues, and pull requests."
