@@ -17,8 +17,6 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   FieldLabel,
-  LockIcon,
-  GlobeIcon,
   GitHubIcon,
   GitHubAvatar,
   RamsButton,
@@ -27,9 +25,37 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill, GroupFootnote } from './grouped';
 
-export function GitHubTab({
+/**
+ * The props needed to render the GitHub CONNECTION surface — the identity
+ * card / sign-in flow / GitHub App block. Shared verbatim between the standalone
+ * GitHubTab wrapper and the merged Git & PRs tab so SettingsPage wires the same
+ * bundle to either. The repositories list is intentionally NOT here — it moved
+ * to the Projects surface — but `repoCount` stays for the App footnote.
+ */
+export type GitHubConnectionProps = {
+  accounts: GitHubAccount[];
+  repoCount: number;
+  broker: GitHubBrokerStatus | null;
+  loading: boolean;
+  actionBusy?: GitHubActionKind | null;
+  actionNote?: string | null;
+  onRefresh?: () => void;
+  onDisconnect?: (user: string) => void;
+  onLoginWithToken?: (token: string) => void;
+  deviceFlowEnabled?: boolean;
+  deviceFlow?: GitHubDeviceFlowState | null;
+  onStartDeviceFlow?: () => void;
+  onPollDeviceFlow?: (flowId: string) => void;
+  onCancelDeviceFlow?: (flowId: string) => void;
+};
+
+/**
+ * The GitHub connection surface, standalone from any page chrome — identity /
+ * sign-in / GitHub App. Renders its own loading + action-feedback lines so it
+ * can drop into either the legacy GitHubTab or the merged Git & PRs tab.
+ */
+export function GitHubConnectionSections({
   accounts,
-  repos,
   repoCount,
   broker,
   loading,
@@ -43,25 +69,7 @@ export function GitHubTab({
   onStartDeviceFlow,
   onPollDeviceFlow,
   onCancelDeviceFlow,
-}: {
-  accounts: GitHubAccount[];
-  repos: GitHubRepo[];
-  repoCount: number;
-  broker: GitHubBrokerStatus | null;
-  loading: boolean;
-  actionBusy?: GitHubActionKind | null;
-  actionNote?: string | null;
-  onRefresh?: () => void;
-  onSwitchAccount?: (user: string) => void;
-  onDisconnect?: (user: string) => void;
-  onLoginWithToken?: (token: string) => void;
-  deviceFlowEnabled?: boolean;
-  deviceFlow?: GitHubDeviceFlowState | null;
-  onStartDeviceFlow?: () => void;
-  onPollDeviceFlow?: (flowId: string) => void;
-  onCancelDeviceFlow?: (flowId: string) => void;
-}) {
-  const [reposExpanded, setReposExpanded] = useState(false);
+}: GitHubConnectionProps) {
   const [deviceCodeCopied, setDeviceCodeCopied] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenValue, setTokenValue] = useState('');
@@ -112,19 +120,7 @@ export function GitHubTab({
     : 'https://github.com/settings/apps/cortex-dev-agent';
 
   return (
-    <div style={{
-      paddingTop: 8,
-      paddingLeft: 8,
-      paddingRight: 32,
-      paddingBottom: 40,
-      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
-      fontFamily: APP_FONT_STACK,
-    }}>
-      <TabHeading
-        title="connectors"
-        subtitle="Connect GitHub so o8 can track your repositories, issues, and pull requests."
-      />
-
+    <>
       {actionNote ? (
         <div style={{
           marginBottom: 28,
@@ -333,52 +329,6 @@ export function GitHubTab({
         </section>
       )}
 
-      {/* ── Repositories ── */}
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup header="Repositories">
-          {repos.length === 0 ? (
-            <div style={{
-              paddingTop: 14,
-              paddingBottom: 14,
-              paddingLeft: 14,
-              paddingRight: 14,
-              fontSize: 13,
-              color: 'var(--t-text-muted)',
-              lineHeight: 1.55,
-              maxWidth: 580,
-            }}>
-              {appConnected
-                ? 'No repositories synced yet. They appear shortly after the GitHub App is installed.'
-                : 'No repositories yet. Install the GitHub App below to sync your issues and pull requests.'}
-            </div>
-          ) : (
-            <>
-              <SettingsRow
-                label={`${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'} synced`}
-                onPress={() => setReposExpanded((v) => !v)}
-                value={reposExpanded ? 'Hide' : 'Show'}
-                divider={reposExpanded}
-              />
-              {reposExpanded ? (
-                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                  {repos.map((repo, idx) => (
-                    <SettingsRow
-                      key={repo.nameWithOwner}
-                      icon={repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
-                      label={repo.nameWithOwner}
-                      value={repo.updatedAt}
-                      onPress={() => window.open(`https://github.com/${repo.nameWithOwner}`, '_blank', 'noopener,noreferrer')}
-                      chevron
-                      divider={idx < repos.length - 1}
-                    />
-                  ))}
-                </div>
-              ) : null}
-            </>
-          )}
-        </SettingsGroup>
-      </section>
-
       {/* ── GitHub App ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup header="GitHub App">
@@ -459,6 +409,34 @@ export function GitHubTab({
               : 'The App lets o8 read issues, open pull requests, and act on your behalf.'}
         </GroupFootnote>
       </section>
+    </>
+  );
+}
+
+/**
+ * Legacy standalone GitHub settings tab — a thin page-chrome wrapper around
+ * GitHubConnectionSections. Kept assignable from SettingsPage's current call
+ * (repos / onSwitchAccount are accepted and ignored) until the merged Git & PRs
+ * tab fully supersedes it and the nav entry is removed.
+ */
+export function GitHubTab(props: GitHubConnectionProps & {
+  repos?: GitHubRepo[];
+  onSwitchAccount?: (user: string) => void;
+}) {
+  return (
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabHeading
+        title="connectors"
+        subtitle="Connect GitHub so o8 can track your repositories, issues, and pull requests."
+      />
+      <GitHubConnectionSections {...props} />
     </div>
   );
 }

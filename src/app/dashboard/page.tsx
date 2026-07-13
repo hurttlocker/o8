@@ -4256,7 +4256,7 @@ function DashboardInner() {
       .then(({ listen }) => listen<{ surface: string; url?: string }>('o8:ui-command', (event) => {
         const surface = event.payload?.surface ?? '';
         if (surface === 'settings') {
-          handleOpenSettingsTab('connectors');
+          handleOpenSettingsTab('git-prs');
           return;
         }
         if (surface === 'mobile_qr') {
