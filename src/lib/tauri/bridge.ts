@@ -155,6 +155,12 @@ export async function browserViewNavigate(url: string): Promise<void> {
   await invoke<void>('browser_view_navigate', { url });
 }
 
+/** Fire-and-forget JS eval into the native browser-view's page — powers the
+ *  toolbar back/forward (history.back()/forward()) on the native path. */
+export async function browserViewEval(js: string): Promise<void> {
+  await invoke<void>('browser_view_eval', { js });
+}
+
 /** Hide the native browser-view window without destroying it (tab hidden,
  *  pane collapsed, occlusion snapshot-swap). */
 export async function browserViewHide(): Promise<void> {

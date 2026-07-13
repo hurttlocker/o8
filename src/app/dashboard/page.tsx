@@ -1161,6 +1161,10 @@ function DashboardInner() {
   // navigation request from the port popover etc.) — this is the live
   // current URL of whichever tab is selected inside the pane.
   const [o8BrowserHoverUrl, setO8BrowserHoverUrl] = useState<string | null>(null);
+  // Header-rail portal target for the browser's page tabs (Cursor borrow,
+  // Q 2026-07-12) — PanelHeaderStrip renders the walled slot; O8Panel hands
+  // the element to O8BrowserPane, which portals its pills in.
+  const [browserHeaderTabSlot, setBrowserHeaderTabSlot] = useState<HTMLElement | null>(null);
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
   const [o8SelectedFileRepoPath, setO8SelectedFileRepoPath] = useState<string | null>(null);
   const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
@@ -2932,6 +2936,55 @@ function DashboardInner() {
     injectPayloadIntoRepoChat(payload, null);
   }, [injectPayloadIntoRepoChat]);
 
+  // ── Native Design Mode draw → repo chat ──
+  // The in-page draw layer (native browser pages stay LIVE while the operator
+  // draws) submits through NativeBrowserSurface, which captures the live
+  // window AT SEND (Q ruling 2026-07-12) and dispatches this event. Persist
+  // the screenshot, then inject prompt + region + sampled elements + shot
+  // path — same shape as the iframe path's onDrawPrompt below.
+  const closeDesignMode = designMode.close;
+  useEffect(() => {
+    const onNativeDraw = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        text?: string;
+        rect?: { left: number; top: number; width: number; height: number };
+        elements?: Array<{ selector: string; tag: string; text: string }>;
+        screenshotBase64?: string | null;
+      }>).detail;
+      const text = detail?.text?.trim();
+      if (!text) return;
+      const finish = (shotPath: string | null) => {
+        const rect = detail?.rect;
+        const region = rect
+          ? `${Math.round(rect.width)}×${Math.round(rect.height)} region at (${Math.round(rect.left)}, ${Math.round(rect.top)})`
+          : 'drawn region';
+        const elements = detail?.elements?.length
+          ? `\nElements under the drawing:\n${detail.elements.map((e) => `- <${e.tag}> ${e.selector}${e.text ? ` — "${e.text}"` : ''}`).join('\n')}`
+          : '';
+        const shot = shotPath ? `\nScreenshot of the drawn area: ${shotPath}` : '';
+        injectPayloadIntoRepoChat({
+          reason: 'design-draw',
+          text: `${text}\n\n[Design Mode drawing — ${region}]${elements}${shot}`,
+        }, null);
+        closeDesignMode();
+      };
+      if (detail?.screenshotBase64) {
+        void fetch('/api/panel/design-shot', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ screenshotBase64: detail.screenshotBase64 }),
+        })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data: { path?: string } | null) => finish(data?.path ?? null))
+          .catch(() => finish(null));
+      } else {
+        finish(null);
+      }
+    };
+    window.addEventListener('o8:design-draw-native', onNativeDraw);
+    return () => window.removeEventListener('o8:design-draw-native', onNativeDraw);
+  }, [injectPayloadIntoRepoChat, closeDesignMode]);
+
   // ── Feed agent data to alert engine + search ──
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
     // AgentDetail from AgentPanel is compatible with AgentSummary for alert detection
@@ -4382,8 +4435,22 @@ function DashboardInner() {
         <Suspense fallback={null}>
           <LazyDesignModeOverlay
             active={designMode.active}
-            onGrab={handleDesignModeGrab}
             onClose={designMode.close}
+            onDrawPrompt={(payload) => {
+              // Draw routing (Q 2026-07-12): prompt + region + the SILENTLY
+              // collected elements under the stroke land in the repo chat.
+              // Part 2 (Q's follow-up reference video) adds the screenshot
+              // crop of the circled area.
+              const region = `${Math.round(payload.rect.width)}×${Math.round(payload.rect.height)} region at (${Math.round(payload.rect.left)}, ${Math.round(payload.rect.top)})`;
+              const page = o8BrowserHoverUrl ? `\nPage: ${o8BrowserHoverUrl}` : '';
+              const elements = payload.elements.length > 0
+                ? `\nElements under the drawing:\n${payload.elements.map((e) => `- <${e.tag}> ${e.selector}${e.text ? ` — "${e.text}"` : ''}`).join('\n')}`
+                : '';
+              injectPayloadIntoRepoChat({
+                reason: 'design-draw',
+                text: `${payload.text}\n\n[Design Mode drawing — ${region}]${page}${elements}`,
+              }, null);
+            }}
           />
         </Suspense>
       ) : null}
@@ -4970,11 +5037,10 @@ function DashboardInner() {
                 onToggleO8Panel={handleToggleO8Panel}
                 o8ActiveTab={o8ActiveTab}
                 onO8TabChange={rightPanelKind === 'o8' ? handleO8TabChange : undefined}
-                browserActive={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
-                browserPreviewUrl={o8BrowserHoverUrl}
-                onOpenBrowser={handleOpenBrowser}
                 approvalCount={approvalCount}
                 onOpenInbox={handleOpenInbox}
+                browserTabsSlotRef={setBrowserHeaderTabSlot}
+                showBrowserTabs={rightPanelKind === 'o8' && (o8ActiveTab === 'browser' || Boolean(o8BrowserHoverUrl))}
               />
               <AnimatePresence initial={false} mode="wait">
                 {rightPanelKind === 'o8' ? (
@@ -5025,6 +5091,7 @@ function DashboardInner() {
                           browserUrl={o8BrowserUrl}
                           browserStateKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
                           onBrowserActiveUrlChange={setO8BrowserHoverUrl}
+                          browserHeaderTabSlot={browserHeaderTabSlot}
                           commitSha={o8CommitSha}
                           onClearCommit={handleClearCommit}
                           onSelectCommit={handleSelectCommit}
