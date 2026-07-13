@@ -53,6 +53,30 @@ async function fetchArchivedOrchestratorThreadIds(): Promise<Set<string> | null>
 }
 
 /**
+ * Packet ids of lanes still in the ACTIVE lane registry. Same bounded +
+ * fail-open doctrine as the archived-thread fetch: a slow or failed probe
+ * returns `null`, which disables the stale-lane filter — we never drop a
+ * packet-bound tab we can't positively confirm is dead.
+ */
+async function fetchActiveLanePacketIds(): Promise<Set<string> | null> {
+  try {
+    const result = await Promise.race([
+      fetch('/api/lanes?active=true', { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null)),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+    ]);
+    const lanes = (result as { lanes?: unknown } | null)?.lanes;
+    if (!Array.isArray(lanes)) return null;
+    const ids = lanes
+      .map((lane) => (lane && typeof lane === 'object' ? (lane as { packetId?: unknown }).packetId : null))
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return new Set(ids);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Pure logic for restoring persisted tab state.
  * Computes which tabs to restore, which tmux sessions to reattach,
  * and which dead terminal tabs need new sessions.
@@ -90,6 +114,17 @@ export async function computeRestoredTabs(
     ? fetchArchivedOrchestratorThreadIds()
     : Promise.resolve<Set<string> | null>(null);
 
+  // Stale-lane sweep (2026-07-12): packet-bound chat tabs whose lane left the
+  // active registry (archived/pruned) restore as zombie pills in the tab
+  // strip forever — nothing else cleans them. Probe runs in parallel, gated
+  // on actually having a packet-bound tab.
+  const needsLaneCheck = saved.tabs.some((tab) => (
+    (tab.kind ?? 'terminal') === 'chat' && Boolean(tab.orchestrationPacket?.packetId)
+  ));
+  const activeLanePacketIdsPromise = needsLaneCheck
+    ? fetchActiveLanePacketIds()
+    : Promise.resolve<Set<string> | null>(null);
+
   let alive: Set<string>;
   let liveRuntimeSessionKeys: Set<PersistedRuntimeSessionKey>;
 
@@ -119,6 +154,8 @@ export async function computeRestoredTabs(
   if (cancelled?.()) return null;
 
   const archivedOrchestratorThreadIds = await archivedThreadIdsPromise;
+  if (cancelled?.()) return null;
+  const activeLanePacketIds = await activeLanePacketIdsPromise;
   if (cancelled?.()) return null;
 
   const currentPreferredRepo = options.preferredRepo;
@@ -215,6 +252,10 @@ export async function computeRestoredTabs(
     }
 
     if (tabKind === 'chat') {
+      // Stale-lane sweep: only a POSITIVE "lane not active" verdict drops a
+      // packet-bound tab (fail-open on null probe).
+      const badgePacketId = savedTab.orchestrationPacket?.packetId?.trim();
+      if (badgePacketId && activeLanePacketIds && !activeLanePacketIds.has(badgePacketId)) continue;
       // Reclassify runtime from sessionKey prefix if persisted value is stale.
       // Tabs saved pre-v0.1.24 persisted chatRuntime='codex' even for dispatched
       // Gemini/opencode packets, and `formatPersistedRuntimeSessionKey` then
