@@ -4,6 +4,7 @@ import { Fragment, forwardRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
+import { ShimmerLine } from './turn-line';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -266,6 +267,13 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
               Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
             </div>
           </div>
+        ) : null}
+
+        {displayWaiting && !isCompacting && isOrchestratorMode && displayMessages.length > 0 ? (
+          // Cursor's trailing anchor (vid2 study): while the turn is live, a
+          // shimmering status line sits at the bottom of the process block and
+          // is pushed down as new lines land above it. Text, never a bubble.
+          <ShimmerLine style={{ alignSelf: 'flex-start' }}>Planning next moves</ShimmerLine>
         ) : null}
 
         {displayWaiting && !isCompacting && !isOrchestratorMode ? (

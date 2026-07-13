@@ -28,12 +28,12 @@ export function FileEditDiffPeek({ state }: { state: PeekOutcome | 'loading' | n
     return splitUnifiedDiff(state.diff).filter((line) => line.kind !== 'meta');
   }, [state]);
 
+  // Cursor anatomy (vid2 study): an inline block slightly darker than the
+  // chat, NO outer border — the diff reads as part of the document flow, with
+  // a colored gutter bar carrying the add/remove signal per row.
   const shellStyle = {
     marginTop: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderStyle: 'solid' as const,
-    borderColor: 'var(--t-divider-subtle)',
+    borderRadius: 6,
     background: 'var(--t-terminal-bg, var(--t-bg-card))',
     overflow: 'hidden',
   };
@@ -88,16 +88,22 @@ export function FileEditDiffPeek({ state }: { state: PeekOutcome | 'loading' | n
         <div style={{ width: '100%', minWidth: 0 }}>
           {lines.map((line, index) => {
             const tone = diffLineTone(line.kind);
+            const gutterBar = line.kind === 'add'
+              ? 'var(--t-terminal-ansi-bright-green, #16a34a)'
+              : line.kind === 'del'
+                ? 'var(--t-terminal-ansi-bright-red, #ef4444)'
+                : 'transparent';
             return (
               <div
                 key={`${index}:${line.text}`}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '44px minmax(0, 1fr)',
+                  gridTemplateColumns: '3px 44px minmax(0, 1fr)',
                   minHeight: 17,
                   background: tone.background,
                 }}
               >
+                <span aria-hidden="true" style={{ background: gutterBar }} />
                 <span
                   style={{
                     color: 'var(--t-text-faint)',
