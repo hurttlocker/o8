@@ -54,9 +54,11 @@ interface DirectiveSummary {
   projects: string[];
   /** #769 — last 3 trailer lines newest-first; empty until a merge appends one. */
   recentMerges: string[];
+  /** Absolute path of the backing markdown file — lets surfaces open it. */
+  file: string | null;
 }
 
-function toSummary(parsed: ParsedDirective): DirectiveSummary {
+function toSummary(parsed: ParsedDirective, file: string | null = null): DirectiveSummary {
   return {
     id: parsed.id,
     title: parsed.title,
@@ -66,6 +68,7 @@ function toSummary(parsed: ParsedDirective): DirectiveSummary {
     body: parsed.body,
     projects: parsed.projects,
     recentMerges: [],
+    file,
   };
 }
 
@@ -95,6 +98,7 @@ export async function GET(req: NextRequest) {
 
     const repoPath = req.nextUrl.searchParams.get('repoPath')?.trim() || null;
 
+    const fileByDirective = new WeakMap<ParsedDirective, string>();
     const parsedAll: ParsedDirective[] = withTimingSync('recall.directives', () => {
       const entries = readdirSync(directivesDir).filter((name) => name.endsWith('.md'));
       const out: ParsedDirective[] = [];
@@ -103,7 +107,10 @@ export async function GET(req: NextRequest) {
           const raw = readFileSync(join(directivesDir, name), 'utf-8');
           const fallbackId = name.replace(/\.md$/, '');
           const parsed = parseDirectiveFile(raw, fallbackId);
-          if (parsed) out.push(parsed);
+          if (parsed) {
+            fileByDirective.set(parsed, join(directivesDir, name));
+            out.push(parsed);
+          }
         } catch (error) {
           console.warn(`[cortex-directives] Failed to read ${name}:`, error);
         }
@@ -128,7 +135,7 @@ export async function GET(req: NextRequest) {
       parsed = parsedAll.filter((d) => directiveAppliesToActiveProject(d, projectScope));
     }
 
-    const directives = parsed.map(toSummary);
+    const directives = parsed.map((d) => toSummary(d, fileByDirective.get(d) ?? null));
 
     // #769 — Hydrate recent-merge trailers from the same markdown files.
     // The helper re-reads the dir, but the cost is trivial (≤dozens of small
