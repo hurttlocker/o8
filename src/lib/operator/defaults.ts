@@ -63,6 +63,8 @@ import {
   envTelemetryOptIn,
   envThinkingEffort,
   envWorkersUseBrain,
+  envWorktreeMaxCount,
+  envWorktreeMaxTotalGb,
   type OverlapGateMode,
   type ClassAComposer,
   type WorkersUseBrain,
@@ -340,6 +342,22 @@ export interface OperatorDefaults {
    * browser instead. Env: `O8_PR_LINK_DESTINATION`.
    */
   prLinkDestination: PrLinkDestination;
+  /**
+   * Retention ceiling for `.cortex-worktrees` packet worktrees — the max number
+   * of SAFE (terminal-lane or orphan, clean git status) worktrees kept per repo
+   * before the existing prune sweep reclaims the oldest first. **Default 20.**
+   * Enforced only at the prune seam; never deletes an active/reviewing lane's
+   * tree or one with uncommitted changes. `0` = unbounded (guard off). Env:
+   * `O8_WORKTREE_MAX_COUNT`.
+   */
+  worktreeMaxCount: number;
+  /**
+   * Retention ceiling on the total on-disk size (GB) of safe `.cortex-worktrees`
+   * worktrees per repo. **Default 20.** Beyond this, the prune sweep removes the
+   * oldest safe+clean worktrees until the measured total drops under the cap.
+   * `0` = unbounded (guard off). Env: `O8_WORKTREE_MAX_TOTAL_GB`.
+   */
+  worktreeMaxTotalGb: number;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -411,6 +429,11 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   commitAttributionEnabled: false,
   // PR rows open the embedded PrPanel, as before.
   prLinkDestination: 'in-app',
+  // Generous defaults — the guard only ever removes SAFE (terminal/orphan +
+  // clean) worktrees oldest-first, so a fresh install behaves as before until a
+  // repo genuinely accumulates >20 stale packet worktrees or >20GB of them.
+  worktreeMaxCount: 20,
+  worktreeMaxTotalGb: 20,
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -507,6 +530,8 @@ interface StoredOperatorDefaults {
   branchPrefix?: string;
   commitAttributionEnabled?: boolean;
   prLinkDestination?: PrLinkDestination;
+  worktreeMaxCount?: number;
+  worktreeMaxTotalGb?: number;
 }
 
 type FileOperatorDefaults = Partial<OperatorDefaults> & {
@@ -648,6 +673,14 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isPrLinkDestination(stored.prLinkDestination)) {
     result.prLinkDestination = stored.prLinkDestination;
   }
+  // Retention limits: accept any finite >= 0 (0 = unbounded/off). Junk falls
+  // through to the fallback rather than corrupting the guard.
+  if (typeof stored.worktreeMaxCount === 'number' && Number.isFinite(stored.worktreeMaxCount) && stored.worktreeMaxCount >= 0) {
+    result.worktreeMaxCount = Math.floor(stored.worktreeMaxCount);
+  }
+  if (typeof stored.worktreeMaxTotalGb === 'number' && Number.isFinite(stored.worktreeMaxTotalGb) && stored.worktreeMaxTotalGb >= 0) {
+    result.worktreeMaxTotalGb = stored.worktreeMaxTotalGb;
+  }
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -695,6 +728,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envBranch = envBranchPrefix();
   const envCommitAttrib = envCommitAttribution();
   const envPrLink = envPrLinkDestination();
+  const envWtCount = envWorktreeMaxCount();
+  const envWtSize = envWorktreeMaxTotalGb();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
   const subscriptionProfile =
@@ -762,6 +797,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     branchPrefix: envBranch ?? fileValues.branchPrefix ?? OPERATOR_DEFAULTS_FALLBACK.branchPrefix,
     commitAttributionEnabled: envCommitAttrib ?? fileValues.commitAttributionEnabled ?? OPERATOR_DEFAULTS_FALLBACK.commitAttributionEnabled,
     prLinkDestination: envPrLink ?? fileValues.prLinkDestination ?? OPERATOR_DEFAULTS_FALLBACK.prLinkDestination,
+    worktreeMaxCount: envWtCount ?? fileValues.worktreeMaxCount ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxCount,
+    worktreeMaxTotalGb: envWtSize ?? fileValues.worktreeMaxTotalGb ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxTotalGb,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -811,6 +848,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     branchPrefix: envBranch !== null ? 'env' : fileValues.branchPrefix !== undefined ? 'file' : 'default',
     commitAttributionEnabled: envCommitAttrib !== null ? 'env' : fileValues.commitAttributionEnabled !== undefined ? 'file' : 'default',
     prLinkDestination: envPrLink !== null ? 'env' : fileValues.prLinkDestination !== undefined ? 'file' : 'default',
+    worktreeMaxCount: envWtCount !== null ? 'env' : fileValues.worktreeMaxCount !== undefined ? 'file' : 'default',
+    worktreeMaxTotalGb: envWtSize !== null ? 'env' : fileValues.worktreeMaxTotalGb !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -1034,6 +1073,18 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.prLinkDestination = update.prLinkDestination;
   }
+  if (update.worktreeMaxCount !== undefined) {
+    if (!Number.isFinite(update.worktreeMaxCount) || update.worktreeMaxCount < 0) {
+      throw new Error('worktreeMaxCount must be a non-negative number (0 = unbounded).');
+    }
+    stored.worktreeMaxCount = Math.min(1000, Math.floor(update.worktreeMaxCount));
+  }
+  if (update.worktreeMaxTotalGb !== undefined) {
+    if (!Number.isFinite(update.worktreeMaxTotalGb) || update.worktreeMaxTotalGb < 0) {
+      throw new Error('worktreeMaxTotalGb must be a non-negative number (0 = unbounded).');
+    }
+    stored.worktreeMaxTotalGb = Math.min(10000, update.worktreeMaxTotalGb);
+  }
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
@@ -1205,6 +1256,16 @@ export function resolveCommitAttributionEnabledSync(): boolean {
 /** Where a PR row opens — embedded panel or OS browser (default 'in-app'). */
 export function resolvePrLinkDestinationSync(): PrLinkDestination {
   return getOperatorDefaultsSync().values.prLinkDestination;
+}
+
+/**
+ * `.cortex-worktrees` retention ceilings (count + total GB) read by the
+ * WorktreeManager prune seam. `0` on either axis = that axis is unbounded.
+ * env > file > fallback (default 20 / 20).
+ */
+export function resolveWorktreeRetentionSync(): { maxCount: number; maxTotalGb: number } {
+  const values = getOperatorDefaultsSync().values;
+  return { maxCount: values.worktreeMaxCount, maxTotalGb: values.worktreeMaxTotalGb };
 }
 
 /** The Targeting Machine's cheap triage/rationale tier (env > file > fallback). */

@@ -306,6 +306,24 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.prLinkDestination = body.prLinkDestination;
   }
 
+  if (body.worktreeMaxCount !== undefined) {
+    const raw = body.worktreeMaxCount;
+    const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error('worktreeMaxCount must be a non-negative number (0 = unbounded).');
+    }
+    update.worktreeMaxCount = Math.floor(parsed);
+  }
+
+  if (body.worktreeMaxTotalGb !== undefined) {
+    const raw = body.worktreeMaxTotalGb;
+    const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error('worktreeMaxTotalGb must be a non-negative number (0 = unbounded).');
+    }
+    update.worktreeMaxTotalGb = parsed;
+  }
+
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
     if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
     const o = raw as Record<string, unknown>;

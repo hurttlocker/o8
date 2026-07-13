@@ -76,6 +76,8 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'models', tabLabel: 'Models', group: "Orchestrator", label: "Orchestrator model", description: "Which Claude model orchestrates", keywords: ['opus', 'sonnet', 'orchestrator'] },
   { tab: 'models', tabLabel: 'Models', group: "API keys", label: "API keys", description: "Bring your own provider keys", keywords: ['byok', 'anthropic', 'openai', 'openrouter', 'gemini', 'key'] },
   { tab: 'models', tabLabel: 'Models', group: "Local models", label: "Local models", description: "Ollama endpoint for Brain and dictation polish", founders: true, keywords: ['ollama', 'local', 'offline'] },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Worktrees", label: "Max worktrees", description: "Cap how many packet worktrees stay on disk — oldest safe ones reclaimed first", keywords: ['worktree', 'retention', 'disk', 'workspace', 'cleanup'] },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Worktrees", label: "Max total size (GB)", description: "Disk ceiling for .cortex-worktrees across repos", keywords: ['worktree', 'disk', 'size', 'storage'] },
   { tab: 'indexing', tabLabel: 'Indexing', group: "Repositories", label: "Repository index", description: "Per-repo index status with a Reindex action", keywords: ['index', 'reindex', 'codebase', 'cortex', 'search'] },
   { tab: 'indexing', tabLabel: 'Indexing', group: "Engineering Brain", label: "Brain knowledge", description: "Directives and ledger outcomes the Brain cites", keywords: ['brain', 'memory', 'directives', 'cortex'] },
   { tab: 'about', tabLabel: 'About', group: "Developer", label: "Preview onboarding", description: "Runs the flow without resetting state (dev builds only)" },
