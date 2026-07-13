@@ -43,7 +43,27 @@ function git(args) {
 
 export function defaultRange() {
   try {
-    return `${git(['describe', '--tags', '--abbrev=0'])}..HEAD`;
+    const latest = git(['describe', '--tags', '--abbrev=0']);
+    // Ship-time trap: release.mjs runs AFTER `npm version patch` has already
+    // tagged HEAD, so `<latest>..HEAD` is EMPTY — every Fixes-Report trailer
+    // between the previous release and this one would be silently dropped and
+    // the whole receipt loop would never fire. When HEAD is exactly the latest
+    // tag, the fixes to resolve are the ones since the PREVIOUS tag.
+    let headTag = null;
+    try {
+      headTag = git(['describe', '--tags', '--exact-match', 'HEAD']);
+    } catch {
+      // HEAD is not tagged — the normal ad-hoc `publish:fixed` case.
+    }
+    if (headTag && headTag === latest) {
+      try {
+        return `${git(['describe', '--tags', '--abbrev=0', `${latest}^`])}..HEAD`;
+      } catch {
+        // The latest tag is the only tag in history.
+        return 'HEAD~20..HEAD';
+      }
+    }
+    return `${latest}..HEAD`;
   } catch {
     // No tags yet (fresh clone, or a repo that has never released).
     return 'HEAD~20..HEAD';
@@ -55,11 +75,15 @@ export function defaultRange() {
  * Accepts `Fixes-Report: A7F3K2` and `Fixes-Report: A7F3K2, B2M9QP`.
  */
 export function collectFixedIds(range) {
-  // \x00-delimited so a commit body with newlines cannot corrupt the parse.
-  const raw = git(['log', range, '--format=%H%x00%s%x00%b%x00%x00']);
+  // Field-delimited with \x00 (git forbids NUL in messages) and RECORD-LED by
+  // \x01. The old `\x00\x00` record TERMINATOR was ambiguous: a commit with an
+  // EMPTY body ("0.1.592" — every `npm version patch` commit) emitted three
+  // consecutive NULs, shifting the framing so the NEXT commit's sha parsed
+  // empty and its Fixes-Report trailers silently dropped.
+  const raw = git(['log', range, '--format=%x01%H%x00%s%x00%b']);
   const found = new Map();
 
-  for (const entry of raw.split('\x00\x00')) {
+  for (const entry of raw.split('\x01')) {
     const [sha, subject, body] = entry.split('\x00');
     if (!sha?.trim()) continue;
     const text = `${subject ?? ''}\n${body ?? ''}`;
