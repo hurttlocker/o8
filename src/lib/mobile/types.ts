@@ -250,7 +250,7 @@ export interface MobileTranscriptToolCall {
   id?: string | null;
   name: string;
   args?: Record<string, unknown>;
-  status?: 'calling' | 'running' | 'done';
+  status?: 'calling' | 'running' | 'done' | 'error';
   preview?: string;
   result?: string;
   sideEffectClass?: ToolSideEffectClass;

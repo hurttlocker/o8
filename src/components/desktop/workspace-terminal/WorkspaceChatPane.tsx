@@ -128,7 +128,8 @@ function WorkspaceChatPaneBase({
     claudeCodeEvents: chat.activeClaudeCodeEvents,
     toolCalls: chat.activeToolCalls.map((tool) => ({
       name: tool.name,
-      status: tool.status ?? 'running',
+      // 3-status pane — the transcript's 'error' status has no badge here.
+      status: tool.status === 'error' ? 'done' as const : (tool.status ?? 'running'),
       args: tool.args,
       preview: tool.preview,
     })),
