@@ -23,13 +23,34 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { buildManifest, defaultRange, readPublished, resolveNewFixes } from './lib/fixed-reports.mjs';
 import { publishFixed } from './publish-fixed.mjs';
+import { verifyNativeBundle } from './native-bundle.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
 const root = process.cwd();
+
+function runNativeGate(serverRoot) {
+  verifyNativeBundle(serverRoot);
+  console.log('[release] native addon architecture gate passed');
+}
+
+if (process.argv[2] === '--verify-native-bundle') {
+  const target = process.argv[3];
+  if (!target) {
+    console.error('[release] usage: node scripts/release.mjs --verify-native-bundle <server-root>');
+    process.exit(1);
+  }
+  try {
+    runNativeGate(resolve(target));
+    process.exit(0);
+  } catch (error) {
+    console.error(`[release] FATAL: ${error.message}`);
+    process.exit(1);
+  }
+}
 
 // Node ABI guard: better-sqlite3 is compiled against the build-machine's Node
 // ABI (NODE_MODULE_VERSION). A v0.1.119 ship built on Node 25 produced an
@@ -59,6 +80,15 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
     console.error(`[release]   TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) cargo tauri build`);
     process.exit(1);
   }
+}
+
+const PACKAGED_SERVER = join(BUNDLE, 'macos', 'o8.app', 'Contents', 'Resources', 'server');
+try {
+  runNativeGate(PACKAGED_SERVER);
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish a bundle without verified x64 + arm64 native addons.');
+  process.exit(1);
 }
 
 // #1163: OPT-IN. The gate launches a disposable 2nd o8.app copy from /tmp that
