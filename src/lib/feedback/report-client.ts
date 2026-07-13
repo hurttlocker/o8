@@ -71,13 +71,20 @@ export function fileToReportImage(
   });
 }
 
-/** POST a report to the team Discord intake. `route` records where it fired. */
+/**
+ * POST a report to the private team intake. `route` records where it fired.
+ *
+ * Resolves the short report id the server assigned. That id is the operator's
+ * receipt: a commit carrying `Fixes-Report: <id>` announces the fix in the public
+ * #fixed channel, credited to them. Show it — an id they never saw is a fix they
+ * can never connect back to the thing they reported.
+ */
 export async function submitReport(input: {
   category: ReportCategory;
   message: string;
   route: string;
   image?: ReportImage | null;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: true; reportId: string | null } | { ok: false; error: string }> {
   try {
     const response = await fetch('/api/feedback/report', {
       method: 'POST',
@@ -90,11 +97,11 @@ export async function submitReport(input: {
         image: input.image ? { dataUrl: input.image.dataUrl, name: input.image.name } : undefined,
       }),
     });
-    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; reportId?: string } | null;
     if (!response.ok || !body?.ok) {
       return { ok: false, error: body?.error || `Report failed (HTTP ${response.status}).` };
     }
-    return { ok: true };
+    return { ok: true, reportId: typeof body.reportId === 'string' ? body.reportId : null };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Report failed.' };
   }

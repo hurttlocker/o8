@@ -34,6 +34,7 @@ export function ReportIssueHost() {
   const [image, setImage] = useState<ReportImage | null>(null);
   const [state, setState] = useState<SendState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const reset = useCallback(() => {
@@ -41,6 +42,7 @@ export function ReportIssueHost() {
     setImage(null);
     setState('idle');
     setError(null);
+    setReportId(null);
   }, []);
 
   // Capture the window FIRST (modal still closed, so the shot is the app state,
@@ -118,6 +120,7 @@ export function ReportIssueHost() {
     const result = await submitReport({ category, message: trimmed, route, image });
     if (result.ok) {
       setState('sent');
+      setReportId(result.reportId);
       setMessage('');
       setImage(null);
     } else {
@@ -176,7 +179,7 @@ export function ReportIssueHost() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>Report an issue</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--t-text-muted)' }}>beta · one-way</span>
+            <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--t-text-muted)' }}>beta · private</span>
             <button
               type="button"
               aria-label="Close"
@@ -270,7 +273,10 @@ export function ReportIssueHost() {
         {/* Footer */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <span style={{ fontSize: 12, fontWeight: 300, color: state === 'error' ? '#ef4444' : state === 'sent' ? 'var(--t-accent)' : 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {state === 'sent' ? 'Sent — thanks ✊🏽' : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_REPORT_MESSAGE}`}
+            {state === 'sent'
+              // The id is their receipt — it's how the fix finds its way back to them.
+              ? (reportId ? `Sent — report ${reportId}` : 'Sent — thanks')
+              : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_REPORT_MESSAGE}`}
           </span>
           {state === 'sent' ? (
             <button

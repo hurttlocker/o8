@@ -16,6 +16,8 @@ type ReportState = 'idle' | 'sending' | 'sent' | 'error';
 interface ReportResponse {
   ok?: boolean;
   error?: string;
+  /** Short id the fix reaches back through — a commit trailer publishes it to #fixed. */
+  reportId?: string;
 }
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -33,6 +35,7 @@ export function ReportIssueSection() {
   const [image, setImage] = useState<AttachedImage | null>(null);
   const [state, setState] = useState<ReportState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmedMessage = message.trim();
@@ -132,6 +135,7 @@ export function ReportIssueSection() {
         return;
       }
       setState('sent');
+      setReportId(typeof body.reportId === 'string' ? body.reportId : null);
       setMessage('');
       setImage(null);
     } catch (sendError) {
@@ -349,7 +353,9 @@ export function ReportIssueSection() {
 
           {state === 'sent' ? (
             <StatusLine tone="success">
-              Sent — thanks. We&apos;ll pick it up from the report channel.
+              {reportId
+                ? `Sent — report ${reportId}. When it ships fixed, it lands in #fixed with your name on it.`
+                : 'Sent — thanks. We’ll pick it up from the report channel.'}
             </StatusLine>
           ) : null}
 

@@ -31,6 +31,7 @@
     "research:session:3": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 3",
     "research:daily": "tsx scripts/research/run-cortex-autoresearch.ts --trigger daily --max-loops 1",
     "research:post-merge": "tsx scripts/research/run-cortex-autoresearch.ts --trigger post-merge --max-loops 1",
+    "publish:fixed": "node scripts/publish-fixed.mjs",
     "measure:render": "bash scripts/measure-render-speed.sh",
     "measure:cli": "bash scripts/measure-cli.sh",
     "measure:socket": "bash scripts/measure-socket.sh",
