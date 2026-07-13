@@ -608,6 +608,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
             opacity: activeTab?.url ? 1 : 0.3,
+            transition: 'background 140ms ease',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -626,6 +627,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
             opacity: activeTab?.url ? 1 : 0.3,
+            transition: 'background 140ms ease',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -694,12 +696,13 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             width: 22, height: 22, border: 'none', borderRadius: 6,
             background: designActive ? 'var(--t-input-bg)' : 'transparent',
             cursor: 'pointer', padding: 0,
+            transition: 'background 140ms ease',
           }}
           onMouseEnter={(e) => { if (!designActive) e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = designActive ? 'var(--t-input-bg)' : 'transparent'; }}
         >
-          {/* Paintbrush */}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={designActive ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          {/* Paintbrush — stroke crossfades to brand-orange when the mode arms. */}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={designActive ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', transition: 'stroke 140ms ease' }}>
             <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
             <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
           </svg>
@@ -720,6 +723,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
             opacity: activeTab?.url ? 1 : 0.3,
+            transition: 'background 140ms ease',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -745,6 +749,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
             opacity: activeTab?.url ? 1 : 0.3,
+            transition: 'background 140ms ease',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
