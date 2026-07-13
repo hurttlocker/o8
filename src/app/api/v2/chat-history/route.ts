@@ -14,6 +14,7 @@ import { performance } from 'node:perf_hooks';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
+import { maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
@@ -316,6 +317,10 @@ export async function POST(request: NextRequest) {
     orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
   }));
 
+  // Auto-title (2026-07-13): once the thread has a real exchange, a free
+  // model names it properly — fire-and-forget, never blocks the persist.
+  if (finalMessages.length >= 2) maybeQueueThreadAutoTitle(filePath);
+
   return NextResponse.json({ ok: true });
 }
 
@@ -343,7 +348,11 @@ export async function PATCH(request: NextRequest) {
 
   if (body.starred !== undefined) data.starred = body.starred;
   if (body.pinned !== undefined) data.pinned = body.pinned;
-  if (body.title !== undefined) data.title = body.title;
+  if (body.title !== undefined) {
+    data.title = body.title;
+    // Operator rename is sacred — the auto-titler never overwrites it.
+    data.titleSource = 'operator';
+  }
   if (body.planText !== undefined) data.planText = normalizePlanText(body.planText) ?? null;
   if (body.repoName !== undefined) data.repoName = body.repoName;
   if (body.repoPath !== undefined) data.repoPath = body.repoPath;
