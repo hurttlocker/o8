@@ -776,7 +776,16 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
   const proc = session.proc;
   if (!proc) return;
 
+  // Every handler below is identity-guarded: after a recycle
+  // (killOrchestratorProc nulls session.proc, then a NEW proc spawns), the OLD
+  // proc's stdout tail / close / error events still fire on the event loop.
+  // Without the guard the old close settled the NEW turn as "proc exited with
+  // code 143" and clobbered session.proc — every recycle-triggering turn died
+  // instantly (live-hit 2026-07-13). Deliberate kill paths (timeout, interrupt,
+  // LOCKOUT, recycle) settle their turn explicitly before killing, so skipping
+  // the stale close loses nothing.
   proc.stdout?.on('data', (chunk: Buffer) => {
+    if (session.proc !== proc) return;
     w.stdoutLineBuffer += chunk.toString('utf-8');
     const lines = w.stdoutLineBuffer.split('\n');
     w.stdoutLineBuffer = lines.pop() ?? '';
@@ -786,11 +795,13 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
   });
 
   proc.stderr?.on('data', (chunk: Buffer) => {
+    if (session.proc !== proc) return;
     w.stderrBuffer += chunk.toString('utf-8');
     if (w.stderrBuffer.length > 4_000) w.stderrBuffer = w.stderrBuffer.slice(-4_000);
   });
 
   proc.on('error', (err) => {
+    if (session.proc !== proc) return;
     clearIdleTimer(w);
     session.proc = null;
     w.procConfig = null;
@@ -806,6 +817,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
   });
 
   proc.on('close', (code) => {
+    if (session.proc !== proc) return;
     clearIdleTimer(w);
     session.proc = null;
     w.procConfig = null;
