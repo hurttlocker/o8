@@ -138,6 +138,22 @@ export async function callCodebaseMemoryTool(
       });
     });
 
+    // EPIPE from a dying child arrives ASYNCHRONOUSLY on the stdin stream —
+    // the try/catch around stdin.write() below cannot catch it, and without
+    // this listener Node escalates it to an uncaughtException that took down
+    // dispatch ticks (seen live 2026-07-12: buildPacketPrompt → traceSymbols
+    // → write EPIPE → ⨯ uncaughtException).
+    child.stdin?.on('error', (err: Error) => {
+      if (resolved) return;
+      clearTimeout(timeout);
+      finish({
+        ok: false,
+        error: `Child stdin error — ${err.message}`,
+        stderr: stderrBuf || undefined,
+        durationMs: Date.now() - started,
+      });
+    });
+
     child.stderr?.on('data', (chunk: Buffer) => {
       stderrBuf += chunk.toString('utf-8');
       // Cap stderr buffer to avoid runaway memory.
