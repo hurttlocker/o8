@@ -213,6 +213,9 @@ export interface AgentPanelProps {
   onCreateWorkspaceTerminal?: () => void;
   onOpenCommandPalette?: () => void;
   onOpenProjectManagement?: () => void;
+  onOpenSettings?: () => void;
+  onOpenMobilePairing?: () => void;
+  onPortPreview?: (port: number, url: string, repo?: string) => void;
   selectedRepoReadiness?: RepoReadiness | null;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;

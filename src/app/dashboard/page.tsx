@@ -42,7 +42,6 @@ import { ReportIssueHost } from '@/components/desktop/ReportIssueHost';
 import {
   OPEN_MOBILE_PAIRING_EVENT,
   OPEN_SETTINGS_TAB_EVENT,
-  REQUEST_ADD_REPO_EVENT,
   type OpenSettingsTabDetail,
 } from '@/lib/desktop/events';
 // ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
@@ -3477,8 +3476,8 @@ function DashboardInner() {
   // (measured 2026-07-10, ~24fps webview during drag), so routing every
   // mousemove through setState makes the content reflow in chunky steps
   // behind the cursor (Q's retest recording). During the drag we write the
-  // width straight onto the column + footer DOM nodes — the browser reflows
-  // the flex layout natively at frame rate — and commit state ONCE on
+  // width straight onto the column DOM node — the browser reflows the flex
+  // layout natively at frame rate — and commit state ONCE on
   // mouseup. The flag is released a frame after the commit so the framer
   // transitions never see the width jump as something to animate.
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -3487,8 +3486,6 @@ function DashboardInner() {
     const startX = e.clientX;
     const startW = leftWidth;
     const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
-    const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
-    const shadowEl = document.querySelector<HTMLElement>('[data-o8-left-card-shadow]');
     const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
     let frame = 0;
     let lastX = startX;
@@ -3499,8 +3496,6 @@ function DashboardInner() {
         frame = 0;
         const w = widthAt(lastX);
         if (colEl) colEl.style.width = `${w}px`;
-        if (footEl) footEl.style.width = `${w}px`;
-        if (shadowEl) shadowEl.style.width = `${w - 10}px`;
       });
     };
     const onUp = () => {
@@ -4407,6 +4402,14 @@ function DashboardInner() {
       onCreateWorkspaceTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
       onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
+      onOpenSettings={toggleSettingsOverlay}
+      onOpenMobilePairing={openMobilePairing}
+      onPortPreview={(_port, url) => {
+        setO8BrowserUrl(url);
+        setO8ActiveTab('browser');
+        setRightPanelKind('o8');
+        openRightPanelFromUser();
+      }}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
       onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
       onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
@@ -4736,7 +4739,7 @@ function DashboardInner() {
         const effectiveLeftWidth = leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth;
         // Shared header + content — composed differently per surface (see below):
         // glass floats the panel as a Lisse card with the header/footer
-        // transparent; solid keeps the merged paper card with the header inside.
+        // transparent; solid keeps the paper card with the header inside.
         const leftHeader = (
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
@@ -4782,15 +4785,11 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-style floating card. 5px buffer on top/left/right.
-            // SOLID: paddingBottom 0 so the panel merges flush with the
-            // DesktopStatusBar footer (flat-bottom panel + flat-top footer)
-            // into one continuous card. GLASS: 5px gap so the panel floats as
-            // a self-contained Lisse card above the now-transparent footer.
+            // Claude-style floating card with a 5px buffer on every edge.
             paddingTop: 5,
             paddingLeft: 5,
             paddingRight: 5,
-            paddingBottom: effectiveGlassSurface ? 5 : 0,
+            paddingBottom: 5,
           }}
         >
           {effectiveGlassSurface ? (
@@ -4818,9 +4817,7 @@ function DashboardInner() {
               </SmoothCorners>
             </>
           ) : (
-            // SOLID — keep the merged-card design: panel rounded-top /
-            // flat-bottom meets the DesktopStatusBar footer (flat-top /
-            // rounded-bottom) as one continuous paper card, header inside.
+            // SOLID — self-contained paper card with the sidebar footer inside.
             <div
               data-chrome-surface="true"
               style={{
@@ -4831,15 +4828,10 @@ function DashboardInner() {
                 overflow: 'hidden',
                 borderTopLeftRadius: 14,
                 borderTopRightRadius: 14,
-                borderBottomLeftRadius: 0,
-                borderBottomRightRadius: 0,
+                borderBottomLeftRadius: 14,
+                borderBottomRightRadius: 14,
                 background: 'var(--t-panel-solid)',
-                // No shadow here — a per-half shadow visibly dies at the
-                // footer seam (the 31px footer card can't develop the same
-                // lateral penumbra as this 700px+ panel). The merged card's
-                // single continuous shadow is cast by the fixed-position
-                // caster in DesktopStatusBar (data-o8-left-card-shadow),
-                // which spans panel + footer as one box. Q report 2026-07-11.
+                boxShadow: 'var(--t-panel-shadow)',
               } as React.CSSProperties}
             >
               {leftHeader}
@@ -5354,7 +5346,6 @@ function DashboardInner() {
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         compact={compactShell}
-        glassSurface={effectiveGlassSurface}
         parkedLanes={parkedLanes}
         onOpenReviewLane={handleOpenReviewLane}
         onOpenAwaitingMerge={handleOpenAwaitingMerge}
@@ -5364,19 +5355,6 @@ function DashboardInner() {
         onOpenShortcuts={() => setShortcutsOpen(true)}
         leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
-        onOpenSettings={toggleSettingsOverlay}
-        onOpenMobilePairing={openMobilePairing}
-        onAddRepo={() => {
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent(REQUEST_ADD_REPO_EVENT));
-          }
-        }}
-        onPortPreview={(_port, url) => {
-          setO8BrowserUrl(url);
-          setO8ActiveTab('browser');
-          setRightPanelKind('o8');
-          openRightPanelFromUser();
-        }}
       />
 
       <GuidedDiscoveryCoachmark
