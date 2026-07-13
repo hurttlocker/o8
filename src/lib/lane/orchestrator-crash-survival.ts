@@ -186,6 +186,7 @@ export function tailJsonlFile(options: {
   fromOffset?: number;
   alive: () => boolean;
   onLine: (line: string) => boolean | void;
+  onOffset?: (offset: number) => void;
   onEnd: () => void;
   intervalMs?: number;
 }): () => void {
@@ -196,6 +197,7 @@ export function tailJsonlFile(options: {
     if (stopped) return;
     const next = readJsonlLines(options.filePath, offset);
     offset = next.offset;
+    options.onOffset?.(offset);
     for (const line of next.lines) {
       if (options.onLine(line) === false) {
         stopped = true;

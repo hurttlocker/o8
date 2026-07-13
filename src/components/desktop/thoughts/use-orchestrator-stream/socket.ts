@@ -44,6 +44,10 @@ interface CreateOrchestratorMessageHandlerOptions {
    * the auto-compact effect reads this to pick the metered vs global threshold.
    */
   lastBackendRef?: RefLike<string | null>;
+  /** Backend selected for the locally active turn, used by Stop/re-subscribe. */
+  activeTurnBackendRef?: RefLike<string | null>;
+  /** Transcript-bearing events observed during the locally active turn. */
+  turnTranscriptEventCountRef?: RefLike<number>;
   lastEventAtRef: RefLike<number>;
   messagesRef: RefLike<MobileTranscriptEntry[]>;
   onOrchestratorActivity?: (event: {
@@ -127,10 +131,18 @@ export function createOrchestratorMessageHandler(
       observedAt,
     });
 
-    // Track the active backend BEFORE seq-dedup/snapshot gating — a snapshot or
-    // replayed event is still truthful about which backend owns the session.
+    // Replay seq values are scoped to one backend session. A backend switch in
+    // the same UI thread starts a new sequence at 1, so carryover from the old
+    // backend must be discarded before de-duplication or the whole new stream
+    // is mistaken for replayed output (#1557).
     if (options.lastBackendRef && typeof msg.data?.backend === 'string') {
+      if (options.lastBackendRef.current && options.lastBackendRef.current !== msg.data.backend) {
+        options.lastSeqRef.current = 0;
+      }
       options.lastBackendRef.current = msg.data.backend;
+      if (options.activeTurnBackendRef && msg.data?.snapshot !== true) {
+        options.activeTurnBackendRef.current = msg.data.backend;
+      }
     }
 
     // Replay de-dup: live + replayed events carry a monotonic per-session seq.
@@ -145,6 +157,12 @@ export function createOrchestratorMessageHandler(
     if (msg.data?.snapshot !== true) {
       options.eventCountRef.current += 1;
       options.lastEventAtRef.current = observedAt;
+      if (
+        options.turnTranscriptEventCountRef
+        && (msg.event === 'output' || msg.event === 'tool-use' || msg.event === 'tool-result' || msg.event === 'error')
+      ) {
+        options.turnTranscriptEventCountRef.current += 1;
+      }
     }
 
     // #register-mcp — transient banner notices ride the same channel but
@@ -313,6 +331,9 @@ export function createOrchestratorMessageHandler(
           }
           if (newStatus === 'dead') {
             options.finalizeFirstTurnPlanCapture();
+          }
+          if (newStatus === 'ready' && options.activeTurnBackendRef) {
+            options.activeTurnBackendRef.current = null;
           }
         } else if (newStatus === 'starting') {
           options.statusRef.current = 'connecting';

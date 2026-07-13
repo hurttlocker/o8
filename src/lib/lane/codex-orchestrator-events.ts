@@ -40,8 +40,8 @@ export function handleCodexJsonLine(
   state: CodexLineHandlerState,
   onEvent: (event: OrchestratorEvent) => void,
   options: { isLocalModel: boolean },
-): void {
-  if (!line.trim()) return;
+): boolean {
+  if (!line.trim()) return false;
   try {
     const parsed = JSON.parse(line) as ParsedCodexLine;
     const type = String(parsed.type ?? '');
@@ -49,20 +49,20 @@ export function handleCodexJsonLine(
 
     if (type === 'thread.started' && typeof parsed.thread_id === 'string') {
       state.threadId = parsed.thread_id;
-      return;
+      return true;
     }
 
     if (type === 'event_msg' && payload?.type === 'agent_message') {
       const text = typeof payload.message === 'string' ? payload.message : '';
       if (text) onEvent({ type: 'text', text });
-      return;
+      return true;
     }
 
     const item = safeObject(parsed.item);
     if (type === 'item.completed' && item?.type === 'agent_message') {
       const text = typeof item.text === 'string' ? item.text : '';
       if (text) onEvent({ type: 'text', text });
-      return;
+      return true;
     }
 
     if (type === 'item.completed' && item?.type === 'tool_use') {
@@ -74,7 +74,7 @@ export function handleCodexJsonLine(
         input = item.arguments;
       }
       onEvent({ type: 'tool_use', id: typeof item.id === 'string' ? item.id : null, name, input });
-      return;
+      return true;
     }
 
     if (type === 'item.completed' && item?.type === 'command_execution') {
@@ -87,7 +87,7 @@ export function handleCodexJsonLine(
       const callId = typeof item.id === 'string' ? item.id : null;
       onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
       if (output) onEvent({ type: 'tool_result', id: callId, name: 'shell', output: output.slice(0, 4_000) });
-      return;
+      return true;
     }
 
     if (type === 'event_msg' && payload?.type === 'exec_command_begin') {
@@ -97,7 +97,7 @@ export function handleCodexJsonLine(
           ? (payload.command as string[]).join(' ')
           : '';
       onEvent({ type: 'tool_use', id: typeof payload.call_id === 'string' ? payload.call_id : null, name: 'shell', input: { command } });
-      return;
+      return true;
     }
 
     if (type === 'event_msg' && payload?.type === 'exec_command_end') {
@@ -107,7 +107,7 @@ export function handleCodexJsonLine(
           ? payload.output
           : '';
       onEvent({ type: 'tool_result', id: typeof payload.call_id === 'string' ? payload.call_id : null, name: 'shell', output: output.slice(0, 4_000) });
-      return;
+      return true;
     }
 
     if (type === 'response_item' && payload?.type === 'reasoning') {
@@ -117,7 +117,7 @@ export function handleCodexJsonLine(
           ? (payload.summary as string[]).join('\n')
           : '';
       if (summary) onEvent({ type: 'thinking', text: summary });
-      return;
+      return true;
     }
 
     if (type === 'response_item' && payload?.type === 'function_call') {
@@ -127,7 +127,7 @@ export function handleCodexJsonLine(
         try { input = JSON.parse(payload.arguments); } catch { input = payload.arguments; }
       }
       onEvent({ type: 'tool_use', id: typeof payload.call_id === 'string' ? payload.call_id : null, name, input });
-      return;
+      return true;
     }
 
     if (type === 'response_item' && payload?.type === 'function_call_output') {
@@ -139,13 +139,15 @@ export function handleCodexJsonLine(
         name: typeof payload.name === 'string' ? payload.name : 'function',
         output: shot ? shot[0] : output.slice(0, 4_000),
       });
-      return;
+      return true;
     }
 
     if (type === 'turn.completed' && parsed.usage) {
       state.cost = options.isLocalModel ? null : computeUsdCost(parsed.usage);
     }
+    return true;
   } catch {
     // Codex can emit banner/info lines before JSON starts.
+    return false;
   }
 }
