@@ -9,7 +9,7 @@ import type { WorkflowStageBadge } from '@/lib/workflows/status';
 // Retired NavRail's `NavSection` type — kept here so the dashboard hooks
 // that flip the section (useUIChrome, useGlobalRepoState,
 // useSettingsOverlayDismiss) can keep their existing imports.
-export type NavSection = 'agents' | 'automations' | 'analytics' | 'settings';
+export type NavSection = 'agents' | 'automations' | 'customize' | 'analytics' | 'settings';
 
 // Lifted out of the retired workspace-side-panel module so callers can
 // keep importing from the same dashboard/types barrel.

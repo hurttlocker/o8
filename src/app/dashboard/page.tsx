@@ -148,6 +148,7 @@ const LazySettingsPage = retryingLazy(() => import('@/components/desktop/Setting
 // LazyAnalyticsPage full-page mount retired — Settings → Analytics tab is
 // the live entry point. AnalyticsPage is still consumed via that tab.
 const LazyAutomationsPage = retryingLazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })), { label: 'Automations' });
+const LazyCustomizePage = retryingLazy(() => import('@/components/desktop/CustomizePage').then(m => ({ default: m.CustomizePage })), { label: 'Customize' });
 const LazyOnboarding = retryingLazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })), { label: 'Onboarding' });
 const LazyCommandPalette = retryingLazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })), { label: 'Command palette' });
 const LazyKeyboardShortcutsOverlay = retryingLazy(() => import('@/components/desktop/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })), { label: 'Keyboard shortcuts' });
@@ -1942,6 +1943,13 @@ function DashboardInner() {
     const handler = () => setActiveNavSection('automations');
     window.addEventListener('o8:open-automations', handler);
     return () => window.removeEventListener('o8:open-automations', handler);
+  }, [setActiveNavSection]);
+
+  // Customize — same page-takeover pattern as Automations (vid3 Cursor study).
+  useEffect(() => {
+    const handler = () => setActiveNavSection('customize');
+    window.addEventListener('o8:open-customize', handler);
+    return () => window.removeEventListener('o8:open-customize', handler);
   }, [setActiveNavSection]);
 
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
@@ -4934,7 +4942,15 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection !== 'automations' && (
+        {activeNavSection === 'customize' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
+              <LazyCustomizePage onClose={() => setActiveNavSection('agents')} />
+            </Suspense>
+          </div>
+        )}
+
+        {activeNavSection !== 'automations' && activeNavSection !== 'customize' && (
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}

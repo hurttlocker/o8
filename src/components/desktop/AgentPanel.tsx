@@ -17,7 +17,7 @@ import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
 import { Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
 import { MenuScale } from 'iconoir-react';
-import { AutoFlash, Delivery, InputSearch } from 'iconoir-react';
+import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
 
 // ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
@@ -31,6 +31,9 @@ const SearchIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentCo
 );
 const AutomationsIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
   <AutoFlash width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
+);
+const CustomizeIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
+  <ControlSlider width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
 );
 import {
   AgentPanelEmptyState,
@@ -573,6 +576,17 @@ function MiniAgentPanelHeader({
             // Same pattern as o8:open-inbox-tab keeps AgentPanel decoupled.
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('o8:open-automations'));
+            }
+          }}
+        />
+        <MiniAgentPanelAction
+          icon={CustomizeIcon}
+          label="Customize"
+          onClick={() => {
+            setSessionMenuOpen(false);
+            // Same page-takeover pattern as Automations (vid3 Cursor study).
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('o8:open-customize'));
             }
           }}
         />
