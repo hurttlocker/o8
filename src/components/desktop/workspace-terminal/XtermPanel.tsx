@@ -5,6 +5,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
+import { registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 
 export interface InlineImage {
   id: string;
@@ -295,8 +296,16 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
     const cleanupPromise = init();
 
+    // Speak-selection bridge: expose this terminal's selection to the
+    // dashboard's Ctrl+Shift+R handler (xterm selections are not DOM
+    // selections — see xterm-selection-registry.ts).
+    const unregisterSelection = registerXtermSelectionSource(
+      () => termRef.current?.getSelection?.() ?? '',
+    );
+
     return () => {
       disposed = true;
+      unregisterSelection();
       cancelReveal(false);
       sendTerminalDetach(tmuxSession);
       observerRef.current?.disconnect();

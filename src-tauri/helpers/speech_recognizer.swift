@@ -67,6 +67,12 @@ var engineLingerGeneration: UInt64 = 0
 /// without synchronization: aligned 64-bit loads/stores are single-copy-atomic
 /// on both shipping arches, and the watchdog only asks "did it move at all".
 var tapBufferCount: UInt64 = 0
+/// True while a config-change-observer-initiated rebuild is settling. The
+/// observer ignores notifications during this window so its own rebuild's
+/// notifications can't re-trigger it (rebuild storm → zero-filled session
+/// head → false "microphone is silent" error).
+var configChangeRebuildFenceActive = false
+
 /// Set when a `.AVAudioEngineConfigurationChange` lands (device unplugged,
 /// sample-rate change) — the prepared graph is stale; the next handleStart
 /// must rebuild even if the engine still claims isRunning.
@@ -947,8 +953,27 @@ func startRecognitionSession(sessionId: UInt64) {
                 emitFinalAndReturnToIdle()
                 return
             }
-            if error.code != 216 && error.code != 1110 {
-                // Recognition timed out or errored — chain to next session
+            if error.code != 216 {
+                // Recognition timed out or errored — chain to next session.
+                // 1110 ("no speech detected") INCLUDED (2026-07-13): a natural
+                // pause in a long dictation ends the segment with 1110, and the
+                // old `!= 1110` guard killed the chain permanently — partials
+                // stopped ~1 min in and everything spoken after the pause was
+                // lost from the live pass (the 3-4 min trading-journal loss).
+                // A silent hold just cycles 1110 → fresh task, which is cheap
+                // and correct for push-to-talk. Only 216 (our own cancel) is
+                // terminal.
+                //
+                // Fold this segment's partial text into the accumulator BEFORE
+                // chaining — an errored task never delivers isFinal, and the
+                // fresh session's reset would otherwise wipe the words Apple
+                // already heard.
+                if !sessionTranscript.isEmpty {
+                    accumulatedTranscript = accumulatedTranscript.isEmpty
+                        ? sessionTranscript
+                        : accumulatedTranscript + " " + sessionTranscript
+                    sessionTranscript = ""
+                }
                 DispatchQueue.main.async {
                     startRecognitionSession(sessionId: sessionId)
                 }
@@ -1214,15 +1239,29 @@ func prepareAudioEngine() {
     // cold start (rebuildAudioEngine), an instance-bound observer would go
     // stale with it. Mid-session, rebuild immediately so the dictation
     // survives the device change; idle, just mark for rebuild at next start.
+    //
+    // FENCE (the intermittent "microphone is silent" red pill): our OWN
+    // rebuild tears down one engine and starts another, and BOTH ends of that
+    // swap can post .AVAudioEngineConfigurationChange — which this object:nil
+    // observer receives, triggering another rebuild, whose notifications
+    // trigger another… The storm keeps replacing the tap mid-session, the
+    // first 1.5s delivers zeros, and the zero-fill detector fires a scary
+    // error even though the NEXT press works fine. Suppress observer-driven
+    // rebuilds for a short window after any rebuild this observer initiated.
     NotificationCenter.default.addObserver(
         forName: .AVAudioEngineConfigurationChange,
         object: nil,
         queue: .main
     ) { _ in
+        if configChangeRebuildFenceActive { return }
         if currentSessionId != 0 {
+            configChangeRebuildFenceActive = true
             emit("status", "audio_engine_config_changed_rebuilding", sessionId: currentSessionId)
             if rebuildAudioEngine(sessionId: currentSessionId) {
                 try? audioEngine.start()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                configChangeRebuildFenceActive = false
             }
         } else {
             engineNeedsRebuild = true
@@ -1388,11 +1427,23 @@ func handleStart(sessionId: UInt64) {
         guard currentSessionId == sessionId,
               tapBufferCount != zeroFillStart,
               sessionPeakSample == 0 else { return }
-        emit("status", "audio_engine_zero_fill", sessionId: sessionId)
-        emitError(
-            "The microphone is delivering silent audio. Quit and reopen o8; if it persists, restart the Mac.",
-            sessionId: sessionId
-        )
+        // SELF-HEAL first (2026-07-13): the operator's live pattern was
+        // "red pill on this press, works on the next press" — i.e. the AUHAL
+        // that zero-fills is transient and a fresh engine hears fine. Do the
+        // rebuild the user's second press would have done, silently, and only
+        // surface the scary error if the REBUILT engine also delivers zeros.
+        emit("status", "audio_engine_zero_fill_rebuilding", sessionId: sessionId)
+        if rebuildAudioEngine(sessionId: sessionId) {
+            try? audioEngine.start()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard currentSessionId == sessionId, sessionPeakSample == 0 else { return }
+            emit("status", "audio_engine_zero_fill", sessionId: sessionId)
+            emitError(
+                "The microphone is delivering silent audio. Quit and reopen o8; if it persists, restart the Mac.",
+                sessionId: sessionId
+            )
+        }
     }
 }
 

@@ -90,6 +90,11 @@ export default function AgentPartialsPage() {
   // no doubles. Tied to a session id; auto-expires on release or the 60s safety.
   const [suppressed, setSuppressed] = useState(false);
   const [graceElapsed, setGraceElapsed] = useState(false);
+  // Session-elapsed seconds — the honest "still recording" signal on long
+  // holds (operator ask 2026-07-13: a long dictation gave no cue the capture
+  // was alive). Rendered in the header from 10s so quick dictations stay clean.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const sessionStartedAtRef = useRef<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const claimSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentActiveRef = useRef(false);
@@ -153,11 +158,20 @@ export default function AgentPartialsPage() {
         graceTimerRef.current = null;
         setGraceElapsed(true);
       }, PAINT_GRACE_MS);
+      sessionStartedAtRef.current = Date.now();
+      setElapsedSeconds(0);
       setState({ phase: 'listening', text: '' });
     };
     const showText = (phase: Phase, text: string) => {
-      // A new frame of live text — keep the HUD alive (cancel any pending fade).
+      // A new frame of live text — keep the HUD alive (cancel any pending fade)
+      // AND re-arm the stranded-bar safety. The safety exists for a missed
+      // terminal event; a live frame is proof the session is NOT stranded.
+      // Without this re-arm the HUD tore itself down at exactly SAFETY_MS into
+      // a long dictation while the operator was still speaking (live-hit
+      // 2026-07-13: "the partials just left and I'm still talking").
       clearDismiss();
+      clearSafety();
+      safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
       setState({ phase, text });
     };
 
@@ -323,6 +337,18 @@ export default function AgentPartialsPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [state?.text]);
 
+  // Tick the elapsed counter once a second while listening.
+  useEffect(() => {
+    if (!state || state.phase !== 'listening') return undefined;
+    const tick = () => {
+      const startedAt = sessionStartedAtRef.current;
+      if (startedAt) setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [state?.phase, state]);
+
   const display = state
     ? state.text || (state.phase === 'listening' ? 'Listening' : '')
     : '';
@@ -406,6 +432,21 @@ export default function AgentPartialsPage() {
               >
                 Symon · Listening
               </span>
+              {state.phase === 'listening' && elapsedSeconds >= 10 ? (
+                <span
+                  style={{
+                    marginLeft: 'auto',
+                    fontSize: 10,
+                    fontWeight: 300,
+                    letterSpacing: '0.04em',
+                    color: 'rgba(255, 255, 255, 0.45)',
+                    lineHeight: 1,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {`${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`}
+                </span>
+              ) : null}
             </div>
 
             {/* The partials transcript — big + room-readable. Bottom-anchored so
