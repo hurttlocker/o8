@@ -54,7 +54,6 @@ import { ProjectsPanel } from './settings/ProjectsPanel';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { VoiceTab } from './settings/VoiceTab';
 import { BillingTab } from './settings/BillingTab';
-import { AccountTab } from './settings/AccountTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
 import { AnalyticsPage } from './AnalyticsPage';
@@ -524,7 +523,6 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <TabButton label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} onClick={() => setActiveTab('connections')} />
 
         <SectionHeader>System</SectionHeader>
-        <TabButton label="Account" icon={<UserIcon />} active={activeTab === 'account'} onClick={() => setActiveTab('account')} />
         <TabButton label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} onClick={() => setActiveTab('billing')} />
         <TabButton label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
@@ -606,9 +604,6 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         )}
         {activeTab === 'voice' && (
           <VoiceTab />
-        )}
-        {activeTab === 'account' && (
-          <AccountTab />
         )}
         {activeTab === 'billing' && (
           <BillingTab />
