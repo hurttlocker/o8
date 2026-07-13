@@ -3,20 +3,28 @@
 /**
  * DesktopStatusBar — compact chrome strip pinned to the bottom of the dashboard.
  *
- * Holds workspace-centered merge and branch state plus right-edge utilities.
- * Sidebar account and utility controls live in AgentPanel.
+ * Holds sidebar utilities, workspace-centered merge and branch state, and
+ * right-edge utilities. Account controls live in AgentPanel.
  */
 
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { SmoothCorners } from '@lisse/react';
+import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { MergeBeacon } from './merge-beacon/MergeBeacon';
 import type { ParkedLane } from './merge-beacon/derive';
+import { FooterPorts } from './desktop-status-bar/footer-ports';
+import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
+import { CanvasModeIcon, DeviceMobileIcon } from './desktop-status-bar/status-bar-icons';
+import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { ViewAsFreeIndicator } from './ViewAsFreeIndicator';
 import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
+
+const COLLAPSED_LEFT_FOOTER_WIDTH = 34;
 
 interface DesktopStatusBarProps {
   branchName: string | null;
@@ -30,11 +38,16 @@ interface DesktopStatusBarProps {
   rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
+  /** Glass surface active: leave the left utility rail transparent. */
+  glassSurface?: boolean;
   /** Lanes parked in the review gate — drives the merge beacon split between
    *  needs-review and approved-awaiting-merge. */
   parkedLanes?: ParkedLane[];
   onOpenReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
+  /** Open the full-screen mobile-pairing QR view. */
+  onOpenMobilePairing: () => void;
+  onPortPreview?: (port: number, url: string, repo?: string) => void;
   /** Contextual bottom-panel (terminal) toggle. Moved from the column
    *  header per operator request — sits in the status bar's center
    *  column next to the branch label. */
@@ -56,11 +69,23 @@ function DesktopStatusBarBase({
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
+  glassSurface = false,
   parkedLanes = [],
   onOpenReviewLane,
   onOpenAwaitingMerge,
+  onOpenMobilePairing,
+  onPortPreview,
 }: DesktopStatusBarProps) {
   const { founder, overrideActive } = useEntitlement();
+  const experimentalCanvas = useExperimentalCanvasFlag();
+  const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
+  const showFooterSecondary = compact || (leftColumnWidth ?? 0) >= 220;
+  const footerCardHidden = leftFooterCollapsed || glassSurface;
+  const leftFooterWidth = compact
+    ? 'auto'
+    : leftFooterCollapsed
+      ? COLLAPSED_LEFT_FOOTER_WIDTH
+      : leftColumnWidth;
 
   // Center the branch cluster on the composer's REAL measured position. The
   // column-width props ignored insets/gaps + a hidden right region and drifted
@@ -114,7 +139,7 @@ function DesktopStatusBarBase({
       data-chrome-surface="true"
       data-stationary-chrome="true"
       style={{
-        // Preserve the established bottom-chrome height for center and right utilities.
+        // Established height for the utility controls and center/right chrome.
         height: 36,
         flexShrink: 0,
         display: 'flex',
@@ -130,6 +155,86 @@ function DesktopStatusBarBase({
         position: 'relative',
       }}
     >
+      <div
+        data-o8-left-footer=""
+        style={{
+          width: leftFooterWidth,
+          flexShrink: 0,
+          display: 'flex',
+          paddingTop: 0,
+          paddingRight: 5,
+          paddingBottom: 5,
+          paddingLeft: 5,
+          overflow: 'visible',
+        }}
+      >
+        <SmoothCorners
+          corners={{
+            topLeft: 0,
+            topRight: 0,
+            bottomLeft: 0,
+            bottomRight: 0,
+          }}
+          autoEffects={false}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: leftFooterCollapsed ? 0 : 6,
+            paddingLeft: leftFooterCollapsed ? 0 : 10,
+            paddingRight: leftFooterCollapsed ? 0 : 10,
+            // Flat on the page (operator ruling 2026-07-13): the icon cluster
+            // sits directly on the rail like the center/right sections — no
+            // paper card, no seam, in every surface mode.
+            background: 'transparent',
+            borderTopWidth: 0,
+            borderTopStyle: 'solid',
+            borderTopColor: 'var(--t-divider-subtle)',
+            boxShadow: 'none',
+            ['--t-chrome-btn-bg' as string]: 'transparent',
+            ['--t-chrome-btn-shadow' as string]: 'none',
+            ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
+            ['--t-chrome-btn-hover-shadow' as string]: 'none',
+          }}
+        >
+          {!compact && !leftFooterCollapsed ? (
+            <>
+              {showFooterSecondary ? (
+                <ChromeButton
+                  icon={<DeviceMobileIcon size={14} />}
+                  label="Pair mobile device"
+                  onClick={onOpenMobilePairing}
+                  size={22}
+                  radius={6}
+                />
+              ) : null}
+              {experimentalCanvas && showFooterSecondary ? (
+                <ChromeButton
+                  icon={<CanvasModeIcon size={14} color="var(--t-text)" />}
+                  label="Canvas mode"
+                  onClick={() => { window.location.assign('/preview/canvas-glass'); }}
+                  size={22}
+                  radius={6}
+                />
+              ) : null}
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  flexShrink: 0,
+                }}
+              >
+                <FooterPorts onPortPreview={onPortPreview} />
+                <SupervisorInboxBadge />
+              </div>
+            </>
+          ) : null}
+        </SmoothCorners>
+      </div>
+
       {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
           The branch/merge cluster itself is lifted into the absolute overlay
           below so it centers on the true workspace surface. */}

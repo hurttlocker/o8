@@ -3468,8 +3468,8 @@ function DashboardInner() {
   // (measured 2026-07-10, ~24fps webview during drag), so routing every
   // mousemove through setState makes the content reflow in chunky steps
   // behind the cursor (Q's retest recording). During the drag we write the
-  // width straight onto the column DOM node — the browser reflows the flex
-  // layout natively at frame rate — and commit state ONCE on
+  // width straight onto the column and footer DOM nodes — the browser reflows
+  // the flex layout natively at frame rate — and commit state ONCE on
   // mouseup. The flag is released a frame after the commit so the framer
   // transitions never see the width jump as something to animate.
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -3478,6 +3478,7 @@ function DashboardInner() {
     const startX = e.clientX;
     const startW = leftWidth;
     const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
+    const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
     const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
     let frame = 0;
     let lastX = startX;
@@ -3488,6 +3489,7 @@ function DashboardInner() {
         frame = 0;
         const w = widthAt(lastX);
         if (colEl) colEl.style.width = `${w}px`;
+        if (footEl) footEl.style.width = `${w}px`;
       });
     };
     const onUp = () => {
@@ -4399,13 +4401,6 @@ function DashboardInner() {
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
       onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
       onOpenSettings={toggleSettingsOverlay}
-      onOpenMobilePairing={openMobilePairing}
-      onPortPreview={(_port, url) => {
-        setO8BrowserUrl(url);
-        setO8ActiveTab('browser');
-        setRightPanelKind('o8');
-        openRightPanelFromUser();
-      }}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
       onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
       onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
@@ -5344,6 +5339,7 @@ function DashboardInner() {
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         compact={compactShell}
+        glassSurface={effectiveGlassSurface}
         parkedLanes={parkedLanes}
         onOpenReviewLane={handleOpenReviewLane}
         onOpenAwaitingMerge={handleOpenAwaitingMerge}
@@ -5353,6 +5349,13 @@ function DashboardInner() {
         onOpenShortcuts={() => setShortcutsOpen(true)}
         leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
+        onOpenMobilePairing={openMobilePairing}
+        onPortPreview={(_port, url) => {
+          setO8BrowserUrl(url);
+          setO8ActiveTab('browser');
+          setRightPanelKind('o8');
+          openRightPanelFromUser();
+        }}
       />
 
       <GuidedDiscoveryCoachmark

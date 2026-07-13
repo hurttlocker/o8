@@ -1,21 +1,16 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- auth avatar URLs are runtime-provided and intentionally render at a fixed 28px */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
-import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { ChromeButton } from '../chrome/ChromeButton';
-import { FooterPorts } from '../desktop-status-bar/footer-ports';
-import { SupervisorInboxBadge } from '../desktop-status-bar/supervisor-inbox-badge';
-import { CanvasModeIcon, DeviceMobileIcon, GearSixIcon } from '../desktop-status-bar/status-bar-icons';
+import { GearSixIcon } from '../desktop-status-bar/status-bar-icons';
 import { AccountMenu } from './AccountMenu';
 import { WhatsNewCard } from './WhatsNewCard';
 
 interface AccountBlockProps {
   onOpenSettings?: () => void;
-  onOpenMobilePairing?: () => void;
-  onPortPreview?: (port: number, url: string, repo?: string) => void;
 }
 
 type AccountPopover = 'menu' | 'whats-new' | null;
@@ -24,12 +19,9 @@ const NOOP = () => {};
 
 export function AccountBlock({
   onOpenSettings,
-  onOpenMobilePairing,
-  onPortPreview,
 }: AccountBlockProps) {
   const { isLoaded, signedIn, user, signIn, signOut } = useO8Auth();
   const { plan, founder, actualPlan, actualFounder } = useEntitlement();
-  const experimentalCanvas = useExperimentalCanvasFlag();
   const accountRowRef = useRef<HTMLDivElement | null>(null);
   const [popover, setPopover] = useState<AccountPopover>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -54,7 +46,6 @@ export function AccountBlock({
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
   const planLabel = isFounder ? 'Founder' : isPaid ? 'Pro' : 'Free Plan';
   const openSettings = onOpenSettings ?? NOOP;
-  const openMobilePairing = onOpenMobilePairing ?? NOOP;
 
   const syncAnchor = useCallback(() => {
     const element = accountRowRef.current;
@@ -95,43 +86,6 @@ export function AccountBlock({
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <div
-        style={{
-          minHeight: 36,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 6,
-          paddingTop: 5,
-          paddingRight: 10,
-          paddingBottom: 5,
-          paddingLeft: 10,
-          ['--t-chrome-btn-bg' as string]: 'transparent',
-          ['--t-chrome-btn-shadow' as string]: 'none',
-          ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
-          ['--t-chrome-btn-hover-shadow' as string]: 'none',
-        } as CSSProperties}
-      >
-        <FooterPorts onPortPreview={onPortPreview} />
-        {experimentalCanvas ? (
-          <ChromeButton
-            icon={<CanvasModeIcon size={14} color="var(--t-text)" />}
-            label="Canvas mode"
-            onClick={() => { window.location.assign('/preview/canvas-glass'); }}
-            size={22}
-            radius={6}
-          />
-        ) : null}
-        <ChromeButton
-          icon={<DeviceMobileIcon size={14} />}
-          label="Pair mobile device"
-          onClick={openMobilePairing}
-          size={22}
-          radius={6}
-        />
-        <SupervisorInboxBadge />
-      </div>
-
       <div
         ref={accountRowRef}
         style={{
