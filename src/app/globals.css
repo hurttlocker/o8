@@ -1839,6 +1839,36 @@ button.workflow-file-item.workflow-file-item-active {
   50%      { opacity: 0.55; }
 }
 
+/* ThoughtBlock "Thinking" shimmer (turn grammar). A gradient overlay band swept
+   across the label by `transform` ONLY — never background-position. Per the
+   o8-sweep-circle note above, the gradient rasterizes once into a layer texture
+   and is then just translated, so this is compositor-only (no per-frame raster).
+   The label clips the band via overflow:hidden. */
+@keyframes o8-thought-shimmer-sweep {
+  0%   { transform: translateX(-160%); }
+  100% { transform: translateX(320%); }
+}
+.o8-thought-shimmer {
+  overflow: hidden;
+  isolation: isolate;
+}
+.o8-thought-shimmer-band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60%;
+  height: 100%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--t-text) 55%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-160%);
+  animation: o8-thought-shimmer-sweep 1.9s ease-in-out infinite;
+}
+
 .o8-dot-shimmer {
   display: inline-flex;
   align-items: center;
@@ -2226,6 +2256,7 @@ button.workflow-file-item.workflow-file-item-active {
   }
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
+  .o8-thought-shimmer-band { animation: none !important; opacity: 0 !important; }
   .o8-orbit { animation: none !important; }
   /* Loaders freeze to a legible resting frame — no motion, cells still read. */
   .o8-loader-bitfield > i,
