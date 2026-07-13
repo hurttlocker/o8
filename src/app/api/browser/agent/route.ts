@@ -110,7 +110,7 @@ async function stopNativeDesignGrab(client: O8WebviewClient): Promise<void> {
  * trail as a `browser_acted` event.
  */
 
-const VERBS = new Set(['read', 'click', 'type', 'probe', 'grab', 'open', 'close', 'designgrab', 'stopdesigngrab', 'drawmode', 'drawresult']);
+const VERBS = new Set(['read', 'click', 'type', 'probe', 'grab', 'open', 'close', 'designgrab', 'stopdesigngrab', 'drawmode', 'drawresult', 'drawpending', 'drawthumb']);
 
 interface AgentBody {
   verb?: unknown;
@@ -220,16 +220,25 @@ export async function POST(request: NextRequest) {
 
   // Native in-page drawing is deliberately pulled through the same narrow eval
   // channel as design-grab: arbitrary HTTPS pages cannot POST back to o8.
-  if (verb === 'drawmode' || verb === 'drawresult') {
-    const js = verb === 'drawmode'
-      ? `(function(){ var a=window.__o8BrowserAgent; return a && a.drawmode ? a.drawmode(${JSON.stringify(args)}) : { ok:false,error:'native browser agent not installed yet' }; })()`
-      : `(function(){ var r=window.__o8DesignDrawResult; if(r) window.__o8DesignDrawResult=null; return r || null; })()`;
+  if (verb === 'drawmode' || verb === 'drawresult' || verb === 'drawpending' || verb === 'drawthumb') {
+    let js: string;
+    if (verb === 'drawmode') {
+      js = `(function(){ var a=window.__o8BrowserAgent; return a && a.drawmode ? a.drawmode(${JSON.stringify(args)}) : { ok:false,error:'native browser agent not installed yet' }; })()`;
+    } else if (verb === 'drawthumb') {
+      // Push a host-cropped thumbnail data: URI into the open draw composer.
+      js = `(function(){ var a=window.__o8BrowserAgent; return a && a.drawthumb ? a.drawthumb(${JSON.stringify(args)}) : { ok:false }; })()`;
+    } else if (verb === 'drawpending') {
+      // Read (without clearing) the region the host should thumbnail.
+      js = `(function(){ var a=window.__o8BrowserAgent; return a && a.drawpending ? a.drawpending() : null; })()`;
+    } else {
+      js = `(function(){ var r=window.__o8DesignDrawResult; if(r) window.__o8DesignDrawResult=null; return r || null; })()`;
+    }
     const trigger = `(async()=>{try{const r=await window.__TAURI_INTERNALS__.invoke('browser_view_eval_result',{js:${JSON.stringify(js)},timeoutMs:4000});return JSON.stringify({open:true,result:r});}catch(e){return JSON.stringify({open:false});}})()`;
     try {
       const result = await webviewClient().evalJs(trigger);
       const parsed = JSON.parse(result.result) as { open?: boolean; result?: string | null };
       if (parsed.open !== true) return NextResponse.json({ ok: false, error: 'native browser-view not open' });
-      if (verb === 'drawresult') return new NextResponse(parsed.result || 'null', { headers: { 'content-type': 'application/json' } });
+      if (verb === 'drawresult' || verb === 'drawpending') return new NextResponse(parsed.result || 'null', { headers: { 'content-type': 'application/json' } });
       return new NextResponse(parsed.result || '{"ok":false,"error":"empty native result"}', { headers: { 'content-type': 'application/json' } });
     } catch {
       return NextResponse.json({ ok: false, error: 'native draw bridge failed' });
