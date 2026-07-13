@@ -7,7 +7,6 @@ import { useEntitlement } from '@/lib/entitlement/context';
 import { ChromeButton } from '../chrome/ChromeButton';
 import { GearSixIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
-import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { WhatsNewCard } from './WhatsNewCard';
 
 interface AccountBlockProps {
@@ -228,11 +227,6 @@ export function AccountBlock({
           openSettings();
         }}
         onWhatsNew={openWhatsNew}
-        onOpenMcpSetup={() => {
-          closePopover();
-          openSettings();
-          window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
-        }}
       />
       {popover === 'whats-new' && anchorRect ? (
         <WhatsNewCard

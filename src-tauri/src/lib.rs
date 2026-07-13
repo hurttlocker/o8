@@ -5652,63 +5652,69 @@ pub fn run() {
                         }
                     }
 
-                    // Ctrl+Shift+R → speak the current text selection aloud
-                    // (voice P4 "say" / speak-selection). Moved off Ctrl+Shift+S
-                    // 2026-07-07 (operator: "S is a bad command") — S collides
-                    // with save-adjacent muscle memory and app chords; R = Read,
-                    // no default collision in Chrome/OBS/Terminal on macOS.
-                    // Avoid Option entirely: the old Option-based chord latched
-                    // the modifier when combined with the agent hold-gesture
-                    // guard. grab_selection does clipboard polling with sleeps,
-                    // so run the whole thing off the event-loop thread;
-                    // play_thread then spawns its own audio thread. Falls back
-                    // to `say` inside play_thread.
-                    if let Ok(sc) = "Control+Shift+R".parse::<Shortcut>() {
-                        let h_speak = app.handle().clone();
-                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
-                            if event.state != ShortcutState::Pressed {
-                                return;
-                            }
-                            // Ctrl+Shift+R says the current selection — ALWAYS. If a read is
-                            // already playing (commonly Symon's OWN voice, or a
-                            // transient/stale is_active right after it finishes),
-                            // stop it first but DON'T return — fall through and say
-                            // the new selection. The old early-return gated the chord on
-                            // is_active, so every press became a no-op stop whenever
-                            // TTS looked active ("say shortcut won't initiate the say", the
-                            // operator hit this constantly while dictating). The
-                            // re-trigger-stacking this once guarded against is now
-                            // prevented by play_thread's single-flight (a new speak
-                            // supersedes the old), so the gate is obsolete. A bare
-                            // Ctrl+Shift+R with nothing selected still just stops, because
-                            // grab_selection returns None below; Escape also stops.
-                            if crate::tts::playback::is_active() {
-                                std::thread::spawn(crate::tts::playback::stop);
-                            }
-                            // o8's own webview doesn't expose its text selection via
-                            // AXSelectedText (and synthetic Cmd+C can't copy it), so
-                            // when o8 is frontmost ask the WEBVIEW for its selection
-                            // (window.getSelection) via the frontend. For any other
-                            // app, grab the selection natively (AX → Cmd+C).
-                            if crate::paste::frontmost_is_o8() {
-                                let _ = h_speak.emit_to("main", "o8:speak-selection", ());
-                                return;
-                            }
-                            std::thread::spawn(|| {
-                                // Legacy safety guard: if an interrupted Option agent
-                                // gesture is still physically down, wait before the
-                                // Cmd+C fallback so the held modifier cannot merge
-                                // into the synthetic copy event.
-                                crate::fn_hotkey::wait_for_option_release(1_200);
-                                match crate::paste::grab_selection() {
-                                    Some(text) => {
-                                        crate::tts::playback::play_thread(text, crate::tts::load_config());
-                                    }
-                                    None => log::info!("[tts] CtrlShiftR: no selection to speak"),
+                    // Ctrl+Alt+R (primary) + Ctrl+Shift+R (legacy) → speak the
+                    // current text selection aloud (voice P4 "say").
+                    // History: Ctrl+Shift+S → Ctrl+Shift+R 2026-07-07 ("S is a
+                    // bad command"); Ctrl+Alt+R added 2026-07-13 because
+                    // Ctrl+Shift+R is DOUBLE-BOOKED on operator machines —
+                    // Claude Desktop registers it as its window toggle, and
+                    // Carbon delivers duplicate registrations to BOTH apps: the
+                    // other window hides itself mid-grab while our read finds
+                    // nothing (live video + o8.log 2026-07-13). The legacy
+                    // chord stays registered for muscle memory on machines
+                    // where it's free. (The old "avoid Option" concern was the
+                    // OPTION-HOLD agent gesture latching — a bare Alt inside a
+                    // chord doesn't trip it; wait_for_option_release below
+                    // still guards the synthetic-copy path.)
+                    // grab_selection does clipboard polling with sleeps, so the
+                    // whole thing runs off the event-loop thread; play_thread
+                    // then spawns its own audio thread. Falls back to `say`
+                    // inside play_thread.
+                    let speak_selection = |h_speak: tauri::AppHandle| move |event: ShortcutState| {
+                        if event != ShortcutState::Pressed {
+                            return;
+                        }
+                        // The chord says the current selection — ALWAYS. If a read is
+                        // already playing (commonly Symon's OWN voice, or a
+                        // transient/stale is_active right after it finishes),
+                        // stop it first but DON'T return — fall through and say
+                        // the new selection. play_thread's single-flight makes a
+                        // new speak supersede the old; a bare chord with nothing
+                        // selected still just stops (grab_selection → None).
+                        if crate::tts::playback::is_active() {
+                            std::thread::spawn(crate::tts::playback::stop);
+                        }
+                        // o8's own webview doesn't expose its text selection via
+                        // AXSelectedText (and synthetic Cmd+C can't copy it), so
+                        // when o8 is frontmost ask the WEBVIEW for its selection
+                        // (window.getSelection) via the frontend. For any other
+                        // app, grab the selection natively (AX → Cmd+C).
+                        if crate::paste::frontmost_is_o8() {
+                            let _ = h_speak.emit_to("main", "o8:speak-selection", ());
+                            return;
+                        }
+                        std::thread::spawn(|| {
+                            // Legacy safety guard: if an interrupted Option agent
+                            // gesture is still physically down, wait before the
+                            // Cmd+C fallback so the held modifier cannot merge
+                            // into the synthetic copy event.
+                            crate::fn_hotkey::wait_for_option_release(1_200);
+                            match crate::paste::grab_selection() {
+                                Some(text) => {
+                                    crate::tts::playback::play_thread(text, crate::tts::load_config());
                                 }
-                            });
-                        }) {
-                            log::warn!("[hotkey] failed to register CtrlShiftR (speak-selection): {e}");
+                                None => log::info!("[tts] speak-selection: no selection to speak"),
+                            }
+                        });
+                    };
+                    for chord in ["Control+Alt+R", "Control+Shift+R"] {
+                        if let Ok(sc) = chord.parse::<Shortcut>() {
+                            let handler = speak_selection(app.handle().clone());
+                            if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                                handler(event.state);
+                            }) {
+                                log::warn!("[hotkey] failed to register {chord} (speak-selection): {e}");
+                            }
                         }
                     }
                 }
