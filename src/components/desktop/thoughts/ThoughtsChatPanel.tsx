@@ -71,6 +71,7 @@ import {
   mergeToolResultIntoEntry,
   sendScratchChatMessage,
 } from '@/components/desktop/orchestrator/send-chat-message';
+import { dedupeDisplayMessages } from './chat-panel/dedupe-display-messages';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -1324,7 +1325,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   );
   const displayMessages = useMemo(() => {
     if (!isOrchestratorMode || isChatMode) return chatMessages;
-    return orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+    // Loaded history + the live stream overlap after a mid-conversation reload;
+    // the same user turn can survive in both the restored (persisted id) and
+    // the live-minted (optimistic id) form. Dedupe so it never double-renders.
+    const base = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+    return dedupeDisplayMessages(base);
   }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages]);
   // See `composerRepoLabelBase` for the rationale — derived here so
   // the empty-state check matches the empty-state-override condition.
