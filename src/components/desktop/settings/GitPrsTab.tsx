@@ -3,11 +3,14 @@
 /**
  * GitPrsTab — the Git & PRs settings page (Cursor-parity pass).
  *
- * Three operator knobs, each gating a real code site: the prefix o8 puts on
- * branches it opens from issues, whether agent commits carry a Co-Authored-By
- * trailer, and whether a PR row opens in the embedded panel or the OS browser.
- * Every write goes through the same gated /api/panel/operator-defaults route as
- * the Dispatch tab; env-sourced fields lock with the reason in the subtitle.
+ * Leads with the GitHub CONNECTION (identity / sign-in / GitHub App, shared with
+ * the legacy Connectors tab via GitHubConnectionSections) so there is one GitHub
+ * story, then the three operator knobs — each gating a real code site: the prefix
+ * o8 puts on branches it opens from issues, whether agent commits carry a
+ * Co-Authored-By trailer, and whether a PR row opens in the embedded panel or the
+ * OS browser. Every knob write goes through the same gated
+ * /api/panel/operator-defaults route as the Dispatch tab; env-sourced fields lock
+ * with the reason in the subtitle.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -23,6 +26,7 @@ import {
   TabHeading,
 } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
+import { GitHubConnectionSections, type GitHubConnectionProps } from './GitHubTab';
 import {
   ENV_LOCKED_REASON,
   type OperatorDefaults,
@@ -124,7 +128,7 @@ function BranchPrefixField({ value, onCommit, disabled }: {
   );
 }
 
-export function GitPrsTab() {
+export function GitPrsTab(github: GitHubConnectionProps) {
   const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -173,26 +177,11 @@ export function GitPrsTab() {
     })();
   }, []);
 
-  if (loading && !data) {
-    return (
-      <div style={{ paddingTop: 40, color: 'var(--t-text-muted)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
-        Loading Git &amp; PR settings...
-      </div>
-    );
-  }
-
   const values = data?.values;
   const sources = data?.sources;
 
-  if (!values || !sources) {
-    return (
-      <div style={{ paddingTop: 40, color: 'var(--t-brand-red, #b91c1c)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
-        {notice ?? 'Unable to load Git & PR settings.'}
-      </div>
-    );
-  }
-
-  const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
+  const envLocked = (field: keyof OperatorDefaults) =>
+    sources ? sources[field] === 'env' : false;
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(field) ? ENV_LOCKED_REASON : normal;
 
@@ -207,11 +196,14 @@ export function GitPrsTab() {
     }}>
       <TabHeading
         title="git & prs"
-        subtitle="How o8 names the branches it opens, whether agent commits are attributed, and where a pull request opens when you click it."
+        subtitle="Connect GitHub and set how o8 names branches, attributes commits, and opens PRs."
       />
 
+      {/* ── GitHub connection (identity / sign-in / GitHub App) ── */}
+      <GitHubConnectionSections {...github} />
+
       {notice ? (
-        <div style={{ marginBottom: 28, fontSize: 13, color: 'var(--t-text)', lineHeight: 1.55 }}>
+        <div style={{ marginTop: 28, fontSize: 13, color: 'var(--t-text)', lineHeight: 1.55 }}>
           <span style={{
             fontFamily: APP_FONT_STACK,
             fontSize: 11,
@@ -227,64 +219,76 @@ export function GitPrsTab() {
         </div>
       ) : null}
 
-      <section>
-        <SettingsGroup
-          header="Branches"
-          footnote="o8 opens one branch per packet it starts from a GitHub issue, named prefix/<number>-<title>. Inline drafts you type in the composer keep their own inline/ marker."
-        >
-          <SettingsRow
-            icon={<BranchIcon />}
-            label="Branch prefix"
-            subtitle={lockedSub('branchPrefix', `Branches from issues are named ${values.branchPrefix}/<number>-<title>`)}
-            accessory={
-              <BranchPrefixField
-                value={values.branchPrefix}
-                onCommit={(next) => { updateField('branchPrefix', next); }}
-                disabled={envLocked('branchPrefix') || busyField === 'branchPrefix'}
+      {loading && !data ? (
+        <div style={{ marginTop: 28, color: 'var(--t-text-muted)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
+          Loading Git &amp; PR settings...
+        </div>
+      ) : !values || !sources ? (
+        <div style={{ marginTop: 28, color: 'var(--t-brand-red, #b91c1c)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
+          {notice ?? 'Unable to load Git & PR settings.'}
+        </div>
+      ) : (
+        <>
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Branches"
+              footnote="o8 opens one branch per packet it starts from a GitHub issue, named prefix/<number>-<title>. Inline drafts you type in the composer keep their own inline/ marker."
+            >
+              <SettingsRow
+                icon={<BranchIcon />}
+                label="Branch prefix"
+                subtitle={lockedSub('branchPrefix', `Branches from issues are named ${values.branchPrefix}/<number>-<title>`)}
+                accessory={
+                  <BranchPrefixField
+                    value={values.branchPrefix}
+                    onCommit={(next) => { updateField('branchPrefix', next); }}
+                    disabled={envLocked('branchPrefix') || busyField === 'branchPrefix'}
+                  />
+                }
               />
-            }
-          />
-        </SettingsGroup>
-      </section>
+            </SettingsGroup>
+          </section>
 
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Commits"
-          footnote="When on, commits o8's agents create in their worktrees carry a Co-Authored-By trailer so the fleet's work is attributable in git history. Your own commits are never touched."
-        >
-          <SettingsRow
-            icon={<SignatureIcon />}
-            label="Tag commits created by agents"
-            subtitle={lockedSub('commitAttributionEnabled', 'Append a Co-Authored-By: o8 agent trailer to agent commits')}
-            checked={values.commitAttributionEnabled}
-            disabled={envLocked('commitAttributionEnabled') || busyField === 'commitAttributionEnabled'}
-            onToggle={(next) => { updateField('commitAttributionEnabled', next); }}
-          />
-        </SettingsGroup>
-      </section>
-
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Pull requests"
-          footnote="In o8 opens the pull request inside the embedded review panel — diffs, checks, and comments without leaving the app. Browser hands it to your default browser on github.com instead."
-        >
-          <SettingsRow
-            icon={<LinkIcon />}
-            label="Open pull requests"
-            subtitle={lockedSub('prLinkDestination', 'Where a PR row opens when you click it')}
-            accessory={
-              <SettingsSegmented
-                value={values.prLinkDestination}
-                onChange={(next) => { updateField('prLinkDestination', next as PrLinkDestination); }}
-                options={[
-                  { value: 'in-app', label: 'In o8' },
-                  { value: 'browser', label: 'Browser' },
-                ]}
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Commits"
+              footnote="When on, commits o8's agents create in their worktrees carry a Co-Authored-By trailer so the fleet's work is attributable in git history. Your own commits are never touched."
+            >
+              <SettingsRow
+                icon={<SignatureIcon />}
+                label="Tag commits created by agents"
+                subtitle={lockedSub('commitAttributionEnabled', 'Append a Co-Authored-By: o8 agent trailer to agent commits')}
+                checked={values.commitAttributionEnabled}
+                disabled={envLocked('commitAttributionEnabled') || busyField === 'commitAttributionEnabled'}
+                onToggle={(next) => { updateField('commitAttributionEnabled', next); }}
               />
-            }
-          />
-        </SettingsGroup>
-      </section>
+            </SettingsGroup>
+          </section>
+
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Pull requests"
+              footnote="In o8 opens the pull request inside the embedded review panel — diffs, checks, and comments without leaving the app. Browser hands it to your default browser on github.com instead."
+            >
+              <SettingsRow
+                icon={<LinkIcon />}
+                label="Open pull requests"
+                subtitle={lockedSub('prLinkDestination', 'Where a PR row opens when you click it')}
+                accessory={
+                  <SettingsSegmented
+                    value={values.prLinkDestination}
+                    onChange={(next) => { updateField('prLinkDestination', next as PrLinkDestination); }}
+                    options={[
+                      { value: 'in-app', label: 'In o8' },
+                      { value: 'browser', label: 'Browser' },
+                    ]}
+                  />
+                }
+              />
+            </SettingsGroup>
+          </section>
+        </>
+      )}
     </div>
   );
 }

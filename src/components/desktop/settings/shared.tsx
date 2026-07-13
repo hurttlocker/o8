@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'general' | 'connectors' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'billing' | 'diagnostics' | 'about';
+export type SettingsTab = 'general' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'billing' | 'diagnostics' | 'about';
 
 // ── Constants ──
 

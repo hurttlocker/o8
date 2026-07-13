@@ -42,7 +42,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { GeneralTab } from './settings/GeneralTab';
-import { GitHubTab } from './settings/GitHubTab';
+import type { GitHubConnectionProps } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
 import { IndexingTab } from './settings/IndexingTab';
 import { ModelsTab } from './settings/ModelsTab';
@@ -97,7 +97,7 @@ function SearchNavIcon({ size = 13 }: { size?: number }) {
 
 // ── Main Settings Page ──
 
-export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTab?: SettingsTab; onClose?: () => void }) {
+export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?: SettingsTab; onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const { founder } = useEntitlement();
@@ -291,6 +291,23 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
     }, Math.max(1000, deviceFlow.nextPollInMs));
     return () => window.clearTimeout(timeout);
   }, [deviceFlow, pollDeviceFlow]);
+
+  const githubConnection: GitHubConnectionProps = {
+    accounts,
+    repoCount,
+    broker: brokerStatus,
+    loading,
+    actionBusy,
+    actionNote,
+    onRefresh: () => { void loadGitHubStatus(true); },
+    onDisconnect: (user: string) => { void runGitHubAction('logout', { user }); },
+    onLoginWithToken: (token: string) => { void runGitHubAction('login_token', { token }); },
+    deviceFlowEnabled,
+    deviceFlow,
+    onStartDeviceFlow: () => { void startDeviceFlow(); },
+    onPollDeviceFlow: (flowId: string) => { void pollDeviceFlow(flowId); },
+    onCancelDeviceFlow: (flowId: string) => { void cancelDeviceFlow(flowId); },
+  };
 
   return (
     <div
@@ -515,7 +532,6 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <TabButton label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} onClick={() => setActiveTab('indexing')} />
 
         <SectionHeader>Connections</SectionHeader>
-        <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         {process.env.NEXT_PUBLIC_O8_SHOW_BYOK === '1' && (
           <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         )}
@@ -550,28 +566,6 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         {activeTab === 'general' && (
           <GeneralTab onNavigateTab={setActiveTab} />
         )}
-        {activeTab === 'connectors' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <GitHubTab
-              accounts={accounts}
-              repos={repos}
-              repoCount={repoCount}
-              broker={brokerStatus}
-              loading={loading}
-              actionBusy={actionBusy}
-              actionNote={actionNote}
-              onRefresh={() => { void loadGitHubStatus(true); }}
-              onSwitchAccount={(user) => { void runGitHubAction('switch', { user }); }}
-              onDisconnect={(user) => { void runGitHubAction('logout', { user }); }}
-              onLoginWithToken={(token) => { void runGitHubAction('login_token', { token }); }}
-              deviceFlowEnabled={deviceFlowEnabled}
-              deviceFlow={deviceFlow}
-              onStartDeviceFlow={() => { void startDeviceFlow(); }}
-              onPollDeviceFlow={(flowId) => { void pollDeviceFlow(flowId); }}
-              onCancelDeviceFlow={(flowId) => { void cancelDeviceFlow(flowId); }}
-            />
-          </div>
-        )}
         {activeTab === 'api-keys' && (
           <APIKeysTab />
         )}
@@ -588,7 +582,7 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
           <ProjectsPanel />
         )}
         {activeTab === 'git-prs' && (
-          <GitPrsTab />
+          <GitPrsTab {...githubConnection} />
         )}
         {activeTab === 'indexing' && (
           <IndexingTab />

@@ -16,7 +16,7 @@ const getTimelineServerSnapshot = () => false;
 export function useUIChrome() {
   // ── Navigation ──
   const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
-  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('connectors');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
 
   // ── Sidebar + Timeline ──
   const [sidebarVisible, setSidebarVisible] = useState(true);

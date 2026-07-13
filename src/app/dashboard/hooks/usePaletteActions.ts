@@ -574,7 +574,7 @@ export function usePaletteActions({
       detail: 'GitHub auth, broker status, and repo access.',
       keywords: ['settings', 'connectors', 'github', 'broker'],
       priority: 210,
-      run: () => handleOpenSettingsTab('connectors'),
+      run: () => handleOpenSettingsTab('git-prs'),
     });
 
     actions.push({
