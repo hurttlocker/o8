@@ -202,15 +202,6 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
-            {showProjectContextToggle ? (
-              <HeaderIconPill
-                icon={<IconInfoCircle />}
-                label={projectContextRailVisible ? 'Hide workspace detail' : 'Show workspace detail'}
-                title={projectContextRailVisible ? 'Hide workspace detail' : 'Show workspace detail'}
-                onClick={onToggleProjectContextRail}
-                yNudge={-3}
-              />
-            ) : null}
             {onToggleBottomPanel ? (
               <HeaderIconPill
                 icon={<IconTerminal />}

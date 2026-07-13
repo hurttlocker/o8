@@ -299,6 +299,22 @@ function OrchestratorTabInner({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // Codex-style collapse for the branch-details rail (Q 2026-07-13): the »
+  // control below the header folds the 256px rail to a 44px icon column
+  // instead of hiding it. Persists across reloads.
+  const [branchRailCollapsed, setBranchRailCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('o8:branch-rail:collapsed') === '1';
+  });
+  const toggleBranchRailCollapsed = useCallback(() => {
+    setBranchRailCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('o8:branch-rail:collapsed', next ? '1' : '0');
+      }
+      return next;
+    });
+  }, []);
   // UltraCode / swarm tier (per-tab). Picking "UltraCode" in the composer's
   // thinking dropdown flips this on; the orchestrator then fans work out to a
   // parallel crew — native Claude sub-agents + Codex workers via o8.
@@ -1020,13 +1036,25 @@ function OrchestratorTabInner({
   const branchRail = (
     <div
       style={{
-        width: (projectContextRailVisible && railFits) ? 256 : 0,
+        width: (projectContextRailVisible && railFits) ? (branchRailCollapsed ? 44 : 256) : 0,
         flexShrink: 0,
+        // minHeight:0 keeps this flex item bounded by the row height so the
+        // rail's own overflowY:auto can engage — without it the rail sized to
+        // its content and the ancestor CLIPPED it with no way to scroll
+        // (Q live-hit, short windows, 2026-07-13).
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
         overflow: 'hidden',
         transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
-      <BranchDetailsLauncher visible={projectContextRailVisible && railFits} repoPath={repoPath ?? null} />
+      <BranchDetailsLauncher
+        visible={projectContextRailVisible && railFits}
+        repoPath={repoPath ?? null}
+        collapsed={branchRailCollapsed}
+        onToggleCollapsed={toggleBranchRailCollapsed}
+      />
     </div>
   );
 
