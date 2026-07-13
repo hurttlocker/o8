@@ -19,6 +19,17 @@ pub const WHISPER_TURBO_MODEL: &str = "openai/whisper-large-v3-turbo";
 
 const TIMEOUT_SECS: u64 = 30;
 
+/// Per-request timeout scaled to the recording length. The client's flat 30s
+/// default is right for command-length dictations but starved long-form ones:
+/// a 3-4 minute WAV (upload + whisper decode) can't round-trip in 30s, so the
+/// pass "failed" exactly when the user had the most to lose (live-hit
+/// 2026-07-13: a ~4 min trading-journal dictation lost the Whisper pass).
+/// 16kHz mono 16-bit WAV ≈ 32,000 bytes/sec of audio.
+fn request_timeout_for(audio_bytes: usize) -> Duration {
+    let audio_secs = (audio_bytes / 32_000) as u64;
+    Duration::from_secs((TIMEOUT_SECS + audio_secs / 2).min(180))
+}
+
 static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize)]
@@ -263,6 +274,7 @@ fn transcribe_via_groq(path: &str, audio: Vec<u8>, key: &str) -> Option<WhisperT
         .and_then(|n| n.to_str())
         .unwrap_or("audio.wav")
         .to_string();
+    let timeout = request_timeout_for(audio.len());
     let mut form = reqwest::blocking::multipart::Form::new()
         .part(
             "file",
@@ -280,6 +292,7 @@ fn transcribe_via_groq(path: &str, audio: Vec<u8>, key: &str) -> Option<WhisperT
         .post(GROQ_TRANSCRIPTION_URL)
         .header("Authorization", format!("Bearer {key}"))
         .multipart(form)
+        .timeout(timeout)
         .send();
 
     match response {
@@ -371,6 +384,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
         return None;
     }
 
+    let request_timeout = request_timeout_for(audio.len());
     let mut body = serde_json::json!({
         "model": WHISPER_TURBO_MODEL,
         "input_audio": {
@@ -390,6 +404,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
         .header("Authorization", format!("Bearer {}", target.bearer))
         .header("HTTP-Referer", "https://github.com/hurttlocker/o8")
         .header("X-Title", "o8")
+        .timeout(request_timeout)
         .json(&body);
 
     let response = request.send();
