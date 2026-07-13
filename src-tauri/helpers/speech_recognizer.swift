@@ -1336,8 +1336,16 @@ func handleStart(sessionId: UInt64) {
         // FIFO-mode liveness (#1540): the parent pump should be delivering
         // chunks within ~1s of session start. If the counter never moves the
         // pump/pipe is dead — say so instead of finalizing empty.
+        //
+        // Cold-start grace (first-press red pill, 2026-07-12): the very first
+        // AudioUnit open per app process pays macOS's cold CoreAudio/HAL
+        // activation tax (worse on Intel) — the pump is healthy, first samples
+        // just take >1s. tapBufferCount == 0 means no FIFO audio has EVER
+        // arrived this helper lifetime, so give that one cold path 3s before
+        // declaring the pipe dead; warm sessions keep the tight 1s deadline.
         let fifoBaseline = tapBufferCount
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        let livenessDeadline: TimeInterval = fifoBaseline == 0 ? 3.0 : 1.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + livenessDeadline) {
             guard currentSessionId == sessionId, tapBufferCount == fifoBaseline else { return }
             emitError("No audio is arriving from the app's microphone stream. Quit and reopen o8.", sessionId: sessionId)
         }
