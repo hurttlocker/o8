@@ -71,6 +71,8 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "Branches", label: "Branch prefix", description: "Prefix for branches agents create from issues", keywords: ['git', 'worktree', 'branch', 'naming'] },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "Attribution", label: "Tag commits created by agents", description: "Append a Co-Authored-By trailer to agent commits", keywords: ['git', 'commit', 'attribution', 'co-authored'] },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "Pull requests", label: "PR link destination", description: "Open pull request links inside o8 or in your browser", keywords: ['git', 'github', 'pull request', 'browser'] },
+  { tab: 'indexing', tabLabel: 'Indexing', group: "Repositories", label: "Repository index", description: "Per-repo index status with a Reindex action", keywords: ['index', 'reindex', 'codebase', 'cortex', 'search'] },
+  { tab: 'indexing', tabLabel: 'Indexing', group: "Engineering Brain", label: "Brain knowledge", description: "Directives and ledger outcomes the Brain cites", keywords: ['brain', 'memory', 'directives', 'cortex'] },
   { tab: 'about', tabLabel: 'About', group: "Developer", label: "Preview onboarding", description: "Runs the flow without resetting state (dev builds only)" },
   { tab: 'about', tabLabel: 'About', group: "Developer", label: "Reset + run onboarding", description: "Clears setup state and restarts the flow (dev builds only)" },
   { tab: 'about', tabLabel: 'About', group: "Links", label: "Documentation", description: "Architecture, workflows, and guides" },
