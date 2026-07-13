@@ -35,6 +35,20 @@ export function useDesignMode(): UseDesignModeResult {
     window.dispatchEvent(new CustomEvent('o8:design-mode', { detail: { active } }));
   }, [active]);
 
+  // Command channel — the browser toolbar's Design button (and any future
+  // surface) toggles the mode without prop-drilling from the dashboard
+  // (browser toolbelt, Q 2026-07-12).
+  useEffect(() => {
+    const onRequest = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: string }>).detail?.action;
+      if (action === 'close') close();
+      else if (action === 'open') setActive(true);
+      else toggle();
+    };
+    window.addEventListener('o8:design-mode-request', onRequest);
+    return () => window.removeEventListener('o8:design-mode-request', onRequest);
+  }, [close, toggle]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
