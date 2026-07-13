@@ -25,6 +25,7 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { autostartIsEnabled, autostartSet, isTauri } from '@/lib/tauri/bridge';
+import { isTelemetryOptedOut, setTelemetryOptOut } from '@/lib/analytics/track';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
@@ -102,6 +103,12 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
     : isPaid
       ? (plan === 'team' || actualPlan === 'team' ? 'Team' : 'Pro')
       : 'Free Plan';
+
+  // ── Usage-data sharing (telemetry opt-out, moved from the old Account tab) ──
+  const [shareUsage, setShareUsage] = useState(true);
+  useEffect(() => {
+    setShareUsage(!isTelemetryOptedOut());
+  }, []);
 
   // ── Launch at login (native autostart via the Tauri bridge) ──
   const [autostart, setAutostart] = useState(false);
@@ -213,7 +220,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       <section style={{ marginBottom: 28 }}>
         <SettingsGroup
           header="Account"
-          footnote="Your o8 identity, plan, and founder status. Sign-in and licensing are managed in the Account tab."
+          footnote="Your o8 identity, plan, and founder status. Optional — o8 runs fully account-less with your own keys; signing in syncs your identity and unlocks managed tokens. License keys activate in Plan & Billing."
         >
           <SettingsRow
             icon={
@@ -235,13 +242,24 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
               )
             }
             label={hasUser ? displayName : 'Sign in'}
-            subtitle={hasUser
-              ? 'Manage in the Account tab'
-              : 'Sign in to sync your identity across desktop and web'}
+            subtitle={
+              !auth.clerkEnabled
+                ? 'Sign-in isn’t configured in this build — everything works with your own keys'
+                : !auth.isLoaded
+                  ? 'Checking session…'
+                  : hasUser
+                    ? (auth.user?.email || 'Signed in with GitHub')
+                    : 'Sign in with GitHub to sync your identity across desktop and web'
+            }
             accessory={
-              <RamsButton variant="ghost" onClick={() => onNavigateTab?.('account')}>
-                {hasUser ? 'Open' : 'Sign in'}
-              </RamsButton>
+              !auth.clerkEnabled || !auth.isLoaded ? undefined : hasUser ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <RamsButton variant="ghost" onClick={auth.openManageAccount}>Manage</RamsButton>
+                  <RamsButton variant="ghost" onClick={() => { void auth.signOut(); }}>Sign out</RamsButton>
+                </span>
+              ) : (
+                <RamsButton variant="primary" onClick={auth.signIn}>Sign in with GitHub</RamsButton>
+              )
             }
             divider
           />
@@ -284,32 +302,42 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
         </section>
       ) : null}
 
-      {values && sources ? (
-        <section style={{ marginTop: tauri ? 28 : 0 }}>
-          <SettingsGroup
-            header="Privacy"
-            footnote="Crash reports carry the error stack trace and the app version — never your code, prompts, or files. Home paths, query strings, and identity are scrubbed before anything leaves your machine. A native (non-JS) crash also attaches a memory snapshot of the moment it failed so we can diagnose it. Turning reports off is respected within seconds across the app, server, and native shell; turning native crash capture back on takes effect on the next launch."
-          >
-            <SettingsRow
-              icon={<ShieldIcon />}
-              label="Crash & error reports"
-              subtitle={lockedSub('crashReportsEnabled', 'Send anonymous crash reports to help fix issues faster. Never includes your code, file paths, or identity.')}
-              checked={values.crashReportsEnabled}
-              disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}
-              onToggle={(next) => { void updateField('crashReportsEnabled', next); }}
-              divider
-            />
-            <SettingsRow
-              icon={<ShieldIcon />}
-              label="Send local crash log to the o8 team"
-              subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log — stack traces + app version only')}
-              checked={values.telemetryOptIn}
-              disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
-              onToggle={(next) => { void updateField('telemetryOptIn', next); }}
-            />
-          </SettingsGroup>
-        </section>
-      ) : null}
+      <section style={{ marginTop: tauri ? 28 : 0 }}>
+        <SettingsGroup
+          header="Privacy"
+          footnote="Usage data is coarse counts only — which features get used, never your code, prompts, or repo names. Crash reports carry the error stack trace and app version; home paths, query strings, and identity are scrubbed before anything leaves your machine."
+        >
+          <SettingsRow
+            icon={<ShieldIcon />}
+            label="Share usage data"
+            subtitle="Helps us improve o8"
+            checked={shareUsage}
+            onToggle={(next) => { setShareUsage(next); setTelemetryOptOut(!next); }}
+            divider={Boolean(values && sources)}
+          />
+          {values && sources ? (
+            <>
+              <SettingsRow
+                icon={<ShieldIcon />}
+                label="Crash & error reports"
+                subtitle={lockedSub('crashReportsEnabled', 'Send anonymous crash reports to help fix issues faster. Never includes your code, file paths, or identity.')}
+                checked={values.crashReportsEnabled}
+                disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}
+                onToggle={(next) => { void updateField('crashReportsEnabled', next); }}
+                divider
+              />
+              <SettingsRow
+                icon={<ShieldIcon />}
+                label="Send local crash log to the o8 team"
+                subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log — stack traces + app version only')}
+                checked={values.telemetryOptIn}
+                disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
+                onToggle={(next) => { void updateField('telemetryOptIn', next); }}
+              />
+            </>
+          ) : null}
+        </SettingsGroup>
+      </section>
     </div>
   );
 }
