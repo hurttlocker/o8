@@ -395,7 +395,7 @@ function OrchestratorTabInner({
     const threadId = chatChromeState.threadId;
     if (!threadId) return;
     let cancelled = false;
-    (async () => {
+    const sync = async () => {
       try {
         const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
         if (cancelled) return;
@@ -429,8 +429,21 @@ function OrchestratorTabInner({
           detail: { tabId, threadId, title: freshLabel },
         }));
       } catch { /* silent */ }
-    })();
-    return () => { cancelled = true; };
+    };
+    void sync();
+    // Auto-titler follow-up (2026-07-13): the server names the thread a few
+    // seconds AFTER the post-turn persist. usePersistChatThread fires this
+    // event on a delay so the header pill + rail pick up the new name
+    // without waiting for a thread switch.
+    const onMaybeUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId?: string }>).detail;
+      if (detail?.threadId === threadId) void sync();
+    };
+    window.addEventListener('o8:thread-title-maybe-updated', onMaybeUpdated as EventListener);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('o8:thread-title-maybe-updated', onMaybeUpdated as EventListener);
+    };
   }, [active, persistLastThread, tabId, chatChromeState.threadId, lockedMode, repoPath]);
 
   // Persist the last-active orchestrator thread id globally so dev

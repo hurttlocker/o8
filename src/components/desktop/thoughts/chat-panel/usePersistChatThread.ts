@@ -10,12 +10,27 @@ function serializeMessages(msgs: MobileTranscriptEntry[]) {
 
 export function usePersistChatThread(resolvedRepoPath: string | null) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titlePokeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelPending = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+  }, []);
+
+  // The server-side auto-titler names the thread a few seconds after a
+  // persist lands (free-model call, fire-and-forget). Poke the title-sync
+  // listeners once after that window so the header pill + left rail pick
+  // up the generated name without a thread switch. Single timer — a newer
+  // persist supersedes the pending poke.
+  const scheduleTitlePoke = useCallback((threadId: string) => {
+    if (typeof window === 'undefined') return;
+    if (titlePokeRef.current) clearTimeout(titlePokeRef.current);
+    titlePokeRef.current = setTimeout(() => {
+      titlePokeRef.current = null;
+      window.dispatchEvent(new CustomEvent('o8:thread-title-maybe-updated', { detail: { threadId } }));
+    }, 6000);
   }, []);
 
   const persistThreadNow = useCallback(
@@ -39,11 +54,12 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
             title: options?.title ?? undefined,
           }),
         });
+        if (msgs.length >= 2) scheduleTitlePoke(tid);
       } catch {
         // silent
       }
     },
-    [resolvedRepoPath],
+    [resolvedRepoPath, scheduleTitlePoke],
   );
 
   const persistThread = useCallback(

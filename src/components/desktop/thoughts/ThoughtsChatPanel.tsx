@@ -76,6 +76,7 @@ import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
+import { isFileEditCall } from './chat-panel/file-edits';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
@@ -1454,6 +1455,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const toolNamesAll: string[] = [];
       let toolCount = 0;
       let lastAssistantId: string | null = null;
+      let turnHadEdits = false;
       for (const entry of newEntries) {
         if (entry.role === 'assistant') lastAssistantId = entry.id;
         if (entry.toolCalls?.length) {
@@ -1461,6 +1463,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             toolCount += 1;
             const name = call.name?.trim();
             if (name) toolNamesAll.push(name);
+            if (isFileEditCall(call)) turnHadEdits = true;
           }
         }
       }
@@ -1491,7 +1494,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setTurnSummary(baseSummary);
       turnStartRef.current = null;
 
-      if (resolvedRepoPath) {
+      // False-attribution guard (2026-07-13): the workspace snapshot counts
+      // EVERY working-tree change, including edits this turn never made
+      // (other agents, pre-existing dirt). Only stamp "Edited N files" when
+      // the turn actually ran a file-edit tool.
+      if (resolvedRepoPath && turnHadEdits) {
         const repoForFetch = resolvedRepoPath;
         const targetAssistantId = lastAssistantId;
         void (async () => {
