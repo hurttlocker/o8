@@ -23,7 +23,6 @@ import {
   RAMS_CONTROL_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -287,7 +286,6 @@ export function MCPTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="MCP" />
       <TabHeading
         title="MCP"
         subtitle="One click to let Claude Desktop or Claude Code dispatch work to your o8 fleet. Your other MCP servers stay untouched — we only write the o8 entry."

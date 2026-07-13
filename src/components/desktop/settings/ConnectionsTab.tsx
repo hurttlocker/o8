@@ -15,7 +15,6 @@ import { Smartphone } from '../lucide-shims';
 import {
   APP_FONT_STACK,
   RamsButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -36,7 +35,6 @@ export function ConnectionsTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="mobile" />
       <TabHeading
         title="mobile"
         subtitle="Pair the o8 mobile app to approve, monitor, and steer your fleet from your phone."

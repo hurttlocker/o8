@@ -6,7 +6,6 @@ import {
   APP_FONT_STACK,
   GitHubIcon,
   InfoIcon,
-  TabBreadcrumb,
   TabHeading,
   normalizeVersion,
   SETTINGS_CONTENT_MAX_WIDTH,
@@ -103,7 +102,6 @@ export function AboutTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="about" />
       <TabHeading
         title="about"
         subtitle="A precision instrument for autonomous engineering teams. Built with Next.js and Tauri."

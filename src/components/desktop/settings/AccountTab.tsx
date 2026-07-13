@@ -20,7 +20,6 @@ import {
   RAMS_INK_QUIET,
   BracketLabel,
   RamsButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -162,7 +161,6 @@ export function AccountTab() {
 
   return (
     <div style={{ paddingTop: 8, paddingLeft: 8, paddingRight: 32, paddingBottom: 40, maxWidth: SETTINGS_CONTENT_MAX_WIDTH, fontFamily: APP_FONT_STACK }}>
-      <TabBreadcrumb tab="account" />
       <TabHeading
         title="account"
         subtitle="Sign in with GitHub to sync your identity across desktop and (soon) the web. Optional — o8 runs fully with your own API keys and no account; signing in unlocks managed tokens and Pro."

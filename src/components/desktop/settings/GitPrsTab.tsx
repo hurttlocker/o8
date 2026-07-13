@@ -20,7 +20,6 @@ import {
   RAMS_CONTROL_BORDER,
   SettingsSegmented,
   SETTINGS_CONTENT_MAX_WIDTH,
-  TabBreadcrumb,
   TabHeading,
 } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
@@ -206,7 +205,6 @@ export function GitPrsTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="git & prs" />
       <TabHeading
         title="git & prs"
         subtitle="How o8 names the branches it opens, whether agent commits are attributed, and where a pull request opens when you click it."
