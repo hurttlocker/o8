@@ -2,16 +2,27 @@ import { describe, it, expect } from 'vitest';
 import { NATIVE_BROWSER_AGENT_SOURCE } from './native-agent-source';
 import { SELECTOR_FOR_SOURCE } from './selector';
 import { GRAB_PAYLOAD_SOURCE } from './grab';
+import { REACT_COMPONENT_NAME_SOURCE } from './react-fiber';
 
 describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
-  it('embeds the no-drift selectorFor + buildGrabbedElement sources verbatim', () => {
-    // The two complex algorithms come from the shared injectable sources, not a
-    // hand-copy — so they can never drift from selector.ts / grab.ts.
+  it('embeds the no-drift selectorFor + buildGrabbedElement + reactComponentName sources verbatim', () => {
+    // The complex algorithms come from the shared injectable sources, not a
+    // hand-copy — so they can never drift from selector.ts / grab.ts / react-fiber.ts.
     expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(SELECTOR_FOR_SOURCE);
     expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(GRAB_PAYLOAD_SOURCE);
+    expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(REACT_COMPONENT_NAME_SOURCE);
   });
 
-  it('installs window.__o8BrowserAgent with the five verbs and is idempotent', () => {
+  it('parses as a standalone function body (createElement-only injected agent)', () => {
+    // The whole source must parse in isolation — the injected agent runs on
+    // hardened CSP/Trusted-Types pages where eval is dead, so a syntax slip
+    // (from the draw/thumb/hover additions) can never be caught at runtime.
+    expect(() => {
+      new Function('window', 'document', 'location', NATIVE_BROWSER_AGENT_SOURCE);
+    }).not.toThrow();
+  });
+
+  it('installs window.__o8BrowserAgent with the read/design/draw verbs and is idempotent', () => {
     const win: Record<string, unknown> = {};
     const doc = {
       title: 'Test Page',
@@ -19,7 +30,6 @@ describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
       querySelector: () => null,
     };
     const loc = { href: 'http://localhost:3000/dashboard' };
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
     const run = new Function('window', 'document', 'location', NATIVE_BROWSER_AGENT_SOURCE) as (
       w: unknown,
       d: unknown,
@@ -29,7 +39,7 @@ describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
     run(win, doc, loc);
     const agent = win.__o8BrowserAgent as Record<string, unknown> | undefined;
     expect(agent).toBeTruthy();
-    for (const verb of ['read', 'click', 'type', 'probe', 'grab']) {
+    for (const verb of ['read', 'click', 'type', 'probe', 'grab', 'drawmode', 'drawthumb', 'drawpending']) {
       expect(typeof agent?.[verb]).toBe('function');
     }
 
@@ -47,7 +57,6 @@ describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
       querySelector: () => null,
     };
     const loc = { href: 'http://localhost:3000/' };
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
     const run = new Function('window', 'document', 'location', NATIVE_BROWSER_AGENT_SOURCE) as (
       w: unknown,
       d: unknown,
