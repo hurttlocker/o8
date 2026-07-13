@@ -1,22 +1,5 @@
 'use client';
 
-/**
- * CommandPalette — full-screen overlay command palette (Cmd+K / Ctrl+K).
- *
- * Issue #661. Distinct from `UniversalSearch` (which is the inline search
- * bar in the TitleBar). This component renders as a modal overlay over the
- * whole desktop dashboard, with grouped fan-out search results and a
- * client-side LRU of recents (localStorage).
- *
- * Spec:
- *   - Autofocus input on open
- *   - Empty query → "Recent" group from localStorage LRU
- *   - Type ≥2 chars → debounce 200ms → grouped results across Issues / Files
- *     / Agents
- *   - ↑/↓ navigate, Enter selects, Esc closes
- *   - The dashboard owns the global Cmd+K listener and toggles `open`
- */
-
 import {
   memo,
   useCallback,
@@ -25,47 +8,30 @@ import {
   useRef,
   useState,
 } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
-  AlertCircle,
-  ArrowRight,
-  BookOpen,
-  ChevronRight,
-  Clock,
-  FileText,
-  GitPullRequestDraft,
-  MessageSquare,
-  Monitor,
-  Search,
-  X,
-  type LucideIcon,
-} from '@/components/desktop/lucide-shims';
+  AlertGlyph,
+  CloseGlyph,
+  PaletteList,
+  SearchGlyph,
+  type PaletteIconKind,
+  type PaletteListItem,
+} from './command-palette/PaletteList';
 import {
-  KIND_COLOR,
   cardStyle,
   clearButtonStyle,
-  detailTextStyle,
   errorRowStyle,
-  footerHintGroupStyle,
-  footerHintTextStyle,
-  footerKbdStyle,
-  footerSpacerStyle,
   footerStyle,
-  iconWrapStyle,
   inputRowStyle,
   inputStyle,
   kbdStyle,
   listStyle,
   overlayStyle,
-  rowStyleBase,
-  sectionHeaderStyle,
+  scopePillStyle,
+  scopeRowStyle,
   statusRowStyle,
-  titleColumnStyle,
-  titleTextStyle,
   type GroupKey,
 } from './command-palette-styles';
-
-// ── Types ──────────────────────────────────────────────────────────────────
 
 export type CommandPaletteSearchKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive';
 
@@ -75,11 +41,7 @@ export interface CommandPaletteSearchTarget {
   filePath?: string;
   line?: number;
   sessionKey?: string;
-  /** chat-history tabId — parent reopens via the existing
-   *  `o8:open-history-chat` event when the row is activated. */
   chatTabId?: string;
-  /** Cortex directive id — parent routes to Settings → Operator Defaults
-   *  (or a directive viewer) via `o8:open-directive`. */
   directiveId?: string;
 }
 
@@ -98,24 +60,14 @@ export interface CommandPaletteRecent {
   title: string;
   detail?: string;
   target: CommandPaletteSearchTarget;
-  /** ms epoch timestamp of last activation. */
   lastUsedAt: number;
 }
 
-/**
- * Action items are client-side palette entries that don't go through the
- * server search — used today for "Switch to project" / "Move repo to
- * project" rows. The host wires `onActivate` directly so the palette never
- * needs to know which subsystem is being driven.
- */
 export interface CommandPaletteActionItem {
-  /** Stable id (eg "project:switch:default"). Used for keyboard nav and as
-   *  the React key. */
   id: string;
   title: string;
   detail?: string;
-  /** Optional swatch color rendered inside the icon slot. Used for project
-   *  rows so the palette mirrors the dot color in the bottom bar. */
+  shortcut?: string;
   swatchColor?: string;
   onActivate: () => void;
 }
@@ -123,36 +75,25 @@ export interface CommandPaletteActionItem {
 export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
-  /** Active workspace path, forwarded to the search route for file scoping. */
   workspace?: string | null;
-  /** Active repo slug or short name for issue scoping. */
   repo?: string | null;
-  /** Client-side rows that bypass the search index (project switch / move). */
   actionItems?: CommandPaletteActionItem[];
   onSelectIssue: (issueNumber: number, repo?: string) => void;
   onSelectFile: (filePath: string, line?: number) => void;
   onSelectAgent: (sessionKey: string) => void;
-  /** #984 — chat-history row activation. Optional; when the host wires it,
-   *  reopens the saved thread. Falls back to a window event otherwise. */
   onSelectChat?: (chatTabId: string, title?: string) => void;
-  /** #984 — directive row activation. Optional; when wired the host can
-   *  open a directive viewer. Falls back to a window event otherwise. */
   onSelectDirective?: (directiveId: string) => void;
 }
 
-interface PaletteItem {
-  id: string;
+type PaletteScope = 'all' | 'agent' | 'file' | 'action' | 'issue' | 'chat' | 'directive';
+type FilterScope = Exclude<PaletteScope, 'all'>;
+
+interface PaletteItem extends PaletteListItem {
   groupKey: GroupKey;
-  title: string;
+  scope: FilterScope;
   detail: string;
-  Icon: LucideIcon;
-  iconColor: string;
-  /** Defined for search-backed rows. Action rows use `onActivate` instead. */
   result?: CommandPaletteSearchResult;
-  /** Defined for client-side action rows. */
   onActivate?: () => void;
-  /** Solid swatch color rendered in place of an icon. */
-  swatchColor?: string;
 }
 
 interface SearchResponse {
@@ -162,32 +103,43 @@ interface SearchResponse {
   error?: string;
 }
 
-// ── Constants ──────────────────────────────────────────────────────────────
-
 const RECENTS_KEY = 'o8:command-palette:recents:v1';
 const RECENTS_MAX = 8;
 const DEBOUNCE_MS = 200;
 const SPRING = { type: 'spring' as const, stiffness: 400, damping: 30 };
-
-const KIND_ICON: Record<CommandPaletteSearchKind, LucideIcon> = {
-  issue: GitPullRequestDraft,
-  file: FileText,
-  agent: Monitor,
-  chat: MessageSquare,
-  directive: BookOpen,
+const EMPTY_GROUPS: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]> = {
+  issue: [],
+  file: [],
+  agent: [],
+  chat: [],
+  directive: [],
 };
 
-const GROUP_LABEL: Record<GroupKey, string> = {
-  recent: 'Recent',
-  issue: 'Issues',
-  file: 'Files',
-  agent: 'Agents',
-  chat: 'Chat history',
-  directive: 'Directives',
-  action: 'Actions',
+const SCOPE_TABS: Array<{ id: PaletteScope; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'agent', label: 'Agents' },
+  { id: 'file', label: 'Files' },
+  { id: 'action', label: 'Actions' },
+  { id: 'issue', label: 'Issues' },
+  { id: 'chat', label: 'Chats' },
+  { id: 'directive', label: 'Rules' },
+];
+
+const KIND_ICON: Record<CommandPaletteSearchKind, PaletteIconKind> = {
+  issue: 'issue',
+  file: 'file',
+  agent: 'agent',
+  chat: 'chat',
+  directive: 'directive',
 };
 
-// ── localStorage LRU helpers ───────────────────────────────────────────────
+function isSearchKind(value: unknown): value is CommandPaletteSearchKind {
+  return value === 'issue'
+    || value === 'file'
+    || value === 'agent'
+    || value === 'chat'
+    || value === 'directive';
+}
 
 function readRecents(): CommandPaletteRecent[] {
   if (typeof window === 'undefined') return [];
@@ -198,12 +150,12 @@ function readRecents(): CommandPaletteRecent[] {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((entry): entry is CommandPaletteRecent => (
-        entry
+        Boolean(entry)
         && typeof entry.id === 'string'
         && typeof entry.title === 'string'
         && typeof entry.lastUsedAt === 'number'
-        && (entry.kind === 'issue' || entry.kind === 'file' || entry.kind === 'agent')
-        && entry.target
+        && isSearchKind(entry.kind)
+        && Boolean(entry.target)
         && typeof entry.target === 'object'
       ))
       .slice(0, RECENTS_MAX);
@@ -217,23 +169,50 @@ function writeRecents(entries: CommandPaletteRecent[]) {
   try {
     window.localStorage.setItem(RECENTS_KEY, JSON.stringify(entries.slice(0, RECENTS_MAX)));
   } catch {
-    // ignore quota / disabled storage
+    // Storage is best-effort; navigation still succeeds when it is unavailable.
   }
 }
 
 function pushRecent(entry: Omit<CommandPaletteRecent, 'lastUsedAt'>): CommandPaletteRecent[] {
-  const now = Date.now();
   const current = readRecents();
-  const dedup = current.filter((existing) => existing.id !== entry.id);
-  const next: CommandPaletteRecent[] = [{ ...entry, lastUsedAt: now }, ...dedup].slice(
-    0,
-    RECENTS_MAX,
-  );
+  const next = [
+    { ...entry, lastUsedAt: Date.now() },
+    ...current.filter((existing) => existing.id !== entry.id),
+  ].slice(0, RECENTS_MAX);
   writeRecents(next);
   return next;
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+function relativeTimestamp(timestamp: number | null): string {
+  if (!timestamp || !Number.isFinite(timestamp)) return '';
+  const elapsed = Math.max(0, Date.now() - timestamp);
+  if (elapsed < 60_000) return 'now';
+  if (elapsed < 3_600_000) return `${Math.max(1, Math.floor(elapsed / 60_000))}m ago`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h ago`;
+  if (elapsed < 604_800_000) return `${Math.floor(elapsed / 86_400_000)}d ago`;
+  return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function chatTimestamp(result: CommandPaletteSearchResult): number | null {
+  const source = result.target?.chatTabId ?? result.id;
+  const match = source.match(/(?:^|\D)(\d{13})(?:\D|$)/);
+  if (!match) return null;
+  const timestamp = Number(match[1]);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function dirname(path: string): string {
+  const normalized = path.replace(/^\.\//, '');
+  const parts = normalized.split('/');
+  parts.pop();
+  return parts.join('/') || '.';
+}
+
+function resultMeta(result: CommandPaletteSearchResult): string {
+  if (result.kind === 'file') return dirname(result.target?.filePath ?? result.detail);
+  if (result.kind === 'chat') return relativeTimestamp(chatTimestamp(result)) || result.detail;
+  return result.detail;
+}
 
 export const CommandPalette = memo(function CommandPalette({
   open,
@@ -248,9 +227,8 @@ export const CommandPalette = memo(function CommandPalette({
   onSelectDirective,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
-  const [groups, setGroups] = useState<Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]>>(
-    { issue: [], file: [], agent: [], chat: [], directive: [] },
-  );
+  const [scope, setScope] = useState<PaletteScope>('all');
+  const [groups, setGroups] = useState<Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]>>(EMPTY_GROUPS);
   const [recents, setRecents] = useState<CommandPaletteRecent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -260,26 +238,23 @@ export const CommandPalette = memo(function CommandPalette({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const selectedIndexRef = useRef(selectedIndex);
+  const selectedIndexRef = useRef(0);
 
-  // Reset state on open and refresh recents from localStorage.
   useEffect(() => {
     if (!open) return;
     setQuery('');
-    setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
-    setError(null);
-    setLoading(false);
-    setSelectedIndex(0);
+    setScope('all');
+    setGroups(EMPTY_GROUPS);
     setRecents(readRecents());
-    // autofocus on the next tick so the overlay is mounted first
-    const handle = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(handle);
+    setLoading(false);
+    setError(null);
+    setSelectedIndex(0);
+    const focusId = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusId);
   }, [open]);
 
-  // Debounced search — 200ms per spec.
   useEffect(() => {
     if (!open) return;
-
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
@@ -291,7 +266,7 @@ export const CommandPalette = memo(function CommandPalette({
 
     const trimmed = query.trim();
     if (trimmed.length < 2) {
-      setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
+      setGroups(EMPTY_GROUPS);
       setError(null);
       setLoading(false);
       return;
@@ -305,26 +280,24 @@ export const CommandPalette = memo(function CommandPalette({
         const params = new URLSearchParams({ q: trimmed });
         if (workspace) params.set('workspace', workspace);
         if (repo) params.set('repo', repo);
-        const response = await fetch(`/api/panel/search?${params.toString()}`, {
-          signal: controller.signal,
-        });
+        const response = await fetch(`/api/panel/search?${params.toString()}`, { signal: controller.signal });
         if (!response.ok) {
           setError('Search is unavailable.');
-          setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
+          setGroups(EMPTY_GROUPS);
           return;
         }
         const data = await response.json() as SearchResponse;
         if (data.error) {
           setError(data.error);
-          setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
+          setGroups(EMPTY_GROUPS);
           return;
         }
-        setGroups(data.groups ?? { issue: [], file: [], agent: [], chat: [], directive: [] });
+        setGroups(data.groups ?? EMPTY_GROUPS);
         setError(null);
-      } catch (err) {
-        if ((err as { name?: string })?.name === 'AbortError') return;
+      } catch (caught) {
+        if ((caught as { name?: string })?.name === 'AbortError') return;
         setError('Search failed.');
-        setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
+        setGroups(EMPTY_GROUPS);
       } finally {
         setLoading(false);
       }
@@ -334,48 +307,40 @@ export const CommandPalette = memo(function CommandPalette({
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [open, query, workspace, repo]);
+  }, [open, query, repo, workspace]);
 
-  // Filter client-side action items by the current query so the palette
-  // surfaces "Switch to Marketing" when the operator types "marketing", but
-  // keeps them out of the way at rest. At rest, consequential actions
-  // (project:move: — changes repo↔project membership) are hidden entirely:
-  // they must be summoned by typing, never sit one arrow-slip from an empty
-  // palette.
   const filteredActionItems = useMemo<PaletteItem[]>(() => {
     if (!actionItems?.length) return [];
     const trimmed = query.trim().toLowerCase();
     const source = trimmed.length === 0
       ? actionItems.filter((entry) => !entry.id.startsWith('project:move:'))
       : actionItems.filter((entry) => (
-        entry.title.toLowerCase().includes(trimmed)
-        || (entry.detail ?? '').toLowerCase().includes(trimmed)
-      ));
+          entry.title.toLowerCase().includes(trimmed)
+          || (entry.detail ?? '').toLowerCase().includes(trimmed)
+        ));
     return source.map((entry) => ({
       id: entry.id,
-      groupKey: 'action' as const,
+      groupKey: 'action',
+      scope: 'action',
       title: entry.title,
       detail: entry.detail ?? '',
-      Icon: ChevronRight,
-      iconColor: 'var(--t-text-muted)',
+      meta: entry.shortcut ?? entry.detail ?? '',
+      iconKind: 'action',
       onActivate: entry.onActivate,
       swatchColor: entry.swatchColor,
     }));
   }, [actionItems, query]);
 
-  // Build the flat ordered item list (used for keyboard navigation +
-  // selection mapping). Sections render off the same array.
-  const items = useMemo<PaletteItem[]>(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      // Empty query → show actions + recents
-      const recentItems: PaletteItem[] = recents.map((entry) => ({
+  const unscopedItems = useMemo<PaletteItem[]>(() => {
+    if (query.trim().length < 2) {
+      const recentItems = recents.map<PaletteItem>((entry) => ({
         id: `recent:${entry.id}`,
-        groupKey: 'recent' as const,
+        groupKey: 'recent',
+        scope: entry.kind,
         title: entry.title,
         detail: entry.detail ?? '',
-        Icon: KIND_ICON[entry.kind] ?? Clock,
-        iconColor: KIND_COLOR[entry.kind] ?? '#64748b',
+        meta: relativeTimestamp(entry.lastUsedAt),
+        iconKind: KIND_ICON[entry.kind],
         result: {
           kind: entry.kind,
           id: entry.id,
@@ -385,57 +350,49 @@ export const CommandPalette = memo(function CommandPalette({
           score: 0,
         },
       }));
-      // Recents lead at rest — what the operator touched last is the likeliest
-      // next jump; project actions follow.
       return [...recentItems, ...filteredActionItems];
     }
 
-    const ordered: PaletteItem[] = [];
-    // Actions first so frequent project switches stay above search noise.
-    ordered.push(...filteredActionItems);
-    const pushGroup = (kind: CommandPaletteSearchKind) => {
+    const ordered: PaletteItem[] = [...filteredActionItems];
+    const appendGroup = (kind: CommandPaletteSearchKind) => {
       for (const result of groups[kind]) {
         ordered.push({
           id: result.id,
           groupKey: kind,
+          scope: kind,
           title: result.title,
           detail: result.detail,
-          Icon: KIND_ICON[kind],
-          iconColor: KIND_COLOR[kind],
+          meta: resultMeta(result),
+          iconKind: KIND_ICON[kind],
           result,
         });
       }
     };
-    pushGroup('agent');
-    pushGroup('issue');
-    pushGroup('file');
-    pushGroup('chat');
-    pushGroup('directive');
+    appendGroup('agent');
+    appendGroup('issue');
+    appendGroup('file');
+    appendGroup('chat');
+    appendGroup('directive');
     return ordered;
   }, [filteredActionItems, groups, query, recents]);
 
-  // Keep selectedIndex in bounds when items shrink.
+  const items = useMemo(
+    () => scope === 'all' ? unscopedItems : unscopedItems.filter((item) => item.scope === scope),
+    [scope, unscopedItems],
+  );
+
   useEffect(() => {
-    if (selectedIndex >= items.length && items.length > 0) {
-      setSelectedIndex(0);
-    }
+    if (items.length === 0 || selectedIndex >= items.length) setSelectedIndex(0);
   }, [items.length, selectedIndex]);
 
-  // Sync selectedIndexRef so the Enter handler always reads the latest index
-  // without closing over a stale value.
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
 
-  // Scroll the active item into view.
   useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const active = list.querySelector<HTMLElement>(`[data-palette-index="${selectedIndex}"]`);
-    if (active) {
-      active.scrollIntoView({ block: 'nearest' });
-    }
-  }, [selectedIndex, items.length]);
+    const active = listRef.current?.querySelector<HTMLElement>(`[data-palette-index="${selectedIndex}"]`);
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [items.length, selectedIndex]);
 
   const handleActivate = useCallback((item: PaletteItem) => {
     if (item.groupKey === 'action') {
@@ -446,17 +403,14 @@ export const CommandPalette = memo(function CommandPalette({
     const target = item.result?.target;
     if (!target || !item.result) return;
 
-    // Promote to recents (best-effort). For agents we skip recents because
-    // sessionKeys are short-lived and stale entries would be useless.
-    if (item.groupKey !== 'agent') {
-      const next = pushRecent({
+    if (item.scope !== 'agent') {
+      setRecents(pushRecent({
         id: item.result.id,
         kind: item.result.kind,
         title: item.title,
         detail: item.detail,
         target,
-      });
-      setRecents(next);
+      }));
     }
 
     if (target.issueNumber !== undefined) {
@@ -469,8 +423,6 @@ export const CommandPalette = memo(function CommandPalette({
       if (onSelectChat) {
         onSelectChat(target.chatTabId, item.title);
       } else if (typeof window !== 'undefined') {
-        // Fallback when the host hasn't wired onSelectChat — keeps the
-        // palette useful in any dashboard layout that mounts it.
         window.dispatchEvent(new CustomEvent('o8:command-palette:open-chat', {
           detail: { chatTabId: target.chatTabId, title: item.title },
         }));
@@ -487,18 +439,29 @@ export const CommandPalette = memo(function CommandPalette({
     onClose();
   }, [onClose, onSelectAgent, onSelectChat, onSelectDirective, onSelectFile, onSelectIssue]);
 
+  const chooseScope = useCallback((nextScope: PaletteScope) => {
+    setScope(nextScope);
+    setSelectedIndex(0);
+    inputRef.current?.focus();
+  }, []);
+
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
       onClose();
       return;
     }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      const currentIndex = SCOPE_TABS.findIndex((tab) => tab.id === scope);
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex = (currentIndex + direction + SCOPE_TABS.length) % SCOPE_TABS.length;
+      chooseScope(SCOPE_TABS[nextIndex].id);
+      return;
+    }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setSelectedIndex((current) => {
-        if (items.length === 0) return 0;
-        return Math.min(current + 1, items.length - 1);
-      });
+      setSelectedIndex((current) => items.length === 0 ? 0 : Math.min(current + 1, items.length - 1));
       return;
     }
     if (event.key === 'ArrowUp') {
@@ -508,13 +471,13 @@ export const CommandPalette = memo(function CommandPalette({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const target = items[selectedIndexRef.current];
-      if (target) handleActivate(target);
+      const item = items[selectedIndexRef.current];
+      if (item) handleActivate(item);
     }
-  }, [handleActivate, items, onClose]);
+  }, [chooseScope, handleActivate, items, onClose, scope]);
 
-  const showEmpty = !loading && !error && items.length === 0;
   const trimmed = query.trim();
+  const showEmpty = !loading && !error && items.length === 0;
 
   return (
     <AnimatePresence>
@@ -542,13 +505,16 @@ export const CommandPalette = memo(function CommandPalette({
           style={cardStyle}
         >
           <div style={inputRowStyle}>
-            <Search size={16} strokeWidth={1.8} color="var(--t-text-muted)" />
+            <SearchGlyph />
             <input
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search issues, files, agents…"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSelectedIndex(0);
+              }}
+              placeholder="Search agents, files, actions..."
               spellCheck={false}
               autoComplete="off"
               style={inputStyle}
@@ -558,35 +524,49 @@ export const CommandPalette = memo(function CommandPalette({
                 type="button"
                 onClick={() => {
                   setQuery('');
+                  setSelectedIndex(0);
                   inputRef.current?.focus();
                 }}
                 aria-label="Clear search"
                 style={clearButtonStyle}
               >
-                <X size={12} strokeWidth={2.2} color="var(--t-text-muted)" />
+                <CloseGlyph />
               </button>
             ) : (
               <kbd style={kbdStyle}>esc</kbd>
             )}
           </div>
 
+          <div style={scopeRowStyle} aria-label="Search scope">
+            {SCOPE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                aria-pressed={scope === tab.id}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseScope(tab.id)}
+                style={scopePillStyle(scope === tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <div ref={listRef} style={listStyle}>
             {error ? (
               <div style={errorRowStyle}>
-                <AlertCircle size={14} strokeWidth={2} color="var(--t-danger, #ef4444)" />
+                <AlertGlyph />
                 <span>{error}</span>
               </div>
             ) : null}
 
-            {loading && items.length === 0 ? (
-              <div style={statusRowStyle}>Searching…</div>
-            ) : null}
+            {loading && items.length === 0 ? <div style={statusRowStyle}>Searching…</div> : null}
 
             {showEmpty ? (
               <div style={statusRowStyle}>
                 {trimmed.length < 2
-                  ? 'Type to search issues, files, and agents.'
-                  : `No results for "${trimmed}".`}
+                  ? scope === 'all' ? 'No recent items or available actions.' : `No recent ${SCOPE_TABS.find((tab) => tab.id === scope)?.label.toLowerCase() ?? 'items'}.`
+                  : `No ${scope === 'all' ? 'results' : SCOPE_TABS.find((tab) => tab.id === scope)?.label.toLowerCase()} for “${trimmed}”.`}
               </div>
             ) : null}
 
@@ -595,112 +575,22 @@ export const CommandPalette = memo(function CommandPalette({
                 items={items}
                 selectedIndex={selectedIndex}
                 onHover={setSelectedIndex}
-                onActivate={handleActivate}
+                onActivate={(index) => {
+                  const item = items[index];
+                  if (item) handleActivate(item);
+                }}
               />
             ) : null}
           </div>
 
           <div style={footerStyle}>
-            <FooterHint label="Move" combo={['↑', '↓']} />
-            <FooterHint label="Open" combo={['↵']} />
-            <FooterHint label="Close" combo={['esc']} />
-            <span style={footerSpacerStyle} />
-            <span style={footerHintTextStyle}>
-              <ArrowRight size={11} strokeWidth={1.8} color="var(--t-text-faint)" />
-              {trimmed.length < 2
-                ? `${recents.length} recent`
-                : `${items.length} result${items.length === 1 ? '' : 's'}`}
-            </span>
+            <span>↑↓ navigate</span>
+            <span>↵ select</span>
+            <span>tab filter</span>
+            <span>esc close</span>
           </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
   );
 });
-
-// ── Subcomponents ──────────────────────────────────────────────────────────
-
-const PaletteList = memo(function PaletteList({
-  items,
-  selectedIndex,
-  onHover,
-  onActivate,
-}: {
-  items: PaletteItem[];
-  selectedIndex: number;
-  onHover: (index: number) => void;
-  onActivate: (item: PaletteItem) => void;
-}) {
-  // Group consecutive items by groupKey so each section renders one header.
-  const sections: Array<{ key: GroupKey; start: number; entries: PaletteItem[] }> = [];
-  for (let i = 0; i < items.length; i += 1) {
-    const item = items[i];
-    const last = sections[sections.length - 1];
-    if (!last || last.key !== item.groupKey) {
-      sections.push({ key: item.groupKey, start: i, entries: [item] });
-    } else {
-      last.entries.push(item);
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {sections.map((section) => (
-        <div key={`section-${section.start}-${section.key}`}>
-          <div style={sectionHeaderStyle}>{GROUP_LABEL[section.key]}</div>
-          {section.entries.map((item, offset) => {
-            const flatIndex = section.start + offset;
-            const isSelected = flatIndex === selectedIndex;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                data-palette-index={flatIndex}
-                onClick={() => onActivate(item)}
-                onMouseEnter={() => onHover(flatIndex)}
-                style={{
-                  ...rowStyleBase,
-                  background: isSelected ? 'var(--t-panel-active, rgba(37,99,235,0.1))' : 'transparent',
-                }}
-              >
-                <span style={iconWrapStyle}>
-                  {item.swatchColor ? (
-                    <span
-                      aria-hidden
-                      style={{
-                        display: 'inline-block',
-                        width: 9,
-                        height: 9,
-                        borderRadius: '50%',
-                        background: item.swatchColor,
-                      }}
-                    />
-                  ) : (
-                    <item.Icon size={14} strokeWidth={1.7} color={item.iconColor} />
-                  )}
-                </span>
-                <span style={titleColumnStyle}>
-                  <span style={titleTextStyle}>{item.title}</span>
-                  {item.detail ? (
-                    <span style={detailTextStyle}>{item.detail}</span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
-    </div>
-  );
-});
-
-function FooterHint({ label, combo }: { label: string; combo: string[] }) {
-  return (
-    <span style={footerHintGroupStyle}>
-      {combo.map((key) => (
-        <kbd key={key} style={footerKbdStyle}>{key}</kbd>
-      ))}
-      <span style={footerHintTextStyle}>{label}</span>
-    </span>
-  );
-}

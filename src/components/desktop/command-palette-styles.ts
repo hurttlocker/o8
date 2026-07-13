@@ -1,49 +1,41 @@
-/**
- * Inline style tokens for the Cmd+K CommandPalette overlay (#661).
- *
- * Pulled out of CommandPalette.tsx to keep that file under the 800-line
- * ceiling while preserving the inline-style discipline (no CSS classes).
- */
-
 import type { CSSProperties } from 'react';
 
-export const KIND_COLOR = {
-  issue: '#f97316',
-  file: '#64748b',
-  agent: '#16a34a',
-  chat: '#8b5cf6',
-  directive: '#0891b2',
-} as const;
+export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'chat' | 'directive' | 'action';
 
 export const overlayStyle: CSSProperties = {
   position: 'fixed',
-  inset: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+  zIndex: 1200,
   display: 'flex',
   alignItems: 'flex-start',
   justifyContent: 'center',
   paddingTop: '12vh',
-  paddingLeft: 16,
   paddingRight: 16,
   paddingBottom: 24,
-  background: 'var(--t-overlay-scrim, rgba(15, 23, 42, 0.32))',
+  paddingLeft: 16,
+  background: 'var(--t-overlay-scrim)',
   backdropFilter: 'blur(6px)',
   WebkitBackdropFilter: 'blur(6px)',
-  zIndex: 1200,
 };
 
 export const cardStyle: CSSProperties = {
   width: '100%',
   maxWidth: 640,
-  borderRadius: 14,
-  border: '1px solid var(--t-panel-border)',
-  background: 'var(--t-glass-elevated, var(--t-panel-solid, var(--t-panel)))',
-  boxShadow: 'var(--t-glass-shadow, 0 24px 64px rgba(15, 23, 42, 0.18))',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  fontFamily: 'var(--font-sans-system)',
-  letterSpacing: '-0.01em',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--t-panel-border)',
+  borderRadius: 14,
+  background: 'var(--t-glass-elevated, var(--t-panel-solid, var(--t-panel)))',
+  boxShadow: 'var(--t-glass-shadow)',
   color: 'var(--t-text)',
+  fontFamily: 'var(--font-sans-system)',
+  letterSpacing: '-0.1px',
 };
 
 export const inputRowStyle: CSSProperties = {
@@ -52,213 +44,225 @@ export const inputRowStyle: CSSProperties = {
   gap: 10,
   paddingTop: 14,
   paddingRight: 14,
-  paddingBottom: 12,
+  paddingBottom: 10,
   paddingLeft: 16,
-  borderBottom: '1px solid var(--t-divider, var(--t-border))',
 };
 
 export const inputStyle: CSSProperties = {
+  minWidth: 0,
   flex: 1,
-  border: 'none',
+  borderWidth: 0,
   background: 'transparent',
   outline: 'none',
+  color: 'var(--t-text)',
   fontSize: 15,
   fontWeight: 300,
-  letterSpacing: '-0.01em',
-  color: 'var(--t-text)',
+  letterSpacing: '-0.1px',
   fontFamily: 'inherit',
   WebkitAppearance: 'none',
-  minWidth: 0,
 };
 
 export const clearButtonStyle: CSSProperties = {
+  width: 22,
+  height: 22,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 22,
-  height: 22,
-  border: 'none',
+  paddingTop: 0,
+  paddingRight: 0,
+  paddingBottom: 0,
+  paddingLeft: 0,
+  borderWidth: 0,
+  borderRadius: 7,
   background: 'var(--t-hover)',
-  borderRadius: 8,
+  color: 'var(--t-text-muted)',
   cursor: 'pointer',
 };
 
 export const kbdStyle: CSSProperties = {
-  fontSize: 10,
-  fontWeight: 500,
-  fontFamily: 'var(--font-sans-system)',
-  color: 'var(--t-kbd-color, var(--t-text-muted))',
-  background: 'var(--t-kbd-bg, var(--t-bg-card))',
-  border: '1px solid var(--t-kbd-border, var(--t-border))',
-  borderRadius: 6,
   paddingTop: 2,
   paddingRight: 6,
   paddingBottom: 2,
   paddingLeft: 6,
-  textTransform: 'uppercase',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--t-kbd-border, var(--t-divider))',
+  borderRadius: 6,
+  background: 'var(--t-kbd-bg, var(--t-bg-card))',
+  color: 'var(--t-kbd-color, var(--t-text-muted))',
+  fontSize: 9.5,
+  fontWeight: 300,
   letterSpacing: '0.04em',
+  lineHeight: 1.25,
+  fontFamily: 'var(--font-sans-system)',
+  textTransform: 'uppercase',
 };
 
+export const scopeRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  overflowX: 'auto',
+  paddingTop: 0,
+  paddingRight: 10,
+  paddingBottom: 8,
+  paddingLeft: 10,
+  borderBottomWidth: 1,
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'var(--t-divider)',
+};
+
+export function scopePillStyle(active: boolean): CSSProperties {
+  return {
+    height: 26,
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    paddingTop: 0,
+    paddingRight: 10,
+    paddingBottom: 0,
+    paddingLeft: 10,
+    borderWidth: 0,
+    borderRadius: 7,
+    background: active ? 'var(--t-input-bg)' : 'transparent',
+    color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
+    fontSize: 12,
+    fontWeight: 300,
+    letterSpacing: '-0.1px',
+    lineHeight: 1.25,
+    fontFamily: 'var(--font-sans-system)',
+    cursor: 'pointer',
+  };
+}
+
 export const listStyle: CSSProperties = {
-  flex: 1,
   maxHeight: '52vh',
+  flex: 1,
   overflowY: 'auto',
-  WebkitOverflowScrolling: 'touch',
   paddingTop: 6,
+  paddingRight: 6,
   paddingBottom: 6,
+  paddingLeft: 6,
+  WebkitOverflowScrolling: 'touch',
 };
 
 export const sectionHeaderStyle: CSSProperties = {
-  paddingTop: 10,
-  paddingRight: 16,
+  paddingTop: 9,
+  paddingRight: 10,
   paddingBottom: 4,
-  paddingLeft: 16,
+  paddingLeft: 10,
+  color: 'var(--t-text-faint)',
   fontSize: 10,
   fontWeight: 300,
-  color: 'var(--t-text-faint)',
-  textTransform: 'uppercase',
   letterSpacing: '0.04em',
+  lineHeight: '14px',
+  textTransform: 'uppercase',
 };
 
 export const rowStyleBase: CSSProperties = {
+  width: '100%',
+  minHeight: 38,
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
-  width: '100%',
-  paddingTop: 8,
-  paddingRight: 12,
-  paddingBottom: 8,
-  paddingLeft: 16,
-  border: 'none',
-  borderRadius: 10,
-  cursor: 'pointer',
-  textAlign: 'left',
-  fontFamily: 'inherit',
+  gap: 9,
+  paddingTop: 6,
+  paddingRight: 10,
+  paddingBottom: 6,
+  paddingLeft: 10,
+  borderWidth: 0,
+  borderRadius: 8,
   color: 'var(--t-text)',
-  minHeight: 44,
-  transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
+  fontFamily: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+  transition: 'background 80ms ease',
 };
 
 export const iconWrapStyle: CSSProperties = {
+  width: 18,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 18,
   flexShrink: 0,
   color: 'var(--t-text-muted)',
 };
 
-export const titleColumnStyle: CSSProperties = {
-  flex: 1,
-  display: 'flex',
-  flexDirection: 'column',
-  minWidth: 0,
-  gap: 2,
-};
-
 export const titleTextStyle: CSSProperties = {
+  minWidth: 0,
+  flex: 1,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  color: 'var(--t-text)',
   fontSize: 13.5,
   fontWeight: 300,
   letterSpacing: '-0.1px',
-  color: 'var(--t-text)',
+  lineHeight: 1.25,
+};
+
+export const metaTextStyle: CSSProperties = {
+  maxWidth: '44%',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-};
-
-export const detailTextStyle: CSSProperties = {
-  fontSize: 11.5,
+  flexShrink: 1,
   color: 'var(--t-text-faint)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  fontWeight: 300,
-  letterSpacing: '-0.1px',
+  fontSize: 9.5,
+  fontWeight: 260,
+  letterSpacing: '-0.4px',
+  lineHeight: 1.25,
+  textAlign: 'right',
 };
 
-export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'chat' | 'directive' | 'action';
-
-export function groupBadgeStyle(group: GroupKey): CSSProperties {
-  const tone = group === 'recent'
-    ? 'var(--t-text-faint)'
-    : group === 'action'
-      ? 'var(--t-text-muted)'
-      : KIND_COLOR[group];
-  return {
-    fontSize: 10,
-    fontWeight: 300,
-    color: tone,
-    paddingTop: 2,
-    paddingRight: 6,
-    paddingBottom: 2,
-    paddingLeft: 6,
-    borderRadius: 6,
-    background: 'transparent',
-    border: '1px solid color-mix(in srgb, var(--t-border) 80%, transparent)',
-    flexShrink: 0,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-  };
-}
+export const enterHintStyle: CSSProperties = {
+  width: 16,
+  flexShrink: 0,
+  color: 'var(--t-text-faint)',
+  fontSize: 11,
+  fontWeight: 300,
+  lineHeight: 1,
+  textAlign: 'right',
+};
 
 export const errorRowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
   paddingTop: 10,
-  paddingRight: 16,
+  paddingRight: 10,
   paddingBottom: 10,
-  paddingLeft: 16,
+  paddingLeft: 10,
+  color: 'var(--t-brand-red)',
   fontSize: 12,
-  color: 'var(--t-danger, #b91c1c)',
+  fontWeight: 300,
 };
 
 export const statusRowStyle: CSSProperties = {
   paddingTop: 16,
-  paddingRight: 16,
+  paddingRight: 10,
   paddingBottom: 16,
-  paddingLeft: 16,
-  fontSize: 12,
+  paddingLeft: 10,
   color: 'var(--t-text-muted)',
+  fontSize: 12,
+  fontWeight: 300,
 };
 
 export const footerStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
+  justifyContent: 'center',
   gap: 14,
-  paddingTop: 8,
-  paddingRight: 14,
-  paddingBottom: 8,
-  paddingLeft: 16,
-  borderTop: '1px solid var(--t-divider, var(--t-border))',
+  paddingTop: 7,
+  paddingRight: 12,
+  paddingBottom: 7,
+  paddingLeft: 12,
+  borderTopWidth: 1,
+  borderTopStyle: 'solid',
+  borderTopColor: 'var(--t-divider)',
   background: 'var(--t-bg-subtle, transparent)',
-  fontSize: 11,
-  color: 'var(--t-text-muted)',
-};
-
-export const footerHintGroupStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-};
-
-export const footerHintTextStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  fontSize: 11,
-  color: 'var(--t-text-muted)',
-  fontWeight: 300,
-  letterSpacing: '-0.1px',
-};
-
-export const footerSpacerStyle: CSSProperties = {
-  flex: 1,
-};
-
-export const footerKbdStyle: CSSProperties = {
-  ...kbdStyle,
-  fontSize: 9,
-  paddingLeft: 5,
-  paddingRight: 5,
+  color: 'var(--t-text-faint)',
+  fontSize: 9.5,
+  fontWeight: 260,
+  letterSpacing: '-0.4px',
+  lineHeight: 1.25,
 };
