@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -24,17 +24,13 @@ import { useWorkspaceChatLifecycle } from '@/components/desktop/workspace-termin
 import { WorkspaceChatComposer } from '@/components/desktop/workspace-terminal/WorkspaceChatComposer';
 import { ChatPacketStatusBanner } from '@/components/desktop/workspace-terminal/ChatPacketStatusBanner';
 import { ChatPacketReviewDiff } from '@/components/desktop/workspace-terminal/ChatPacketReviewDiff';
-import { PacketHeaderCard } from '@/components/desktop/workspace-terminal/PacketHeaderCard';
 import { PacketWorkingFooter } from '@/components/desktop/workspace-terminal/PacketWorkingFooter';
 import {
-  WorkspaceRichChatEvents,
-  stripWorkspaceRichRendererFallback,
-} from '@/components/desktop/workspace-terminal/chat-renderers/WorkspaceRichChatEvents';
-import { PromptGlyph, looksLikePacketPrompt } from '@/components/desktop/workspace-terminal/workspace-chat-prompt';
-import { retryingLazy } from '@/lib/react/retrying-lazy';
-
-const LazyMessageBubble = retryingLazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.MessageBubble })), { label: 'Message bubble' });
-const LazyChainOfThought = retryingLazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.ChainOfThought })), { label: 'Chain of thought' });
+  WorkspaceTranscript,
+  type WorkspaceTranscriptHeader,
+} from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
+import { PromptGlyph } from '@/components/desktop/workspace-terminal/workspace-chat-prompt';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 interface WorkspaceChatPaneProps {
   tab: TerminalTab;
@@ -115,10 +111,10 @@ function WorkspaceChatPaneBase({
     setStreamingTimestamp(Date.now());
   }, [chat.agentRunning, chat.tabId]);
 
-  const streamingMessage = useMemo<import('@/components/desktop/LLMChat').LLMMessage>(() => ({
+  const streamingEntry = useMemo<MobileTranscriptEntry>(() => ({
     id: `stream:${chat.tabId}`,
     role: 'assistant',
-    content: chat.streamingText || 'Thinking...',
+    text: chat.streamingText,
     model: chat.selectedModel.label,
     timestamp: streamingTimestamp ?? 0,
     tokens: chat.streamMeta.tokens,
@@ -126,14 +122,24 @@ function WorkspaceChatPaneBase({
     sources: chat.streamMeta.sources,
     recalledFacts: chat.streamMeta.recalledFacts,
     claudeCodeEvents: chat.activeClaudeCodeEvents,
-    toolCalls: chat.activeToolCalls.map((tool) => ({
-      name: tool.name,
-      // 3-status pane — the transcript's 'error' status has no badge here.
-      status: tool.status === 'error' ? 'done' as const : (tool.status ?? 'running'),
-      args: tool.args,
-      preview: tool.preview,
-    })),
-  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, streamingTimestamp, chat.streamMeta, chat.activeClaudeCodeEvents, chat.activeToolCalls]);
+    toolCalls: chat.activeToolCalls,
+    thinking: chat.activeThinking?.thinking,
+    thinkingSteps: chat.activeThinking?.steps,
+    thinkingDurationMs: chat.streamMeta.thinkingDurationMs,
+    thinkingActive: Boolean(chat.activeThinking),
+  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, streamingTimestamp, chat.streamMeta, chat.activeClaudeCodeEvents, chat.activeToolCalls, chat.activeThinking]);
+
+  const packetHeader = useMemo<WorkspaceTranscriptHeader>(() => ({
+    enabled: Boolean(tab.orchestrationPacket),
+    title: tab.orchestrationPacket?.title ?? tab.label ?? 'Dispatched packet',
+    branch: tab.orchestrationPacket?.branchTarget ?? null,
+    runtime: tab.orchestrationPacket?.runtime ?? tab.chatRuntime ?? null,
+    status: liveStatus,
+  }), [liveStatus, tab.chatRuntime, tab.label, tab.orchestrationPacket]);
+  const transcriptRepoPath = livePacket?.lane?.worktreePath
+    ?? livePacket?.lane?.repoPath
+    ?? tab.repo?.localPath;
+  const streamingEntries = useMemo(() => [streamingEntry], [streamingEntry]);
 
   return (
     <div
@@ -193,14 +199,14 @@ function WorkspaceChatPaneBase({
         style={{
           flex: 1,
           overflowY: 'auto',
-          paddingTop: chat.llmMessages.length === 0 && !chat.agentRunning ? 0 : 24,
+          paddingTop: chat.messages.length === 0 && !chat.agentRunning ? 0 : 24,
           paddingBottom: 24,
           paddingLeft: 'var(--cortex-chat-gutter)',
           paddingRight: 'var(--cortex-chat-gutter)',
           background: 'transparent',
         }}
       >
-        {chat.visibleMessages.length === 0 && !chat.agentRunning ? (
+        {chat.visibleTranscriptEntries.length === 0 && !chat.agentRunning ? (
           chat.isAgentTab ? (
             laneRetired ? (
               <div
@@ -289,10 +295,10 @@ function WorkspaceChatPaneBase({
                 // #1293 FIX 1 — a dispatched Codex `exec --json` streams its
                 // transcript to the LANE, not this session's sessionKey slice.
                 // The additive packetId-keyed poll (useWorkspaceChatPane) fills
-                // `packetLlmMessages`; when present, render the real work instead
+                // `packetTranscriptEntries`; when present, render the real work instead
                 // of a static placeholder. Stays empty for Claude-Code / steered
                 // Codex (sessionKey slice fills), so their path is untouched.
-                const hasPacketTranscript = chat.packetLlmMessages.length > 0;
+                const hasPacketTranscript = chat.packetTranscriptEntries.length > 0;
 
                 // Review affordances shared by the hero + transcript layouts:
                 // the inline diff (FIX 2 — so "Ready for review" shows WHAT to
@@ -362,40 +368,26 @@ function WorkspaceChatPaneBase({
 
                 if (hasPacketTranscript) {
                   return (
-                    <Suspense fallback={null}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
-                        {chat.packetLlmMessages.map((message, index) => {
-                          const bubbleMessage = stripWorkspaceRichRendererFallback(message);
-                          return (
-                            <div key={message.id} style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                              <LazyMessageBubble
-                                message={bubbleMessage}
-                                isLast={index === chat.packetLlmMessages.length - 1}
-                                onRunInTerminal={onRunInTerminal}
-                              />
-                              {message.role === 'assistant' ? (
-                                <WorkspaceRichChatEvents
-                                  message={message}
-                                  repoPath={tab.repo?.localPath}
-                                  onPermissionDecision={chat.handleClaudePermissionDecision}
-                                />
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                        {stillWorking && !awaitingReview ? (
-                          <PacketWorkingFooter
-                            status={liveStatus}
-                            runtimeLabel={chat.runtimeLabel}
-                            activity={chat.packetTranscriptActivity}
-                            fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
-                          />
-                        ) : null}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start', paddingTop: 4 }}>
-                          {reviewAffordances}
-                        </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
+                      <WorkspaceTranscript
+                        entries={chat.packetTranscriptEntries}
+                        packetHeader={packetHeader}
+                        repoPath={transcriptRepoPath}
+                        onRunInTerminal={onRunInTerminal}
+                        onPermissionDecision={chat.handleClaudePermissionDecision}
+                      />
+                      {stillWorking && !awaitingReview ? (
+                        <PacketWorkingFooter
+                          status={liveStatus}
+                          runtimeLabel={chat.runtimeLabel}
+                          activity={chat.packetTranscriptActivity}
+                          fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
+                        />
+                      ) : null}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start', paddingTop: 4 }}>
+                        {reviewAffordances}
                       </div>
-                    </Suspense>
+                    </div>
                   );
                 }
 
@@ -559,101 +551,53 @@ function WorkspaceChatPaneBase({
             </div>
           )
         ) : (
-          <Suspense fallback={null}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
-              {chat.visibleMessages.map((message, index) => {
-                // For dispatched packets: replace the FIRST user bubble (the
-                // giant packet prompt) with a collapsible PacketHeaderCard so
-                // the transcript doesn't open with a wall of text.
-                const isFirstUser = index === 0 && message.role === 'user';
-                const firstUserPrompt = isFirstUser
-                  ? (typeof message.content === 'string' ? message.content : String(message.content ?? ''))
-                  : '';
-                if (isFirstUser && (tab.orchestrationPacket || looksLikePacketPrompt(firstUserPrompt))) {
-                  return (
-                    <PacketHeaderCard
-                      key={message.id}
-                      title={tab.orchestrationPacket?.title ?? tab.label ?? 'Dispatched packet'}
-                      branch={tab.orchestrationPacket?.branchTarget ?? null}
-                      runtime={tab.orchestrationPacket?.runtime ?? tab.chatRuntime ?? null}
-                      status={liveStatus}
-                      prompt={firstUserPrompt}
-                    />
-                  );
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
+            <WorkspaceTranscript
+              entries={chat.visibleTranscriptEntries}
+              packetHeader={packetHeader}
+              repoPath={transcriptRepoPath}
+              markLast={!chat.sending}
+              onRunInTerminal={onRunInTerminal}
+              onPermissionDecision={chat.handleClaudePermissionDecision}
+            />
+            {chat.agentRunning ? (
+              <WorkspaceTranscript
+                entries={streamingEntries}
+                repoPath={transcriptRepoPath}
+                isStreaming
+                onRunInTerminal={onRunInTerminal}
+                onPermissionDecision={chat.handleClaudePermissionDecision}
+              />
+            ) : null}
+            {!chat.agentRunning && chat.isRuntimeBound && chat.supervisorActive && chat.messages.length > 0 && !laneRetired ? (
+              <PacketWorkingFooter
+                status={liveStatus}
+                runtimeLabel={chat.runtimeLabel}
+                activity={chat.packetTranscriptActivity}
+                fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
+              />
+            ) : null}
+            {(livePacket?.id ?? tab.orchestrationPacket?.packetId ?? tabSessionKey) ? (
+              <ChatPacketStatusBanner
+                status={liveStatus}
+                laneId={livePacket?.lane?.laneId ?? null}
+                packetId={livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null}
+                sessionKey={tabSessionKey}
+                packetTitle={livePacket?.title ?? tab.orchestrationPacket?.title ?? null}
+                mergeMode={livePacket?.lane?.mergeMode ?? null}
+                mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
+                onReview={
+                  orchestratorData?.onOpenO8Panel
+                    ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
+                    : undefined
                 }
-                const bubbleMessage = stripWorkspaceRichRendererFallback(message);
-                return (
-                  <div key={message.id} style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                    <LazyMessageBubble
-                      message={bubbleMessage}
-                      isLast={index === chat.visibleMessages.length - 1 && !chat.sending}
-                      onRetry={message.role === 'assistant' ? () => chat.handleRetry(message.id) : undefined}
-                      onEdit={message.role === 'user' ? (content) => chat.handleEdit(message.id, content) : undefined}
-                      onDelete={() => chat.handleDelete(message.id)}
-                      onRunInTerminal={onRunInTerminal}
-                    />
-                    {message.role === 'assistant' ? (
-                      <WorkspaceRichChatEvents
-                        message={message}
-                        repoPath={tab.repo?.localPath}
-                        onPermissionDecision={chat.handleClaudePermissionDecision}
-                      />
-                    ) : null}
-                  </div>
-                );
-              })}
-              {chat.agentRunning && chat.activeThinking && chat.activeThinking.steps.length > 0 ? (
-                <LazyChainOfThought
-                  steps={chat.activeThinking.steps}
-                  thinking={chat.activeThinking.thinking}
-                  durationMs={chat.streamMeta.thinkingDurationMs}
-                  isLive
-                />
-              ) : null}
-              {chat.agentRunning ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                  <LazyMessageBubble
-                    message={stripWorkspaceRichRendererFallback(streamingMessage)}
-                    isLast
-                    onRunInTerminal={onRunInTerminal}
-                  />
-                  <WorkspaceRichChatEvents
-                    message={streamingMessage}
-                    repoPath={tab.repo?.localPath}
-                    onPermissionDecision={chat.handleClaudePermissionDecision}
-                  />
-                </div>
-              ) : null}
-              {!chat.agentRunning && chat.isRuntimeBound && chat.supervisorActive && chat.messages.length > 0 && !laneRetired ? (
-                <PacketWorkingFooter
-                  status={liveStatus}
-                  runtimeLabel={chat.runtimeLabel}
-                  activity={chat.packetTranscriptActivity}
-                  fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
-                />
-              ) : null}
-              {(livePacket?.id ?? tab.orchestrationPacket?.packetId ?? tabSessionKey) ? (
-                <ChatPacketStatusBanner
-                  status={liveStatus}
-                  laneId={livePacket?.lane?.laneId ?? null}
-                  packetId={livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null}
-                  sessionKey={tabSessionKey}
-                  packetTitle={livePacket?.title ?? tab.orchestrationPacket?.title ?? null}
-                  mergeMode={livePacket?.lane?.mergeMode ?? null}
-                  mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
-                  onReview={
-                    orchestratorData?.onOpenO8Panel
-                      ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
-                      : undefined
-                  }
-                />
-              ) : null}
-            </div>
-          </Suspense>
+              />
+            ) : null}
+          </div>
         )}
       </div>
 
-      {chat.showScrollToBottom && (chat.llmMessages.length > 0 || chat.agentRunning) ? (
+      {chat.showScrollToBottom && (chat.messages.length > 0 || chat.agentRunning) ? (
         <div
           style={{
             position: 'absolute',
