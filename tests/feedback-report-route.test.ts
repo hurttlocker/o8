@@ -12,6 +12,7 @@ import type { CrashRecord } from '@/lib/telemetry/crash-store';
 const crashRecords = vi.hoisted(() => ({ current: [] as CrashRecord[] }));
 const ledger = vi.hoisted(() => ({ written: [] as unknown[] }));
 const auth = vi.hoisted(() => ({ ghUser: null as string | null }));
+const webhook = vi.hoisted(() => ({ url: 'https://discord.test/webhook' as string | null }));
 
 vi.mock('@/lib/telemetry/crash-store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/telemetry/crash-store')>()),
@@ -25,6 +26,11 @@ vi.mock('@/lib/feedback/report-ledger', async (importOriginal) => ({
 vi.mock('@/lib/auth/jwt', () => ({
   verifyToken: async (token: string) =>
     (token === 'valid-token' && auth.ghUser ? { uid: 'u1', plan: 'free', ghUser: auth.ghUser } : null),
+}));
+// Pinned, so the suite can never depend on (or post to) the operator's real
+// o8.release.json webhook.
+vi.mock('@/lib/feedback/webhooks', () => ({
+  resolveFeedbackWebhook: () => webhook.url,
 }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: async () => null }));
 vi.mock('@/lib/repos/projects', () => ({
@@ -69,6 +75,7 @@ beforeEach(() => {
   crashRecords.current = [];
   ledger.written = [];
   auth.ghUser = null;
+  webhook.url = 'https://discord.test/webhook';
   captured.form = null;
   captured.json = null;
   vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
@@ -197,6 +204,20 @@ describe('report id + attribution (the #fixed loop)', () => {
 
     const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
     expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')?.value).toBe('anonymous');
+  });
+
+  it('errors loudly on a build with no webhook, instead of swallowing the report', async () => {
+    webhook.url = null; // the old hardcoded fallback is gone — revoked 2026-07-13
+
+    const res = await postReport({ category: 'bug', message: 'nowhere to send this', route: '/dashboard' });
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { ok: boolean; error: string };
+    expect(body.error).toContain('not configured');
+    // Silence would let the operator walk away believing they were heard.
+    expect(captured.form).toBeNull();
+    expect(captured.json).toBeNull();
+    expect(ledger.written).toHaveLength(0);
   });
 
   it('does not ledger a report that never reached Discord', async () => {
