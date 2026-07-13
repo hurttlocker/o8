@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ToolCallChip,
   classifyToolCall as classifyToolCallChip,
   extractO8AskQuestion,
   type ToolCallChipStatus,
 } from '@/components/desktop/orchestrator/ToolCallChip';
+import { ShimmerLine, TurnChevron } from './turn-line';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 
@@ -123,22 +123,13 @@ function toolKey(tool: MobileTranscriptToolCall, index: number) {
 }
 
 /**
- * Collapse threshold: when an assistant turn fires more tool calls than this,
- * the LIVE cluster shows ONE summary chip (running tool if any, else most
- * recent) plus a "+N more" affordance instead of tiling every chip. Picked
- * from dogfood observation — a 73-call architectural exploration shouldn't
- * paint a 24-row pill wall just to convey "I'm reading the codebase."
+ * Turn-grammar rollup (Cursor parity, vid2 mechanics — operator ruling
+ * 2026-07-13): live activity renders as ONE shimmering text line (the current
+ * call), settled turns as one slim rollup line — "Explored 4 files · Ran 2
+ * commands ›" — whose chevron expands per-call text lines (no pills, no
+ * Collapse button). Errors always render as red cards and never fold.
  */
-const COLLAPSE_AT = 3;
-
-/**
- * Settled-turn rollup (Cursor parity, operator ruling 2026-07-13): once every
- * call in the cluster is DONE (none running, none errored), the pills collapse
- * into one slim muted text line — "Explored 4 files · Ran 2 commands ⌄" —
- * expandable back to the full chip wall. Errors and live activity keep the
- * pill treatment: an in-flight verb and a red error card must stay visible.
- */
-function describeToolRollup(toolCalls: MobileTranscriptToolCall[]): string {
+export function describeToolRollupParts(toolCalls: MobileTranscriptToolCall[], mode: 'lead' | 'fold' = 'lead'): string[] {
   let explored = 0;
   let ran = 0;
   let dispatched = 0;
@@ -152,16 +143,23 @@ function describeToolRollup(toolCalls: MobileTranscriptToolCall[]): string {
     else if (kind === 'write') edited += 1;
     else other += 1;
   }
+  // 'lead' capitalizes for a standalone line; 'fold' lowercases so the parts
+  // read naturally inside the edit aggregate ("Edited 12 files, ran 1 command").
+  const cased = (word: string) => (mode === 'lead' ? word : word.toLowerCase());
   const parts: string[] = [];
-  if (explored > 0) parts.push(`Explored ${explored} ${explored === 1 ? 'file' : 'files'}`);
-  if (ran > 0) parts.push(`Ran ${ran} ${ran === 1 ? 'command' : 'commands'}`);
-  if (dispatched > 0) parts.push(`Dispatched ${dispatched} ${dispatched === 1 ? 'agent' : 'agents'}`);
-  if (edited > 0) parts.push(`Edited ${edited} ${edited === 1 ? 'file' : 'files'}`);
+  if (explored > 0) parts.push(`${cased('Explored')} ${explored} ${explored === 1 ? 'file' : 'files'}`);
+  if (ran > 0) parts.push(`${cased('Ran')} ${ran} ${ran === 1 ? 'command' : 'commands'}`);
+  if (dispatched > 0) parts.push(`${cased('Dispatched')} ${dispatched} ${dispatched === 1 ? 'agent' : 'agents'}`);
+  if (edited > 0) parts.push(`${cased('Edited')} ${edited} ${edited === 1 ? 'file' : 'files'}`);
   if (other > 0) parts.push(`${other} ${other === 1 ? 'tool call' : 'tool calls'}`);
-  return parts.join(' · ');
+  return parts;
 }
 
-export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
+function describeToolRollup(toolCalls: MobileTranscriptToolCall[]): string {
+  return describeToolRollupParts(toolCalls, 'lead').join(' · ');
+}
+
+export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }: { toolCalls: MobileTranscriptToolCall[]; suppressSettledRollup?: boolean }) {
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -212,20 +210,41 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
 
   if (toolCalls.length === 0 || !summaryTool) return null;
 
-  const hiddenCount = Math.max(0, toolCalls.length - 1);
-  const collapsed = !showAll && toolCalls.length >= COLLAPSE_AT;
   // Settled rollup: every call done, nothing errored → one slim text line.
   const allSettled = erroredTools.length === 0
     && toolCalls.every((tool) => chipStatus(tool) === 'done');
+  const runningTool = toolCalls.find((tool) => chipStatus(tool) === 'running') ?? null;
 
-  if (allSettled && !showAll) {
-    return (
-      <div ref={rootRef} style={{ maxWidth: '92%', minWidth: 0 }}>
+  // Folded into the edit-run aggregate line ("Edited 12 files, ran 1 command"):
+  // a clean settled cluster paints nothing of its own. Errors never fold.
+  if (allSettled && suppressSettledRollup && !showAll) return null;
+
+  return (
+    <div
+      ref={rootRef}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3,
+        maxWidth: '92%',
+        minWidth: 0,
+      }}
+    >
+      {runningTool && !showAll ? (
+        // Live: a plain shimmering text line — the Cursor text-sheen loader.
+        // No pills, no boxes; settled calls fold into the rollup on turn end.
+        <ShimmerLine>
+          {classifyTool(runningTool).verb === 'Read' ? 'Reading' : classifyTool(runningTool).verb === 'Run' ? 'Running' : classifyTool(runningTool).verb}
+          <span style={{ fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
+            {toolArgument(runningTool)}
+          </span>
+        </ShimmerLine>
+      ) : (
         <button
           type="button"
-          onClick={() => setShowAll(true)}
-          aria-expanded={false}
-          aria-label={`Show all ${toolCalls.length} tool calls in this turn`}
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          aria-label={showAll ? 'Collapse the tool call list' : `Show all ${toolCalls.length} tool calls in this turn`}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -244,119 +263,62 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
           }}
         >
           <span>{describeToolRollup(toolCalls)}</span>
-          <RollupChevron />
+          <TurnChevron open={showAll} />
         </button>
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div
-      ref={rootRef}
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        flexWrap: 'wrap',
-        gap: 5,
-        maxWidth: '92%',
-        paddingTop: 2,
-        paddingRight: 0,
-        paddingBottom: selectedTool ? 4 : 2,
-        paddingLeft: 0,
-      }}
-    >
-      {collapsed ? (
-        <>
-          {(() => {
-            const key = toolKey(summaryTool, toolCalls.indexOf(summaryTool));
-            const classified = classifyTool(summaryTool);
-            return (
-              <ToolCallChip
-                key={key}
-                verb={classified.verb}
-                kind={classified.kind}
-                argument={toolArgument(summaryTool)}
-                status={chipStatus(summaryTool)}
-                onClick={() => setExpandedToolId((current) => current === key ? null : key)}
-              />
-            );
-          })()}
+      {showAll ? toolCalls.map((tool, index) => {
+        const key = toolKey(tool, index);
+        const classified = classifyTool(tool);
+        const status = chipStatus(tool);
+        return (
           <button
+            key={key}
             type="button"
-            onClick={() => setShowAll(true)}
-            aria-label={`Show all ${toolCalls.length} tool calls in this turn`}
+            onClick={() => setExpandedToolId((current) => current === key ? null : key)}
+            aria-label={`${classified.verb} ${toolArgument(tool)} — show detail`}
             style={{
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
-              gap: 4,
-              border: '1px solid var(--t-divider-subtle)',
-              borderRadius: 999,
+              gap: 6,
+              paddingTop: 0,
+              paddingRight: 0,
+              paddingBottom: 0,
+              paddingLeft: 12,
+              border: 'none',
               background: 'transparent',
+              textAlign: 'left',
+              cursor: 'pointer',
+              minWidth: 0,
               color: 'var(--t-text-muted)',
               fontFamily: 'var(--font-sans-system)',
-              fontSize: 11,
-              fontWeight: 300,
-              letterSpacing: '0.01em',
-              paddingTop: 3,
-              paddingRight: 9,
-              paddingBottom: 3,
-              paddingLeft: 9,
-              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: '-0.005em',
+              lineHeight: 1.5,
               WebkitTapHighlightColor: 'transparent',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; }}
           >
-            +{hiddenCount} more
-          </button>
-        </>
-      ) : (
-        <>
-          {toolCalls.map((tool, index) => {
-            const key = toolKey(tool, index);
-            const classified = classifyTool(tool);
-            return (
-              <ToolCallChip
-                key={key}
-                verb={classified.verb}
-                kind={classified.kind}
-                argument={toolArgument(tool)}
-                status={chipStatus(tool)}
-                onClick={() => setExpandedToolId((current) => current === key ? null : key)}
-              />
-            );
-          })}
-          {showAll ? (
-            <button
-              type="button"
-              onClick={() => setShowAll(false)}
-              aria-label="Collapse tool call list"
+            <span style={{ flexShrink: 0 }}>{classified.verb}</span>
+            <span
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                border: '1px solid var(--t-divider-subtle)',
-                borderRadius: 999,
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                fontFamily: 'var(--font-sans-system)',
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
                 fontSize: 11,
-                fontWeight: 300,
-                letterSpacing: '0.01em',
-                paddingTop: 3,
-                paddingRight: 9,
-                paddingBottom: 3,
-                paddingLeft: 9,
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
+                color: 'var(--t-text-secondary)',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; }}
             >
-              Collapse
-            </button>
-          ) : null}
-        </>
-      )}
+              {toolArgument(tool)}
+            </span>
+            {status === 'error' ? (
+              <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 500, color: 'var(--t-brand-red, #ef4444)' }}>failed</span>
+            ) : null}
+          </button>
+        );
+      }) : null}
 
       {erroredTools.map((tool, index) => {
         const errorText = truncateError(tool.result ?? tool.preview ?? 'Tool call failed');
@@ -535,21 +497,3 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
   );
 }
 
-function RollupChevron() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{ display: 'block', flexShrink: 0, color: 'var(--t-text-faint)' }}
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
