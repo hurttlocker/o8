@@ -186,7 +186,7 @@ export function GitHubConnectionSections({
               </div>
             </div>
           </SettingsGroup>
-          <GroupFootnote>Terminal git and gh commands use this sign-in.</GroupFootnote>
+          <GroupFootnote>Repo access for this machine — terminal git, gh, and dispatched agents push with this credential. It is separate from your o8 account (General), which identifies you but can never touch your repos.</GroupFootnote>
         </section>
       ) : (
         /* ── Sign in (disconnected) ── */
