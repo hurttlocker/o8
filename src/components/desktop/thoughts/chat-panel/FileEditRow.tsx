@@ -286,9 +286,73 @@ export function FileEditRow({ edit, repoPath }: { edit: FileEditRowData; repoPat
   );
 }
 
-/** Stacked wrapper — renders each edit row in call order under the turn. */
+/**
+ * Stacked wrapper — renders each edit row in call order under the turn.
+ *
+ * Cursor parity (operator ruling 2026-07-13): once EVERY edit has settled and
+ * there is more than one, the stack collapses to a single slim line —
+ * "Edited 9 files +349 −3" with colored counts (summed only from honestly
+ * derivable per-edit counts; no numbers when none derive) — expandable back to
+ * the per-file rows. Live edits and failures always show the full rows.
+ */
 export function FileEditRowStack({ edits, repoPath }: { edits: FileEditRowData[]; repoPath?: string | null }) {
+  const [expanded, setExpanded] = useState(false);
   if (edits.length === 0) return null;
+
+  const anyWorking = edits.some((edit) => edit.status === 'editing');
+  const anyFailed = edits.some((edit) => edit.status === 'error');
+  const collapsible = edits.length > 1 && !anyWorking && !anyFailed;
+
+  if (collapsible && !expanded) {
+    const added = edits.reduce((sum, edit) => sum + (typeof edit.added === 'number' ? edit.added : 0), 0);
+    const removed = edits.reduce((sum, edit) => sum + (typeof edit.removed === 'number' ? edit.removed : 0), 0);
+    const hasCounts = edits.some((edit) => typeof edit.added === 'number' || typeof edit.removed === 'number');
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        aria-expanded={false}
+        aria-label={`Show the ${edits.length} files edited this turn`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          border: 'none',
+          background: 'transparent',
+          padding: 0,
+          textAlign: 'left',
+          cursor: 'pointer',
+          color: 'var(--t-text-muted)',
+          fontFamily: 'var(--font-sans-system)',
+          fontSize: 12,
+          fontWeight: 400,
+          letterSpacing: '-0.005em',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        <span>{`Edited ${edits.length} files`}</span>
+        {hasCounts ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+            fontSize: 10.5,
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {added > 0 ? (
+              <span style={{ color: 'var(--t-terminal-ansi-bright-green, #16a34a)' }}>{`+${added}`}</span>
+            ) : null}
+            {removed > 0 ? (
+              <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>{`−${removed}`}</span>
+            ) : null}
+          </span>
+        ) : null}
+        <StackChevron open={false} />
+      </button>
+    );
+  }
+
   return (
     <div
       role="list"
@@ -300,10 +364,62 @@ export function FileEditRowStack({ edits, repoPath }: { edits: FileEditRowData[]
         width: '100%',
       }}
     >
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          aria-expanded={true}
+          aria-label="Collapse the edited-files list"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            border: 'none',
+            background: 'transparent',
+            padding: 0,
+            textAlign: 'left',
+            cursor: 'pointer',
+            color: 'var(--t-text-muted)',
+            fontFamily: 'var(--font-sans-system)',
+            fontSize: 12,
+            fontWeight: 400,
+            letterSpacing: '-0.005em',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <span>{`Edited ${edits.length} files`}</span>
+          <StackChevron open={true} />
+        </button>
+      ) : null}
       {edits.map((edit) => (
         <FileEditRow key={edit.id} edit={edit} repoPath={repoPath} />
       ))}
     </div>
+  );
+}
+
+function StackChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{
+        display: 'block',
+        flexShrink: 0,
+        color: 'var(--t-text-faint)',
+        transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }
 

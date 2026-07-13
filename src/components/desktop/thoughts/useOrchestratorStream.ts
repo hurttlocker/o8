@@ -520,6 +520,12 @@ export function useOrchestratorStream(
 
     const text = current.chunks.join('\n');
     const thinking = current.thinkingChunks.length > 0 ? current.thinkingChunks.join('\n') : undefined;
+    // Reasoning-phase fields (see CurrentAssistantStreamState): the frozen
+    // duration drives the "Thought for Ns" line; `thinkingActive` stays true
+    // only while reasoning is still the ONLY thing that has happened.
+    const thinkingDurationMs = current.thinkingDurationMs ?? undefined;
+    const thinkingActive = current.thinkingStartedAt != null && current.thinkingDurationMs == null
+      && current.chunks.length === 0;
     setMessages(prev => {
       const idx = prev.findIndex(m => m.id === current.id);
       if (idx >= 0) {
@@ -528,6 +534,8 @@ export function useOrchestratorStream(
           ...next[idx],
           text: text || (thinking ? '' : ''),
           thinking,
+          ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
+          thinkingActive,
           timestamp: next[idx].timestamp ?? Date.now(),
           timestampLabel: next[idx].timestampLabel ?? formatTimestampLabel(Date.now()),
         };
@@ -539,6 +547,8 @@ export function useOrchestratorStream(
         role: 'assistant',
         text: text || (thinking ? '' : ''),
         thinking,
+        ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
+        thinkingActive,
         timestamp: Date.now(),
         timestampLabel: formatTimestampLabel(Date.now()),
       };

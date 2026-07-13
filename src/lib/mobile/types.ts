@@ -320,6 +320,12 @@ export interface MobileTranscriptEntry {
   thinking?: string;
   thinkingSteps?: MobileTranscriptThinkingStep[];
   thinkingDurationMs?: number;
+  /** True while a reasoning phase is in flight for this entry. Claude 5-family
+   *  thinking streams signature-only (content redacted at the API), so this
+   *  marker — set on the thinking block start, cleared when the first answer
+   *  token or tool call ends reasoning — is what lets the transcript show a
+   *  live "Thinking" line even when `thinking` text never arrives. */
+  thinkingActive?: boolean;
   claudeCodeEvents?: ClaudeCodeStreamJsonChatEvent[];
   recalledFacts?: number;
   command?: MobileTranscriptCommand;
