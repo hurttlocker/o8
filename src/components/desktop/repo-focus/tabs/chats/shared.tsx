@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '../../../lucide-shims';
@@ -107,9 +108,47 @@ export function SectionLabel({
   );
 }
 
-function RepoGroupLabel({ label, trailing, noIcon = false }: { label: string; trailing?: React.ReactNode; noIcon?: boolean }) {
+function RepoGroupLabel({
+  label,
+  trailing,
+  noIcon = false,
+  collapsed,
+  onToggle,
+  onCreate,
+  createTitle,
+}: {
+  label: string;
+  trailing?: React.ReactNode;
+  noIcon?: boolean;
+  /** Drawer state — only meaningful when onToggle is provided. */
+  collapsed?: boolean;
+  /** When set, the whole header toggles the repo drawer (Cursor pattern). */
+  onToggle?: () => void;
+  /** Hover-revealed [+] — spawn a new session scoped to this repo. */
+  onCreate?: () => void;
+  createTitle?: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const toggleable = Boolean(onToggle);
+  // Leading 11px slot keeps its exact geometry (OCD rule: icons stay where
+  // they are). At rest the folder reads as identity; the chevron only takes
+  // the slot when the drawer is collapsed (state must read at a glance) or
+  // while hovering a toggleable header (affordance).
+  const leadingGlyph = noIcon
+    ? null
+    : toggleable && collapsed
+      ? <ChevronRight size={11} strokeWidth={2} />
+      : toggleable && hovered
+        ? <ChevronDown size={11} strokeWidth={2} />
+        : <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />;
   return (
     <div
+      role={toggleable ? 'button' : undefined}
+      aria-expanded={toggleable ? !collapsed : undefined}
+      title={toggleable ? `${collapsed ? 'Show' : 'Hide'} ${label} sessions` : undefined}
+      onClick={onToggle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -121,6 +160,8 @@ function RepoGroupLabel({ label, trailing, noIcon = false }: { label: string; tr
         paddingLeft: 12,
         color: 'var(--t-text-faint)',
         fontFamily: REPO_FOCUS_FONT,
+        cursor: toggleable ? 'pointer' : undefined,
+        userSelect: 'none',
       }}
     >
       {/* Folder glyph (or empty spacer for non-repo groups like
@@ -139,7 +180,7 @@ function RepoGroupLabel({ label, trailing, noIcon = false }: { label: string; tr
           flexShrink: 0,
         }}
       >
-        {noIcon ? null : <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />}
+        {leadingGlyph}
       </span>
       <span
         style={{
@@ -156,7 +197,43 @@ function RepoGroupLabel({ label, trailing, noIcon = false }: { label: string; tr
       >
         {label}
       </span>
-      {trailing}
+      {onCreate ? (
+        <button
+          type="button"
+          title={createTitle ?? `New session in ${label}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCreate();
+          }}
+          style={{
+            width: 16,
+            height: 16,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 0,
+            background: 'transparent',
+            padding: 0,
+            cursor: 'pointer',
+            outline: 'none',
+            color: 'var(--t-text-muted)',
+            fontSize: 13,
+            lineHeight: '13px',
+            fontWeight: 400,
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 120ms ease',
+            flexShrink: 0,
+          }}
+        >
+          +
+        </button>
+      ) : null}
+      {trailing ? (
+        // The trailing slot (group-by picker) must not toggle the drawer.
+        <span onClick={(event) => event.stopPropagation()} style={{ display: 'inline-flex', flexShrink: 0 }}>
+          {trailing}
+        </span>
+      ) : null}
     </div>
   );
 }

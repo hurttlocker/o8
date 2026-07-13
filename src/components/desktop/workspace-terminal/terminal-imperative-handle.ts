@@ -43,7 +43,7 @@ export interface ImperativeHandleDeps {
     draftReason?: string;
     targetSessionKey?: string;
   }) => string;
-  openWorkspaceOrchestratorTab: () => string;
+  openWorkspaceOrchestratorTab: (repo?: RegisteredRepo | null) => string;
   openWorkspaceTerminalTab: (agentId: string, repo?: RegisteredRepo) => string;
   openWorkspaceInspectorTab: (canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
   persistTabsNow: (currentTabs: TerminalTab[], currentActiveId: string) => void;
@@ -87,7 +87,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     isRestoreSettled: () => deps.restoreSettledRef.current,
     openCliChatSession: (options) => deps.openWorkspaceCliChatSession(options),
     openLlmChatSession: (options) => deps.openWorkspaceLlmChatSession(options ?? {}),
-    openOrchestratorTab: () => deps.openWorkspaceOrchestratorTab(),
+    openOrchestratorTab: (repo) => deps.openWorkspaceOrchestratorTab(repo),
     openTerminalTab: (repo) => deps.openWorkspaceTerminalTab('shell', repo),
     openHistoryChat: (historyTabId, title, historyRepo) => {
       const currentTab = deps.tabsRef.current.find((tab) => tab.id === deps.activeTabId)
