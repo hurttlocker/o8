@@ -11,7 +11,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
-import { registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
+import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 
 interface InlineImage {
   id: string;
@@ -159,6 +159,11 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         if (!readOnly) {
           term.onData((data) => { sendTerminalInput(tmuxSession, data); });
         }
+        // Snapshot selections for the speak-selection reader (busy TUIs can
+        // wipe the live selection before the chord lands).
+        term.onSelectionChange(() => {
+          recordXtermSelectionSnapshot(term.getSelection?.() ?? '');
+        });
 
         const observer = new ResizeObserver(() => {
           if (disposed || !fitAddonRef.current) return;
