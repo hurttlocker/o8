@@ -322,17 +322,19 @@ describe('orchestrator socket — tool error status (turn grammar)', () => {
 });
 
 describe('orchestrator socket — backend tracking (Fable Slice 4)', () => {
-  it('stamps lastBackendRef from any event carrying data.backend — snapshots and deduped replays included', () => {
+  it('resets the replay cursor when a thread switches backend, then applies the new stream', () => {
     const h = makeHarness({ status: 'connecting', lastSeq: 5 });
 
     // Subscribe-ack snapshot (no seq) — the FIRST thing a fresh client sees.
     h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'ready', snapshot: true, backend: 'fable' } });
     expect(h.lastBackendRef.current).toBe('fable');
 
-    // A deduped replay still updates the backend (tracked before seq gating).
-    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'dup', backend: 'codex' }, seq: 5 });
+    // Codex has its own per-session sequence, so seq=1 is new even though the
+    // previous Fable session had already reached seq=5.
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'codex reply', backend: 'codex' }, seq: 1 });
     expect(h.lastBackendRef.current).toBe('codex');
-    expect(h.currentAssistantRef.current).toBeNull(); // the dedup itself still held
+    expect(h.lastSeqRef.current).toBe(1);
+    expect(h.currentAssistantRef.current?.chunks).toContain('codex reply');
   });
 
   it('leaves lastBackendRef untouched for events without a backend field or off-channel', () => {
