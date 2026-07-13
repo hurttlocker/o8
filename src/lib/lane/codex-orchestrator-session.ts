@@ -105,6 +105,7 @@ const DEFAULT_CODEX_MODEL = MODEL_IDS.codexDefault;
 const USER_CODEX_HOME = join(homedir(), '.codex');
 const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
 const CODEX_ORCHESTRATOR_HOME_DIR = orchestratorDataDir('codex-orchestrator');
+export const CODEX_FIRST_EVENT_TIMEOUT_MS = 45_000;
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -427,6 +428,14 @@ export async function sendToCodexOrchestrator(
   if (options.toolProfile === 'fable') {
     throw new Error("Codex orchestrator does not support the 'fable' tool profile (Fable is Claude-only).");
   }
+  const settleBeforeSpawnIfAborted = (): boolean => {
+    if (!options.signal?.aborted) return false;
+    session.status = 'ready';
+    session.proc = null;
+    onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+    return true;
+  };
+  if (settleBeforeSpawnIfAborted()) return;
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
   const model = resolveOrchestratorModelSync(options.model);
   const isLocalModel = !!parseLocalModel(model);
@@ -439,6 +448,7 @@ export async function sendToCodexOrchestrator(
   if (session.status === 'busy') {
     await waitForSessionIdle(session, PREEMPT_SETTLE_MS);
   }
+  if (settleBeforeSpawnIfAborted()) return;
 
   // A SIGTERM'd turn exits non-zero → 'dead', so the settle wait above commonly
   // lands here; auto-recover into a fresh turn.
@@ -468,8 +478,10 @@ export async function sendToCodexOrchestrator(
     onEvent({ type: 'done', sessionId: session.threadId, cost: null });
     return;
   }
+  if (settleBeforeSpawnIfAborted()) return;
 
   const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
+  if (settleBeforeSpawnIfAborted()) return;
   let codexBin: string;
   try {
     const resolved = await resolveCli({
@@ -487,6 +499,7 @@ export async function sendToCodexOrchestrator(
       reasoningEffort = 'xhigh';
     }
   } catch (err) {
+    if (settleBeforeSpawnIfAborted()) return;
     session.status = 'dead';
     const note = err instanceof CliNotFoundError
       ? `Codex binary not found: ${err.message}`
@@ -495,6 +508,7 @@ export async function sendToCodexOrchestrator(
     onEvent({ type: 'done', sessionId: session.threadId, cost: null });
     return;
   }
+  if (settleBeforeSpawnIfAborted()) return;
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
@@ -526,7 +540,7 @@ export async function sendToCodexOrchestrator(
         message,
       ];
 
-  return new Promise<void>((promiseResolve, promiseReject) => {
+  return new Promise<void>((promiseResolve) => {
     let crashRecord: OrchestratorTurnRecord | null = null;
     let stdoutFd: number | null = null;
     let stderrFd: number | null = null;
@@ -546,22 +560,35 @@ export async function sendToCodexOrchestrator(
       stderrFd = openAppendFile(crashRecord.stderrPath);
     }
 
-    const proc = spawn(codexBin, args, {
-      cwd: session.repoPath,
-      env: {
-        ...process.env,
-        // codex is a node shim — the server's own runtime must be on PATH (#1551).
-        PATH: pathWithNodeRuntime(),
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-        O8_MANAGED_SESSION: '1',
-        CODEX_HOME: codexHome,
-      },
-      detached: crashEnabled,
-      stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
-        ? ['ignore', stdoutFd, stderrFd]
-        : ['ignore', 'pipe', 'pipe'],
-    });
+    let proc: ChildProcess;
+    try {
+      proc = spawn(codexBin, args, {
+        cwd: session.repoPath,
+        env: {
+          ...process.env,
+          // codex is a node shim — the server's own runtime must be on PATH (#1551).
+          PATH: pathWithNodeRuntime(),
+          FORCE_COLOR: '0',
+          NO_COLOR: '1',
+          O8_MANAGED_SESSION: '1',
+          CODEX_HOME: codexHome,
+        },
+        detached: crashEnabled,
+        stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
+          ? ['ignore', stdoutFd, stderrFd]
+          : ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      if (stdoutFd !== null) closeSync(stdoutFd);
+      if (stderrFd !== null) closeSync(stderrFd);
+      finishOrchestratorTurn(crashRecord);
+      session.status = 'dead';
+      const note = err instanceof Error ? err.message : String(err);
+      onEvent({ type: 'error', error: note });
+      onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+      promiseResolve();
+      return;
+    }
     if (stdoutFd !== null) closeSync(stdoutFd);
     if (stderrFd !== null) closeSync(stderrFd);
     if (crashEnabled) proc.unref();
@@ -570,38 +597,8 @@ export async function sendToCodexOrchestrator(
     }
     session.proc = proc;
 
-    const processTimeout = setTimeout(() => {
-      console.warn(`[codex-orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
-      // Surface the kill to the chat — mirrors orchestrator-session.ts so the
-      // user sees a small terminating note instead of a silent freeze.
-      const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
-      onEvent({
-        type: 'error',
-        error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
-      });
-      proc.kill('SIGTERM');
-      setTimeout(() => {
-        if (!proc.killed) proc.kill('SIGKILL');
-      }, 5_000);
-    }, PROCESS_TIMEOUT_MS);
-
     const userAbortSignal = options.signal;
     let userAbortListener: (() => void) | null = null;
-    if (userAbortSignal) {
-      if (userAbortSignal.aborted) {
-        console.log(`[codex-orchestrator-session] Abort requested before spawn listener attached — killing ${session.sessionName}`);
-        proc.kill('SIGTERM');
-      } else {
-        userAbortListener = () => {
-          console.log(`[codex-orchestrator-session] User interrupt — killing ${session.sessionName}`);
-          if (!proc.killed) proc.kill('SIGTERM');
-          setTimeout(() => {
-            if (!proc.killed) proc.kill('SIGKILL');
-          }, 2_000);
-        };
-        userAbortSignal.addEventListener('abort', userAbortListener, { once: true });
-      }
-    }
     const detachUserAbortListener = () => {
       if (userAbortSignal && userAbortListener) {
         userAbortSignal.removeEventListener('abort', userAbortListener);
@@ -612,14 +609,65 @@ export async function sendToCodexOrchestrator(
     let lineBuffer = '';
     const lineState = { cost: null as number | null, threadId: session.threadId };
     let stopCrashTail: (() => void) | null = null;
-    const handleCodexLine = (line: string) => handleCodexJsonLine(line, lineState, onEvent, { isLocalModel });
+    let crashTailOffset = 0;
+    let settled = false;
+    let processTimeout: ReturnType<typeof setTimeout> | null = null;
+    let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
+    let sawFirstEvent = false;
+    const handleCodexLine = (line: string) => {
+      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel });
+      if (parsed) {
+        sawFirstEvent = true;
+        if (firstEventTimeout) {
+          clearTimeout(firstEventTimeout);
+          firstEventTimeout = null;
+        }
+      }
+    };
+
+    const drainCrashOutput = () => {
+      stopCrashTail?.();
+      stopCrashTail = null;
+      if (!crashRecord) return;
+      const remainder = readJsonlLines(crashRecord.stdoutPath, crashTailOffset);
+      crashTailOffset = remainder.offset;
+      for (const line of remainder.lines) handleCodexLine(line);
+    };
+
+    const settle = (status: 'ready' | 'dead', error?: string, drain = false) => {
+      if (settled) return;
+      settled = true;
+      if (processTimeout) clearTimeout(processTimeout);
+      if (firstEventTimeout) clearTimeout(firstEventTimeout);
+      if (drain) drainCrashOutput();
+      else stopCrashTail?.();
+      finishOrchestratorTurn(crashRecord);
+      detachUserAbortListener();
+      session.proc = null;
+      if (lineState.threadId) session.threadId = lineState.threadId;
+      session.status = status;
+      if (error) onEvent({ type: 'error', error });
+      onEvent({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
+      promiseResolve();
+    };
+
+    const terminate = (escalateAfterMs: number) => {
+      if (proc.exitCode == null && proc.signalCode == null) proc.kill('SIGTERM');
+      const escalation = setTimeout(() => {
+        if (proc.exitCode == null && proc.signalCode == null) proc.kill('SIGKILL');
+      }, escalateAfterMs);
+      escalation.unref?.();
+    };
 
     if (crashRecord) {
       stopCrashTail = tailJsonlFile({
         filePath: crashRecord.stdoutPath,
-        fromOffset: fileSize(crashRecord.stdoutPath),
+        // The file was created empty immediately before spawn. Starting at its
+        // post-spawn size can skip a fast child's first event.
+        fromOffset: 0,
         alive: () => isPidAlive(crashRecord?.pid) && session.proc === proc,
         onLine: handleCodexLine,
+        onOffset: (offset) => { crashTailOffset = offset; },
         onEnd: () => {},
       });
     }
@@ -640,44 +688,47 @@ export async function sendToCodexOrchestrator(
     });
 
     proc.on('error', (err) => {
-      clearTimeout(processTimeout);
-      stopCrashTail?.();
-      finishOrchestratorTurn(crashRecord);
-      detachUserAbortListener();
-      session.status = 'dead';
-      session.proc = null;
-      onEvent({ type: 'error', error: err.message });
-      promiseReject(err);
+      settle('dead', err.message, true);
     });
 
     proc.on('close', (code) => {
-      clearTimeout(processTimeout);
-      stopCrashTail?.();
-      finishOrchestratorTurn(crashRecord);
-      detachUserAbortListener();
-      session.proc = null;
-
+      if (settled) return;
       if (lineBuffer.trim()) {
         handleCodexLine(lineBuffer);
       }
-
-      if (lineState.threadId) session.threadId = lineState.threadId;
-      session.status = code === 0 ? 'ready' : 'dead';
-
-      if (code !== 0) {
-        // Always surface a non-zero exit — and BEFORE the done event, so
-        // consumers don't treat the turn as a normal completion. A crash
-        // with empty stderr used to produce a clean `done` and nothing else.
-        onEvent({
-          type: 'error',
-          error: stderr.trim() ? stderr.slice(0, 500) : `codex exited with code ${code}`,
-        });
-      }
-
-      onEvent({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
-
-      promiseResolve();
+      const crashStderr = crashRecord && code !== 0
+        ? readFileSync(crashRecord.stderrPath, 'utf8')
+        : '';
+      const error = code === 0
+        ? undefined
+        : (stderr || crashStderr).trim().slice(0, 500) || `codex exited with code ${code}`;
+      settle(code === 0 ? 'ready' : 'dead', error, true);
     });
+
+    if (!sawFirstEvent) {
+      firstEventTimeout = setTimeout(() => {
+        const note = 'Codex produced no output for 45s — the turn was aborted; re-send to retry';
+        console.warn(`[codex-orchestrator-session] ${note} (${session.sessionName})`);
+        settle('dead', note);
+        terminate(2_000);
+      }, CODEX_FIRST_EVENT_TIMEOUT_MS);
+    }
+
+    processTimeout = setTimeout(() => {
+      const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
+      const note = `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — re-send your message to continue.`;
+      console.warn(`[codex-orchestrator-session] ${note} (${session.sessionName})`);
+      settle('dead', note);
+      terminate(5_000);
+    }, PROCESS_TIMEOUT_MS);
+
+    userAbortListener = () => {
+      console.log(`[codex-orchestrator-session] User interrupt — killing ${session.sessionName}`);
+      settle('dead');
+      terminate(2_000);
+    };
+    if (userAbortSignal?.aborted) userAbortListener();
+    else userAbortSignal?.addEventListener('abort', userAbortListener, { once: true });
   });
 }
 

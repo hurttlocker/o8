@@ -236,6 +236,10 @@ export function useOrchestratorStream(
   // from every event). Read by the auto-compact effect to pick the metered
   // window target vs the global one.
   const lastBackendRef = useRef<string | null>(null);
+  // Per-turn override used for backend-scoped subscribe + interrupt messages.
+  // It must be set before the send ACK because the operator can press Stop
+  // while the selected backend is still resolving its CLI (#1557).
+  const activeTurnBackendRef = useRef<OrchestratorBackendId | null>(null);
   const missionRotationInFlightRef = useRef(false);
   const pendingMissionCompletionRef = useRef<OrchestratorMissionCompletedDetail | null>(null);
   const transitionStripTimerRef = useRef<number | null>(null);
@@ -247,6 +251,7 @@ export function useOrchestratorStream(
   // restart (no events arrive post-reconnect) or a dead backend turn (no
   // events for > HEAL_STALE_AFTER_MS while the UI still thinks it's working).
   const eventCountRef = useRef(0);
+  const turnTranscriptEventCountRef = useRef(0);
   const lastEventAtRef = useRef<number>(Date.now());
   // Wall-clock of the most recent local send(). The 3s reconnect heal uses this
   // to avoid clearing a freshly-started turn's "busy" state: a send that fired
@@ -394,6 +399,8 @@ export function useOrchestratorStream(
     const nextStatus = connected ? 'ready' : 'connecting';
     resetEpochRef.current += 1;
     lastSeqRef.current = 0;
+    activeTurnBackendRef.current = null;
+    turnTranscriptEventCountRef.current = 0;
     syncMessages([]);
     planTextRef.current = null;
     setPlanText(null);
@@ -486,7 +493,10 @@ export function useOrchestratorStream(
     if (!hasStaleStatus && !hasOrphanAssistant && !hasRunningTools) return;
 
     console.warn(`[orchestrator-stream] Healing stale busy state: ${reason}`);
-    if (hasStaleStatus) setStatus('ready');
+    if (hasStaleStatus) {
+      statusRef.current = 'ready';
+      setStatus('ready');
+    }
     if (hasOrphanAssistant) currentAssistantRef.current = null;
     endTurn();
     if (hasRunningTools) {
@@ -604,6 +614,7 @@ export function useOrchestratorStream(
         type: 'orchestrator-subscribe',
         repoPath: repoPathRef.current,
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
+        ...(activeTurnBackendRef.current ? { backend: activeTurnBackendRef.current } : {}),
         // Replay anything we missed since the last event we applied — on a
         // reconnect mid-turn this recovers the in-flight tokens instead of
         // leaving us stuck on a "Working" pill with no stream.
@@ -634,6 +645,7 @@ export function useOrchestratorStream(
 
     ws.onmessage = createOrchestratorMessageHandler({
       captureFirstTurnPlanRef,
+      activeTurnBackendRef,
       currentWs: ws,
       currentAssistantRef,
       eventCountRef,
@@ -651,6 +663,7 @@ export function useOrchestratorStream(
       setMessages,
       setStatus,
       statusRef,
+      turnTranscriptEventCountRef,
       wsRef,
     });
 
@@ -690,6 +703,7 @@ export function useOrchestratorStream(
       type: 'orchestrator-subscribe',
       repoPath,
       ...(threadId ? { threadId } : {}),
+      ...(activeTurnBackendRef.current ? { backend: activeTurnBackendRef.current } : {}),
       since: 0,
     }));
   }, [repoPath, threadId]);
@@ -830,6 +844,20 @@ export function useOrchestratorStream(
       if (statusRef.current !== 'busy') return;
       const quietFor = Date.now() - lastEventAtRef.current;
       if (quietFor >= HEAL_STALE_AFTER_MS) {
+        if (turnTranscriptEventCountRef.current === 0) {
+          const at = Date.now();
+          setMessages((prev) => {
+            const next = [...prev, {
+              id: `orch-stale-no-events-${at}`,
+              role: 'system' as const,
+              text: 'Orchestrator error: This turn produced no transcript events before the client watchdog expired. Re-send to retry.',
+              timestamp: at,
+              timestampLabel: formatTimestampLabel(at),
+            }];
+            messagesRef.current = next;
+            return next;
+          });
+        }
         healStaleBusyState(`no events for ${Math.round(quietFor / 1000)}s while status=busy`);
       }
     }, HEAL_POLL_INTERVAL_MS);
@@ -877,6 +905,7 @@ export function useOrchestratorStream(
         type: 'orchestrator-interrupt',
         repoPath: activeRepoPath,
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
+        ...(activeTurnBackendRef.current ? { backend: activeTurnBackendRef.current } : {}),
       }));
     }
     if (statusRef.current === 'busy') {
@@ -919,6 +948,7 @@ export function useOrchestratorStream(
     const collide = options?.collide === true;
     const collideBaseBackend = collide ? options?.backend : undefined;
     const backend = collide ? 'collide' : options?.backend;
+    activeTurnBackendRef.current = backend ?? null;
     // Collide is its own fusion — the swarm hint does not apply on a Collide turn.
     const swarm = options?.swarm === true && !collide;
     // Solo forbids fan-out entirely — it never combines with swarm or collide.
@@ -926,7 +956,10 @@ export function useOrchestratorStream(
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
-      if (!activeRepoPath) return;
+      if (!activeRepoPath) {
+        activeTurnBackendRef.current = null;
+        return;
+      }
       const transcriptSnapshot = messagesRef.current;
       let planCaptureSource = transcriptSnapshot;
       const projectedTokens = estimateNextTurnTokens(message);
@@ -966,6 +999,7 @@ export function useOrchestratorStream(
           planCaptureSource = primed.transcript;
           setMessages(primed.transcript);
         } catch (error) {
+          activeTurnBackendRef.current = null;
           setMessages((prev) => [
             ...prev.filter((entry) => entry.id !== compactingId),
             {
@@ -1023,6 +1057,7 @@ export function useOrchestratorStream(
         outboundMessage = `${SOLO_TURN_HINT}\n\n${outboundMessage}`;
       }
       const clientMessageId = createOrchestratorClientMessageId();
+      turnTranscriptEventCountRef.current = 0;
       const payload = JSON.stringify({
         type: 'orchestrator-send',
         repoPath: activeRepoPath,
@@ -1045,6 +1080,7 @@ export function useOrchestratorStream(
       });
 
       if (!delivered) {
+        activeTurnBackendRef.current = null;
         const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
         statusRef.current = nextStatus;
         setStatus(nextStatus);
