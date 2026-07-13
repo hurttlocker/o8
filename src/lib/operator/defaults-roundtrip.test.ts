@@ -50,6 +50,8 @@ const NON_DEFAULT_UPDATE = {
   branchPrefix: 'wip',
   commitAttributionEnabled: true,
   prLinkDestination: 'browser',
+  worktreeMaxCount: 12,
+  worktreeMaxTotalGb: 8,
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {

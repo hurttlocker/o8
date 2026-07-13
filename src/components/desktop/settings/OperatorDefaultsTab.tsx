@@ -27,6 +27,7 @@ import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './groupe
 import { useEntitlement } from '@/lib/entitlement/context';
 import { resolveEffectiveDefaultOrchestratorBackend } from '@/lib/operator/dispatch-runtime-default';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
+import { WorktreeRetentionSection } from './WorktreeRetentionSection';
 import {
   PickerMenu,
   SUBSCRIPTION_PROFILE_OPTIONS,
@@ -556,6 +557,10 @@ export function OperatorDefaultsTab() {
             disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
           />
         </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <WorktreeRetentionSection />
       </section>
 
       {foundersMode ? (

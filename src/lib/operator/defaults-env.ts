@@ -340,3 +340,24 @@ export function envPrLinkDestination(): PrLinkDestination | null {
   if (raw && isPrLinkDestination(raw)) return raw;
   return null;
 }
+
+/**
+ * Parse a positive-number retention limit env var. `0` (and any non-positive /
+ * non-finite value) is rejected → null → falls through to the file/fallback,
+ * so `O8_WORKTREE_MAX_COUNT=0` cannot silently disable the guard by accident.
+ * A caller wanting "unbounded" sets the persisted knob, not the env, to 0.
+ */
+function envPositiveNumber(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined) return null;
+  const parsed = Number(raw.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function envWorktreeMaxCount(): number | null {
+  return envPositiveNumber('O8_WORKTREE_MAX_COUNT');
+}
+
+export function envWorktreeMaxTotalGb(): number | null {
+  return envPositiveNumber('O8_WORKTREE_MAX_TOTAL_GB');
+}

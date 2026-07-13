@@ -1367,6 +1367,16 @@ export class WorktreeManager {
       console.warn(`[worktree-prune] Orphan scan failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    // Retention enforcement (Cursor-parity): beyond the operator's max-count /
+    // max-total-size limits, reclaim the OLDEST safe worktrees first. "Safe" =
+    // not bound to an active/reviewing lane AND no uncommitted changes. Runs on
+    // the same throttled prune cadence as the age sweep above.
+    const retired = await this.enforceRetentionLimits(activeLanePaths).catch((err) => {
+      console.warn(`[worktree-retention] enforcement failed: ${err instanceof Error ? err.message : String(err)}`);
+      return [] as string[];
+    });
+    for (const id of retired) pruned.push(id);
+
     // Also run git's built-in prune for any orphaned worktrees
     await execFileAsync('git', ['worktree', 'prune'], {
       cwd: this.repoRoot,
@@ -1374,6 +1384,114 @@ export class WorktreeManager {
     }).catch(() => {});
 
     return pruned;
+  }
+
+  /**
+   * Enforce the `.cortex-worktrees` retention ceilings (count + total GB).
+   *
+   * Triple-guarded, in this order — when ANY guard is unsure, the worktree is
+   * KEPT, never removed:
+   *   1. SAFE-to-remove: the worktree's path must NOT back an active/reviewing
+   *      lane (`activeLanePaths` is every non-terminal lane's worktree path).
+   *      A path absent from that set is a terminal-lane or orphan worktree.
+   *   2. OLDEST-FIRST: candidates are sorted ascending by last activity; only
+   *      the oldest are considered for removal, up to what the limits require.
+   *   3. CLEAN: `git status --porcelain` must be empty (no uncommitted/untracked
+   *      changes). A dirty tree is skipped + logged, never deleted — matching
+   *      the "never lose agent work" contract of the rest of this file.
+   *
+   * `activeLanePaths` is passed in from {@link prune} (single lane-registry read).
+   * A `0` limit on either axis means that axis is unbounded (guard off).
+   * Returns the ids actually removed.
+   */
+  private async enforceRetentionLimits(activeLanePaths: Set<string> | null): Promise<string[]> {
+    // Fail closed: a null set means the lane-registry read failed, so we can't
+    // tell active from terminal. The age sweep tolerates that (24h floor); this
+    // path has NO age floor and could reap a clean in-flight worktree — skip
+    // the whole pass instead.
+    if (activeLanePaths === null) {
+      console.warn('[worktree-retention] lane registry unavailable — skipping retention pass (fail closed)');
+      return [];
+    }
+    let maxCount = 0;
+    let maxTotalGb = 0;
+    try {
+      const { resolveWorktreeRetentionSync } = await import('@/lib/operator/defaults');
+      const limits = resolveWorktreeRetentionSync();
+      maxCount = limits.maxCount;
+      maxTotalGb = limits.maxTotalGb;
+    } catch {
+      // Operator defaults unavailable — no configured ceiling, nothing to do.
+      return [];
+    }
+    if (maxCount <= 0 && maxTotalGb <= 0) return [];
+
+    // Measure disk usage (needed for the size axis). Only candidate worktrees
+    // living DIRECTLY under THIS repo's .cortex-worktrees are in scope — this
+    // excludes claude-managed trees (.claude/worktrees) and is symlink-safe
+    // (macOS /var → /private/var would defeat a plain string prefix match).
+    const all = await this.list({ withDiskUsage: maxTotalGb > 0 });
+    const inScope = await Promise.all(
+      all.map(async (wt) => (await this.samePath(path.dirname(wt.path), this.worktreeBase)) && !activeLanePaths?.has(wt.path)),
+    );
+    const candidates = all
+      .filter((_, i) => inScope[i])
+      // Oldest first — the retention victim order.
+      .sort((a, b) => a.lastActivityAt - b.lastActivityAt);
+
+    if (candidates.length === 0) return [];
+
+    const maxBytes = maxTotalGb > 0 ? maxTotalGb * 1024 * 1024 * 1024 : 0;
+    let liveCount = candidates.length;
+    let liveBytes = candidates.reduce((sum, wt) => sum + (wt.diskUsageBytes ?? 0), 0);
+    const removed: string[] = [];
+
+    for (const wt of candidates) {
+      const overCount = maxCount > 0 && liveCount > maxCount;
+      const overSize = maxBytes > 0 && liveBytes > maxBytes;
+      if (!overCount && !overSize) break;
+
+      // Guard 3: never delete a worktree with uncommitted work.
+      if (await this.hasUncommittedChanges(wt.path)) {
+        console.log(`[worktree-retention] Skipping ${wt.id} — uncommitted changes present (refusing to delete dirty worktree)`);
+        continue;
+      }
+
+      await this.cleanup(wt.id, { force: true, deleteBranch: true });
+      liveCount -= 1;
+      liveBytes -= wt.diskUsageBytes ?? 0;
+      removed.push(wt.id);
+      console.log(
+        `[worktree-retention] Reclaimed ${wt.id} (oldest-first; count ${liveCount}/${maxCount || '∞'}, `
+        + `size ${(liveBytes / 1024 / 1024 / 1024).toFixed(2)}GB/${maxTotalGb || '∞'})`,
+      );
+    }
+
+    return removed;
+  }
+
+  /**
+   * True when the worktree has uncommitted or untracked changes (`git status
+   * --porcelain` is non-empty). Fail-safe: if git can't be trusted here — the
+   * toplevel isn't this dir (would walk up to the repo root, #1404) or the probe
+   * throws — return true so the caller KEEPS the worktree rather than risk a
+   * delete over unsaved work.
+   */
+  private async hasUncommittedChanges(worktreePath: string): Promise<boolean> {
+    try {
+      const { stdout: toplevelRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: worktreePath,
+        timeout: 5000,
+      });
+      if (path.resolve(toplevelRaw.trim()) !== path.resolve(worktreePath)) return true;
+      const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+        cwd: worktreePath,
+        timeout: 5000,
+      });
+      return stdout.trim().length > 0;
+    } catch {
+      return true;
+    }
   }
 
   // ── Link to Agent Session ──
