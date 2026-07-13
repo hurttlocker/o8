@@ -155,6 +155,16 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
 
   const searchNoun = TABS.find((t) => t.id === tab)?.label ?? 'customizations';
 
+  // Inventory density on the pills themselves (operator ask): totals, not
+  // filtered counts, so the numbers are stable while searching.
+  const tabCounts: Record<CustomizeTab, number> = {
+    rules: directives.length,
+    connections: BUILTIN_CONNECTIONS.length + servers.length,
+    commands: ORCHESTRATOR_SLASH_COMMANDS.length,
+    agents: agents.length,
+    hooks: hooks.length,
+  };
+
   // Open a customization's backing file in the app's file viewer. The
   // dashboard carries an always-mounted o8:open-file listener (added with this
   // surface — O8Panel's own listener unmounts under the takeover), so closing
@@ -354,6 +364,17 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
               }}
             >
               {item.label}
+              {!loading && tabCounts[item.id] > 0 ? (
+                <span style={{
+                  marginLeft: 5,
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.4px',
+                  color: 'var(--t-text-faint)',
+                }}>
+                  {tabCounts[item.id]}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -378,6 +399,44 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
 }
 
 // ── Shared list primitives ──
+
+/** Cursor's "Show N more ›" — sections cap at LIMIT rows until expanded. */
+function TruncatedRows({ rows, limit = 6 }: { rows: React.ReactNode[]; limit?: number }) {
+  const [showAll, setShowAll] = useState(false);
+  if (rows.length <= limit) return <>{rows}</>;
+  if (showAll) return <>{rows}</>;
+  return (
+    <>
+      {rows.slice(0, limit)}
+      <button
+        type="button"
+        onClick={() => setShowAll(true)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          border: 'none',
+          background: 'transparent',
+          paddingTop: 5,
+          paddingBottom: 5,
+          paddingLeft: 10,
+          paddingRight: 10,
+          textAlign: 'left',
+          cursor: 'pointer',
+          color: 'var(--t-text-muted)',
+          fontSize: 12,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
+          fontFamily: UI_FONT,
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        {`Show ${rows.length - limit} more`}
+        <ChevronDownGlyph />
+      </button>
+    </>
+  );
+}
 
 function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
@@ -588,7 +647,7 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
       {global.length > 0 ? (
         <>
           <SectionHeader label="Global" count={global.length} />
-          {global.map((d) => (
+          <TruncatedRows rows={global.map((d) => (
             <Row
               key={d.id}
               title={d.title}
@@ -604,13 +663,13 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
                 {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
               </div>
             </Row>
-          ))}
+          ))} />
         </>
       ) : null}
       {repoScoped.length > 0 ? (
         <>
           <SectionHeader label="Repo" count={repoScoped.length} />
-          {repoScoped.map((d) => (
+          <TruncatedRows rows={repoScoped.map((d) => (
             <Row
               key={d.id}
               title={d.title}
@@ -626,7 +685,7 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
                 {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
               </div>
             </Row>
-          ))}
+          ))} />
         </>
       ) : null}
     </div>
@@ -678,7 +737,7 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
           actionLabel="Add in Settings"
           onAction={openSettingsMcpTab}
         />
-      ) : servers.map((server) => (
+      ) : <TruncatedRows rows={servers.map((server) => (
         <Row
           key={server.id}
           title={server.name}
@@ -715,7 +774,7 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
             </button>
           </div>
         </Row>
-      ))}
+      ))} />}
     </div>
   );
 }
@@ -761,7 +820,7 @@ function CommandsTab({ query }: { query: string }) {
       {groups.map(([group, commands]) => (
         <div key={group} style={{ display: 'flex', flexDirection: 'column' }}>
           <SectionHeader label={group} count={commands.length} />
-          {commands.map((command) => (
+          <TruncatedRows rows={commands.map((command) => (
             <Row
               key={command.command}
               title={command.command}
@@ -769,7 +828,7 @@ function CommandsTab({ query }: { query: string }) {
               subtitle={command.description}
               pill={command.argHint ?? null}
             />
-          ))}
+          ))} />
         </div>
       ))}
     </div>
@@ -796,7 +855,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
     list.length > 0 ? (
       <>
         <SectionHeader label={label} count={list.length} />
-        {list.map((agent) => (
+        <TruncatedRows rows={list.map((agent) => (
           <Row
             key={agent.file}
             title={agent.name}
@@ -813,7 +872,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
               <OpenFileLink file={agent.file} onOpenFile={onOpenFile} />
             </div>
           </Row>
-        ))}
+        ))} />
       </>
     ) : null
   );
@@ -840,7 +899,7 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
     list.length > 0 ? (
       <>
         <SectionHeader label={label} count={list.length} />
-        {list.map((hook, index) => (
+        <TruncatedRows rows={list.map((hook, index) => (
           <div
             key={`${hook.scope}-${hook.event}-${index}`}
             role="button"
@@ -882,7 +941,7 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
               {hook.command}
             </span>
           </div>
-        ))}
+        ))} />
       </>
     ) : null
   );
