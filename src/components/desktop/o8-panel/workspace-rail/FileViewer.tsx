@@ -326,7 +326,7 @@ export function FileViewer({
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {dirty || error || canTogglePreview ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
-          <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-faint)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 12, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {error ?? (dirty ? 'Modified' : fileKind === 'markdown' ? 'Markdown preview' : 'SVG preview')}
           </span>
           {canTogglePreview ? <PreviewToggle mode={viewMode} onModeChange={handleViewModeChange} /> : null}
@@ -393,11 +393,11 @@ export function FileViewer({
                 <div
                   key={index}
                   style={{
-                    height: 18,
-                    lineHeight: '18px',
+                    height: 19,
+                    lineHeight: '19px',
                     color: 'var(--t-text-faint)',
                     fontFamily: MONO_FONT,
-                    fontSize: 10,
+                    fontSize: 10.5,
                     paddingRight: 8,
                     textAlign: 'right',
                   }}
@@ -426,8 +426,8 @@ export function FileViewer({
                 color: 'var(--t-text)',
                 caretColor: 'var(--t-text)',
                 fontFamily: MONO_FONT,
-                fontSize: 11,
-                lineHeight: '18px',
+                fontSize: 12,
+                lineHeight: '19px',
                 tabSize: 2,
                 whiteSpace: 'pre',
                 overflowX: 'auto',
