@@ -147,3 +147,63 @@ describe('the lockout FIRES end-to-end on a warm plan proc', () => {
     expect(session.status).toBe('ready');
   });
 });
+
+describe('recycle race — a replaced proc\'s late events must not touch the new turn', () => {
+  // Live-hit 2026-07-13: a config-change recycle SIGTERM'd the old proc, the
+  // new proc spawned and the turn started — then the OLD proc's `close` fired
+  // on the event loop, settled the NEW turn as "proc exited with code 143" and
+  // clobbered session.proc. Every recycle-triggering turn died instantly.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const armRecycledPair = (name: string): { session: OrchestratorSession; oldProc: any; newProc: any; w: any; events: unknown[]; resolved: () => boolean } => {
+    const session = testSession(name);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = getWarmState(name) as any;
+    const oldProc = mockProc();
+    session.proc = oldProc as unknown as OrchestratorSession['proc'];
+    attachOrchestratorProcHandlers(session, w);
+    // Recycle: killOrchestratorProc nulls the ref, then a new proc spawns and
+    // the next turn arms against it.
+    session.proc = null;
+    const newProc = mockProc();
+    session.proc = newProc as unknown as OrchestratorSession['proc'];
+    w.procConfig = { cwd: '/repo', model: 'm', permissionMode: 'full', toolProfile: 'full', effort: 'adaptive', mcpConfigHash: 'h2' };
+    attachOrchestratorProcHandlers(session, w);
+    const events: unknown[] = [];
+    let resolved = false;
+    w.activeTurn = testTurn(events, () => { resolved = true; });
+    session.status = 'busy';
+    return { session, oldProc, newProc, w, events, resolved: () => resolved };
+  };
+
+  it('the OLD proc\'s late close (SIGTERM 143) leaves the new turn and proc untouched', () => {
+    const { session, oldProc, newProc, w, events, resolved } = armRecycledPair('recycle-race-1');
+
+    oldProc.emit('close', 143);
+
+    expect(resolved()).toBe(false);                 // new turn NOT settled by the stale close
+    expect(w.activeTurn?.settled).toBe(false);
+    expect(session.proc).toBe(newProc);             // proc reference NOT clobbered
+    expect(session.status).toBe('busy');            // turn still live
+    expect(events.some((e) => (e as { type?: string }).type === 'error')).toBe(false);
+  });
+
+  it('stale stdout from the OLD proc never reaches the new turn\'s line handler', () => {
+    const { oldProc, w, events } = armRecycledPair('recycle-race-2');
+
+    oldProc.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'result', session_id: 'stale' })}\n`));
+
+    expect(w.activeTurn?.settled).toBe(false);      // stale `result` cannot settle the new turn
+    expect(events.length).toBe(0);
+  });
+
+  it('the CURRENT proc crashing mid-turn still settles the turn (crash path intact)', () => {
+    const { session, newProc, w, resolved } = armRecycledPair('recycle-race-3');
+
+    newProc.emit('close', 1);
+
+    expect(resolved()).toBe(true);                  // genuine crash still settles
+    expect(w.activeTurn).toBeNull();
+    expect(session.proc).toBeNull();
+    expect(session.status).toBe('dead');
+  });
+});
