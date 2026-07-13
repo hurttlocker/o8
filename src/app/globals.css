@@ -2304,8 +2304,13 @@ button.workflow-file-item.workflow-file-item-active {
 .o8-fam.fam-working>i{animation:o8-fam-sine 1.9s ease-in-out infinite;animation-delay:-0.95s}
 .o8-fam.fam-working>i:nth-child(5){animation-delay:0s}
 @keyframes o8-fam-blinkoff{0%{opacity:1}78%{opacity:1}82%{opacity:0}92%{opacity:0}96%{opacity:1}100%{opacity:1}}
-.o8-fam.fam-review>i{opacity:.3}
-.o8-fam.fam-review>i:nth-child(5){opacity:1;animation:o8-fam-blinkoff 3.2s ease-in-out infinite}
+/* review = Hourglass (Q pick 2026-07-12, round-2 lab): rows drain
+   top → middle → bottom in hard steps, then reset — sand settling, time
+   held. Replaces Hold-blink (kept above as lab history). */
+@keyframes o8-fam-hour{0%{opacity:.75}15%{opacity:.06}80%{opacity:.06}92%{opacity:.75}100%{opacity:.75}}
+.o8-fam.fam-review>i{animation:o8-fam-hour 3.6s ease-in-out infinite}
+.o8-fam.fam-review>i:nth-child(4),.o8-fam.fam-review>i:nth-child(5),.o8-fam.fam-review>i:nth-child(6){animation-delay:.45s}
+.o8-fam.fam-review>i:nth-child(7),.o8-fam.fam-review>i:nth-child(8),.o8-fam.fam-review>i:nth-child(9){animation-delay:.9s}
 @keyframes o8-fam-settle{0%{opacity:.25}5%{opacity:1}94%{opacity:1}100%{opacity:.25}}
 .o8-fam.fam-merged>i{animation:o8-fam-settle 6s ease-out infinite}
 .o8-fam.fam-merged>i:nth-child(1){animation-delay:-0.09s}
@@ -2343,3 +2348,81 @@ button.workflow-file-item.workflow-file-item-active {
 .o8-fam.fam-idle>i:nth-child(7){animation:o8-fam-drift 12s linear infinite;animation-delay:calc(var(--fam-shift,0s) - 9s)}
 .o8-fam.fam-idle>i:nth-child(4){animation:o8-fam-drift 12s linear infinite;animation-delay:calc(var(--fam-shift,0s) - 10.5s)}
 @media (prefers-reduced-motion: reduce){.o8-fam>i{animation:none!important}}
+
+/* Awaiting-review — round 2 (10 candidates, 3×3). Every candidate is built on
+   the EXACT AgentStatusDot .o8-fam grid geometry (3×3px cells, 1px gap, 11px
+   footprint) so whichever wins drops straight into the component. Calm grey
+   (#94a3b8), patient cadences (2.8–5.4s), opacity-only (compositor-safe). Cells
+   are reading-order 1-9 (5 = center). Lab-only until the operator locks one.
+   (Claude, 2026-07-12.) */
+.o8-rev2{position:relative;display:inline-grid;grid-template-columns:repeat(3,3px);grid-auto-rows:3px;gap:1px;width:11px;height:11px;flex-shrink:0}
+.o8-rev2>i{background:#94a3b8;border-radius:0.75px;opacity:.22;will-change:opacity}
+
+/* 1 — Held frame: grid rests at a calm dim, top-left corner blinks off rarely. */
+.o8-rev2.rev2-held>i{opacity:.5}
+@keyframes o8-rev2-held{0%,80%{opacity:.5}86%{opacity:.06}94%{opacity:.06}100%{opacity:.5}}
+.o8-rev2.rev2-held>i:nth-child(1){animation:o8-rev2-held 3.4s ease-in-out infinite}
+
+/* 2 — Center breath: eight outer cells hold faint, center breathes very slowly. */
+.o8-rev2.rev2-center>i{opacity:.22}
+@keyframes o8-rev2-center{0%{opacity:.35}50%{opacity:1}100%{opacity:.35}}
+.o8-rev2.rev2-center>i:nth-child(5){animation:o8-rev2-center 2.8s ease-in-out infinite}
+
+/* 3 — Reading cursor: perimeter holds lit, one brighter cell steps the ring slowly. */
+@keyframes o8-rev2-cursor{0%{opacity:1}12%{opacity:.35}100%{opacity:.35}}
+.o8-rev2.rev2-cursor>i:nth-child(5){opacity:.12}
+.o8-rev2.rev2-cursor>i:nth-child(1),.o8-rev2.rev2-cursor>i:nth-child(2),.o8-rev2.rev2-cursor>i:nth-child(3),.o8-rev2.rev2-cursor>i:nth-child(4),.o8-rev2.rev2-cursor>i:nth-child(6),.o8-rev2.rev2-cursor>i:nth-child(7),.o8-rev2.rev2-cursor>i:nth-child(8),.o8-rev2.rev2-cursor>i:nth-child(9){animation:o8-rev2-cursor 4.8s linear infinite}
+.o8-rev2.rev2-cursor>i:nth-child(1){animation-delay:0s}
+.o8-rev2.rev2-cursor>i:nth-child(2){animation-delay:-.6s}
+.o8-rev2.rev2-cursor>i:nth-child(3){animation-delay:-1.2s}
+.o8-rev2.rev2-cursor>i:nth-child(6){animation-delay:-1.8s}
+.o8-rev2.rev2-cursor>i:nth-child(9){animation-delay:-2.4s}
+.o8-rev2.rev2-cursor>i:nth-child(8){animation-delay:-3s}
+.o8-rev2.rev2-cursor>i:nth-child(7){animation-delay:-3.6s}
+.o8-rev2.rev2-cursor>i:nth-child(4){animation-delay:-4.2s}
+
+/* 4 — Hourglass: rows drain top → middle → bottom in steps, then reset. */
+@keyframes o8-rev2-hour{0%{opacity:.75}15%{opacity:.06}80%{opacity:.06}92%{opacity:.75}100%{opacity:.75}}
+.o8-rev2.rev2-hourglass>i{animation:o8-rev2-hour 3.6s ease-in-out infinite}
+.o8-rev2.rev2-hourglass>i:nth-child(4),.o8-rev2.rev2-hourglass>i:nth-child(5),.o8-rev2.rev2-hourglass>i:nth-child(6){animation-delay:.45s}
+.o8-rev2.rev2-hourglass>i:nth-child(7),.o8-rev2.rev2-hourglass>i:nth-child(8),.o8-rev2.rev2-hourglass>i:nth-child(9){animation-delay:.9s}
+
+/* 5 — Checkmark: a tick-shaped subset holds dim and pulses up once per cycle. */
+.o8-rev2.rev2-check>i{opacity:.1}
+@keyframes o8-rev2-check{0%{opacity:.35}50%{opacity:1}100%{opacity:.35}}
+.o8-rev2.rev2-check>i:nth-child(3),.o8-rev2.rev2-check>i:nth-child(4),.o8-rev2.rev2-check>i:nth-child(6),.o8-rev2.rev2-check>i:nth-child(8){animation:o8-rev2-check 3s ease-in-out infinite}
+
+/* 6 — Checkerboard: alternate cells cross-fade against their opposites, glacial. */
+@keyframes o8-rev2-checkerA{0%{opacity:.9}50%{opacity:.12}100%{opacity:.9}}
+@keyframes o8-rev2-checkerB{0%{opacity:.12}50%{opacity:.9}100%{opacity:.12}}
+.o8-rev2.rev2-checker>i:nth-child(odd){animation:o8-rev2-checkerA 3.5s ease-in-out infinite}
+.o8-rev2.rev2-checker>i:nth-child(even){animation:o8-rev2-checkerB 3.5s ease-in-out infinite}
+
+/* 7 — Look-up: all nine hold lit, then blink off in unison rarely. */
+.o8-rev2.rev2-lookup>i{animation:o8-rev2-lookup 3s ease-in-out infinite}
+@keyframes o8-rev2-lookup{0%,82%{opacity:.6}88%{opacity:.05}95%{opacity:.05}100%{opacity:.6}}
+
+/* 8 — Pause bars: two outer columns hold a faint shimmer, middle column dark. */
+.o8-rev2.rev2-pause>i{opacity:.07}
+@keyframes o8-rev2-pause{0%{opacity:.45}50%{opacity:.85}100%{opacity:.45}}
+.o8-rev2.rev2-pause>i:nth-child(1),.o8-rev2.rev2-pause>i:nth-child(4),.o8-rev2.rev2-pause>i:nth-child(7),.o8-rev2.rev2-pause>i:nth-child(3),.o8-rev2.rev2-pause>i:nth-child(6),.o8-rev2.rev2-pause>i:nth-child(9){animation:o8-rev2-pause 3.2s ease-in-out infinite}
+
+/* 9 — One drops: grid holds, a single cell dips out and restores, wandering. */
+@keyframes o8-rev2-drop{0%{opacity:.5}5%{opacity:.04}12%{opacity:.5}100%{opacity:.5}}
+.o8-rev2.rev2-drop>i{animation:o8-rev2-drop 5.4s ease-in-out infinite}
+.o8-rev2.rev2-drop>i:nth-child(5){animation-delay:0s}
+.o8-rev2.rev2-drop>i:nth-child(1){animation-delay:-.6s}
+.o8-rev2.rev2-drop>i:nth-child(8){animation-delay:-1.2s}
+.o8-rev2.rev2-drop>i:nth-child(3){animation-delay:-1.8s}
+.o8-rev2.rev2-drop>i:nth-child(6){animation-delay:-2.4s}
+.o8-rev2.rev2-drop>i:nth-child(9){animation-delay:-3s}
+.o8-rev2.rev2-drop>i:nth-child(2){animation-delay:-3.6s}
+.o8-rev2.rev2-drop>i:nth-child(7){animation-delay:-4.2s}
+.o8-rev2.rev2-drop>i:nth-child(4){animation-delay:-4.8s}
+
+/* 10 — Knock: outer ring holds faint, center double-pulses ("knock-knock"). */
+.o8-rev2.rev2-knock>i{opacity:.28}
+@keyframes o8-rev2-knock{0%{opacity:.3}8%{opacity:1}16%{opacity:.3}24%{opacity:1}32%{opacity:.3}100%{opacity:.3}}
+.o8-rev2.rev2-knock>i:nth-child(5){animation:o8-rev2-knock 3.2s ease-in-out infinite}
+
+@media (prefers-reduced-motion: reduce){.o8-rev2>i{animation:none!important}}

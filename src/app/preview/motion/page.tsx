@@ -53,6 +53,35 @@ const REVIEW_CANDIDATES: Array<{ kind: ReviewKind; cells: number; title: string;
   { kind: 'frame', cells: 3, title: 'Frame', mechanic: 'Brackets nudge in around a held dot — under review, framed' },
 ];
 
+// Awaiting-review — ROUND 2. Every candidate is built on the EXACT AgentStatusDot
+// 3×3 nine-cell grid (.o8-rev2 mirrors .o8-fam geometry — 3px cells, 1px gap,
+// 11px footprint) so whichever the operator locks drops straight into the
+// component. Calm grey, patient cadences, opacity-only. CSS in globals.css as
+// .o8-rev2-<kind>. Lab-only. (Claude, 2026-07-12.)
+type Rev2Kind =
+  | 'held'
+  | 'center'
+  | 'cursor'
+  | 'hourglass'
+  | 'check'
+  | 'checker'
+  | 'lookup'
+  | 'pause'
+  | 'drop'
+  | 'knock';
+const REVIEW2_CANDIDATES: Array<{ kind: Rev2Kind; title: string; mechanic: string }> = [
+  { kind: 'held', title: 'Held frame', mechanic: 'All nine cells rest at a calm dim; the top-left corner blinks off once every 3.4s — a parked frame with a slow tick.' },
+  { kind: 'center', title: 'Center breath', mechanic: 'The eight outer cells hold faint while the center cell alone breathes very slowly (2.8s) — one eye open, waiting on you.' },
+  { kind: 'cursor', title: 'Reading cursor', mechanic: 'The perimeter holds lit; a single brighter cell steps around the ring one position per beat — scanning, parked on your turn.' },
+  { kind: 'hourglass', title: 'Hourglass', mechanic: 'Rows drain top → middle → bottom in hard steps, then all reset — sand settling, time held.' },
+  { kind: 'check', title: 'Checkmark', mechanic: 'A tick-shaped subset of cells holds dim and pulses up together once per 3s cycle — an approval waiting to be given.' },
+  { kind: 'checker', title: 'Checkerboard', mechanic: 'Alternating cells cross-fade against their opposites at a glacial 3.5s — a slow held swap, nothing rushing.' },
+  { kind: 'lookup', title: 'Look-up', mechanic: 'All nine hold lit together, then blink off in unison once every 3s — the whole object glancing up at you.' },
+  { kind: 'pause', title: 'Pause bars', mechanic: 'The two outer columns hold with a faint synchronized shimmer, middle column dark — the pause glyph, parked.' },
+  { kind: 'drop', title: 'One drops', mechanic: 'The grid holds; a single cell dips out and restores per beat, wandering the positions — a slow idle fidget while it waits.' },
+  { kind: 'knock', title: 'Knock', mechanic: 'The outer ring holds faint while the center double-pulses ("knock-knock") once per 3.2s — a patient tap on the glass.' },
+];
+
 export default function MotionPreviewPage() {
   const [showFocused, setShowFocused] = useState(true);
 
@@ -272,6 +301,60 @@ export default function MotionPreviewPage() {
                 <div style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.1px' }}>{c.title}</div>
                 <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 2, fontFamily: 'var(--font-mono, monospace)' }}>
                   .o8-rev-{c.kind}
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{c.mechanic}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Awaiting review — ROUND 2. 10 candidates, every one on the real
+          AgentStatusDot 3×3 nine-cell grid so the winner drops straight into the
+          component. Calm grey, patient, opacity-only. */}
+      <section style={{ maxWidth: 920, margin: '0 auto 40px auto' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 440, letterSpacing: '-0.2px', margin: 0, marginBottom: 6 }}>
+          Awaiting review — round 2 (10 candidates, 3×3)
+        </h2>
+        <p style={{ fontSize: 12.5, color: 'var(--t-text-muted)', margin: 0, marginBottom: 16, lineHeight: 1.5, maxWidth: 660 }}>
+          Ten fresh review mechanics, every one built on the <strong>exact AgentStatusDot nine-cell 3×3 grid</strong> (same cell size, gap, and footprint as the shipping family) so whichever you lock drops straight into the component. Calm grey, patient cadence (2.8–5.4s) — &quot;paused, parked, your turn,&quot; clearly distinct from working (Breathe) and idle (Drift). Shown enlarged 3×, at real size, and in a live row.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          {REVIEW2_CANDIDATES.map((c) => (
+            <div
+              key={c.kind}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                padding: 16,
+                borderRadius: 12,
+                border: '1px solid var(--t-divider, #e5e7eb)',
+                background: 'var(--t-bg-card, #ffffff)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, minHeight: 52 }}>
+                {/* enlarged 3× so the cadence reads clearly */}
+                <div style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ transform: 'scale(3)', transformOrigin: 'center' }}>
+                    <Review2Candidate kind={c.kind} />
+                  </div>
+                </div>
+                {/* real size (11px), how it actually appears in a row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Review2Candidate kind={c.kind} />
+                  <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', letterSpacing: '-0.2px' }}>real</span>
+                </div>
+                {/* in a live row — mark + review label */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <Review2Candidate kind={c.kind} />
+                  <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--t-text)', whiteSpace: 'nowrap' }}>review ready</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.1px' }}>{c.title}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--t-text-faint)', marginTop: 2, fontFamily: 'var(--font-mono, monospace)' }}>
+                  .o8-rev2-{c.kind}
                 </div>
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>{c.mechanic}</div>
@@ -637,6 +720,19 @@ function ReviewCandidate({ kind, cells }: { kind: ReviewKind; cells: number }) {
   return (
     <span className={`o8-rev-${kind}`} aria-hidden>
       {Array.from({ length: cells }, (_, i) => (
+        <i key={i} />
+      ))}
+    </span>
+  );
+}
+
+// Renders one round-2 review candidate — always nine cells on the real
+// AgentStatusDot 3×3 grid (.o8-rev2 mirrors .o8-fam geometry). The variant class
+// drives the opacity choreography; CSS lives in globals.css (.o8-rev2-<kind>).
+function Review2Candidate({ kind }: { kind: Rev2Kind }) {
+  return (
+    <span className={`o8-rev2 rev2-${kind}`} aria-hidden>
+      {Array.from({ length: 9 }, (_, i) => (
         <i key={i} />
       ))}
     </span>
