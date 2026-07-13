@@ -10,7 +10,8 @@
  *   - idle    → "Drift": one faint spark wanders the 3×3 perimeter over 12s,
  *               per-instance random phase so idle walls never pulse in lockstep
  *   - running → "Breathe": center vs ring pulse in anti-phase sine (accent blue)
- *   - review  → "Hold-blink": grid held dim, center cell lit, blinks OFF rarely (grey)
+ *   - review  → "Hourglass": rows drain top → middle → bottom in steps, reset (grey)
+ *               (Q pick 2026-07-12 round-2 lab; replaced Hold-blink, may iterate)
  *   - rejected→ "Gravity" in amber — the 8 outer cells fall + fade, then reassemble
  *   - failed  → "Gravity" in red — SAME mark, color = severity (declined vs crash)
  *   - merged  → "Settle": cells pop in staggered and hold ~95% of the cycle (green)
