@@ -277,7 +277,10 @@ function SplitHeaderPillStrips({
   );
 
   return (
-    <div data-no-drag style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
+    // No blanket data-no-drag here (Q ruling 2026-07-12): every pill guards
+    // itself, so the strip's NEGATIVE SPACE stays a window-drag region even
+    // when tabs are present over the workspace.
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
       {workspaces.map((workspace, index) => {
         const canClose = index !== 0;
         return (
@@ -523,12 +526,10 @@ function HeaderPillStrip({
 
   return (
     <div
-      data-no-drag
       style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}
     >
       <div
         ref={scrollRef}
-        data-no-drag
         style={{
           flex: 1,
           minWidth: 0,
