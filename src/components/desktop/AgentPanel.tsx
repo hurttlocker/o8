@@ -158,6 +158,16 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const handleCreateOrchestrator = useCallback(() => {
     onCreateWorkspaceOrchestrator?.();
   }, [onCreateWorkspaceOrchestrator]);
+  // Repo-header [+] — spawn a fresh orchestrator bound to that repo
+  // (Cursor's contextual New Agent pattern).
+  const handleCreateOrchestratorForRepo = useCallback((repo: RepoFocusRepo) => {
+    onCreateWorkspaceOrchestrator?.({
+      name: repo.name,
+      localPath: repo.localPath,
+      remoteUrl: repo.remoteUrl ?? undefined,
+      branch: repo.defaultBranch ?? null,
+    });
+  }, [onCreateWorkspaceOrchestrator]);
   const handleCreateChat = useCallback(() => {
     if (onCreateWorkspaceChat) {
       onCreateWorkspaceChat();
@@ -440,11 +450,19 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             showLiveSessions={false}
             groupMode="flat"
             showKindInMeta
+            onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
             // Spawned agents lands between the active chats and the
             // Archived section per operator's hierarchy: chats →
-            // spawned → archived. Same data source as before.
-            slotBeforeArchived={<AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} />}
+            // spawned → archived. Workers already nested under a visible
+            // orchestrator thread are excluded so nothing lists twice.
+            slotBeforeArchived={({ nestedPacketIds }) => (
+              <AgentPanelExtraAgents
+                activeSessionKey={activeSessionKey}
+                onSelectSession={onSelectSession}
+                hidePacketIds={nestedPacketIds}
+              />
+            )}
           />
         </section>
 

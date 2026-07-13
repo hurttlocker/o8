@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type MouseEvent } from 'react';
-import { CheckCircle2 } from '../../../lucide-shims';
+import { CheckCircle2, ChevronDown, ChevronRight } from '../../../lucide-shims';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
 import { HISTORY_ROW_TONES } from './constants';
 import {
@@ -9,6 +9,7 @@ import {
   historySection,
   isAutomationSession,
   packetRepoLabel,
+  packetStateTone,
   packetTimestamp,
   shimmerTextStyle,
 } from './helpers';
@@ -191,6 +192,9 @@ export function HistoryChatRow({
   tone,
   onOpen,
   onOpenMenu,
+  ownedCount = 0,
+  ownedExpanded = true,
+  onToggleOwned,
 }: {
   item: ChatHistoryItem;
   active: boolean;
@@ -199,6 +203,11 @@ export function HistoryChatRow({
   tone?: HistoryRowTone | null;
   onOpen: () => void;
   onOpenMenu?: (event: MouseEvent<HTMLDivElement>) => void;
+  /** Workers this orchestrator thread spawned (ownership nesting, Q ruling
+   *  2026-07-12: variant A structure + variant B's count-as-collapse). */
+  ownedCount?: number;
+  ownedExpanded?: boolean;
+  onToggleOwned?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const rowTone = active
@@ -337,10 +346,150 @@ export function HistoryChatRow({
           letterSpacing: '-0.4px',
         }}
       >
+        {/* Variant-B affordance: faint "N agents" count doubles as the
+            per-thread collapse toggle for the nested worker rows below.
+            stopPropagation — the row itself opens the chat. */}
+        {compact && ownedCount > 0 && onToggleOwned ? (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-expanded={ownedExpanded}
+            title={`${ownedExpanded ? 'Hide' : 'Show'} ${ownedCount} spawned ${ownedCount === 1 ? 'agent' : 'agents'}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleOwned();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleOwned();
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 2,
+              cursor: 'pointer',
+              color: 'var(--t-text-faint)',
+              outline: 'none',
+            }}
+          >
+            <span>{ownedCount} {ownedCount === 1 ? 'agent' : 'agents'}</span>
+            {ownedExpanded ? <ChevronDown size={9} strokeWidth={2} /> : <ChevronRight size={9} strokeWidth={2} />}
+          </span>
+        ) : null}
         {compact ? (
           <span>{formatElapsedAgo(item.modifiedAt)}</span>
         ) : null}
       </span>
+    </div>
+  );
+}
+
+/**
+ * OwnedWorkerRow — a worker packet nested under the orchestrator thread that
+ * spawned it (linkage: packet.orchestratorThreadId === thread tabId). Variant
+ * A of the ownership mockup (Q 2026-07-12): +7 indent from the parent text
+ * column, smaller dimmer title, same 6px status-dot vocabulary — ownership
+ * reads spatially, zero clicks. Click focuses the worker's lane via the same
+ * event the Spawned-agents section dispatches.
+ */
+export function OwnedWorkerRow({ packet }: { packet: OrchestratorPacket }) {
+  const [hovered, setHovered] = useState(false);
+  const tone = packetStateTone(packet);
+  const dotState: AgentDotState =
+    tone?.key === 'running' ? 'running'
+      : tone?.key === 'review' ? 'review'
+        : tone?.key === 'merged' ? 'merged'
+          : tone?.key === 'failed' ? 'failed'
+            : 'idle';
+  const timestamp = packetTimestamp(packet);
+  const focusLane = () => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:focus-spawned-agent-lane', {
+      detail: {
+        packetId: packet.id,
+        sessionKey: packet.lane?.sessionKey ?? null,
+        laneId: packet.lane?.laneId ?? null,
+        title: packet.title,
+      },
+    }));
+  };
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={focusLane}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        focusLane();
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: '100%',
+        minHeight: 26,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: 'var(--t-text-muted)',
+        cursor: 'pointer',
+        textAlign: 'left',
+        outline: 'none',
+        fontFamily: REPO_FOCUS_FONT,
+        paddingTop: 4,
+        paddingRight: 12,
+        paddingBottom: 4,
+        // Parent thread title sits at x=37; workers nest exactly +7 (the
+        // locked repo-child indent step). Dot centers in the gutter beside.
+        paddingLeft: 44,
+        position: 'relative',
+        transition: 'background 180ms ease',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: 21,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          display: 'inline-flex',
+          alignItems: 'center',
+        }}
+      >
+        <AgentStatusDot state={dotState} />
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12,
+          lineHeight: 1.25,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {packet.title}
+      </span>
+      {timestamp ? (
+        <span
+          style={{
+            flexShrink: 0,
+            color: 'var(--t-text-faint)',
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
+          }}
+        >
+          {formatElapsedAgo(timestamp)}
+        </span>
+      ) : null}
     </div>
   );
 }

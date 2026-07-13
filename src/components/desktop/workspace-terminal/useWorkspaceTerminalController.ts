@@ -510,7 +510,7 @@ export function useWorkspaceTerminalController(
     return newTab.id;
   }, [createDefaultChatTab, setActiveTabIdFromUser]);
 
-  const spawnOrchestratorTab = useCallback((): string => {
+  const spawnOrchestratorTab = useCallback((repoOverride?: RegisteredRepo | null): string => {
     // "+ New session → Orchestrator" — before minting yet another empty
     // Orchestrator tab, look for one the operator already has open with
     // no attached thread, no packet, and no draft. Focus it instead.
@@ -523,6 +523,16 @@ export function useWorkspaceTerminalController(
       && (!tab.chatMessages || tab.chatMessages.length === 0)
     ));
     if (emptyExisting) {
+      // Repo-scoped spawn (the [+] on a sidebar repo header) — retarget the
+      // reused empty tab so it binds to the requested repo, not whatever
+      // repo the stale blank tab was minted against.
+      if (repoOverride && emptyExisting.repo?.localPath !== repoOverride.localPath) {
+        const nextTabs = tabsRef.current.map((tab) => (
+          tab.id === emptyExisting.id ? { ...tab, repo: repoOverride } : tab
+        ));
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+      }
       setActiveTabIdFromUser(emptyExisting.id);
       return emptyExisting.id;
     }
@@ -531,10 +541,11 @@ export function useWorkspaceTerminalController(
     // last-thread restore (see createDefaultOrchestratorTab comments).
     // Fix 1: bind to the focused worker-lane's repo when one is open, so
     // opening a fresh orchestrator while watching a lane from repo X doesn't
-    // snap to whatever the stale global selection points at.
+    // snap to whatever the stale global selection points at. An explicit
+    // repoOverride (sidebar repo-header spawn) wins over both.
     const newTab = createDefaultOrchestratorTab({
       fresh: true,
-      repoOverride: deriveFocusedLaneRepo(tabsRef.current, effectiveActiveTabIdRef.current),
+      repoOverride: repoOverride ?? deriveFocusedLaneRepo(tabsRef.current, effectiveActiveTabIdRef.current),
     });
     const nextTabs = [...tabsRef.current, newTab];
     tabsRef.current = nextTabs;
