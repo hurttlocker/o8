@@ -2464,7 +2464,7 @@ function DashboardInner() {
     window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
   }, []);
 
-  const handleCreateWorkspaceOrchestrator = useCallback(() => {
+  const handleCreateWorkspaceOrchestrator = useCallback((repo?: { name: string; localPath: string; remoteUrl?: string; branch?: string | null } | null) => {
     void (async () => {
       try {
         const target = await waitForWorkspaceTerminalTarget({
@@ -2472,7 +2472,7 @@ function DashboardInner() {
           fallbackToAnyExisting: true,
         });
         setActiveTileId(target.tileId);
-        flashWorkspaceTab(target.handle.openOrchestratorTab());
+        flashWorkspaceTab(target.handle.openOrchestratorTab(repo ?? undefined));
       } catch {
         // Workspace may still be mounting; the click is best-effort.
       }
@@ -4358,7 +4358,7 @@ function DashboardInner() {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
         }
       }}
-      onCreateWorkspaceOrchestrator={() => { leaveNavTakeover(); handleCreateWorkspaceOrchestrator(); }}
+      onCreateWorkspaceOrchestrator={(repo) => { leaveNavTakeover(); handleCreateWorkspaceOrchestrator(repo); }}
       onCreateWorkspaceChat={() => { leaveNavTakeover(); handleCreateWorkspaceChat(); }}
       onCreateWorkspaceTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}

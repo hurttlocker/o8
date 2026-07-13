@@ -97,6 +97,9 @@ interface ExtraAgentGroup {
 export interface AgentPanelExtraAgentsProps {
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
+  /** Packet ids already rendered as nested owned-worker rows under their
+   *  orchestrator thread in the rail — excluded here to avoid double-listing. */
+  hidePacketIds?: ReadonlySet<string>;
 }
 
 // ── Constants ──
@@ -382,7 +385,7 @@ function GroupHeader({
 
 const COLLAPSED_KEY = 'o8:agent-panel:spawned-agents-collapsed';
 
-function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentPanelExtraAgentsProps) {
+function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePacketIds }: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
@@ -558,8 +561,13 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
 
   const rows = useMemo(() => buildRows(lanes, agents, rejectedPacketIds), [lanes, agents, rejectedPacketIds]);
   const visibleRows = useMemo(
-    () => rows.filter((row) => !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))),
-    [rows, archivedSessionKeys],
+    () => rows.filter((row) => (
+      !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))
+      // Workers already nested under their orchestrator thread in the rail
+      // above (ownership nesting, 2026-07-12) — never list twice.
+      && !(row.packetId && hidePacketIds?.has(row.packetId))
+    )),
+    [rows, archivedSessionKeys, hidePacketIds],
   );
   const groups = useMemo(() => groupRows(visibleRows, repos), [visibleRows, repos]);
 
