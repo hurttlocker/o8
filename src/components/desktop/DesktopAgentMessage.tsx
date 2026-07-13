@@ -17,7 +17,7 @@ import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
-import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
+import { ToolCallChipCluster, describeToolRollupParts } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { BrainFeedCard } from '@/components/desktop/thoughts/chat-panel/BrainFeedCard';
 import { isMeteredBrainFeedCall } from '@/components/desktop/thoughts/brain-feed';
 import { useSmoothText } from '@/components/desktop/thoughts/chat-panel/use-smooth-text';
@@ -215,6 +215,14 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       (toolCall) => !isMeteredBrainFeedCall(toolCall) && !isFileEditCall(toolCall),
     ),
     [entry.toolCalls],
+  );
+  // Cursor's settled aggregate merges the turn's tool work into the edit line:
+  // "Edited 12 files, ran 1 command, explored 2 files +903 −3". When the entry
+  // has file edits, the cluster's summary folds into the FileEditRowStack
+  // header and the standalone rollup line is suppressed (errors never fold).
+  const rollupExtras = useMemo(
+    () => describeToolRollupParts(clusterToolCalls, 'fold'),
+    [clusterToolCalls],
   );
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
@@ -489,8 +497,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       ) : null}
 
       {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
-      {fileEdits.length > 0 ? <FileEditRowStack edits={fileEdits} repoPath={repoPath} /> : null}
-      {clusterToolCalls.length > 0 ? <ToolCallChipCluster toolCalls={clusterToolCalls} /> : null}
+      {fileEdits.length > 0 ? <FileEditRowStack edits={fileEdits} repoPath={repoPath} extras={rollupExtras} /> : null}
+      {clusterToolCalls.length > 0 ? (
+        <ToolCallChipCluster toolCalls={clusterToolCalls} suppressSettledRollup={fileEdits.length > 0} />
+      ) : null}
       {brainFeedCalls.map((toolCall, index) => (
         <BrainFeedCard key={toolCall.id ?? `brain-feed-${index}`} toolCall={toolCall} />
       ))}
