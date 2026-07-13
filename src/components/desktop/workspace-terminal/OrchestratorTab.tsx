@@ -641,11 +641,31 @@ function OrchestratorTabInner({
   useEffect(() => {
     if (!active || !initialThreadId) return;
     if (loadedInitialThreadRef.current === initialThreadId) return;
-    loadedInitialThreadRef.current = initialThreadId;
-    const timer = window.setTimeout(() => {
-      chatPanelRef.current?.loadThread(initialThreadId);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    // Retry until the chat panel's imperative handle exists — on a cold reload
+    // the ref is still null at t=0 (hydration lag), and a single-shot load
+    // stamped the guard ref anyway, silently dropping the restore. The tab
+    // then wore the thread's TITLE (persisted label) over an empty transcript.
+    // Mirrors the localStorage-restore effect's retry loop above.
+    let cancelled = false;
+    let attempts = 0;
+    const tryLoad = () => {
+      if (cancelled) return;
+      if (loadedInitialThreadRef.current === initialThreadId) return;
+      const handle = chatPanelRef.current;
+      if (handle) {
+        console.log(`[orchestrator] loading tab-bound thread ${initialThreadId} (attempt ${attempts})`);
+        loadedInitialThreadRef.current = initialThreadId;
+        handle.loadThread(initialThreadId);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 40) window.setTimeout(tryLoad, 50);
+    };
+    const timer = window.setTimeout(tryLoad, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [active, initialThreadId]);
 
   useEffect(() => {
