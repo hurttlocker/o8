@@ -126,6 +126,7 @@ import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { resolveFocusableLaneBinding } from './hooks/focusOrchestrationPacketLane';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import type { GrabbedElement } from '@/lib/browser/grab';
+import { cropRegionBase64 } from '@/lib/browser/region-crop';
 import { createTileRegistry } from './tileRegistry';
 import { SettingsOverlay } from './SettingsOverlay';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
@@ -578,6 +579,15 @@ function historyRepoContextFromMobileThread(thread: MobileOrchestratorThread): S
     branch: thread.repoBranch ?? null,
     remoteUrl: null,
   };
+}
+
+/** One line per element sampled under a Design Mode stroke — leads with the
+ *  React component name (Cursor parity) when discovered, e.g.
+ *  `- <AgentSwarm> section.swarm — "Agent Swarm"`; falls back to the raw tag. */
+function formatDrawElement(e: { selector: string; tag: string; text: string; component?: string | null }): string {
+  const head = e.component ? `<${e.component}>` : `<${e.tag}>`;
+  const body = e.text ? ` — "${e.text}"` : '';
+  return `- ${head} ${e.selector}${body}`;
 }
 
 export default function DashboardPage() {
@@ -2948,37 +2958,50 @@ function DashboardInner() {
       const detail = (event as CustomEvent<{
         text?: string;
         rect?: { left: number; top: number; width: number; height: number };
-        elements?: Array<{ selector: string; tag: string; text: string }>;
+        elements?: Array<{ selector: string; tag: string; text: string; component?: string | null }>;
+        viewport?: { width: number; height: number } | null;
         screenshotBase64?: string | null;
       }>).detail;
       const text = detail?.text?.trim();
       if (!text) return;
-      const finish = (shotPath: string | null) => {
+      const finish = (shotPath: string | null, cropPath: string | null) => {
         const rect = detail?.rect;
         const region = rect
           ? `${Math.round(rect.width)}×${Math.round(rect.height)} region at (${Math.round(rect.left)}, ${Math.round(rect.top)})`
           : 'drawn region';
         const elements = detail?.elements?.length
-          ? `\nElements under the drawing:\n${detail.elements.map((e) => `- <${e.tag}> ${e.selector}${e.text ? ` — "${e.text}"` : ''}`).join('\n')}`
+          ? `\nElements under the drawing:\n${detail.elements.map(formatDrawElement).join('\n')}`
           : '';
-        const shot = shotPath ? `\nScreenshot of the drawn area: ${shotPath}` : '';
+        const shot = shotPath ? `\nScreenshot (full page): ${shotPath}` : '';
+        const crop = cropPath ? `\nScreenshot (drawn region crop): ${cropPath}` : '';
         injectPayloadIntoRepoChat({
           reason: 'design-draw',
-          text: `${text}\n\n[Design Mode drawing — ${region}]${elements}${shot}`,
+          text: `${text}\n\n[Design Mode drawing — ${region}]${elements}${shot}${crop}`,
         }, null);
         closeDesignMode();
       };
-      if (detail?.screenshotBase64) {
-        void fetch('/api/panel/design-shot', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ screenshotBase64: detail.screenshotBase64 }),
-        })
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data: { path?: string } | null) => finish(data?.path ?? null))
-          .catch(() => finish(null));
+      const screenshot = detail?.screenshotBase64;
+      if (screenshot) {
+        const ts = Date.now();
+        const persist = (base64: string, variant: 'full' | 'crop'): Promise<string | null> =>
+          fetch('/api/panel/design-shot', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ screenshotBase64: base64, variant, ts }),
+          })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data: { path?: string } | null) => data?.path ?? null)
+            .catch(() => null);
+        // Full page always; the crop of the stroke bounds when we have a rect.
+        const cropPromise = detail?.rect
+          ? cropRegionBase64(screenshot, detail.rect, detail.viewport ?? null, { pad: 8 })
+              .then((cropB64) => (cropB64 ? persist(cropB64, 'crop') : null))
+          : Promise.resolve<string | null>(null);
+        void Promise.all([persist(screenshot, 'full'), cropPromise])
+          .then(([shotPath, cropPath]) => finish(shotPath, cropPath))
+          .catch(() => finish(null, null));
       } else {
-        finish(null);
+        finish(null, null);
       }
     };
     window.addEventListener('o8:design-draw-native', onNativeDraw);
@@ -4444,7 +4467,7 @@ function DashboardInner() {
               const region = `${Math.round(payload.rect.width)}×${Math.round(payload.rect.height)} region at (${Math.round(payload.rect.left)}, ${Math.round(payload.rect.top)})`;
               const page = o8BrowserHoverUrl ? `\nPage: ${o8BrowserHoverUrl}` : '';
               const elements = payload.elements.length > 0
-                ? `\nElements under the drawing:\n${payload.elements.map((e) => `- <${e.tag}> ${e.selector}${e.text ? ` — "${e.text}"` : ''}`).join('\n')}`
+                ? `\nElements under the drawing:\n${payload.elements.map(formatDrawElement).join('\n')}`
                 : '';
               injectPayloadIntoRepoChat({
                 reason: 'design-draw',

@@ -18,8 +18,16 @@ import path from 'node:path';
 const MAX_BASE64_LENGTH = 16 * 1024 * 1024; // ~12MB decoded
 
 export async function POST(request: Request): Promise<Response> {
-  const body = await request.json().catch(() => null) as { screenshotBase64?: unknown } | null;
+  const body = await request.json().catch(() => null) as {
+    screenshotBase64?: unknown;
+    variant?: unknown;
+    ts?: unknown;
+  } | null;
   const base64 = typeof body?.screenshotBase64 === 'string' ? body.screenshotBase64.trim() : '';
+  // Two variants share one timestamp: the full-page capture and the crop of the
+  // drawn region (Cursor parity, 2026-07-12). `ts` ties the pair together.
+  const isCrop = body?.variant === 'crop';
+  const ts = Number.isFinite(Number(body?.ts)) && Number(body?.ts) > 0 ? Math.floor(Number(body?.ts)) : Date.now();
   if (!base64) {
     return Response.json({ ok: false, error: 'screenshotBase64 is required' }, { status: 400 });
   }
@@ -33,7 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     const dataDir = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
     const shotsDir = path.join(dataDir, 'design-shots');
     mkdirSync(shotsDir, { recursive: true });
-    const filePath = path.join(shotsDir, `draw-${Date.now()}.png`);
+    const filePath = path.join(shotsDir, `draw-${ts}${isCrop ? '-crop' : ''}.png`);
     writeFileSync(filePath, Buffer.from(base64, 'base64'));
     return Response.json({ ok: true, path: filePath });
   } catch (error) {

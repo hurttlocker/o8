@@ -31,6 +31,7 @@ import {
   type BrowserViewRect,
 } from '@/lib/tauri/bridge';
 import { NATIVE_BROWSER_AGENT_SOURCE } from '@/lib/browser/native-agent-source';
+import { cropRegionBase64, type CropRect } from '@/lib/browser/region-crop';
 
 interface NativeBrowserSurfaceProps {
   /** The active tab's URL — the page the native window navigates to. */
@@ -408,12 +409,44 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         body: JSON.stringify({ verb: 'drawmode', args: { on: false } }),
       }).catch(() => {});
     };
+    // The composer thumbnail (Cursor parity, preview only — the REAL payload
+    // screenshot is still captured fresh at send). The in-page composer can't
+    // screenshot itself, so when the page reports a pending drawn region we
+    // capture the live window HERE, crop it, and push it back as a data: URI.
+    // Deduped by region so we capture once per stroke.
+    let deliveredThumbKey = '';
+    const pollThumb = () => {
+      void fetch('/api/browser/agent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verb: 'drawpending', args: {} }) })
+        .then((reply) => reply.text()).then((text) => {
+          if (!text || text === 'null') { deliveredThumbKey = ''; return; }
+          let pending: { rect?: CropRect; viewport?: { width: number; height: number } } | null = null;
+          try { pending = JSON.parse(text); } catch { return; }
+          const rect = pending?.rect;
+          if (!rect) return;
+          const key = `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)}`;
+          if (key === deliveredThumbKey) return;
+          deliveredThumbKey = key;
+          void browserViewCapture().then((png) => {
+            if (!png) return;
+            void cropRegionBase64(png, rect, pending?.viewport ?? null, { maxHeight: 88, pad: 8 }).then((cropB64) => {
+              if (!cropB64) return;
+              void fetch('/api/browser/agent', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ verb: 'drawthumb', args: { dataUri: `data:image/png;base64,${cropB64}` } }),
+              }).catch(() => {});
+            });
+          }).catch(() => {});
+        }).catch(() => {});
+    };
+
     const startPolling = () => {
       if (poll) clearInterval(poll);
+      deliveredThumbKey = '';
       poll = setInterval(() => {
         void fetch('/api/browser/agent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verb: 'drawresult', args: {} }) })
           .then((reply) => reply.text()).then((text) => {
-            if (!text || text === 'null') return;
+            if (!text || text === 'null') { pollThumb(); return; }
             let payload: Record<string, unknown> | null = null;
             try { payload = JSON.parse(text) as Record<string, unknown>; } catch { return; }
             // Esc INSIDE the native page (its keydown never reaches this
@@ -425,7 +458,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
               window.dispatchEvent(new CustomEvent('o8:design-mode-request', { detail: { action: 'close' } }));
               return;
             }
-            if (!payload?.ok) return;
+            if (!payload?.ok) { pollThumb(); return; }
             if (poll) clearInterval(poll); poll = null;
             void browserViewCapture().then((screenshotBase64) => {
               window.dispatchEvent(new CustomEvent('o8:design-draw-native', { detail: { ...payload, screenshotBase64 } }));
