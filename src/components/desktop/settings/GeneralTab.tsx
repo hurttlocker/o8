@@ -220,7 +220,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       <section style={{ marginBottom: 28 }}>
         <SettingsGroup
           header="Account"
-          footnote="Your o8 identity, plan, and founder status. Optional — o8 runs fully account-less with your own keys; signing in syncs your identity and unlocks managed tokens. License keys activate in Plan & Billing."
+          footnote="Your o8 account — identity, plan, and founder status. It never touches your code: repo access for agents and terminal git lives in Git & PRs. Optional — o8 runs fully account-less; signing in syncs your identity and unlocks managed tokens. License keys activate in Plan & Billing."
         >
           <SettingsRow
             icon={
