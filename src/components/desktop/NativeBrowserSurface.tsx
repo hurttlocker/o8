@@ -27,6 +27,7 @@ import {
   browserViewHide,
   browserViewShow,
   browserViewCapture,
+  browserViewClose,
   type BrowserViewRect,
 } from '@/lib/tauri/bridge';
 import { NATIVE_BROWSER_AGENT_SOURCE } from '@/lib/browser/native-agent-source';
@@ -392,60 +393,112 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     };
   }, [checkOcclusion]);
 
-  // Design Mode click-to-grab over the native window (Stage 4b). When Design Mode
-  // turns on while the browser is visible, ask the route to install the in-page
-  // grab handler and await the operator's click (long poll); the GrabbedElement
-  // comes back and we hand it to the dashboard's grab handler. Turning Design Mode
-  // off (or a completed grab) aborts the poll + tears the handler down.
+  // Native in-page draw mode owns pointer input while the browser stays live.
+  // The host arms it for the visible instance, polls the page-owned result sink,
+  // captures the live window at submission, then forwards the draw payload.
   useEffect(() => {
     if (!isTauri()) return;
-    let controller: AbortController | null = null;
-    const stopGrab = () => {
-      controller?.abort();
-      controller = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const stopDraw = () => {
+      if (poll) clearInterval(poll);
+      poll = null;
       void fetch('/api/browser/agent', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ verb: 'stopdesigngrab', args: {} }),
+        body: JSON.stringify({ verb: 'drawmode', args: { on: false } }),
       }).catch(() => {});
     };
+    const startPolling = () => {
+      if (poll) clearInterval(poll);
+      poll = setInterval(() => {
+        void fetch('/api/browser/agent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verb: 'drawresult', args: {} }) })
+          .then((reply) => reply.text()).then((text) => {
+            if (!text || text === 'null') return;
+            let payload: Record<string, unknown> | null = null;
+            try { payload = JSON.parse(text) as Record<string, unknown>; } catch { return; }
+            // Esc INSIDE the native page (its keydown never reaches this
+            // webview) — tear down and exit Design Mode so the brush and
+            // the in-page canvas can't desync.
+            if (payload?.escaped === true) {
+              if (poll) clearInterval(poll); poll = null;
+              stopDraw();
+              window.dispatchEvent(new CustomEvent('o8:design-mode-request', { detail: { action: 'close' } }));
+              return;
+            }
+            if (!payload?.ok) return;
+            if (poll) clearInterval(poll); poll = null;
+            void browserViewCapture().then((screenshotBase64) => {
+              window.dispatchEvent(new CustomEvent('o8:design-draw-native', { detail: { ...payload, screenshotBase64 } }));
+              stopDraw();
+            });
+          }).catch(() => {});
+      }, 350);
+    };
+
+    const armDrawMode = () => fetch('/api/browser/agent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ verb: 'drawmode', args: { on: true } }),
+    }).then((r) => r.json() as Promise<{ ok?: boolean; error?: string }>);
+
+    // True while Design Mode is armed — the recreate/arm retry loop below
+    // must stop the moment the operator toggles the mode off.
+    let designArmed = false;
+
     const onDesignMode = (event: Event) => {
       const active = (event as CustomEvent<{ active?: boolean }>).detail?.active === true;
       if (!active) {
-        stopGrab();
+        designArmed = false;
+        stopDraw();
         return;
       }
       // Design Mode on: only the VISIBLE instance arms. O8Panel mounts
       // NativeBrowserSurface TWICE (main + utility shell); a hidden instance must
-      // do NOTHING here — calling stopGrab would tear down the visible instance's
-      // design-grab on the shared native window (they drive one browser-view).
+      // do NOTHING here (they drive one shared browser-view).
       if (!visibleRef.current) return;
-      controller?.abort();
-      controller = new AbortController();
-      const ctrl = controller;
-      fetch('/api/browser/agent', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ verb: 'designgrab', args: {} }),
-        signal: ctrl.signal,
-      })
-        .then((r) => (r.ok ? r.text() : null))
-        .then((text) => {
-          if (!text || ctrl.signal.aborted) return;
-          let parsed: { ok?: boolean; element?: unknown } | null = null;
-          try { parsed = JSON.parse(text); } catch { return; }
-          if (parsed && parsed.ok && parsed.element) {
-            window.dispatchEvent(new CustomEvent('o8:design-grab-result', { detail: { grabbed: parsed.element } }));
-          }
-        })
-        .catch(() => {});
+      designArmed = true;
+      void armDrawMode().then(async (resp) => {
+        if (!designArmed) return;
+        if (resp?.ok) { startPolling(); return; }
+        if (!String(resp?.error ?? '').includes('not installed')) return;
+        // The agent source injects at WINDOW CREATION, so a window that
+        // predates the draw layer (or any code update — page CSP blocks
+        // eval-based re-injection) can never learn drawmode in place.
+        // RECREATE it. Ordering matters (live-hit 2026-07-12 ×2): window
+        // destruction is ASYNC — an immediate reopen finds the dying window
+        // still registered and takes Rust's "exists → navigate" path, which
+        // never registers the init script. Settle after close, reopen with
+        // the CURRENT source, then poll-arm until the fresh page answers.
+        const rect = computeRect();
+        if (!rect) return;
+        await browserViewClose();
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+        if (!designArmed) return;
+        lastRect.current = '';
+        await browserViewOpen(url, rect, NATIVE_BROWSER_AGENT_SOURCE);
+        let attempts = 0;
+        const tryArm = () => {
+          if (!designArmed) return;
+          void armDrawMode().then((retry) => {
+            if (!designArmed) return;
+            if (retry?.ok) { startPolling(); return; }
+            attempts += 1;
+            if (attempts < 24) window.setTimeout(tryArm, 500);
+          }).catch(() => {
+            attempts += 1;
+            if (designArmed && attempts < 24) window.setTimeout(tryArm, 500);
+          });
+        };
+        window.setTimeout(tryArm, 800);
+      }).catch(() => {});
     };
     window.addEventListener('o8:design-mode', onDesignMode);
     return () => {
+      designArmed = false;
       window.removeEventListener('o8:design-mode', onDesignMode);
-      controller?.abort();
+      if (poll) clearInterval(poll);
     };
-  }, []);
+  }, [computeRect, url]);
 
   // Dashboard-forced occlusion: the Design Mode grab result card opens over the
   // native window (an always-on-top OS window), so the dashboard signals us to

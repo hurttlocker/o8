@@ -1,14 +1,32 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { selectorFor } from '@/lib/browser/selector';
-import { buildGrabbedElement, type GrabbedElement } from '@/lib/browser/grab';
 
 interface DesignModeOverlayProps {
   active: boolean;
-  onGrab: (grabbed: GrabbedElement) => void;
   onClose: () => void;
+  /** DRAW is Design Mode (Q ruling 2026-07-12 — the click-to-grab with hard
+   *  element squares is dead): a freeform paint stroke over the page — circle
+   *  it, underline it, scribble on it — and on release a floating composer
+   *  materializes anchored to the drawing. The submitted text + region + the
+   *  SILENTLY collected elements under the stroke route here; part 2 (Q's
+   *  next reference video) adds the screenshot crop. */
+  onDrawPrompt?: (payload: DesignDrawPrompt) => void;
 }
+
+export interface DesignDrawPrompt {
+  text: string;
+  rect: ScreenRect;
+  points: Array<{ x: number; y: number }>;
+  /** Technical context under the drawing, collected silently at submit. */
+  elements: Array<{ selector: string; tag: string; text: string }>;
+}
+
+/** Movement past this many px turns a press into a draw (filters accidental
+ *  clicks — a bare click does nothing now that grab is gone). */
+const DRAW_THRESHOLD_PX = 6;
 
 interface ScreenRect {
   top: number;
@@ -64,73 +82,261 @@ function resolveTarget(clientX: number, clientY: number, overlay: HTMLDivElement
   return { el: hit, rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height } };
 }
 
-export function DesignModeOverlay({ active, onGrab, onClose }: DesignModeOverlayProps) {
+function strokeBounds(points: Array<{ x: number; y: number }>): ScreenRect {
+  let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { top: minY, left: minX, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
+
+export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
-  const targetRef = useRef<Resolved | null>(null);
-  const [hover, setHover] = useState<ScreenRect | null>(null);
-  const [grabbable, setGrabbable] = useState(false);
+  // Draw state — pointsRef accumulates at mousemove rate; `stroke` mirrors it
+  // for render. `composerAt` anchors the floating prompt to the finished
+  // drawing.
+  const pointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const downRef = useRef<{ x: number; y: number } | null>(null);
+  const drawingRef = useRef(false);
+  const [stroke, setStroke] = useState<Array<{ x: number; y: number }>>([]);
+  const [composerAt, setComposerAt] = useState<ScreenRect | null>(null);
+  const [draft, setDraft] = useState('');
+  const composerInputRef = useRef<HTMLInputElement>(null);
+  /** A gesture that CLEARED existing ink/composer suppresses the double-click
+   *  exit briefly — rapid re-draws were reading as double-clicks and dumping
+   *  the operator out of the mode (Q live-hit 2026-07-12: "it just is always
+   *  clicking [out]"). Exit needs a CLEAN double-tap. */
+  const suppressExitUntilRef = useRef(0);
+
+  // The ink is CONFINED to the browser content area (Q ruling 2026-07-12:
+  // "just in the browser") — the overlay portals into the pane marked
+  // [data-o8-draw-surface] instead of covering the window, so the rest of
+  // the app (toolbar, drawer, Design button) stays live while armed. That
+  // also makes the Design button a working off-switch for free.
+  const [surfaceEl, setSurfaceEl] = useState<HTMLElement | null>(null);
+  const surfaceRectRef = useRef<ScreenRect | null>(null);
+  const [, bumpRectVersion] = useState(0);
 
   useEffect(() => {
     if (!active) {
-      targetRef.current = null;
-      setHover(null);
+      pointsRef.current = [];
+      downRef.current = null;
+      drawingRef.current = false;
+      setStroke([]);
+      setComposerAt(null);
+      setDraft('');
+      setSurfaceEl(null);
+      surfaceRectRef.current = null;
       return;
     }
+    // Multiple browser mounts can exist (main + contextual) — pick the one
+    // actually laid out.
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>('[data-o8-draw-surface]'));
+    const el = candidates.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.width > 10 && rect.height > 10;
+    }) ?? null;
+    setSurfaceEl(el);
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      surfaceRectRef.current = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+      bumpRectVersion((n) => n + 1);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [active]);
 
-    const handleMove = (event: MouseEvent) => {
-      const resolved = resolveTarget(event.clientX, event.clientY, overlayRef.current);
-      targetRef.current = resolved;
-      setHover(resolved?.rect ?? null);
-      setGrabbable(Boolean(resolved?.el));
+  const inComposer = (target: EventTarget | null) => (
+    target instanceof Element && Boolean(target.closest('[data-design-composer]'))
+  );
+
+  // Gesture: mousedown on the overlay starts it; move/up ride WINDOW
+  // listeners for the gesture's lifetime so a stroke that leaves the pane
+  // finishes cleanly (points clamp to the surface).
+  const beginGesture = (event: React.MouseEvent) => {
+    if (inComposer(event.target)) return;
+    event.preventDefault();
+    if (pointsRef.current.length > 0 || composerAt) {
+      suppressExitUntilRef.current = Date.now() + 800;
+    }
+    setComposerAt(null);
+    setDraft('');
+    setStroke([]);
+    pointsRef.current = [];
+    drawingRef.current = false;
+    downRef.current = { x: event.clientX, y: event.clientY };
+
+    const clamp = (p: { x: number; y: number }) => {
+      const rect = surfaceRectRef.current;
+      if (!rect) return p;
+      return {
+        x: Math.min(Math.max(p.x, rect.left), rect.left + rect.width),
+        y: Math.min(Math.max(p.y, rect.top), rect.top + rect.height),
+      };
     };
 
-    const handleClick = (event: MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const resolved = targetRef.current ?? resolveTarget(event.clientX, event.clientY, overlayRef.current);
-      const target = resolved?.el;
-      if (!target) return; // cross-origin frame or empty — nothing to grab
-      try {
-        onGrab(buildGrabbedElement(target, selectorFor(target)));
-      } finally {
-        onClose();
+    const handleMove = (moveEvent: MouseEvent) => {
+      const down = downRef.current;
+      if (!down) return;
+      const point = clamp({ x: moveEvent.clientX, y: moveEvent.clientY });
+      if (!drawingRef.current) {
+        const dist = Math.hypot(point.x - down.x, point.y - down.y);
+        if (dist >= DRAW_THRESHOLD_PX) {
+          drawingRef.current = true;
+          pointsRef.current = [down, point];
+          setStroke([...pointsRef.current]);
+        }
+        return;
+      }
+      pointsRef.current.push(point);
+      setStroke([...pointsRef.current]);
+    };
+
+    const handleUp = () => {
+      window.removeEventListener('mousemove', handleMove, true);
+      window.removeEventListener('mouseup', handleUp, true);
+      const wasDrawing = drawingRef.current;
+      downRef.current = null;
+      drawingRef.current = false;
+      if (!wasDrawing) return;
+      if (onDrawPrompt && pointsRef.current.length > 1) {
+        setComposerAt(strokeBounds(pointsRef.current));
+        window.setTimeout(() => composerInputRef.current?.focus(), 30);
       }
     };
 
     window.addEventListener('mousemove', handleMove, true);
-    window.addEventListener('click', handleClick, true);
-    return () => {
-      window.removeEventListener('mousemove', handleMove, true);
-      window.removeEventListener('click', handleClick, true);
-    };
-  }, [active, onClose, onGrab]);
+    window.addEventListener('mouseup', handleUp, true);
+  };
 
-  if (!active) return null;
+  // Scrolling while armed (Q live-hit 2026-07-12: "the browser stops and I
+  // can't scroll when I draw"). Same-origin iframe pages scroll directly;
+  // the native page gets a brief reveal-scroll-refreeze cycle. Either way
+  // any existing ink clears — the page moved under it, so both the drawing
+  // and the element sampling would lie.
+  const handleWheel = (event: React.WheelEvent) => {
+    if (inComposer(event.target)) return;
+    if (pointsRef.current.length > 0 || composerAt) {
+      pointsRef.current = [];
+      setStroke([]);
+      setComposerAt(null);
+      setDraft('');
+    }
+    const iframe = surfaceEl?.querySelector<HTMLIFrameElement>('iframe[data-o8-browser]');
+    if (iframe) {
+      try {
+        iframe.contentWindow?.scrollBy(event.deltaX, event.deltaY);
+      } catch {
+        // cross-origin — nothing to scroll from here
+      }
+    }
+  };
 
-  return (
+  const submitDraw = () => {
+    const text = draft.trim();
+    if (!text || !composerAt || !onDrawPrompt) return;
+    // Silent technical context (Q ruling): sample the stroke and collect the
+    // distinct elements it passed over — the orchestrator gets what the
+    // operator circled without the operator naming it. The snapshot img over
+    // a frozen native page yields nothing here (part 2 adds the screenshot
+    // crop for that path).
+    const seen = new Set<Element>();
+    const elements: DesignDrawPrompt['elements'] = [];
+    const step = Math.max(1, Math.floor(pointsRef.current.length / 24));
+    for (let i = 0; i < pointsRef.current.length && elements.length < 4; i += step) {
+      const p = pointsRef.current[i];
+      const resolved = resolveTarget(p.x, p.y, overlayRef.current);
+      const el = resolved?.el;
+      if (!el || seen.has(el) || el === overlayRef.current) continue;
+      if (el instanceof HTMLElement && el.closest('[data-design-composer]')) continue;
+      seen.add(el);
+      const textContent = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      try {
+        elements.push({ selector: selectorFor(el), tag: el.tagName.toLowerCase(), text: textContent });
+      } catch {
+        // selector derivation failed — skip this element
+      }
+    }
+    try {
+      onDrawPrompt({ text, rect: composerAt, points: pointsRef.current, elements });
+    } finally {
+      onClose();
+    }
+  };
+
+  if (!active || !surfaceEl) return null;
+  // Native browser page: the in-page injected draw layer owns the gesture
+  // (the native window sits ABOVE this webview and stays LIVE — scroll works,
+  // ink rides the page, screenshot captures at send). This overlay only
+  // handles same-origin iframe pages.
+  if (surfaceEl.querySelector('[data-o8-native-browser]')) return null;
+
+  const surfaceRect = surfaceRectRef.current;
+  const toLocalX = (x: number) => x - (surfaceRect?.left ?? 0);
+  const toLocalY = (y: number) => y - (surfaceRect?.top ?? 0);
+
+  // Composer anchor — bottom-center of the drawing, clamped to the pane.
+  const composerWidth = Math.min(320, Math.max(200, (surfaceRect?.width ?? 320) - 16));
+  const composerLeft = composerAt && surfaceRect
+    ? Math.min(Math.max(8, toLocalX(composerAt.left) + composerAt.width / 2 - composerWidth / 2), Math.max(8, surfaceRect.width - composerWidth - 8))
+    : 0;
+  const composerTop = composerAt && surfaceRect
+    ? Math.min(toLocalY(composerAt.top) + composerAt.height + 10, surfaceRect.height - 56)
+    : 0;
+
+  return createPortal(
     <div
       ref={overlayRef}
       aria-hidden="true"
       data-design-mode-overlay="true"
+      onMouseDown={beginGesture}
+      onWheel={handleWheel}
+      onClickCapture={(event) => {
+        if (inComposer(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onDoubleClick={(event) => {
+        // Quick exit without the keyboard (Q ruling 2026-07-12): a CLEAN
+        // double-tap leaves the mode. Mid-draw can't trigger it (drawing
+        // needs movement), and a tap that just cleared ink/composer is part
+        // of the draw rhythm, not an exit.
+        if (inComposer(event.target)) return;
+        if (drawingRef.current) return;
+        if (Date.now() < suppressExitUntilRef.current) return;
+        onClose();
+      }}
       style={{
-        position: 'fixed',
+        position: 'absolute',
         top: 0,
         right: 0,
         bottom: 0,
         left: 0,
-        zIndex: 9999,
+        zIndex: 60,
         cursor: 'crosshair',
         backgroundColor: 'rgba(15, 23, 42, 0.08)',
         userSelect: 'none',
+        overflow: 'hidden',
       }}
     >
       <div
         style={{
-          position: 'fixed',
-          top: 18,
+          position: 'absolute',
+          top: 10,
           left: '50%',
           transform: 'translateX(-50%)',
-          minHeight: 44,
+          maxWidth: 'calc(100% - 24px)',
+          minHeight: 34,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -155,28 +361,110 @@ export function DesignModeOverlay({ active, onGrab, onClose }: DesignModeOverlay
           whiteSpace: 'nowrap',
         }}
       >
-        Design Mode — click any element to grab it · Esc to exit
+        Draw on the page · double-click or Esc to exit
       </div>
 
-      {hover ? (
-        <div
-          style={{
-            position: 'fixed',
-            top: hover.top,
-            left: hover.left,
-            width: hover.width,
-            height: hover.height,
-            borderWidth: 2,
-            borderStyle: 'solid',
-            borderColor: grabbable ? '#2563eb' : 'rgba(148, 163, 184, 0.8)',
-            borderRadius: 6,
-            backgroundColor: grabbable ? 'rgba(37, 99, 235, 0.08)' : 'rgba(148, 163, 184, 0.06)',
-            boxSizing: 'border-box',
-            pointerEvents: 'none',
-            transition: 'top 60ms linear, left 60ms linear, width 60ms linear, height 60ms linear',
-          }}
-        />
+      {/* The freeform ink stroke — brand-orange paint over the page. */}
+      {stroke.length > 1 ? (
+        <svg
+          width="100%"
+          height="100%"
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}
+          aria-hidden
+        >
+          <polyline
+            points={stroke.map((p) => `${toLocalX(p.x)},${toLocalY(p.y)}`).join(' ')}
+            fill="none"
+            stroke="var(--t-brand-orange, #FF5A1F)"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.9}
+          />
+        </svg>
       ) : null}
-    </div>
+
+      {/* Floating composer — materializes anchored to the finished drawing
+          (Cursor part 1). Enter or the send arrow submits; part 2 refines
+          the payload per Q's follow-up reference. */}
+      {composerAt ? (
+        <div
+          data-design-composer
+          style={{
+            position: 'absolute',
+            top: composerTop,
+            left: composerLeft,
+            width: composerWidth,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            paddingTop: 8,
+            paddingBottom: 8,
+            paddingLeft: 12,
+            paddingRight: 8,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
+            background: 'var(--t-panel-solid, var(--t-panel))',
+            boxShadow: '0 12px 32px rgba(15, 23, 42, 0.28)',
+            zIndex: 10000,
+          }}
+        >
+          <input
+            ref={composerInputRef}
+            type="text"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                submitDraw();
+              }
+              event.stopPropagation();
+            }}
+            placeholder="Describe what to change here…"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              background: 'transparent',
+              outline: 'none',
+              color: 'var(--t-text)',
+              fontSize: 12.5,
+              fontFamily: 'var(--font-sans-system)',
+            }}
+          />
+          <button
+            type="button"
+            onClick={submitDraw}
+            aria-label="Send"
+            disabled={!draft.trim()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 26,
+              height: 26,
+              border: 'none',
+              borderRadius: 8,
+              background: draft.trim() ? 'var(--t-accent)' : 'var(--t-hover)',
+              color: draft.trim() ? '#ffffff' : 'var(--t-text-faint)',
+              cursor: draft.trim() ? 'pointer' : 'default',
+              flexShrink: 0,
+              padding: 0,
+              transition: 'background 120ms ease, color 120ms ease',
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+              <path d="M12 19V5" />
+              <path d="m5 12 7-7 7 7" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
+
+    </div>,
+    surfaceEl,
   );
 }
