@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // eslint-disable-next-line no-restricted-imports
+// @ts-expect-error — plain .mjs build script, no type declarations by design
 import { collectFixedIds, defaultRange } from '../scripts/lib/fixed-reports.mjs';
 
 let repo: string;
