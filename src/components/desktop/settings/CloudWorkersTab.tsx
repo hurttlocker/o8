@@ -25,7 +25,6 @@ import {
   FieldLabel,
   HairlineRule,
   SectionLabel,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -165,7 +164,6 @@ export function CloudWorkersTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="cloud workers" />
       <TabHeading
         title="cloud workers"
         subtitle="API keys for self-hosted workers running on your own infra. Workers open outbound-only HTTPS to the o8 backend, pick up dispatched jobs, and stream transcripts back."

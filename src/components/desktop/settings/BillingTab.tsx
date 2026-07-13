@@ -31,7 +31,6 @@ import {
   BracketLabel,
   KeyIcon,
   RamsButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -222,7 +221,6 @@ export function BillingTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="billing" />
       <TabHeading
         title="plan & billing"
         subtitle="o8 is free — the whole product runs on your own CLI subscriptions, and nothing here is gated. Paid plans add managed inference, off-network mobile, and cloud agents; they're on the way."

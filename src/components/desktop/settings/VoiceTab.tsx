@@ -34,7 +34,6 @@ import {
   RAMS_INK_QUIET,
   MicIcon,
   SettingsSegmented,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -247,7 +246,6 @@ export function VoiceTab() {
         fontFamily: APP_FONT_STACK,
       }}
     >
-      <TabBreadcrumb tab="voice" />
       <TabHeading
         title="voice"
         subtitle="Hold the Fn key in any app to dictate — o8 transcribes, polishes, and pastes the text at the caret. These permissions and toggles control the system-wide voice path."

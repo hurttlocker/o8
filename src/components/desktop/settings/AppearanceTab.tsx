@@ -18,7 +18,6 @@ import {
   ActivityIcon,
   LayersIcon,
   SettingsSegmented,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -238,7 +237,6 @@ export function AppearanceTab() {
         fontFamily: APP_FONT_STACK,
       }}
     >
-      <TabBreadcrumb tab="appearance" />
       <TabHeading
         title="appearance"
         subtitle="Theme controls how o8 looks. Accent colors and status indicators stay consistent across themes."

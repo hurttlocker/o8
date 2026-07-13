@@ -22,7 +22,6 @@
 import { useState } from 'react';
 import {
   RamsButton,
-  TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -85,7 +84,6 @@ export function ProjectsPanel() {
         gap: 24,
       }}>
         <div style={{ minWidth: 0 }}>
-          <TabBreadcrumb tab="projects" />
           <TabHeading
             title="projects"
             subtitle="A project is the shared context for a product: multiple repositories, standing instructions, and attached files."

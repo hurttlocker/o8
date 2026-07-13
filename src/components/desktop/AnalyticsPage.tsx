@@ -27,7 +27,6 @@ import {
   BracketLabel,
   HairlineRule,
   SectionLabel,
-  TabBreadcrumb,
   TabHeading,
 } from './settings/shared';
 import { AnalyticsMoatSections, type AutonomyMetrics, type GovernanceMetrics } from './analytics/AnalyticsMoatSections';
@@ -732,7 +731,6 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
     >
       <div style={{ maxWidth: embedded ? 980 : 940, marginLeft: 'auto', marginRight: 'auto' }}>
         {/* Breadcrumb + heading */}
-        <TabBreadcrumb scope={embedded ? 'settings' : 'dashboard'} tab="analytics" />
         <div style={{
           display: 'flex',
           alignItems: 'flex-start',
