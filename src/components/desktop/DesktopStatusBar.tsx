@@ -3,37 +3,20 @@
 /**
  * DesktopStatusBar — compact chrome strip pinned to the bottom of the dashboard.
  *
- * Mirrors the compact TitleBar controls at the top but lives at the foot of
- * the flex column.
- *
- *   [⚙] [🟢 N]  [+]                                  [⎇ branch-name]
- *     settings ports addRepo                         current branch
- *
- * Content migrated here from the retired NavRail (settings, ports, alerts
- * all used to live on the left side column). Every button uses the
- * shared ChromeButton so the style matches TitleBar + future WorkspaceTerminal
- * tabs.
+ * Holds workspace-centered merge and branch state plus right-edge utilities.
+ * Sidebar account and utility controls live in AgentPanel.
  */
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { SmoothCorners } from '@lisse/react';
-import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { MergeBeacon } from './merge-beacon/MergeBeacon';
 import type { ParkedLane } from './merge-beacon/derive';
-import { FooterPorts } from './desktop-status-bar/footer-ports';
-import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
-import { CanvasModeIcon, DeviceMobileIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
-import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
-import { SettingsQuickDrawer } from './SettingsQuickDrawer';
 import { ViewAsFreeIndicator } from './ViewAsFreeIndicator';
 import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
-
-const COLLAPSED_LEFT_FOOTER_WIDTH = 34;
 
 interface DesktopStatusBarProps {
   branchName: string | null;
@@ -47,21 +30,11 @@ interface DesktopStatusBarProps {
   rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
-  /** Glass surface active. In glass mode the left footer drops its paper card
-   *  (transparent bg, no shadow/border/rounding) so the panel above floats as
-   *  a self-contained Lisse card — the icons sit directly on the vibrancy. */
-  glassSurface?: boolean;
   /** Lanes parked in the review gate — drives the merge beacon split between
    *  needs-review and approved-awaiting-merge. */
   parkedLanes?: ParkedLane[];
   onOpenReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
-  onOpenSettings: () => void;
-  /** Retained for API compatibility — add-repo now lives on the Projects row in AgentPanel. */
-  onAddRepo?: () => void;
-  /** Open the full-screen mobile-pairing QR view (a canvas tab). */
-  onOpenMobilePairing: () => void;
-  onPortPreview?: (port: number, url: string, repo?: string) => void;
   /** Contextual bottom-panel (terminal) toggle. Moved from the column
    *  header per operator request — sits in the status bar's center
    *  column next to the branch label. */
@@ -83,65 +56,11 @@ function DesktopStatusBarBase({
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
-  glassSurface = false,
   parkedLanes = [],
   onOpenReviewLane,
   onOpenAwaitingMerge,
-  onOpenSettings,
-  onAddRepo,
-  onOpenMobilePairing,
-  onPortPreview,
 }: DesktopStatusBarProps) {
   const { founder, overrideActive } = useEntitlement();
-  const settingsButtonRef = useRef<HTMLDivElement | null>(null);
-  const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
-  const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
-  const experimentalCanvas = useExperimentalCanvasFlag();
-  const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
-  // Width tier for the left footer cluster (Q's clipped-corner screenshot,
-  // 2026-07-10): the row is centered with overflow:visible, so once content
-  // exceeds the sidebar width it bleeds off BOTH rounded corners. Shed the
-  // mid-priority buttons instead of clipping — Settings and the ports/inbox
-  // cluster (the live signal) always stay.
-  const showFooterSecondary = compact || (leftColumnWidth ?? 0) >= 220; // Pair mobile + Canvas
-  // Drop the footer's paper card when collapsed OR in glass mode — glass wants
-  // the panel above to float as its own Lisse card with the icons on vibrancy.
-  // Icon spacing (gap/padding) still keys off leftFooterCollapsed so the glass
-  // footer keeps its centered cluster.
-  const footerCardHidden = leftFooterCollapsed || glassSurface;
-  const leftFooterWidth = compact
-    ? 'auto'
-    : leftFooterCollapsed
-      ? COLLAPSED_LEFT_FOOTER_WIDTH
-      : leftColumnWidth;
-
-  const syncSettingsAnchor = useCallback(() => {
-    setSettingsAnchorRect(settingsButtonRef.current?.getBoundingClientRect() ?? null);
-  }, []);
-
-  const toggleSettingsDrawer = useCallback(() => {
-    syncSettingsAnchor();
-    setSettingsDrawerOpen((open) => !open);
-  }, [syncSettingsAnchor]);
-
-  const closeSettingsDrawer = useCallback(() => {
-    setSettingsDrawerOpen(false);
-  }, []);
-
-  const openFullSettings = useCallback(() => {
-    setSettingsDrawerOpen(false);
-    onOpenSettings();
-  }, [onOpenSettings]);
-
-  useEffect(() => {
-    if (!settingsDrawerOpen) return;
-    window.addEventListener('resize', syncSettingsAnchor);
-    window.addEventListener('scroll', syncSettingsAnchor, true);
-    return () => {
-      window.removeEventListener('resize', syncSettingsAnchor);
-      window.removeEventListener('scroll', syncSettingsAnchor, true);
-    };
-  }, [settingsDrawerOpen, syncSettingsAnchor]);
 
   // Center the branch cluster on the composer's REAL measured position. The
   // column-width props ignored insets/gaps + a hidden right region and drifted
@@ -195,9 +114,7 @@ function DesktopStatusBarBase({
       data-chrome-surface="true"
       data-stationary-chrome="true"
       style={{
-        // Bumped from 28 → 36 so the footer card (= 36 - 5 = 31 tall) fits
-        // the 28px tall FooterPorts + SupervisorInboxBadge cleanly without
-        // them spilling out of the card's rounded bottom.
+        // Preserve the established bottom-chrome height for center and right utilities.
         height: 36,
         flexShrink: 0,
         display: 'flex',
@@ -213,166 +130,9 @@ function DesktopStatusBarBase({
         position: 'relative',
       }}
     >
-      {/* Left footer — bottom half of the SAME visual card as the panel
-          above. Flat top corners (meet the panel card flush), rounded
-          bottom corners. A thin top border draws the divider between
-          panel content and footer buttons. */}
-      {/* Continuous shadow for the merged sidebar-panel + footer card.
-          The two halves live in different subtrees (column vs status bar),
-          so neither can cast the union's shadow itself — a shadow on each
-          half visibly breaks at the seam because the 31px footer never
-          develops the 700px panel's lateral penumbra. This fixed-position
-          box spans the whole merged card (top 5 = panel top, bottom 5 =
-          footer bottom, both viewport-anchored) and casts the ONE shadow;
-          both halves paint shadowless on top. Interior is transparent —
-          box-shadow paints outside the box regardless of background. */}
-      {!compact && !footerCardHidden && typeof leftFooterWidth === 'number' && leftFooterWidth > 0 ? (
-        <div
-          aria-hidden
-          data-o8-left-card-shadow=""
-          style={{
-            position: 'fixed',
-            top: 5,
-            bottom: 5,
-            left: 5,
-            width: leftFooterWidth - 10,
-            borderRadius: 14,
-            boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
-            pointerEvents: 'none',
-            zIndex: -1,
-          }}
-        />
-      ) : null}
-      <div
-        // Tagged so the dashboard's left-drag handler can width-sync this
-        // card per-frame via direct DOM (drags bypass React — see
-        // startLeftDrag in dashboard/page.tsx).
-        data-o8-left-footer=""
-        style={{
-          width: leftFooterWidth,
-          flexShrink: 0,
-          display: 'flex',
-          // Buffer mirrors the panel card's: 5px on left/right/bottom,
-          // 0 on top so this card meets the panel card with no gap.
-          paddingTop: 0,
-          paddingRight: 5,
-          paddingBottom: 5,
-          paddingLeft: 5,
-          overflow: 'visible',
-        }}
-      >
-        <SmoothCorners
-          // Squircle bottom corners — the same Lisse "list corners" the
-          // workspace uses — with a flat top so this still merges with the
-          // panel card above into one card. Collapsed → radius 0 (no card).
-          corners={{
-            topLeft: 0,
-            topRight: 0,
-            bottomLeft: { radius: footerCardHidden ? 0 : 14, smoothing: 0.6 },
-            bottomRight: { radius: footerCardHidden ? 0 : 14, smoothing: 0.6 },
-          }}
-          autoEffects={false}
-          // Inner card — flat top (merges with panel above), rounded bottom.
-          // Centered cluster — buttons sit in the middle of the footer, not
-          // crammed left like a traditional status bar.
-          //
-          // When the sidebar column is collapsed (leftFooterCollapsed=true)
-          // we drop the solid paper card entirely — just the gear icon
-          // floats in transparent space. The merged-card design only makes
-          // sense when there's a panel above to merge with. 2026-05-27.
-          //
-          // Token overrides flatten any chrome-btn-styled descendants (the
-          // SupervisorInboxBadge especially renders a solid white pill with
-          // shadow in its inactive state — those tokens are appropriate over
-          // vibrancy chrome but look like a floating tile on the solid card).
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: leftFooterCollapsed ? 0 : 6,
-            paddingLeft: leftFooterCollapsed ? 0 : 10,
-            paddingRight: leftFooterCollapsed ? 0 : 10,
-            background: footerCardHidden ? 'transparent' : 'var(--t-panel-solid)',
-            // Corner rounding now lives on the SmoothCorners `corners` prop
-            // above (squircle bottom / flat top) — a plain borderRadius here
-            // would be a circle, not the "list corners" squircle.
-            borderTop: footerCardHidden ? 'none' : '0.5px solid var(--t-divider-subtle)',
-            // No own shadow — the merged panel+footer card's continuous
-            // shadow comes from the data-o8-left-card-shadow caster below.
-            // A shadow on this 31px box alone reads as a broken seam where
-            // the panel's shadow stops (Q report 2026-07-11).
-            boxShadow: 'none',
-            ['--t-chrome-btn-bg' as string]: 'transparent',
-            ['--t-chrome-btn-shadow' as string]: 'none',
-            ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
-            ['--t-chrome-btn-hover-shadow' as string]: 'none',
-          }}
-        >
-          <div ref={settingsButtonRef} style={{ display: 'flex', alignItems: 'center' }}>
-            <ChromeButton
-              icon={<GearSixIcon size={14} color="var(--t-text)" />}
-              label="Settings"
-              active={settingsDrawerOpen}
-              onClick={toggleSettingsDrawer}
-              size={22}
-              radius={6}
-            />
-          </div>
-          <SettingsQuickDrawer
-            open={settingsDrawerOpen}
-            anchorRect={settingsAnchorRect}
-            onClose={closeSettingsDrawer}
-            onOpenSettings={openFullSettings}
-          />
-          {!compact && !leftFooterCollapsed ? (
-            <>
-              {showFooterSecondary ? (
-                <ChromeButton
-                  icon={<DeviceMobileIcon size={14} />}
-                  label="Pair mobile device"
-                  onClick={onOpenMobilePairing}
-                  size={22}
-                  radius={6}
-                />
-              ) : null}
-              {/* Add-repo moved to the Projects row in AgentPanel
-                  (Q ruling 2026-07-11) — contextual beats chrome. */}
-              {experimentalCanvas && showFooterSecondary ? (
-                <ChromeButton
-                  icon={<CanvasModeIcon size={14} color="var(--t-text)" />}
-                  label="Canvas mode"
-                  onClick={() => { window.location.assign('/preview/canvas-glass'); }}
-                  size={22}
-                  radius={6}
-                />
-              ) : null}
-              {/* Ports count + supervisor inbox merged as one cluster — both pills
-                  share dims (26h / 7r / 11/300 chrome label) and the wrapper has
-                  flexShrink:0 + gap:4 so they stay locked together when the panel
-                  width changes. Per operator note 2026-05-27. */}
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  flexShrink: 0,
-                }}
-              >
-                <FooterPorts onPortPreview={onPortPreview} />
-                <SupervisorInboxBadge />
-              </div>
-            </>
-          ) : null}
-        </SmoothCorners>
-      </div>
-
       {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
           The branch/merge cluster itself is lifted into the absolute overlay
-          below so it centers on the TRUE workspace surface, not on this
-          leftover flex gap (which the collapsed-left gear's 34px floor would
-          otherwise shove ~17px off-center). */}
+          below so it centers on the true workspace surface. */}
       <div style={{ flex: 1, minWidth: 0 }} />
 
       {/* Center cluster — absolutely centered on the true workspace surface
@@ -381,8 +141,7 @@ function DesktopStatusBarBase({
           composer and its chips in EVERY panel state, instead of drifting with
           the chrome-button section widths (operator: "they look cheap when they
           don't line up", 2026-06-15). pointerEvents:none lets clicks fall
-          through the empty span to the floating gear beneath; the cluster
-          re-enables them. */}
+          through the empty span; the cluster re-enables them. */}
       <div
         style={{
           position: 'absolute',

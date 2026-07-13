@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { ConnectionPill } from './ConnectionPill';
 import { UpdateCard } from './UpdateCard';
+import { AccountBlock } from './account-block/AccountBlock';
 import { FixedReportCard } from './FixedReportCard';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
@@ -87,6 +88,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     ideWorkspaceSessions,
     onOpenCommandPalette,
     onOpenProjectManagement,
+    onOpenSettings,
+    onOpenMobilePairing,
+    onPortPreview,
     leftPanelFocus: liftedLeftPanelFocus,
   } = props;
 
@@ -286,6 +290,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         <ConnectionPill />
         <FixedReportCard />
         <UpdateCard />
+        <AccountBlock
+          onOpenSettings={onOpenSettings}
+          onOpenMobilePairing={onOpenMobilePairing}
+          onPortPreview={onPortPreview}
+        />
         {addRepoDialog}
       </div>
     );
@@ -485,7 +494,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       </div>
       <ConnectionPill />
       <FixedReportCard />
-        <UpdateCard />
+      <UpdateCard />
+      <AccountBlock
+        onOpenSettings={onOpenSettings}
+        onOpenMobilePairing={onOpenMobilePairing}
+        onPortPreview={onPortPreview}
+      />
       {addRepoDialog}
     </div>
   );
