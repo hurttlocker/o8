@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
+import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-digest';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -228,7 +229,7 @@ function field(name: string, value: string) {
   };
 }
 
-function buildEmbed(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics) {
+function buildEmbed(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, crashes: CrashDigest) {
   const fields = [
     field('Version', diagnostics.version),
     field('OS', diagnostics.osLabel),
@@ -236,6 +237,11 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
     field('Route', diagnostics.route),
     ...(diagnostics.projectLabel ? [field('Project', diagnostics.projectLabel)] : []),
     field('Timestamp', diagnostics.timestamp),
+    // Full-width: the summary carries a stack-trace head that reads badly in a
+    // narrow inline column, and the traces themselves ride as crashes.txt.
+    ...(crashes.count > 0
+      ? [{ name: 'Crashes', value: truncate(crashes.summary, DISCORD_FIELD_VALUE_LIMIT), inline: false }]
+      : []),
   ];
 
   const footer = { text: 'o8 beta · one-way intake' };
@@ -253,10 +259,10 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
   };
 }
 
-async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[]): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest): Promise<{ ok: true } | { ok: false; error: string }> {
   const webhookUrl = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim() || DEFAULT_WEBHOOK_URL;
   const embed = {
-    ...buildEmbed(category, message, diagnostics),
+    ...buildEmbed(category, message, diagnostics, crashes),
     // Render the first screenshot inline in the embed; the rest ride along as
     // additional attachments. The attachment:// URL must match a file below.
     ...(images[0] ? { image: { url: `attachment://${images[0].filename}` } } : {}),
@@ -266,15 +272,26 @@ async function postDiscordReport(category: FeedbackCategory, message: string, di
     embeds: [embed],
   };
 
+  // Stack traces blow past Discord's 1024-char field cap, so the traces that
+  // preceded this report ride as a file rather than inline. Image filenames are
+  // caller-supplied, so step around one that already claims our name.
+  const taken = new Set(images.map((img) => img.filename));
+  let crashName = 'crashes.txt';
+  for (let i = 1; taken.has(crashName); i += 1) crashName = `crashes-${i}.txt`;
+  const crashFile = crashes.text
+    ? { bytes: Buffer.from(crashes.text, 'utf8'), mime: 'text/plain', filename: crashName }
+    : null;
+
   try {
     let response: Response;
-    if (images.length > 0) {
+    const files: ParsedImage[] = crashFile ? [...images, crashFile] : images;
+    if (files.length > 0) {
       // Discord renders uploaded images via multipart/form-data: a `payload_json`
-      // part (the embed) + one `files[n]` part per image.
+      // part (the embed) + one `files[n]` part per attachment.
       const form = new FormData();
       form.append('payload_json', JSON.stringify(payload));
-      images.forEach((img, i) => {
-        form.append(`files[${i}]`, new Blob([img.bytes], { type: img.mime }), img.filename);
+      files.forEach((file, i) => {
+        form.append(`files[${i}]`, new Blob([file.bytes], { type: file.mime }), file.filename);
       });
       response = await fetch(webhookUrl, { method: 'POST', body: form });
     } else {
@@ -314,7 +331,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const diagnostics = await buildDiagnostics(validated.route, validated.userAgent);
-    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images);
+    // Join the human's report to the machine's crashes — Sentry gets these too,
+    // but only in packaged builds, and only the team ever sees them there.
+    const crashes = collectCrashDigest();
+    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes);
     if (!posted.ok) return jsonError(posted.error, 502);
     return NextResponse.json({ ok: true });
   } catch (error) {
