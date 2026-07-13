@@ -35,6 +35,17 @@ export function AccountBlock({
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [anchorElement, setAnchorElement] = useState<HTMLElement | null>(null);
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  // Clerk can fail to finish loading (offline boot, dev-bridge localhost
+  // origin) — after a grace window, stop waiting and show the signed-out row
+  // so the account block is never a permanently blank strip. signIn() still
+  // works: the native flow opens the system browser regardless.
+  const [authLoadTimedOut, setAuthLoadTimedOut] = useState(false);
+  useEffect(() => {
+    if (isLoaded) return undefined;
+    const timer = setTimeout(() => setAuthLoadTimedOut(true), 4000);
+    return () => clearTimeout(timer);
+  }, [isLoaded]);
+  const showAccountRow = isLoaded || authLoadTimedOut;
 
   const hasUser = signedIn && Boolean(user);
   const displayName = user?.name?.trim() || user?.email?.trim() || 'Account';
@@ -134,7 +145,7 @@ export function AccountBlock({
           boxSizing: 'border-box',
         }}
       >
-        {isLoaded ? (
+        {showAccountRow ? (
           <>
             <button
               type="button"
