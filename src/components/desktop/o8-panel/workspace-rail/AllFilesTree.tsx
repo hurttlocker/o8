@@ -110,12 +110,14 @@ function TreeNode({
           border: 'none',
           borderRadius: 0,
           background: selected ? 'var(--t-input-bg)' : 'transparent',
-          color: isDir ? 'var(--t-text)' : extensionColor(node.name),
+          // Cursor look (Q 2026-07-12): names read in the UI sans at rest —
+          // the extension color lives on the ICON only, not the whole row.
+          color: 'var(--t-text)',
           cursor: 'pointer',
-          fontFamily: MONO_FONT,
-          fontSize: 11,
-          fontWeight: isDir ? 650 : 450,
-          letterSpacing: 0,
+          fontFamily: UI_FONT,
+          fontSize: 12.5,
+          fontWeight: isDir ? 460 : 380,
+          letterSpacing: '-0.1px',
           paddingTop: 0,
           paddingRight: 8,
           paddingBottom: 0,
@@ -134,7 +136,9 @@ function TreeNode({
         ) : (
           <>
             <span style={{ width: 10, flexShrink: 0 }} />
-            <FileIcon size={13} />
+            <span style={{ display: 'inline-flex', color: extensionColor(node.name) }}>
+              <FileIcon size={13} />
+            </span>
           </>
         )}
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
