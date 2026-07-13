@@ -19,7 +19,7 @@
  * (`src/lib/projects/store.ts` + `/api/projects/*`).
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   RamsButton,
   TabHeading,
@@ -40,6 +40,7 @@ import {
 import { OrgSuggestionStrip } from './projects/OrgSuggestionStrip';
 import { ProjectCard } from './projects/ProjectCard';
 import { ProjectForm, emptyFormState, formStateFromProject } from './projects/ProjectForm';
+import { UnassignedReposGroup } from './projects/ProjectRepoRows';
 import { useProjectsData } from './projects/useProjectsData';
 
 export function ProjectsPanel() {
@@ -57,6 +58,9 @@ export function ProjectsPanel() {
     submitCreate,
     submitEdit,
     handleDelete,
+    handleSetMainRepo,
+    handleRemoveRepo,
+    handleAddRepo,
     handleArchiveLock,
     handleDismissSuggestion,
     handleGroupSuggestion,
@@ -67,6 +71,13 @@ export function ProjectsPanel() {
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
 
   const isAnythingOpen = creating || editingProjectId !== null;
+
+  // Repos connected but not in any project — their home is the quiet group at
+  // the bottom now that the repo list left the Connectors surface.
+  const unassignedRepos = useMemo(() => {
+    const assigned = new Set(projects.flatMap((project) => project.repos.map((link) => link.repoId)));
+    return repos.filter((repo) => !assigned.has(repo.id));
+  }, [projects, repos]);
 
   return (
     <div style={{
@@ -204,13 +215,21 @@ export function ProjectsPanel() {
                     || lock.runtimeProjectId === project.id
                     || lock.projectName.toLowerCase() === project.name.toLowerCase()
                   ));
+                  const availableRepos = repos.filter((repo) => (
+                    !project.repos.some((link) => link.repoId === repo.id)
+                  ));
                   return (
                     <ProjectCard
                       key={project.id}
                       project={project}
                       reposById={reposById}
+                      availableRepos={availableRepos}
+                      repoBusyKey={busyKey}
                       locks={locksForProject}
                       onArchiveLock={(laneId) => { void handleArchiveLock(laneId); }}
+                      onSetMainRepo={(repoId) => { void handleSetMainRepo(project.id, repoId); }}
+                      onRemoveRepo={(repoId) => { void handleRemoveRepo(project.id, repoId); }}
+                      onAddRepo={(repoId) => { void handleAddRepo(project.id, repoId); }}
                       onEdit={() => {
                         setCreating(false);
                         setEditingProjectId(project.id);
@@ -242,6 +261,15 @@ export function ProjectsPanel() {
           </>
         )}
       </section>
+
+      {!loading ? (
+        <UnassignedReposGroup
+          repos={unassignedRepos}
+          projects={projects}
+          busyKey={busyKey}
+          onAddRepoToProject={(projectId, repoId) => { void handleAddRepo(projectId, repoId); }}
+        />
+      ) : null}
     </div>
   );
 }

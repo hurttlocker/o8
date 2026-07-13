@@ -43,6 +43,9 @@ export interface ProjectsDataState {
   submitCreate: (state: FormState, suggestionOrigin?: SuggestionOrigin) => Promise<void>;
   submitEdit: (projectId: string, before: ProjectWithRepos, state: FormState) => Promise<void>;
   handleDelete: (projectId: string) => Promise<void>;
+  handleSetMainRepo: (projectId: string, repoId: string) => Promise<void>;
+  handleRemoveRepo: (projectId: string, repoId: string) => Promise<void>;
+  handleAddRepo: (projectId: string, repoId: string, role?: ProjectRole | null) => Promise<void>;
   handleArchiveLock: (laneId: string) => Promise<void>;
   handleDismissSuggestion: (suggestion: OrgSuggestion) => Promise<void>;
   handleGroupSuggestion: (suggestion: OrgSuggestion) => Promise<void>;
@@ -261,6 +264,61 @@ export function useProjectsData(): ProjectsDataState {
     }
   }, [refresh]);
 
+  const handleSetMainRepo = useCallback(async (projectId: string, repoId: string) => {
+    setBusyKey(`repo-main:${projectId}:${repoId}`);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mainRepoId: repoId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to set main repo.');
+      await refresh();
+      broadcastProjectsUpdated();
+    } catch (err) {
+      setTopError(err instanceof Error ? err.message : 'Failed to set main repo.');
+    } finally {
+      setBusyKey(null);
+    }
+  }, [refresh]);
+
+  const handleRemoveRepo = useCallback(async (projectId: string, repoId: string) => {
+    setBusyKey(`repo-remove:${projectId}:${repoId}`);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/repos/${repoId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? 'Failed to remove repo.');
+      }
+      await refresh();
+      broadcastProjectsUpdated();
+    } catch (err) {
+      setTopError(err instanceof Error ? err.message : 'Failed to remove repo.');
+    } finally {
+      setBusyKey(null);
+    }
+  }, [refresh]);
+
+  const handleAddRepo = useCallback(async (projectId: string, repoId: string, role: ProjectRole | null = null) => {
+    setBusyKey(`repo-add:${projectId}:${repoId}`);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/repos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoId, role }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to add repo.');
+      await refresh();
+      broadcastProjectsUpdated();
+    } catch (err) {
+      setTopError(err instanceof Error ? err.message : 'Failed to add repo.');
+    } finally {
+      setBusyKey(null);
+    }
+  }, [refresh]);
+
   const handleArchiveLock = useCallback(async (laneId: string) => {
     setBusyKey(`archive-lock:${laneId}`);
     try {
@@ -341,6 +399,9 @@ export function useProjectsData(): ProjectsDataState {
     submitCreate,
     submitEdit,
     handleDelete,
+    handleSetMainRepo,
+    handleRemoveRepo,
+    handleAddRepo,
     handleArchiveLock,
     handleDismissSuggestion,
     handleGroupSuggestion,
