@@ -5313,6 +5313,17 @@ function DashboardInner() {
                   borderTopRightRadius: 14,
                   borderBottomLeftRadius: 14,
                   borderBottomRightRadius: 14,
+                  // Shadow + border live on this outer rounded rect, not the
+                  // squircle: clip-path clips box-shadows, and Lisse's traced
+                  // shadow (autoEffects) inserts an unconstrained wrapper div
+                  // that breaks the flex height chain — the list then paints
+                  // past the window bottom instead of scrolling internally.
+                  // The rounded-rect silhouette is invisible under the 48px
+                  // blur, and the 1px border tracks the squircle to sub-pixel.
+                  boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
+                  border: isGlassSurface
+                    ? '1px solid rgba(255, 255, 255, 0.08)'
+                    : '1px solid var(--t-divider-subtle)',
                   zIndex: 200,
                   fontFamily: 'var(--font-sans-system)',
                   // Ink vars live on the positioned container so they cascade
@@ -5332,13 +5343,14 @@ function DashboardInner() {
                 {/* Lisse squircle edges so the hover preview's corners overlay
                     the SAME curve as the open AgentPanel / center workspace —
                     not a plain rounded rect (operator OCD fix). autoEffects
-                    traces the border + drop shadow to the squircle;
-                    shadowStrategy="box-shadow" keeps the soft shadow
-                    WebKit-safe (its rounded-rect silhouette is invisible under
-                    the 48px blur). backdrop-filter is clipped to the squircle. */}
+                    OFF, exactly like the expanded rail's card (line ~4838):
+                    pure clip-path with no wrapper div, so the style's flex
+                    constraints land on the real flex child and the AgentPanel
+                    list scrolls internally when the window is short.
+                    backdrop-filter is clipped to the squircle. */}
                 <SmoothCorners
                   corners={{ radius: 14, smoothing: 0.6 }}
-                  shadowStrategy="box-shadow"
+                  autoEffects={false}
                   style={{
                     flex: 1,
                     minHeight: 0,
@@ -5348,10 +5360,6 @@ function DashboardInner() {
                     background: isGlassSurface ? 'rgba(20, 24, 32, 0.78)' : 'var(--t-panel-solid)',
                     backdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
                     WebkitBackdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
-                    boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
-                    border: isGlassSurface
-                      ? '1px solid rgba(255, 255, 255, 0.08)'
-                      : '1px solid var(--t-divider-subtle)',
                   } as React.CSSProperties}
                 >
                   {agentPanelElement}
