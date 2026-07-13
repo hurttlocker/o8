@@ -18,6 +18,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { usePrLinkDestinationFlag } from '@/lib/operator/use-pr-link-destination';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import {
   ACTIVITY_COLORS,
@@ -115,6 +116,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [selectedPr, setSelectedPr] = useState<{ number: number; repo: string | null } | null>(() => (
     selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null
   ));
+  const prLinkDestination = usePrLinkDestinationFlag();
 
   useEffect(() => {
     setSelectedPr(selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null);
@@ -439,7 +441,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     if (item.kind === 'commit') {
       onSelectCommit?.(item.hash, item.repo ? { repo: item.repo } : undefined);
     } else if (item.kind === 'pr') {
-      setSelectedPr({ number: item.number, repo: item.repo ?? null });
+      if (prLinkDestination === 'browser' && item.repo) {
+        openExternalUrl(`https://github.com/${item.repo}/pull/${item.number}`);
+      } else {
+        setSelectedPr({ number: item.number, repo: item.repo ?? null });
+      }
     } else if (item.kind === 'issue') {
       if (onSelectIssue) {
         onSelectIssue(item.number, item.repo);
@@ -449,7 +455,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     } else if (item.kind === 'ci') {
       openExternalUrl(`https://github.com/${item.repo}/actions/runs/${item.id}`);
     }
-  }, [onSelectCommit, onSelectIssue]);
+  }, [onSelectCommit, onSelectIssue, prLinkDestination]);
 
   if (selectedPr) {
     return (

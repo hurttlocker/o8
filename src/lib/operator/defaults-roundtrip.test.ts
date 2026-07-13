@@ -47,6 +47,9 @@ const NON_DEFAULT_UPDATE = {
   telemetryOptIn: true,
   telemetryIngestUrl: 'https://telemetry.example/ingest',
   crashReportsEnabled: false,
+  branchPrefix: 'wip',
+  commitAttributionEnabled: true,
+  prLinkDestination: 'browser',
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {

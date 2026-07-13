@@ -8,6 +8,7 @@ import type {
   ApprovalRisk,
   MergeStrategy,
 } from '@/lib/approvals/types';
+import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -98,7 +99,7 @@ async function commitDirtyWorktree(worktreePath: string, commitMessage: string):
   await git(worktreePath, ['add', '-A']);
   const { stdout: porcelain } = await git(worktreePath, ['status', '--porcelain'], { timeout: 5000 });
   if (porcelain.trim()) {
-    await git(worktreePath, ['commit', '-m', commitMessage]);
+    await git(worktreePath, ['commit', '-m', resolveAttributedCommitMessage(commitMessage)]);
   }
 }
 

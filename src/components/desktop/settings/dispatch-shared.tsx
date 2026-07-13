@@ -31,6 +31,7 @@ export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw
 export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
 export type AutoApplyUpdates = 'off' | 'when-idle';
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
+export type PrLinkDestination = 'in-app' | 'browser';
 
 export interface TargetingTierUI {
   runtime: DispatchRuntime;
@@ -75,6 +76,9 @@ export interface OperatorDefaults {
   telemetryOptIn: boolean;
   telemetryIngestUrl: string;
   crashReportsEnabled: boolean;
+  branchPrefix: string;
+  commitAttributionEnabled: boolean;
+  prLinkDestination: PrLinkDestination;
 }
 
 export interface OperatorDefaultsResponse {
