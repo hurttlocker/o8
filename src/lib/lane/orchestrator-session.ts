@@ -23,7 +23,6 @@
  * [[session_may14_sdk_pricing_pivot]] memories for the why.
  */
 
-import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -40,14 +39,16 @@ import {
   processStreamEvent,
   type OrchestratorEvent,
 } from '@/lib/lane/orchestrator-stream-events';
-import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { MODEL_IDS } from '@/lib/models';
-import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
+import { fableEnvOverride } from '@/lib/lane/fable-profile';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
+import { fingerprintMcpConfig, firstMcpConfigDivergence } from '@/lib/lane/orchestrator-mcp-fingerprint';
+import { buildOrchestratorArgs } from '@/lib/lane/orchestrator-spawn-args';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import {
@@ -392,17 +393,16 @@ export async function rehydrateOrchestratorSessions(options: OrchestratorRehydra
  * that carries dispatch (the #1075 lockout would otherwise race). `'fable'`
  * likewise gets its own `-fable` file (keeps operator + cortex, strips externals)
  * so a concurrent full turn for the same repo can't clobber its surface either. */
-function ensureMcpConfig(repoPath: string, profile: ToolProfile = 'full'): string {
+type ClaudeMcpConfig = ReturnType<typeof toClaudeJson>;
+
+function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: ClaudeMcpConfig): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
   const suffix = profile === 'propose' ? '-propose' : profile === 'fable' ? '-fable' : '';
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}${suffix}.json`);
-  // Tool-Spine: the Claude orchestrator surface projection. toClaudeJson emits
-  // the full `{ mcpServers }` envelope; the stringify (2-space, no trailing
-  // newline) is unchanged, so the written file is byte-identical to the legacy
-  // `{ mcpServers: getMcpServersConfig(repoPath) }` form (Step B).
-  const config = toClaudeJson(buildToolRegistry(repoPath, { profile }));
-
+  // The caller fingerprints this exact object. Keeping construction out of the
+  // writer prevents transient resolver state from making the stored hash differ
+  // from the config the CLI actually reads.
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`[orchestrator-session] MCP config written to ${configPath}`);
   return configPath;
@@ -575,7 +575,9 @@ interface OrchestratorProcConfig {
   permissionMode: OrchestratorPermissionMode;
   toolProfile: ToolProfile;
   effort: ThinkingEffort;
+  mcpConfigPath: string;
   mcpConfigHash: string;
+  mcpConfigMaterial: string;
 }
 
 interface OrchestratorActiveTurn {
@@ -619,19 +621,21 @@ export function getWarmState(sessionName: string): WarmState {
   return w;
 }
 
-/** Hash the MCP-config content a proc would bake — recycle the proc on change. */
-function mcpConfigContentHash(repoPath: string, toolProfile: ToolProfile): string {
-  try {
-    const json = JSON.stringify(toClaudeJson(buildToolRegistry(repoPath, { profile: toolProfile })));
-    return createHash('sha256').update(json).digest('hex').slice(0, 16);
-  } catch {
-    return 'unknown';
-  }
-}
-
 function procConfigMatches(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): boolean {
   return !!a && a.cwd === b.cwd && a.model === b.model && a.permissionMode === b.permissionMode
     && a.toolProfile === b.toolProfile && a.effort === b.effort && a.mcpConfigHash === b.mcpConfigHash;
+}
+
+function firstProcConfigDivergence(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): string {
+  if (!a) return 'procConfig';
+  for (const key of ['cwd', 'model', 'permissionMode', 'toolProfile', 'effort'] as const) {
+    if (a[key] !== b[key]) return key;
+  }
+  if (a.mcpConfigHash !== b.mcpConfigHash) {
+    const key = firstMcpConfigDivergence(a.mcpConfigMaterial, b.mcpConfigMaterial);
+    return `${key} (${a.mcpConfigHash}->${b.mcpConfigHash})`;
+  }
+  return 'procConfig';
 }
 
 function clearIdleTimer(w: WarmState): void {
@@ -841,29 +845,21 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
 
 /** Spawn a fresh resident proc with the baked config. First-turn cold. */
 function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, config: OrchestratorProcConfig): void {
-  const mcpConfigPath = ensureMcpConfig(session.repoPath, config.toolProfile);
   // Layer B — a Fable turn keeps `--dangerously-skip-permissions` (kept MCP tools
   // run autonomously) AND adds `--disallowedTools <native>` to strip Claude's
   // native read/write tools (the token lever). isFable takes precedence over the
   // plan branch so the lockout holds regardless of permission mode. See
   // `fable-profile.ts` for the empirical basis.
   const isFable = config.toolProfile === 'fable';
-  const args: string[] = [
-    '--input-format', 'stream-json',
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    ...(isFable
-      ? fableLockoutArgs()
-      : config.permissionMode === 'plan'
-        ? ['--permission-mode', 'plan']
-        : ['--dangerously-skip-permissions']),
-    '--verbose',
-    '--mcp-config', mcpConfigPath,
-    '--model', config.model,
-  ];
-  if (config.effort && config.effort !== 'adaptive') args.push('--effort', claudeEffortFlagValue(config.effort));
-  if (session.claudeSessionId) args.push('--resume', session.claudeSessionId);
-  else args.push('--append-system-prompt', buildOrchestratorSystemPrompt(session.repoPath));
+  const args = buildOrchestratorArgs({
+    permissionMode: config.permissionMode,
+    toolProfile: config.toolProfile,
+    effort: config.effort,
+    mcpConfigPath: config.mcpConfigPath,
+    model: config.model,
+    claudeSessionId: session.claudeSessionId,
+    systemPrompt: buildOrchestratorSystemPrompt(session.repoPath),
+  });
 
   // #1066 billing guard — the orchestrator REPL must stay subscription-billed.
   assertNoPrintFlag(args, 'Orchestrator REPL session');
@@ -971,20 +967,25 @@ export async function sendToOrchestrator(
   // Write the MCP config (idempotent) + compute the desired resident-proc config.
   // A 'propose' turn gets the operator-stripped read-only surface — Collide's
   // lockout. The config baked into the resident proc is compared each turn.
-  ensureMcpConfig(session.repoPath, toolProfile);
+  const mcpConfig = toClaudeJson(buildToolRegistry(session.repoPath, { profile: toolProfile }));
+  const mcpFingerprint = fingerprintMcpConfig(mcpConfig);
+  const mcpConfigPath = ensureMcpConfig(session.repoPath, toolProfile, mcpConfig);
   const desiredConfig: OrchestratorProcConfig = {
     cwd: session.repoPath,
     model,
     permissionMode,
     toolProfile,
     effort: thinkingEffort,
-    mcpConfigHash: mcpConfigContentHash(session.repoPath, toolProfile),
+    mcpConfigPath,
+    mcpConfigHash: mcpFingerprint.hash,
+    mcpConfigMaterial: mcpFingerprint.material,
   };
 
   // Recycle the resident proc when its baked config no longer matches (model /
   // permission mode / tool profile / effort / MCP-config content change).
   if (session.proc && !procConfigMatches(w.procConfig, desiredConfig)) {
-    console.log(`[orchestrator-session] recycle ${session.sessionName} — config changed`);
+    const divergence = firstProcConfigDivergence(w.procConfig, desiredConfig);
+    console.log(`[orchestrator-session] recycle ${session.sessionName} — config changed at ${divergence}`);
     killOrchestratorProc(session, w);
   }
 
