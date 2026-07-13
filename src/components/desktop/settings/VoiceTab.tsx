@@ -5,9 +5,8 @@
  *
  * Surfaces the macOS permission state for the global Fn-hotkey dictation path
  * (Accessibility / Input Monitoring / Fn-key binding), jump-to-Settings buttons
- * for granting, and the two background-presence toggles:
- *   - Start o8 at login (autostart, default ON)
- *   - Background mode — hide Dock icon, pill only (default OFF)
+ * for granting, and the dictation preferences. (Launch-at-login moved to the
+ * General tab — it's an app-level setting, not a voice one.)
  *
  * All native state is read live through the Tauri bridge (isTauri() guarded).
  * Inline styles only, var(--t-*) tokens, raw-SVG icons (repo rule: no React
@@ -22,8 +21,6 @@ import {
   fnKeyUsageType,
   openSystemSettings,
   openVoiceSettings,
-  autostartIsEnabled,
-  autostartSet,
   backgroundModeIsEnabled,
   backgroundModeSet,
   agentGetEscalation,
@@ -101,15 +98,6 @@ function permPill(state: PermState) {
 
 // ── Small raw-SVG glyphs for row icon tiles ──
 
-function PowerIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-      <line x1="12" y1="2" x2="12" y2="12" />
-    </svg>
-  );
-}
-
 function SparkleIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -147,7 +135,6 @@ export function VoiceTab() {
   const [inputMonitoring, setInputMonitoring] = useState<PermState>('unknown');
   // null = unread; number = AppleFnUsageType (0 = Do Nothing, the value we want).
   const [fnUsage, setFnUsage] = useState<number | null | undefined>(undefined);
-  const [autostart, setAutostart] = useState(false);
   // Two-tier brain escalation policy (~/.o8/agent_models.json via the router).
   const [escalation, setEscalation] = useState<'off' | 'auto' | 'deep'>('auto');
   // Groq BYOK for fast transcription (free tier). The config read strips the
@@ -179,14 +166,12 @@ export function VoiceTab() {
 
   const loadAll = useCallback(async () => {
     if (!tauri) return;
-    const [, auto, bg, esc, prefs] = await Promise.all([
+    const [, bg, esc, prefs] = await Promise.all([
       refreshPermissions(),
-      autostartIsEnabled(),
       backgroundModeIsEnabled(),
       agentGetEscalation().catch(() => 'auto'),
       voicePrefsGet().catch(() => null),
     ]);
-    setAutostart(auto);
     setGroqKeySet(Boolean(prefs && (prefs as Record<string, unknown>).groq_api_key_set));
     setFnHudPartials(Boolean(prefs && (prefs as Record<string, unknown>).fn_hud_partials));
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
@@ -205,11 +190,6 @@ export function VoiceTab() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [tauri, refreshPermissions]);
-
-  const handleAutostart = useCallback((next: boolean) => {
-    setAutostart(next);
-    void autostartSet(next).then(setAutostart);
-  }, []);
 
   const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
     setEscalation(next);
@@ -338,21 +318,6 @@ export function VoiceTab() {
                 &ldquo;Press 🌐 key to&rdquo; to &ldquo;Do Nothing&rdquo;.
               </div>
             ) : null}
-          </section>
-
-          <section style={{ marginTop: 28 }}>
-            <SettingsGroup
-              header="Background presence"
-              footnote="Keep o8 resident so the pill and Fn hotkey work without the window open. The menu-bar tray is always the way back."
-            >
-              <SettingsRow
-                icon={<PowerIcon />}
-                label="Start o8 at login"
-                subtitle="Dictation ready from the moment you sit down"
-                checked={autostart}
-                onToggle={handleAutostart}
-              />
-            </SettingsGroup>
           </section>
 
           <section style={{ marginTop: 28 }}>
