@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { ConnectionPill } from './ConnectionPill';
 import { UpdateCard } from './UpdateCard';
+import { FixedReportCard } from './FixedReportCard';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
@@ -280,6 +281,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
         <ConnectionPill />
+        <FixedReportCard />
         <UpdateCard />
         {addRepoDialog}
       </div>
@@ -479,7 +481,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
 
       </div>
       <ConnectionPill />
-      <UpdateCard />
+      <FixedReportCard />
+        <UpdateCard />
       {addRepoDialog}
     </div>
   );
