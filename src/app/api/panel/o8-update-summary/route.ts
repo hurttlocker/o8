@@ -53,6 +53,39 @@ function summaryModels() {
   return configured.length > 0 ? configured : SUMMARY_MODELS;
 }
 
+/// The public repo's CHANGELOG.md is the real "what changed" content —
+/// dated sections of sanitized high-signal commit subjects. The RELEASE
+/// bodies there are release.mjs boilerplate, and the repo's own commit
+/// subjects are all "sync: Update changelog" noise, so this file is the
+/// only honest source for summarization. Returns the newest entry lines
+/// (shas stripped), capped.
+async function fetchChangelogEntries(limit = 24): Promise<string[]> {
+  try {
+    const response = await fetch(
+      `https://raw.githubusercontent.com/${RELEASE_REPO}/main/CHANGELOG.md`,
+      { headers: { 'User-Agent': 'o8-update-summary' }, cache: 'no-store' },
+    );
+    if (!response.ok) return [];
+    const text = await response.text();
+    const out: string[] = [];
+    for (const rawLine of text.split('\n')) {
+      const line = rawLine.trim();
+      if (line.startsWith('## ')) {
+        if (out.length >= limit) break;
+        out.push(line.replace(/^##\s*/, '').trim());
+        continue;
+      }
+      if (!line.startsWith('- ')) continue;
+      const entry = line.replace(/^-\s*/, '').replace(/`[0-9a-f]{7,40}`\s*/i, '').trim();
+      if (entry) out.push(entry);
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
     const response = await fetch(url, {
@@ -122,7 +155,13 @@ function fallbackSummary(tag: string, body: string, commitTitles: string[]): str
   const lines = body
     .split('\n')
     .map((line) => line.replace(/^[-*#>\s]+/, '').trim())
-    .filter((line) => line.length > 0 && !/^\[/.test(line));
+    // Drop the release.mjs boilerplate ("Auto-update artifacts for o8 vX. See
+    // <url> for details.") — the o8-releases COMMITS are the real sanitized
+    // changelog, so a boilerplate-only body must fall through to them.
+    .filter((line) => line.length > 0
+      && !/^\[/.test(line)
+      && !/^auto-update artifacts/i.test(line)
+      && !/^see https?:\/\//i.test(line));
   const source = lines.length > 0 ? lines : commitTitles;
   const top = source.slice(0, 4).join(' \u00b7 ');
   return top || `${tag} is ready to install.`;
@@ -137,9 +176,10 @@ export async function GET(request: NextRequest) {
 
     const tag = version.startsWith('v') ? version : `v${version}`;
 
-    const [release, commits] = await Promise.all([
+    const [release, commits, changelogEntries] = await Promise.all([
       fetchJson<GithubRelease>(`https://api.github.com/repos/${RELEASE_REPO}/releases/tags/${tag}`),
       fetchJson<GithubCommit[]>(`https://api.github.com/repos/${RELEASE_REPO}/commits?per_page=${COMMIT_LIMIT}`),
+      fetchChangelogEntries(),
     ]);
 
     if (!release) {
@@ -162,6 +202,9 @@ export async function GET(request: NextRequest) {
       'Release notes body (from GitHub):',
       body || '(no body)',
       '',
+      'Public changelog (newest first — date headers then entries; summarize the entries closest to this release\'s publish date):',
+      changelogEntries.length > 0 ? changelogEntries.map((entry) => `- ${entry}`).join('\n') : '(none)',
+      '',
       'Recent commit titles on main (newest first, may include commits beyond this release):',
       commitTitles.length > 0 ? commitTitles.map((title) => `- ${title}`).join('\n') : '(none)',
     ].filter(Boolean).join('\n');
@@ -175,7 +218,10 @@ export async function GET(request: NextRequest) {
     try {
       summary = await summarizeWithOpenRouter(prompt);
     } catch {
-      summary = fallbackSummary(tag, body, commitTitles);
+      // Prefer changelog entries over commit titles — the o8-releases repo's
+      // own commit subjects are "sync: Update changelog" noise.
+      const digestSource = changelogEntries.filter((entry) => !/^\d{4}-\d{2}-\d{2}$/.test(entry));
+      summary = fallbackSummary(tag, body, digestSource.length > 0 ? digestSource : commitTitles);
       fallback = true;
     }
     return NextResponse.json({
