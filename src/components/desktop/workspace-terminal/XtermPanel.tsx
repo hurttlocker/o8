@@ -5,7 +5,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
-import { registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
+import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 
 export interface InlineImage {
   id: string;
@@ -234,6 +234,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         fitAddonRef.current = fitAddon;
         term.onData((data) => {
           sendTerminalInput(tmuxSession, data);
+        });
+        // Snapshot every selection for the speak-selection reader — busy TUIs
+        // redraw and can wipe the live selection before the chord lands.
+        term.onSelectionChange(() => {
+          recordXtermSelectionSnapshot(term.getSelection?.() ?? '');
         });
 
         observerRef.current = new ResizeObserver(() => {
