@@ -4329,12 +4329,19 @@ function DashboardInner() {
         // xterm selections are NOT DOM selections — when the DOM has nothing,
         // fall back to any live terminal's own selection so the read chord
         // works inside terminal tabs (Claude Code TUIs included).
-        const text = window.getSelection()?.toString().trim()
-          || readAnyXtermSelection().trim();
+        const domText = window.getSelection()?.toString().trim() ?? '';
+        const xtermText = domText ? '' : readAnyXtermSelection().trim();
+        const text = domText || xtermText;
+        // Field diagnostics (#1545): a dead read must say which stage was empty.
+        console.info(
+          '[speak-selection] chord received: dom=%d chars, xterm=%d chars',
+          domText.length,
+          xtermText.length,
+        );
         if (!text) return;
         import('@tauri-apps/api/core')
           .then(({ invoke }) => invoke('tts_speak', { text }))
-          .catch(() => { /* noop */ });
+          .catch((err) => { console.warn('[speak-selection] tts_speak failed:', err); });
       }))
       .then((un) => {
         if (disposed) { un(); return; }

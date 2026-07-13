@@ -22,29 +22,55 @@ interface WhatsNewCardProps {
 
 const CARD_WIDTH = 360;
 const SUMMARY_CACHE_KEY = 'o8:account-whats-new:summaries:v1';
+// Cap the accumulated mini-changelog — this is a sidebar card, not an archive.
+const CHANGELOG_MAX_ENTRIES = 24;
 
-function readCachedSummary(version: string): string | null {
-  if (typeof window === 'undefined') return null;
+function readSummaryCache(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
   try {
     const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    if (!raw) return null;
+    if (!raw) return {};
     const cache = JSON.parse(raw) as Record<string, string>;
-    return typeof cache[version] === 'string' ? cache[version] : null;
+    return cache && typeof cache === 'object' ? cache : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
+function readCachedSummary(version: string): string | null {
+  const cache = readSummaryCache();
+  return typeof cache[version] === 'string' ? cache[version] : null;
+}
+
+/** The cache doubles as the local mini-changelog: every version summarized on
+ *  this install accumulates here (newest-first by version), so the card can
+ *  show release history WITHOUT any extra network or LLM calls — one summary
+ *  call per version per install, ever. */
 function writeCachedSummary(version: string, summary: string) {
   if (typeof window === 'undefined') return;
   try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    const cache = raw ? JSON.parse(raw) as Record<string, string> : {};
+    const cache = readSummaryCache();
     cache[version] = summary;
-    window.localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(cache));
+    const keep = Object.keys(cache).sort(compareVersionsDesc).slice(0, CHANGELOG_MAX_ENTRIES);
+    const pruned: Record<string, string> = {};
+    for (const key of keep) pruned[key] = cache[key];
+    window.localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(pruned));
   } catch {
     // Release summaries are an optional convenience; storage can fail safely.
   }
+}
+
+/** Sort "v0.1.591"-style tags newest-first; non-parseable tags sink. */
+function compareVersionsDesc(a: string, b: string): number {
+  const parse = (tag: string) => tag.replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10));
+  const av = parse(a);
+  const bv = parse(b);
+  for (let i = 0; i < Math.max(av.length, bv.length); i += 1) {
+    const ai = Number.isFinite(av[i]) ? av[i] : -1;
+    const bi = Number.isFinite(bv[i]) ? bv[i] : -1;
+    if (ai !== bi) return bi - ai;
+  }
+  return 0;
 }
 
 function rawBodyFallback(release: RecentRelease): string {
@@ -76,6 +102,9 @@ export function WhatsNewCard({ anchorRect, anchorElement, onClose }: WhatsNewCar
   const [releases, setReleases] = useState<ReleaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Collapsed by default: only the newest ship shows; "Show more" reveals the
+  // rest of the fetched releases PLUS the locally accumulated mini-changelog.
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     cardRef.current?.focus();
@@ -111,7 +140,22 @@ export function WhatsNewCard({ anchorRect, anchorElement, onClose }: WhatsNewCar
         return Promise.all(recent.map((release) => summarizeRelease(release, controller.signal)));
       })
       .then((summaries) => {
-        if (!controller.signal.aborted) setReleases(summaries);
+        if (controller.signal.aborted) return;
+        // Merge in the local mini-changelog: versions summarized on earlier
+        // opens/ships that the 2-release fetch no longer covers. Pure cache —
+        // zero extra calls.
+        const seen = new Set(summaries.map((entry) => entry.version));
+        const history: ReleaseSummary[] = Object.entries(readSummaryCache())
+          .filter(([version]) => !seen.has(version))
+          .map(([version, summary]) => ({
+            version,
+            summary,
+            body: '',
+            publishedAt: null,
+            releaseUrl: null,
+          }));
+        const merged = [...summaries, ...history].sort((a, b) => compareVersionsDesc(a.version, b.version));
+        setReleases(merged);
       })
       .catch((caught) => {
         if (controller.signal.aborted) return;
@@ -244,15 +288,15 @@ export function WhatsNewCard({ anchorRect, anchorElement, onClose }: WhatsNewCar
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {releases.map((release, index) => (
+          {(expanded ? releases : releases.slice(0, 1)).map((release, index, visible) => (
             <section
               key={release.version}
               style={{
                 paddingTop: 14,
                 paddingRight: 0,
-                paddingBottom: index === releases.length - 1 ? 2 : 14,
+                paddingBottom: index === visible.length - 1 ? 2 : 14,
                 paddingLeft: 0,
-                borderBottomWidth: index === releases.length - 1 ? 0 : 1,
+                borderBottomWidth: index === visible.length - 1 ? 0 : 1,
                 borderBottomStyle: 'solid',
                 borderBottomColor: 'var(--t-divider)',
               }}
@@ -285,6 +329,37 @@ export function WhatsNewCard({ anchorRect, anchorElement, onClose }: WhatsNewCar
               </p>
             </section>
           ))}
+          {!expanded && releases.length > 1 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              style={{
+                marginTop: 10,
+                minHeight: 24,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                borderWidth: 0,
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 12,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: 'var(--font-sans-system)',
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+              {`Show ${releases.length - 1} more`}
+            </button>
+          ) : null}
         </div>
       )}
     </div>,

@@ -15,6 +15,7 @@ import {
   Gauge,
   Github,
   LogOut,
+  MessageSquare,
   RefreshCw,
   Settings2,
   Sparkles,
@@ -37,6 +38,7 @@ const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const POLL_MS = 30_000;
 const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 const DOCS_URL = 'https://o8.run';
+const DISCORD_URL = 'https://discord.gg/uSU9TXsk5d';
 // Paint the panel token directly — NOT through color-mix. In glass mode
 // --t-panel-solid is a linear-gradient (an <image>), and color-mix() only
 // accepts <color> args, so the old color-mix() was invalid CSS → the whole
@@ -772,6 +774,12 @@ export function SettingsQuickDrawer({
           <RowButton onClick={() => openExternalUrl(DOCS_URL)}>
             <IconFrame><BookOpen size={13} /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Get help</span>
+            <ExternalLink size={11} color={FAINT} />
+          </RowButton>
+
+          <RowButton onClick={() => openExternalUrl(DISCORD_URL)}>
+            <IconFrame><MessageSquare size={13} /></IconFrame>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Community Discord</span>
             <ExternalLink size={11} color={FAINT} />
           </RowButton>
 
