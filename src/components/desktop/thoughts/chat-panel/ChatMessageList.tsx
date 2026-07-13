@@ -206,15 +206,28 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
               </Fragment>
             );
           }
+          // The "Worked for Ns" line anchors ABOVE the turn's FIRST assistant
+          // message (Cursor position — right under the operator prompt).
+          // Legacy summaries without the first-message anchor fall back to the
+          // old after-last position so restored threads don't lose the line.
+          const summaryAnchorsBefore = turnSummary?.firstAssistantMessageId
+            ? msg.id === turnSummary.firstAssistantMessageId
+            : false;
+          const summaryAnchorsAfter = turnSummary && !turnSummary.firstAssistantMessageId
+            ? msg.id === turnSummary.assistantMessageId
+            : false;
           return (
             <Fragment key={msg.id}>
+              {summaryAnchorsBefore && turnSummary ? (
+                <TurnSummaryCard summary={turnSummary} />
+              ) : null}
               <DesktopAgentMessage
                 entry={msg}
                 isLast={index === displayMessages.length - 1 && !displayWaiting}
                 isStreaming={isLatestAssistant && !!displayWaiting}
                 repoPath={repoPath}
               />
-              {turnSummary && msg.id === turnSummary.assistantMessageId ? (
+              {summaryAnchorsAfter && turnSummary ? (
                 <TurnSummaryCard summary={turnSummary} />
               ) : null}
               {showChipsHere ? (

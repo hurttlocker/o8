@@ -1459,10 +1459,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
       const toolNamesAll: string[] = [];
       let toolCount = 0;
+      let firstAssistantId: string | null = null;
       let lastAssistantId: string | null = null;
       let turnHadEdits = false;
       for (const entry of newEntries) {
-        if (entry.role === 'assistant') lastAssistantId = entry.id;
+        if (entry.role === 'assistant') {
+          if (!firstAssistantId) firstAssistantId = entry.id;
+          lastAssistantId = entry.id;
+        }
         if (entry.toolCalls?.length) {
           for (const call of entry.toolCalls) {
             toolCount += 1;
@@ -1487,6 +1491,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const tokensUsed = Math.max(0, orchStream.runningTotal - start.runningTotalAtStart);
       const baseSummary: TurnSummary = {
         assistantMessageId: lastAssistantId,
+        firstAssistantMessageId: firstAssistantId,
         elapsedMs,
         toolCount,
         toolNames: distinctNames.slice(0, 3),

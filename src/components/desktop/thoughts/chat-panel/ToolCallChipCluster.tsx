@@ -124,13 +124,42 @@ function toolKey(tool: MobileTranscriptToolCall, index: number) {
 
 /**
  * Collapse threshold: when an assistant turn fires more tool calls than this,
- * the cluster shows ONE summary chip (running tool if any, else most recent)
- * plus a "+N more" affordance instead of tiling every chip. Picked from
- * dogfood observation — a 73-call architectural exploration shouldn't paint
- * a 24-row pill wall just to convey "I'm reading the codebase." Click the
- * "+N more" chip to expand and inspect every chip individually.
+ * the LIVE cluster shows ONE summary chip (running tool if any, else most
+ * recent) plus a "+N more" affordance instead of tiling every chip. Picked
+ * from dogfood observation — a 73-call architectural exploration shouldn't
+ * paint a 24-row pill wall just to convey "I'm reading the codebase."
  */
 const COLLAPSE_AT = 3;
+
+/**
+ * Settled-turn rollup (Cursor parity, operator ruling 2026-07-13): once every
+ * call in the cluster is DONE (none running, none errored), the pills collapse
+ * into one slim muted text line — "Explored 4 files · Ran 2 commands ⌄" —
+ * expandable back to the full chip wall. Errors and live activity keep the
+ * pill treatment: an in-flight verb and a red error card must stay visible.
+ */
+function describeToolRollup(toolCalls: MobileTranscriptToolCall[]): string {
+  let explored = 0;
+  let ran = 0;
+  let dispatched = 0;
+  let edited = 0;
+  let other = 0;
+  for (const tool of toolCalls) {
+    const kind = classifyTool(tool).kind;
+    if (kind === 'read' || kind === 'spec') explored += 1;
+    else if (kind === 'shell') ran += 1;
+    else if (kind === 'delegate') dispatched += 1;
+    else if (kind === 'write') edited += 1;
+    else other += 1;
+  }
+  const parts: string[] = [];
+  if (explored > 0) parts.push(`Explored ${explored} ${explored === 1 ? 'file' : 'files'}`);
+  if (ran > 0) parts.push(`Ran ${ran} ${ran === 1 ? 'command' : 'commands'}`);
+  if (dispatched > 0) parts.push(`Dispatched ${dispatched} ${dispatched === 1 ? 'agent' : 'agents'}`);
+  if (edited > 0) parts.push(`Edited ${edited} ${edited === 1 ? 'file' : 'files'}`);
+  if (other > 0) parts.push(`${other} ${other === 1 ? 'tool call' : 'tool calls'}`);
+  return parts.join(' · ');
+}
 
 export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
@@ -185,6 +214,41 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
 
   const hiddenCount = Math.max(0, toolCalls.length - 1);
   const collapsed = !showAll && toolCalls.length >= COLLAPSE_AT;
+  // Settled rollup: every call done, nothing errored → one slim text line.
+  const allSettled = erroredTools.length === 0
+    && toolCalls.every((tool) => chipStatus(tool) === 'done');
+
+  if (allSettled && !showAll) {
+    return (
+      <div ref={rootRef} style={{ maxWidth: '92%', minWidth: 0 }}>
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          aria-expanded={false}
+          aria-label={`Show all ${toolCalls.length} tool calls in this turn`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            border: 'none',
+            background: 'transparent',
+            padding: 0,
+            textAlign: 'left',
+            cursor: 'pointer',
+            color: 'var(--t-text-muted)',
+            fontFamily: 'var(--font-sans-system)',
+            fontSize: 12,
+            fontWeight: 400,
+            letterSpacing: '-0.005em',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <span>{describeToolRollup(toolCalls)}</span>
+          <RollupChevron />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -262,7 +326,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
               />
             );
           })}
-          {toolCalls.length >= COLLAPSE_AT ? (
+          {showAll ? (
             <button
               type="button"
               onClick={() => setShowAll(false)}
@@ -468,5 +532,24 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
         </div>
       ) : null}
     </div>
+  );
+}
+
+function RollupChevron() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: 'block', flexShrink: 0, color: 'var(--t-text-faint)' }}
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }
