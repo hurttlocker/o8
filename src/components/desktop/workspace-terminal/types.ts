@@ -1,5 +1,4 @@
 import type { CanvasRepoTaskLaunchRequest, CanvasTab } from '@/components/desktop/Canvas';
-import type { LLMMessage } from '@/components/desktop/LLMChat';
 import type { LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -260,5 +259,3 @@ export interface QueuedContextCard {
   meta: string[];
   preview?: string;
 }
-
-export type WorkspaceLlmMessage = LLMMessage;

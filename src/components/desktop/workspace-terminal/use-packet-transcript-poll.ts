@@ -54,8 +54,8 @@ export interface PacketTranscriptPollResult {
  *
  * Codex `exec --json` emits an interleaved stream of tool_call / tool_result /
  * assistant events. We fold each tool pair onto the assistant turn that closes
- * it so `WorkspaceRichChatEvents` can render the tool cards — the same contract
- * the sessionKey-keyed transcript uses. Type-only import of `TranscriptEvent`
+ * it so the shared `DesktopAgentMessage` receives the same raw entry contract
+ * as the sessionKey-keyed transcript. Type-only import of `TranscriptEvent`
  * keeps this client-safe (the normalization runs in the API route).
  */
 /**

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildLinkedIssueContext } from '@/components/desktop/IssueLinkPicker';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
-import { mapWorkspaceTranscriptMessages } from '@/components/desktop/workspace-terminal/workspace-chat-message-mapper';
 import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import { useWorkspaceChatModelOptions } from '@/components/desktop/workspace-terminal/useWorkspaceChatModelOptions';
 import {
@@ -103,7 +102,7 @@ export function useWorkspaceChatPane({
     () => getRuntimeCapability(chatRuntime ?? 'codex').label,
     [chatRuntime],
   );
-  const { availableModels, selectedModel, selectedModelLabel } = useWorkspaceChatModelOptions(chatRuntime, tab.chatModel);
+  const { availableModels, selectedModel } = useWorkspaceChatModelOptions(chatRuntime, tab.chatModel);
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
 
@@ -138,11 +137,6 @@ export function useWorkspaceChatPane({
     sessionKey: normalizedSessionKey,
     active,
   });
-  const packetLlmMessages = useMemo(
-    () => mapWorkspaceTranscriptMessages(packetEvents.entries, selectedModelLabel),
-    [packetEvents.entries, selectedModelLabel],
-  );
-
   const commitMessages = useCallback(
     (next: MobileTranscriptEntry[]) => {
       onUpdateMessages(tabId, next);
@@ -691,57 +685,16 @@ export function useWorkspaceChatPane({
     await sendText(message, { claudeMode });
   }, [sendText, sending]);
 
-  const llmMessages = useMemo(
-    () => mapWorkspaceTranscriptMessages(messages, selectedModelLabel),
-    [messages, selectedModelLabel],
-  );
-
-  const visibleMessages = useMemo(
-    () => (agentRunning && liveAssistantId ? llmMessages.filter((message) => message.id !== liveAssistantId) : llmMessages),
-    [agentRunning, liveAssistantId, llmMessages],
+  const visibleTranscriptEntries = useMemo(
+    () => (agentRunning && liveAssistantId ? messages.filter((message) => message.id !== liveAssistantId) : messages),
+    [agentRunning, liveAssistantId, messages],
   );
 
   useEffect(() => {
     if (!scrollRef.current) return;
-    if (visibleMessages.length === 0 && !streamingText && activeToolCalls.length === 0) return;
+    if (visibleTranscriptEntries.length === 0 && !streamingText && activeToolCalls.length === 0) return;
     scrollToBottom();
-  }, [activeToolCalls.length, scrollToBottom, streamingText, visibleMessages.length]);
-
-  const handleRetry = useCallback((messageId: string) => {
-    const messageIndex = messagesRef.current.findIndex((entry) => entry.id === messageId);
-    if (messageIndex < 0) return;
-    const previousMessages = messagesRef.current.slice(0, messageIndex);
-    const lastUser = [...previousMessages].reverse().find((entry) => entry.role === 'user');
-    if (!lastUser) return;
-    const baseMessages = previousMessages.filter((entry) => entry.id !== lastUser.id);
-    commitMessages(baseMessages);
-    void sendText(lastUser.text, { baseMessages });
-  }, [commitMessages, sendText]);
-
-  const handleEdit = useCallback((messageId: string, content: string) => {
-    const messageIndex = messagesRef.current.findIndex((entry) => entry.id === messageId);
-    if (messageIndex < 0) return;
-    setDraft(content);
-    commitMessages(messagesRef.current.slice(0, messageIndex));
-    requestAnimationFrame(() => composeRef.current?.focus());
-  }, [commitMessages]);
-
-  const handleDelete = useCallback((messageId: string) => {
-    const current = messagesRef.current;
-    const messageIndex = current.findIndex((entry) => entry.id === messageId);
-    if (messageIndex < 0) return;
-    const message = current[messageIndex];
-    if (!message) return;
-    if (message.role === 'user' && current[messageIndex + 1]?.role === 'assistant') {
-      commitMessages(current.filter((_, index) => index !== messageIndex && index !== messageIndex + 1));
-      return;
-    }
-    if (message.role === 'assistant' && messageIndex > 0 && current[messageIndex - 1]?.role === 'user') {
-      commitMessages(current.filter((_, index) => index !== messageIndex && index !== messageIndex - 1));
-      return;
-    }
-    commitMessages(current.filter((_, index) => index !== messageIndex));
-  }, [commitMessages]);
+  }, [activeToolCalls.length, scrollToBottom, streamingText, visibleTranscriptEntries.length]);
 
   const handleRemoveQueuedContext = useCallback((contextId: string) => {
     setQueuedContextCards((previous) => previous.filter((card) => card.id !== contextId));
@@ -761,10 +714,7 @@ export function useWorkspaceChatPane({
     disableClaudeBypassPermissions,
     draft,
     enableClaudeBypassPermissions,
-    handleDelete,
-    handleEdit,
     handleRemoveQueuedContext,
-    handleRetry,
     handleClaudePermissionDecision,
     handleScroll,
     handleSend,
@@ -773,9 +723,8 @@ export function useWorkspaceChatPane({
     isRuntimeBound,
     issuePickerOpen,
     linkedIssue,
-    llmMessages,
     messages,
-    packetLlmMessages,
+    packetTranscriptEntries: packetEvents.entries,
     packetTranscriptActivity: packetEvents.activity,
     normalizedSessionKey,
     queuedContextCards,
@@ -792,7 +741,7 @@ export function useWorkspaceChatPane({
     supervisorActive,
     tabId,
     toggleClaudePlanMode,
-    visibleMessages,
+    visibleTranscriptEntries,
     onSelectModel,
   };
 }

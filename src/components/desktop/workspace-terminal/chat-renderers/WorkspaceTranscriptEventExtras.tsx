@@ -1,23 +1,12 @@
 'use client';
 
 import { useState, type CSSProperties, type ReactNode } from 'react';
-import { DiffViewer } from '@/components/desktop/o8-panel/workspace-rail/DiffViewer';
-import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
-import {
-  deriveFileChangesFromTools,
-  type FileChangePreview,
-  type LLMMessage,
-  type SourceInfo,
-  type ToolCallInfo,
-} from '@/components/desktop/llm-chat/shared';
-import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { ClaudePermissionDecision } from '@/components/desktop/workspace-terminal/workspace-stream-events';
-import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
+import type { MobileTranscriptEntry, MobileTranscriptSource } from '@/lib/mobile/types';
 
 type PermissionRequest = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>;
 type PlanStep = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'plan_step' }>;
-type ToolCallEvent = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'tool_call' }>;
-type ToolResultEvent = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'tool_result' }>;
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, Menlo, monospace';
@@ -32,32 +21,13 @@ function hostnameFor(url: string) {
   }
 }
 
-function eventToolCalls(events: ClaudeCodeStreamJsonChatEvent[]): ToolCallInfo[] {
-  return events
-    .filter((event): event is ToolCallEvent => event.type === 'tool_call')
-    .map((event) => ({
-      name: event.name,
-      status: event.status,
-      args: event.args,
-      preview: event.preview,
-    }));
-}
-
-function dedupeFileChanges(changes: FileChangePreview[]) {
-  const seen = new Set<string>();
-  return changes.filter((change) => {
-    const key = [change.path, change.tool, change.oldText, change.newText, change.content].join('\u0000');
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function sourceLinks(sources?: SourceInfo[]) {
+function sourceLinks(sources?: MobileTranscriptSource[]) {
   return (sources ?? [])
-    .filter((source): source is SourceInfo & { url: string } => typeof source.url === 'string' && source.url.trim().length > 0)
+    .filter((source): source is MobileTranscriptSource & { url: string } => (
+      typeof source.url === 'string' && source.url.trim().length > 0
+    ))
     .map((source) => ({
-      title: source.title?.trim() || hostnameFor(source.url),
+      title: source.title.trim() || hostnameFor(source.url),
       url: source.url,
       domain: hostnameFor(source.url),
     }));
@@ -79,8 +49,11 @@ function linksFromToolResults(events: ClaudeCodeStreamJsonChatEvent[]) {
   return links;
 }
 
-function webLinksFor(message: LLMMessage) {
-  const links = [...sourceLinks(message.sources), ...linksFromToolResults(message.claudeCodeEvents ?? [])];
+function webLinksFor(entry: MobileTranscriptEntry) {
+  const links = [
+    ...sourceLinks(entry.sources),
+    ...linksFromToolResults(entry.claudeCodeEvents ?? []),
+  ];
   const seen = new Set<string>();
   return links.filter((link) => {
     if (seen.has(link.url)) return false;
@@ -90,8 +63,8 @@ function webLinksFor(message: LLMMessage) {
 }
 
 function statusColor(status?: string) {
-  if (status === 'done' || status === 'complete') return 'var(--t-brand-green, var(--t-accent))';
-  if (status === 'active' || status === 'running' || status === 'calling') return 'var(--t-brand-orange, var(--t-accent))';
+  if (status === 'complete') return 'var(--t-brand-green, var(--t-accent))';
+  if (status === 'active') return 'var(--t-brand-orange, var(--t-accent))';
   return 'var(--t-text-faint)';
 }
 
@@ -151,92 +124,6 @@ function HeaderButton({
       </span>
       {children}
     </button>
-  );
-}
-
-function FilesChangedBlock({ changes, repoPath }: { changes: FileChangePreview[]; repoPath?: string | null }) {
-  const [expanded, setExpanded] = useState(false);
-  const [selectedPath, setSelectedPath] = useState(changes[0]?.path ?? null);
-  if (changes.length === 0) return null;
-
-  const additions = changes.reduce((sum, change) => sum + change.additions, 0);
-  const deletions = changes.reduce((sum, change) => sum + change.deletions, 0);
-  const selected = changes.some((change) => change.path === selectedPath)
-    ? selectedPath
-    : changes[0]?.path ?? null;
-
-  return (
-    <div style={cardStyle()}>
-      <HeaderButton expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 750, color: 'var(--t-text)' }}>
-          {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 750, color: 'var(--t-brand-green, var(--t-accent))' }}>+{additions}</span>
-        <span style={{ fontSize: 11, fontWeight: 750, color: 'var(--t-brand-red, var(--t-text-secondary))' }}>-{deletions}</span>
-      </HeaderButton>
-      {expanded ? (
-        <div
-          style={{
-            borderTopWidth: 1,
-            borderTopStyle: 'solid',
-            borderTopColor: 'var(--t-divider-subtle)',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {changes.map((change) => {
-              const active = selected === change.path;
-              return (
-                <button
-                  key={change.id}
-                  type="button"
-                  onClick={() => setSelectedPath(change.path)}
-                  style={{
-                    minHeight: 34,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    paddingTop: 7,
-                    paddingRight: 12,
-                    paddingBottom: 7,
-                    paddingLeft: 28,
-                    borderWidth: 0,
-                    borderTopWidth: 1,
-                    borderTopStyle: 'solid',
-                    borderTopColor: 'var(--t-divider-subtle)',
-                    backgroundColor: active ? 'var(--t-accent-soft)' : 'transparent',
-                    color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: UI_FONT,
-                  }}
-                >
-                  <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5 }}>
-                    {change.path}
-                  </span>
-                  <span style={{ fontSize: 10.5, fontWeight: 750, color: 'var(--t-brand-green, var(--t-accent))' }}>+{change.additions}</span>
-                  <span style={{ fontSize: 10.5, fontWeight: 750, color: 'var(--t-brand-red, var(--t-text-secondary))' }}>-{change.deletions}</span>
-                </button>
-              );
-            })}
-          </div>
-          {selected ? (
-            <div
-              style={{
-                height: 230,
-                display: 'flex',
-                minHeight: 0,
-                borderTopWidth: 1,
-                borderTopStyle: 'solid',
-                borderTopColor: 'var(--t-divider-subtle)',
-                backgroundColor: 'var(--t-panel)',
-              }}
-            >
-              <DiffViewer repoPath={repoPath} selectedFile={selected} mode="unified" />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -327,7 +214,16 @@ function PlanPill({ steps }: { steps: PlanStep[] }) {
           }}
         >
           {steps.map((step, index) => (
-            <div key={`${step.id ?? step.text}-${index}`} style={{ display: 'grid', gridTemplateColumns: '18px minmax(0, 1fr)', columnGap: 8, paddingTop: 4, paddingBottom: 4 }}>
+            <div
+              key={`${step.id ?? step.text}-${index}`}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '18px minmax(0, 1fr)',
+                columnGap: 8,
+                paddingTop: 4,
+                paddingBottom: 4,
+              }}
+            >
               <span
                 style={{
                   width: 8,
@@ -348,35 +244,6 @@ function PlanPill({ steps }: { steps: PlanStep[] }) {
   );
 }
 
-function ToolCards({
-  events,
-  toolCalls,
-}: {
-  events: ClaudeCodeStreamJsonChatEvent[];
-  toolCalls?: ToolCallInfo[];
-}) {
-  const results = events.filter((event): event is ToolResultEvent => event.type === 'tool_result');
-  const calls = events.filter((event): event is ToolCallEvent => event.type === 'tool_call');
-  const visibleCalls: MobileTranscriptToolCall[] = calls.length > 0
-    ? eventToolCalls(events).map((tool, index) => {
-      const result = results.find((candidate) => (
-        candidate.id && calls[index]?.id
-          ? candidate.id === calls[index]?.id
-          : candidate.name === tool.name
-      ));
-      return {
-        ...tool,
-        result: result?.output ?? result?.preview,
-      };
-    })
-    : (toolCalls ?? []);
-  if (visibleCalls.length === 0) return null;
-
-  return (
-    <ToolCallChipCluster toolCalls={visibleCalls} />
-  );
-}
-
 function PermissionPrompt({
   request,
   onDecision,
@@ -394,19 +261,14 @@ function PermissionPrompt({
     try {
       await onDecision(request, decision);
       setState('done');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to send decision.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to send decision.');
       setState('error');
     }
   };
 
   return (
-    <div
-      style={{
-        ...cardStyle(),
-        borderColor: 'var(--t-brand-orange, var(--t-panel-border))',
-      }}
-    >
+    <div style={{ ...cardStyle(), borderColor: 'var(--t-brand-orange, var(--t-panel-border))' }}>
       <div
         style={{
           paddingTop: 10,
@@ -485,39 +347,19 @@ function PermissionPrompt({
   );
 }
 
-export function messageUsesWorkspaceRichRenderers(message: LLMMessage) {
-  return Boolean(
-    message.claudeCodeEvents?.length
-    || message.toolCalls?.length
-    || webLinksFor(message).length,
-  );
-}
-
-export function stripWorkspaceRichRendererFallback(message: LLMMessage): LLMMessage {
-  if (!messageUsesWorkspaceRichRenderers(message)) return message;
-  return {
-    ...message,
-    toolCalls: undefined,
-    sources: undefined,
-  };
-}
-
-export function WorkspaceRichChatEvents({
-  message,
-  repoPath,
+export function WorkspaceTranscriptEventExtras({
+  entry,
   onPermissionDecision,
 }: {
-  message: LLMMessage;
-  repoPath?: string | null;
+  entry: MobileTranscriptEntry;
   onPermissionDecision?: (request: PermissionRequest, decision: ClaudePermissionDecision) => Promise<void> | void;
 }) {
-  const events = message.claudeCodeEvents ?? [];
+  const events = entry.claudeCodeEvents ?? [];
   const plans = events.filter((event): event is PlanStep => event.type === 'plan_step');
   const permissions = events.filter((event): event is PermissionRequest => event.type === 'permission_request');
-  const webLinks = webLinksFor(message);
-  const fileChanges = dedupeFileChanges(deriveFileChangesFromTools([...(message.toolCalls ?? []), ...eventToolCalls(events)]));
+  const webLinks = webLinksFor(entry);
 
-  if (!messageUsesWorkspaceRichRenderers(message)) return null;
+  if (plans.length === 0 && permissions.length === 0 && webLinks.length === 0) return null;
 
   return (
     <div
@@ -539,9 +381,7 @@ export function WorkspaceRichChatEvents({
           onDecision={onPermissionDecision}
         />
       ))}
-      <FilesChangedBlock changes={fileChanges} repoPath={repoPath} />
       <WebSearchList links={webLinks} />
-      <ToolCards events={events} toolCalls={message.toolCalls} />
     </div>
   );
 }
