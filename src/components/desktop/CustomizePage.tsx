@@ -43,6 +43,7 @@ interface DirectiveSummary {
   priority: number | null;
   body: string;
   projects: string[];
+  file: string | null;
 }
 
 interface ExternalServer {
@@ -66,6 +67,7 @@ interface HookEntry {
   command: string;
   matcher: string | null;
   scope: 'user' | 'project';
+  file: string;
 }
 
 interface RegisteredRepoLite {
@@ -120,7 +122,6 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     void (async () => {
       const [directivesRes, serversRes, inventoryRes] = await Promise.allSettled([
         fetch('/api/cortex/directives').then((r) => (r.ok ? r.json() : null)),
@@ -153,6 +154,16 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
     !q || fields.some((field) => field?.toLowerCase().includes(q));
 
   const searchNoun = TABS.find((t) => t.id === tab)?.label ?? 'customizations';
+
+  // Open a customization's backing file in the app's file viewer. The
+  // dashboard carries an always-mounted o8:open-file listener (added with this
+  // surface — O8Panel's own listener unmounts under the takeover), so closing
+  // and dispatching immediately is race-free.
+  const openFile = (path: string) => {
+    onClose?.();
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:open-file', { detail: { path } }));
+  };
 
   return (
     <div style={{
@@ -351,15 +362,15 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         {loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : tab === 'rules' ? (
-          <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
+          <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
           <ConnectionsTab servers={servers.filter((s) => matches(s.name, s.command, s.url))} query={q} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'commands' ? (
           <CommandsTab query={q} />
         ) : tab === 'agents' ? (
-          <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
+          <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (
-          <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher))} />
+          <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher))} onOpenFile={openFile} />
         )}
       </div>
     </div>
@@ -377,11 +388,13 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   );
 }
 
-function Row({ title, titleMono = false, subtitle, pill, expanded, onClick, children }: {
+function Row({ title, titleMono = false, subtitle, pill, dot, expanded, onClick, children }: {
   title: string;
   titleMono?: boolean;
   subtitle?: string | null;
   pill?: string | null;
+  /** 6px status dot (the app's only leading affordance — hurttlocker). */
+  dot?: 'green' | 'gray' | null;
   expanded?: boolean;
   onClick?: () => void;
   children?: React.ReactNode;
@@ -419,6 +432,15 @@ function Row({ title, titleMono = false, subtitle, pill, expanded, onClick, chil
           transition: 'background 100ms ease',
         }}
       >
+        {dot ? (
+          <span aria-hidden="true" style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            flexShrink: 0,
+            background: dot === 'green' ? 'var(--t-terminal-ansi-bright-green, #16a34a)' : 'var(--t-text-faint)',
+          }} />
+        ) : null}
         <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{
             fontSize: titleMono ? 12 : 13.5,
@@ -545,10 +567,11 @@ function EmptyState({ title, body, actionLabel, onAction }: {
 
 // ── Tabs ──
 
-function RulesTab({ directives, expandedRow, onToggleRow }: {
+function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
   directives: DirectiveSummary[];
   expandedRow: string | null;
   onToggleRow: (id: string | null) => void;
+  onOpenFile: (path: string) => void;
 }) {
   const global = directives.filter((d) => !d.repoName);
   const repoScoped = directives.filter((d) => d.repoName);
@@ -574,8 +597,11 @@ function RulesTab({ directives, expandedRow, onToggleRow }: {
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
-              <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {d.body}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {d.body}
+                </div>
+                {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
               </div>
             </Row>
           ))}
@@ -593,14 +619,40 @@ function RulesTab({ directives, expandedRow, onToggleRow }: {
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
-              <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {d.body}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {d.body}
+                </div>
+                {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
               </div>
             </Row>
           ))}
         </>
       ) : null}
     </div>
+  );
+}
+
+function OpenFileLink({ file, onOpenFile }: { file: string; onOpenFile: (path: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenFile(file)}
+      style={{
+        alignSelf: 'flex-start',
+        border: 'none',
+        background: 'transparent',
+        padding: 0,
+        fontSize: 12,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        color: 'var(--t-accent, #2563eb)',
+        cursor: 'pointer',
+        fontFamily: UI_FONT,
+      }}
+    >
+      Open file ›
+    </button>
   );
 }
 
@@ -631,8 +683,9 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
           key={server.id}
           title={server.name}
           titleMono
+          dot={server.enabled === false ? 'gray' : 'green'}
           subtitle={server.transport === 'http' ? server.url ?? 'http' : server.command ?? 'stdio'}
-          pill={server.enabled === false ? 'disabled' : server.transport}
+          pill={server.transport}
           expanded={expandedRow === server.id}
           onClick={() => onToggleRow(expandedRow === server.id ? null : server.id)}
         >
@@ -723,10 +776,11 @@ function CommandsTab({ query }: { query: string }) {
   );
 }
 
-function AgentsTab({ agents, expandedRow, onToggleRow }: {
+function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
   agents: AgentEntry[];
   expandedRow: string | null;
   onToggleRow: (id: string | null) => void;
+  onOpenFile: (path: string) => void;
 }) {
   const user = agents.filter((a) => a.scope === 'user');
   const project = agents.filter((a) => a.scope === 'project');
@@ -756,6 +810,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow }: {
                 <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>{agent.description}</div>
               ) : null}
               <DetailLine label="File" value={agent.file} mono />
+              <OpenFileLink file={agent.file} onOpenFile={onOpenFile} />
             </div>
           </Row>
         ))}
@@ -770,7 +825,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow }: {
   );
 }
 
-function HooksTab({ hooks }: { hooks: HookEntry[] }) {
+function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path: string) => void }) {
   const user = hooks.filter((h) => h.scope === 'user');
   const project = hooks.filter((h) => h.scope === 'project');
   if (hooks.length === 0) {
@@ -788,6 +843,16 @@ function HooksTab({ hooks }: { hooks: HookEntry[] }) {
         {list.map((hook, index) => (
           <div
             key={`${hook.scope}-${hook.event}-${index}`}
+            role="button"
+            tabIndex={0}
+            title={`Open ${hook.file}`}
+            onClick={() => onOpenFile(hook.file)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onOpenFile(hook.file);
+              }
+            }}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -796,6 +861,8 @@ function HooksTab({ hooks }: { hooks: HookEntry[] }) {
               paddingBottom: 7,
               paddingLeft: 10,
               paddingRight: 10,
+              borderRadius: 9,
+              cursor: 'pointer',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
