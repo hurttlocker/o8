@@ -281,9 +281,12 @@ function BottomUtilitySurface({
   onRepoPathChange?: (repoPath: string) => void;
 }) {
   if (kind === 'files') {
+    // Cursor arrangement (Q ruling 2026-07-12): content center-left, tree on
+    // the far-right edge — mirrors the O8Panel files utility surface.
     return (
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(210px, 30%) minmax(0, 1fr)', background: 'var(--t-bg)' }}>
-        <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderRight: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(210px, 30%)', background: 'var(--t-bg)' }}>
+        <FileViewer repoPath={repoPath} selectedFile={selectedFile} />
+        <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderLeft: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
           <AllFilesTree
             repoPath={repoPath}
             selectedFile={selectedFile}
@@ -291,7 +294,6 @@ function BottomUtilitySurface({
             onSelectFile={onSelectFile}
           />
         </div>
-        <FileViewer repoPath={repoPath} selectedFile={selectedFile} />
       </div>
     );
   }

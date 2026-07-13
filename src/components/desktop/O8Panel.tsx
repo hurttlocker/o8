@@ -577,9 +577,12 @@ export function O8Panel({
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'files') {
+      // Cursor arrangement (Q ruling 2026-07-12, vid2 3:10-4:10): the file
+      // CONTENT reads in the center-left, the tree hugs the far-right edge.
       return (
-        <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(210px, 34%) minmax(0, 1fr)', background: 'var(--t-bg)' }}>
-          <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderRight: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(210px, 34%)', background: 'var(--t-bg)' }}>
+          <FileViewer repoPath={repoPath} selectedFile={selectedUtilityFile} />
+          <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderLeft: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
             <AllFilesTree
               repoPath={repoPath}
               selectedFile={selectedUtilityFile}
@@ -587,7 +590,6 @@ export function O8Panel({
               onSelectFile={handleSelectUtilityFile}
             />
           </div>
-          <FileViewer repoPath={repoPath} selectedFile={selectedUtilityFile} />
         </div>
       );
     }
