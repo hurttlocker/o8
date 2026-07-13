@@ -275,6 +275,12 @@ function resolveReleaseConfig() {
       if (typeof parsed.sentryDsn === 'string') {
         cfg.sentryDsn = parsed.sentryDsn.trim();
       }
+      // Private feedback-intake webhook. This one IS a secret (anyone holding it
+      // can post as us into the ops channel), which is why it lives here and not
+      // in source — the previous hardcoded one had to be revoked.
+      if (typeof parsed.feedbackWebhookUrl === 'string') {
+        cfg.feedbackWebhookUrl = parsed.feedbackWebhookUrl.trim();
+      }
     } catch (e) {
       console.warn('⚠️  o8.release.json parse failed — ignoring:', e.message);
     }
@@ -283,6 +289,8 @@ function resolveReleaseConfig() {
   if (fromEnv) cfg.githubOAuthClientId = fromEnv;
   const sentryFromEnv = process.env.SENTRY_DSN?.trim();
   if (sentryFromEnv) cfg.sentryDsn = sentryFromEnv;
+  const feedbackFromEnv = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim();
+  if (feedbackFromEnv) cfg.feedbackWebhookUrl = feedbackFromEnv;
   return cfg;
 }
 const releaseConfig = resolveReleaseConfig();
@@ -313,6 +321,19 @@ if (releaseConfig.sentryDsn) {
   console.log('📦 Baking O8_SENTRY_DSN into server.js wrapper (Sentry enabled)');
 } else {
   console.log('📦 No sentryDsn configured — Sentry stays dormant in this build');
+}
+
+// Bake the private feedback-intake webhook. Absent → the in-app Report button
+// fails with a clear "not configured" error rather than silently swallowing a
+// report the operator just spent a minute writing.
+const FEEDBACK_ENV_STANZA = releaseConfig.feedbackWebhookUrl
+  ? `\n// Private feedback-intake webhook, baked at release build.\n` +
+    `if (!process.env.O8_FEEDBACK_WEBHOOK_URL) process.env.O8_FEEDBACK_WEBHOOK_URL = ${JSON.stringify(releaseConfig.feedbackWebhookUrl)};\n`
+  : '';
+if (releaseConfig.feedbackWebhookUrl) {
+  console.log('📦 Baking O8_FEEDBACK_WEBHOOK_URL into server.js wrapper (in-app Report enabled)');
+} else {
+  console.log('⚠️  No feedbackWebhookUrl configured — the in-app Report button will error in this build');
 }
 
 // Bake the app version so both the boot crash guard below AND the server's
@@ -444,7 +465,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
+${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${FEEDBACK_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
 process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);

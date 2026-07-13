@@ -7,12 +7,12 @@ import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-digest';
 import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
+import { resolveFeedbackWebhook } from '@/lib/feedback/webhooks';
 import { verifyToken } from '@/lib/auth/jwt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_WEBHOOK_URL = 'https://discord.com/api/webhooks/1511754353743233055/qVbE00fdbM741Z364P1R8d-UDF1r8h6R1VXEw10Fj-rqtzKc3NWdlBvU6XktYgGR8rlR';
 const MESSAGE_LIMIT = 4000;
 const DISCORD_DESCRIPTION_LIMIT = 4096;
 const DISCORD_FIELD_VALUE_LIMIT = 1024;
@@ -283,7 +283,13 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
 }
 
 async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
-  const webhookUrl = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim() || DEFAULT_WEBHOOK_URL;
+  const webhookUrl = resolveFeedbackWebhook();
+  if (!webhookUrl) {
+    // Fail loudly. Silently dropping a report the operator spent a minute writing
+    // is worse than erroring — they'd walk away believing they were heard.
+    return { ok: false, error: 'Report intake is not configured on this build (no feedback webhook).' };
+  }
+
   const embed = {
     ...buildEmbed(category, message, diagnostics, crashes, report),
     // Render the first screenshot inline in the embed; the rest ride along as

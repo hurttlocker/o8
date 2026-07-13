@@ -3,5 +3,9 @@
   "//githubOAuthClientId": "Public OAuth client id for the device-flow GitHub app (issue #1338). Client IDs are PUBLIC, not secrets — this is baked into the packaged server so a fresh install can render the 'Connect GitHub' device-flow CTA. Copy this file to o8.release.json (gitignored) and paste the client id. A GITHUB_OAUTH_CLIENT_ID env var at build time overrides this. Absent → device flow stays disabled.",
   "githubOAuthClientId": "",
   "//sentryDsn": "Sentry crash/error reporting DSN (telemetry ruling). DSNs are ingest-only (not a secret) but treat them as deployment config. Baked into the packaged server + native shell so the desktop app reports crashes tagged with the app version + plan. Copy this file to o8.release.json (gitignored) and paste the DSN. A SENTRY_DSN env var at build time overrides this. Absent → Sentry stays fully dormant (no init, no network). Respect the in-app 'Crash & error reports' toggle regardless.",
-  "sentryDsn": ""
+  "sentryDsn": "",
+  "//feedbackWebhookUrl": "PRIVATE ops-channel Discord webhook — where in-app bug reports (⌘⇧E) land. Reports carry a screenshot of the operator's whole window plus crash traces with their repo paths in them, which is exactly why intake is private and why this IS a real secret: anyone holding it can post as us. It used to be hardcoded in src/app/api/feedback/report/route.ts; that one was revoked 2026-07-13. Baked into packaged builds by scripts/tauri-export.mjs; read straight from this file in dev. An O8_FEEDBACK_WEBHOOK_URL env var overrides. Absent → the in-app Report button errors loudly rather than silently swallowing a report.",
+  "feedbackWebhookUrl": "",
+  "//fixedWebhookUrl": "PUBLIC #fixed channel Discord webhook. Only ever carries SHIPPED fixes, credited to the reporter's GitHub handle — never an open problem, because open problems rot and fixed ones never do. Used by scripts/publish-fixed.mjs (npm run publish:fixed) at release time, not by the app at runtime. An O8_FIXED_WEBHOOK_URL env var overrides. Absent → publish:fixed refuses to run.",
+  "fixedWebhookUrl": ""
 }
