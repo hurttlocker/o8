@@ -14,10 +14,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
-import { isTauri, browserViewNavigate } from '@/lib/tauri/bridge';
+import { isTauri, browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
 import { O8EnginePane } from './O8EnginePane';
 import { NativeBrowserSurface } from './NativeBrowserSurface';
@@ -77,6 +78,15 @@ interface O8BrowserPaneProps {
   // Bubbles the currently-loaded URL up to the dashboard so the TitleBar
   // Browser button can render a hover-preview iframe pointed at it.
   onActiveUrlChange?: (url: string | null) => void;
+  /** Cursor 2-bar parity (Q 2026-07-12): when the host provides a strip slot,
+   *  the page tabs PORTAL into it (pages become first-class tabs next to
+   *  Files/Terminal) and the pane's own tab-bar row doesn't render — one
+   *  strip + one toolbar. Hosts without a slot (ContextualPanel, the main
+   *  browser tab) keep the internal tab bar unchanged. */
+  tabStripSlot?: HTMLElement | null;
+  /** Called when the operator interacts with a portaled page tab while
+   *  another utility surface is active — the host focuses the browser. */
+  onFocusRequest?: () => void;
 }
 
 // ── Helpers ──
@@ -105,6 +115,43 @@ let tabCounter = 0;
 function newTabId(): string {
   tabCounter += 1;
   return `btab-${tabCounter}-${Date.now()}`;
+}
+
+/**
+ * Real site favicon in the tab pill (Cursor borrow, Q 2026-07-12) — external
+ * sites resolve through Google's favicon service; localhost/dev servers and
+ * any failure fall back to the quiet globe glyph.
+ */
+function TabFavicon({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  let host: string | null = null;
+  try {
+    const parsed = new URL(url);
+    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isLoopbackUrl(url)) {
+      host = parsed.hostname;
+    }
+  } catch {
+    host = null;
+  }
+  if (!host || failed) {
+    return (
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12 }}>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    );
+  }
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+      width={12}
+      height={12}
+      alt=""
+      onError={() => setFailed(true)}
+      style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12, borderRadius: 3 }}
+    />
+  );
 }
 
 const DEFAULT_STATE_SCOPE_KEY = 'right-panel';
@@ -150,7 +197,7 @@ function activeUrlFromSnapshot(snapshot: BrowserPaneStateSnapshot | null): strin
 
 // ── Component ──
 
-export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onActiveUrlChange }: O8BrowserPaneProps) {
+export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onActiveUrlChange, tabStripSlot, onFocusRequest }: O8BrowserPaneProps) {
   const normalizedStateScopeKey = normalizeStateScopeKey(stateScopeKey);
   const [initialBrowserState] = useState<BrowserPaneStateSnapshot | null>(() => readBrowserPaneState(normalizedStateScopeKey));
   const [tabs, setTabs] = useState<BrowserTab[]>(() => initialBrowserState?.tabs ?? []);
@@ -159,6 +206,9 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** Stable handle for the header-rail "New page" event listener — the
+   *  listener mounts before addNewTab is declared below. */
+  const addNewTabRef = useRef<(() => void) | null>(null);
   const seeded = useRef(initialBrowserState !== null);
   const hasStoredState = useRef(initialBrowserState !== null);
   /** Agent-driving glow — pulses when an agent verb lands on this surface. */
@@ -174,9 +224,29 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
    *  bypassed for tabs with a url. */
   const [inTauri] = useState<boolean>(() => isTauri());
   const nativeEnabled = useNativeBrowserViewFlag() && inTauri;
+  /** Browser toolbelt (Cursor borrow, Q 2026-07-12): the Design toggle in the
+   *  URL row arms the app-wide Design Mode grab; active state mirrors the
+   *  hook's broadcast so the keyboard toggle stays in sync. */
+  const [designActive, setDesignActive] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+  useEffect(() => {
+    const onMode = (event: Event) => {
+      setDesignActive(Boolean((event as CustomEvent<{ active?: boolean }>).detail?.active));
+    };
+    window.addEventListener('o8:design-mode', onMode);
+    return () => window.removeEventListener('o8:design-mode', onMode);
+  }, []);
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
+
+  // Header-rail [+] → "New page" (the universal opener in PanelHeaderStrip
+  // dispatches this; the pane owns tab state, so it does the actual add).
+  useEffect(() => {
+    const onNewPage = () => addNewTabRef.current?.();
+    window.addEventListener('o8:browser-new-page', onNewPage);
+    return () => window.removeEventListener('o8:browser-new-page', onNewPage);
+  }, []);
 
   // The agent-driving indicator — mirror the canvas card: pulse a glow when an
   // o8_browser_* verb lands on the panel surface (the ghost cursor moves inside
@@ -286,6 +356,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     setUrlInput('');
     setTimeout(() => urlRef.current?.focus(), 50);
   }, []);
+  useEffect(() => { addNewTabRef.current = addNewTab; }, [addNewTab]);
 
   const closeTab = useCallback((id: string) => {
     setTabs(prev => {
@@ -335,6 +406,24 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     if (activeTab?.url) openExternalUrl(activeTab.url);
   }, [activeTab]);
 
+  // Back / forward (Q 2026-07-12: "we need the back and forward buttons on
+  // the left"). Native path: eval history into the child window. Iframe
+  // path: same-origin (proxied localhost) frames honor contentWindow
+  // history; cross-origin throws → quiet no-op.
+  const goHistory = useCallback((direction: 'back' | 'forward') => {
+    if (nativeEnabled && activeTab?.url) {
+      void browserViewEval(direction === 'back' ? 'history.back()' : 'history.forward()');
+      return;
+    }
+    try {
+      const win = iframeRef.current?.contentWindow;
+      if (direction === 'back') win?.history.back();
+      else win?.history.forward();
+    } catch {
+      // cross-origin — nothing we can do from here
+    }
+  }, [activeTab?.url, nativeEnabled]);
+
   const iframeSrc = activeTab?.url ? liveSrc(activeTab.url) : '';
 
   // Origin-sensitive SPAs (Clerk/OAuth) render BLANK when proxied to our origin
@@ -345,6 +434,20 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     const url = activeTab?.url;
+    const loadedTabId = activeTab?.id;
+    // Real page title in the tab (Cursor borrow) — readable whenever the
+    // frame is same-origin (all proxied localhost pages). Cross-origin
+    // throws → hostname stays.
+    if (iframe && loadedTabId) {
+      try {
+        const liveTitle = iframe.contentDocument?.title?.trim();
+        if (liveTitle) {
+          setTabs((prev) => prev.map((t) => (t.id === loadedTabId && t.title !== liveTitle ? { ...t, title: liveTitle } : t)));
+        }
+      } catch {
+        // cross-origin — keep the hostname title
+      }
+    }
     if (!iframe || !url || !isLoopbackUrl(url) || engineUrls.has(url)) return;
     window.setTimeout(() => {
       if (iframeRef.current !== iframe) return; // navigated away
@@ -361,109 +464,120 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
         // cross-origin — can't inspect; leave it as-is
       }
     }, 1500);
-  }, [activeTab?.url, engineUrls]);
+  }, [activeTab?.url, activeTab?.id, engineUrls]);
 
-  // If no tabs, show empty state with option to add
-  if (tabs.length === 0) {
-    return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-          <circle cx="12" cy="12" r="10" />
-          <line x1="2" y1="12" x2="22" y2="12" />
-          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-        </svg>
-        <span style={{ color: 'var(--t-text-faint)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>No active previews</span>
-        <button
-          type="button"
-          onClick={addNewTab}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            paddingTop: 5, paddingRight: 12, paddingBottom: 5, paddingLeft: 12,
-            borderRadius: 8, border: '1px solid var(--t-divider-subtle)',
-            background: 'var(--t-hover)', color: 'var(--t-text)',
-            fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', cursor: 'pointer',
-          }}
-        >
-          + New Tab
-        </button>
-      </div>
-    );
+  // Empty state — shared by both hosts (inline early-return look for slotless
+  // hosts, content-area render for slot mode where the strip stays up).
+  const emptyState = (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+      <span style={{ color: 'var(--t-text-faint)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>No active previews</span>
+      <button
+        type="button"
+        onClick={addNewTab}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          paddingTop: 5, paddingRight: 12, paddingBottom: 5, paddingLeft: 12,
+          borderRadius: 8, border: '1px solid var(--t-divider-subtle)',
+          background: 'var(--t-hover)', color: 'var(--t-text)',
+          fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', cursor: 'pointer',
+        }}
+      >
+        + New Tab
+      </button>
+    </div>
+  );
+
+  if (tabs.length === 0 && !tabStripSlot) {
+    return emptyState;
   }
 
   // New Tab page — show port tiles when tab has no URL
   const showNewTabPage = activeTab && !activeTab.url;
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* ── Tab bar ── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', height: 34,
-        paddingLeft: 6, paddingRight: 6, gap: 1,
-        borderBottom: '1px solid var(--t-divider)',
-        background: 'transparent', flexShrink: 0,
-        overflow: 'hidden',
-      }}>
-        {tabs.map(tab => {
+  // Adaptive label density (Q ruling 2026-07-12: "don't want it to look
+  // janky with a few things open"): full page title when there's room,
+  // hostname when tabs multiply, favicon-only when it's tight. The ACTIVE
+  // tab always keeps its label so you never lose your place.
+  const labelMode: 'title' | 'host' | 'icon' = tabs.length <= 2 ? 'title' : tabs.length <= 4 ? 'host' : 'icon';
+
+  // Page-tab pills — rendered either in the pane's own tab-bar row (slotless
+  // hosts) or PORTALED into the host's header rail (Cursor parity: pages sit
+  // next to the state drawer as first-class tabs).
+  const tabPills = (
+    <>
+      {tabs.map(tab => {
           const isActive = tab.id === activeTabId;
           const isHovered = tab.id === hoveredTabId;
+          const showLabel = labelMode !== 'icon' || isActive;
+          const labelText = labelMode === 'title' ? tab.title : titleFromUrl(tab.url);
           return (
             <div
               key={tab.id}
-              onClick={() => setActiveTabId(tab.id)}
+              onClick={() => { onFocusRequest?.(); setActiveTabId(tab.id); }}
               onMouseEnter={() => setHoveredTabId(tab.id)}
               onMouseLeave={() => setHoveredTabId(null)}
+              title={tab.title}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                height: 26, paddingLeft: 10, paddingRight: 6,
+                display: 'flex', alignItems: 'center', gap: showLabel ? 6 : 0,
+                height: 22, paddingLeft: showLabel ? 9 : 6, paddingRight: showLabel ? 5 : 6,
                 borderRadius: 6, cursor: 'pointer',
                 background: isActive ? 'var(--t-panel-active, var(--t-input-bg))' : isHovered ? 'var(--t-hover)' : 'transparent',
-                maxWidth: 180, minWidth: 0, flexShrink: 1,
+                maxWidth: labelMode === 'title' ? 180 : labelMode === 'host' ? 120 : isActive ? 140 : 30,
+                minWidth: 0, flexShrink: 1,
                 transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
-              {/* Globe favicon */}
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12 }}>
-                <circle cx="12" cy="12" r="10" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-              </svg>
+              {/* Icon-only + hovered: the favicon SWAPS to the close × in
+                  place (Chrome behavior) so the pill never widens. */}
+              {!showLabel && isHovered ? null : <TabFavicon url={tab.url} />}
+              {showLabel ? (
               <span style={{
                 flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px',
+                fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px',
                 color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
               }}>
-                {tab.title}
+                {labelText}
               </span>
-              {/* Close button */}
-              {(isActive || isHovered) ? (
+              ) : null}
+              {/* Close × — labelled pills: on active/hover with a spacer
+                  otherwise; icon-only pills: only while hovered (it took the
+                  favicon's spot, same footprint). */}
+              {(showLabel && (isActive || isHovered)) || (!showLabel && isHovered) ? (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 20, height: 20, border: 'none', borderRadius: 4,
+                    width: showLabel ? 17 : 12, height: showLabel ? 17 : 12, border: 'none', borderRadius: 4,
                     background: 'transparent', cursor: 'pointer', flexShrink: 0, padding: 0,
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block', width: 10, height: 10, minWidth: 10, minHeight: 10 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block', width: 9, height: 9, minWidth: 9, minHeight: 9 }}>
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
-              ) : <div style={{ width: 20, flexShrink: 0 }} />}
+              ) : showLabel ? <div style={{ width: 17, flexShrink: 0 }} /> : null}
             </div>
           );
         })}
-        {/* Add tab button */}
+        {/* Add tab button — slotless hosts only. In header mode the strip's
+            own [+] is the universal opener (new page + utility surfaces). */}
+        {!tabStripSlot ? (
         <button
           type="button"
-          onClick={addNewTab}
+          onClick={() => { onFocusRequest?.(); addNewTab(); }}
           title="New tab"
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 24, height: 24, border: 'none', borderRadius: 6,
+            width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', flexShrink: 0, padding: 0,
             marginLeft: 2,
           }}
@@ -475,15 +589,52 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
-      </div>
+        ) : null}
+    </>
+  );
 
-      {/* ── URL bar ── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 4,
-        height: 36, paddingLeft: 6, paddingRight: 6,
-        borderBottom: '1px solid var(--t-divider)',
-        flexShrink: 0,
-      }}>
+  // URL toolbar pieces — live in the pane's own row for slotless hosts, or
+  // travel UP into the header portal next to the tabs (Q ruling 2026-07-12:
+  // "move it up" — zero chrome rows inside the panel).
+  const urlToolbar = (
+    <>
+        {/* Back / Forward — leftmost, Cursor order */}
+        <button
+          type="button"
+          onClick={() => goHistory('back')}
+          title="Back"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 22, height: 22, border: 'none', borderRadius: 6,
+            background: 'transparent', cursor: 'pointer', padding: 0,
+            opacity: activeTab?.url ? 1 : 0.3,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+            <path d="m12 19-7-7 7-7" />
+            <path d="M19 12H5" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => goHistory('forward')}
+          title="Forward"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 22, height: 22, border: 'none', borderRadius: 6,
+            background: 'transparent', cursor: 'pointer', padding: 0,
+            opacity: activeTab?.url ? 1 : 0.3,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+            <path d="m12 5 7 7-7 7" />
+            <path d="M5 12h14" />
+          </svg>
+        </button>
         {/* Reload */}
         <button
           type="button"
@@ -491,26 +642,26 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
           title="Reload"
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26, border: 'none', borderRadius: 6,
+            width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
             <polyline points="23 4 23 10 17 10" />
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
         </button>
-        {/* URL input */}
+        {/* URL input — flat fill, no border: the well reads as one quiet
+            surface at Cursor's weight instead of a chunky outlined field. */}
         <div style={{
           flex: 1, display: 'flex', alignItems: 'center',
-          height: 26, paddingLeft: 10, paddingRight: 10,
-          borderRadius: 8, background: 'var(--t-input-bg)',
-          border: '1px solid var(--t-divider)',
+          height: 22, paddingLeft: 9, paddingRight: 9,
+          borderRadius: 6, background: 'var(--t-input-bg)',
         }}>
           {/* Lock/globe icon */}
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', marginRight: 6 }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', marginRight: 6 }}>
             <circle cx="12" cy="12" r="10" />
             <line x1="2" y1="12" x2="22" y2="12" />
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -525,11 +676,65 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             placeholder="Enter URL or search..."
             style={{
               flex: 1, border: 'none', background: 'transparent', outline: 'none',
-              color: 'var(--t-text)', fontSize: 12,
+              color: 'var(--t-text)', fontSize: 11.5,
               fontFamily: 'var(--font-sans-system)',
             }}
           />
         </div>
+        {/* Design Mode toggle — arms the app-wide click-to-grab (Cmd+Shift+D
+            twin). Active = brand-orange brush, Cursor's solid-state pattern
+            in our accent. */}
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('o8:design-mode-request', { detail: { action: 'toggle' } }))}
+          title={designActive ? 'Exit Design Mode (Esc)' : 'Design Mode — click any element to grab it (⌘⇧D)'}
+          aria-pressed={designActive}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 22, height: 22, border: 'none', borderRadius: 6,
+            background: designActive ? 'var(--t-input-bg)' : 'transparent',
+            cursor: 'pointer', padding: 0,
+          }}
+          onMouseEnter={(e) => { if (!designActive) e.currentTarget.style.background = 'var(--t-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = designActive ? 'var(--t-input-bg)' : 'transparent'; }}
+        >
+          {/* Paintbrush */}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={designActive ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+            <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
+            <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
+          </svg>
+        </button>
+        {/* Copy current URL */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!activeTab?.url) return;
+            void navigator.clipboard?.writeText(activeTab.url).then(() => {
+              setUrlCopied(true);
+              window.setTimeout(() => setUrlCopied(false), 1200);
+            });
+          }}
+          title="Copy current URL"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 22, height: 22, border: 'none', borderRadius: 6,
+            background: 'transparent', cursor: 'pointer', padding: 0,
+            opacity: activeTab?.url ? 1 : 0.3,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          {urlCopied ? (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t-success, #16a34a)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+          )}
+        </button>
         {/* Open in external browser */}
         <button
           type="button"
@@ -537,7 +742,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
           title="Open in browser"
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26, border: 'none', borderRadius: 6,
+            width: 22, height: 22, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
             opacity: activeTab?.url ? 1 : 0.3,
           }}
@@ -545,16 +750,55 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           {/* External link icon */}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             <polyline points="15 3 21 3 21 9" />
             <line x1="10" y1="14" x2="21" y2="3" />
           </svg>
         </button>
+    </>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {tabStripSlot ? (
+        // Header rail carries TABS ONLY (Q correction 2026-07-12: the URL
+        // stays below — manipulation space + room for tabs, same reason
+        // Cursor keeps its toolbar row). The [+] up top opens a new page.
+        createPortal(
+          <div style={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, overflow: 'hidden' }}>
+            {tabPills}
+          </div>,
+          tabStripSlot,
+        )
+      ) : (
+        <div style={{
+          display: 'flex', alignItems: 'center', height: 30,
+          paddingLeft: 5, paddingRight: 5, gap: 1,
+          borderBottom: '1px solid var(--t-divider)',
+          background: 'transparent', flexShrink: 0,
+          overflow: 'hidden',
+        }}>
+          {tabPills}
+        </div>
+      )}
+
+      {tabs.length === 0 ? emptyState : (
+      <>
+      {/* ── URL toolbar — always the pane's own row (Cursor keeps it below
+            the tabs too; this is where the operator manipulates the page). ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 3,
+        height: 30, paddingLeft: 5, paddingRight: 5,
+        borderBottom: '1px solid var(--t-divider)',
+        flexShrink: 0,
+      }}>
+        {urlToolbar}
       </div>
 
-      {/* ── Content area ── */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', boxShadow: agentGlow ? 'inset 0 0 0 1.5px rgba(245,158,11,0.75)' : 'none', transition: 'box-shadow 200ms ease-out' }}>
+      {/* ── Content area — the Design Mode draw surface (the ink is confined
+            here, Q ruling 2026-07-12: "just in the browser"). ── */}
+      <div data-o8-draw-surface style={{ flex: 1, minHeight: 0, position: 'relative', boxShadow: agentGlow ? 'inset 0 0 0 1.5px rgba(245,158,11,0.75)' : 'none', transition: 'box-shadow 200ms ease-out' }}>
         {showNewTabPage ? (
           <div style={{
             height: '100%', display: 'flex', flexDirection: 'column',
@@ -669,6 +913,8 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
           </>
         ) : null}
       </div>
+      </>
+      )}
     </div>
   );
 }

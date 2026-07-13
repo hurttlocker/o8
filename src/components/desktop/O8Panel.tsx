@@ -63,6 +63,10 @@ interface O8PanelProps {
   // Bubbles the browser pane's active URL up so the TitleBar Browser
   // button can render a hover preview iframe pointed at it.
   onBrowserActiveUrlChange?: (url: string | null) => void;
+  /** Header-rail portal target for the browser's page tabs (Cursor borrow,
+   *  Q 2026-07-12) — provided by the dashboard's PanelHeaderStrip. Pages
+   *  render up there next to the state drawer; the pane skips its own row. */
+  browserHeaderTabSlot?: HTMLElement | null;
   onSelectedFileChange?: (filePath: string) => void;
   commitSha?: string | null;
   onClearCommit?: () => void;
@@ -193,14 +197,17 @@ function RightUtilityTabStrip({
 }) {
   return (
     <div style={{
+      // Cursor-density strip (browser siphon pass 1, Q 2026-07-12): 34px not
+      // 44, quiet weights per the locked tab language — active = bg fill,
+      // never bold.
       display: 'flex',
       alignItems: 'center',
-      gap: 6,
-      minHeight: 44,
-      paddingTop: 8,
-      paddingRight: 10,
-      paddingBottom: 8,
-      paddingLeft: 10,
+      gap: 5,
+      minHeight: 34,
+      paddingTop: 4,
+      paddingRight: 8,
+      paddingBottom: 4,
+      paddingLeft: 8,
       borderBottom: '1px solid var(--t-divider)',
       background: 'var(--t-bg)',
       flexShrink: 0,
@@ -211,9 +218,9 @@ function RightUtilityTabStrip({
         aria-label="Open right panel tab picker"
         title="Open tab picker"
         style={{
-          width: 28,
-          height: 28,
-          borderRadius: 8,
+          width: 24,
+          height: 24,
+          borderRadius: 7,
           border: 'none',
           background: activeTab === 'launcher' ? 'var(--t-panel-hover)' : 'transparent',
           color: activeTab === 'launcher' ? 'var(--t-text)' : 'var(--t-text-muted)',
@@ -226,13 +233,13 @@ function RightUtilityTabStrip({
         onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = activeTab === 'launcher' ? 'var(--t-panel-hover)' : 'transparent'; }}
       >
-        <PlusIcon size={15} />
+        <PlusIcon size={14} />
       </button>
 
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 5,
+        gap: 4,
         minWidth: 0,
         flex: 1,
         overflowX: 'auto',
@@ -249,15 +256,15 @@ function RightUtilityTabStrip({
               onClick={() => onSelect(tab)}
               aria-label={def.label}
               style={{
-                height: 28,
+                height: 24,
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 7,
+                gap: 6,
                 paddingTop: 0,
-                paddingRight: 8,
+                paddingRight: 6,
                 paddingBottom: 0,
-                paddingLeft: 9,
-                borderRadius: 9,
+                paddingLeft: 8,
+                borderRadius: 7,
                 border: '1px solid transparent',
                 background: active ? 'var(--t-panel-hover)' : 'transparent',
                 color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
@@ -267,8 +274,8 @@ function RightUtilityTabStrip({
               onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--t-hover)'; }}
               onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
             >
-              {Icon({ size: 13 })}
-              <span style={{ fontSize: 12, fontWeight: active ? 700 : 600, whiteSpace: 'nowrap' }}>
+              {Icon({ size: 12.5 })}
+              <span style={{ fontSize: 12, fontWeight: active ? 400 : 300, letterSpacing: '-0.1px', whiteSpace: 'nowrap' }}>
                 {def.label}
               </span>
               <span
@@ -277,16 +284,16 @@ function RightUtilityTabStrip({
                   onClose(tab);
                 }}
                 style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: 5,
+                  width: 15,
+                  height: 15,
+                  borderRadius: 4,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'var(--t-text-faint)',
                 }}
               >
-                <XIcon size={10} />
+                <XIcon size={9} />
               </span>
             </button>
           );
@@ -430,6 +437,7 @@ export function O8Panel({
   browserUrl,
   browserStateKey = 'right-panel',
   onBrowserActiveUrlChange,
+  browserHeaderTabSlot = null,
   onSelectedFileChange,
   onSelectCommit,
   onSelectIssue,
@@ -443,7 +451,11 @@ export function O8Panel({
   termWsConnected = false,
 }: O8PanelProps) {
   const activeTab = externalTab ?? 'activity';
-  const activeUtilityTab = isRightUtilityTab(activeTab) ? activeTab : null;
+  // Browser is EXCLUDED from the utility shell (Q ruling 2026-07-12) — it's
+  // a first-class drawer state whose pages render in the header rail, so it
+  // never earns a strip row. activeTab === 'browser' renders the dedicated
+  // main mount below instead.
+  const activeUtilityTab = isRightUtilityTab(activeTab) && activeTab !== 'browser' ? activeTab : null;
   const utilityShellActive = activeTab === 'launcher' || activeUtilityTab !== null;
   // Best-of-N compare matrix (item 3) — the first ready comparison group, read
   // from mission state. useOrchestratorData returns null outside the provider, so
@@ -474,6 +486,11 @@ export function O8Panel({
   const renderedUtilityTabs = activeUtilityTab && !utilityTabs.includes(activeUtilityTab)
     ? [...utilityTabs, activeUtilityTab]
     : utilityTabs;
+  // One-time sweep: browser left the utility system (Q 2026-07-12) — drop
+  // any lingering strip membership from earlier in the session.
+  useEffect(() => {
+    setUtilityTabs((prev) => (prev.includes('browser') ? prev.filter((t) => t !== 'browser') : prev));
+  }, []);
   useEffect(() => {
     if (!activeUtilityTab) return;
     queueMicrotask(() => {
@@ -482,6 +499,14 @@ export function O8Panel({
   }, [activeUtilityTab]);
 
   const openRightUtilityTab = useCallback((tab: RightUtilityTab) => {
+    // Browser is a first-class drawer state now (Q ruling 2026-07-12: "the
+    // browser pill in the middle — why do we need it?") — its pages live in
+    // the header rail, so it never joins the utility strip. The launcher
+    // entry just activates the main browser tab.
+    if (tab === 'browser') {
+      onActiveTabChange?.('browser');
+      return;
+    }
     setUtilityTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
     onActiveTabChange?.(tab);
   }, [onActiveTabChange]);
@@ -600,6 +625,8 @@ export function O8Panel({
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
           stateScopeKey={browserStateKey}
           onActiveUrlChange={onBrowserActiveUrlChange}
+          tabStripSlot={browserHeaderTabSlot}
+          onFocusRequest={() => onActiveTabChange?.('browser')}
         />
       );
     }
@@ -684,7 +711,9 @@ export function O8Panel({
           Ask-o8 chat trigger renders inline in the spec pane's own
           toolbar (passed via toolbarSlot below) so all three buttons
           (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' ? (
+      {/* No Brain chat on the browser — it's a real browser now (Q ruling
+          2026-07-12); its header/toolbar carry browser tools instead. */}
+      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' ? (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
           <O8ScratchChat
             repoPath={repoPath}
@@ -744,7 +773,17 @@ export function O8Panel({
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' && !utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane key={browserStateKey} previews={previews} navigateToUrl={pendingBrowserUrl ?? browserUrl} stateScopeKey={browserStateKey} onActiveUrlChange={onBrowserActiveUrlChange} />
+        {/* The utility-mounted browser wins the header slot when both exist —
+            two instances portaling into one node would duplicate the pills. */}
+        <O8BrowserPane
+          key={browserStateKey}
+          previews={previews}
+          navigateToUrl={pendingBrowserUrl ?? browserUrl}
+          stateScopeKey={browserStateKey}
+          onActiveUrlChange={onBrowserActiveUrlChange}
+          tabStripSlot={renderedUtilityTabs.includes('browser') ? null : browserHeaderTabSlot}
+          onFocusRequest={() => onActiveTabChange?.('browser')}
+        />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' || activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ActivityPane
