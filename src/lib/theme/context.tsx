@@ -216,11 +216,15 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
     vibrancyStyle.remove();
   }
 
-  // Chrome-surface scope — only meaningful in glass+light combo, where the
-  // dark vibrancy material bleeds through chrome and we need to flip text
-  // to white. Solid mode and dark palette don't need this.
+  // Chrome-surface scope — in glass mode the chrome panels (left rail, right
+  // panel) sit on the DARK macOS vibrancy material in BOTH palettes, so their
+  // text/borders must flip to white-alpha to stay legible. Light glass always
+  // did this; dark glass needs the SAME treatment (its DARK_BASE tokens read
+  // muddy on the transparent vibrancy) — one shared block, since "white on dark
+  // vibrancy" is correct for either palette. Only the center transcript keeps
+  // its own opaque surface. Solid mode paints opaque chrome and needs none.
   let chromeScopeStyle = document.getElementById('theme-chrome-surface');
-  const needsChromeFlip = theme.paletteId === 'light' && theme.surface === 'glass';
+  const needsChromeFlip = theme.surface === 'glass';
   if (needsChromeFlip) {
     if (!chromeScopeStyle) {
       chromeScopeStyle = document.createElement('style');
@@ -228,7 +232,7 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
       document.head.appendChild(chromeScopeStyle);
     }
     chromeScopeStyle.textContent = `
-      [data-palette="light"][data-surface="glass"] [data-chrome-surface="true"] {
+      [data-surface="glass"] [data-chrome-surface="true"] {
         --t-bg: transparent;
         --t-bg-subtle: transparent;
         --t-panel: transparent;
