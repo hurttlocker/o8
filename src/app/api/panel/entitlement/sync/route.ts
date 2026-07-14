@@ -13,7 +13,7 @@ import { getEntitlement } from '@/lib/entitlement/store';
 import {
   clearActiveIdentity,
   clearManagedGithubState,
-  readActiveIdentity,
+  readManagedGithubState,
   writeActiveIdentity,
   writeManagedGithubState,
 } from '@/lib/github-broker/managed';
@@ -61,13 +61,17 @@ const SIGN_OUT_MARKER_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
  * install-CTA marker; 503 (feature off server-side) → clear. Network errors
  * leave existing state alone — a stale token self-expires within the hour.
  *
- * `expectedOwner` is the Clerk id the caller believes is signed in. The write
- * is guarded against it (audit #2): a fire-and-forget refresh that returns AFTER
- * a different user has signed in (active identity moved), or whose server-verified
- * owner disagrees with the caller, is DROPPED rather than persisted — so one
- * account can never end up holding another account's repo-write token.
+ * Identity is the SERVER-VERIFIED subject (`ownerClerkUserId`) — never the
+ * client's claim (audit #2). That value:
+ *   - REQUIRED: an old/omitting server (no field) means we can't safely bind, so
+ *     we drop the write rather than trust a client-supplied owner (kills the
+ *     rolling-deploy mis-stamp).
+ *   - drives both the persisted owner AND the active-identity anchor the broker
+ *     verifies against, so a client that lies about who is signed in can only
+ *     ever fetch/serve ITS OWN token.
+ *   - clears the prior user's token on an owner change (user switch).
  */
-async function syncManagedGithubApp(sessionToken: string, expectedOwner: string): Promise<void> {
+async function syncManagedGithubApp(sessionToken: string): Promise<void> {
   try {
     const res = await fetch(`${proxyBaseUrl()}/github/app/token`, {
       method: 'POST',
@@ -88,13 +92,17 @@ async function syncManagedGithubApp(sessionToken: string, expectedOwner: string)
       ownerClerkUserId?: string;
     };
 
-    // Race guard: if the active desktop identity changed while this request was
-    // in flight (sign-out, or another user signed in), or the server-verified
-    // owner is not who the caller claimed, do NOT write — fail closed.
-    const owner = data.ownerClerkUserId || expectedOwner;
+    // The verified subject is the ONLY identity we trust here. No client fallback.
+    const owner = typeof data.ownerClerkUserId === 'string' ? data.ownerClerkUserId.trim() : '';
     if (!owner) return;
-    if (expectedOwner && owner !== expectedOwner) return;
-    if (readActiveIdentity() !== owner) return;
+
+    // Owner change on this desktop → drop the previous user's token immediately.
+    const priorOwner = readManagedGithubState()?.ownerClerkUserId;
+    if (priorOwner && priorOwner !== owner) clearManagedGithubState();
+
+    // Anchor the active identity to the verified owner — this is what the broker
+    // checks the token against on every read.
+    writeActiveIdentity(owner);
 
     if (data.installed === true && data.token && data.expiresAt && data.installationId) {
       writeManagedGithubState({
@@ -188,6 +196,12 @@ export async function POST(request: Request) {
     // the marker's own age or the incoming token's iat.
     if (body?.clearSignInMarker === true) {
       clearSignOutMarker();
+      // A fresh sign-in must never inherit a prior user's managed GitHub token
+      // (audit #2). Wipe it + the identity anchor now; the follow-up license
+      // sync repopulates for the VERIFIED new user (or leaves nothing → the
+      // broker fails closed). Cheap: the token is re-minted within the hour.
+      clearManagedGithubState();
+      clearActiveIdentity();
       return NextResponse.json({ ok: true });
     }
     const activeClerkUserId = typeof body?.clerkUserId === 'string' ? body.clerkUserId.trim() : '';
@@ -234,19 +248,12 @@ export async function POST(request: Request) {
     // fire-and-forget: GitHub features degrade to device-flow OAuth, never
     // block the license sync.
     //
-    // Cross-account binding (audit #2): stamp the active-identity anchor BEFORE
-    // the fetch so it flips the instant this user is signed in, and drop the
-    // previous user's managed token on a user switch — otherwise a failed
-    // refresh for the new user would leave the prior user's repo-write token
-    // readable. The token itself is served only while owner === active identity.
-    if (activeClerkUserId) {
-      const priorIdentity = readActiveIdentity();
-      if (priorIdentity && priorIdentity !== activeClerkUserId) {
-        clearManagedGithubState();
-      }
-      writeActiveIdentity(activeClerkUserId);
-      void syncManagedGithubApp(sessionToken, activeClerkUserId);
-    }
+    // Cross-account binding (audit #2): the sync resolves the SERVER-VERIFIED
+    // owner and anchors identity to it — we deliberately do NOT seed identity
+    // from the client-supplied activeClerkUserId (which is spoofable). Fresh
+    // sign-in already wiped any prior user's token below, so the window between
+    // sign-in and this refresh has no stale token to leak.
+    void syncManagedGithubApp(sessionToken);
 
     const res = await fetch(`${proxyBaseUrl()}/account/license`, {
       method: 'POST',
@@ -287,6 +294,13 @@ export async function POST(request: Request) {
     if (postFetchSignedOutAt !== null && postFetchIat !== null && postFetchIat < postFetchSignedOutAt) {
       return clearSignedOutEntitlement('stale_session', 401);
     }
+
+    // Authoritative identity anchor from the VERIFIED license subject — a second
+    // source alongside the managed-token sync (audit #2), so even if that
+    // fire-and-forget refresh failed, the broker still binds the persisted token
+    // to the right owner. verified.subject is confirmed non-null + == the caller
+    // above, so this can only ever anchor to the genuine signed-in user.
+    writeActiveIdentity(verified.subject);
 
     const wrote = writeCachedEntitlement({
       plan: verified.plan,
