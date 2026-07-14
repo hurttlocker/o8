@@ -11,9 +11,11 @@ import { tokenIssuedAt } from '@/lib/entitlement/identity-guards';
 import { clearCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
 import {
+  bumpSignInEpoch,
   clearActiveIdentity,
   clearManagedGithubState,
   readManagedGithubState,
+  readSignInEpoch,
   writeActiveIdentity,
   writeManagedGithubState,
 } from '@/lib/github-broker/managed';
@@ -73,12 +75,17 @@ const SIGN_OUT_MARKER_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
  */
 async function syncManagedGithubApp(sessionToken: string): Promise<void> {
   try {
+    // Capture the sign-in generation BEFORE the round-trip. If a fresh sign-in
+    // bumps it while we're in flight, this refresh is stale and must not write
+    // (audit #2 single-process late-response race).
+    const epochAtStart = readSignInEpoch();
+
     const res = await fetch(`${proxyBaseUrl()}/github/app/token`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
     if (res.status === 503) {
-      clearManagedGithubState();
+      if (readSignInEpoch() === epochAtStart) clearManagedGithubState();
       return;
     }
     if (!res.ok) return;
@@ -95,6 +102,12 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
     // The verified subject is the ONLY identity we trust here. No client fallback.
     const owner = typeof data.ownerClerkUserId === 'string' ? data.ownerClerkUserId.trim() : '';
     if (!owner) return;
+
+    // Staleness gate: a fresh sign-in during the round-trip means THIS refresh is
+    // for a now-superseded session. Bail before touching any state — otherwise a
+    // late B-refresh would clobber A's freshly-synced token (audit #2). Node's
+    // single thread makes this check→write sequence atomic within the process.
+    if (readSignInEpoch() !== epochAtStart) return;
 
     // Owner change on this desktop → drop the previous user's token immediately.
     const priorOwner = readManagedGithubState()?.ownerClerkUserId;
@@ -200,6 +213,9 @@ export async function POST(request: Request) {
       // (audit #2). Wipe it + the identity anchor now; the follow-up license
       // sync repopulates for the VERIFIED new user (or leaves nothing → the
       // broker fails closed). Cheap: the token is re-minted within the hour.
+      // Bump the sign-in generation so any prior user's in-flight refresh that
+      // completes after this point is detected as stale and dropped.
+      bumpSignInEpoch();
       clearManagedGithubState();
       clearActiveIdentity();
       return NextResponse.json({ ok: true });
