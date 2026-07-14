@@ -142,17 +142,26 @@ export async function fetchFixedManifest(now: number = Date.now()): Promise<Fixe
  */
 export function matchReceipts(
   manifest: FixedEntry[],
-  reports: { id: string; ts: number }[],
+  reports: { id: string; ts: number; title?: string }[],
   seen: Set<string>,
 ): FixReceipt[] {
-  const mine = new Map(reports.map((r) => [r.id.toUpperCase(), r.ts]));
+  const mine = new Map(reports.map((r) => [r.id.toUpperCase(), r]));
 
   const receipts: FixReceipt[] = [];
   for (const entry of manifest) {
     if (seen.has(entry.id)) continue;
-    const reportedAt = mine.get(entry.id);
-    if (reportedAt === undefined) continue; // somebody else's report
-    receipts.push({ ...entry, reportedAt });
+    const own = mine.get(entry.id);
+    if (!own) continue; // somebody else's report
+
+    // Show them THEIR OWN WORDS. The manifest title is the sanitized line we
+    // publish to the world; this machine's ledger still has the raw text they
+    // typed, and "you reported this — <what you actually said>" is the whole
+    // point of a receipt. Fall back to the public title if the local one is gone.
+    receipts.push({
+      ...entry,
+      title: own.title?.trim() || entry.title,
+      reportedAt: own.ts,
+    });
   }
   // Most recently filed first — the freshest one is the one they remember.
   return receipts.sort((a, b) => b.reportedAt - a.reportedAt);

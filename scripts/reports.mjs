@@ -35,6 +35,7 @@ import {
   recordStatus,
 } from './lib/fixed-reports.mjs';
 import { syncReports } from './sync-reports.mjs';
+import { publicTitle } from './lib/sanitize-title.mjs';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -208,7 +209,22 @@ async function annotate(id, { status, note }) {
     process.exit(1);
   }
 
-  recordStatus({ id: upper, status: status ?? null, note: note ?? null, ts: Date.now() });
+  // A public status puts this report's title in front of the world, so clean it
+  // now — at the moment we decide to publish, not at ship time.
+  let cleaned = null;
+  if (status && PUBLIC_STATUSES.has(status)) {
+    const { title, via } = await publicTitle(report.title);
+    cleaned = title;
+    if (via === 'redact') console.warn(`  ${DIM}(title polish unavailable — the redacted text will publish)${RESET}`);
+  }
+
+  recordStatus({
+    id: upper,
+    status: status ?? null,
+    note: note ?? null,
+    ...(cleaned ? { publicTitle: cleaned } : {}),
+    ts: Date.now(),
+  });
   console.log(`${upper} → ${status ?? 'note added'}`);
   if (note) console.log(`  ${DIM}${note}${RESET}`);
 
@@ -219,6 +235,7 @@ async function annotate(id, { status, note }) {
 
   if (status && PUBLIC_STATUSES.has(status)) {
     console.log(`\n  This reaches the reporter in-app on the next release.`);
+    if (cleaned && cleaned !== report.title) console.log(`  ${DIM}published as: ${cleaned}${RESET}`);
     if (status === 'needs-info' && !note) {
       console.warn(`  ⚠ needs-info with no note says "we need something" without saying WHAT. Add --note.`);
     }

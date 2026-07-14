@@ -21,6 +21,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { redact } from './sanitize-title.mjs';
 
 export const MANIFEST_SCHEMA = 1;
 
@@ -85,6 +86,7 @@ export function readStatus() {
         const id = String(event.id).toUpperCase();
         const current = byId.get(id) ?? { status: 'open', notes: [] };
         if (event.status) current.status = event.status;
+        if (event.publicTitle) current.publicTitle = event.publicTitle;
         if (event.note) current.notes.push({ note: event.note, ts: event.ts, status: event.status ?? null });
         current.ts = event.ts;
         byId.set(id, current);
@@ -256,9 +258,22 @@ export function resolveNewFixes(range, version) {
  * GitHub-handle list to every install would be a needless identity leak.
  */
 export function buildManifest(published, generatedAt, { status = readStatus(), reports = readLedger() } = {}) {
+  // FINAL GATE. Every string leaving here lands on a world-readable GitHub URL,
+  // so redact() runs unconditionally on the way out — even on text a caller
+  // already sanitized. Sanitization upstream is the polish; this is the guard,
+  // and it must not depend on any caller remembering to call it.
+  const safe = (text) => redact(text ?? '');
+
   const fixed = published
     .filter((entry) => entry.id && entry.title && entry.version)
-    .map((entry) => ({ id: entry.id, title: entry.title, version: entry.version, status: 'fixed' }));
+    .map((entry) => ({
+      id: entry.id,
+      // publicTitle is the model-cleaned line; the raw title is a fallback that
+      // still goes through redact(). Raw prose never ships as-is.
+      title: safe(entry.publicTitle || entry.title),
+      version: entry.version,
+      status: 'fixed',
+    }));
 
   // Asks ride along with the wins. A reporter whose bug we cannot reproduce hears
   // "we looked at this, can you tell us X" instead of silence — which is the whole
@@ -272,13 +287,13 @@ export function buildManifest(published, generatedAt, { status = readStatus(), r
     const report = reports.get(id);
     if (!report?.title) continue;
     const latest = [...state.notes].reverse().find((n) => n.note);
+    if (!latest?.note) continue;                   // an ask with nothing to ask is worse than silence
     asks.push({
       id,
-      title: report.title,
+      title: safe(state.publicTitle || report.publicTitle || report.title),
       version: report.version ?? 'unknown',
       status: state.status,
-      // The note IS the ask — without it the card has nothing to say.
-      ...(latest?.note ? { note: latest.note } : {}),
+      note: safe(latest.note),                     // we wrote it, but we type paths too
     });
   }
 

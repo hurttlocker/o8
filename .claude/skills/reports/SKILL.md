@@ -53,6 +53,24 @@ npm run reports -- status FYPPHK wont-fix --note "by design — the menu stays f
 
 Every note is mirrored to a **thread on the original report** in the intake channel, so the trail lives where the report does and survives this machine.
 
+### Nothing raw ever goes public
+
+The report's private half — **screenshot, crash traces, repo paths, OS** — lives only in the intake channel, which denies `@everyone`. It never goes anywhere else.
+
+The reporter's **prose** is the part that used to leak: it was republished verbatim to `#fixed` **and to `fixed.json`, a world-readable GitHub URL**. So before anything is published, the title is sanitized:
+
+1. `redact()` — deterministic. Strips paths, emails, URLs, IPs, @handles, keys. **Always runs.**
+2. A **free** model (`openai/gpt-oss-20b:free`, $0) rewrites the redacted text into a neutral bug title.
+
+The model is the polish, never the guard — if OpenRouter is down we publish the redacted text, **never the raw text**. `buildManifest` redacts unconditionally on the way out as a final gate, so raw prose physically cannot reach the manifest even if an upstream path forgets.
+
+```
+raw    (private):  "the diff panel shits itself when I open /Users/bob/clients/acme-secret"
+public (#fixed):   "Diff panel crashes when opening file"
+```
+
+The **reporter still sees their own words** — their app reads the raw title from its own local ledger and only falls back to the public one. They get "you reported this — <what you actually said>"; the world gets the clean line.
+
 ### What the reporter actually sees
 
 The fix manifest is a **public** download, so we publish **wins and asks — never wounds**:
