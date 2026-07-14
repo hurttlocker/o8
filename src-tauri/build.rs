@@ -309,19 +309,25 @@ fn build_speech_recognizer() {
           );
         }
 
-        // In release mode, also create the triple-suffixed copy that Tauri's
-        // externalBin expects for the CURRENT cargo TARGET. The per-arch
-        // copies made above already cover both triple paths directly; this
-        // handles the case where the canonical Cargo target triple may differ
-        // from "<arch>-apple-darwin" (e.g. with version suffix).
+        // In release mode the sidecar Tauri bundles for the CURRENT cargo
+        // target is the UNIVERSAL fat binary, not the thin current-arch
+        // slice. o8 ships one x86_64 build to every Mac (release.mjs points
+        // darwin-aarch64 at the same artifact), so with a thin sidecar every
+        // Apple Silicon Mac ran the speech helper under Rosetta — where the
+        // SFSpeechRecognizer client silently fails (the 2026-07-13 M4
+        // "waveform moves, zero partials" diagnosis). A fat sidecar costs
+        // ~200KB and lets exec pick the NATIVE arm64 slice on AS (child
+        // processes don't inherit the parent's Rosetta mode) while Intel
+        // keeps the identical x86_64 slice it runs today.
         let arch_prefix = cargo_target.split('-').next().unwrap_or("aarch64");
         let canonical_arch_bin =
           helpers_dir.join(format!("speech_recognizer-{arch_prefix}-apple-darwin"));
         let sidecar = helpers_dir.join(format!("speech_recognizer-{cargo_target}"));
-        // Only copy if the canonical path differs from the sidecar path
-        // (they are the same when cargo_target == "<arch>-apple-darwin").
+        let _ = copy_if_changed(&swift_bin, &canonical_arch_bin);
+        codesign_if_needed(&canonical_arch_bin, HELPER_IDENTIFIER);
         if canonical_arch_bin != sidecar {
-          let _ = copy_if_changed(&canonical_arch_bin, &sidecar);
+          let _ = copy_if_changed(&swift_bin, &sidecar);
+          codesign_if_needed(&sidecar, HELPER_IDENTIFIER);
         }
       }
 
