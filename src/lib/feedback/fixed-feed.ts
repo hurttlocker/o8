@@ -25,10 +25,20 @@ const MANIFEST_URL = 'https://github.com/hurttlocker/o8-releases/releases/latest
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // the manifest only changes on release
 const FETCH_TIMEOUT_MS = 8000;
 
+/**
+ * `fixed` is a win; `needs-info` is an ask ("we looked, can you tell us X?").
+ * Wounds — wont-fix, cant-reproduce, attempted — are never published: a public
+ * list of what we won't fix is the rot board we refused to build.
+ */
+export type ReceiptStatus = 'fixed' | 'needs-info';
+
 export interface FixedEntry {
   id: string;
   title: string;
   version: string;
+  status: ReceiptStatus;
+  /** For needs-info, the ask itself. Without it the card has nothing to say. */
+  note?: string;
 }
 
 /** A fix for a report THIS machine filed, that the operator hasn't seen yet. */
@@ -81,10 +91,19 @@ function parseManifest(payload: unknown): FixedEntry[] {
   const out: FixedEntry[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const { id, title, version } = item as Record<string, unknown>;
-    if (typeof id === 'string' && typeof title === 'string' && typeof version === 'string' && id && title) {
-      out.push({ id: id.toUpperCase(), title, version });
-    }
+    const { id, title, version, status, note } = item as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof title !== 'string' || typeof version !== 'string' || !id || !title) continue;
+    // The first shipped manifest predates `status` — those entries are all fixes.
+    const resolved: ReceiptStatus = status === 'needs-info' ? 'needs-info' : 'fixed';
+    // An ask with nothing to ask for is worse than silence — drop it.
+    if (resolved === 'needs-info' && typeof note !== 'string') continue;
+    out.push({
+      id: id.toUpperCase(),
+      title,
+      version,
+      status: resolved,
+      ...(typeof note === 'string' && note ? { note } : {}),
+    });
   }
   return out;
 }

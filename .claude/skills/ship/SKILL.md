@@ -23,6 +23,16 @@ pgrep -fl "npm run ship|tauri build|notarytool" && echo "SHIP ALREADY RUNNING �
 
 If one is running: do not start a second. Wait for it or surface to Q. (Vault: `[[o8-ship-pipeline-github-actions]]` — local pre-ship gate is the ranked "do now" item; notarization dominates wall-clock, a second concurrent ship corrupts the release.)
 
+## Before you bump: check the user bug queue
+
+```bash
+npm run reports
+```
+
+Real users filed these from the app. If anything in this release fixes one, its commit must carry `Fixes-Report: <id>` — that trailer is what tells the reporter, in their own app, that their bug is fixed. Miss it and they never find out. **Q will not remember the ids; you must.** Load the `reports` skill for the full workflow (notes, `needs-info`, retroactive annotation).
+
+Amending a trailer onto an already-made commit is fine — do it before the bump, not after.
+
 ## Ship sequence
 
 1. Collision gate (above) must print "clear to ship".
