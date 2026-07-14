@@ -180,6 +180,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
         label: tab.label,
         kind: tab.kind,
         sessionKey: tab.chatSessionKey,
+        orchestratorThreadId: tab.orchestratorThreadId,
       })),
       activeTabId: deps.activeTabId,
     }),

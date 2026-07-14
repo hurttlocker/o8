@@ -12,6 +12,15 @@ import {
 import { HISTORY_ROW_TONES } from './constants';
 import type { ChatHistoryItem, HistoryRowTone } from './types';
 
+export function resolveRailActiveSessionKey(
+  activeSessionKey: string | null | undefined,
+  focusedTab?: { kind: string; orchestratorThreadId?: string | null } | null,
+): string | null {
+  if (focusedTab?.kind !== 'orchestrator') return activeSessionKey ?? null;
+  const threadId = focusedTab.orchestratorThreadId?.trim();
+  return threadId ? `llm-chat:${threadId}` : null;
+}
+
 /**
  * ShinyText text shimmer (reactbits mechanic, Q pick 2026-07-14): glyphs keep
  * a translucent `base` fill so they are ALWAYS legible, and a narrow

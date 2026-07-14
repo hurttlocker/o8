@@ -183,7 +183,13 @@ export interface TerminalTabHandle {
   focusTabAtIndex: (oneBasedIndex: number) => boolean;
   closeActiveTab: () => boolean;
   getTabsSnapshot: () => {
-    tabs: Array<{ id: string; label: string; kind: TerminalTab['kind']; sessionKey?: string }>;
+    tabs: Array<{
+      id: string;
+      label: string;
+      kind: TerminalTab['kind'];
+      sessionKey?: string;
+      orchestratorThreadId?: string;
+    }>;
     activeTabId: string;
   };
   setOrchestrationPacket: (tabId: string, packet: WorkspaceOrchestrationPacketBadge | null) => boolean;
