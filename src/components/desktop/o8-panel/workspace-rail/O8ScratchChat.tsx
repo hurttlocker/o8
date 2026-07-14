@@ -1138,42 +1138,6 @@ export function O8ScratchChat({
                 <PaperPlaneTilt size={14} weight="fill" />
               </button>
             </div>
-
-            {/* Cost-shape legend (#1125). Send/Summary/Orchestrator ride the
-                free OpenRouter chat models; Ask Brain runs the cortex_ask
-                pipeline (paid grok-4.1-fast for classify+retrieve, Claude
-                Sonnet via your Claude Code subscription for narrative answers).
-                Tiny + faint by design — informative without competing with
-                the composer. */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                marginTop: 6,
-                fontFamily: UI_FONT,
-                fontSize: 9.5,
-                fontWeight: 260,
-                color: 'var(--t-text-faint, #94a3b8)',
-                letterSpacing: '-0.4px',
-              }}
-            >
-              <span>Send · Summary · Orchestrator: free models</span>
-              <span style={{ opacity: 0.5 }}>·</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <span
-                  aria-hidden
-                  style={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: '50%',
-                    background: 'var(--t-brand-orange, #FF5A1F)',
-                    flexShrink: 0,
-                  }}
-                />
-                Ask Brain: grok + your Claude sub
-              </span>
-            </div>
           </div>
         </div>,
         document.body,
