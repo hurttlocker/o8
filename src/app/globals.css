@@ -1839,33 +1839,37 @@ button.workflow-file-item.workflow-file-item-active {
   50%      { opacity: 0.55; }
 }
 
-/* ThoughtBlock "Thinking" shimmer (turn grammar). A gradient overlay band swept
-   across the label by `transform` ONLY — never background-position. Per the
-   o8-sweep-circle note above, the gradient rasterizes once into a layer texture
-   and is then just translated, so this is compositor-only (no per-frame raster).
-   The label clips the band via overflow:hidden. */
+/* ThoughtBlock "Thinking" / ShimmerLine sheen (turn grammar). The gradient is
+   CLIPPED TO THE GLYPHS (background-clip:text) so the highlight travels
+   through the letters — the previous overlay-band approach painted a light
+   rectangle sweeping OVER the whole row, which read as a glaring smudge on
+   dark glass (Q report 2026-07-14). Trade-off: background-position animates
+   with per-frame raster (not compositor-only like the old transform band),
+   but the painted area is a single ≤20px text line and reduced-motion
+   disables it entirely — the "never animate paint props" doctrine targets
+   large surfaces. Base ink --t-text-secondary, sweep peaks at full --t-text. */
 @keyframes o8-thought-shimmer-sweep {
-  0%   { transform: translateX(-160%); }
-  100% { transform: translateX(320%); }
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0% 0; }
 }
 .o8-thought-shimmer {
   overflow: hidden;
-  isolation: isolate;
-}
-.o8-thought-shimmer-band {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 60%;
-  height: 100%;
-  pointer-events: none;
-  background: linear-gradient(
+  /* 300% size + position within [0%,100%] keeps the gradient covering every
+     glyph at every frame — with clipped text, an uncovered glyph paints
+     NOTHING (live-hit: only "Ru" of "Running" rendered at the sweep's
+     extremes with a 220% gradient swept past full coverage). The narrow
+     45→55% highlight still fully enters and exits the visible span. */
+  background-image: linear-gradient(
     100deg,
-    transparent 30%,
-    color-mix(in srgb, var(--t-text) 55%, transparent) 50%,
-    transparent 70%
+    var(--t-text-secondary) 45%,
+    var(--t-text) 50%,
+    var(--t-text-secondary) 55%
   );
-  transform: translateX(-160%);
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   animation: o8-thought-shimmer-sweep 1.9s ease-in-out infinite;
 }
 
@@ -2256,7 +2260,9 @@ button.workflow-file-item.workflow-file-item-active {
   }
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
-  .o8-thought-shimmer-band { animation: none !important; opacity: 0 !important; }
+  /* Sheen freezes to plain secondary ink — the gradient's resting frame
+     paints the whole line in --t-text-secondary (highlight parked off-glyph). */
+  .o8-thought-shimmer { animation: none !important; }
   .o8-orbit { animation: none !important; }
   /* Loaders freeze to a legible resting frame — no motion, cells still read. */
   .o8-loader-bitfield > i,
