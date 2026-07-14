@@ -1343,6 +1343,20 @@ fn spawn_bundled_ws_server(
         for (k, v) in ai_keys {
             ws_cmd.env(k, v);
         }
+        // The ws-server hosts the in-app orchestrator sessions, and a turn
+        // GENERATES the orchestrator's Claude MCP config
+        // (orchestrator-session.ts → buildToolRegistry → resolve*McpServerPath).
+        // That resolver prefers the bundled .mjs only when O8_BUNDLED_MCP_PATH is
+        // set — otherwise it falls back to a dev `tsx …/*.ts` path that does NOT
+        // exist in the packaged bundle, so the orchestrator launches with ZERO
+        // o8/cortex tools ("MCP tool bridge is not live" + FALSE-DISPATCH). The
+        // next-server child gets these vars (~line 4975); the ws-server child
+        // needs the same parity or the in-app orchestrator is toothless.
+        let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
+        if bundled_operator_mcp.exists() {
+            ws_cmd.env("O8_BUNDLED_MCP_DIR", server_dir);
+            ws_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
+        }
         match ws_cmd
             .stdout(child_stdio(ws_log))
             .stderr(child_stdio(ws_log))
