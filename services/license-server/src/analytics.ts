@@ -325,7 +325,13 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       f.gh                       as github
     from agg a
     left join ( select sub, max(plan) as plan from proxy_usage group by sub ) pl on pl.sub = a.ident
-    left join ( select clerk_user_id, perks_json->>'displayName' as gh from founders where status = 'active' ) f
+    left join (
+      -- displayName is only set when checkout metadata carried a handle; the
+      -- identity backfill writes github_login instead. Fall back so a founder
+      -- whose checkout lookup failed still labels their row (ghost-founder fix).
+      select clerk_user_id, coalesce(nullif(perks_json->>'displayName', ''), github_login) as gh
+      from founders where status = 'active'
+    ) f
       on f.clerk_user_id = a.ident
     order by (a.calls + a.events) desc
     limit 20
