@@ -115,9 +115,12 @@ export function GitHubConnectionSections({
     );
   }
 
+  // No installation yet → the BYO-app creation page. Never link a specific
+  // app's settings page: those are only visible to the app's owner, so any
+  // other account gets GitHub's 404 (report BBX85E).
   const installUrl = broker?.installationId
     ? `https://github.com/settings/installations/${broker.installationId}`
-    : 'https://github.com/settings/apps/cortex-dev-agent';
+    : 'https://github.com/settings/apps/new';
 
   return (
     <>
@@ -406,7 +409,7 @@ export function GitHubConnectionSections({
             ? `Installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repository' : 'repositories'}.`
             : appConfigured
               ? 'Finish the checks above to bring the App online.'
-              : 'The App lets o8 read issues, open pull requests, and act on your behalf.'}
+              : 'Optional: create your own GitHub App for higher rate limits, then point o8 at it with GITHUB_APP_ID and ~/.o8/github-app.pem. Signing in above is all most setups need.'}
         </GroupFootnote>
       </section>
     </>
