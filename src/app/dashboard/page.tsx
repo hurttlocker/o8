@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { isTauri, browserViewHide } from '@/lib/tauri/bridge';
+import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
@@ -3788,7 +3788,7 @@ function DashboardInner() {
   }, [openRightPanelFromUser]);
 
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!canUseTauriEvents()) return;
     const breakdown = parkedLanes.reduce<Record<string, number>>((acc, lane) => {
       acc[lane.status] = (acc[lane.status] ?? 0) + 1;
       return acc;
@@ -4193,7 +4193,7 @@ function DashboardInner() {
   // click stay in lockstep. voice_settings never arrives here (Rust opens the
   // standalone window directly).
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!canUseTauriEvents()) return;
     let unlisten: (() => void) | null = null;
     let disposed = false;
     const O8_TAB_SURFACES: Record<string, O8Tab> = {
@@ -4291,7 +4291,7 @@ function DashboardInner() {
   // overlay in THIS webview, not a separate window, so it can't be opened from
   // Rust directly). Toggling matches the in-app ⌘, binding above. Tauri-only.
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!canUseTauriEvents()) return;
     let unlisten: (() => void) | null = null;
     let disposed = false;
     import('@tauri-apps/api/event')
@@ -4313,7 +4313,7 @@ function DashboardInner() {
   // frontmost app; we read `window.getSelection()` here and speak it through the
   // native TTS engine. For other apps the Rust side grabs the selection itself.
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!canUseTauriEvents()) return;
     let unlisten: (() => void) | null = null;
     let disposed = false;
     import('@tauri-apps/api/event')

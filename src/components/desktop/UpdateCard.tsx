@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
+import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import { installUpdateAndRestart, RELEASE_URL } from '@/lib/app-update/client-restart';
 
 interface UpdateInfo {
@@ -199,7 +199,9 @@ export function UpdateCard() {
   }, []);
 
   useEffect(() => {
-    if (!isTauri()) return;
+    // Main-window only — these update listeners in the native browser-view
+    // would ACL-crash (see canUseTauriEvents).
+    if (!canUseTauriEvents()) return;
     let cancelled = false;
     let availableUnlisten: Promise<() => void> | null = null;
     let clearUnlisten: Promise<() => void> | null = null;

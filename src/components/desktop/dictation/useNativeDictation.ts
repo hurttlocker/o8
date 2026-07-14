@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
+import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import type { DictationSnapshot, DictationStartOptions, DictationState } from './types';
 
 const SUCCESS_FLASH_MS = 600;
@@ -252,7 +252,9 @@ export function useNativeDictation() {
 
   // Install the o8:stt-event listener once.
   useEffect(() => {
-    if (!isTauri()) return;
+    // Main-window only — this listener in the native browser-view would
+    // ACL-crash (see canUseTauriEvents).
+    if (!canUseTauriEvents()) return;
     let disposed = false;
     import('@tauri-apps/api/event')
       .then(({ listen }) => listen<SttEventPayload>('o8:stt-event', (e) => handleEvent(e.payload)))

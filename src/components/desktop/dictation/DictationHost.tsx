@@ -23,7 +23,7 @@ import {
 import { DictationPill } from './DictationPill';
 import { useDictation } from './useDictation';
 import { isNativeDictationAvailable, useNativeDictation } from './useNativeDictation';
-import { isTauri } from '@/lib/tauri/bridge';
+import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import { useSymonEditBridge } from './useSymonEditBridge';
 import type { DictationStartOptions } from './types';
 
@@ -97,7 +97,9 @@ export function DictationHost({ children }: DictationHostProps) {
   // sticky-registered composer's fill → insertText at the focused editable →
   // ask Rust for a real synthetic paste as the LAST resort.
   useEffect(() => {
-    if (!isTauri()) return;
+    // Main-window only (canUseTauriEvents) — the same listener mounted in the
+    // native browser-view would ACL-crash on emit/listen.
+    if (!canUseTauriEvents()) return;
     let disposed = false;
     let unlistenFn: (() => void) | null = null;
     import('@tauri-apps/api/event')
