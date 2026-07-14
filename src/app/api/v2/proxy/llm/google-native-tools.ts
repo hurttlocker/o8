@@ -134,6 +134,8 @@ interface GoogleStreamOptions {
   model: string;
   scopedRepoRoot: string | null;
   tabId: string;
+  /** Restrict attached tools to this allowlist of names. Absent = all tools. */
+  toolNames?: string[];
 }
 
 function buildGoogleUrl(model: string, apiKey: string) {
@@ -149,7 +151,18 @@ function jsonError(message: string, status: number) {
 
 const PLAN_MODE_NOTE = '\n\nIMPORTANT: You are in PLAN mode. You have NO tools available. Do not write `<execute_tool>` markers, function calls, or pretend to invoke tools. Reason and answer using only the conversation context. If the user asks for something that needs a tool, explain what you would do and ask them to switch to Code mode.';
 
-function buildGoogleRequest(messages: Message[], disableTools: boolean) {
+/** Filter the tool declarations to an allowlist of tool names (e.g. the operator
+ *  rail restricts the o8 model to file-editing tools — no shell/github). Absent =
+ *  all tools (the generic google-provider path is unchanged). */
+function selectToolDeclarations(toolNames?: string[]) {
+  if (!toolNames) return GEMINI_TOOL_DECLARATIONS;
+  const allow = new Set(toolNames);
+  return [{
+    functionDeclarations: GEMINI_TOOL_DECLARATIONS[0].functionDeclarations.filter((d) => allow.has(d.name)),
+  }];
+}
+
+function buildGoogleRequest(messages: Message[], disableTools: boolean, toolNames?: string[]) {
   const baseSystem = messages.find((message) => message.role === 'system')?.content;
   const systemMessage = disableTools && baseSystem ? `${baseSystem}${PLAN_MODE_NOTE}` : baseSystem;
   const contents: GoogleContent[] = messages
@@ -174,7 +187,7 @@ function buildGoogleRequest(messages: Message[], disableTools: boolean) {
       generationConfig: {
         thinkingConfig: { includeThoughts: true },
       },
-      ...(!disableTools ? { tools: GEMINI_TOOL_DECLARATIONS } : {}),
+      ...(!disableTools ? { tools: selectToolDeclarations(toolNames) } : {}),
     } satisfies Record<string, unknown>,
   };
 }
@@ -349,7 +362,7 @@ async function consumeGoogleStream(
 }
 
 export async function createGoogleToolResponseStream(options: GoogleStreamOptions): Promise<Response> {
-  const { body, contents } = buildGoogleRequest(options.messages, Boolean(options.disableTools));
+  const { body, contents } = buildGoogleRequest(options.messages, Boolean(options.disableTools), options.toolNames);
   const initialFetch = await fetchGoogleStream(options.apiKey, options.model, body);
   if (!initialFetch.ok) {
     return jsonError(initialFetch.message, initialFetch.status);
@@ -417,6 +430,8 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
               model: activeModel,
               repoRoot: options.scopedRepoRoot,
               tabId: options.tabId,
+              // Enforce the allowlist at execution, not just advertisement.
+              allowedTools: options.toolNames,
             });
 
             enqueue({

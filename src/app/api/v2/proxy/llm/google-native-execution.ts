@@ -61,9 +61,22 @@ function resolveProjectPath(repoRoot: string | null, inputPath: string): { resol
   if (relativePath.startsWith('..') || relativePath === '..') {
     return { error: 'Path must stay within the project directory.' };
   }
+  const normalized = normalizePathForDisplay(repoRoot, resolvedPath);
+  // Block sensitive files (mirrors tools.ts validatePath): the Gemini rail's
+  // file tools must not touch secrets or git plumbing. Without this a
+  // create_file({file_path:'.env'}) or '.git/hooks/pre-commit' would land —
+  // caught by the 2026-07-14 adversarial review. Case-insensitive: macOS APFS
+  // is case-insensitive by default, so '.ENV' resolves to the same inode.
+  const lower = normalized.toLowerCase();
+  if (lower.includes('.env') && !lower.includes('.env.example')) {
+    return { error: 'Cannot modify .env files.' };
+  }
+  if (lower === '.git' || lower.startsWith('.git/')) {
+    return { error: 'Cannot modify the .git directory.' };
+  }
   return {
     resolvedPath,
-    relativePath: normalizePathForDisplay(repoRoot, resolvedPath),
+    relativePath: normalized,
   };
 }
 
@@ -674,8 +687,20 @@ async function executeGithub(argumentsValue: Record<string, unknown>, repoRoot: 
 export async function executeNativeTool(
   toolName: string,
   argumentsValue: Record<string, unknown>,
-  options: { model: string; repoRoot: string | null; tabId: string },
+  options: { model: string; repoRoot: string | null; tabId: string; allowedTools?: string[] },
 ): Promise<NativeToolResult> {
+  // Server-side allowlist ENFORCEMENT (not just advertisement). Filtering the
+  // declared tools is a soft guarantee — a model (esp. a weak free-tier one, or
+  // one nudged by injected file content) can still EMIT an undeclared call.
+  // Reject anything outside the caller's allowlist before it runs. Closes the
+  // github/shell `pr merge` path (2026-07-14 adversarial review round 2).
+  if (options.allowedTools && !options.allowedTools.includes(toolName)) {
+    return {
+      status: 'error',
+      output: `Tool "${toolName}" is not available in this mode.`,
+      response: { status: 'error', message: `Tool "${toolName}" is not permitted in this mode.` },
+    };
+  }
   if (toolName === 'read_file') {
     return executeReadFile(argumentsValue, options.repoRoot);
   }
