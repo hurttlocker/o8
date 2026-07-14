@@ -202,7 +202,14 @@ const RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH = 1180;
 const RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH = 900;
 const RESPONSIVE_COMPACT_SHELL_WIDTH = 420;
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
-const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
+// The right panel opens on Browser — a calm launcher ("get to anything") rather
+// than the dense Activity feed, which read as overwhelming (operator 2026-07-14).
+// Whatever the user switches to persists + restores; this is only the first-run
+// default. LEGACY was 'activity' — the one-time migration below moves users off
+// the auto-persisted old default without clobbering a genuine explicit choice.
+const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'browser';
+const LEGACY_DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
+const O8_ACTIVE_TAB_PREF_VERSION = '2';
 
 /** Image extensions that open in the ImagePreview inspector ('image' tab kind)
  *  instead of the Monaco FileViewer — so a Finder-opened PNG renders instead of
@@ -1203,6 +1210,19 @@ function DashboardInner() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(O8_ACTIVE_TAB_STORAGE_KEY);
+      // One-time migration to the Browser default: existing users carry an
+      // auto-persisted value from the old 'activity' default that nobody
+      // explicitly chose. Bump the pref version once — if the saved tab is the
+      // legacy default (or absent), adopt the new default; a genuine non-default
+      // choice (e.g. workspace) is preserved. After this, normal persistence.
+      const versionKey = `${O8_ACTIVE_TAB_STORAGE_KEY}:v`;
+      if (window.localStorage.getItem(versionKey) !== O8_ACTIVE_TAB_PREF_VERSION) {
+        window.localStorage.setItem(versionKey, O8_ACTIVE_TAB_PREF_VERSION);
+        if (!raw || normalizeO8ActiveTab(raw) === LEGACY_DEFAULT_O8_ACTIVE_TAB) {
+          window.localStorage.removeItem(O8_ACTIVE_TAB_STORAGE_KEY);
+          return; // keep state at the new DEFAULT_O8_ACTIVE_TAB (browser)
+        }
+      }
       const migrated = normalizeO8ActiveTab(raw);
       if (migrated) setO8ActiveTab(migrated);
       if (raw && migrated && raw !== migrated) {
