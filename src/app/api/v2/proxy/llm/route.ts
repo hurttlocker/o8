@@ -30,6 +30,7 @@ import {
   resolveApiKey,
   type Message,
 } from './provider-config';
+import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 import { createGoogleToolResponseStream } from './google-native-tools';
 import { streamOpenRouterFallback } from './operator-fallback';
 
@@ -419,6 +420,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
     const geminiKey = process.env.GOOGLE_AI_API_KEY ?? null;
     const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
+    // Founder/paid managed-inference route (the zero-setup perk): the same
+    // `/v1/inference` proxy the Brain uses, verified to stream OpenRouter-format
+    // SSE for the free chain. Lets a signed-in founder run the o8 model with NO
+    // local keys — the packaged app has none, which is why the model was dead
+    // on every real install (report BCJBBJ). Only take the proxy route here;
+    // local/BYO-key routes are handled by the env-key paths below.
+    const inferenceRoute = await resolveOpenRouterRoute().catch(() => null);
+    const operatorProxy = inferenceRoute?.via === 'proxy'
+      ? { url: inferenceRoute.url, headers: inferenceRoute.headers }
+      : null;
     const paidPlan = getEntitlementSync().plan !== 'free';
     // Absent tier = auto: founders default High (Gemini), free defaults Low.
     const wantsLow = requestedThinkingEffort === 'low';
@@ -462,11 +473,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       geminiQuotaExhausted = true;
     }
 
-    if (openRouterKey) {
+    // Free chain — runs when there's ANY way to reach it: a founder's managed
+    // proxy (zero keys), or a direct OpenRouter key (dev box / BYOK). The proxy
+    // wins when present; `endpoint` overrides the destination so `apiKey` is
+    // unused on that path.
+    if (operatorProxy || openRouterKey) {
       let lastFailure: Response | null = null;
       for (const freeModel of OPERATOR_FREE_OPENROUTER_MODELS) {
         const response = await streamOpenRouterFallback({
-          apiKey: openRouterKey,
+          apiKey: openRouterKey ?? '',
+          endpoint: operatorProxy,
           messages,
           model: freeModel,
           auth,
@@ -489,7 +505,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         lastFailure = response;
       }
       if (!geminiKey) {
-        return lastFailure ?? jsonError('o8 Operator unavailable: every free model failed.', 503);
+        return lastFailure ?? jsonError('The o8 model is temporarily unavailable — every free model failed to respond. Try again in a moment.', 503);
       }
     }
 
@@ -510,8 +526,11 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       });
     }
 
+    // No managed proxy (not signed in as a founder) and no local key. The o8
+    // model needs an inference source — never leak env-var names to the user
+    // (report BCJBBJ showed a raw "set OPENROUTER_API_KEY…" dev string).
     return jsonError(
-      'o8 Operator unavailable: set OPENROUTER_API_KEY (free chain) or GOOGLE_AI_API_KEY.',
+      'The free o8 model needs a connection: sign in with your founder account to use o8-managed inference, or add your own model key in Settings → Keys.',
       503,
     );
   }
