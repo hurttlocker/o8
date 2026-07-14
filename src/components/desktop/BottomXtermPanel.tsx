@@ -39,7 +39,15 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, readOnly = false },
   ref,
 ) {
-  const { themeId } = useTheme();
+  const { themeId, surface } = useTheme();
+  // Glass surface: the bottom terminal reads as part of the chrome, so it
+  // bleeds the vibrancy like every other glass panel instead of painting a
+  // solid near-black slab (Q ruling 2026-07-14). Solid surface keeps the
+  // opaque paper terminal. Kept in a ref so the init effect sees the current
+  // value without re-initializing the terminal.
+  const glass = surface === 'glass';
+  const glassRef = useRef(glass);
+  glassRef.current = glass;
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const termRef = useRef<any>(null);
@@ -117,14 +125,14 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           lineHeight: 1.35,
           cursorBlink: true,
           cursorStyle: 'block',
-          // Opaque canvas — blending against the chrome would make the
-          // terminal bleed through the glass on midnight / dark themes.
-          allowTransparency: false,
+          // Transparency follows the surface axis: glass mode blends the
+          // terminal into the vibrancy chrome; solid keeps an opaque canvas.
+          allowTransparency: true,
           allowProposedApi: true,
           scrollback: 10000,
           // Watch posture: a read-only agent-run view never captures input.
           disableStdin: readOnly,
-          theme: buildXtermTheme(),
+          theme: { ...buildXtermTheme(), ...(glassRef.current ? { background: 'rgba(0,0,0,0)' } : {}) },
         });
 
         const fitAddon = new FitAddon();
@@ -198,15 +206,17 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
     };
   }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, readOnly]);
 
-  // Live-update xterm theme when the app theme switches — no dispose/recreate.
+  // Live-update xterm theme when the app theme OR surface switches — no
+  // dispose/recreate. Glass keeps the terminal background fully transparent
+  // so the vibrancy shows through.
   useEffect(() => {
     if (!termRef.current) return;
     try {
-      termRef.current.options.theme = buildXtermTheme();
+      termRef.current.options.theme = { ...buildXtermTheme(), ...(glass ? { background: 'rgba(0,0,0,0)' } : {}) };
     } catch {
       // Terminal may have been disposed mid-update; safe to ignore.
     }
-  }, [themeId]);
+  }, [themeId, glass]);
 
   if (error) {
     return (
@@ -236,7 +246,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       width: '100%',
       display: visible ? 'flex' : 'none',
       flexDirection: 'column',
-      background: 'var(--t-terminal-bg, #16191e)',
+      background: glass ? 'transparent' : 'var(--t-terminal-bg, #16191e)',
       overflow: 'hidden',
     }}>
       {inlineImages.map((img) => (
@@ -259,7 +269,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         // height and the parent's overflow:hidden clips the bottom rows (the
         // "cut off" trust prompt). With it, the ResizeObserver re-fits the
         // xterm to the actual visible height so nothing is clipped.
-        flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', background: 'var(--t-terminal-bg, #16191e)', paddingTop: 2, paddingLeft: 2,
+        flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', background: glass ? 'transparent' : 'var(--t-terminal-bg, #16191e)', paddingTop: 2, paddingLeft: 2,
       }} />
     </div>
   );
