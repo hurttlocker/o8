@@ -12,9 +12,15 @@
  * experimental llm-chat tab as the free-test surface (operator ruling
  * 2026-07-12).
  *
- * v1 is pure conversational streaming: NO tools (`disableTools: true`), NO
- * dispatch, NO MCP. If the model is asked to do repo work it answers in text and
- * never dispatches.
+ * Founders/paid tier (Gemini 3 Flash, "High") gets the file-editing tool loop:
+ * read_file/create_file/edit_file/shell scoped to the SELECTED repo's working
+ * tree, executed server-side by the proxy's Google tool loop. Edits land in the
+ * working tree and surface in the o8 workspace diff for the operator to review +
+ * commit — Composer parity, still governed (the model never commits or merges).
+ * The free tier ("Low", OpenRouter chain) stays pure conversational streaming
+ * (NO tools) — the free models' tool-calling is unproven and that rail is
+ * tools-free. NO orchestrator dispatch, NO MCP on either tier (Q ruling
+ * 2026-07-14).
  *
  * Stateless: the proxy holds no server session, so a "session" here is just a
  * deterministic per-repo+thread name used to route WS broadcasts. Prior turns
@@ -54,6 +60,22 @@ const O8_PROMPT_BASE = [
   'edit files, or drive the repo. If the operator asks for real repo work, say plainly',
   'that the o8 model is conversational only and that they can switch the composer',
   'to Claude or Codex to dispatch actual agents. Never claim you dispatched or ran anything.',
+].join(' ');
+
+// Founders/tool-capable base — used ONLY when the file-editing tools are actually
+// attached (paid plan, High rail). The Composer contract: DO the work by calling
+// the tools, don't paste code and ask the operator to save it; edits land in the
+// working tree and surface in the o8 workspace diff for operator review.
+const O8_PROMPT_BASE_CAPABLE = [
+  'Answer concisely and helpfully.',
+  'You have file tools attached and can act on the scoped repository DIRECTLY: read',
+  'files, create new files, and edit existing files. When the operator asks you to',
+  'build, create, edit, or fix something, DO IT by calling the attached tools — never',
+  'paste a code block and tell them to save it themselves. Match each tool\'s schema',
+  'exactly. Your changes are written to the working tree and surface in the o8 workspace',
+  'diff for the operator to review and commit; you never commit, push, or merge anything',
+  'yourself — GitHub stays the operator\'s action. Confirm from the tool result before',
+  'claiming a file was written, and keep prose brief around the actions.',
 ].join(' ');
 
 const O8_PROMPT_RECURSIVE = [
@@ -115,13 +137,50 @@ Answer style:
 - Lead with the answer, omit throat-clearing, and do not restate the request.
 - A strict requested output format overrides every style preference. Return only that format, with no preface or afterword.`;
 
-function o8SystemPrompt(tier: 'low' | 'high'): string {
-  const identity = tier === 'high'
-    ? 'You are o8 — the conversational model inside the o8 control plane.'
-    : 'You are o8 — the free conversational model inside the o8 control plane.';
+/**
+ * Tier + tool-access decision for an o8 turn. Pure + exported so the
+ * security-relevant invariant is testable through the real entry point: the
+ * FREE tier must never be granted file tools. Mirrors the proxy's own
+ * Gemini-routing gate (`paidPlan && !wantsLow`, route.ts) so the prompt we send
+ * matches whether tools will actually be attached — the free OpenRouter chain
+ * is tools-free, so promising editing there would make the model hallucinate
+ * edits. Defense-in-depth: even if this returned the wrong answer, the proxy
+ * still fail-closes a free plan to the tools-free chain.
+ */
+export function o8TierAccess(
+  paidPlan: boolean,
+  thinkingEffort: OrchestratorTurnOptions['thinkingEffort'],
+  hasRepo: boolean,
+): { tier: 'low' | 'high'; toolsEnabled: boolean } {
+  const tier: 'low' | 'high' = thinkingEffort === 'high'
+    ? 'high'
+    : thinkingEffort === 'low'
+      ? 'low'
+      : paidPlan ? 'high' : 'low';
+  // Both free and founders edit files (Q ruling 2026-07-14) — tool access gates
+  // on a scoped repo, NOT the plan. `paidPlan` only picks the default rail/tier.
+  // The proxy independently fail-closes when no repo resolves, so this is the
+  // client half of a two-sided gate.
+  const toolsEnabled = hasRepo;
+  return { tier, toolsEnabled };
+}
+
+export function o8SystemPrompt(tier: 'low' | 'high', toolsEnabled: boolean, repoName = ''): string {
+  const identity = toolsEnabled
+    ? 'You are o8 — the model inside the o8 control plane, able to chat and edit the repo directly.'
+    : tier === 'high'
+      ? 'You are o8 — the conversational model inside the o8 control plane.'
+      : 'You are o8 — the free conversational model inside the o8 control plane.';
+  const base = toolsEnabled ? O8_PROMPT_BASE_CAPABLE : O8_PROMPT_BASE;
+  // Repo-awareness (Q ruling 2026-07-14): name the repo the turn is scoped to so
+  // the model can orient itself — "orchestrator light". With tools it should read
+  // real files rather than guess.
+  const repoLine = toolsEnabled && repoName
+    ? `You are scoped to the "${repoName}" repository; read real files with the file tools before making repo-specific claims — never invent file contents.`
+    : '';
   const parts = tier === 'high'
-    ? [identity, O8_PROMPT_BASE, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES]
-    : [identity, O8_PROMPT_BASE, O8_PROMPT_RECURSIVE];
+    ? [identity, base, repoLine, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES].filter(Boolean)
+    : [identity, base, repoLine, O8_PROMPT_RECURSIVE].filter(Boolean);
   const envelope = `${parts.join(' ')}\n\n${O8_CONCEPTS}`;
   return tier === 'high' ? `${envelope}\n\n${O8_PROMPT_TUNED_SLOT}` : envelope;
 }
@@ -137,6 +196,7 @@ function o8SessionName(repoPath: string, threadId?: string | null): string {
 
 async function sendToO8Orchestrator(
   sessionName: string,
+  repoPath: string,
   message: string,
   onEvent: (event: OrchestratorEvent) => void,
   options: OrchestratorTurnOptions,
@@ -155,12 +215,11 @@ async function sendToO8Orchestrator(
   // Tier mirrors the proxy's own gate: explicit effort wins, absent = plan
   // auto (founders High, free Low). The prompt must match the rail the proxy
   // will actually pick, so both resolve the same way.
-  const tier: 'low' | 'high' = options.thinkingEffort === 'high'
-    ? 'high'
-    : options.thinkingEffort === 'low'
-      ? 'low'
-      : getEntitlementSync().plan !== 'free' ? 'high' : 'low';
-  const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier) }, ...history];
+  const paidPlan = getEntitlementSync().plan !== 'free';
+  const hasRepo = Boolean(repoPath && repoPath.trim());
+  const repoName = hasRepo ? (repoPath.split('/').filter(Boolean).pop() ?? '') : '';
+  const { tier, toolsEnabled } = o8TierAccess(paidPlan, options.thinkingEffort, hasRepo);
+  const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier, toolsEnabled, repoName) }, ...history];
 
   let response: Response;
   try {
@@ -171,7 +230,13 @@ async function sendToO8Orchestrator(
         model: 'o8-operator',
         provider: 'operator',
         messages,
-        disableTools: true,
+        // Founders rail edits files directly via the proxy's server-side Google
+        // tool loop; the free rail stays tools-off. `repoPath` scopes write_file/
+        // edit_file/run_terminal_command to THIS repo's working tree (the proxy
+        // resolves it against the registry and sandboxes writes within it). Only
+        // send it when tools are on, so the free path is unchanged.
+        disableTools: !toolsEnabled,
+        ...(toolsEnabled ? { repoPath } : {}),
         // Tier gate (Q ruling 2026-07-12): High = founders rail, Low = free
         // rail. Absent = server auto by plan. The proxy enforces the plan
         // either way — this is a request, not an entitlement.
@@ -209,9 +274,11 @@ async function sendToO8Orchestrator(
   }
 
   // SSE frames: `data: {json}\n\n`, terminated by `data: [DONE]`. We map
-  // `{ type: 'content', text }` → text events and `{ type: 'error', message }`
-  // → an error event; every other frame (thinking / usage / tool_call / sources
-  // / fallback) is irrelevant to v1 conversational streaming and skipped.
+  // `content`→text, `thinking`→thinking, and the founders tool loop's
+  // `tool_use`/`tool_result` frames → the matching OrchestratorEvents so file
+  // edits render as tool pills + the "edited files" card in the transcript.
+  // `error`→error; `usage` / `fallback` / `sources` carry no transcript payload
+  // and are skipped (cost is unmetered on the operator rail).
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -226,7 +293,16 @@ async function sendToO8Orchestrator(
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6);
         if (data === '[DONE]' || data.trim() === '') continue;
-        let parsed: { type?: string; text?: unknown; message?: unknown };
+        let parsed: {
+          type?: string;
+          text?: unknown;
+          message?: unknown;
+          toolName?: unknown;
+          toolCallId?: unknown;
+          arguments?: unknown;
+          output?: unknown;
+          status?: unknown;
+        };
         try {
           parsed = JSON.parse(data);
         } catch {
@@ -234,6 +310,24 @@ async function sendToO8Orchestrator(
         }
         if (parsed.type === 'content' && typeof parsed.text === 'string') {
           if (parsed.text) onEvent({ type: 'text', text: parsed.text });
+        } else if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
+          if (parsed.text) onEvent({ type: 'thinking', text: parsed.text });
+        } else if (parsed.type === 'tool_use' && typeof parsed.toolName === 'string') {
+          onEvent({
+            type: 'tool_use',
+            id: typeof parsed.toolCallId === 'string' ? parsed.toolCallId : null,
+            name: parsed.toolName,
+            input: parsed.arguments ?? null,
+          });
+        } else if (parsed.type === 'tool_result' && typeof parsed.toolName === 'string') {
+          const output = typeof parsed.output === 'string' ? parsed.output : '';
+          onEvent({
+            type: 'tool_result',
+            id: typeof parsed.toolCallId === 'string' ? parsed.toolCallId : null,
+            name: parsed.toolName,
+            output,
+            ...(parsed.status === 'error' || /^\s*error/i.test(output) ? { isError: true } : {}),
+          });
         } else if (parsed.type === 'error') {
           onEvent({
             type: 'error',
@@ -274,6 +368,6 @@ export const o8Backend: OrchestratorBackend = {
   sendTurn(repoPath, message, onEvent, options) {
     const sessionName = o8SessionName(repoPath, options?.threadId);
     ensured.add(sessionName);
-    return sendToO8Orchestrator(sessionName, message, onEvent, options ?? {});
+    return sendToO8Orchestrator(sessionName, repoPath, message, onEvent, options ?? {});
   },
 };

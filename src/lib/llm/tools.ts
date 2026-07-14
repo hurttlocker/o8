@@ -455,11 +455,13 @@ function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT)
   if (rel.startsWith('..') || rel.startsWith('/')) {
     return { error: 'Error: Path must be within the repository' };
   }
-  // Block sensitive files
-  if (rel.includes('.env') && !rel.includes('.env.example')) {
+  // Block sensitive files. Case-insensitive: macOS APFS is case-insensitive by
+  // default, so '.ENV' resolves to the same inode as '.env'.
+  const relLower = rel.toLowerCase();
+  if (relLower.includes('.env') && !relLower.includes('.env.example')) {
     return { error: 'Error: Cannot modify .env files from chat (security)' };
   }
-  if (rel === '.git' || rel.startsWith('.git/')) {
+  if (relLower === '.git' || relLower.startsWith('.git/')) {
     return { error: 'Error: Cannot modify .git directory' };
   }
   return { resolved, rel };

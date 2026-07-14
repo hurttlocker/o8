@@ -349,12 +349,17 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const headerRepoPath = request.headers.get(LLM_REPO_PATH_HEADER)?.trim() || '';
   const requestedRepoPath = bodyRepoPath || headerRepoPath;
   let effectiveRepoRoot = process.cwd();
+  // Whether effectiveRepoRoot is a REAL registered repo vs the process.cwd()
+  // fallback. Tool writes must never target cwd (the app's own dir) — gate on
+  // this before attaching any file tools (2026-07-14 adversarial review).
+  let repoResolved = false;
   if (requestedRepoPath) {
     const resolvedRepo = await resolveRepoPathFromRegistry(requestedRepoPath);
     if (!resolvedRepo.ok) {
       return jsonError(resolvedRepo.message, resolvedRepo.status);
     }
     effectiveRepoRoot = resolvedRepo.repoRoot;
+    repoResolved = true;
   }
   const nonSystemMessages = rawMessages.filter((message) => message.role !== 'system');
   const priorSystemMessages = rawMessages
@@ -419,6 +424,15 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     const wantsLow = requestedThinkingEffort === 'low';
     let geminiQuotaExhausted = false;
 
+    // o8-model file editing (Composer parity). RESTRICTED tool subset — file
+    // ops only, NO shell/github (an adversarial review found a github `pr merge`
+    // path). Tools attach only when the caller asked for them AND a real repo
+    // resolved, so writes never target the app's own cwd.
+    const operatorToolNames = ['read_file', 'create_file', 'edit_file'];
+    const operatorToolsAllowed = !disableTools && repoResolved;
+    const operatorDisableTools = !operatorToolsAllowed;
+    const operatorScopedRepoRoot = operatorToolsAllowed ? effectiveRepoRoot : null;
+
     if (paidPlan && !wantsLow && geminiKey) {
       // Primary then rollback, BOTH through Gemini (Q ruling 2026-07-13):
       // the primary is a preview id Google can re-point or retire, so any
@@ -429,12 +443,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         const geminiResponse = await createGoogleToolResponseStream({
           apiKey: geminiKey,
           auth,
-          disableTools,
+          disableTools: operatorDisableTools,
           lastUserContent: lastUserMsg?.content,
           messages,
           model: geminiModel,
-          scopedRepoRoot: effectiveRepoRoot,
+          scopedRepoRoot: operatorScopedRepoRoot,
           tabId,
+          toolNames: operatorToolNames,
         });
         if (geminiResponse.ok) return geminiResponse;
         lastGeminiResponse = geminiResponse;
@@ -455,6 +470,11 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           messages,
           model: freeModel,
           auth,
+          // File-editing tools for free + founders-low (Composer parity). The
+          // fallback filters to file ops only (no shell/github) and sandboxes
+          // to the repo — same gate as the Gemini rail.
+          enableTools: operatorToolsAllowed,
+          scopedRepoRoot: operatorScopedRepoRoot,
           // Degradation banner only for a founder whose Gemini quota died —
           // the free plan rides this chain by design, no banner.
           notice: geminiQuotaExhausted
@@ -480,12 +500,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       return createGoogleToolResponseStream({
         apiKey: geminiKey,
         auth,
-        disableTools,
+        disableTools: operatorDisableTools,
         lastUserContent: lastUserMsg?.content,
         messages,
         model: OPERATOR_GEMINI_ROLLBACK_MODEL,
-        scopedRepoRoot: effectiveRepoRoot,
+        scopedRepoRoot: operatorScopedRepoRoot,
         tabId,
+        toolNames: operatorToolNames,
       });
     }
 
