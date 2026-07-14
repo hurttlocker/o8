@@ -115,12 +115,14 @@ export function GitHubConnectionSections({
     );
   }
 
-  // No installation yet → the BYO-app creation page. Never link a specific
-  // app's settings page: those are only visible to the app's owner, so any
-  // other account gets GitHub's 404 (report BBX85E).
+  // Priority: manage an existing installation → install the managed public
+  // "o8" App (Cursor-style, one click) → BYO-app creation page. Never link a
+  // specific app's settings page: those are only visible to the app's owner,
+  // so any other account gets GitHub's 404 (report BBX85E).
+  const managedInstall = !broker?.installationId && !!broker?.managedInstallUrl;
   const installUrl = broker?.installationId
     ? `https://github.com/settings/installations/${broker.installationId}`
-    : 'https://github.com/settings/apps/new';
+    : broker?.managedInstallUrl || 'https://github.com/settings/apps/new';
 
   return (
     <>
@@ -400,7 +402,7 @@ export function GitHubConnectionSections({
               rel="noreferrer"
               style={primaryLinkStyle(false)}
             >
-              {appConnected ? 'Manage on GitHub' : 'Set up on GitHub'}
+              {appConnected ? 'Manage on GitHub' : managedInstall ? 'Install the o8 GitHub App' : 'Set up on GitHub'}
             </a>
           </div>
         </SettingsGroup>
@@ -409,7 +411,9 @@ export function GitHubConnectionSections({
             ? `Installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repository' : 'repositories'}.`
             : appConfigured
               ? 'Finish the checks above to bring the App online.'
-              : 'Optional: create your own GitHub App for higher rate limits, then point o8 at it with GITHUB_APP_ID and ~/.o8/github-app.pem. Signing in above is all most setups need.'}
+              : managedInstall
+                ? 'One click on GitHub: pick your repos and o8 gets higher rate limits plus issue and PR sync. You can change repos any time.'
+                : 'Optional: create your own GitHub App for higher rate limits, then point o8 at it with GITHUB_APP_ID and ~/.o8/github-app.pem. Signing in above is all most setups need.'}
         </GroupFootnote>
       </section>
     </>
