@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { hardenPreviewDocument } from '@/lib/spec/html-style-presets';
 import { FONT_FAMILY } from './shared';
 
 /**
@@ -18,6 +19,10 @@ export function PacketBuyinDocPane({ packet }: { packet: OrchestratorPacket }) {
   const [open, setOpen] = useState(false);
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sandboxedHtml = useMemo(
+    () => (html ? hardenPreviewDocument(html, { allowScripts: true }) : null),
+    [html],
+  );
 
   useEffect(() => {
     if (!open || !artifactId) return;
@@ -42,7 +47,7 @@ export function PacketBuyinDocPane({ packet }: { packet: OrchestratorPacket }) {
 
   const openInNewTab = () => {
     if (!html) return;
-    const blob = new Blob([html], { type: 'text/html' });
+    const blob = new Blob([hardenPreviewDocument(html)], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank', 'noopener,noreferrer');
     // Revoke after the tab has had a chance to load the document.
@@ -91,7 +96,7 @@ export function PacketBuyinDocPane({ packet }: { packet: OrchestratorPacket }) {
           </svg>
           Buy-in doc
         </button>
-        {open && html ? (
+        {open && sandboxedHtml ? (
           <button
             type="button"
             onClick={openInNewTab}
@@ -112,12 +117,12 @@ export function PacketBuyinDocPane({ packet }: { packet: OrchestratorPacket }) {
       {open && error ? (
         <div style={{ marginTop: 8, fontSize: 10.5, color: '#b91c1c' }}>{error}</div>
       ) : null}
-      {open && html && !error ? (
+      {open && sandboxedHtml && !error ? (
         <div style={{ marginTop: 8, height: 360, overflow: 'hidden', borderRadius: 8, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)' }}>
           <iframe
             title="Buy-in doc"
             sandbox="allow-scripts"
-            srcDoc={html}
+            srcDoc={sandboxedHtml}
             style={{ display: 'block', width: '100%', height: '100%', border: 'none', background: '#fff' }}
           />
         </div>

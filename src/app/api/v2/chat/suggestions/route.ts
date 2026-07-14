@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     const contextBlock = buildContextBlock(body.recentContext);
     const userPrompt = `Assistant just said:\n"""\n${truncated}\n"""${contextBlock}\n\nReturn the JSON now.`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8_000);
 
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: [{ parts: [{ text: userPrompt }] }],

@@ -2,10 +2,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { readFile, stat } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { extname } from 'node:path';
 import { existsSync } from 'node:fs';
-
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+import { expandHome, safeJoinReal } from '@/lib/fs/safe-path';
+import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp']);
 const MIME_MAP: Record<string, string> = {
@@ -28,16 +28,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'path param required' }, { status: 400 });
   }
 
-  const home = process.env.HOME || require('os').homedir();
-  let root = DEFAULT_ROOT;
+  let root: string | null = getDefaultLlmRepoRoot();
   if (workspaceParam) {
-    root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
+    const scope = await resolveRegisteredRepoScope(expandHome(workspaceParam));
+    root = scope.repoRoot;
+  }
+  if (!root) {
+    return NextResponse.json({ error: 'Workspace is not a registered repository' }, { status: 400 });
   }
 
-  const fullPath = join(root, filePath);
-
-  // Path traversal protection
-  if (!fullPath.startsWith(root)) {
+  const fullPath = safeJoinReal(root, filePath);
+  if (!fullPath) {
     return NextResponse.json({ error: 'Path traversal not allowed' }, { status: 403 });
   }
 

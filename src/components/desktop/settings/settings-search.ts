@@ -67,7 +67,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'general', tabLabel: 'General', group: "Account", label: "Plan", description: "Your current plan and founder status", keywords: ['founder', 'free', 'subscription'] },
   { tab: 'general', tabLabel: 'General', group: "Account", label: "Upgrade to Founders", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
   { tab: 'general', tabLabel: 'General', group: "Startup", label: "Launch at login", description: "Start o8 automatically when you sign in to your Mac", keywords: ['autostart', 'boot', 'startup'] },
-  { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Crash & error reports", description: "Send anonymous crash reports to help fix issues faster", keywords: ['telemetry', 'sentry', 'privacy'] },
+  { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Crash & error reports", description: "Optionally send scrubbed error messages and stack traces", keywords: ['telemetry', 'sentry', 'privacy'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Send local crash log to the o8 team", description: "Upload the local ~/.o8/telemetry crash log", keywords: ['telemetry', 'privacy'] },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "Branches", label: "Branch prefix", description: "Prefix for branches agents create from issues", keywords: ['git', 'worktree', 'branch', 'naming'] },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "Attribution", label: "Tag commits created by agents", description: "Append a Co-Authored-By trailer to agent commits", keywords: ['git', 'commit', 'attribution', 'co-authored'] },

@@ -107,12 +107,18 @@ export interface RateLimiterOpts {
   maxPerMin: number;
   maxPending: number;
   windowMs: number;
+  maxPerIpPerMin?: number;
+  maxGlobalPerMin?: number;
+  maxTrackedKeys?: number;
 }
 
 export const DEFAULT_RATE_LIMITS: RateLimiterOpts = {
   maxPerMin: 30,
   maxPending: 8,
   windowMs: 60_000,
+  maxPerIpPerMin: 120,
+  maxGlobalPerMin: 3_000,
+  maxTrackedKeys: 10_000,
 };
 
 export class RateLimiter {
@@ -121,13 +127,44 @@ export class RateLimiter {
 
   constructor(private readonly opts: RateLimiterOpts = DEFAULT_RATE_LIMITS) {}
 
-  /** Record + check a connect attempt. Every attempt counts against the window
-   *  (a rejected flood keeps itself rejected). Returns false when over the limit. */
-  allowConnect(routingId: string, now: number): boolean {
-    const arr = (this.connects.get(routingId) ?? []).filter((t) => now - t < this.opts.windowMs);
+  private record(key: string, limit: number, now: number): boolean {
+    const arr = (this.connects.get(key) ?? []).filter((t) => now - t < this.opts.windowMs);
     arr.push(now);
-    this.connects.set(routingId, arr);
-    return arr.length <= this.opts.maxPerMin;
+    this.connects.set(key, arr);
+
+    const maxTrackedKeys = this.opts.maxTrackedKeys ?? DEFAULT_RATE_LIMITS.maxTrackedKeys!;
+    if (this.connects.size > maxTrackedKeys) {
+      let oldestKey: string | null = null;
+      let oldest = Number.POSITIVE_INFINITY;
+      for (const [candidate, times] of this.connects) {
+        if (candidate === 'global') continue;
+        const last = times.at(-1) ?? 0;
+        if (last < oldest) {
+          oldest = last;
+          oldestKey = candidate;
+        }
+      }
+      if (oldestKey) this.connects.delete(oldestKey);
+    }
+    return arr.length <= limit;
+  }
+
+  /** Record + check routing-id, source-IP, and global connect windows. Every
+   * attempt counts even after one dimension is over limit, so rotating routing
+   * ids cannot bypass the relay's aggregate admission ceiling. */
+  allowConnect(routingId: string, now: number, clientAddress = 'unknown'): boolean {
+    const routeAllowed = this.record(`route:${routingId}`, this.opts.maxPerMin, now);
+    const ipAllowed = this.record(
+      `ip:${clientAddress}`,
+      this.opts.maxPerIpPerMin ?? DEFAULT_RATE_LIMITS.maxPerIpPerMin!,
+      now,
+    );
+    const globalAllowed = this.record(
+      'global',
+      this.opts.maxGlobalPerMin ?? DEFAULT_RATE_LIMITS.maxGlobalPerMin!,
+      now,
+    );
+    return routeAllowed && ipAllowed && globalAllowed;
   }
 
   /** Reserve a pending-unauth slot at admit. Returns false when over the cap. */
@@ -141,7 +178,8 @@ export class RateLimiter {
   /** Release a pending-unauth slot (on ready, close, or handshake-timeout). */
   clearPending(routingId: string): void {
     const n = this.pending.get(routingId) ?? 0;
-    if (n > 0) this.pending.set(routingId, n - 1);
+    if (n > 1) this.pending.set(routingId, n - 1);
+    else this.pending.delete(routingId);
   }
 
   pendingCount(routingId: string): number {

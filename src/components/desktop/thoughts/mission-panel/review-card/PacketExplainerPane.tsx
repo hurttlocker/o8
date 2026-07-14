@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { hardenPreviewDocument } from '@/lib/spec/html-style-presets';
 import { FONT_FAMILY, paneLabelStyle, paneStyle } from './shared';
 
 /**
@@ -15,6 +16,10 @@ export function PacketExplainerPane({ packet }: { packet: OrchestratorPacket }) 
   const artifactId = explainer?.status === 'ready' ? explainer.artifactId ?? null : null;
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sandboxedHtml = useMemo(
+    () => (html ? hardenPreviewDocument(html, { allowScripts: true }) : null),
+    [html],
+  );
 
   useEffect(() => {
     if (!artifactId) {
@@ -54,12 +59,12 @@ export function PacketExplainerPane({ packet }: { packet: OrchestratorPacket }) 
       {error ? (
         <div style={{ fontSize: 10.5, color: '#b91c1c', fontFamily: FONT_FAMILY }}>{error}</div>
       ) : null}
-      {html !== null && !error ? (
+      {sandboxedHtml !== null && !error ? (
         <div style={{ flex: 1, minHeight: 320, overflow: 'hidden', borderRadius: 8, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)' }}>
           <iframe
             title="Packet explainer"
             sandbox="allow-scripts"
-            srcDoc={html}
+            srcDoc={sandboxedHtml}
             style={{ display: 'block', width: '100%', height: '100%', minHeight: 320, border: 'none', background: '#fff' }}
           />
         </div>

@@ -1,6 +1,7 @@
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { safeJoinReal } from '@/lib/fs/safe-path';
 
 export const ABSOLUTE_PATH_NOT_ALLOWLISTED = 'absolute_path_not_allowlisted';
 
@@ -31,15 +32,21 @@ export function operatorConfigAllowlist(): string[] {
 export function resolveAllowedOperatorConfigPath(filePath: string): string | null {
   if (!isAbsolute(filePath)) return null;
   const resolved = resolve(filePath);
-  return operatorConfigAllowlist().includes(resolved) ? resolved : null;
+  if (!operatorConfigAllowlist().includes(resolved)) return null;
+
+  try {
+    if (existsSync(resolved) && lstatSync(resolved).isSymbolicLink()) return null;
+  } catch {
+    return null;
+  }
+
+  const home = homedir();
+  return safeJoinReal(home, relative(home, resolved), { allowMissing: true });
 }
 
 export function resolveRepoRelativeFilePath(root: string, filePath: string): string | null {
   if (isAbsolute(filePath)) return null;
-  const resolved = resolve(root, filePath);
-  const rel = relative(root, resolved);
-  if (rel.startsWith('..') || isAbsolute(rel)) return null;
-  return resolved;
+  return safeJoinReal(root, filePath, { allowMissing: true });
 }
 
 export function buildQuickDocs(repoRoot?: string | null): { groups: QuickDocGroup[] } {

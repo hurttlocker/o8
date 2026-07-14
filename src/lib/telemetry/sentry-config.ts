@@ -50,7 +50,7 @@ export function resolveCrashReportsToggle(): boolean {
   try {
     return resolveCrashReportsEnabledSync();
   } catch {
-    return true; // default ON — matches the operator-defaults fallback
+    return false; // fail closed if local preferences cannot be read
   }
 }
 

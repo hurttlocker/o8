@@ -426,10 +426,12 @@ fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelR
             };
         }
     };
-    let (req_url, bearer): (String, Option<String>) = match &target {
-        crate::entitlement::GeminiTarget::Direct { url } => (url.clone(), None),
+    let (req_url, bearer, google_api_key): (String, Option<String>, Option<String>) = match &target {
+        crate::entitlement::GeminiTarget::Direct { url, api_key } => {
+            (url.clone(), None, Some(api_key.clone()))
+        }
         crate::entitlement::GeminiTarget::Proxy { url, token } => {
-            (url.clone(), Some(token.clone()))
+            (url.clone(), Some(token.clone()), None)
         }
     };
     let is_proxy = bearer.is_some();
@@ -575,6 +577,9 @@ fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelR
             let mut req = client.post(&req_url).json(body);
             if let Some(token) = &bearer {
                 req = req.bearer_auth(token);
+            }
+            if let Some(api_key) = &google_api_key {
+                req = req.header("x-goog-api-key", api_key);
             }
             match req.send() {
                 Ok(response) if response.status().is_success() => {

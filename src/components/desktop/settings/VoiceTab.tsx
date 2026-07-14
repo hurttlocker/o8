@@ -352,7 +352,7 @@ export function VoiceTab() {
           <section style={{ marginTop: 28 }}>
             <SettingsGroup
               header="Transcription"
-              footnote="A free Groq key makes release-to-paste near-instant (their free tier easily covers one person's dictation). Keys stay on this machine in ~/.o8/dictation.json — never sent anywhere but Groq."
+              footnote="A free Groq key makes release-to-paste near-instant (their free tier easily covers one person's dictation). Keys stay in macOS Keychain and are sent only to Groq."
             >
               <SettingsRow
                 icon={<MicIcon />}

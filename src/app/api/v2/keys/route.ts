@@ -234,9 +234,10 @@ async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ va
     }
 
     if (config.id === 'google') {
-      // Google AI uses query param for key
-      const url = `${config.validateUrl}?key=${key}`;
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await fetch(config.validateUrl, {
+        headers: { 'x-goog-api-key': key },
+        signal: controller.signal,
+      });
       clearTimeout(timeout);
       if (res.status === 400 || res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
       return { valid: true };

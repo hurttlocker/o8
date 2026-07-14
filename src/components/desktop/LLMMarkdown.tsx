@@ -11,6 +11,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo, memo } from 'react';
 import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from './lucide-shims';
 import { DiffCard } from './DiffCard';
+import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -420,7 +421,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
         const id = 'mermaid-' + Math.random().toString(36).slice(2, 8);
         try {
           const { svg: rendered } = await mermaid.render(id, code, offscreen);
-          if (!cancelled) setSvg(rendered);
+          if (!cancelled) setSvg(sanitizeAgentHtml(rendered));
         } finally {
           // Clean up offscreen container and any error elements mermaid injected
           offscreen.remove();

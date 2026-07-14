@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 
 import { db } from './db/client.js';
 import { invites } from './db/schema.js';
@@ -14,7 +14,9 @@ import { invites } from './db/schema.js';
  *  - redeem:   public, one-time. Captures the invitee email.
  */
 
-const CODE_RE = /^\d{3}-\d{3}$/;
+// Keep legacy NNN-NNN codes redeemable, but every new desktop issues a 128-bit
+// `o8_...` code so the public resolve endpoint is not a six-digit oracle.
+const CODE_RE = /^(?:\d{3}-\d{3}|o8_[A-Za-z0-9_-]{22})$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function isValidCodeFormat(code: string): boolean {
@@ -69,11 +71,16 @@ export async function redeemInvite(code: string, email: string): Promise<{ ok: b
   if (!isValidCodeFormat(code)) return { ok: false, reason: 'invalid_code' };
   if (!EMAIL_RE.test(email)) return { ok: false, reason: 'invalid_email' };
 
+  const updated = await db
+    .update(invites)
+    .set({ status: 'redeemed', redeemedBy: email, redeemedAt: new Date() })
+    .where(and(eq(invites.code, code), ne(invites.status, 'redeemed')))
+    .returning({ owner: invites.owner });
+  if (updated[0]) return { ok: true, owner: updated[0].owner };
+
   const rows = await db.select().from(invites).where(eq(invites.code, code)).limit(1);
   const row = rows[0];
-  if (!row) return { ok: false, reason: 'not_found' };
-  if (row.status === 'redeemed') return { ok: false, reason: 'already_redeemed', owner: row.owner };
-
-  await db.update(invites).set({ status: 'redeemed', redeemedBy: email, redeemedAt: new Date() }).where(eq(invites.code, code));
-  return { ok: true, owner: row.owner };
+  return row
+    ? { ok: false, reason: 'already_redeemed', owner: row.owner }
+    : { ok: false, reason: 'not_found' };
 }

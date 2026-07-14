@@ -185,7 +185,46 @@ export function buildPreviewSrcdoc(content: string, opts: HtmlStylePresetOptions
   // all network egress (fetch/XHR/beacon/WebSocket/forms) while still allowing
   // the preview to render styled HTML with images and run its inline height
   // script. (SECURITY_AUDIT_2026-07-02 §CRIT-2.)
-  const csp = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob: https: http:; "
-    + "font-src data: https:; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'";
+  const csp = previewContentSecurityPolicy({ allowScripts: true });
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${css}</style></head><body>${content}<script>${heightScript}<\/script></body></html>`;
+}
+
+function previewContentSecurityPolicy(options: { allowScripts: boolean }): string {
+  return [
+    "default-src 'none'",
+    "style-src 'unsafe-inline'",
+    'img-src data: blob:',
+    'font-src data:',
+    'media-src data: blob:',
+    options.allowScripts ? "script-src 'unsafe-inline'" : "script-src 'none'",
+    "connect-src 'none'",
+    "frame-src 'none'",
+    "child-src 'none'",
+    "worker-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "object-src 'none'",
+  ].join('; ');
+}
+
+/**
+ * Add a restrictive CSP to a complete agent-authored HTML document without
+ * rewriting its markup. The iframe may keep inline scripts for interactive
+ * charts, but no network-capable resource class is available. Standalone blob
+ * tabs use the script-free mode because they no longer have iframe sandboxing.
+ */
+export function hardenPreviewDocument(
+  html: string,
+  options: { allowScripts?: boolean } = {},
+): string {
+  const csp = previewContentSecurityPolicy({ allowScripts: options.allowScripts === true });
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+
+  if (/<head(?:\s[^>]*)?>/i.test(html)) {
+    return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${meta}`);
+  }
+  if (/<html(?:\s[^>]*)?>/i.test(html)) {
+    return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${meta}</head>`);
+  }
+  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
 }

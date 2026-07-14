@@ -202,14 +202,15 @@ describe('inference-route', () => {
   });
 
   describe('resolveEmbedRoute', () => {
-    it('routes DIRECT with a local Gemini key (key in the query string)', () => {
+    it('routes DIRECT with a local Gemini key in a header, never the URL', () => {
       process.env.GEMINI_API_KEY = 'g-local';
       setEnt(null);
       const route = resolveEmbedRoute('gemini-embedding-001');
       expect(route?.via).toBe('direct');
       expect(route?.url).toContain('generativelanguage.googleapis.com');
       expect(route?.url).toContain('gemini-embedding-001:embedContent');
-      expect(route?.url).toContain('key=g-local');
+      expect(route?.url).not.toContain('g-local');
+      expect(route?.headers['x-goog-api-key']).toBe('g-local');
     });
 
     it('routes to PROXY (Bearer) when no Gemini key but a plan token exists', () => {

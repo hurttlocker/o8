@@ -19,10 +19,19 @@ import { handleAccountLicense } from './account-license.js';
 import { handleGithubAppToken } from './github-app.js';
 import { handleLinkInstall } from './account-link.js';
 import { runGithubBackfill } from './identity.js';
+import { BoundedRateLimiter, clientAddress } from './rate-limit.js';
 
 const app = new Hono();
 
 const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team', 'founder'];
+const publicLimiter = new BoundedRateLimiter();
+const HOUR_MS = 60 * 60 * 1000;
+
+function allowPublicRequest(c: Parameters<typeof clientAddress>[0], bucket: string, limit: number): boolean {
+  const ip = clientAddress(c);
+  return publicLimiter.allow(`${bucket}:ip:${ip}`, limit, HOUR_MS)
+    && publicLimiter.allow(`${bucket}:global`, limit * 250, HOUR_MS);
+}
 
 /** Constant-time admin guard. Returns true when the bearer matches. */
 function isAdmin(authHeader: string | undefined): boolean {
@@ -280,6 +289,10 @@ app.post('/admin/backfill-github', async (c) => {
 // (the desktop sends INVITE_REGISTER_TOKEN). 503 when registration isn't configured.
 app.post('/invites/register', async (c) => {
   if (!env.INVITE_REGISTER_TOKEN) return c.json({ error: 'registration_not_configured' }, 503);
+  if (!allowPublicRequest(c, 'invite-register', 60)) {
+    c.header('Retry-After', '3600');
+    return c.json({ error: 'rate_limited' }, 429);
+  }
   if (!isInviteRegistrar(c.req.header('authorization'))) {
     return c.json({ error: 'unauthorized' }, 401);
   }
@@ -296,6 +309,9 @@ app.post('/invites/register', async (c) => {
   const accent = typeof body.accent === 'string' ? body.accent.trim() : '#FF5A1F';
   const position = typeof body.position === 'number' ? body.position : 0;
   if (!code || !owner) return c.json({ error: 'code and owner required' }, 400);
+  if (owner.length > 80 || !/^#[0-9A-Fa-f]{6}$/.test(accent) || !Number.isInteger(position) || position < 1 || position > 10_000) {
+    return c.json({ error: 'invalid invite metadata' }, 400);
+  }
 
   const result = await registerInvite({ code, owner, accent, position });
   if (!result.ok) return c.json({ ok: false, reason: result.reason }, result.reason === 'code_taken' ? 409 : 400);
@@ -304,12 +320,20 @@ app.post('/invites/register', async (c) => {
 
 // Resolve a code for the landing (public — no secrets, just owner + colorway + status).
 app.get('/invites/:code', async (c) => {
+  if (!allowPublicRequest(c, 'invite-resolve', 240)) {
+    c.header('Retry-After', '3600');
+    return c.json({ valid: false, reason: 'rate_limited' }, 429);
+  }
   const result = await resolveInvite(c.req.param('code'));
   return c.json(result, result.valid ? 200 : 404);
 });
 
 // Redeem a code (public, one-time). Captures the invitee email.
 app.post('/invites/redeem', async (c) => {
+  if (!allowPublicRequest(c, 'invite-redeem', 20)) {
+    c.header('Retry-After', '3600');
+    return c.json({ ok: false, reason: 'rate_limited' }, 429);
+  }
   let body: { code?: unknown; email?: unknown };
   try {
     body = await c.req.json();
@@ -323,8 +347,9 @@ app.post('/invites/redeem', async (c) => {
 
   const result = await redeemInvite(code, email);
   if (!result.ok) {
-    const status = result.reason === 'already_redeemed' ? 409 : result.reason === 'not_found' ? 404 : 400;
-    return c.json({ ok: false, reason: result.reason, owner: result.owner ?? null }, status);
+    // Do not turn redemption into a state oracle. The public resolve page can
+    // present UX status, while this mutation returns one generic rejection.
+    return c.json({ ok: false, reason: 'invite_unavailable' }, 400);
   }
   return c.json({ ok: true, owner: result.owner ?? null });
 });

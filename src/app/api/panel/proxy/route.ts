@@ -4,6 +4,7 @@ import {
   PREVIEW_MESSAGE_SOURCE,
   PREVIEW_PROXY_ROUTE,
 } from '@/lib/panel/preview';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
@@ -17,6 +18,13 @@ const HOP_BY_HOP_REQUEST_HEADERS = new Set([
   'trailer',
   'transfer-encoding',
   'upgrade',
+]);
+const SENSITIVE_REQUEST_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+  'x-o8-client-addr',
+  'x-o8-worker-packet-id',
 ]);
 const FRAME_BUSTING_RESPONSE_HEADERS = [
   'content-security-policy',
@@ -41,6 +49,9 @@ function parseLocalTarget(targetUrl: string | null): URL | null {
     const parsed = new URL(targetUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) return null;
     if (!LOCAL_HOSTS.has(parsed.hostname)) return null;
+    const { apiPort, wsPort } = resolvePortInfo();
+    const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+    if (port === apiPort || port === wsPort) return null;
     return parsed;
   } catch {
     return null;
@@ -783,6 +794,7 @@ function buildUpstreamHeaders(req: NextRequest, targetUrl: URL): Headers {
   req.headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase();
     if (HOP_BY_HOP_REQUEST_HEADERS.has(lowerKey)) return;
+    if (SENSITIVE_REQUEST_HEADERS.has(lowerKey)) return;
     if (lowerKey.startsWith('sec-')) return;
     if (lowerKey.startsWith('x-forwarded-')) return;
 

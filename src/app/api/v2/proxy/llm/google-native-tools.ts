@@ -138,8 +138,8 @@ interface GoogleStreamOptions {
   toolNames?: string[];
 }
 
-function buildGoogleUrl(model: string, apiKey: string) {
-  return `${GOOGLE_API_URL}/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+function buildGoogleUrl(model: string) {
+  return `${GOOGLE_API_URL}/${model}:streamGenerateContent?alt=sse`;
 }
 
 function jsonError(message: string, status: number) {
@@ -201,9 +201,9 @@ async function fetchGoogleStream(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), GOOGLE_TIMEOUT_MS);
     try {
-      return await fetch(buildGoogleUrl(activeModel, apiKey), {
+      return await fetch(buildGoogleUrl(activeModel), {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(body),
         signal: controller.signal,
       });

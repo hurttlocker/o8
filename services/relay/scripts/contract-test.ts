@@ -129,6 +129,17 @@ function testRateLimits(): void {
   // Different routingId is independent.
   assert(rl.allowConnect('r2', t0 + 5), 'a different routingId is not rate-limited');
 
+  const rotating = new RateLimiter({
+    ...DEFAULT_RATE_LIMITS,
+    maxPerIpPerMin: 4,
+    maxGlobalPerMin: 100,
+  });
+  let rotatingAllowed = 0;
+  for (let i = 0; i < 8; i++) {
+    if (rotating.allowConnect(`rotated-${i}`, t0 + i, '203.0.113.10')) rotatingAllowed += 1;
+  }
+  assert(rotatingAllowed === 4, 'rotating routing ids cannot bypass the source-IP limit');
+
   const rl2 = new RateLimiter(DEFAULT_RATE_LIMITS);
   let pending = 0;
   for (let i = 0; i < 12; i++) if (rl2.admitPending('r1')) pending += 1;

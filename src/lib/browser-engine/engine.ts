@@ -14,6 +14,7 @@ import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
 import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
+import { assertPublicHttpUrl } from '@/lib/network/safe-url';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -147,6 +148,23 @@ class BrowserEngine {
     }
     const browser = await this.browser();
     const context = await browser.newContext({ viewport: VIEWPORT });
+    // Validate every HTTP request, not only the initial navigation. Redirects,
+    // subresources, and clicked links can otherwise pivot a public page into a
+    // loopback, RFC1918, or cloud-metadata target after the first check.
+    await context.route('**/*', async (route) => {
+      try {
+        const requestUrl = route.request().url();
+        const protocol = new URL(requestUrl).protocol;
+        if (protocol === 'http:' || protocol === 'https:') {
+          await assertPublicHttpUrl(requestUrl);
+        } else if (!['about:', 'blob:', 'data:'].includes(protocol)) {
+          throw new Error('Browser request scheme is not allowed.');
+        }
+        await route.continue();
+      } catch {
+        await route.abort('blockedbyclient');
+      }
+    });
     const page = await context.newPage();
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
     const session: EngineSession = { context, page, lastUsedAt: Date.now() };
@@ -190,8 +208,9 @@ class BrowserEngine {
 
   async open(scope: string, url: string): Promise<EngineEnvelope> {
     const target = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    const validated = await assertPublicHttpUrl(target);
     const session = await this.session(scope);
-    await session.page.goto(target, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+    await session.page.goto(validated.toString(), { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     return { ok: true, url: session.page.url(), title: await session.page.title().catch(() => ''), surface: 'engine' };
   }
 

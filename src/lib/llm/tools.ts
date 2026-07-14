@@ -12,6 +12,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
+import { safeJoinReal } from '@/lib/fs/safe-path';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 50_000; // 50KB
@@ -430,7 +431,10 @@ function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT)
     return { error: 'Error: No repository is scoped to this chat' };
   }
 
-  const resolved = join(repoRoot, path);
+  const resolved = safeJoinReal(repoRoot, path, { allowMissing: true });
+  if (!resolved) {
+    return { error: 'Error: Path must resolve within the repository' };
+  }
   const rel = relative(repoRoot, resolved);
   if (rel.startsWith('..') || rel.startsWith('/')) {
     return { error: 'Error: Path must be within the repository' };
@@ -690,7 +694,10 @@ function readFile(path: string, startLine?: number, endLine?: number, repoRoot: 
       return { content: 'Error: No repository is scoped to this chat' };
     }
 
-    const resolved = join(repoRoot, path);
+    const resolved = safeJoinReal(repoRoot, path);
+    if (!resolved) {
+      return { content: 'Error: Path must resolve within the repository' };
+    }
     const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..') || rel.startsWith('/')) {
       return { content: 'Error: Path outside repository' };
@@ -725,7 +732,10 @@ function listFiles(dirPath?: string, pattern?: string, repoRoot: string | null =
       return { content: 'Error: No repository is scoped to this chat' };
     }
 
-    const resolved = join(repoRoot, dirPath || '.');
+    const resolved = safeJoinReal(repoRoot, dirPath || '.');
+    if (!resolved) {
+      return { content: 'Error: Path must resolve within the repository' };
+    }
     const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..')) {
       return { content: 'Error: Path outside repository' };

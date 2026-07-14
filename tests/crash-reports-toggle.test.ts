@@ -32,8 +32,8 @@ function postReq(body: unknown): Request {
 }
 
 describe('crash reports toggle — real route round-trip', () => {
-  it('defaults ON, persists OFF through the real POST, and the shared sync resolver sees it', async () => {
-    expect(resolveCrashReportsEnabledSync()).toBe(true); // default ON
+  it('defaults OFF, persists changes through the real POST, and the shared sync resolver sees them', async () => {
+    expect(resolveCrashReportsEnabledSync()).toBe(false); // privacy-preserving default
 
     const res = await POST(postReq({ crashReportsEnabled: false }));
     const payload = await res.json();
@@ -48,7 +48,7 @@ describe('crash reports toggle — real route round-trip', () => {
     const getPayload = await getRes.json();
     expect(getPayload.values.crashReportsEnabled).toBe(false);
 
-    // Flip back ON — proves the toggle is reversible end-to-end.
+    // Explicitly opt in — proves the toggle is reversible end-to-end.
     const res2 = await POST(postReq({ crashReportsEnabled: true }));
     const payload2 = await res2.json();
     expect(payload2.values.crashReportsEnabled).toBe(true);

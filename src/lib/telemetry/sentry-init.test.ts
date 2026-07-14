@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { isPackaged, resolveSentryConfig, resolveSentryDsn } from './sentry-config';
 import { initSentryNode } from './sentry-node';
@@ -9,6 +9,23 @@ import { initSentryNode } from './sentry-node';
  * A DSN in env is ALSO gated on packaged, so dev / dev-bridge runs stay silent.
  */
 describe('sentry — dormant without a DSN', () => {
+  let packagedBefore: string | undefined;
+  let dsnBefore: string | undefined;
+
+  beforeEach(() => {
+    packagedBefore = process.env.O8_PACKAGED_APP;
+    dsnBefore = process.env.O8_SENTRY_DSN;
+    delete process.env.O8_PACKAGED_APP;
+    delete process.env.O8_SENTRY_DSN;
+  });
+
+  afterEach(() => {
+    if (packagedBefore === undefined) delete process.env.O8_PACKAGED_APP;
+    else process.env.O8_PACKAGED_APP = packagedBefore;
+    if (dsnBefore === undefined) delete process.env.O8_SENTRY_DSN;
+    else process.env.O8_SENTRY_DSN = dsnBefore;
+  });
+
   it('resolveSentryDsn is empty when not packaged', () => {
     expect(isPackaged()).toBe(false);
     expect(resolveSentryDsn()).toBe('');
@@ -29,7 +46,7 @@ describe('sentry — dormant without a DSN', () => {
     const cfg = resolveSentryConfig();
     expect(cfg.dsn).toBe('');
     expect(cfg.environment).toBe('production');
-    expect(cfg.enabled).toBe(true); // toggle default ON (dormant regardless of DSN)
+    expect(cfg.enabled).toBe(false); // reporting requires an explicit opt-in
     expect(typeof cfg.founder).toBe('boolean');
     expect(cfg.release.length).toBeGreaterThan(0);
   });

@@ -100,27 +100,37 @@ describe('scrub — scrubSentryEvent', () => {
 
     const out = scrubSentryEvent(event, { dropBreadcrumbsWithPaths: true });
 
-    expect(out.message).toBe('boom at /Users/…/o8/x.ts');
-    expect(out.exception?.values?.[0].value).toBe('ENOENT /Users/…/.o8/db');
-    expect(out.exception?.values?.[0].stacktrace?.frames?.[0].filename).toBe('/Users/…/o8/src/a.ts');
+    expect(out).not.toBeNull();
+    expect(out!.message).toBe('boom at /Users/…/o8/x.ts');
+    expect(out!.exception?.values?.[0].value).toBe('ENOENT /Users/…/.o8/db');
+    expect(out!.exception?.values?.[0].stacktrace?.frames?.[0].filename).toBe('/Users/…/o8/src/a.ts');
     // request identity dropped, url query stripped
-    expect(out.request?.url).toBe('https://x.o8.run/api');
-    expect(out.request?.query_string).toBeUndefined();
-    expect(out.request?.headers).toBeUndefined();
-    expect(out.request?.cookies).toBeUndefined();
-    expect(out.request?.data).toBeUndefined();
+    expect(out!.request?.url).toBe('https://x.o8.run/api');
+    expect(out!.request?.query_string).toBeUndefined();
+    expect(out!.request?.headers).toBeUndefined();
+    expect(out!.request?.cookies).toBeUndefined();
+    expect(out!.request?.data).toBeUndefined();
     // path-bearing breadcrumb dropped; the safe one kept (with api_key scrubbed)
-    expect(out.breadcrumbs).toHaveLength(1);
-    expect(out.breadcrumbs?.[0].message).toBe('clicked button');
-    expect(out.breadcrumbs?.[0].data).toEqual({ count: 2 });
+    expect(out!.breadcrumbs).toHaveLength(1);
+    expect(out!.breadcrumbs?.[0].message).toBe('clicked button');
+    expect(out!.breadcrumbs?.[0].data).toEqual({ count: 2 });
     // extra PII dropped; identity removed
-    expect(out.extra).toEqual({ packetId: 'p1' });
-    expect(out.user).toBeUndefined();
-    expect(out.server_name).toBeUndefined();
+    expect(out!.extra).toEqual({ packetId: 'p1' });
+    expect(out!.user).toBeUndefined();
+    expect(out!.server_name).toBeUndefined();
   });
 
   it('never throws on a malformed event', () => {
     expect(() => scrubSentryEvent({} as SentryEventLike)).not.toThrow();
     expect(() => scrubSentryEvent({ exception: { values: undefined } } as SentryEventLike)).not.toThrow();
+  });
+
+  it('drops an event when scrubbing cannot inspect it safely', () => {
+    const event = new Proxy({} as SentryEventLike, {
+      get() {
+        throw new Error('malformed event');
+      },
+    });
+    expect(scrubSentryEvent(event)).toBeNull();
   });
 });

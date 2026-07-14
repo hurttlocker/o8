@@ -68,7 +68,7 @@ export async function initSentryBrowser(): Promise<void> {
       sampleRate: 1.0,
       beforeSend: (event) =>
         enabled
-          ? (scrubSentryEvent(event as SentryEventLike, { dropBreadcrumbsWithPaths: true }) as typeof event)
+          ? (scrubSentryEvent(event as SentryEventLike, { dropBreadcrumbsWithPaths: true }) as typeof event | null)
           : null,
     });
     Sentry.setTags({
