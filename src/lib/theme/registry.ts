@@ -369,7 +369,12 @@ const DARK_BASE: Record<string, string> = {
 };
 
 const DARK_GLASS: Record<string, string> = {
-  '--t-bg': 'rgba(22, 25, 30, 0.56)',
+  // Dark glass carries NO base tint — the native HudWindow vibrancy already
+  // reads as dark frosted glass, so any tint on top only fogs it. (Light glass
+  // needs its 0.62 paper tint solely because the same dark vibrancy has to be
+  // lightened.) Transparent base → crisp glass; only the center transcript
+  // (--t-chat-surface-bg) stays opaque.
+  '--t-bg': 'transparent',
   '--t-bg-gradient':
     'radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 22%), linear-gradient(180deg, rgba(32, 36, 42, 0.52) 0%, rgba(18, 20, 24, 0.48) 100%)',
   '--t-bg-subtle': 'rgba(56, 62, 72, 0.28)',
