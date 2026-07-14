@@ -845,31 +845,6 @@ function DashboardInner() {
     }));
   }, [workspaceActiveMap]);
 
-  // `…` menu handlers. Only orchestrator + llm-chat tabs back to
-  // /api/v2/chat-history, so we gate by kind. Other tab kinds (CLI
-  // sessions, terminals, canvas) skip the menu entirely.
-  const titleMenuActive = (workspaceHeaderActive.kind === 'orchestrator'
-    || workspaceHeaderActive.kind === 'llm-chat')
-    && Boolean(workspaceHeaderActive.tabId);
-
-  const handleTitleArchive = useCallback(async () => {
-    const workspaceTabId = workspaceHeaderActive.tabId;
-    if (!workspaceTabId) return;
-    const threadId = threadIdByTabRef.current.get(workspaceTabId) ?? workspaceTabId;
-    try {
-      await fetch('/api/v2/chat-history', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tabId: threadId, archivedAt: new Date().toISOString() }),
-      });
-      window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
-        detail: { tabId: workspaceTabId, threadId, archived: true },
-      }));
-    } catch {
-      // silent — operator will see staleness on next refresh
-    }
-  }, [workspaceHeaderActive.tabId]);
-
   // Workspace tab id → chat-history thread id map. OrchestratorTab
   // broadcasts 'o8:workspace-thread-id' whenever its loaded thread
   // changes; we use the map to PATCH the canonical chat-history file
@@ -948,29 +923,6 @@ function DashboardInner() {
     };
   }, []);
 
-  const handleTitleRenameSubmit = useCallback(async (newTitle: string) => {
-    // The header strip flipped its label into an inline input and the
-    // operator committed a new value. PATCH the chat-history record
-    // keyed by THREAD id (chat-history file key), not the workspace
-    // tab id. Broadcast updates so other surfaces refetch.
-    const workspaceTabId = workspaceHeaderActive.tabId;
-    const trimmed = newTitle.trim();
-    if (!workspaceTabId || !trimmed) return;
-    const threadId = threadIdByTabRef.current.get(workspaceTabId) ?? workspaceTabId;
-    const res = await fetch('/api/v2/chat-history', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tabId: threadId, title: trimmed }),
-    });
-    if (!res.ok) throw new Error('rename failed');
-    // Include both the workspace tab id (for in-memory label updates)
-    // and the thread id (for chat-history-keyed surfaces) so both
-    // listeners can fire correctly.
-    window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
-      detail: { tabId: workspaceTabId, threadId, title: trimmed, source: 'user' },
-    }));
-  }, [workspaceHeaderActive.tabId]);
-
   // Single-workspace spawn shortcut. Dispatches a window event the
   // (only) WorkspaceTerminalRoot listens for to call its spawn handlers.
   // Only meaningful when there's a single workspace; with splits each
@@ -983,30 +935,6 @@ function DashboardInner() {
   const handleSpawnChat = useCallback(() => dispatchSpawn('chat'), [dispatchSpawn]);
   const handleSpawnTerminal = useCallback(() => dispatchSpawn('terminal'), [dispatchSpawn]);
 
-  const handleTitleShare = useCallback(async () => {
-    const workspaceTabId = workspaceHeaderActive.tabId;
-    if (!workspaceTabId) return;
-    const threadId = threadIdByTabRef.current.get(workspaceTabId) ?? workspaceTabId;
-    try {
-      const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const messages = Array.isArray(data?.messages) ? data.messages : [];
-      const title = data?.title ?? workspaceHeaderActive.label ?? 'Conversation';
-      const lines: string[] = [`# ${title}`, ''];
-      for (const msg of messages) {
-        const role = msg?.role ?? 'note';
-        const content = typeof msg?.content === 'string' ? msg.content : JSON.stringify(msg?.content ?? '');
-        lines.push(`**${role}**`, '', content, '');
-      }
-      const markdown = lines.join('\n');
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(markdown);
-      }
-    } catch {
-      // silent
-    }
-  }, [workspaceHeaderActive.label, workspaceHeaderActive.tabId]);
 
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const settingsPanelRef = useRef<HTMLDivElement>(null);
@@ -4973,9 +4901,6 @@ function DashboardInner() {
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
           splitHeaderWorkspaces={splitHeaderWorkspaces}
-          onTitleRenameSubmit={titleMenuActive ? handleTitleRenameSubmit : undefined}
-          onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
-          onTitleShare={titleMenuActive ? handleTitleShare : undefined}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />
