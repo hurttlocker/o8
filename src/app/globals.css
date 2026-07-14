@@ -1849,27 +1849,28 @@ button.workflow-file-item.workflow-file-item-active {
    disables it entirely — the "never animate paint props" doctrine targets
    large surfaces. Base ink --t-text-secondary, sweep peaks at full --t-text. */
 @keyframes o8-thought-shimmer-sweep {
-  0%   { background-position: 100% 0; }
-  100% { background-position: 0% 0; }
+  0%   { background-position: 150% 0; }
+  100% { background-position: -50% 0; }
 }
 .o8-thought-shimmer {
   overflow: hidden;
-  /* 300% size + position within [0%,100%] keeps the gradient covering every
-     glyph at every frame — with clipped text, an uncovered glyph paints
-     NOTHING (live-hit: only "Ru" of "Running" rendered at the sweep's
-     extremes with a 220% gradient swept past full coverage). The narrow
-     45→55% highlight still fully enters and exits the visible span. */
+  /* ShinyText technique (reactbits, Q pick 2026-07-14): glyphs paint via a
+     TRANSLUCENT text-fill (always legible — no coverage constraint), and a
+     narrow transparent-edged shine sweeps through them via the clipped
+     background. -webkit-text-fill-color beats the inline `color` without
+     !important, so the reduced-motion path (class absent) keeps its plain
+     inline ink. */
+  -webkit-text-fill-color: color-mix(in srgb, var(--t-text-secondary) 72%, transparent);
   background-image: linear-gradient(
-    100deg,
-    var(--t-text-secondary) 45%,
+    120deg,
+    rgba(0, 0, 0, 0) 42%,
     var(--t-text) 50%,
-    var(--t-text-secondary) 55%
+    rgba(0, 0, 0, 0) 58%
   );
-  background-size: 300% 100%;
+  background-size: 200% 100%;
   background-repeat: no-repeat;
   -webkit-background-clip: text;
   background-clip: text;
-  -webkit-text-fill-color: transparent;
   animation: o8-thought-shimmer-sweep 1.9s ease-in-out infinite;
 }
 
@@ -2260,9 +2261,12 @@ button.workflow-file-item.workflow-file-item-active {
   }
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
-  /* Sheen freezes to plain secondary ink — the gradient's resting frame
-     paints the whole line in --t-text-secondary (highlight parked off-glyph). */
-  .o8-thought-shimmer { animation: none !important; }
+  /* Sheen off: restore full-opacity ink and drop the shine entirely. */
+  .o8-thought-shimmer {
+    animation: none !important;
+    -webkit-text-fill-color: currentColor !important;
+    background-image: none !important;
+  }
   .o8-orbit { animation: none !important; }
   /* Loaders freeze to a legible resting frame — no motion, cells still read. */
   .o8-loader-bitfield > i,
