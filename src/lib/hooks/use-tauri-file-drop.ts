@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
 
 export interface TauriDropClientCoords {
   x: number;
@@ -63,7 +63,9 @@ export function useTauriFileDrop({
   useEffect(() => {
     if (disabled) return undefined;
     if (typeof window === 'undefined') return undefined;
-    if (!isTauri()) return undefined;
+    // Event listeners only in the main window — a main-app page mounted in the
+    // native browser-view would ACL-crash on emit/listen (see canUseTauriEvents).
+    if (!canUseTauriEvents()) return undefined;
 
     let mounted = true;
     const unlistens: Array<() => void> = [];

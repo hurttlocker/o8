@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
 import { useSignIn, useClerk } from '@clerk/nextjs';
 
 import { O8_AUTH_STATE_KEY, startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
@@ -74,7 +75,10 @@ export function DesktopAuthCallbackHandler() {
       }
     };
 
-    // Hot path: live deep-link event from the Tauri shell.
+    // Hot path: live deep-link event from the Tauri shell. Main-window only —
+    // in the native browser-view this listen ACL-denies (the .catch below keeps
+    // it from crashing, but skip the wasted attempt). See canUseTauriEvents.
+    if (!canUseTauriEvents()) return () => { cancelled = true; };
     void import('@tauri-apps/api/event')
       .then(({ listen }) =>
         listen<string[]>('o8:auth-callback', (event) => {

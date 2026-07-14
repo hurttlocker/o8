@@ -18,7 +18,7 @@
  * the editor's own beforeinput pipeline.
  */
 import { useEffect } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
 
 type CapturePayload = { requestId: string };
 type ApplyPayload = { requestId: string; mode: 'selection' | 'field'; text: string };
@@ -112,7 +112,9 @@ function applyEdit(mode: 'selection' | 'field', text: string): { ok: boolean; er
 
 export function useSymonEditBridge(): void {
   useEffect(() => {
-    if (!isTauri()) return;
+    // Main-window only — these listeners in the native browser-view would
+    // ACL-crash (see canUseTauriEvents).
+    if (!canUseTauriEvents()) return;
     let disposed = false;
     const unlisteners: Array<() => void> = [];
     void Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')])

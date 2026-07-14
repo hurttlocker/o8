@@ -19,6 +19,42 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+/**
+ * The current webview window's label, read SYNCHRONOUSLY from the Tauri
+ * internals metadata (no async `getCurrentWindow()` import). null outside Tauri.
+ */
+export function currentWindowLabel(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const internals = (window as unknown as {
+      __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } };
+    }).__TAURI_INTERNALS__;
+    return internals?.metadata?.currentWindow?.label ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether Tauri event emit/listen is SAFE to call in the current window.
+ *
+ * Tauri injects `__TAURI_INTERNALS__` into any webview whose URL matches a
+ * capability's `remote.urls` — and o8's are `http(s)://localhost:*|127.0.0.1:*`.
+ * The native `browser-view` window loads localhost pages, so `isTauri()` is TRUE
+ * inside it even though it holds NO capability (deliberately — granting it would
+ * hand every browsed site o8's event IPC). If a main-app page (e.g. the operator
+ * browses to o8's own localhost origin) mounts there, its emit/listen effects
+ * fire and the ACL rejects each with "Command plugin:event|emit not allowed by
+ * ACL" → a burst of unhandled rejections that crash the renderer (reports on
+ * v0.1.597). Every main-app event site must gate on THIS, not bare isTauri():
+ * the main-app event contract only holds in the `main` window (the satellite
+ * windows — dock/agent-partials/point-overlay/spatial-ink/voice-settings — run
+ * their OWN pages and use events directly under their own grants).
+ */
+export function canUseTauriEvents(): boolean {
+  return isTauri() && currentWindowLabel() === 'main';
+}
+
 // #932 phase 2: tauri-plugin-mcp's old setupPluginListeners() init dance
 // was deleted. The eval_and_await protocol invokes JS from Rust per call
 // (via webview.eval()) instead of holding persistent JS-side listeners,
@@ -200,7 +236,8 @@ export async function peekPendingFileOpens(): Promise<string[]> {
 /** Subscribe to warm file-open requests. Resolves to an unlisten fn (null
  *  outside Tauri). */
 export async function onFileOpenRequest(handler: (paths: string[]) => void): Promise<(() => void) | null> {
-  if (!isTauri()) return null;
+  // Main-window only — this listener in the native browser-view ACL-denies.
+  if (!canUseTauriEvents()) return null;
   try {
     const { listen } = await import('@tauri-apps/api/event');
     return await listen<string[]>('file-open-request', (event) => handler(event.payload ?? []));
