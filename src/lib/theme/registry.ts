@@ -146,10 +146,10 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-code-bg': 'rgba(15, 23, 42, 0.06)',
   '--t-drag-handle': 'rgba(15, 23, 42, 0.22)',
   '--t-drag-handle-hover': '#94a3b8',
-  // Rail selection shimmer flare — orange on light paper (ink-on-ink flare
-  // was too quiet there); dark palettes fall back to their ice-white ink
-  // via the call sites' var() fallback (Q tune 2026-07-14).
-  '--t-shimmer-flare': '#FF5A1F',
+  // Rail selection shimmer flare — accent blue on light paper (report
+  // 6BG69K: the orange pass read too quiet against light ink; blue carries
+  // more contrast there). Dark keeps its ice-white via its own token.
+  '--t-shimmer-flare': '#2563eb',
   '--t-search-border': 'rgba(15, 23, 42, 0.08)',
   '--t-btn-secondary-border': 'rgba(15, 23, 42, 0.12)',
   '--t-btn-secondary-hover': 'rgba(15, 23, 42, 0.06)',
