@@ -37,6 +37,15 @@ export interface ReportRecord {
   reporter: string | null;
   /** App version the report was filed against. */
   version: string;
+  /**
+   * Where this ledger row came from. 'local' = filed from THIS install (⌘⇧E)
+   * — the only rows that earn a "you reported this" receipt. 'intake-sync' =
+   * mirrored from the intake channel by the maintainer's sync (ops tooling);
+   * without the marker the maintainer's box showed receipts for EVERYONE's
+   * reports. Absent on rows written before 2026-07-14 — treated as 'local'
+   * (a normal user's ledger only ever contains their own reports).
+   */
+  origin?: 'local' | 'intake-sync';
 }
 
 function dataDir(): string {
@@ -80,7 +89,8 @@ export function recordReport(record: ReportRecord): boolean {
   try {
     const dir = feedbackDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    appendFileSync(reportLedgerPath(), `${JSON.stringify(record)}\n`, 'utf8');
+    const stamped: ReportRecord = { origin: 'local', ...record };
+    appendFileSync(reportLedgerPath(), `${JSON.stringify(stamped)}\n`, 'utf8');
     return true;
   } catch (err) {
     try {
