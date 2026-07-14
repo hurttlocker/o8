@@ -263,6 +263,16 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     }
   }, [preferredRepo]);
 
+  // The pickers' open state is only maintained by the typing handler above —
+  // a PROGRAMMATIC clear (send, slash-route, reset) bypasses it and left the
+  // commands popup latched open over an empty composer (report FYPPHK).
+  // Watch `input` itself so every clear path closes them.
+  useEffect(() => {
+    if (input.startsWith('/')) return;
+    setShowSlashPicker(false);
+    if (!input.includes('@')) setShowFilePicker(false);
+  }, [input]);
+
   const handlePaste = useCallback((event: React.ClipboardEvent) => {
     const items = event.clipboardData?.items;
     if (!items) return;
