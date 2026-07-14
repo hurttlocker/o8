@@ -115,15 +115,18 @@ fn build_speech_recognizer() {
           .nth(3)
           .map(|path| path.to_path_buf())
       });
-      let generated_dir = if profile == "release" {
-        helpers_dir.to_path_buf()
-      } else {
-        // Keep dev/check outputs out of src-tauri/helpers. Tauri dev watches
-        // that directory and restarts whenever build.rs rewrites a sidecar.
-        target_dir
-          .clone()
-          .unwrap_or_else(|| helpers_dir.to_path_buf())
-      };
+      // Thin per-arch slices and the lipo'd fat binary are build INTERMEDIATES
+      // and must never be generated into src-tauri/helpers: (a) Tauri dev
+      // watches that directory and restarts whenever build.rs rewrites a
+      // sidecar, and (b) in release the bundling copies below overwrite
+      // helpers/speech_recognizer-<arch>-apple-darwin with the FAT binary —
+      // when that same path was also lipo's thin input, the NEXT release build
+      // reused it (needs_rebuild only checks the Swift source) and lipo failed
+      // with "have the same architectures (arm64)" (the v0.1.596 ship failure).
+      // helpers/ only ever receives finished copies for Tauri's bundler.
+      let generated_dir = target_dir
+        .clone()
+        .unwrap_or_else(|| helpers_dir.to_path_buf());
       let _ = std::fs::create_dir_all(&generated_dir);
       let swift_bin = generated_dir.join("speech_recognizer");
 
