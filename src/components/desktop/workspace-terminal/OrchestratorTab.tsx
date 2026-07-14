@@ -44,6 +44,7 @@ import type { QuickAction } from '@/lib/orchestrator/quick-actions';
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
+import { COLLAPSED_BRANCH_RAIL_WIDTH } from '@/components/desktop/branch-rail-geometry';
 import {
   ThoughtsChatPanel,
   type ThoughtsChatPanelChromeState,
@@ -1036,7 +1037,7 @@ function OrchestratorTabInner({
   const branchRail = (
     <div
       style={{
-        width: (projectContextRailVisible && railFits) ? (branchRailCollapsed ? 44 : 256) : 0,
+        width: (projectContextRailVisible && railFits) ? (branchRailCollapsed ? COLLAPSED_BRANCH_RAIL_WIDTH : 256) : 0,
         flexShrink: 0,
         // minHeight:0 keeps this flex item bounded by the row height so the
         // rail's own overflowY:auto can engage — without it the rail sized to
