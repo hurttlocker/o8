@@ -649,6 +649,10 @@ func stopSession(requestedSessionId: UInt64? = nil) {
     // THERE, not here — otherwise we lose the tail of the current session.
     if let recognitionTask {
         recognitionTask.finish()
+    } else if finishAnalyzerSessionIfActive() {
+        // SpeechAnalyzer owns this session — its results loop delivers the
+        // final into sessionTranscript and calls emitFinalAndReturnToIdle.
+        // The 1.5s safety net below still covers a wedged finalize.
     } else {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             if isShuttingDown
@@ -757,6 +761,7 @@ func resetSessionState() {
     recordedSamples.removeAll(keepingCapacity: true)
     recognitionTask = nil
     currentRequest = nil
+    cancelAnalyzerSessionIfActive()
     currentSessionId = 0
 }
 
@@ -765,7 +770,7 @@ func resetSessionState() {
 func handleQuit() {
     // If a session is active, stop it first — the final callback will see
     // isQuitting and exit(0) after emitting.
-    if recognitionTask != nil && audioEngine.isRunning {
+    if (recognitionTask != nil || analyzerBox != nil) && audioEngine.isRunning {
         isQuitting = true
         stopSession()
         return
@@ -833,6 +838,339 @@ func requestAuthorization(completion: @escaping (Bool) -> Void) {
     }
 }
 
+// MARK: - SpeechAnalyzer path (macOS 26+)
+
+// The durable replacement for SFSpeechRecognizer's fragile server path
+// (2026-07-13 Apple Silicon diagnosis, vault/memory: waveform-moves-zero-
+// partials on M4). SpeechTranscriber is fully on-device, needs NO
+// Siri/Dictation toggle (kills kLSRErrorDomain 201 structurally), no speech-
+// recognition TCC grant, and its model asset is APP-downloadable via
+// AssetInventory — SFSpeech could only tell the user to visit System
+// Settings. Fail-safe contract: any failure anywhere in this path latches
+// `analyzerUnusableForRun` and the session falls back to the untouched
+// SFSpeechRecognizer machinery below; macOS ≤ 15 never enters it.
+
+/// Opt-out escape hatch for the field: O8_DISABLE_SPEECH_ANALYZER=1.
+var analyzerDisabledByEnv = ProcessInfo.processInfo.environment["O8_DISABLE_SPEECH_ANALYZER"] == "1"
+/// Latched true on the first analyzer failure — SFSpeech owns the rest of the run.
+var analyzerUnusableForRun = false
+/// Latch so the background model download is only kicked once per run.
+var analyzerAssetDownloadStarted = false
+/// The live analyzer session (typed AnyObject so pre-26 targets still compile).
+var analyzerBox: AnyObject?
+/// True between the gate taking ownership and the async setup resolving.
+/// While set, the tap parks buffers in `analyzerPendingBuffers` so the first
+/// spoken words survive the ~100ms analyzer boot (classic first-words-cut
+/// dictation bug) and are flushed into whichever engine wins.
+var analyzerStarting = false
+var analyzerPendingBuffers: [AVAudioPCMBuffer] = []
+let analyzerPendingLock = NSLock()
+
+func analyzerParkBuffer(_ buffer: AVAudioPCMBuffer) {
+    analyzerPendingLock.lock()
+    if analyzerPendingBuffers.count < 64 { // ~1.5s cap — never grow unbounded
+        analyzerPendingBuffers.append(buffer)
+    }
+    analyzerPendingLock.unlock()
+}
+
+func analyzerTakePendingBuffers() -> [AVAudioPCMBuffer] {
+    analyzerPendingLock.lock()
+    let pending = analyzerPendingBuffers
+    analyzerPendingBuffers = []
+    analyzerPendingLock.unlock()
+    return pending
+}
+
+@available(macOS 26.0, *)
+final class AnalyzerSession {
+    let sessionId: UInt64
+    private let transcriber: SpeechTranscriber
+    private let analyzer: SpeechAnalyzer
+    private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
+    private let analyzerFormat: AVAudioFormat?
+    private var converter: AVAudioConverter?
+    /// Text already finalized by the transcriber this session; volatile
+    /// results are appended on top of it for each partial emission.
+    private var finalizedText = ""
+    private var resultsTask: Task<Void, Never>?
+    private var finishing = false
+
+    private init(
+        sessionId: UInt64,
+        transcriber: SpeechTranscriber,
+        analyzer: SpeechAnalyzer,
+        inputContinuation: AsyncStream<AnalyzerInput>.Continuation,
+        analyzerFormat: AVAudioFormat?
+    ) {
+        self.sessionId = sessionId
+        self.transcriber = transcriber
+        self.analyzer = analyzer
+        self.inputContinuation = inputContinuation
+        self.analyzerFormat = analyzerFormat
+    }
+
+    /// Build and start a session for the current locale, or return nil when
+    /// the analyzer path cannot own this session (unsupported locale, asset
+    /// not yet installed, or any setup error). Asset-missing is NOT a
+    /// failure: the download is kicked off in the background and the
+    /// analyzer takes over on a later session once it lands.
+    static func make(sessionId: UInt64, localeIdentifier: String) async -> AnalyzerSession? {
+        let locale = Locale(identifier: localeIdentifier)
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults],
+            attributeOptions: []
+        )
+
+        do {
+            let installed = await SpeechTranscriber.installedLocales
+            let isInstalled = installed.contains {
+                $0.identifier(.bcp47) == locale.identifier(.bcp47)
+            }
+            if !isInstalled {
+                let supported = await SpeechTranscriber.supportedLocales
+                if supported.isEmpty {
+                    // Hardware without on-device transcription at all (live-
+                    // verified: Intel macOS 26 reports zero locales). Latch
+                    // the path off so future sessions skip the probe and go
+                    // straight to SFSpeech with no added start latency.
+                    analyzerUnusableForRun = true
+                    emit("status", "analyzer_unsupported_hardware", sessionId: sessionId)
+                    return nil
+                }
+                let isSupported = supported.contains {
+                    $0.identifier(.bcp47) == locale.identifier(.bcp47)
+                }
+                guard isSupported else {
+                    emit("status", "analyzer_locale_unsupported:\(localeIdentifier)", sessionId: sessionId)
+                    return nil
+                }
+                if !analyzerAssetDownloadStarted {
+                    analyzerAssetDownloadStarted = true
+                    emit("status", "analyzer_asset_downloading:\(localeIdentifier)", sessionId: sessionId)
+                    Task.detached {
+                        do {
+                            if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                                try await request.downloadAndInstall()
+                            }
+                            emit("status", "analyzer_asset_installed:\(localeIdentifier)")
+                        } catch {
+                            emit("status", "analyzer_asset_download_failed:\(error.localizedDescription)")
+                        }
+                    }
+                }
+                // SFSpeech carries this session; the analyzer owns the next
+                // one that starts after the download completes.
+                return nil
+            }
+
+            let analyzer = SpeechAnalyzer(modules: [transcriber])
+            let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+            let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
+            let session = AnalyzerSession(
+                sessionId: sessionId,
+                transcriber: transcriber,
+                analyzer: analyzer,
+                inputContinuation: continuation,
+                analyzerFormat: format
+            )
+            session.startResultsLoop()
+            try await analyzer.start(inputSequence: stream)
+            return session
+        } catch {
+            emit("status", "analyzer_setup_failed:\(error.localizedDescription)", sessionId: sessionId)
+            return nil
+        }
+    }
+
+    /// Consume transcriber results and mirror them into the exact state the
+    /// legacy path uses (`sessionTranscript` + partial emissions), so
+    /// emitFinalAndReturnToIdle / Whisper finalize work unchanged. Volatile
+    /// results REPLACE the pending tail; finalized results fold into
+    /// `finalizedText`.
+    private func startResultsLoop() {
+        resultsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await result in self.transcriber.results {
+                    let text = String(result.text.characters)
+                    DispatchQueue.main.async {
+                        guard self.sessionId == currentSessionId
+                            || (isShuttingDown && self.sessionId == finalizingSessionId) else { return }
+                        if result.isFinal {
+                            self.finalizedText = self.finalizedText.isEmpty
+                                ? text
+                                : self.finalizedText + " " + text
+                            sessionTranscript = self.finalizedText
+                        } else if text.isEmpty {
+                            sessionTranscript = self.finalizedText
+                        } else {
+                            sessionTranscript = self.finalizedText.isEmpty
+                                ? text
+                                : self.finalizedText + " " + text
+                        }
+                        let fullText = accumulatedTranscript.isEmpty
+                            ? sessionTranscript
+                            : accumulatedTranscript + " " + sessionTranscript
+                        if !fullText.isEmpty {
+                            emit("partial", fullText, sessionId: self.sessionId)
+                        }
+                    }
+                }
+            } catch {
+                emit("status", "analyzer_results_error:\(error.localizedDescription)", sessionId: self.sessionId)
+            }
+            // Results stream ended (finalize or failure) — if we are the
+            // session being shut down, deliver the final from the same
+            // machinery the legacy path uses.
+            DispatchQueue.main.async {
+                if isShuttingDown && self.sessionId == finalizingSessionId {
+                    emitFinalAndReturnToIdle()
+                }
+            }
+        }
+    }
+
+    /// Called from the audio tap thread with the raw mic buffer.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard !finishing else { return }
+        guard let analyzerFormat else {
+            inputContinuation.yield(AnalyzerInput(buffer: buffer))
+            return
+        }
+        if buffer.format == analyzerFormat {
+            inputContinuation.yield(AnalyzerInput(buffer: buffer))
+            return
+        }
+        if converter == nil || converter?.inputFormat != buffer.format {
+            converter = AVAudioConverter(from: buffer.format, to: analyzerFormat)
+        }
+        guard let converter else { return }
+        let ratio = analyzerFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio))
+        guard capacity > 0,
+              let out = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else { return }
+        var consumed = false
+        var conversionError: NSError?
+        converter.convert(to: out, error: &conversionError) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        if conversionError == nil, out.frameLength > 0 {
+            inputContinuation.yield(AnalyzerInput(buffer: out))
+        }
+    }
+
+    /// Ask the analyzer for its final result. The results loop delivers it
+    /// into sessionTranscript and then calls emitFinalAndReturnToIdle; the
+    /// existing 1.5s stopSession safety net still covers a wedged finalize.
+    func finish() {
+        guard !finishing else { return }
+        finishing = true
+        inputContinuation.finish()
+        Task {
+            do {
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+            } catch {
+                emit("status", "analyzer_finalize_error:\(error.localizedDescription)", sessionId: sessionId)
+                DispatchQueue.main.async {
+                    if isShuttingDown && self.sessionId == finalizingSessionId {
+                        emitFinalAndReturnToIdle()
+                    }
+                }
+            }
+        }
+    }
+
+    func cancel() {
+        finishing = true
+        inputContinuation.finish()
+        resultsTask?.cancel()
+        Task { await analyzer.cancelAndFinishNow() }
+    }
+}
+
+/// Gate at the top of startRecognitionSession: returns true when the
+/// analyzer path takes ownership of this session. Async setup — on failure
+/// it latches analyzer-off and re-enters startRecognitionSession, which then
+/// routes to SFSpeech.
+func startAnalyzerSessionIfPossible(sessionId: UInt64) -> Bool {
+    guard #available(macOS 26.0, *), !analyzerDisabledByEnv, !analyzerUnusableForRun else {
+        return false
+    }
+    let localeId = currentLocaleIdentifier
+    analyzerStarting = true
+    Task {
+        let session = await AnalyzerSession.make(sessionId: sessionId, localeIdentifier: localeId)
+        DispatchQueue.main.async {
+            guard sessionId == currentSessionId, !isShuttingDown else {
+                analyzerStarting = false
+                _ = analyzerTakePendingBuffers()
+                if #available(macOS 26.0, *), let s = session { s.cancel() }
+                return
+            }
+            if let session {
+                analyzerBox = session
+                sessionTranscript = ""
+                analyzerStarting = false
+                for parked in analyzerTakePendingBuffers() {
+                    session.append(parked)
+                }
+                emit("status", "analyzer_session_started:\(localeId)", sessionId: sessionId)
+            } else {
+                // Not usable (this session) — SFSpeech carries it. Only
+                // hardware-unsupported latches the whole run off; locale and
+                // asset misses retry naturally next session.
+                startSFSpeechRecognitionSession(sessionId: sessionId)
+                analyzerStarting = false
+                for parked in analyzerTakePendingBuffers() {
+                    currentRequest?.append(parked)
+                }
+            }
+        }
+    }
+    return true
+}
+
+/// Route the live tap buffer to whichever engine owns the session.
+func feedRecognitionAudio(_ buffer: AVAudioPCMBuffer) {
+    if #available(macOS 26.0, *), let session = analyzerBox as? AnalyzerSession {
+        session.append(buffer)
+        return
+    }
+    if analyzerStarting {
+        analyzerParkBuffer(buffer)
+        return
+    }
+    currentRequest?.append(buffer)
+}
+
+/// Finish the analyzer session if one owns the current shutdown; returns
+/// true when the analyzer will deliver the final (so stopSession should not
+/// double-finalize through the legacy path).
+func finishAnalyzerSessionIfActive() -> Bool {
+    guard #available(macOS 26.0, *), let session = analyzerBox as? AnalyzerSession else {
+        return false
+    }
+    analyzerBox = nil
+    session.finish()
+    return true
+}
+
+/// Hard-cancel (rapid restart / teardown) — no final expected.
+func cancelAnalyzerSessionIfActive() {
+    guard #available(macOS 26.0, *), let session = analyzerBox as? AnalyzerSession else { return }
+    analyzerBox = nil
+    session.cancel()
+}
+
 // MARK: - Recognition (restartable)
 
 var recognizer: SFSpeechRecognizer?
@@ -840,8 +1178,18 @@ var inputNode: AVAudioInputNode!
 var nativeFormat: AVAudioFormat!
 
 /// Start or restart a recognition session. The audio engine stays running;
-/// only the recognition task and request are recreated.
+/// only the recognition engine state is recreated. On macOS 26+ the
+/// SpeechAnalyzer path takes the session when usable; everything else (and
+/// every chained SFSpeech restart) rides the legacy path below.
 func startRecognitionSession(sessionId: UInt64) {
+    guard !isShuttingDown else { return }
+    if startAnalyzerSessionIfPossible(sessionId: sessionId) { return }
+    startSFSpeechRecognitionSession(sessionId: sessionId)
+}
+
+/// The legacy SFSpeechRecognizer session (macOS ≤ 15, analyzer fallback, and
+/// mid-session chain restarts — a session never switches engines midway).
+func startSFSpeechRecognitionSession(sessionId: UInt64) {
     guard !isShuttingDown else { return }
     guard appleSpeechRecognitionEnabled else {
         // This early-return IS the "apple=0 on every session" signature: speech
@@ -905,7 +1253,7 @@ func startRecognitionSession(sessionId: UInt64) {
                 emit("partial", fullText, sessionId: sessionId)
                 // Chain to next session — no delay to minimize audio gap.
                 DispatchQueue.main.async {
-                    startRecognitionSession(sessionId: sessionId)
+                    startSFSpeechRecognitionSession(sessionId: sessionId)
                 }
             } else {
                 emit("partial", fullText, sessionId: sessionId)
@@ -1006,7 +1354,7 @@ func startRecognitionSession(sessionId: UInt64) {
                     sessionTranscript = ""
                 }
                 DispatchQueue.main.async {
-                    startRecognitionSession(sessionId: sessionId)
+                    startSFSpeechRecognitionSession(sessionId: sessionId)
                 }
             }
         }
@@ -1100,8 +1448,8 @@ func configureAudioInputGraph(sessionId: UInt64? = nil) -> Bool {
             return
         }
 
-        // Feed audio to the current recognition request
-        currentRequest?.append(buffer)
+        // Feed audio to whichever recognition engine owns the session
+        feedRecognitionAudio(buffer)
 
         // Convert to 16kHz mono for Whisper recording. Build the converter
         // from the actual buffer format so external mics with different
@@ -1322,6 +1670,7 @@ func handleStart(sessionId: UInt64) {
         recognitionTask?.cancel()
         recognitionTask = nil
         currentRequest = nil
+        cancelAnalyzerSessionIfActive()
         shutdownGeneration &+= 1
         if !shutdownEmitted {
             let stoppedId = finalizingSessionId != 0 ? finalizingSessionId : currentSessionId
