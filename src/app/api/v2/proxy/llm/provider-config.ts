@@ -5,8 +5,17 @@ export type Provider = 'anthropic' | 'openai' | 'google' | 'operator';
 
 /** o8 Operator backing model for FOUNDERS/paid — Gemini Flash via
  *  GOOGLE_AI_API_KEY (tool-capable, fastest; not available to free users —
- *  Q ruling 2026-07-12: "nemo for free, gemini for founders"). */
-export const OPERATOR_GEMINI_MODEL = 'gemini-2.5-flash';
+ *  Q ruling 2026-07-12: "nemo for free, gemini for founders"). Swapped to
+ *  Gemini 3 (Q ruling 2026-07-13) after the model shootout Round 3: tied
+ *  quality (2.00 across seeds on the production two-angle harness), ~15%
+ *  faster p50, ~14% cheaper per suite than 2.5 despite higher list rates
+ *  (fewer completion tokens). Live-verified on the Gemini API 2026-07-13. */
+export const OPERATOR_GEMINI_MODEL = 'gemini-3-flash-preview';
+
+/** Rollback for the founders rail — proven production record. The proxy tries
+ *  this THROUGH GEMINI when the primary fails for any reason (preview IDs can
+ *  be re-pointed or retired by Google) before touching the free chain. */
+export const OPERATOR_GEMINI_ROLLBACK_MODEL = 'gemini-2.5-flash';
 
 /** o8 Operator FREE chain — $0 OpenRouter models, ordered. Bake-off
  *  2026-07-12 (scratchpad bakeoff_results.json): nemotron passed tool-calling
@@ -52,7 +61,7 @@ export interface ProviderConfig {
 const PRICING: Record<string, { input: number; output: number }> = {
   'gemini-3.1-pro-preview': { input: 1.25, output: 10 },
   'gemini-3-pro-preview': { input: 1.25, output: 10 },
-  'gemini-3-flash-preview': { input: 0.15, output: 0.60 },
+  'gemini-3-flash-preview': { input: 0.50, output: 3.00 },
   'gemini-2.5-pro': { input: 1.25, output: 10 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash-lite': { input: 0.04, output: 0.15 },
