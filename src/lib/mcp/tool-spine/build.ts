@@ -33,7 +33,10 @@ function detectRepoSlug(repoPath: string): string {
   }
 }
 
-function findBundledMcpServer(fileName: string): string | null {
+// `moduleDir` is injectable ONLY so the packaged sibling-probe branch below is
+// reachable in a unit test (real callers use the default — this module's own
+// bundle dir). See build-mcp-resolution.test.ts.
+export function findBundledMcpServer(fileName: string, moduleDir?: string): string | null {
   if (fileName === 'operator-mcp-server.mjs') {
     const explicitOperatorPath = process.env.O8_BUNDLED_MCP_PATH;
     if (explicitOperatorPath && existsSync(explicitOperatorPath)) {
@@ -44,12 +47,31 @@ function findBundledMcpServer(fileName: string): string | null {
   const bundledDir =
     process.env.O8_BUNDLED_MCP_DIR
     || (process.env.O8_BUNDLED_MCP_PATH ? dirname(process.env.O8_BUNDLED_MCP_PATH) : null);
-  if (!bundledDir) {
-    return null;
+  if (bundledDir) {
+    const bundled = join(bundledDir, fileName);
+    if (existsSync(bundled)) {
+      return bundled;
+    }
   }
 
-  const bundled = join(bundledDir, fileName);
-  return existsSync(bundled) ? bundled : null;
+  // Defense in depth (belt to the sidecar's suspenders). The Rust sidecar sets
+  // O8_BUNDLED_MCP_PATH/DIR for its children — but this exact class already bit
+  // once: the next-server child got the vars, the ws-server child (which hosts
+  // the in-app orchestrator and thus GENERATES the orchestrator MCP config) did
+  // not, so the resolver fell through to a dev `tsx …/*.ts` path absent from the
+  // bundle. When esbuild flattens this module into `server/*-impl.mjs`, the
+  // bundled operator/cortex `.mjs` sit right beside it — so in any packaged
+  // process (O8_PACKAGED_APP=1) resolve the sibling directly, env or no env. A
+  // dev checkout has no sibling .mjs, so it still falls through to the tsx source.
+  if (process.env.O8_PACKAGED_APP) {
+    const baseDir = moduleDir ?? dirname(fileURLToPath(import.meta.url));
+    const sibling = resolve(baseDir, fileName);
+    if (existsSync(sibling)) {
+      return sibling;
+    }
+  }
+
+  return null;
 }
 
 /**
