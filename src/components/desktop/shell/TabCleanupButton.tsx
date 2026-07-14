@@ -1,56 +1,78 @@
 'use client';
 
-import { useState } from 'react';
+import { motion } from 'framer-motion';
 
 interface TabCleanupButtonProps {
   finishedTabCount: number;
   onCleanup: () => void;
 }
 
+/**
+ * TabCleanupButton — sweeps the finished (non-active) CLI-session tabs from the
+ * workspace strip. It only renders inside the header pill strip, which itself
+ * only appears when 2+ tabs are open, so this button "pops up" once there's
+ * more than one tab AND at least one is finished.
+ *
+ * Chrome intentionally matches HeaderIconPill exactly (transparent → hover,
+ * secondary → text, no border, no box): the operator flagged the old
+ * bordered-card + boxed-badge treatment as standing out too much. The count is
+ * kept as quiet inline text beside the broom, not a badge.
+ */
 export function TabCleanupButton({
   finishedTabCount,
   onCleanup,
 }: TabCleanupButtonProps) {
-  const [hovered, setHovered] = useState(false);
   if (finishedTabCount < 1) return null;
 
   const label = `Clean up ${finishedTabCount} finished ${finishedTabCount === 1 ? 'tab' : 'tabs'}`;
 
   return (
-    <button
+    <motion.button
       type="button"
       data-no-drag
       onClick={onCleanup}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       aria-label={label}
       title={label}
+      initial={false}
+      animate="rest"
+      whileHover="hover"
+      variants={{
+        rest: {
+          background: 'var(--t-pill-rest-bg, transparent)',
+          color: 'var(--t-text-secondary)',
+        },
+        hover: {
+          background: 'var(--t-hover)',
+          color: 'var(--t-text)',
+        },
+      }}
+      transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
       style={{
+        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 5,
-        minWidth: 44,
-        height: 28,
-        paddingLeft: 8,
+        height: 26,
+        minWidth: 26,
+        paddingLeft: 7,
         paddingRight: 7,
+        borderWidth: 0,
         borderRadius: 7,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: hovered ? 'var(--t-divider)' : 'var(--t-divider-subtle)',
-        background: hovered ? 'var(--t-hover)' : 'var(--t-input-bg)',
-        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
         cursor: 'pointer',
-        fontFamily: 'var(--font-sans-system)',
-        fontSize: 11,
-        fontWeight: 500,
-        lineHeight: 1,
-        paddingTop: 0,
-        paddingBottom: 0,
         flexShrink: 0,
-        transition: 'background 120ms ease, border-color 120ms ease, color 120ms ease',
+        fontFamily: 'var(--font-sans-system)',
+        WebkitTapHighlightColor: 'transparent',
+        ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
+      {/* Transparent hit-extender — lifts the click target to ~44px tall
+          without touching the visible 26px pill. Upward-dominant so it reaches
+          into the drag band, not the content below. Mirrors HeaderIconPill. */}
+      <span
+        aria-hidden
+        style={{ position: 'absolute', top: -14, bottom: -4, left: 0, right: 0 }}
+      />
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width={14}
@@ -65,23 +87,14 @@ export function TabCleanupButton({
       <span
         aria-hidden="true"
         style={{
-          minWidth: 14,
-          height: 14,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: 7,
-          background: 'var(--t-panel)',
-          color: 'var(--t-text)',
-          paddingLeft: 4,
-          paddingRight: 4,
-          fontSize: 10,
-          fontWeight: 600,
+          fontSize: 11,
+          fontWeight: 400,
           lineHeight: 1,
+          letterSpacing: '-0.1px',
         }}
       >
         {finishedTabCount}
       </span>
-    </button>
+    </motion.button>
   );
 }
