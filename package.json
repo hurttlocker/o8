@@ -1,7 +1,7 @@
 {
   "name": "o8",
-  "version": "0.1.593",
-  "description": "o8 \u2014 governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
+  "version": "0.1.594",
+  "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "productName": "o8",
   "private": true,
   "main": "src/app/layout.tsx",
