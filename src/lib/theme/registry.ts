@@ -407,7 +407,7 @@ const DARK_GLASS: Record<string, string> = {
 // reads the surface as one continuous dark page.
 const DARK_SOLID: Record<string, string> = {
   '--t-bg': '#16191E',
-  '--t-bg-gradient': '#16191E',
+  '--t-bg-gradient': '#1a1e24',
   '--t-bg-subtle': '#1E2228',
   '--t-panel': '#22262C',
   '--t-panel-translucent': '#1E2228',
@@ -430,7 +430,7 @@ const DARK_SOLID: Record<string, string> = {
   '--t-timeline-bar': '#22262C',
   '--t-shell-backdrop': '#16191E',
   '--t-glass-elevated': '#22262C',
-  '--t-glass-muted': '#1E2228',
+  '--t-glass-muted': '#1a1e24',
   '--t-glass-muted-strong': '#22262C',
   '--t-glass-shadow':
     '0 16px 36px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.04)',
