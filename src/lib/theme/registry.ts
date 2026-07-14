@@ -146,6 +146,10 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-code-bg': 'rgba(15, 23, 42, 0.06)',
   '--t-drag-handle': 'rgba(15, 23, 42, 0.22)',
   '--t-drag-handle-hover': '#94a3b8',
+  // Rail selection shimmer flare — orange on light paper (ink-on-ink flare
+  // was too quiet there); dark palettes fall back to their ice-white ink
+  // via the call sites' var() fallback (Q tune 2026-07-14).
+  '--t-shimmer-flare': '#FF5A1F',
   '--t-search-border': 'rgba(15, 23, 42, 0.08)',
   '--t-btn-secondary-border': 'rgba(15, 23, 42, 0.12)',
   '--t-btn-secondary-hover': 'rgba(15, 23, 42, 0.06)',
@@ -334,6 +338,11 @@ const DARK_BASE: Record<string, string> = {
   '--t-code-bg': 'rgba(0, 0, 0, 0.24)',
   '--t-drag-handle': 'rgba(255, 255, 255, 0.22)',
   '--t-drag-handle-hover': '#5f6b7a',
+  // Rail selection shimmer flare — ice-white ink (Q: "the light blue was
+  // good"). Defined in BOTH palette bases because ThemeProvider only SETS
+  // vars on palette switch (never clears), so a light-only token would
+  // leak its orange into dark.
+  '--t-shimmer-flare': '#e8ecf2',
   '--t-search-border': 'rgba(255, 255, 255, 0.08)',
   '--t-btn-secondary-border': 'rgba(255, 255, 255, 0.1)',
   '--t-btn-secondary-hover': 'rgba(255, 255, 255, 0.06)',
