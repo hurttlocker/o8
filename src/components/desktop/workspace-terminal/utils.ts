@@ -56,6 +56,26 @@ export function deriveFocusedLaneRepo(
   return null;
 }
 
+/**
+ * "+ New session → Orchestrator" reuse gate: a tab only counts as a blank
+ * spawn when NOTHING has bound to it — no packet, no draft, and crucially no
+ * orchestrator thread. Orchestrator transcripts live server-side by thread id
+ * (tab.chatMessages stays empty forever), so an empty-messages check alone
+ * matched USED tabs and every new-session click merely refocused the old
+ * conversation — "new session button does nothing / opens the old
+ * orchestrator" (report D3YPBP, Q repro 2026-07-14).
+ */
+export function isReusableBlankOrchestratorTab(tab: TerminalTab): boolean {
+  return (
+    tab.kind === 'orchestrator'
+    && tab.freshSpawn === true
+    && !tab.orchestrationPacket
+    && !tab.chatDraftInjection
+    && !tab.orchestratorThreadId
+    && (!tab.chatMessages || tab.chatMessages.length === 0)
+  );
+}
+
 export function shortenPath(value: string) {
   const userPath = value.replace(/^\/Users\/[^/]+/, '~');
   if (userPath !== value) return userPath;
