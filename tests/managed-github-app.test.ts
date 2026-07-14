@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,19 +23,38 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 import {
+  clearActiveIdentity,
   clearManagedGithubState,
   readManagedGithubToken,
+  writeActiveIdentity,
   writeManagedGithubState,
 } from '@/lib/github-broker/managed';
-import { getInstallationForRepo, getInstallationToken } from '@/lib/github-broker/auth';
+import {
+  GitHubManagedUnavailableError,
+  getInstallationForRepo,
+  getInstallationToken,
+  githubInstallationFetch,
+} from '@/lib/github-broker/auth';
+
+const OWNER = 'user_owner_abc';
+
+function persistValidToken(owner = OWNER, token = 'ghs_managed_test_token') {
+  writeManagedGithubState({
+    installed: true,
+    token,
+    expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
+    installationId: 4242,
+    accountLogin: 'chris-example',
+    ownerClerkUserId: owner,
+  });
+}
 
 /**
  * Real-path seam (reachability rule): the entitlement sync persists managed
- * GitHub App state to disk, and the broker's REAL auth functions — the ones
- * every /api/panel GitHub route calls — must pick it up with no BYO env
- * config and no network. Testing readManagedGithubToken alone would be the
- * "green tests encode the premise" trap; getInstallationForRepo /
- * getInstallationToken are what actual callers reach.
+ * GitHub App state + an active-identity anchor to disk, and the broker's REAL
+ * auth functions — the ones every /api/panel GitHub route calls, INCLUDING
+ * githubInstallationFetch (where the audit's HIGH #1 lived) — must pick them up
+ * with no BYO env config and no network for the setup.
  */
 describe('managed GitHub App broker seam', () => {
   let dataDir: string;
@@ -49,26 +68,65 @@ describe('managed GitHub App broker seam', () => {
 
   afterEach(() => {
     clearManagedGithubState();
+    clearActiveIdentity();
     delete process.env.CORTEX_IDE_DATA_DIR;
+    vi.restoreAllMocks();
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('broker auth serves the persisted managed token without any BYO config or network', async () => {
+  it('serves the token through the full broker chain when owner === active identity', async () => {
+    persistValidToken();
+    writeActiveIdentity(OWNER);
+
+    const installation = await getInstallationForRepo('someone/some-repo');
+    expect(installation.id).toBe(4242);
+    expect(installation.account?.login).toBe('chris-example');
+    expect(await getInstallationToken(installation.id)).toBe('ghs_managed_test_token');
+  });
+
+  it('githubInstallationFetch reaches GitHub with the managed token (audit #1 — no "not configured" throw)', async () => {
+    persistValidToken();
+    writeActiveIdentity(OWNER);
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('[]', { status: 200 }),
+    );
+
+    const { response } = await githubInstallationFetch('someone/some-repo', '/repos/someone/some-repo/issues');
+    expect(response.status).toBe(200);
+    const call = fetchMock.mock.calls[0];
+    expect(String(call[0])).toBe('https://api.github.com/repos/someone/some-repo/issues');
+    const headers = new Headers((call[1] as RequestInit).headers);
+    expect(headers.get('authorization')).toBe('Bearer ghs_managed_test_token');
+  });
+
+  it('FAILS CLOSED when the active identity is a DIFFERENT user (cross-account, audit #2)', async () => {
+    persistValidToken(OWNER);
+    writeActiveIdentity('user_someone_else');
+
+    expect(readManagedGithubToken()).toBeNull();
+    // The broker must not fabricate an installation for a token it won't serve.
+    await expect(getInstallationForRepo('someone/some-repo')).rejects.toBeInstanceOf(
+      GitHubManagedUnavailableError,
+    );
+  });
+
+  it('FAILS CLOSED when no active identity is recorded', () => {
+    persistValidToken(OWNER);
+    // no writeActiveIdentity
+    expect(readManagedGithubToken()).toBeNull();
+  });
+
+  it('FAILS CLOSED for a legacy token with no owner stamp', () => {
+    // A pre-binding file shape (no ownerClerkUserId) must not be served.
     writeManagedGithubState({
       installed: true,
-      token: 'ghs_managed_test_token',
+      token: 'ghs_legacy',
       expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
       installationId: 4242,
       accountLogin: 'chris-example',
     });
-
-    // The exact chain githubInstallationFetch runs for every panel route.
-    const installation = await getInstallationForRepo('someone/some-repo');
-    expect(installation.id).toBe(4242);
-    expect(installation.account?.login).toBe('chris-example');
-
-    const token = await getInstallationToken(installation.id);
-    expect(token).toBe('ghs_managed_test_token');
+    writeActiveIdentity(OWNER);
+    expect(readManagedGithubToken()).toBeNull();
   });
 
   it('an expiring managed token is treated as absent (falls back, never serves stale)', () => {
@@ -78,15 +136,19 @@ describe('managed GitHub App broker seam', () => {
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
       installationId: 4242,
       accountLogin: 'chris-example',
+      ownerClerkUserId: OWNER,
     });
+    writeActiveIdentity(OWNER);
     expect(readManagedGithubToken()).toBeNull();
   });
 
-  it('installed:false marker exposes the install CTA and no token', () => {
+  it('installed:false marker never yields a token', () => {
     writeManagedGithubState({
       installed: false,
-      installUrl: 'https://github.com/apps/o8/installations/new',
+      installUrl: 'https://github.com/apps/o8-run/installations/new',
+      ownerClerkUserId: OWNER,
     });
+    writeActiveIdentity(OWNER);
     expect(readManagedGithubToken()).toBeNull();
   });
 });

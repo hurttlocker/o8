@@ -8,6 +8,16 @@ import { readManagedGithubToken } from './managed';
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
 
+/** Managed mode has no valid token right now (expired / not installed). Distinct
+ * from "not configured" so routes can surface a reconnect prompt (audit #6). */
+export class GitHubManagedUnavailableError extends Error {
+  readonly code = 'github_managed_unavailable';
+  constructor() {
+    super('The o8 GitHub App token is unavailable — sign in again or install the o8 GitHub App to reconnect.');
+    this.name = 'GitHubManagedUnavailableError';
+  }
+}
+
 function githubHeaders(token: string, extra?: HeadersInit): HeadersInit {
   return {
     Accept: 'application/vnd.github+json',
@@ -69,6 +79,11 @@ export async function getInstallationForRepo(repoFullName: string) {
         account: managed.accountLogin ? { login: managed.accountLogin } : undefined,
       } as { id: number; target_type?: string; permissions?: Record<string, string>; account?: { login?: string; type?: string } };
     }
+    // Managed mode with no valid token (expired between the hourly mints, or
+    // never installed). Throw a CLEAR, catchable error so callers surface
+    // "reconnect GitHub" rather than the misleading "App is not configured"
+    // that requireGitHubAppConfig would throw below (audit #6).
+    throw new GitHubManagedUnavailableError();
   }
   const response = await githubAppFetch(`/repos/${repoFullName}/installation`);
   const text = await response.text();
@@ -84,10 +99,13 @@ export async function getInstallationForRepo(repoFullName: string) {
 }
 
 export async function getInstallationToken(installationId: number) {
-  // Managed mode: the license server minted this token; use it as-is.
+  // Managed mode: the license server minted this token; use it as-is. Never
+  // fall through to githubAppFetch (no BYO key exists — it would throw the
+  // misleading "not configured", audit #1/#6).
   if (!getGitHubAppConfig()) {
     const managed = readManagedGithubToken();
     if (managed && managed.installationId === installationId) return managed.token;
+    throw new GitHubManagedUnavailableError();
   }
   const cached = installationTokenCache.get(installationId);
   if (cached && (Date.now() + INSTALLATION_TOKEN_TTL_SKEW_MS) < cached.expiresAtMs) {
@@ -113,8 +131,11 @@ export async function getInstallationToken(installationId: number) {
 export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit) {
   const installation = await getInstallationForRepo(repoFullName);
   const token = await getInstallationToken(installation.id);
-  const config = requireGitHubAppConfig();
-  const response = await fetch(`${config.apiBaseUrl}${path}`, {
+  // Managed mode has NO BYO config — requireGitHubAppConfig() would throw here
+  // even though we hold a valid token (audit #1, the bug that made every managed
+  // GitHub call fail). The API base is always public GitHub in managed mode.
+  const apiBaseUrl = getGitHubAppConfig()?.apiBaseUrl ?? 'https://api.github.com';
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     headers: githubHeaders(token, init?.headers),
     cache: 'no-store',

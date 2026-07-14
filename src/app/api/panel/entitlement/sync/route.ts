@@ -10,7 +10,13 @@ import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founde
 import { tokenIssuedAt } from '@/lib/entitlement/identity-guards';
 import { clearCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
-import { clearManagedGithubState, writeManagedGithubState } from '@/lib/github-broker/managed';
+import {
+  clearActiveIdentity,
+  clearManagedGithubState,
+  readActiveIdentity,
+  writeActiveIdentity,
+  writeManagedGithubState,
+} from '@/lib/github-broker/managed';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,8 +60,14 @@ const SIGN_OUT_MARKER_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
  * 200 installed:true → persist token; 200 installed:false → persist the
  * install-CTA marker; 503 (feature off server-side) → clear. Network errors
  * leave existing state alone — a stale token self-expires within the hour.
+ *
+ * `expectedOwner` is the Clerk id the caller believes is signed in. The write
+ * is guarded against it (audit #2): a fire-and-forget refresh that returns AFTER
+ * a different user has signed in (active identity moved), or whose server-verified
+ * owner disagrees with the caller, is DROPPED rather than persisted — so one
+ * account can never end up holding another account's repo-write token.
  */
-async function syncManagedGithubApp(sessionToken: string): Promise<void> {
+async function syncManagedGithubApp(sessionToken: string, expectedOwner: string): Promise<void> {
   try {
     const res = await fetch(`${proxyBaseUrl()}/github/app/token`, {
       method: 'POST',
@@ -73,7 +85,17 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
       installationId?: number;
       accountLogin?: string;
       installUrl?: string;
+      ownerClerkUserId?: string;
     };
+
+    // Race guard: if the active desktop identity changed while this request was
+    // in flight (sign-out, or another user signed in), or the server-verified
+    // owner is not who the caller claimed, do NOT write — fail closed.
+    const owner = data.ownerClerkUserId || expectedOwner;
+    if (!owner) return;
+    if (expectedOwner && owner !== expectedOwner) return;
+    if (readActiveIdentity() !== owner) return;
+
     if (data.installed === true && data.token && data.expiresAt && data.installationId) {
       writeManagedGithubState({
         installed: true,
@@ -81,9 +103,10 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
         expiresAt: data.expiresAt,
         installationId: data.installationId,
         accountLogin: data.accountLogin,
+        ownerClerkUserId: owner,
       });
     } else if (data.installed === false) {
-      writeManagedGithubState({ installed: false, installUrl: data.installUrl });
+      writeManagedGithubState({ installed: false, installUrl: data.installUrl, ownerClerkUserId: owner });
     }
   } catch (error) {
     console.warn('[entitlement] managed GitHub App sync skipped:', error);
@@ -127,6 +150,7 @@ async function clearSignedOutEntitlement(reason: string, status = 200) {
   clearCachedEntitlement();
   clearFounderRecord();
   clearManagedGithubState();
+  clearActiveIdentity();
   const entitlement = await getEntitlement();
   return NextResponse.json({ ok: false, reason, plan: entitlement.plan, source: 'none' }, { status });
 }
@@ -209,7 +233,20 @@ export async function POST(request: Request) {
     // can act as the public "o8" App without any local key. Best-effort and
     // fire-and-forget: GitHub features degrade to device-flow OAuth, never
     // block the license sync.
-    void syncManagedGithubApp(sessionToken);
+    //
+    // Cross-account binding (audit #2): stamp the active-identity anchor BEFORE
+    // the fetch so it flips the instant this user is signed in, and drop the
+    // previous user's managed token on a user switch — otherwise a failed
+    // refresh for the new user would leave the prior user's repo-write token
+    // readable. The token itself is served only while owner === active identity.
+    if (activeClerkUserId) {
+      const priorIdentity = readActiveIdentity();
+      if (priorIdentity && priorIdentity !== activeClerkUserId) {
+        clearManagedGithubState();
+      }
+      writeActiveIdentity(activeClerkUserId);
+      void syncManagedGithubApp(sessionToken, activeClerkUserId);
+    }
 
     const res = await fetch(`${proxyBaseUrl()}/account/license`, {
       method: 'POST',
