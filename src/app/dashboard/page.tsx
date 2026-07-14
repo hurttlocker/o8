@@ -2434,8 +2434,11 @@ function DashboardInner() {
         });
         setActiveTileId(target.tileId);
         flashWorkspaceTab(target.handle.openOrchestratorTab(repo ?? undefined));
-      } catch {
-        // Workspace may still be mounting; the click is best-effort.
+      } catch (error) {
+        // Workspace may still be mounting; the click is best-effort — but a
+        // swallowed failure here IS "the New session button does nothing"
+        // (report D3YPBP), so leave forensics in the error ring buffer.
+        console.error('[workspace-spawn] orchestrator spawn failed:', error);
       }
     })();
   }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget]);
@@ -2454,8 +2457,9 @@ function DashboardInner() {
           label: 'Chat',
           createNew: true,
         }));
-      } catch {
-        // Workspace may still be mounting; the click is best-effort.
+      } catch (error) {
+        // Best-effort, but never silent — see the orchestrator catch above.
+        console.error('[workspace-spawn] chat spawn failed:', error);
       }
     })();
   }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
@@ -2470,8 +2474,9 @@ function DashboardInner() {
         });
         setActiveTileId(target.tileId);
         flashWorkspaceTab(target.handle.openTerminalTab(workspaceTerminalPreferredRepo ?? undefined));
-      } catch {
-        // Workspace may still be mounting; the click is best-effort.
+      } catch (error) {
+        // Best-effort, but never silent — see the orchestrator catch above.
+        console.error('[workspace-spawn] terminal spawn failed:', error);
       }
     })();
   }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
