@@ -757,9 +757,12 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
             {addMenuOpen && (
               <div style={{
                 position: 'absolute',
-                top: 'calc(100% + 6px)',
+                // Opens UPWARD: the + lives in the bottom panel's header, so
+                // downward growth clips at the window edge whenever the panel
+                // is short — above the header there is always the full app.
+                bottom: 'calc(100% + 6px)',
                 right: 0,
-                width: 420,
+                width: 320,
                 borderRadius: 14,
                 background: 'var(--t-panel)',
                 backdropFilter: 'blur(24px) saturate(1.6)',
@@ -772,70 +775,12 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 paddingLeft: 4,
                 zIndex: 400,
               } as React.CSSProperties}>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                  gap: 4,
-                  paddingBottom: 6,
-                  borderBottom: '1px solid var(--t-divider-subtle)',
-                  marginBottom: 4,
-                }}>
-                  {BOTTOM_PANEL_SURFACES.map((surface) => {
-                    const SurfaceIcon = surface.icon;
-                    return (
-                      <button
-                        key={surface.id}
-                        type="button"
-                        onClick={() => handleCreateSurface(surface.id)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          minHeight: 58,
-                          paddingTop: 9,
-                          paddingRight: 10,
-                          paddingBottom: 9,
-                          paddingLeft: 10,
-                          borderRadius: 10,
-                          border: '1px solid transparent',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'var(--t-hover)';
-                          e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'transparent';
-                          e.currentTarget.style.borderColor = 'transparent';
-                        }}
-                      >
-                        <span style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 9,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: 'var(--t-text-secondary)',
-                          background: 'var(--t-input-bg)',
-                          flexShrink: 0,
-                        }}>
-                          {SurfaceIcon({ size: 15 })}
-                        </span>
-                        <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                          <span style={{ fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
-                            {surface.label}
-                          </span>
-                          <span style={{ fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {surface.description}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                {/* Terminal-first (Q 2026-07-14): the + on the terminal panel
+                    means "another shell" far more often than "another panel
+                    surface", so the shells lead in one flat row vocabulary and
+                    the panel surfaces follow as the same quiet rows below a
+                    divider. The old layout led with a chunky 2-col card grid
+                    (and a redundant Terminal card next to the Shell row). */}
                 {visibleAgents.map((agent) => (
                   <button
                     key={agent.id}
@@ -889,6 +834,64 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     )}
                   </button>
                 ))}
+                <div style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 4, paddingTop: 4 }}>
+                  {BOTTOM_PANEL_SURFACES.filter((surface) => surface.id !== 'terminal').map((surface) => {
+                    const SurfaceIcon = surface.icon;
+                    return (
+                      <button
+                        key={surface.id}
+                        type="button"
+                        onClick={() => handleCreateSurface(surface.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          width: '100%',
+                          paddingTop: 7,
+                          paddingRight: 10,
+                          paddingBottom: 7,
+                          paddingLeft: 10,
+                          borderRadius: 10,
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span style={{
+                          width: 18,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          color: 'var(--t-text-secondary)',
+                        }}>
+                          {SurfaceIcon({ size: 14 })}
+                        </span>
+                        <span style={{
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: 'var(--t-text)',
+                          flex: 1,
+                        }}>
+                          {surface.label}
+                        </span>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 300,
+                          color: 'var(--t-text-faint)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}>
+                          {surface.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
