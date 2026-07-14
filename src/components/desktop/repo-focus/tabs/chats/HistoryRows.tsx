@@ -299,9 +299,10 @@ export function HistoryChatRow({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            // Focused-row title shimmer — flare at 95% white-ish so the
-            // sweep reads against the dark base text without going blue.
-            ...(active ? shimmerTextStyle('var(--t-text)', 'rgba(120, 130, 145, 0.95)') : {}),
+            // Focused-row title shimmer — full-ink flare (brightest value in
+            // both palettes): with the selection pill off, the shimmer alone
+            // carries "you are here" (Q tune 2026-07-14).
+            ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-text)') : {}),
           }}
         >
           {item.title}

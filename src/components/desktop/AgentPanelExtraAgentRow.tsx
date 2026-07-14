@@ -153,7 +153,10 @@ export function ExtraAgentRowView({
         paddingLeft: 37,
         paddingRight: 12,
         borderWidth: 0,
-        background: active ? 'var(--t-input-bg)' : 'transparent',
+        // EXPERIMENT (Q 2026-07-14): no active-row pill — the ShinyText title
+        // shimmer alone marks the selection (was 'var(--t-input-bg)'); matches
+        // HISTORY_ROW_TONES.active in chats/constants.ts — revert both together.
+        background: 'transparent',
         display: 'flex',
         alignItems: 'center',
         gap: 9,
@@ -174,7 +177,7 @@ export function ExtraAgentRowView({
       onMouseLeave={(event) => {
         setHovered(false);
         onCloseHoverCard?.();
-        event.currentTarget.style.background = active ? 'var(--t-input-bg)' : 'transparent';
+        event.currentTarget.style.background = 'transparent';
       }}
     >
       {/* Status dot in the absolute left gutter — matches HistoryRows so the
@@ -197,7 +200,7 @@ export function ExtraAgentRowView({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          ...(active ? shimmerTextStyle('var(--t-text)', 'color-mix(in srgb, var(--t-text) 55%, var(--t-accent) 45%)') : {}),
+          ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-text)') : {}),
         }}
       >
         {row.name}
