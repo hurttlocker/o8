@@ -34,9 +34,9 @@ import { retryingLazy } from '@/lib/react/retrying-lazy';
 
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
-type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'terminal'>;
+type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'terminal' | 'inbox'>;
 
-const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'side-chat', 'browser', 'review', 'terminal'];
+const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'side-chat', 'browser', 'review', 'terminal', 'inbox'];
 
 function isRightUtilityTab(tab: O8Tab): tab is RightUtilityTab {
   return RIGHT_UTILITY_TAB_IDS.includes(tab as RightUtilityTab);
@@ -101,6 +101,15 @@ function ReviewIcon({ size = 18 }: { size?: number }) {
 
 function TerminalIcon({ size = 18 }: { size?: number }) {
   return <TablerTerminal size={size} strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
+}
+
+function InboxIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </svg>
+  );
 }
 
 function PlusIcon({ size = 16 }: { size?: number }) {
@@ -176,6 +185,7 @@ const RIGHT_UTILITY_TABS: RightUtilityDefinition[] = [
   { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
   { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
   { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
+  { id: 'inbox', label: 'Incident Queue', description: 'Approvals & agent failures needing attention', icon: InboxIcon },
 ];
 
 const RIGHT_UTILITY_BY_ID = Object.fromEntries(
@@ -320,7 +330,7 @@ function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => vo
   // taller card on big screens; compact rows when the panel is short
   // (e.g. split layouts) — never overflows into a scroll.
   const padding = 28; // 14 top + 14 bottom
-  const gapsTotal = 6 * 4; // 5 cards = 4 gaps × 6px
+  const gapsTotal = 6 * (RIGHT_UTILITY_TABS.length - 1); // N cards = N−1 gaps × 6px
   const usable = Math.max(0, (panelHeight ?? 600) - padding - gapsTotal);
   const fairShare = usable / RIGHT_UTILITY_TABS.length;
   const cardHeight = Math.max(52, Math.min(64, fairShare));
@@ -654,6 +664,13 @@ export function O8Panel({
       );
     }
 
+    if (tab === 'inbox') {
+      // Incident Queue is a closeable contextual surface now (report RVKTQV):
+      // it joins the utility strip like Review/Files rather than force-taking
+      // the panel. The status-bar / header approval badge re-opens it.
+      return <O8InboxPane active={active} />;
+    }
+
     if (sendTerminalCreate && sendTerminalAttach && sendTerminalInput && sendTerminalResize && sendTerminalDetach && sendAgentKill) {
       return (
         <ContextualPanel
@@ -805,9 +822,10 @@ export function O8Panel({
           selectedPrRepo={prRepo ?? null}
         />
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'inbox' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8InboxPane active={activeTab === 'inbox'} />
-      </div>
+      {/* Inbox (Incident Queue) now renders through the closeable utility strip
+          above — see renderUtilitySurface('inbox'). No standalone main-tab mount
+          (report RVKTQV): a second mount here would double the pane + its data
+          subscriptions when the utility shell is active. */}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8SpecPane
           repoPath={repoPath}
