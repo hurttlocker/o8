@@ -17,7 +17,7 @@ import {
   type GitHubSyncResource,
 } from './store';
 import { githubInstallationFetch } from './auth';
-import { getGitHubAppConfig } from './env';
+import { hasGitHubBrokerAccess } from './auth';
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
 
@@ -287,11 +287,10 @@ async function syncPullRequestByHead(repoFullName: string, headRefName: string) 
 }
 
 export async function ensureGitHubIssues(repoFullName: string, options?: { fresh?: boolean }) {
-  const config = getGitHubAppConfig();
   const current = listGitHubIssues(repoFullName);
   const syncState = readGitHubSyncState(repoFullName, 'issues');
 
-  if (!config) {
+  if (!hasGitHubBrokerAccess()) {
     return {
       issues: current,
       error: current.length > 0 ? null : 'GitHub App is not configured.',
@@ -319,11 +318,10 @@ export async function ensureGitHubIssues(repoFullName: string, options?: { fresh
 }
 
 export async function ensureGitHubPullRequests(repoFullName: string) {
-  const config = getGitHubAppConfig();
   const current = listGitHubPullRequests(repoFullName);
   const syncState = readGitHubSyncState(repoFullName, 'pull_requests');
 
-  if (!config) {
+  if (!hasGitHubBrokerAccess()) {
     return {
       prs: current,
       error: current.length > 0 ? null : 'GitHub App is not configured.',
@@ -352,9 +350,8 @@ export async function ensureGitHubPullRequests(repoFullName: string) {
 
 export async function ensureGitHubPullRequest(repoFullName: string, prNumber: number) {
   const current = getGitHubPullRequestByNumber(repoFullName, prNumber);
-  const config = getGitHubAppConfig();
 
-  if (!config) {
+  if (!hasGitHubBrokerAccess()) {
     return {
       pr: current,
       error: current ? null : 'GitHub App is not configured.',
@@ -374,9 +371,8 @@ export async function ensureGitHubPullRequest(repoFullName: string, prNumber: nu
 
 export async function ensureGitHubPullRequestByHead(repoFullName: string, headRefName: string) {
   const current = getGitHubPullRequestByHead(repoFullName, headRefName);
-  const config = getGitHubAppConfig();
 
-  if (!config) {
+  if (!hasGitHubBrokerAccess()) {
     return {
       pr: current,
       error: current ? null : 'GitHub App is not configured.',
