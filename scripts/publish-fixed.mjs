@@ -48,6 +48,7 @@ import {
   resolveNewFixes,
   writePublished,
 } from './lib/fixed-reports.mjs';
+import { syncReports } from './sync-reports.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const rangeFlag = process.argv.indexOf('--range');
@@ -103,6 +104,21 @@ export async function publishFixed({ range, dryRun = false } = {}) {
     throw new Error(
       'No #fixed webhook. Set O8_FIXED_WEBHOOK_URL, or add "fixedWebhookUrl" to o8.release.json.',
     );
+  }
+
+  // Pull the intake channel into the local ledger FIRST. A user's report was
+  // recorded on THEIR machine, never ours — without this, every fix we ship for
+  // somebody else's bug resolves to "unknown report id" and is silently dropped.
+  // Best-effort: a missing bot token must not block a release, but it does mean
+  // only self-filed reports resolve, so say so.
+  try {
+    const { fresh } = await syncReports({ dryRun });
+    if (fresh.length > 0) {
+      console.log(`[publish-fixed] imported ${fresh.length} report(s) from the intake channel`);
+    }
+  } catch (err) {
+    console.warn(`⚠ could not sync the intake channel: ${err instanceof Error ? err.message : err}`);
+    console.warn('  Only reports filed on THIS machine will resolve — a fix for someone else\'s bug will be skipped.');
   }
 
   const version = appVersion();
