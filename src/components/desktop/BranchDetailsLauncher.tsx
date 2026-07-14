@@ -2,7 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { SmoothCorners } from '@lisse/react';
 import { CollapsedRailIcon, ChevronsLeftIcon, ChevronsRightIcon } from './branch-rail-collapse';
+import {
+  COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
+  COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
+  COLLAPSED_BRANCH_RAIL_INSET,
+  COLLAPSED_BRANCH_RAIL_WIDTH,
+  WORKSPACE_RAIL_CORNER_SMOOTHING,
+} from './branch-rail-geometry';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
 import { useBranchPr } from './useBranchPr';
@@ -90,7 +98,7 @@ function pickTarget(
 export function BranchDetailsLauncher({ visible = true, repoPath = null, collapsed = false, onToggleCollapsed }: {
   visible?: boolean;
   repoPath?: string | null;
-  /** Codex-style fold: 44px icon column instead of the full 256px card stack. */
+  /** Codex-style fold: inset icon column instead of the full 256px card stack. */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
@@ -143,7 +151,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
     data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
   };
 
-  // Collapsed — a 44px icon column (Codex parity, Q 2026-07-13): one icon per
+  // Collapsed — an inset icon column (Codex parity, Q 2026-07-13): one icon per
   // card, « to expand below the stack. Icons act as jump-ins: browser opens
   // the Browser tab directly; the rest expand the rail.
   if (collapsed) {
@@ -151,11 +159,13 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
       <aside
         className="hide-scrollbar"
         style={{
-          width: 44,
+          width: COLLAPSED_BRANCH_RAIL_WIDTH,
           height: '100%',
           flexShrink: 0,
-          paddingTop: 8,
+          paddingTop: COLLAPSED_BRANCH_RAIL_INSET,
+          paddingRight: COLLAPSED_BRANCH_RAIL_INSET,
           paddingBottom: 12,
+          paddingLeft: COLLAPSED_BRANCH_RAIL_INSET,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -165,22 +175,26 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
         }}
       >
         {/* Codex parity: the collapsed icons sit on a rounded drawer capsule. */}
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 0,
-          paddingTop: 5,
-          paddingBottom: 5,
-          paddingLeft: 4,
-          paddingRight: 4,
-          borderRadius: 18,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider-subtle)',
-          background: 'var(--t-bg-card)',
-          flexShrink: 0,
-        }}>
+        <SmoothCorners
+          corners={{ radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
+          innerBorder={{ width: 1, color: 'var(--t-divider-subtle)', opacity: 1 }}
+          autoEffects={false}
+          style={{
+            width: COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 0,
+            paddingTop: 5,
+            paddingBottom: 5,
+            paddingLeft: 4,
+            paddingRight: 4,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'transparent',
+            background: 'var(--t-bg-card)',
+            flexShrink: 0,
+          }}>
         <CollapsedRailIcon title="Expand" onClick={() => onToggleCollapsed?.()}><ChevronsLeftIcon /></CollapsedRailIcon>
         <CollapsedRailIcon title="Progress" onClick={() => onToggleCollapsed?.()}><ChecksIcon /></CollapsedRailIcon>
         <CollapsedRailIcon title="Environment" onClick={() => onToggleCollapsed?.()}><DiffIcon /></CollapsedRailIcon>
@@ -190,7 +204,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
         <CollapsedRailIcon title="Subagents" onClick={() => onToggleCollapsed?.()}><WorkerIcon /></CollapsedRailIcon>
         <CollapsedRailIcon title="Browser" onClick={() => open('browser')}><GlobeIcon /></CollapsedRailIcon>
         <CollapsedRailIcon title="Sources" onClick={() => onToggleCollapsed?.()}><SquaresIcon /></CollapsedRailIcon>
-        </div>
+        </SmoothCorners>
       </aside>
     );
   }
