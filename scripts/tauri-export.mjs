@@ -48,7 +48,13 @@ const loaderHtml = `<!DOCTYPE html>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
     body {
-      background: #0a0a0a;
+      /* Glass, not a black slab (Q 2026-07-14): the Tauri window is
+         transparent with the vibrancy material applied by the Rust shell, so
+         a translucent tint here reads as the SAME dark glass the app chrome
+         uses (mirrors DARK_GLASS --t-bg-gradient). On OS versions where the
+         boot-time material apply silently fails, the tint alone still gives
+         a legible dark veil instead of raw desktop. */
+      background: linear-gradient(180deg, rgba(32, 36, 42, 0.62) 0%, rgba(18, 20, 24, 0.58) 100%);
       color: #f4f4f5;
       font-family: "Inter", system-ui, -apple-system, sans-serif;
       -webkit-font-smoothing: antialiased;
@@ -85,36 +91,16 @@ const loaderHtml = `<!DOCTYPE html>
     for (let p = 47100; p <= 47104; p++) PROBE_RANGE.push(p);
     const CANDIDATES = HINT ? [HINT, ...PROBE_RANGE.filter(p => p !== HINT)] : PROBE_RANGE;
 
-    const STAGES = [
-      '(NODE)  probing runtime',
-      '(PORT)  locating sidecar',
-      '(DB)    opening ledger',
-      '(WS)    warming sockets',
-      '(AGENT) spinning orchestrator',
-    ];
-    let stageIndex = 0;
     let attempts = 0;
 
-    function updateStamp() {
+    // Steady boot line — no rotating stage text, no ticking clock (Q 2026-07-14:
+    // "it should just stay the o8 loading, it shouldn't blink"). The ascii wave
+    // + pulsing dots carry the alive signal; the only text change allowed is
+    // the failure message in tick()'s deadline branch.
+    (function stampOnce() {
       const el = document.getElementById('stamp');
-      if (!el) return;
-      const n = new Date();
-      el.textContent = 'v' + (window.__O8_VERSION__ || 'dev') + ' · ' +
-        String(n.getHours()).padStart(2,'0') + ':' +
-        String(n.getMinutes()).padStart(2,'0') + ':' +
-        String(n.getSeconds()).padStart(2,'0');
-    }
-    setInterval(updateStamp, 1000);
-    updateStamp();
-
-    function rotateStage() {
-      const el = document.getElementById('stage');
-      if (!el) return;
-      el.textContent = STAGES[stageIndex % STAGES.length];
-      stageIndex++;
-    }
-    setInterval(rotateStage, 900);
-    rotateStage();
+      if (el) el.textContent = 'v' + (window.__O8_VERSION__ || 'dev');
+    })();
 
     async function probe(port) {
       try {
@@ -163,16 +149,16 @@ const loaderHtml = `<!DOCTYPE html>
   <div class="bootbar mono">
     <span class="left">
       <span class="brand">o8</span>
-      <span id="stage">(NODE)  probing runtime</span>
+      <span id="stage">starting</span>
       <span class="dot-row"><span></span><span></span><span></span></span>
     </span>
-    <span id="stamp">v0.1.16 · 00:00:00</span>
+    <span id="stamp">v0.1.16</span>
   </div>
   <script>
     (function () {
       var cv = document.getElementById('ascii');
       var ctx = cv.getContext('2d');
-      var CFG = { text: 'o8', cell: 6, scale: 0.4, color: '#ffffff', bg: '#0a0a0a', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
+      var CFG = { text: 'o8', cell: 6, scale: 0.4, color: '#ffffff', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
       var RAMP = ' .:-=+*#%@';
       var dpr = 1, W = 0, H = 0, cols = 0, rows = 0, lum = null;
       var cx = -1, cy = -1;
@@ -214,7 +200,9 @@ const loaderHtml = `<!DOCTYPE html>
         if (start === null) start = ts;
         var t = (ts - start) / 1000;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.fillStyle = CFG.bg; ctx.fillRect(0, 0, W, H);
+        // Transparent canvas — the body's glass tint (and the window vibrancy
+        // beneath it) shows through between the glyphs.
+        ctx.clearRect(0, 0, W, H);
         ctx.fillStyle = CFG.color;
         ctx.font = CFG.cell + 'px ui-monospace, Menlo, monospace';
         ctx.textBaseline = 'top'; ctx.textAlign = 'left';
