@@ -17,6 +17,7 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
+import { resolveRailActiveSessionKey } from '@/components/desktop/repo-focus/tabs/chats/helpers';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -4349,6 +4350,19 @@ function DashboardInner() {
   const showRightPanelColumn = chatVisible && !compactShell;
   const workspaceInset = compactShell ? 2 : 4;
 
+  // History-row focus follows the thread bound to the actually focused
+  // workspace tab. A freshly spawned orchestrator has no thread yet, so it
+  // must clear the rail shimmer instead of inheriting activeSessionKey from
+  // the previously viewed conversation. The workspace-active-label broadcast
+  // rerenders this page on tab switches and when a thread becomes bound.
+  const focusedWorkspaceSnapshot = activeTileId
+    ? workspaceTerminalHandlesRef.current.get(activeTileId)?.getTabsSnapshot()
+    : null;
+  const focusedWorkspaceTab = focusedWorkspaceSnapshot?.tabs.find(
+    (tab) => tab.id === focusedWorkspaceSnapshot.activeTabId,
+  );
+  const railActiveSessionKey = resolveRailActiveSessionKey(activeSessionKey, focusedWorkspaceTab);
+
   // Same AgentPanel element drives both the in-column mount AND the hover-
   // preview overlay. Only one of the two ever renders at a time (in-column
   // when sidebar is expanded, overlay when collapsed + hovered) so this is
@@ -4356,7 +4370,7 @@ function DashboardInner() {
   // Keeps the overlay's content 1:1 with the real panel — no condensed copy.
   const agentPanelElement = (
     <AgentPanel
-      activeSessionKey={activeSessionKey ?? null}
+      activeSessionKey={railActiveSessionKey}
       selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
       selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
       selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
