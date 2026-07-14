@@ -4,6 +4,7 @@ import { db } from './db/client.js';
 import { installLinks } from './db/schema.js';
 import { env } from './env.js';
 import { verifyClerkSession } from './clerk-verify.js';
+import { clerkBackend } from './clerk-backend.js';
 
 /**
  * POST /account/link-install — associate a pre-sign-in install credential with
@@ -37,11 +38,18 @@ export async function handleLinkInstall(c: Context): Promise<Response> {
   // Store the full sub form so it joins straight onto proxy_usage/product_events.
   const installSub = installId.startsWith('install:') ? installId : `install:${installId}`;
 
+  // Best-effort GitHub handle so analytics can label this person. Cached in
+  // clerk-backend (~10min); a null just means the row labels on a later link.
+  const gh = await clerkBackend.resolveGithubAccount(clerkUserId).catch(() => null);
+
   try {
     await db
       .insert(installLinks)
-      .values({ installSub, clerkUserId })
-      .onConflictDoUpdate({ target: installLinks.installSub, set: { clerkUserId } });
+      .values({ installSub, clerkUserId, githubLogin: gh?.githubLogin ?? null })
+      .onConflictDoUpdate({
+        target: installLinks.installSub,
+        set: { clerkUserId, ...(gh?.githubLogin ? { githubLogin: gh.githubLogin } : {}) },
+      });
   } catch (err) {
     console.error('[link-install] upsert failed:', err);
     return c.json({ ok: false, error: 'record_failed' });
