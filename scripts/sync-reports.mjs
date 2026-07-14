@@ -90,6 +90,10 @@ export function parseReportEmbed(message) {
     title,
     reporter,
     version: field('Version') || 'unknown',
+    // The message a retroactive note threads onto. A report filed on THIS machine
+    // is recorded before Discord replies, so it has no messageId until sync
+    // backfills it — see the enrich pass below.
+    ...(message.id ? { messageId: String(message.id) } : {}),
   };
 }
 
@@ -128,11 +132,20 @@ export async function syncReports({ dryRun = false } = {}) {
   const known = readLedger();
 
   const fresh = [];
+  const enriched = [];
   let legacy = 0;
   for (const message of messages) {
     const record = parseReportEmbed(message);
     if (!record) { legacy += 1; continue; }
-    if (known.has(record.id)) continue;
+
+    const existing = known.get(record.id);
+    if (existing) {
+      // A report filed on THIS machine was ledgered before Discord replied, so it
+      // has no messageId — and without one there is nothing to hang a note on.
+      // The ledger is append-only and last-write-wins, so re-append it enriched.
+      if (!existing.messageId && record.messageId) enriched.push({ ...existing, messageId: record.messageId });
+      continue;
+    }
     // Guard the same channel being paged twice.
     if (fresh.some((r) => r.id === record.id)) continue;
     fresh.push(record);
@@ -141,13 +154,14 @@ export async function syncReports({ dryRun = false } = {}) {
   // Oldest first, so the ledger reads chronologically like a locally-filed one.
   fresh.sort((a, b) => a.ts - b.ts);
 
-  if (fresh.length > 0 && !dryRun) {
+  const writes = [...fresh, ...enriched];
+  if (writes.length > 0 && !dryRun) {
     const dir = feedbackDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    appendFileSync(ledgerPath(), fresh.map((r) => `${JSON.stringify(r)}\n`).join(''), 'utf8');
+    appendFileSync(ledgerPath(), writes.map((r) => `${JSON.stringify(r)}\n`).join(''), 'utf8');
   }
 
-  return { fresh, legacy, scanned: messages.length };
+  return { fresh, enriched, legacy, scanned: messages.length };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
