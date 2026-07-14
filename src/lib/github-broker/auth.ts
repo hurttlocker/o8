@@ -8,6 +8,16 @@ import { readManagedGithubToken } from './managed';
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
 
+/**
+ * Whether the broker can reach GitHub at all — BYO App config OR a live managed
+ * token. Callers that used to gate on `!getGitHubAppConfig()` MUST use this, or
+ * they short-circuit managed mode ("not configured") before ever trying the
+ * managed token (audit #1 — the sync.ts issue/PR readers did exactly that).
+ */
+export function hasGitHubBrokerAccess(): boolean {
+  return Boolean(getGitHubAppConfig()) || readManagedGithubToken() !== null;
+}
+
 /** Managed mode has no valid token right now (expired / not installed). Distinct
  * from "not configured" so routes can surface a reconnect prompt (audit #6). */
 export class GitHubManagedUnavailableError extends Error {

@@ -34,6 +34,7 @@ import {
   getInstallationForRepo,
   getInstallationToken,
   githubInstallationFetch,
+  hasGitHubBrokerAccess,
 } from '@/lib/github-broker/auth';
 
 const OWNER = 'user_owner_abc';
@@ -140,6 +141,18 @@ describe('managed GitHub App broker seam', () => {
     });
     writeActiveIdentity(OWNER);
     expect(readManagedGithubToken()).toBeNull();
+  });
+
+  it('hasGitHubBrokerAccess is TRUE in managed mode with a valid bound token (audit #1 — sync.ts readers)', () => {
+    persistValidToken();
+    writeActiveIdentity(OWNER);
+    expect(hasGitHubBrokerAccess()).toBe(true);
+  });
+
+  it('hasGitHubBrokerAccess is FALSE with no config and no servable token', () => {
+    persistValidToken();
+    writeActiveIdentity('user_someone_else'); // owner mismatch → token not servable
+    expect(hasGitHubBrokerAccess()).toBe(false);
   });
 
   it('installed:false marker never yields a token', () => {

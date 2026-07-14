@@ -18,10 +18,21 @@ import { dirname, join } from 'node:path';
  * identity it was minted for. Two mechanisms enforce that on a shared desktop:
  *   1. The state is stamped with `ownerClerkUserId` (the license server's VERIFIED
  *      subject, not a client claim).
- *   2. A separate `active-identity` anchor records who is currently signed in.
- *      The token is served only when owner === active identity; anything else
- *      (a late fire-and-forget write from a signed-out user, a failed refresh
- *      that left the prior user's token, a missing/legacy owner) FAILS CLOSED.
+ *   2. A separate `active-identity` anchor records who is currently signed in
+ *      (from the license server's VERIFIED subject, never a client claim). The
+ *      token is served only when owner === active identity; anything else (a
+ *      late fire-and-forget write from a signed-out user, a failed refresh that
+ *      left the prior user's token, a missing/legacy owner, a fresh sign-in that
+ *      wiped state) FAILS CLOSED.
+ *
+ * RESIDUAL (documented, not yet closed): the anchor is process-global, not
+ * request-bound. o8 in production runs ONE bundled Next server per OS user, with
+ * ~/.o8 at 0700, so "the currently signed-in user" is unambiguous. The only way
+ * to see A served B's token is TWO Next processes sharing CORTEX_IDE_DATA_DIR
+ * with TWO different users signed in at once (a dev-bridge / shared-account
+ * oddity, not a real deployment). Fully closing it needs the panel routes to
+ * carry the caller's Clerk identity to the broker — a larger change tracked
+ * separately. Everything a single-process desktop can hit fails closed.
  */
 
 export interface ManagedGithubState {

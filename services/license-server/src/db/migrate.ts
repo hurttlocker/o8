@@ -23,20 +23,31 @@ export async function runStartupMigrations(): Promise<void> {
   // A dedicated short-lived connection: we don't want a failed DDL to wedge the
   // shared query pool, and boot is the only caller.
   const sql = postgres(env.DATABASE_URL, { prepare: false, max: 1 });
+  let applied = 0;
+  let failed = 0;
   try {
     for (const statement of ADDITIVE_STATEMENTS) {
       try {
         await sql.unsafe(statement);
+        applied += 1;
       } catch (err) {
         // Non-fatal: log loudly and keep booting. A missing additive column
         // degrades one feature (analytics labels); it must not take the whole
         // license server — inference, licensing, and webhooks stay up.
+        failed += 1;
         console.error(
-          `[migrate] statement failed (continuing): ${statement}\n  ${err instanceof Error ? err.message : err}`,
+          `[migrate] statement FAILED (continuing): ${statement}\n  ${err instanceof Error ? err.message : err}`,
         );
       }
     }
-    console.log(`[migrate] ${ADDITIVE_STATEMENTS.length} additive migration(s) applied`);
+    // Report the truth — never claim success for statements that threw (audit #3).
+    if (failed > 0) {
+      console.error(
+        `[migrate] ${applied} applied, ${failed} FAILED — schema readiness NOT guaranteed; features touching the failed columns will 500 until resolved`,
+      );
+    } else {
+      console.log(`[migrate] ${applied} additive migration(s) applied`);
+    }
   } finally {
     await sql.end({ timeout: 5 });
   }

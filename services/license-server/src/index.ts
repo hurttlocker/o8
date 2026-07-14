@@ -329,15 +329,22 @@ app.post('/invites/redeem', async (c) => {
   return c.json({ ok: true, owner: result.owner ?? null });
 });
 
-// Self-migrate before accepting traffic — Railway never runs drizzle-kit push,
+// Self-migrate BEFORE accepting traffic — Railway never runs drizzle-kit push,
 // so additive columns (install_links.github_login) must be applied here or the
-// first request that touches them 500s (audit #3). Non-fatal on failure.
-void runStartupMigrations().catch((err) => {
-  console.error('[license-server] startup migration error:', err instanceof Error ? err.message : err);
-});
+// first request that touches them 500s (audit #3). Awaited so a request can't
+// race the migration; a migration failure is logged (in runStartupMigrations)
+// but still starts the server — a degraded feature must not take licensing down.
+async function boot() {
+  try {
+    await runStartupMigrations();
+  } catch (err) {
+    console.error('[license-server] startup migration error:', err instanceof Error ? err.message : err);
+  }
+  serve({ fetch: app.fetch, port: env.PORT }, (info) => {
+    console.log(`[license-server] listening on :${info.port} (issuer=${env.ISSUER})`);
+  });
+}
 
-serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`[license-server] listening on :${info.port} (issuer=${env.ISSUER})`);
-});
+void boot();
 
 export { app };
