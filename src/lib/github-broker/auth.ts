@@ -2,7 +2,8 @@ import 'server-only';
 
 import { createHmac, createPrivateKey, timingSafeEqual } from 'node:crypto';
 import { SignJWT } from 'jose';
-import { requireGitHubAppConfig } from './env';
+import { getGitHubAppConfig, requireGitHubAppConfig } from './env';
+import { readManagedGithubToken } from './managed';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
@@ -55,6 +56,20 @@ function buildGitHubError(response: Response, bodyText: string) {
 }
 
 export async function getInstallationForRepo(repoFullName: string) {
+  // Managed mode: no BYO app key on this machine — there is exactly ONE
+  // installation (the signed-in user's, minted by the license server). We
+  // can't call /repos/:repo/installation without an app JWT; a repo outside
+  // the user's installation just 404s downstream with the token, which the
+  // existing error surface already reports.
+  if (!getGitHubAppConfig()) {
+    const managed = readManagedGithubToken();
+    if (managed) {
+      return {
+        id: managed.installationId,
+        account: managed.accountLogin ? { login: managed.accountLogin } : undefined,
+      } as { id: number; target_type?: string; permissions?: Record<string, string>; account?: { login?: string; type?: string } };
+    }
+  }
   const response = await githubAppFetch(`/repos/${repoFullName}/installation`);
   const text = await response.text();
   if (!response.ok) {
@@ -69,6 +84,11 @@ export async function getInstallationForRepo(repoFullName: string) {
 }
 
 export async function getInstallationToken(installationId: number) {
+  // Managed mode: the license server minted this token; use it as-is.
+  if (!getGitHubAppConfig()) {
+    const managed = readManagedGithubToken();
+    if (managed && managed.installationId === installationId) return managed.token;
+  }
   const cached = installationTokenCache.get(installationId);
   if (cached && (Date.now() + INSTALLATION_TOKEN_TTL_SKEW_MS) < cached.expiresAtMs) {
     return cached.token;

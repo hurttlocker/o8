@@ -10,6 +10,7 @@ import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founde
 import { tokenIssuedAt } from '@/lib/entitlement/identity-guards';
 import { clearCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
+import { clearManagedGithubState, writeManagedGithubState } from '@/lib/github-broker/managed';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,47 @@ function signOutMarkerPath(): string {
 // user forever with zero action (#1483). Any marker older than this is ignored.
 const SIGN_OUT_MARKER_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
+/**
+ * Refresh the managed GitHub App installation token from the license server.
+ * 200 installed:true → persist token; 200 installed:false → persist the
+ * install-CTA marker; 503 (feature off server-side) → clear. Network errors
+ * leave existing state alone — a stale token self-expires within the hour.
+ */
+async function syncManagedGithubApp(sessionToken: string): Promise<void> {
+  try {
+    const res = await fetch(`${proxyBaseUrl()}/github/app/token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+    if (res.status === 503) {
+      clearManagedGithubState();
+      return;
+    }
+    if (!res.ok) return;
+    const data = (await res.json()) as {
+      installed?: boolean;
+      token?: string;
+      expiresAt?: string;
+      installationId?: number;
+      accountLogin?: string;
+      installUrl?: string;
+    };
+    if (data.installed === true && data.token && data.expiresAt && data.installationId) {
+      writeManagedGithubState({
+        installed: true,
+        token: data.token,
+        expiresAt: data.expiresAt,
+        installationId: data.installationId,
+        accountLogin: data.accountLogin,
+      });
+    } else if (data.installed === false) {
+      writeManagedGithubState({ installed: false, installUrl: data.installUrl });
+    }
+  } catch (error) {
+    console.warn('[entitlement] managed GitHub App sync skipped:', error);
+  }
+}
+
 function markSignedOut(): void {
   try {
     const filePath = signOutMarkerPath();
@@ -84,6 +126,7 @@ function readSignedOutAt(): number | null {
 async function clearSignedOutEntitlement(reason: string, status = 200) {
   clearCachedEntitlement();
   clearFounderRecord();
+  clearManagedGithubState();
   const entitlement = await getEntitlement();
   return NextResponse.json({ ok: false, reason, plan: entitlement.plan, source: 'none' }, { status });
 }
@@ -161,6 +204,12 @@ export async function POST(request: Request) {
     } catch {
       /* install id unavailable — skip linking, never block the sync */
     }
+
+    // Managed GitHub App token — fetched alongside the license so the broker
+    // can act as the public "o8" App without any local key. Best-effort and
+    // fire-and-forget: GitHub features degrade to device-flow OAuth, never
+    // block the license sync.
+    void syncManagedGithubApp(sessionToken);
 
     const res = await fetch(`${proxyBaseUrl()}/account/license`, {
       method: 'POST',
