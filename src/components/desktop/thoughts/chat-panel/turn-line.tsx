@@ -44,7 +44,6 @@ export function ShimmerLine({ children, reducedMotion = false, style }: {
       }}
     >
       {children}
-      {reducedMotion ? null : <span aria-hidden="true" className="o8-thought-shimmer-band" />}
     </span>
   );
 }

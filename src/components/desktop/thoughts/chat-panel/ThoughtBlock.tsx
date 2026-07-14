@@ -131,7 +131,6 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
             }}
           >
             Thinking
-            {reducedMotion ? null : <span aria-hidden="true" className="o8-thought-shimmer-band" />}
           </span>
         ) : (
           <span
