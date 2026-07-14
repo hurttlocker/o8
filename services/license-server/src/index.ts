@@ -15,6 +15,7 @@ import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscri
 import { handleAnalytics, handleSiteEvent, handleTelemetry } from './analytics.js';
 import { handleIssueFree } from './free-issue.js';
 import { handleAccountLicense } from './account-license.js';
+import { handleGithubAppToken } from './github-app.js';
 import { handleLinkInstall } from './account-link.js';
 import { runGithubBackfill } from './identity.js';
 
@@ -169,6 +170,11 @@ app.post('/issue-free', handleIssueFree);
 //    the app. 503 until CLERK_ISSUER is configured. ─────────────────────────
 app.post('/account/license', handleAccountLicense);
 app.post('/account/link-install', handleLinkInstall);
+
+// ── Managed GitHub App token mint — the desktop asks for a short-lived
+//    installation token for the PUBLIC "o8" GitHub App. Same Clerk-session
+//    auth as /account/license; the App private key lives only here. ─────────
+app.post('/github/app/token', handleGithubAppToken);
 
 // ── Manual issuance (ADMIN-guarded) — for testing before live Stripe ──────────
 app.post('/issue-entitlement', async (c) => {

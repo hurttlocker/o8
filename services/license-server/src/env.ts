@@ -120,6 +120,19 @@ export const env = {
   // clerkUserId lookup is unaffected). NEVER shipped in the desktop build.
   CLERK_SECRET_KEY: optional('CLERK_SECRET_KEY', ''),
 
+  // Managed GitHub App (the public "o8" App users install with one click).
+  // This server holds the App's private key and mints short-lived installation
+  // tokens for signed-in desktops (/github/app/token) — the key NEVER ships in
+  // the app. All three optional: when unset the endpoint answers 503 and the
+  // desktop falls back to device-flow OAuth exactly as before. The PEM follows
+  // the same literal-\n normalization as LICENSE_PRIVATE_KEY.
+  GITHUB_APP_ID: optional('GITHUB_APP_ID', ''),
+  GITHUB_APP_PRIVATE_KEY: (() => {
+    const raw = optional('GITHUB_APP_PRIVATE_KEY', '');
+    return raw.includes('\\n') ? raw.replace(/\\n/g, '\n') : raw;
+  })(),
+  GITHUB_APP_SLUG: optional('GITHUB_APP_SLUG', ''),
+
   // Welcome email (best-effort, Resend). Optional: when RESEND_API_KEY is unset
   // the mail is skipped (Stripe sends its own receipt, and the license is
   // delivered by account-fetch on sign-in regardless).
