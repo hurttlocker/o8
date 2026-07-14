@@ -1,74 +1,56 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
-import { Internet, Terminal as TerminalIcon, Database } from 'iconoir-react';
+import { Internet, Server as ServerIcon } from 'iconoir-react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
-import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
 import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 
-type PortCategory = 'agent' | 'browser' | 'noise';
+type PortKind = 'page' | 'service';
 
 interface PortEntry {
   port: number;
   repo: string | null;
   process: string;
-  category: PortCategory;
-  agentSession: string | null;
-}
-
-interface ManagedRun {
-  id: string;
-  session: string;
-  command: string;
-  title?: string | null;
-  startedAt?: string | null;
-  status: 'running' | 'finished' | 'gone' | 'killed';
-}
-
-const WELL_KNOWN_PORTS: Record<number, string> = {
-  3000: 'Dev server',
-  3001: 'Dev server',
-  3002: 'WebSocket',
-  8080: 'Dev server',
-};
-
-function portLabel(port: number): string {
-  return WELL_KNOWN_PORTS[port] ?? `Port ${port}`;
+  /** Human label from the server ("Next.js", "Vite", "Python http.server", …). */
+  label: string;
+  /** page = openable web page · service = background listener (informational). */
+  kind: PortKind;
 }
 
 /**
- * Inline footer-anchored ports indicator. Polls `/api/panel/ports` (now tagged
- * agent / browser / noise) plus `/api/panel/managed-runs` (portless `o8 run`
- * jobs), and refreshes on agent-lifecycle events. The popover opens upward and
- * splits ports into three buckets:
- *   - Agent  → o8-owned `o8 run` sessions; click opens a live read-only terminal
- *   - Browser→ the operator's dev servers; click previews the URL
- *   - Noise  → db/infra ports, collapsed by default
- *
- * Long-press / right-click on a port row swaps the popover to an action panel
- * with "Send to mobile" + "Copy URL" (#782). Long-press threshold is 500ms.
+ * Inline footer-anchored dev-server launcher. Polls `/api/panel/ports` (now
+ * server-classified into `page` vs `service`) and refreshes on agent-lifecycle
+ * events. The popover is a launcher, not a port dump:
+ *   - Pages    → local dev servers that answered with a web page. Click opens
+ *                them in o8's embedded browser (`onPortPreview`). Long-press /
+ *                right-click swaps to a "Send to mobile · Copy URL" panel (#782).
+ *   - Services → background listeners (DBs, APIs, MCP bridges). Collapsed behind
+ *                an "N more services" toggle, informational only — no click.
+ * The footer badge counts PAGES. o8's own ports never appear (filtered server-side).
  */
 const LONG_PRESS_MS = 500;
 
-type ActionTarget = { port: number; url: string; repo: string };
+type ActionTarget = { port: number; url: string; repo: string; label: string };
 type ActionToast = { tone: 'success' | 'error'; message: string } | null;
 
 type FooterPortsOnPortPreview = (port: number, url: string, repo?: string) => void;
 
-const PORT_ROW_STYLE = {
+// 44px min-height per Apple HIG — a generous click target for opening a dev server.
+const PAGE_ROW_STYLE = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
+  gap: 9,
   width: '100%',
+  minHeight: 44,
   paddingTop: 6,
   paddingRight: 8,
   paddingBottom: 6,
-  paddingLeft: 8,
+  paddingLeft: 10,
   borderWidth: 0,
-  borderRadius: 6,
+  borderRadius: 8,
   background: 'transparent',
   color: 'var(--t-text)',
   fontSize: 13.5,
@@ -80,41 +62,38 @@ const PORT_ROW_STYLE = {
   fontFamily: 'var(--font-sans-system)',
   userSelect: 'none' as const,
   WebkitUserSelect: 'none' as const,
-};
+} as const;
+
+const SERVICE_ROW_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  paddingTop: 5,
+  paddingRight: 8,
+  paddingBottom: 5,
+  paddingLeft: 10,
+  borderRadius: 6,
+  color: 'var(--t-text-faint)',
+  fontSize: 12,
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
+  lineHeight: 1.25,
+  fontFamily: 'var(--font-sans-system)',
+} as const;
 
 const PORT_NUM_STYLE = {
   fontSize: 9.5,
-  fontWeight: 260,
+  fontWeight: 300,
   letterSpacing: '-0.2px',
   color: 'var(--t-text-faint)',
   fontFamily: '"SF Mono", ui-monospace, monospace',
 } as const;
 
-function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <div
-      style={{
-        paddingTop: 5,
-        paddingRight: 8,
-        paddingBottom: 2,
-        paddingLeft: 8,
-        fontSize: 9,
-        fontWeight: 600,
-        letterSpacing: '0.5px',
-        textTransform: 'uppercase',
-        color: 'var(--t-text-faint)',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPortPreview }) {
   const [ports, setPorts] = useState<PortEntry[]>([]);
-  const [runs, setRuns] = useState<ManagedRun[]>([]);
   const [open, setOpen] = useState(false);
-  const [noiseExpanded, setNoiseExpanded] = useState(false);
+  const [servicesExpanded, setServicesExpanded] = useState(false);
   const [popoverLeft, setPopoverLeft] = useState(120);
   const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
   const [actionToast, setActionToast] = useState<ActionToast>(null);
@@ -128,19 +107,12 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
 
   useEffect(() => {
     let cancelled = false;
-    function fetchAll() {
+    function fetchPorts() {
       fetch('/api/panel/ports')
         .then((r) => r.json())
         .then((data: { ports?: PortEntry[] }) => {
           if (cancelled) return;
           setPorts(data.ports ?? []);
-        })
-        .catch(() => {});
-      fetch('/api/panel/managed-runs')
-        .then((r) => r.json())
-        .then((data: { runs?: ManagedRun[] }) => {
-          if (cancelled) return;
-          setRuns(data.runs ?? []);
         })
         .catch(() => {});
     }
@@ -152,23 +124,20 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
         clearTimeout(timeoutHandle);
         timeoutHandle = undefined;
       }
-      fetchAll();
+      fetchPorts();
     }, { timeout: 3000, fallbackDelayMs: 1500 });
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = undefined;
       if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       rICHandle = undefined;
-      fetchAll();
+      fetchPorts();
     }, 1500);
-    const handler = () => fetchAll();
+    const handler = () => fetchPorts();
     window.addEventListener('o8:agent-lifecycle', handler);
-    // PERF: the WS now bridges agent-lifecycle to this window event
-    // (DesktopWebSocketContext) — before, that event only fired when the operator
-    // killed a run from this window, so this interval WAS the signal rather than
-    // a fallback. With the socket live it is a genuine safety net; with the
-    // socket down we have no signal, so we keep the old cadence rather than go
-    // blind. Reconnecting also refetches immediately (wsConnected in deps).
-    const fallback = setInterval(fetchAll, wsConnected ? 60_000 : 20_000);
+    // Socket bridges agent-lifecycle into this window event; the interval is a
+    // safety net (slower when the socket is live, faster when it's down so we
+    // don't go blind). Reconnecting refetches immediately (wsConnected in deps).
+    const fallback = setInterval(fetchPorts, wsConnected ? 60_000 : 20_000);
     return () => {
       cancelled = true;
       if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
@@ -249,33 +218,11 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     }
   };
 
-  // Stop a running o8 run (kills its tmux session). Optimistically drop it
-  // from local state, then fire the lifecycle event so every surface refetches.
-  const killRun = (session: string) => {
-    setRuns((prev) => prev.filter((r) => r.session !== session));
-    setPorts((prev) => prev.filter((p) => p.agentSession !== session));
-    fetch('/api/panel/managed-runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'kill', session }),
-    })
-      .catch(() => {})
-      .finally(() => window.dispatchEvent(new Event('o8:agent-lifecycle')));
-  };
-
   // ── Buckets ──
-  const agentPorts = ports.filter((p) => p.category === 'agent');
-  const browserPorts = ports.filter((p) => p.category === 'browser');
-  const noisePorts = ports.filter((p) => p.category === 'noise');
-  const agentPortSessions = new Set(agentPorts.map((p) => p.agentSession).filter(Boolean));
-  const portlessRuns = runs.filter((r) => r.status === 'running' && !agentPortSessions.has(r.session));
-  const agentCount = agentPorts.length + portlessRuns.length;
-  const displayTotal = ports.length + portlessRuns.length;
-  const bucketsPresent =
-    (agentCount > 0 ? 1 : 0) + (browserPorts.length > 0 ? 1 : 0) + (noisePorts.length > 0 ? 1 : 0);
-  const showLabels = bucketsPresent > 1;
+  const pages = ports.filter((p) => p.kind === 'page');
+  const services = ports.filter((p) => p.kind === 'service');
 
-  if (displayTotal === 0) return null;
+  if (pages.length === 0 && services.length === 0) return null;
 
   const showPopover = () => {
     if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
@@ -292,26 +239,24 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     }, 200);
   };
 
-  const ariaLabel = `${displayTotal} active port${displayTotal === 1 ? '' : 's'}`;
-  const compactTotal = displayTotal > 99 ? '99+' : String(displayTotal);
+  const hasPages = pages.length > 0;
+  const ariaLabel = hasPages
+    ? `${pages.length} local dev server${pages.length === 1 ? '' : 's'}`
+    : 'No local dev servers';
 
-  // ── Row renderers (close over long-press refs + handlers) ──
-  const renderPortButton = (p: PortEntry) => {
+  // ── Row renderers ──
+  const renderPageRow = (p: PortEntry) => {
     const url = `http://localhost:${p.port}`;
     const repo = p.repo ?? '';
-    const isAgent = p.category === 'agent';
-    const isNoise = p.category === 'noise';
-    const Glyph = isAgent ? TerminalIcon : isNoise ? Database : Internet;
-    const accent = isAgent ? 'var(--t-accent)' : isNoise ? 'var(--t-text-faint)' : 'var(--t-success)';
     return (
       <button
-        key={`${p.category}-${repo}-${p.port}`}
+        key={`page-${repo}-${p.port}`}
         type="button"
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
           if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-          enterActionMode({ port: p.port, url, repo });
+          enterActionMode({ port: p.port, url, repo, label: p.label });
         }}
         onPointerDown={(event) => {
           if (event.pointerType === 'mouse' && event.button !== 0) return;
@@ -319,7 +264,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           if (longPressTimer.current) clearTimeout(longPressTimer.current);
           longPressTimer.current = setTimeout(() => {
             longPressTimer.current = null;
-            enterActionMode({ port: p.port, url, repo });
+            enterActionMode({ port: p.port, url, repo, label: p.label });
           }, LONG_PRESS_MS);
         }}
         onPointerUp={() => {
@@ -334,78 +279,54 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
         onClick={() => {
           if (longPressFiredRef.current) { longPressFiredRef.current = false; return; }
           setOpen(false);
-          if (isAgent && p.agentSession) {
-            window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session: p.agentSession, label: `Agent · ${portLabel(p.port)}` } }));
-            return;
-          }
           if (onPortPreview) onPortPreview(p.port, url, repo || undefined);
           else openExternalUrl(url);
         }}
-        style={PORT_ROW_STYLE}
-        title={isAgent
-          ? 'Click to watch the live terminal · Long-press for actions'
-          : 'Click to preview · Long-press or right-click for actions'}
+        style={PAGE_ROW_STYLE}
+        title="Click to open in browser · Long-press or right-click for actions"
         onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >
-        <Glyph width={13} height={13} color={accent} strokeWidth={2} style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1 }}>{isAgent ? `Agent · ${portLabel(p.port)}` : portLabel(p.port)}</span>
+        <Internet width={14} height={14} color="var(--t-success)" strokeWidth={2} style={{ flexShrink: 0 }} />
+        <span
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
+          {repo ? (
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 300,
+                color: 'var(--t-text-faint)',
+                letterSpacing: '-0.1px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {repo}
+            </span>
+          ) : null}
+        </span>
         <span style={PORT_NUM_STYLE}>:{p.port}</span>
       </button>
     );
   };
 
-  const renderRunButton = (run: ManagedRun) => {
-    const label = deriveManagedRunLabel(run);
-    return (
-      <button
-        key={`run-${run.session}`}
-        type="button"
-        onClick={() => {
-          setOpen(false);
-          window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session: run.session, label, command: run.command } }));
-        }}
-        style={PORT_ROW_STYLE}
-        title={`Watch the live terminal: ${run.command}`}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-      >
-        <TerminalIcon width={13} height={13} color="var(--t-accent)" strokeWidth={2} style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-        <span style={PORT_NUM_STYLE}>run</span>
-      </button>
-    );
-  };
-
-  // Wrap an agent watch-row with a trailing stop button (kills the run).
-  const withStop = (watchNode: ReactNode, session: string, rowKey: string) => (
-    <div key={rowKey} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-      <div style={{ flex: 1, minWidth: 0 }}>{watchNode}</div>
-      <button
-        type="button"
-        title="Stop run"
-        aria-label="Stop run"
-        onClick={(event) => { event.stopPropagation(); killRun(session); }}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          flexShrink: 0,
-          borderWidth: 0,
-          borderRadius: 6,
-          background: 'transparent',
-          color: 'var(--t-text-faint)',
-          cursor: 'pointer',
-        }}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-danger-soft, var(--t-panel-hover))'; event.currentTarget.style.color = 'var(--t-danger)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-faint)'; }}
-      >
-        <svg width={9} height={9} viewBox="0 0 24 24" style={{ display: 'block' }} aria-hidden="true">
-          <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
-        </svg>
-      </button>
+  const renderServiceRow = (p: PortEntry) => (
+    <div key={`svc-${p.repo ?? ''}-${p.port}`} style={SERVICE_ROW_STYLE}>
+      <ServerIcon width={12} height={12} color="var(--t-text-faint)" strokeWidth={2} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {p.label}{p.repo ? ` · ${p.repo}` : ''}
+      </span>
+      <span style={PORT_NUM_STYLE}>:{p.port}</span>
     </div>
   );
 
@@ -432,8 +353,8 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           borderRadius: 7,
           borderWidth: 0,
           flexShrink: 0,
-          background: agentCount > 0 ? 'var(--t-accent-soft)' : 'var(--t-success-soft)',
-          color: agentCount > 0 ? 'var(--t-accent)' : 'var(--t-success)',
+          background: hasPages ? 'var(--t-success-soft)' : 'var(--t-panel-hover)',
+          color: hasPages ? 'var(--t-success)' : 'var(--t-text-faint)',
           fontSize: 11,
           fontWeight: 300,
           letterSpacing: '-0.1px',
@@ -445,7 +366,14 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
         }}
         onClick={() => setOpen((v) => !v)}
       >
-        {compactTotal}
+        {hasPages ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Internet width={12} height={12} color="var(--t-success)" strokeWidth={2} />
+            {pages.length}
+          </span>
+        ) : (
+          <Internet width={13} height={13} color="var(--t-text-faint)" strokeWidth={2} />
+        )}
       </button>
       {open && typeof document !== 'undefined' ? createPortal(
         <div
@@ -456,7 +384,8 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
             position: 'fixed',
             bottom: 48,
             left: popoverLeft,
-            minWidth: 200,
+            minWidth: 220,
+            maxWidth: 320,
             padding: 6,
             borderRadius: 12,
             background: 'var(--t-panel-solid)',
@@ -471,14 +400,16 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
               paddingTop: 4,
               paddingRight: 8,
               paddingBottom: 6,
-              paddingLeft: 8,
+              paddingLeft: 10,
               fontSize: 10,
               fontWeight: 300,
               color: 'var(--t-text-faint)',
               letterSpacing: '-0.1px',
             }}
           >
-            {displayTotal} active port{displayTotal === 1 ? '' : 's'}
+            {hasPages
+              ? `${pages.length} local dev server${pages.length === 1 ? '' : 's'}`
+              : 'Local dev servers'}
           </div>
           {actionTarget ? (
             <PortActionPanel
@@ -491,41 +422,47 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
             />
           ) : (
             <>
-              {agentCount > 0 ? (
-                <>
-                  {showLabels ? <SectionLabel>Agent</SectionLabel> : null}
-                  {agentPorts.map((p) => withStop(renderPortButton(p), p.agentSession ?? '', `ap-${p.port}`))}
-                  {portlessRuns.map((r) => withStop(renderRunButton(r), r.session, `ar-${r.session}`))}
-                </>
-              ) : null}
-              {browserPorts.length > 0 ? (
-                <>
-                  {showLabels ? <SectionLabel>Browser</SectionLabel> : null}
-                  {browserPorts.map(renderPortButton)}
-                </>
-              ) : null}
-              {noisePorts.length > 0 ? (
+              {hasPages ? (
+                pages.map(renderPageRow)
+              ) : (
+                <div
+                  style={{
+                    paddingTop: 8,
+                    paddingRight: 10,
+                    paddingBottom: 10,
+                    paddingLeft: 10,
+                    fontSize: 12.5,
+                    fontWeight: 300,
+                    color: 'var(--t-text-faint)',
+                    letterSpacing: '-0.1px',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  No local dev servers
+                </div>
+              )}
+              {services.length > 0 ? (
                 <>
                   <button
                     type="button"
-                    onClick={() => setNoiseExpanded((v) => !v)}
+                    onClick={() => setServicesExpanded((v) => !v)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
                       width: '100%',
+                      marginTop: hasPages ? 4 : 2,
                       paddingTop: 5,
                       paddingRight: 8,
-                      paddingBottom: 4,
-                      paddingLeft: 8,
+                      paddingBottom: 5,
+                      paddingLeft: 10,
                       borderWidth: 0,
                       borderRadius: 6,
                       background: 'transparent',
                       color: 'var(--t-text-faint)',
-                      fontSize: 9,
-                      fontWeight: 600,
-                      letterSpacing: '0.5px',
-                      textTransform: 'uppercase',
+                      fontSize: 11,
+                      fontWeight: 300,
+                      letterSpacing: '-0.1px',
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontFamily: 'var(--font-sans-system)',
@@ -536,15 +473,17 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
                     <span
                       style={{
                         display: 'inline-flex',
-                        transform: noiseExpanded ? 'rotate(90deg)' : 'none',
+                        transform: servicesExpanded ? 'rotate(90deg)' : 'none',
                         transition: 'transform 120ms ease',
                       }}
                     >
                       <ChevronRight size={10} strokeWidth={2} />
                     </span>
-                    <span style={{ flex: 1 }}>Background · {noisePorts.length}</span>
+                    <span style={{ flex: 1 }}>
+                      {services.length} more service{services.length === 1 ? '' : 's'}
+                    </span>
                   </button>
-                  {noiseExpanded ? noisePorts.map(renderPortButton) : null}
+                  {servicesExpanded ? services.map(renderServiceRow) : null}
                 </>
               ) : null}
             </>
@@ -557,10 +496,9 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
 }
 
 /**
- * Action panel shown inside the ports popover after a long-press / right-click
- * on a port row. Two actions: send the dev-host URL to the connected mobile
- * client (#782) or copy the URL to the clipboard. The inline toast clears
- * itself after ~2.4s.
+ * Action panel shown inside the launcher after a long-press / right-click on a
+ * dev-server row. Two actions: send the dev-host URL to the connected mobile
+ * client (#782) or copy the URL. The inline toast clears itself after ~2.4s.
  */
 function PortActionPanel({
   target,
@@ -585,10 +523,10 @@ function PortActionPanel({
     paddingRight: 6,
     paddingBottom: 6,
     paddingLeft: 6,
-    fontSize: 11,
-    fontWeight: 600,
-    color: 'var(--t-text-faint)',
-    letterSpacing: 0,
+    fontSize: 12,
+    fontWeight: 300,
+    color: 'var(--t-text)',
+    letterSpacing: '-0.1px',
   } as const;
 
   const actionRowStyle = {
@@ -605,7 +543,8 @@ function PortActionPanel({
     background: 'transparent',
     color: 'var(--t-text)',
     fontSize: 12,
-    fontWeight: 500,
+    fontWeight: 300,
+    letterSpacing: '-0.1px',
     cursor: 'pointer',
     textAlign: 'left' as const,
     fontFamily: 'var(--font-sans-system)',
@@ -619,7 +558,7 @@ function PortActionPanel({
         <button
           type="button"
           onClick={onBack}
-          aria-label="Back to port list"
+          aria-label="Back to dev server list"
           title="Back"
           style={{
             display: 'inline-flex',
@@ -639,11 +578,11 @@ function PortActionPanel({
         >
           <ChevronRight size={11} strokeWidth={2} />
         </button>
-        <span style={{ flex: 1 }}>{portLabel(target.port)}</span>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{target.label}</span>
         <span
           style={{
             fontSize: 10,
-            fontWeight: 600,
+            fontWeight: 300,
             color: 'var(--t-text-faint)',
             fontFamily: '"SF Mono", ui-monospace, monospace',
           }}
@@ -685,7 +624,7 @@ function PortActionPanel({
           paddingBottom: 4,
           paddingLeft: 8,
           fontSize: 10,
-          fontWeight: 500,
+          fontWeight: 300,
           color: 'var(--t-text-faint)',
           fontFamily: '"SF Mono", ui-monospace, monospace',
           overflow: 'hidden',
@@ -705,9 +644,9 @@ function PortActionPanel({
             paddingLeft: 8,
             marginTop: 2,
             fontSize: 11,
-            fontWeight: 600,
+            fontWeight: 300,
             color: toastTone,
-            letterSpacing: 0,
+            letterSpacing: '-0.1px',
           }}
         >
           {toast.message}
