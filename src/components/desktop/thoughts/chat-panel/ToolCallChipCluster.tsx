@@ -7,7 +7,7 @@ import {
   type ToolCallChipStatus,
 } from '@/components/desktop/orchestrator/ToolCallChip';
 import { ShimmerLine, TurnChevron } from './turn-line';
-import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 
 function stringifyValue(value: unknown): string {
@@ -159,6 +159,50 @@ function describeToolRollup(toolCalls: MobileTranscriptToolCall[]): string {
   return describeToolRollupParts(toolCalls, 'lead').join(' · ');
 }
 
+/** An entry that contributes NOTHING to the transcript except tool calls —
+ *  no text, no thinking, no media, no status/compaction payload. */
+function isToolOnlyEntry(entry: MobileTranscriptEntry): boolean {
+  return entry.role === 'assistant'
+    && (entry.toolCalls?.length ?? 0) > 0
+    && !entry.text?.trim()
+    && !entry.thinking?.trim()
+    && !entry.thinkingActive
+    && !(entry.media?.length)
+    && !entry.command
+    && !entry.compaction;
+}
+
+/**
+ * Merge CONSECUTIVE tool-only assistant entries into one, so parallel work
+ * that the backend emitted as separate assistant messages renders as a single
+ * cluster (one counted "Running N commands" line) instead of a stack of
+ * shimmer rows (operator ruling 2026-07-13 — five parallel eval commands ate
+ * ~150px of transcript). Render-time derivation only: state is untouched, the
+ * merged entry keeps the first entry's identity, and any entry with its own
+ * text/thinking/media terminates the run.
+ */
+export function mergeAdjacentToolOnlyEntries(entries: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
+  let merged: MobileTranscriptEntry[] | null = null;
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    if (isToolOnlyEntry(entry) && i + 1 < entries.length && isToolOnlyEntry(entries[i + 1])) {
+      const run = [entry];
+      while (i + 1 < entries.length && isToolOnlyEntry(entries[i + 1])) {
+        i += 1;
+        run.push(entries[i]);
+      }
+      if (merged === null) merged = entries.slice(0, entries.indexOf(entry));
+      merged.push({
+        ...run[0],
+        toolCalls: run.flatMap((e) => e.toolCalls ?? []),
+      });
+      continue;
+    }
+    if (merged !== null) merged.push(entry);
+  }
+  return merged ?? entries;
+}
+
 export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }: { toolCalls: MobileTranscriptToolCall[]; suppressSettledRollup?: boolean }) {
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -213,7 +257,18 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
   // Settled rollup: every call done, nothing errored → one slim text line.
   const allSettled = erroredTools.length === 0
     && toolCalls.every((tool) => chipStatus(tool) === 'done');
-  const runningTool = toolCalls.find((tool) => chipStatus(tool) === 'running') ?? null;
+  const runningTools = toolCalls.filter((tool) => chipStatus(tool) === 'running');
+  const runningTool = runningTools[0] ?? null;
+  const runningCount = runningTools.length;
+  // Noun for the counted line: one kind reads naturally ("5 commands",
+  // "3 files"), mixed kinds fall back to "tool calls".
+  const runningKinds = new Set(runningTools.map((tool) => classifyTool(tool).kind));
+  const runningNoun = runningKinds.size === 1
+    ? (runningKinds.has('shell') ? 'commands'
+      : runningKinds.has('read') || runningKinds.has('spec') ? 'files'
+        : runningKinds.has('delegate') ? 'agents'
+          : runningKinds.has('write') ? 'edits' : 'tool calls')
+    : 'tool calls';
 
   // Folded into the edit-run aggregate line ("Edited 12 files, ran 1 command"):
   // a clean settled cluster paints nothing of its own. Errors never fold.
@@ -231,14 +286,41 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
       }}
     >
       {runningTool && !showAll ? (
-        // Live: a plain shimmering text line — the Cursor text-sheen loader.
-        // No pills, no boxes; settled calls fold into the rollup on turn end.
-        <ShimmerLine>
-          {classifyTool(runningTool).verb === 'Read' ? 'Reading' : classifyTool(runningTool).verb === 'Run' ? 'Running' : classifyTool(runningTool).verb}
-          <span style={{ fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
-            {toolArgument(runningTool)}
-          </span>
-        </ShimmerLine>
+        runningCount > 1 ? (
+          // Parallel work collapses to ONE counted line (operator ruling
+          // 2026-07-13: five stacked "Running…" rows ate ~150px of transcript).
+          // Same grammar as the edited-files aggregate — count on one line,
+          // chevron expands to the per-call list.
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            aria-expanded={false}
+            aria-label={`Show the ${runningCount} tool calls currently running`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              border: 'none',
+              background: 'transparent',
+              padding: 0,
+              textAlign: 'left',
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <ShimmerLine>{`Running ${runningCount} ${runningNoun}`}</ShimmerLine>
+            <TurnChevron open={false} />
+          </button>
+        ) : (
+          // Live: a plain shimmering text line — the Cursor text-sheen loader.
+          // No pills, no boxes; settled calls fold into the rollup on turn end.
+          <ShimmerLine>
+            {classifyTool(runningTool).verb === 'Read' ? 'Reading' : classifyTool(runningTool).verb === 'Run' ? 'Running' : classifyTool(runningTool).verb}
+            <span style={{ fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
+              {toolArgument(runningTool)}
+            </span>
+          </ShimmerLine>
+        )
       ) : (
         <button
           type="button"
