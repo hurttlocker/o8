@@ -113,6 +113,12 @@ pub fn open(
     // the main window's web content (occlusion of o8 overlays is handled in
     // Stage 5 via snapshot-swap).
     attach_as_child(app, &win);
+    // Round the BOTTOM corners so the child window reads as one card with the
+    // right panel's Lisse (14px squircle) corners in glass mode — otherwise the
+    // native window's square bottom paints over the panel's rounded corner and
+    // reads dead-square (operator, 2026-07-14). Applied once on build; the layer
+    // clip tracks resize, so set_rect/show don't need to re-apply.
+    round_bottom_corners(&win, 14.0);
     log::info!("[browser-view] opened → {url}");
     Ok(())
 }
@@ -327,6 +333,69 @@ fn attach_as_child(app: &tauri::AppHandle, child: &tauri::WebviewWindow) {
     // command body runs on the main thread.
     unsafe {
         let _: () = msg_send![main_ptr, addChildWindow: child_ptr, ordered: ordered];
+    }
+}
+
+/// Round the browser-view window's BOTTOM corners so it matches the right panel's
+/// Lisse squircle (`SmoothCorners radius:14`) and never runs dead-square into the
+/// panel's rounded bottom edge in glass mode.
+///
+/// Clips the NSWindow content-view layer (which contains the WKWebView, same as
+/// `round_window_corners` in `lib.rs`) with the CONTINUOUS corner curve — the
+/// Apple squircle, `kCACornerCurveContinuous` == the NSString `"continuous"` — so
+/// it reads like the web-layer Lisse corners rather than a plain circular arc.
+/// `masksToBounds` makes the clip track the window bounds, so the corners stay
+/// round through every `reposition` resize.
+///
+/// BOTTOM-ONLY, not all four: the window's top edge butts flush under the pane's
+/// URL-toolbar divider (a straight horizontal seam, NOT a panel corner), so
+/// rounding the top would notch the page under the toolbar. The content view's
+/// backing layer is not geometry-flipped, so `minY` is the VISUAL bottom →
+/// `kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner`.
+///
+/// The radius is in LAYER POINTS, which equal CSS px (the window frame is sized
+/// in physical px, but the backing layer's coordinate space is points), so 14.0
+/// matches the 14px web radius directly — no `scale_factor` multiply.
+///
+/// The window is made non-opaque with a clear background so the clipped-away
+/// corner triangles reveal the panel beneath instead of the opaque window
+/// backing. The WKWebView keeps drawing its own opaque page background inside the
+/// rounded rect, so the page itself never turns translucent.
+#[cfg(target_os = "macos")]
+fn round_bottom_corners(win: &tauri::WebviewWindow, radius: f64) {
+    use objc2::{msg_send, runtime::AnyObject};
+    use objc2_app_kit::NSColor;
+    use objc2_foundation::NSString;
+
+    let win_ptr = match win.ns_window() {
+        Ok(p) if !p.is_null() => p as *mut AnyObject,
+        _ => return,
+    };
+    // kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner (see doc comment: minY is
+    // the visual bottom for this non-flipped content-view layer).
+    let bottom_corners: usize = (1 << 0) | (1 << 1);
+    // Safety: Tauri guarantees a live NSWindow for the window's lifetime; a Tauri
+    // command body (open()'s caller) runs on the main thread — mirrors
+    // attach_as_child + round_window_corners.
+    unsafe {
+        let _: () = msg_send![win_ptr, setOpaque: false];
+        let clear = NSColor::clearColor();
+        let _: () = msg_send![win_ptr, setBackgroundColor: &*clear];
+
+        let content: *mut AnyObject = msg_send![win_ptr, contentView];
+        if content.is_null() {
+            return;
+        }
+        let _: () = msg_send![content, setWantsLayer: true];
+        let layer: *mut AnyObject = msg_send![content, layer];
+        if layer.is_null() {
+            return;
+        }
+        let continuous = NSString::from_str("continuous");
+        let _: () = msg_send![layer, setCornerCurve: &*continuous];
+        let _: () = msg_send![layer, setCornerRadius: radius];
+        let _: () = msg_send![layer, setMaskedCorners: bottom_corners];
+        let _: () = msg_send![layer, setMasksToBounds: true];
     }
 }
 
