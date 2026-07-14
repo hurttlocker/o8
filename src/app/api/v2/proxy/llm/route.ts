@@ -25,6 +25,7 @@ import {
   isSupportedProvider,
   OPERATOR_FREE_OPENROUTER_MODELS,
   OPERATOR_GEMINI_MODEL,
+  OPERATOR_GEMINI_ROLLBACK_MODEL,
   PROVIDERS,
   resolveApiKey,
   type Message,
@@ -419,21 +420,30 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     let geminiQuotaExhausted = false;
 
     if (paidPlan && !wantsLow && geminiKey) {
-      const geminiResponse = await createGoogleToolResponseStream({
-        apiKey: geminiKey,
-        auth,
-        disableTools,
-        lastUserContent: lastUserMsg?.content,
-        messages,
-        model: OPERATOR_GEMINI_MODEL,
-        scopedRepoRoot: effectiveRepoRoot,
-        tabId,
-      });
-      const status = geminiResponse.status;
-      if (geminiResponse.ok || (status !== 429 && status !== 503 && status !== 402)) {
-        return geminiResponse;
+      // Primary then rollback, BOTH through Gemini (Q ruling 2026-07-13):
+      // the primary is a preview id Google can re-point or retire, so any
+      // failure on it — not just quota — gets one retry on the proven
+      // rollback model before the free chain is even considered.
+      let lastGeminiResponse: Response | null = null;
+      for (const geminiModel of [OPERATOR_GEMINI_MODEL, OPERATOR_GEMINI_ROLLBACK_MODEL]) {
+        const geminiResponse = await createGoogleToolResponseStream({
+          apiKey: geminiKey,
+          auth,
+          disableTools,
+          lastUserContent: lastUserMsg?.content,
+          messages,
+          model: geminiModel,
+          scopedRepoRoot: effectiveRepoRoot,
+          tabId,
+        });
+        if (geminiResponse.ok) return geminiResponse;
+        lastGeminiResponse = geminiResponse;
       }
-      // Quota/exhaustion — drop into the free chain below.
+      const status = lastGeminiResponse?.status ?? 503;
+      if (status !== 429 && status !== 503 && status !== 402) {
+        return lastGeminiResponse ?? jsonError('o8 Operator unavailable.', 503);
+      }
+      // Quota/exhaustion on the whole Gemini rail — drop into the free chain.
       geminiQuotaExhausted = true;
     }
 
@@ -450,7 +460,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           notice: geminiQuotaExhausted
             ? {
               originalModel: OPERATOR_GEMINI_MODEL,
-              originalModelLabel: 'Gemini 2.5 Flash',
+              originalModelLabel: 'Gemini 3 Flash',
               reason: 'Gemini quota exhausted — using the free chain',
             }
             : null,
@@ -464,7 +474,8 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     }
 
     // Last resort so o8 always answers when any key exists — a free install
-    // with only a Google key beats a dead composer.
+    // with only a Google key beats a dead composer. Rides the ROLLBACK model
+    // (stable id, proven record) so this path never depends on a preview id.
     if (geminiKey) {
       return createGoogleToolResponseStream({
         apiKey: geminiKey,
@@ -472,7 +483,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         disableTools,
         lastUserContent: lastUserMsg?.content,
         messages,
-        model: OPERATOR_GEMINI_MODEL,
+        model: OPERATOR_GEMINI_ROLLBACK_MODEL,
         scopedRepoRoot: effectiveRepoRoot,
         tabId,
       });
