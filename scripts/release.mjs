@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { buildManifest, defaultRange, readPublished, resolveNewFixes } from './lib/fixed-reports.mjs';
 import { publishFixed } from './publish-fixed.mjs';
+import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 
 const REPO = 'hurttlocker/o8';
@@ -163,6 +164,16 @@ console.log(`[release] wrote ${latestJsonPath}`);
 // CUMULATIVE on purpose: a per-release list would lose a fix for anyone who skips
 // versions. Contains no reporter handles — the app only needs "was MY report
 // fixed, and in which version".
+// Mirror the intake channel into the local ledger first — a user's report was
+// recorded on THEIR machine, not ours, so without this every fix we ship for
+// someone else's bug resolves to "unknown id" and never reaches fixed.json.
+try {
+  const { fresh } = await syncReports();
+  if (fresh.length > 0) console.log(`[release] imported ${fresh.length} report(s) from the intake channel`);
+} catch (err) {
+  console.warn(`[release] ⚠ intake-channel sync failed: ${err?.message ?? err}`);
+  console.warn('[release]   only self-filed reports will resolve — fixes for other people\'s bugs will be skipped.');
+}
 const { entries: pendingFixes, missing: unknownFixes } = resolveNewFixes(defaultRange(), version);
 const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
