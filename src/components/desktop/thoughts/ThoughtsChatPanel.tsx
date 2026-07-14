@@ -2231,6 +2231,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           display: 'flex',
           flex: 1,
           minHeight: 0,
+          background: thoughtsBodyBackground,
           outline: attachmentDragOver ? '2px solid var(--t-accent)' : 'none',
           outlineOffset: -2,
         }}
@@ -2272,7 +2273,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         </div>
         {transcriptSideRail ?? null}
       </div>
-
       <ChatToastStack
         reloadNotice={reloadNotice}
         onDismissReloadNotice={dismissReloadNotice}
