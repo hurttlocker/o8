@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { isTauri } from '@/lib/tauri/bridge';
+import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
   startRealtimeSession,
   type RealtimeSessionHandle,
@@ -192,7 +192,9 @@ export function RealtimeVoiceHost() {
 
   // Right-⌘ double-tap → `o8:realtime-toggle` (emitted from fn_hotkey.rs).
   useEffect(() => {
-    if (!isTauri()) return;
+    // Main-window only — a main-app page in the native browser-view would
+    // ACL-crash on this listen (see canUseTauriEvents).
+    if (!canUseTauriEvents()) return;
     let unlisten: (() => void) | null = null;
     let alive = true;
     void import('@tauri-apps/api/event')
