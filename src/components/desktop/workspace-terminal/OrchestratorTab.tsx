@@ -994,7 +994,12 @@ function OrchestratorTabInner({
 
   const hasMessages = chatChromeState.hasMessages;
 
-  const thoughtsBodyBackground = 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%)';
+  // The glass top-glow lives on the TAB ROOT (below), not the chat body:
+  // when it sat on the body, the run strip / comparison row above rendered
+  // flat chat-surface next to the glow and read as a darker bar on dark
+  // glass (Q report 2026-07-14). One gradient over the whole pane keeps
+  // every top-of-pane row flush with the transcript.
+  const thoughtsBodyBackground = 'transparent';
   const thoughtsElevatedSurface = 'var(--t-glass-elevated)';
   const thoughtsElevatedBorder = '1px solid var(--t-glass-border-strong)';
   const thoughtsElevatedShadow = 'var(--t-glass-shadow)';
@@ -1119,7 +1124,7 @@ function OrchestratorTabInner({
         flexDirection: 'column',
         height: '100%',
         minHeight: 0,
-        background: 'var(--t-chat-surface-bg, #ffffff)',
+        background: 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%), var(--t-chat-surface-bg, #ffffff)',
       }}
     >
 
@@ -1137,7 +1142,7 @@ function OrchestratorTabInner({
             borderBottomWidth: 1,
             borderBottomStyle: 'solid',
             borderBottomColor: 'var(--t-divider-subtle)',
-            background: 'var(--t-chat-surface-bg, #ffffff)',
+            background: 'transparent',
           }}
         >
           {readyComparisonGroups.map((group) => (

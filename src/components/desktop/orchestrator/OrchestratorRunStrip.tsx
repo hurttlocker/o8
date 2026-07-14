@@ -101,7 +101,10 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
         paddingRight: 14,
         paddingBottom: 6,
         paddingLeft: 14,
-        background: 'var(--t-chat-surface-bg, #ffffff)',
+        // Transparent — the OrchestratorTab root paints the chat surface +
+        // glass top-glow as ONE field; an opaque strip here occluded the
+        // glow and read as a darker bar on dark glass (Q report 2026-07-14).
+        background: 'transparent',
         flexShrink: 0,
       }}
     >
