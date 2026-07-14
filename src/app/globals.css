@@ -1816,12 +1816,16 @@ button.workflow-file-item.workflow-file-item-active {
   50%      { opacity: 0.45; }
 }
 
+/* Sweep for shimmerTextStyle (ShinyText mechanic): with the 200%-sized
+   transparent-edged flare gradient, [150%, -50%] carries the shine fully
+   in and out of the glyph span each cycle. Glyph legibility comes from the
+   translucent text-fill, never from gradient coverage. */
 @keyframes o8-text-shimmer {
   0% {
-    background-position: 200% center;
+    background-position: 150% center;
   }
   100% {
-    background-position: -200% center;
+    background-position: -50% center;
   }
 }
 
@@ -2258,6 +2262,12 @@ button.workflow-file-item.workflow-file-item-active {
   .o8-dot-shimmer > span,
   .o8-pulse-circle {
     animation: none !important;
+  }
+  /* ShinyText rows: restore full-opacity ink and drop the shine
+     (stylesheet !important beats the inline shimmerTextStyle props). */
+  .o8-text-shimmer {
+    -webkit-text-fill-color: currentColor !important;
+    background-image: none !important;
   }
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
