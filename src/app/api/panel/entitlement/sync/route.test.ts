@@ -184,4 +184,47 @@ describe('entitlement sync route', () => {
       expect(existsSync(markerPath())).toBe(false);
     });
   });
+
+  // ── Managed GitHub App token — cross-account race (audit #2) ────────────────
+  describe('managed GitHub App token binding', () => {
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    it('drops user B\'s delayed refresh that completes AFTER user A signs in', async () => {
+      const { readManagedGithubState } = await import('@/lib/github-broker/managed');
+
+      // Hold B's /github/app/token response open so it lands after A signs in.
+      let releaseB: (r: Response) => void = () => {};
+      const bTokenResponse = new Promise<Response>((res) => { releaseB = res; });
+
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/github/app/token')) return bTokenResponse; // B's delayed refresh
+        if (url.endsWith('/account/link-install')) return new Response('{}', { status: 200 });
+        return new Response('{}', { status: 404 }); // free — license path writes no managed state
+      }) as unknown as typeof fetch;
+
+      // 1) B syncs → kicks off the fire-and-forget managed refresh (awaits B's token).
+      await post({ clerkUserId: 'user_B' }, sessionToken(30));
+      await flush();
+
+      // 2) A signs in → bumps the sign-in epoch and clears state.
+      await post({ clearSignInMarker: true }, sessionToken(40));
+
+      // 3) B's delayed token finally arrives with a valid, correctly-owned token.
+      releaseB(Response.json({
+        installed: true,
+        token: 'ghs_B_token',
+        expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
+        installationId: 99,
+        accountLogin: 'user-b',
+        ownerClerkUserId: 'user_B',
+      }));
+      await flush();
+      await flush();
+
+      // The stale refresh must NOT have persisted B's token — A is now signed in.
+      const state = readManagedGithubState();
+      expect(state?.token).toBeUndefined();
+    });
+  });
 });

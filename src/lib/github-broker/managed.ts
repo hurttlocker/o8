@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -58,6 +59,38 @@ function statePath(): string {
 
 function activeIdentityPath(): string {
   return join(dataDir(), 'active-identity');
+}
+
+function signInEpochPath(): string {
+  return join(dataDir(), 'github-signin-epoch');
+}
+
+// ── Sign-in generation guard (audit #2, single-process late-response race) ─────
+// A fire-and-forget managed refresh for user B can complete AFTER B signs out
+// and A signs in — and would then blindly write B's identity + token, so the
+// broker serves B's token to A. Each fresh sign-in bumps this epoch; a refresh
+// captures it at start and only writes if it's unchanged, so a stale in-flight
+// refresh is dropped. Node is single-threaded, so the capture→check→write is
+// atomic within the process (the cross-process case stays the documented residual).
+
+export function readSignInEpoch(): string | null {
+  try {
+    const raw = readFileSync(signInEpochPath(), 'utf-8').trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+export function bumpSignInEpoch(): void {
+  try {
+    const p = signInEpochPath();
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, `${randomUUID()}\n`, { mode: 0o600 });
+    hardenPermissions(p);
+  } catch (err) {
+    console.error('[github-managed] failed to bump sign-in epoch:', err);
+  }
 }
 
 // ── Active-identity anchor: who is signed into this desktop right now ──────────
