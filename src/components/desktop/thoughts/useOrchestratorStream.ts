@@ -528,8 +528,12 @@ export function useOrchestratorStream(
     const current = currentAssistantRef.current;
     if (!current || (current.chunks.length === 0 && current.thinkingChunks.length === 0)) return;
 
-    const text = current.chunks.join('\n');
-    const thinking = current.thinkingChunks.length > 0 ? current.thinkingChunks.join('\n') : undefined;
+    // Token-streaming backends (verbatimStream) send slices of one continuous
+    // string — concatenate verbatim. Block-emitting backends (Claude REPL,
+    // Codex items) send complete segments that need the '\n' glue.
+    const joiner = current.verbatimStream ? '' : '\n';
+    const text = current.chunks.join(joiner);
+    const thinking = current.thinkingChunks.length > 0 ? current.thinkingChunks.join(joiner) : undefined;
     // Reasoning-phase fields (see CurrentAssistantStreamState): the frozen
     // duration drives the "Thought for Ns" line; `thinkingActive` stays true
     // only while reasoning is still the ONLY thing that has happened.

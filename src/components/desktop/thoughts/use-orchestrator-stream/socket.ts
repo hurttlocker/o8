@@ -23,6 +23,13 @@ export interface CurrentAssistantStreamState {
   /** Frozen reasoning duration — stamped once when the first answer token or
    *  tool call ends the thinking phase. */
   thinkingDurationMs?: number | null;
+  /** True for TOKEN-streaming backends (the o8 proxy rail): chunks are
+   *  verbatim slices of one continuous string and must be concatenated with
+   *  no separator. Block-emitting backends (Claude REPL, Codex items) send
+   *  complete segments where the '\n' join glue is correct — injecting '\n'
+   *  between token chunks rendered every few words as its own markdown
+   *  paragraph (the 2026-07-13 o8-model transcript bug). */
+  verbatimStream?: boolean;
 }
 
 interface CreateOrchestratorMessageHandlerOptions {
@@ -62,9 +69,13 @@ interface CreateOrchestratorMessageHandlerOptions {
   wsRef: RefLike<WebSocket | null>;
 }
 
+/** Backends whose text events are token slices, not complete blocks. */
+const VERBATIM_STREAM_BACKENDS = new Set(['o8']);
+
 function createAssistantState(
   resetEpochRef: RefLike<number>,
   assistantMessageId?: unknown,
+  backend?: unknown,
 ): CurrentAssistantStreamState {
   return {
     id: typeof assistantMessageId === 'string' && assistantMessageId.trim()
@@ -73,6 +84,7 @@ function createAssistantState(
     chunks: [],
     thinkingChunks: [],
     epoch: resetEpochRef.current,
+    verbatimStream: typeof backend === 'string' && VERBATIM_STREAM_BACKENDS.has(backend),
   };
 }
 
@@ -200,7 +212,7 @@ export function createOrchestratorMessageHandler(
               options.statusRef.current = 'busy';
               options.setStatus('busy');
             }
-            options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId);
+            options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
           }
           const thinkingState = options.currentAssistantRef.current;
           if (thinkingState.thinkingStartedAt == null) {
@@ -244,7 +256,7 @@ export function createOrchestratorMessageHandler(
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
-          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId);
+          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
         } else if (options.currentAssistantRef.current.epoch !== options.resetEpochRef.current) {
           options.currentAssistantRef.current = null;
           break;
@@ -353,7 +365,7 @@ export function createOrchestratorMessageHandler(
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
-          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId);
+          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
         }
 
         const current = options.currentAssistantRef.current;
