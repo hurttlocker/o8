@@ -6,6 +6,7 @@ import { isTauri, browserViewHide } from '@/lib/tauri/bridge';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
+import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@/components/desktop/branch-rail-geometry';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
@@ -4981,7 +4982,7 @@ function DashboardInner() {
         {/* The white workspace card. Lisse squircle ("list corners" from the
             canvas) on all four corners so the TOP rounds too — not just the
             bottom. autoEffects off = pure clip-path, no injected shadow. */}
-        <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <SmoothCorners corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
           visible={showCanvasFtux}

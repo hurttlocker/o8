@@ -49,7 +49,6 @@ interface ChatMessageListProps {
   repoPath?: string | null;
   activeTargetLabel: string;
   activeTargetColor: string;
-  thoughtsBodyBackground: string;
   thoughtsMutedGlass: string;
   thoughtsElevatedBorder: string;
   thoughtsElevatedShadow: string;
@@ -89,7 +88,6 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   repoPath,
   activeTargetLabel,
   activeTargetColor,
-  thoughtsBodyBackground,
   thoughtsMutedGlass,
   thoughtsElevatedBorder,
   thoughtsElevatedShadow,
@@ -160,7 +158,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       paddingLeft: 'var(--cortex-chat-gutter)',
       display: 'flex',
       flexDirection: 'column',
-      background: thoughtsBodyBackground,
+      background: 'transparent',
       minHeight: 0,
     }}>
       <div style={{

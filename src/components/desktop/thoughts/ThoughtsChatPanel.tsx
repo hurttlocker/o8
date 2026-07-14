@@ -2246,7 +2246,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             repoPath={resolvedRepoPath}
             activeTargetLabel={activeTargetLabel}
             activeTargetColor={activeTargetColor}
-            thoughtsBodyBackground={thoughtsBodyBackground}
             thoughtsMutedGlass={thoughtsMutedGlass}
             thoughtsElevatedBorder={thoughtsElevatedBorder}
             thoughtsElevatedShadow={thoughtsElevatedShadow}
