@@ -2,30 +2,32 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
-import { listManagedRuns, listRunningRuns } from '@/lib/runtimes/managed-runs/registry';
-
-/** agent = o8-owned run (→ live terminal) · browser = dev server (→ preview) · noise = db/infra (collapsed) */
-type PortCategory = 'agent' | 'browser' | 'noise';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { resolvePortInfo } from '@/lib/panel/api-port';
+import { classifyProbe, deriveServerLabel, type HttpProbeResult, type PortKind } from '@/lib/panel/port-classify';
 
 interface PortEntry {
   port: number;
   pid: number;
   process: string;
+  /** Human label ("Next.js", "Vite", "Python http.server", …). */
+  label: string;
   cwd: string;
   repo: string | null;
-  category: PortCategory;
-  agentSession: string | null;
+  /** page = openable web page (2xx html / redirect) · service = everything else. */
+  kind: PortKind;
 }
-
-// ── Response cache (ports don't change fast enough to scan every request) ──
-let portsCache: { data: unknown; ts: number } | null = null;
-const PORTS_CACHE_TTL_MS = 10_000; // 10s cache — ports don't change every second
 
 interface PortGroup {
   repo: string;
   repoPath: string;
   ports: number[];
 }
+
+// ── Response cache (ports don't change fast enough to scan every request) ──
+let portsCache: { data: unknown; ts: number } | null = null;
+const PORTS_CACHE_TTL_MS = 10_000; // 10s cache — ports don't change every second
 
 // Well-known system ports to ignore
 const IGNORE_PORTS = new Set([22, 53, 80, 443, 631, 5000, 5353, 7000]);
@@ -35,24 +37,116 @@ const IGNORE_PROCESSES = new Set([
   'ControlCenter', 'Finder', 'AirPlayXPCHelper', 'WiFiAgent', 'bluetoothd',
 ]);
 
+// Known dev runtimes + infra whose non-page listeners are still worth showing
+// under the collapsed "N more services" toggle (a project API server, a local
+// database). Everything else that isn't a page is dropped as pure noise.
+const DEV_PROCESSES = new Set(['node', 'next-server', 'tsx', 'bun', 'deno', 'python', 'Python', 'python3', 'go', 'cargo', 'ruby', 'java', 'uvicorn', 'gunicorn', 'flask']);
+const INFRA_PROCESSES = ['postgres', 'postmaster', 'redis', 'mysqld', 'mariadbd', 'mongod', 'memcached', 'elasticsearch', 'rabbitmq', 'etcd', 'clickhouse'];
+
+// o8's own machinery, matched on the command line (NOT a hardcoded port) so the
+// app never lists its own MCP bridges, WebSocket server, or bundled Next server
+// as if they were the operator's dev servers.
+const O8_INFRA_COMMAND = /operator-mcp-server|cortex-mcp-server|tauri-plugin-mcp|openclaw|ws-server(\.mjs)?\b|[/\\]out[/\\]server[/\\]server\.js/i;
+
+// Browsers answer their remote-debug ports (e.g. Chrome :9222) with an HTML
+// page — a probe would tag them "page", but they're never a dev server the
+// operator wants to open. Excluded by process identity, not by port.
+const NON_DEV_PROCESS = /google chrome|chromium|firefox|safari|microsoft edge|\bbrave\b|\bopera\b|\barc\b/i;
+
+function o8DataDir(): string {
+  return process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.o8');
+}
+
+function readPortFile(name: string): number | null {
+  try {
+    const p = join(o8DataDir(), name);
+    if (!existsSync(p)) return null;
+    const n = parseInt(readFileSync(p, 'utf-8').trim(), 10);
+    return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
+  } catch { return null; }
+}
+
+function intEnv(name: string): number | null {
+  const raw = process.env[name];
+  if (!raw) return null;
+  const n = parseInt(raw, 10);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
+}
+
+function portFromUrl(url: string | undefined): number | null {
+  if (!url) return null;
+  try {
+    const n = parseInt(new URL(url).port, 10);
+    return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
+  } catch { return null; }
+}
+
+/**
+ * Every port that belongs to o8 itself — the API/frontend port, the WebSocket
+ * port, and (in dev-bridge mode) the separate dev-server frontend. Resolved
+ * dynamically from the api-port helpers, the `~/.o8` port files, and env vars —
+ * never hardcoded — because the app's own frontend serves HTML and would
+ * otherwise show up as an openable "dev server."
+ */
+function resolveO8OwnPorts(): Set<number> {
+  const own = new Set<number>();
+  const add = (n: number | null | undefined) => { if (typeof n === 'number' && Number.isInteger(n) && n > 0 && n < 65536) own.add(n); };
+  try {
+    const info = resolvePortInfo();
+    add(info.apiPort);
+    add(info.wsPort);
+  } catch { /* fall through to file/env resolution */ }
+  add(readPortFile('api-port'));
+  add(readPortFile('ws-port'));
+  add(intEnv('O8_API_PORT'));
+  add(intEnv('O8_WS_PORT'));
+  add(intEnv('PORT'));
+  add(intEnv('WS_PORT'));
+  add(intEnv('CORTEX_IDE_PORT'));
+  add(portFromUrl(process.env.O8_DEV_FRONTEND_URL));
+  return own;
+}
+
+/**
+ * Fast loopback HTTP probe. Reads only the response headers (body is cancelled)
+ * so the classify decision stays under ~400ms even for slow dev servers.
+ */
+async function probePort(port: number): Promise<HttpProbeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 400);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: controller.signal,
+      headers: { 'user-agent': 'o8-port-probe' },
+    });
+    const contentType = res.headers.get('content-type');
+    try { await res.body?.cancel(); } catch { /* body already consumed */ }
+    return { reachable: true, status: res.status, contentType };
+  } catch {
+    return { reachable: false, status: null, contentType: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function GET() {
-  // Return cached response if fresh
   if (portsCache && (Date.now() - portsCache.ts) < PORTS_CACHE_TTL_MS) {
     return NextResponse.json(portsCache.data);
   }
 
   try {
-    // Get all listening TCP ports
     const raw = execSync(
       'lsof -i -P -n -sTCP:LISTEN -F pcn 2>/dev/null',
       { encoding: 'utf-8', timeout: 5000 },
     ).trim();
 
-    // Parse lsof output (field mode: p=pid, c=command, n=name)
-    const entries: PortEntry[] = [];
+    // Parse lsof output (field mode: p=pid, c=command, n=name).
+    interface RawEntry { port: number; pid: number; process: string; cwd: string; command: string; repo: string | null }
+    const entries: RawEntry[] = [];
     let currentPid = 0;
     let currentProcess = '';
-    const pidCwdCache = new Map<number, string>();
 
     for (const line of raw.split('\n')) {
       if (line.startsWith('p')) {
@@ -60,148 +154,106 @@ export async function GET() {
       } else if (line.startsWith('c')) {
         currentProcess = line.slice(1);
       } else if (line.startsWith('n')) {
-        // Parse port from name field like "*:3001" or "127.0.0.1:3001"
         const match = line.match(/:(\d+)$/);
         if (!match) continue;
-
         const port = parseInt(match[1], 10);
         if (IGNORE_PORTS.has(port)) continue;
         if (IGNORE_PROCESSES.has(currentProcess)) continue;
         if (port < 1024 && currentProcess !== 'node') continue;
-
-        // CWD resolution deferred to batch below
-        const cwd = '';
-
-        // Deduplicate the SAME process double-binding (IPv4 + IPv6) by (pid,port);
-        // two DIFFERENT processes on one port number are both kept so the
-        // agent-owned one can still be attributed (collapsed for render later).
+        // Dedup the same process double-binding IPv4 + IPv6 on one (pid, port).
         if (!entries.some(e => e.pid === currentPid && e.port === port)) {
-          entries.push({
-            port,
-            pid: currentPid,
-            process: currentProcess,
-            cwd,
-            repo: null,
-            category: 'browser',
-            agentSession: null,
-          });
+          entries.push({ port, pid: currentPid, process: currentProcess, cwd: '', command: '', repo: null });
         }
       }
     }
 
-    // Batch-resolve CWDs for all unique PIDs in one lsof call
-    const uniquePids = [...new Set(entries.map(e => e.pid))];
+    // Drop o8's own web ports up front — the app's own UI is never a dev server.
+    const o8OwnPorts = resolveO8OwnPorts();
+    let candidates = entries.filter(e => !o8OwnPorts.has(e.port));
+
+    // Batch-resolve CWD + full command line for every unique PID in two calls.
+    const uniquePids = [...new Set(candidates.map(e => e.pid))];
     if (uniquePids.length > 0) {
+      const pidList = uniquePids.join(',');
+      const cwdByPid = new Map<number, string>();
       try {
-        const pidList = uniquePids.join(',');
-        const cwdRaw = execSync(
-          `lsof -p ${pidList} -a -d cwd -Fn 2>/dev/null`,
-          { encoding: 'utf-8', timeout: 3000 },
-        ).trim();
+        const cwdRaw = execSync(`lsof -p ${pidList} -a -d cwd -Fn 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 }).trim();
         let pid = 0;
         for (const line of cwdRaw.split('\n')) {
           if (line.startsWith('p')) pid = parseInt(line.slice(1), 10);
-          else if (line.startsWith('n') && pid) pidCwdCache.set(pid, line.slice(1));
+          else if (line.startsWith('n') && pid) cwdByPid.set(pid, line.slice(1));
         }
-      } catch { /* batch CWD resolution failed — entries keep empty cwd */ }
+      } catch { /* CWD resolution failed — entries keep empty cwd */ }
 
-      for (const entry of entries) {
-        entry.cwd = pidCwdCache.get(entry.pid) ?? '';
+      const cmdByPid = new Map<number, string>();
+      try {
+        const psRaw = execSync(`ps -o pid=,command= -p ${pidList} 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 }).trim();
+        for (const line of psRaw.split('\n')) {
+          const m = line.trim().match(/^(\d+)\s+(.*)$/);
+          if (m) cmdByPid.set(parseInt(m[1], 10), m[2]);
+        }
+      } catch { /* command resolution failed — labels fall back to process name */ }
+
+      for (const entry of candidates) {
+        entry.cwd = cwdByPid.get(entry.pid) ?? '';
+        entry.command = cmdByPid.get(entry.pid) ?? '';
       }
     }
 
-    // Match ports to registered repos
+    // Drop o8's own MCP bridges / WS server / bundled server (by command
+    // signature) and browsers' remote-debug ports (by process identity).
+    candidates = candidates.filter(e =>
+      !O8_INFRA_COMMAND.test(`${e.process} ${e.command}`) && !NON_DEV_PROCESS.test(e.process));
+
+    // Attribute each port to a registered repo by CWD (longest path wins).
     let repos: { name: string; localPath: string }[] = [];
     try {
-      const repoData = JSON.parse(
-        execSync('cat ~/.o8/repos.json 2>/dev/null || echo "[]"', { encoding: 'utf-8' }),
-      );
+      const repoData = JSON.parse(execSync('cat ~/.o8/repos.json 2>/dev/null || echo "[]"', { encoding: 'utf-8' }));
       repos = (Array.isArray(repoData) ? repoData : repoData.repos ?? []).map(
-        (r: { name?: string; localPath?: string }) => ({
-          name: r.name ?? '',
-          localPath: r.localPath ?? '',
-        }),
+        (r: { name?: string; localPath?: string }) => ({ name: r.name ?? '', localPath: r.localPath ?? '' }),
       );
     } catch { /* no repo registry */ }
-
-    // Assign repo by CWD matching — longest path wins (most specific)
     const sortedRepos = [...repos].sort((a, b) => b.localPath.length - a.localPath.length);
-    for (const entry of entries) {
+    for (const entry of candidates) {
       if (!entry.cwd) continue;
       for (const repo of sortedRepos) {
-        if (entry.cwd.startsWith(repo.localPath)) {
-          entry.repo = repo.name;
-          break;
-        }
+        if (repo.localPath && entry.cwd.startsWith(repo.localPath)) { entry.repo = repo.name; break; }
       }
     }
 
-    // Tag EVERY listening port BEFORE the dev-relevance filter — agent ownership
-    // is the strongest signal and must not be gated behind the weakest heuristic
-    // (an o8-owned port of an arbitrary binary outside a registered repo would
-    // otherwise be dropped before it could be tagged 'agent'):
-    //  - agent: the process descends from a live `o8 run` tmux pane (pane-pid
-    //    ancestry — o8 owns the session, so the port's process is in its tree).
-    //  - noise: db/cache/infra → collapsed.  - browser: dev server → preview.
-    const NOISE_PROCESSES = ['postgres', 'postmaster', 'redis', 'mysqld', 'mariadbd', 'mongod', 'memcached', 'elasticsearch', 'rabbitmq', 'etcd', 'clickhouse'];
-    const classifyNonAgent = (entry: PortEntry) => {
-      entry.category = NOISE_PROCESSES.some(p => entry.process.toLowerCase().includes(p)) ? 'noise' : 'browser';
-    };
-    try {
-      await listManagedRuns(); // reconcile against live tmux (flips dead runs away)
-      const panePidToRun = new Map<number, string>();
-      for (const run of listRunningRuns()) {
-        if (typeof run.panePid === 'number') panePidToRun.set(run.panePid, run.session);
-      }
-      let ownerSession: (pid: number) => string | null = () => null;
-      if (panePidToRun.size > 0) {
-        // One ps snapshot → pid→ppid map; walk each port's process up to a run pane.
-        const ppidByPid = new Map<number, number>();
-        try {
-          const psRaw = execSync('ps -axo pid=,ppid= 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
-          for (const line of psRaw.split('\n')) {
-            const m = line.trim().match(/^(\d+)\s+(\d+)$/);
-            if (m) ppidByPid.set(parseInt(m[1], 10), parseInt(m[2], 10));
-          }
-        } catch { /* ps failed — no agent tags this pass */ }
-        ownerSession = (pid: number): string | null => {
-          let cur = pid;
-          for (let hops = 0; cur > 1 && hops < 32; hops += 1) {
-            const session = panePidToRun.get(cur);
-            if (session) return session;
-            const parent = ppidByPid.get(cur);
-            if (parent === undefined || parent === cur) break;
-            cur = parent;
-          }
-          return null;
-        };
-      }
-      for (const entry of entries) {
-        const session = ownerSession(entry.pid);
-        if (session) { entry.category = 'agent'; entry.agentSession = session; }
-        else classifyNonAgent(entry);
-      }
-    } catch { /* registry/tmux unavailable — entries keep default 'browser' */ }
+    // Probe every candidate in parallel → page vs service.
+    const kinds = await Promise.all(candidates.map(e => probePort(e.port)));
+    const classified: PortEntry[] = candidates.map((e, i) => ({
+      port: e.port,
+      pid: e.pid,
+      process: e.process,
+      label: deriveServerLabel(e.process, e.command),
+      cwd: e.cwd,
+      repo: e.repo,
+      kind: classifyProbe(kinds[i]),
+    }));
 
-    // Keep agent-owned ports regardless of repo/process; otherwise require a
-    // registered repo or a known dev tool.
-    const DEV_PROCESSES = new Set(['node', 'next-server', 'tsx', 'bun', 'deno', 'python', 'Python', 'go', 'cargo', 'ruby', 'java', 'uvicorn', 'gunicorn', 'flask']);
-    const relevant = entries.filter(e => e.category === 'agent' || e.repo !== null || DEV_PROCESSES.has(e.process));
+    // Pages: every openable web page. Services: only dev/infra-relevant listeners
+    // (a project API server, a local database) — never random OS daemons.
+    const isRelevantService = (e: PortEntry) =>
+      e.repo !== null
+      || DEV_PROCESSES.has(e.process)
+      || INFRA_PROCESSES.some(p => e.process.toLowerCase().includes(p));
+    const shown = classified.filter(e => e.kind === 'page' || isRelevantService(e));
 
-    // One row per port number for the UI — prefer the agent-owned entry when two
-    // distinct processes hold the same port.
+    // One row per port number for the UI (prefer a page when two processes collide).
     const byPort = new Map<number, PortEntry>();
-    for (const entry of relevant) {
+    for (const entry of shown) {
       const existing = byPort.get(entry.port);
-      if (!existing || (entry.category === 'agent' && existing.category !== 'agent')) byPort.set(entry.port, entry);
+      if (!existing || (entry.kind === 'page' && existing.kind !== 'page')) byPort.set(entry.port, entry);
     }
-    const filtered = [...byPort.values()];
+    const ports = [...byPort.values()].sort((a, b) => a.port - b.port);
 
-    // Group by repo
+    // Group by repo — consumed by the mobile dev-host typeahead + repo running
+    // indicators (kept for backward compatibility with those surfaces).
     const groups: PortGroup[] = [];
     const repoMap = new Map<string, PortGroup>();
-
-    for (const entry of filtered) {
+    for (const entry of ports) {
       const key = entry.repo ?? entry.cwd ?? 'Unknown';
       if (!repoMap.has(key)) {
         const group: PortGroup = {
@@ -214,14 +266,15 @@ export async function GET() {
       }
       repoMap.get(key)!.ports.push(entry.port);
     }
-
-    // Sort ports within groups
     for (const g of groups) g.ports.sort((a, b) => a - b);
 
+    const pageCount = ports.filter(e => e.kind === 'page').length;
     const result = {
-      ports: filtered.sort((a, b) => a.port - b.port),
+      ports,
       groups,
-      total: filtered.length,
+      pageCount,
+      serviceCount: ports.length - pageCount,
+      total: ports.length,
     };
     portsCache = { data: result, ts: Date.now() };
     return NextResponse.json(result);
@@ -229,6 +282,8 @@ export async function GET() {
     return NextResponse.json({
       ports: [],
       groups: [],
+      pageCount: 0,
+      serviceCount: 0,
       total: 0,
       error: err instanceof Error ? err.message : 'Failed to scan ports',
     });
