@@ -923,29 +923,60 @@ func startRecognitionSession(sessionId: UInt64) {
                 "recognizer_error:\(error.domain):\(error.code):\(error.localizedDescription)",
                 sessionId: sessionId
             )
-            // 203 = server refused (observed live: speech_api user quota).
-            // Flip to on-device for the rest of this daemon's lifetime when
-            // the machine supports it — the chained restart below picks the
-            // flag up immediately. A transient server hiccup costs nothing
-            // (on-device transcribes fine); a real quota lock costs EVERYTHING
-            // without this. If on-device is unavailable, say so once,
-            // actionably — never a silent apple=0 again.
-            if error.domain == "kAFAssistantErrorDomain" && error.code == 203
-                && !onDeviceFallbackActive {
+            // Server path dead — flip to on-device for the rest of this
+            // daemon's lifetime when the machine supports it; the chained
+            // restart below picks the flag up immediately. Two triggers:
+            //   203 (kAFAssistantErrorDomain) = server refused (observed
+            //   live: speech_api user quota).
+            //   201 (kLSRErrorDomain) = "Siri and Dictation are disabled" —
+            //   since macOS ~14 the SERVER path requires Siri or Keyboard
+            //   Dictation enabled in System Settings while isAvailable still
+            //   lies true (FB13235751). A fresh Mac with Dictation never
+            //   toggled hits this on EVERY task; before 2026-07-13 it just
+            //   chain-restarted forever — the Apple Silicon "waveform moves,
+            //   zero partials" bug. A transient server hiccup costs nothing
+            //   (on-device transcribes fine); a real lockout costs EVERYTHING
+            //   without this. If on-device is unavailable, say so once,
+            //   actionably — never a silent apple=0 again.
+            let serverPathDead =
+                (error.domain == "kAFAssistantErrorDomain" && error.code == 203)
+                || (error.domain == "kLSRErrorDomain" && error.code == 201)
+            if serverPathDead && !onDeviceFallbackActive {
                 var onDeviceSupported = false
                 if #available(macOS 13.0, *) {
                     onDeviceSupported = recognizer.supportsOnDeviceRecognition
                 }
                 if onDeviceSupported {
                     onDeviceFallbackActive = true
-                    emit("status", "recognizer_fallback:on_device_after_203", sessionId: sessionId)
+                    emit(
+                        "status",
+                        "recognizer_fallback:on_device_after_\(error.domain == "kLSRErrorDomain" ? "201" : "203")",
+                        sessionId: sessionId
+                    )
                 } else if !quotaErrorSurfaced {
                     quotaErrorSurfaced = true
                     emitError(
-                        "Apple's speech service is rate-limiting this Mac and offline dictation isn't installed. Enable Dictation in System Settings → Keyboard to download offline speech, then relaunch o8.",
+                        error.code == 201
+                            ? "Apple requires Siri or Dictation to be enabled for speech recognition. Turn on Dictation in System Settings → Keyboard, then relaunch o8."
+                            : "Apple's speech service is rate-limiting this Mac and offline dictation isn't installed. Enable Dictation in System Settings → Keyboard to download offline speech, then relaunch o8.",
                         sessionId: sessionId
                     )
                 }
+            }
+            // 1101 (kAFAssistantErrorDomain) = the ON-DEVICE model asset is
+            // missing ("No asset found com.apple.siri.asr.assistant"). Fires
+            // when the on-device path runs on a Mac that never downloaded the
+            // offline speech model (it only installs when a Dictation language
+            // is added). Chain-restarting cannot fix an absent asset — surface
+            // the actionable step once instead of dying silently.
+            if error.domain == "kAFAssistantErrorDomain" && error.code == 1101
+                && (onDeviceFallbackActive || requiresOnDeviceRecognition)
+                && !quotaErrorSurfaced {
+                quotaErrorSurfaced = true
+                emitError(
+                    "Offline dictation isn't installed on this Mac. Enable Dictation in System Settings → Keyboard to download offline speech, then relaunch o8.",
+                    sessionId: sessionId
+                )
             }
             if isShuttingDown {
                 // finish() delivered an error instead of a final — still emit
