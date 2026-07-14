@@ -34,8 +34,10 @@ describe('matchReceipts — the local join', () => {
   it('surfaces a fix for a report this machine filed', () => {
     const out = matchReceipts([entry('A7F3K2')], [report('A7F3K2')], new Set());
     expect(out).toHaveLength(1);
-    expect(out[0].title).toBe('Diff panel went blank');
     expect(out[0].version).toBe('0.1.592');
+    // The local ledger's text wins over the manifest's sanitized title — see the
+    // "their OWN words" case below.
+    expect(out[0].title).toBe('whatever');
   });
 
   it("ignores fixes for somebody else's report", () => {
@@ -62,6 +64,22 @@ describe('matchReceipts — the local join', () => {
       new Set(),
     );
     expect(out.map((r) => r.id)).toEqual(['NEW222', 'OLD111']);
+  });
+
+  it('shows the reporter their OWN words, not the sanitized public title', () => {
+    // The manifest title is the model-cleaned line the world sees. This machine
+    // still has the raw text they typed — that is what a receipt should echo.
+    const out = matchReceipts(
+      [entry('A7F3K2', 'Diff panel crashes when opening file')],
+      [{ id: 'A7F3K2', ts: NOW, title: 'the diff panel shits itself when I open my client repo' }],
+      new Set(),
+    );
+    expect(out[0].title).toBe('the diff panel shits itself when I open my client repo');
+  });
+
+  it('falls back to the public title when the local ledger has no text', () => {
+    const out = matchReceipts([entry('A7F3K2', 'Diff panel crashes')], [{ id: 'A7F3K2', ts: NOW }], new Set());
+    expect(out[0].title).toBe('Diff panel crashes');
   });
 
   it('is empty when the manifest has not shipped yet', () => {
