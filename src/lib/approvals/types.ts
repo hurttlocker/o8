@@ -91,7 +91,8 @@ export interface LlmApprovalContinuation {
   model: string;
   provider: 'openai' | 'anthropic' | 'google';
   messages: Array<{ role: string; content: string }>;
-  approvedTools: string[];
+  /** Legacy field retained for persisted approvals; never grants authorization. */
+  approvedTools?: string[];
   repoPath?: string;
 }
 

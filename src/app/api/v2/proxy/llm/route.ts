@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest } from 'next/server';
 import { createApproval } from '@/lib/approvals/store';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
+import { consumeLlmToolGrant } from '@/lib/approvals/llm-tool-grants';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getEntitlementSync } from '@/lib/entitlement/store';
@@ -311,19 +312,17 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     model,
     provider,
     messages: rawMessages,
-    approvedTools: approvedToolsList,
     disableTools,
     repoPath: rawRepoPath,
-    toolOverrides: rawToolOverrides,
+    approvalGrant: rawApprovalGrant,
     thinkingEffort: rawThinkingEffort,
   } = body as {
     model: string;
     provider: string;
     messages: Message[];
-    approvedTools?: string[];
     disableTools?: boolean;
     repoPath?: string;
-    toolOverrides?: Record<string, Record<string, unknown>>;
+    approvalGrant?: string;
     thinkingEffort?: ThinkingEffort;
   };
   const requestedThinkingEffort = parseRequestedThinkingEffort(rawThinkingEffort);
@@ -340,8 +339,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
   const anthropicTaskBudget = anthropicTaskBudgetResult.value;
 
-  const approvedTools = new Set(approvedToolsList ?? []);
-  const toolOverrides = rawToolOverrides ?? {};
+  const approvalGrant = typeof rawApprovalGrant === 'string' ? rawApprovalGrant : null;
   const tabId = request.headers.get('x-tab-id')?.trim() || '';
   const bodyRepoPath = typeof rawRepoPath === 'string' ? rawRepoPath.trim() : '';
   if (rawRepoPath != null && typeof rawRepoPath !== 'string') {
@@ -731,18 +729,20 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           const toolResultParts: string[] = [];
 
           for (const toolCall of toolCalls) {
-            const toolOverride = toolOverrides[toolCall.name];
-            if (toolOverride && typeof toolOverride === 'object') {
-              toolCall.args = { ...toolCall.args, ...toolOverride };
-            }
-
             const policyContext = buildPolicyContext(toolCall.name, toolCall.args, {
               runtime: 'chat',
               workspacePath: effectiveRepoRoot,
               sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
             });
-            const policyResult = approvedTools.has(toolCall.name)
-              ? { requiresApproval: false, risk: 'low' as const, reason: 'Pre-approved', ruleId: 'pre-approved', blocked: false }
+            const exactCallApproved = consumeLlmToolGrant({
+              token: approvalGrant,
+              tabId,
+              repoPath: effectiveRepoRoot,
+              toolName: toolCall.name,
+              args: toolCall.args,
+            });
+            const policyResult = exactCallApproved
+              ? { requiresApproval: false, risk: 'low' as const, reason: 'Exact one-shot approval', ruleId: 'one-shot-approval', blocked: false }
               : evaluatePolicy(policyContext);
 
             if (policyResult.blocked) {
@@ -816,7 +816,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                       model,
                       provider,
                       messages: rawMessages,
-                      approvedTools: [...approvedTools],
+                      approvedTools: [],
                       repoPath: effectiveRepoRoot,
                     },
                   })

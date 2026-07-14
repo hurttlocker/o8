@@ -221,20 +221,6 @@ export const APPROVAL_REQUIRED_TOOLS = new Set([
 
 // ── Terminal Command Safety Tiers ──
 
-// 🟢 Auto-run: read-only commands that can never cause damage
-const SAFE_COMMANDS = new Set([
-  'ls', 'cat', 'head', 'tail', 'wc', 'echo', 'pwd', 'which', 'whoami',
-  'find', 'grep', 'rg', 'ag', 'tree', 'file', 'stat', 'du', 'df',
-  'git status', 'git log', 'git diff', 'git branch', 'git remote',
-  'git show', 'git stash list', 'git tag',
-  'node -v', 'node --version', 'npm list', 'npm ls', 'npm --version',
-  'npx tsc --noEmit', 'npx tsc --version',
-  'go version', 'go test', 'python3 --version', 'rustc --version',
-  'cortex stats', 'cortex doctor', 'cortex health', 'cortex search',
-  'gh issue list', 'gh pr list', 'gh repo view',
-  'date', 'uptime', 'hostname', 'env',
-]);
-
 // 🟡 Needs approval: mutation commands
 const MUTATION_PREFIXES = [
   'npm install', 'npm run', 'npm ci', 'npm update', 'npm uninstall',
@@ -288,15 +274,6 @@ export function classifyCommand(command: string): { safety: CommandSafety; reaso
     }
   }
 
-  // Check safe commands (exact match on the base command)
-  const baseCmd = trimmed.split(/\s+/).slice(0, 3).join(' '); // "git status", "npm list"
-  const baseCmdTwo = trimmed.split(/\s+/).slice(0, 2).join(' ');
-  const baseCmdOne = trimmed.split(/\s+/)[0];
-
-  if (SAFE_COMMANDS.has(baseCmd) || SAFE_COMMANDS.has(baseCmdTwo) || SAFE_COMMANDS.has(baseCmdOne)) {
-    return { safety: 'safe', reason: 'Read-only command' };
-  }
-
   // Check mutation prefixes
   for (const prefix of MUTATION_PREFIXES) {
     if (trimmed.startsWith(prefix)) {
@@ -304,8 +281,11 @@ export function classifyCommand(command: string): { safety: CommandSafety; reaso
     }
   }
 
-  // Default: anything unknown needs approval
-  return { safety: 'needs_approval', reason: 'Unknown command — requires approval' };
+  // Shell strings are never intrinsically read-only: `cat` can read credentials,
+  // `env` can expose provider keys, and separators/substitutions can append a
+  // mutation to an innocent-looking prefix. Every non-blocked command therefore
+  // requires an exact, one-shot operator approval.
+  return { safety: 'needs_approval', reason: 'Shell command requires exact one-shot approval' };
 }
 
 // ── Tool Execution ──
@@ -586,6 +566,21 @@ function deleteFile(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): 
 const MAX_OUTPUT = 10_000; // 10KB output cap for LLM
 const COMMAND_TIMEOUT = 30_000; // 30s timeout
 
+function terminalToolEnv(): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !(
+        /(?:^|_)(?:API_?)?KEY$/i.test(key)
+        || /(?:^|_)(?:TOKEN|SECRET|PASSWORD|COOKIE|CREDENTIALS?|PRIVATE_KEY)$/i.test(key)
+        || /^(?:AWS|AZURE|GOOGLE|GCP|OPENAI|ANTHROPIC|OPENROUTER|GEMINI|XAI)_/i.test(key)
+        || key === 'O8_ANALYTICS_TOKEN'
+        || key === 'WS_TOKEN'
+      )),
+    ),
+    NODE_ENV: process.env.NODE_ENV ?? 'development',
+  };
+}
+
 function runTerminalCommand(command: string, cwd?: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
   const classification = classifyCommand(command);
 
@@ -614,7 +609,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
       timeout: COMMAND_TIMEOUT,
       cwd: workDir,
       maxBuffer: 1024 * 1024, // 1MB buffer
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, // no ANSI
+      env: { ...terminalToolEnv(), FORCE_COLOR: '0', NO_COLOR: '1' }, // no ANSI or inherited credentials
       shell: '/bin/zsh',
     });
 
