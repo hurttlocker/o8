@@ -28,6 +28,7 @@ import {
   createWorkspaceTabId,
   deriveFocusedLaneRepo,
   generateLlmChatTabId,
+  isReusableBlankOrchestratorTab,
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
@@ -515,20 +516,22 @@ export function useWorkspaceTerminalController(
     // Orchestrator tab, look for one the operator already has open with
     // no attached thread, no packet, and no draft. Focus it instead.
     // Mirrors the chat-side `isEmptyLlmChatTab` reuse in computeLlmChatSession.
-    const emptyExisting = tabsRef.current.find((tab) => (
-      tab.kind === 'orchestrator'
-      && tab.freshSpawn === true
-      && !tab.orchestrationPacket
-      && !tab.chatDraftInjection
-      && (!tab.chatMessages || tab.chatMessages.length === 0)
-    ));
+    const emptyExisting = tabsRef.current.find(isReusableBlankOrchestratorTab);
     if (emptyExisting) {
-      // Repo-scoped spawn (the [+] on a sidebar repo header) — retarget the
-      // reused empty tab so it binds to the requested repo, not whatever
-      // repo the stale blank tab was minted against.
-      if (repoOverride && emptyExisting.repo?.localPath !== repoOverride.localPath) {
+      // Reusing a blank tab must be INDISTINGUISHABLE from spawning a new
+      // one — resolve the same target a fresh spawn would (explicit
+      // override → focused lane → global preferred) and retarget the blank
+      // tab to it. Previously only an explicit repoOverride retargeted, so
+      // the generic "+ New session" reused a stale blank minted against the
+      // PREVIOUS repo and ignored the operator's current selection
+      // (Q repro 2026-07-14: select o8, spawn, hero still says o8-mobile).
+      const targetRepo = repoOverride
+        ?? deriveFocusedLaneRepo(tabsRef.current, effectiveActiveTabIdRef.current)
+        ?? preferredRepoRef.current
+        ?? null;
+      if (targetRepo && emptyExisting.repo?.localPath !== targetRepo.localPath) {
         const nextTabs = tabsRef.current.map((tab) => (
-          tab.id === emptyExisting.id ? { ...tab, repo: repoOverride } : tab
+          tab.id === emptyExisting.id ? { ...tab, repo: targetRepo } : tab
         ));
         tabsRef.current = nextTabs;
         setTabs(nextTabs);
