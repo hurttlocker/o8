@@ -1388,10 +1388,20 @@ pub(crate) fn read_terminal_tail_via_accessibility() -> Option<String> {
             return true;
         }
         let lower = trimmed.to_lowercase();
+        // Claude Code footer/status vocabulary (live-hit 2026-07-14: the
+        // model|Ctx|cost line and "bypass permissions on · 1 shell" were
+        // collected as content and spoken as "the last message").
         if lower.contains("? for shortcuts")
             || lower.contains("esc to interrupt")
             || lower.contains("auto-accept")
-            || lower.starts_with("bypassing permissions")
+            || lower.contains("bypass permissions")
+            || lower.contains("accept edits on")
+            || lower.contains("plan mode on")
+            || lower.contains("/clear to save")
+            || lower.contains("how is claude doing this session")
+            || lower.contains("0: dismiss")
+            || (trimmed.contains('|') && lower.contains("ctx:"))
+            || trimmed.starts_with('›')
         {
             return true;
         }
@@ -1465,6 +1475,16 @@ pub(crate) fn grab_selection() -> Option<String> {
         const AX_AUTHORITATIVE_TERMINALS: [&str; 2] =
             ["com.apple.Terminal", "com.googlecode.iterm2"];
         if AX_AUTHORITATIVE_TERMINALS.contains(&bundle_id.as_str()) {
+            // One retry before falling to the tail: a TUI redraw tick can
+            // transiently blank AXSelectedText while a real selection exists.
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            if let Some(text) = run_on_main_thread(read_selected_text_via_accessibility) {
+                log::info!(
+                    "[tts] grab_selection: AXSelectedText got {} chars on retry",
+                    text.len()
+                );
+                return Some(text);
+            }
             // No selection in a terminal → speak the VISIBLE TAIL instead
             // (operator ruling 2026-07-13: the read chord's best home is a
             // Claude Code TUI, where mouse reporting eats drag-select so a
