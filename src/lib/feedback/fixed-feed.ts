@@ -142,7 +142,7 @@ export async function fetchFixedManifest(now: number = Date.now()): Promise<Fixe
  */
 export function matchReceipts(
   manifest: FixedEntry[],
-  reports: { id: string; ts: number; title?: string }[],
+  reports: { id: string; ts: number; title?: string; origin?: string }[],
   seen: Set<string>,
 ): FixReceipt[] {
   const mine = new Map(reports.map((r) => [r.id.toUpperCase(), r]));
@@ -152,6 +152,13 @@ export function matchReceipts(
     if (seen.has(entry.id)) continue;
     const own = mine.get(entry.id);
     if (!own) continue; // somebody else's report
+    // Only reports filed from THIS install earn a receipt. Rows mirrored from
+    // the intake channel by the maintainer's sync carry origin 'intake-sync' —
+    // without this check the ops box showed "you reported this" for every
+    // fixed report in existence (Q hit it on the D3YPBP fix, 2026-07-14).
+    // The Map is last-write-wins, so a re-appended marked row (ledger is
+    // append-only) overrides an older unmarked copy of the same id.
+    if (own.origin === 'intake-sync') continue; // mirrored by ops sync, not filed here
 
     // Show them THEIR OWN WORDS. The manifest title is the sanitized line we
     // publish to the world; this machine's ledger still has the raw text they

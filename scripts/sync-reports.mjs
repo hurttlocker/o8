@@ -90,6 +90,12 @@ export function parseReportEmbed(message) {
     title,
     reporter,
     version: field('Version') || 'unknown',
+    // Mirrored from the channel by ops tooling — NOT filed from this install.
+    // The fixed-receipt join skips these, otherwise the maintainer's box shows
+    // "you reported this" for every fixed report (hit 2026-07-14). The enrich
+    // pass below deliberately does NOT copy this marker onto rows that were
+    // genuinely filed here.
+    origin: 'intake-sync',
     // The message a retroactive note threads onto. A report filed on THIS machine
     // is recorded before Discord replies, so it has no messageId until sync
     // backfills it — see the enrich pass below.
