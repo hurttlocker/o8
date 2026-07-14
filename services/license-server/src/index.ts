@@ -5,6 +5,7 @@ import { count, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { db } from './db/client.js';
+import { runStartupMigrations } from './db/migrate.js';
 import { entitlementEvents, founders, subscriptions } from './db/schema.js';
 import { env } from './env.js';
 import { mintLicense, type Plan } from './mint.js';
@@ -326,6 +327,13 @@ app.post('/invites/redeem', async (c) => {
     return c.json({ ok: false, reason: result.reason, owner: result.owner ?? null }, status);
   }
   return c.json({ ok: true, owner: result.owner ?? null });
+});
+
+// Self-migrate before accepting traffic — Railway never runs drizzle-kit push,
+// so additive columns (install_links.github_login) must be applied here or the
+// first request that touches them 500s (audit #3). Non-fatal on failure.
+void runStartupMigrations().catch((err) => {
+  console.error('[license-server] startup migration error:', err instanceof Error ? err.message : err);
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

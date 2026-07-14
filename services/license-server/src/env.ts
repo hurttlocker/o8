@@ -120,6 +120,16 @@ export const env = {
   // clerkUserId lookup is unaffected). NEVER shipped in the desktop build.
   CLERK_SECRET_KEY: optional('CLERK_SECRET_KEY', ''),
 
+  // Authorized parties for Clerk session verification (audit #4). Comma-separated
+  // origins that legitimately mint our sessions (e.g. "https://o8.run,tauri://localhost").
+  // When set, verifyClerkSession requires the token's `azp` to match one — blocks
+  // a same-instance token minted by a sibling subdomain from being redeemed here
+  // for a repo-write GitHub token. Empty (default) = no check (unchanged behavior).
+  CLERK_AUTHORIZED_PARTIES: optional('CLERK_AUTHORIZED_PARTIES', '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   // Managed GitHub App (the public "o8" App users install with one click).
   // This server holds the App's private key and mints short-lived installation
   // tokens for signed-in desktops (/github/app/token) — the key NEVER ships in

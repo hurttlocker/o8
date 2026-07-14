@@ -143,7 +143,10 @@ export async function handleGithubAppToken(c: Context): Promise<Response> {
   try {
     const installations = await listInstallations();
     const mine = installations.find((i) => i.accountId === gh.githubAccountId);
-    if (!mine) return c.json({ installed: false, installUrl: installUrl() });
+    // ownerClerkUserId is the SERVER-VERIFIED subject — the desktop stamps it on
+    // the persisted token so the broker only ever serves the token back to the
+    // same signed-in identity (cross-account binding, audit #2).
+    if (!mine) return c.json({ installed: false, installUrl: installUrl(), ownerClerkUserId: clerkUserId });
 
     const minted = await mintInstallationToken(mine.id);
     return c.json({
@@ -152,6 +155,7 @@ export async function handleGithubAppToken(c: Context): Promise<Response> {
       expiresAt: minted.expiresAt,
       installationId: mine.id,
       accountLogin: mine.accountLogin,
+      ownerClerkUserId: clerkUserId,
     });
   } catch (err) {
     console.error('[github-app] token mint failed:', err instanceof Error ? err.message : err);

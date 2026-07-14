@@ -30,6 +30,18 @@ export async function verifyClerkSession(token: string | null): Promise<string |
   if (!keySet) return null;
   try {
     const { payload } = await jwtVerify(token, keySet, { issuer: env.CLERK_ISSUER });
+    // Authorized-party check (audit #4): a signature+issuer-valid token from a
+    // sibling app on an allowed Clerk subdomain would otherwise be redeemable
+    // here for a repo-write GitHub token. When CLERK_AUTHORIZED_PARTIES is set,
+    // require the token's `azp` to be one of ours. Opt-in: unset = no check, so
+    // this can't lock out prod before the allowlist is confirmed.
+    if (env.CLERK_AUTHORIZED_PARTIES.length > 0) {
+      const azp = typeof payload.azp === 'string' ? payload.azp : '';
+      if (!azp || !env.CLERK_AUTHORIZED_PARTIES.includes(azp)) {
+        console.warn(`[clerk-verify] rejected token: azp "${azp}" not in authorized parties`);
+        return null;
+      }
+    }
     return typeof payload.sub === 'string' && payload.sub ? payload.sub : null;
   } catch (err) {
     console.warn(
