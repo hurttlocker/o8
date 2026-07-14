@@ -5,6 +5,31 @@ import type { Message } from './provider-config';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TIMEOUT_MS = 30_000;
 
+/**
+ * Where to POST + which headers to send. When `endpoint` is set (the founder
+ * managed-proxy route), it wins — the request never touches OpenRouter directly
+ * and `apiKey` is unused. Otherwise it's the direct OpenRouter call with the
+ * BYO/env key. Both speak the same OpenAI-compatible streaming shape, so only
+ * the destination + auth differ.
+ */
+function resolveUpstream(options: StreamOptions): { url: string; headers: Record<string, string> } {
+  if (options.endpoint) {
+    return {
+      url: options.endpoint.url,
+      headers: { 'Content-Type': 'application/json', ...options.endpoint.headers },
+    };
+  }
+  return {
+    url: OPENROUTER_URL,
+    headers: {
+      Authorization: `Bearer ${options.apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://o8.app',
+      'X-Title': 'o8 Operator',
+    },
+  };
+}
+
 // o8-model file editing on the free/OpenRouter rail — RESTRICTED to file ops.
 // NO shell, NO github, NO dispatch: the o8 model must never push to GitHub
 // (operator ruling 2026-07-14). executeTool sandboxes writes to scopedRepoRoot
@@ -25,6 +50,14 @@ interface StreamOptions {
   enableTools?: boolean;
   /** Repo root the file tools are sandboxed to. Required when enableTools. */
   scopedRepoRoot?: string | null;
+  /**
+   * Managed-inference route override (the founder perk). When set, the request
+   * POSTs to this URL with these headers instead of OpenRouter + the raw key —
+   * so a signed-in founder gets the o8 model with ZERO local keys, drawing on
+   * o8's managed proxy (same `/v1/inference` endpoint the Brain uses, verified
+   * to stream OpenRouter-format SSE). `apiKey` is ignored on this path.
+   */
+  endpoint?: { url: string; headers: Record<string, string> } | null;
 }
 
 /**
@@ -43,20 +76,16 @@ export async function streamOpenRouterFallback(options: StreamOptions): Promise<
   if (options.enableTools && options.scopedRepoRoot) {
     return streamOpenRouterWithTools({ ...options, scopedRepoRoot: options.scopedRepoRoot });
   }
-  const { apiKey, messages, model, notice } = options;
+  const { messages, model, notice } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
+  const target = resolveUpstream(options);
 
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(OPENROUTER_URL, {
+    upstream = await fetch(target.url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://o8.app',
-        'X-Title': 'o8 Operator',
-      },
+      headers: target.headers,
       body: JSON.stringify({
         model,
         stream: true,
@@ -180,7 +209,8 @@ type ORToolAcc = { id: string; name: string; args: string };
 async function streamOpenRouterWithTools(
   options: StreamOptions & { scopedRepoRoot: string },
 ): Promise<Response> {
-  const { apiKey, model, messages, notice, scopedRepoRoot } = options;
+  const { model, messages, notice, scopedRepoRoot } = options;
+  const target = resolveUpstream(options);
 
   const tools = TOOLS
     .filter((tool) => OPERATOR_FILE_TOOL_NAMES.includes(tool.name))
@@ -222,14 +252,9 @@ async function streamOpenRouterWithTools(
           const timer = setTimeout(() => stepController.abort(), OPENROUTER_TIMEOUT_MS);
           let upstream: globalThis.Response;
           try {
-            upstream = await fetch(OPENROUTER_URL, {
+            upstream = await fetch(target.url, {
               method: 'POST',
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://o8.app',
-                'X-Title': 'o8 Operator',
-              },
+              headers: target.headers,
               body: JSON.stringify({ model, stream: true, messages: convo, tools, tool_choice: 'auto' }),
               signal: stepController.signal,
             });
