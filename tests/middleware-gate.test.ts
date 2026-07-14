@@ -2,14 +2,14 @@
  * Deterministic suite for the API auth gate (src/middleware.ts).
  *
  * Covers the Tier-1 security model:
- *   - socket-truth header (x-o8-client-addr) is authoritative when present
- *   - dev-fallback heuristics only trust genuinely-loopback signals
- *   - bearer/ws-token fallback for LAN clients (mobile, Tailscale)
- *   - read-only allowlist + worker-route bypass behave as documented
+ *   - loopback is transport context, not an authenticated principal
+ *   - operator, worker, and device bearer capabilities are distinct
+ *   - read-only iframe exceptions and self-authenticating routes stay explicit
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -20,8 +20,14 @@ vi.mock('@clerk/nextjs/server', () => ({
 }));
 
 const TEST_TOKEN = 'vitest-gate-token-0123456789abcdef';
+const DEVICE_TOKEN = 'vitest-device-token-0123456789abcdef';
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-gate-test-'));
 writeFileSync(path.join(dataDir, 'ws-token'), `${TEST_TOKEN}\n`, 'utf-8');
+writeFileSync(
+  path.join(dataDir, 'mobile-device-tokens'),
+  `${createHash('sha256').update(DEVICE_TOKEN).digest('hex')}\n`,
+  'utf-8',
+);
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { panelGateMiddleware } = await import('@/middleware');
@@ -37,13 +43,13 @@ function gatedRequest(
 }
 
 describe('panelGateMiddleware — loopback trust', () => {
-  it('passes curl-style loopback requests (Host only, no browser headers)', () => {
+  it('rejects curl-style loopback requests without an operator credential', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/panel/repos', {
         headers: { host: 'localhost:3001' },
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   it('rejects LAN requests with no token', () => {
@@ -173,11 +179,11 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
-  it('passes /api/mobile/symon/tool from loopback (the ws-server relay origin)', () => {
+  it('requires the operator bearer for the loopback ws-server relay', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/mobile/symon/tool', {
         method: 'POST',
-        headers: { host: 'localhost:3001' },
+        headers: { host: 'localhost:3001', authorization: `Bearer ${TEST_TOKEN}` },
       }),
     );
     expect(res.status).toBe(200);
@@ -193,11 +199,11 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
-  it('passes /api/telemetry/crash from loopback (the webview origin)', () => {
+  it('requires the operator bearer for loopback renderer crash reports', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/telemetry/crash', {
         method: 'POST',
-        headers: { host: 'localhost:3001' },
+        headers: { host: 'localhost:3001', authorization: `Bearer ${TEST_TOKEN}` },
       }),
     );
     expect(res.status).toBe(200);
@@ -230,13 +236,13 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
-  it('passes the Tauri webview origin', () => {
+  it('does not treat the Tauri origin as an operator credential', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/orchestrator/threads', {
         headers: { host: 'localhost:3001', origin: 'tauri://localhost' },
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -255,7 +261,7 @@ describe('panelGateMiddleware — socket truth is authoritative', () => {
     expect(res.status).toBe(401);
   });
 
-  it('passes a known-loopback socket regardless of Host', () => {
+  it('does not treat a known-loopback socket as an operator credential', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/panel/repos', {
         headers: {
@@ -264,7 +270,7 @@ describe('panelGateMiddleware — socket truth is authoritative', () => {
         },
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -281,13 +287,13 @@ describe('panelGateMiddleware — bearer token fallback for LAN clients', () => 
     expect(res.status).toBe(200);
   });
 
-  it('passes with the correct token as a query parameter (WS upgrade path)', () => {
+  it('rejects HTTP query-string credentials', () => {
     const res = panelGateMiddleware(
       gatedRequest(`http://192.168.1.50:3001/api/mobile/inbox?token=${TEST_TOKEN}`, {
         headers: { host: '192.168.1.50:3001' },
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   it('rejects a wrong token', () => {
@@ -303,23 +309,53 @@ describe('panelGateMiddleware — bearer token fallback for LAN clients', () => 
   });
 });
 
+describe('panelGateMiddleware — per-device capability scope', () => {
+  function deviceRequest(pathname: string, method = 'GET') {
+    return panelGateMiddleware(gatedRequest(`http://192.168.1.50:3001${pathname}`, {
+      method,
+      headers: {
+        host: '192.168.1.50:3001',
+        authorization: `Bearer ${DEVICE_TOKEN}`,
+      },
+    }));
+  }
+
+  it('allows the mobile API family', () => {
+    expect(deviceRequest('/api/mobile/inbox').status).toBe(200);
+  });
+
+  it('allows the explicit mobile approval capability', () => {
+    expect(deviceRequest('/api/panel/approvals', 'POST').status).toBe(200);
+  });
+
+  it.each([
+    '/api/browser/agent',
+    '/api/panel/file-io?path=/etc/hosts',
+    '/api/panel/github-auth',
+    '/api/setup/mcp-servers',
+    '/api/orchestrator/merge',
+  ])('denies device credentials outside the mobile capability set: %s', (pathname) => {
+    expect(deviceRequest(pathname, 'POST').status).toBe(403);
+  });
+});
+
 describe('panelGateMiddleware — allowlists and bypasses', () => {
-  it('allows read-only setup GETs from anywhere', () => {
+  it('gates setup GETs because they expose machine configuration', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/setup/status', {
         headers: { host: '192.168.1.50:3001' },
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
-  it('allows setup identity GETs from anywhere with cross-origin callers', () => {
+  it('gates setup identity GETs from cross-origin callers', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/setup/identity', {
         headers: { host: '192.168.1.50:3001', origin: 'https://example.com' },
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   it('still gates setup identity non-GETs from LAN', () => {
@@ -413,11 +449,24 @@ describe('panelGateMiddleware — default-deny (RF-2: no fail-open)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('still passes that unlisted route from loopback (operator surface unaffected)', () => {
+  it('denies an unlisted route from loopback without an operator credential', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/some-future-route-nobody-gated', {
         method: 'POST',
         headers: { host: 'localhost:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('allows an unlisted route only with the exact operator bearer', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://localhost:3001/api/some-future-route-nobody-gated', {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${TEST_TOKEN}`,
+        },
       }),
     );
     expect(res.status).toBe(200);

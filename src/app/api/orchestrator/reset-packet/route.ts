@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
 
   // Operator/orchestrator-only control verb — a dispatched worker cannot reset
   // any packet (§HIGH-4).
-  if (resolveRequestPrincipal(request) === 'worker') {
+  if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Resetting packets is operator-only; a dispatched worker cannot call this.', 403);
   }
 

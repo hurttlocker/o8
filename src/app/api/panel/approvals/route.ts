@@ -159,7 +159,8 @@ export async function POST(request: NextRequest) {
   // merge-policy). A worker self-approving its own card is the CRIT-1 moat
   // collapse. The worker presents O8_WORKER_TOKEN via its CLI; the operator
   // webview + orchestrator MCP never do. (SECURITY_AUDIT_2026-07-02 §CRIT-1.)
-  if (resolveRequestPrincipal(request) === 'worker') {
+  const principal = resolveRequestPrincipal(request);
+  if (principal !== 'operator' && principal !== 'device') {
     return NextResponse.json(
       { ok: false, error: 'Approvals are operator-only; a worker cannot resolve them.' },
       { status: 403, headers: { 'Cache-Control': 'no-store, max-age=0' } },

@@ -11,7 +11,7 @@
  * "the real endpoint denies the worker", not "the guard function returns 'worker'".
  *
  * Capability matrix asserted (RF-1 §1.3), per principal:
- *   - operator (no worker token, loopback)  → allowed / reaches real logic
+ *   - operator (ws-token bearer)             → allowed / reaches real logic
  *   - worker   (local-worker token)          → 403 (or governance card), never mutates
  *   - unauthenticated remote (LAN, no token) → 401 at the real entry point
  *
@@ -67,6 +67,8 @@ function req(
   if (principal === 'worker') {
     headers.authorization = `Bearer ${WORKER_TOKEN}`;
     if (workerPacketId) headers['x-o8-worker-packet-id'] = workerPacketId;
+  } else {
+    headers.authorization = `Bearer ${WS_TOKEN}`;
   }
   return new NextRequest(url, {
     method,
@@ -117,6 +119,14 @@ function lanReq(url: string, method = 'POST'): NextRequest {
   });
 }
 
+function anonymousLoopbackReq(url: string, body?: unknown): NextRequest {
+  return new NextRequest(url, {
+    method: 'POST',
+    headers: { host: 'localhost:3001' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-approve)', () => {
   const url = 'http://localhost:3001/api/panel/approvals';
 
@@ -128,7 +138,14 @@ describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-ap
     expect(getApproval(approval.id)?.status).toBe('pending');
   });
 
-  it('OPERATOR (no worker token) → resolves the SAME card to approved', async () => {
+  it('omitting the worker token stays ANONYMOUS and cannot self-approve', async () => {
+    const approval = createTestApproval('sess:crit1-omitted-token');
+    const res = await approvals.POST(anonymousLoopbackReq(url, { action: 'approve', id: approval.id }));
+    expect(res.status).toBe(403);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+  });
+
+  it('OPERATOR ws-token → resolves the SAME card to approved', async () => {
     const approval = createTestApproval('sess:crit1-operator');
     const res = await approvals.POST(req(url, { principal: 'operator', body: { action: 'approve', id: approval.id } }));
     expect(res.status).toBe(200);

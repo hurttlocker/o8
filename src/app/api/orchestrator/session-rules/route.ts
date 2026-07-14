@@ -51,7 +51,8 @@ export async function GET(request: NextRequest) {
   if (!threadId) {
     return operatorError('invalid_request', 'threadId query param is required.', 400);
   }
-  if (resolveRequestPrincipal(request) === 'worker' && !workerMayReadThread(request, threadId)) {
+  const principal = resolveRequestPrincipal(request);
+  if (principal !== 'operator' && (principal !== 'worker' || !workerMayReadThread(request, threadId))) {
     return operatorError('forbidden', 'A dispatched worker can only read session rules for the thread that dispatched its packet.', 403);
   }
   try {
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  if (resolveRequestPrincipal(request) === 'worker') {
+  if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Editing session rules is operator-only; a dispatched worker can read but not add rules.', 403);
   }
 
@@ -99,7 +100,7 @@ export async function DELETE(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  if (resolveRequestPrincipal(request) === 'worker') {
+  if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Editing session rules is operator-only; a dispatched worker can read but not remove rules.', 403);
   }
 

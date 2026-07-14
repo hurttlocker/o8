@@ -3,6 +3,10 @@ import type { Metadata, Viewport } from 'next';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import NavigationBridge from '@/components/NavigationBridge';
 import { O8AuthProvider } from '@/components/auth/O8AuthProvider';
+import { ApiBearerBootstrap } from '@/components/security/ApiBearerBootstrap';
+import { headers } from 'next/headers';
+import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -21,7 +25,7 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const mobileBuildRevision = process.env.VERCEL_GIT_COMMIT_SHA
     ?? process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA
     ?? process.env.GIT_COMMIT_SHA
@@ -32,10 +36,17 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   // window.__O8_WS_PORT__ instead of hardcoding 3002. See
   // src/lib/panel/ws-port-client.ts for the reader.
   const { wsPort } = resolvePortInfo();
+  const requestHeaders = await headers();
+  const isLocal = headersIndicateLoopback((name) => requestHeaders.get(name));
+  const operatorToken = isLocal ? getOrCreateWsToken() : '';
 
   return (
     <html lang="en" style={{ background: '#1C1C1E' }} suppressHydrationWarning>
+      <head>
+        {operatorToken ? <meta name="ws-token" content={operatorToken} /> : null}
+      </head>
       <body style={{ background: '#1C1C1E', margin: 0, fontFamily: 'var(--font-sans-system)' }} suppressHydrationWarning>
+        {operatorToken ? <ApiBearerBootstrap source="meta" /> : null}
         <script
           dangerouslySetInnerHTML={{
             __html: `

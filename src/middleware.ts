@@ -8,9 +8,12 @@
  * `requirePanelAuth` through every route file.
  *
  * Security posture:
- *   - Requests from loopback origins (127.0.0.1, localhost, Tauri webview) pass.
- *   - Cross-origin or LAN requests must present the panel bearer token that
- *     matches the actual ws-token on disk — not just "any Bearer".
+ *   - Every stateful or sensitive API request needs an affirmative principal,
+ *     including requests that originate on loopback.
+ *   - The operator bearer matches the actual ws-token on disk. Worker and
+ *     paired-device bearers are restricted to explicit capability lists.
+ *   - A few read-only iframe resources may use socket-truth loopback because
+ *     iframe navigation cannot attach an Authorization header.
  *   - Without this, any LAN device could reach the Next dev/prod server and
  *     dispatch Codex, approve merges, etc. (See audit 2026-04-09.)
  *
@@ -33,6 +36,7 @@ import { migrateDataDirOnce } from '@/lib/data-dir-migration';
 // DB-free reader of the registry's derived active-token-hash file (#5). Importing
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
+import { isLocalWorkerToken } from '@/lib/auth/worker-token';
 
 migrateDataDirOnce();
 
@@ -80,11 +84,6 @@ function loadPanelToken(): string | null {
  * flip setupComplete before the desktop app is ready.
  */
 const ALLOWLIST_READ_ONLY: RegExp[] = [
-  // Setup wizard reads — needs to run before any token is known.
-  /^\/api\/setup(\/|$)/,
-  // GitHub device flow login — must be reachable without prior auth.
-  /^\/api\/panel\/github-device(\/|$)/,
-  /^\/api\/panel\/github-auth(\/|$)/,
   // Health check for the Tauri shell to know the bundled server is up.
   /^\/api\/panel\/status(\/|$)/,
   // v2 auth endpoints (login, callback) must be reachable.
@@ -97,15 +96,44 @@ const ALLOWLIST_READ_ONLY: RegExp[] = [
 ];
 
 const ALLOWLIST_ANY_METHOD: RegExp[] = [
-  // github-device and v2/auth both need POST for the handshake.
-  /^\/api\/panel\/github-device(\/|$)/,
-  /^\/api\/panel\/github-auth(\/|$)/,
+  // v2/auth needs POST for the handshake.
   /^\/api\/v2\/auth(\/|$)/,
   // Mobile device enrollment (#5): an UNPAIRED phone has no bearer token yet, so
   // this bootstrap POST bypasses the bearer gate. It is NOT unauthenticated — the
   // handler requires a valid single-use enroll code (and the E2EE flag) before
   // minting a per-device token.
   /^\/api\/mobile\/enroll(\/|$)/,
+];
+
+const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile(\/|$)/ },
+  { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/v2\/chat-history(?:\/list)?\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/v2\/repos\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/v2\/proxy\/(?:llm|cli)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/runtime\/launch\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/worktrees\/merge\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/orchestrator\/reset-session\/?$/ },
+];
+
+const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|approvals)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'DELETE']), path: /^\/api\/panel\/managed-runs\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/panel\/artifacts(?:\/mirror)?\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/lanes(?:\/[^/]+(?:\/(?:scope|diff))?)?\/?$/ },
+  { methods: new Set(['GET', 'POST']), path: /^\/api\/lanes\/[^/]+\/(?:events|heartbeat)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/(?:browser\/agent|cortex\/ask\/answer)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/repo-spec(?:\/|$)/ },
+  { methods: new Set(['GET']), path: /^\/api\/tasks(?:\/[^/]+)?\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/tasks\/[^/]+\/(?:report|block)\/?$/ },
+];
+
+const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
+  /^\/api\/browser\/proxy\/?$/,
+  /^\/api\/browser\/engine\/view\/?$/,
+  /^\/api\/panel\/proxy\/?$/,
 ];
 
 /**
@@ -196,6 +224,18 @@ function isActiveDeviceToken(presented: string): boolean {
   return readActiveTokenHashes().has(hash);
 }
 
+function deviceMayAccess(pathname: string, method: string): boolean {
+  return DEVICE_CAPABILITIES.some((capability) => (
+    capability.methods.has(method) && capability.path.test(pathname)
+  ));
+}
+
+function workerMayAccess(pathname: string, method: string): boolean {
+  return WORKER_CAPABILITIES.some((capability) => (
+    capability.methods.has(method) && capability.path.test(pathname)
+  ));
+}
+
 function isAllowlisted(pathname: string, method: string): boolean {
   // Any-method allowlist (OAuth handshakes).
   if (ALLOWLIST_ANY_METHOD.some((p) => p.test(pathname))) return true;
@@ -237,39 +277,39 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  // DEFAULT-DENY. The matcher restricts this middleware to /api/*, so every
-  // remaining request is a state-touching API route (including app relaunch
-  // requests under /api/panel/app/*). It passes ONLY from a
-  // loopback origin (socket truth — desktop app, MCP server, curl from
-  // localhost) or with a valid ws/device token — never by omission. This closes
-  // the fail-open + trailing-slash gate class (SECURITY_AUDIT_2026-07-02
-  // §HIGH-1/MED-2): an unlisted new /api/* route is denied, not exposed.
-  if (isTrustedLocalRequest(req)) {
+  // A small number of iframe resources cannot attach Authorization headers.
+  // Keep them read-only and require socket-truth loopback; all other API calls
+  // need an affirmative principal even when they originate on localhost.
+  if (
+    (method === 'GET' || method === 'HEAD')
+    && LOOPBACK_READ_CAPABILITIES.some((pattern) => pattern.test(pathname))
+    && isTrustedLocalRequest(req)
+  ) {
     return NextResponse.next();
   }
 
-  // Bearer-token fallback for non-loopback callers (Tailscale, mobile Safari
-  // hitting the dev port over LAN). The presented token MUST match the
-  // panel bearer token persisted in ~/.o8/ws-token.
+  // An operator bearer is valid on every API route. The root layout installs
+  // it on same-origin fetches before hydration for local desktop pages.
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  const queryToken = req.nextUrl.searchParams.get('token')?.trim() ?? '';
 
   const panelToken = loadPanelToken();
   if (panelToken) {
     if (bearer && tokenMatches(bearer, panelToken)) {
       return NextResponse.next();
     }
-    if (queryToken && tokenMatches(queryToken, panelToken)) {
-      return NextResponse.next();
-    }
   }
 
-  // Per-device token (#5) — additive, always checked (a no-op until a device
-  // enrolls). Lets a per-device-token phone reach the gated mobile surface; the
-  // shared ws-token above keeps desktop + legacy phones working unchanged.
-  if (isActiveDeviceToken(bearer) || isActiveDeviceToken(queryToken)) {
-    return NextResponse.next();
+  if (isLocalWorkerToken(bearer)) {
+    if (workerMayAccess(pathname, method)) return NextResponse.next();
+    return NextResponse.json({ error: 'Worker token is not authorized for this endpoint.' }, { status: 403 });
+  }
+
+  // A per-device credential is a capability token, not an operator credential.
+  // It can reach only the explicit mobile surface above; new routes fail closed.
+  if (isActiveDeviceToken(bearer)) {
+    if (deviceMayAccess(pathname, method)) return NextResponse.next();
+    return NextResponse.json({ error: 'Device token is not authorized for this endpoint.' }, { status: 403 });
   }
 
   return NextResponse.json(

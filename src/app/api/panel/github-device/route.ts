@@ -5,6 +5,7 @@ import { fetchGitHubUser, fetchGitHubEmail } from '@/lib/auth/github';
 import { findOrCreateByGithub } from '@/lib/db/users';
 import { signToken } from '@/lib/auth/jwt';
 import { createSession } from '@/lib/db/sessions';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -114,6 +115,9 @@ function pendingResponse(flow: DeviceFlowRecord, note: string) {
 }
 
 export async function POST(request: Request) {
+  if (resolveRequestPrincipal(request) !== 'operator') {
+    return NextResponse.json({ error: 'GitHub device login is operator-only.' }, { status: 403 });
+  }
   try {
     const payload = await request.json().catch(() => null) as {
       action?: DeviceAction;
