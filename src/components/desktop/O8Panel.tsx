@@ -699,7 +699,10 @@ export function O8Panel({
         // in solid mode. (Per-tab content that must stay paper — e.g. the
         // workspace orchestrator hero — paints its own --t-chat-surface-bg.)
         background: 'var(--t-chrome)',
-        borderLeft: '1px solid var(--t-divider)',
+        // No explicit left divider: the solid center transcript meeting the
+        // glass panel already reads as a boundary. On the DARK slab a white-alpha
+        // --t-divider rendered as a hard vertical seam (invisible on light paper,
+        // so light never showed it) — operator fix 2026-07-14.
       }}
     >
       {/* Scratch chat — floating Ask-o8 button + dialog, sits across tabs where
