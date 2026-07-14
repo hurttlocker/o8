@@ -22,6 +22,14 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 
 export function useExperimentalChatFlag(): boolean {
   const isFounder = useFounderStatus();
-  // Founders get early access regardless of the operator default.
-  return useRetryingRemoteFlag(fetchFlag, cache) || isFounder;
+  // RETIRED (Q ruling 2026-07-14): the separate casual "Chat" surface is
+  // gone — the o8 model merged into the Orchestrator chat, which is now the
+  // one conversation surface for every tier. This hook pins FALSE so the
+  // default llm-chat tab never spawns, existing llm-chat tabs stay hidden
+  // (visibleTabs filter), and the launch pickers drop the Chat option.
+  // The remote-flag plumbing stays readable as a re-entry seam, but it can
+  // no longer turn the surface back on.
+  void useRetryingRemoteFlag(fetchFlag, cache);
+  void isFounder;
+  return false;
 }

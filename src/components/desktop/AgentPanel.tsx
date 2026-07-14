@@ -558,7 +558,6 @@ function MiniAgentPanelHeader({
         {sessionMenuOpen ? (
           <MiniSessionMenu
             onCreateOrchestrator={() => runSessionAction(onCreateOrchestrator)}
-            onCreateChat={() => runSessionAction(onCreateChat)}
             onCreateTerminal={() => runSessionAction(onCreateTerminal)}
           />
         ) : null}
@@ -666,11 +665,9 @@ function MiniAgentPanelHeader({
 
 function MiniSessionMenu({
   onCreateOrchestrator,
-  onCreateChat,
   onCreateTerminal,
 }: {
   onCreateOrchestrator: () => void;
-  onCreateChat: () => void;
   onCreateTerminal: () => void;
 }) {
   return (
@@ -689,17 +686,13 @@ function MiniSessionMenu({
         overflow: 'visible',
       }}
     >
+      {/* "Chat" retired (Q 2026-07-14): the o8 model lives in the
+          Orchestrator chat — one conversation surface, no redundancy. */}
       <MiniSessionMenuItem
         icon={Sparkles}
         title="Orchestrator"
         subtitle="Fleet by default"
         onClick={onCreateOrchestrator}
-      />
-      <MiniSessionMenuItem
-        icon={MessageSquare}
-        title="Chat"
-        subtitle="Direct LLM conversation"
-        onClick={onCreateChat}
       />
       <MiniSessionMenuItem
         icon={Terminal}
