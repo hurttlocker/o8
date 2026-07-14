@@ -18,5 +18,10 @@ export async function fetchOnce(url: string, init?: RequestInit): Promise<Respon
   promise.finally(() => {
     setTimeout(() => inflight.delete(url), DEDUP_WINDOW_MS);
   });
-  return promise;
+  // EVERY caller gets a clone — the cached original is never read. Handing
+  // the first caller the original meant its res.json() disturbed the body,
+  // and any dedup hit inside the 150ms window then died at clone() with
+  // "Body is disturbed or locked" — an unhandled rejection that silently
+  // killed whichever flow deduped second (report D3YPBP, crash log v0.1.591).
+  return promise.then((response) => response.clone());
 }
