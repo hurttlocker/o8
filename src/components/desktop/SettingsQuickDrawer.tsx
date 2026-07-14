@@ -31,8 +31,8 @@ import {
 import { useTheme } from '@/lib/theme/context';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
-import type { PaletteId } from '@/lib/theme/registry';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
+import { ThemeContrastGlyph, GlassGlyph, ThemeToggle, SurfaceToggle } from './settings-quick-drawer/theme-rows';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -418,77 +418,8 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
   );
 }
 
-function ThemeGlyphSun() {
-  return (
-    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-    </svg>
-  );
-}
-
-function ThemeGlyphMoon() {
-  return (
-    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-    </svg>
-  );
-}
-
-function ThemeContrastGlyph() {
-  return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function ThemeToggle({ paletteId, setPalette }: { paletteId: PaletteId; setPalette: (id: PaletteId) => void }) {
-  const opts: Array<{ id: PaletteId; label: string; glyph: ReactNode }> = [
-    { id: 'light', label: 'Light', glyph: <ThemeGlyphSun /> },
-    { id: 'dark', label: 'Dark', glyph: <ThemeGlyphMoon /> },
-  ];
-  return (
-    <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: SUBTLE_BG, flexShrink: 0 }}>
-      {opts.map((o) => {
-        const active = paletteId === o.id;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            aria-pressed={active}
-            onClick={() => setPalette(o.id)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              height: 20,
-              paddingLeft: 7,
-              paddingRight: 8,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: active ? SELECTED_BORDER : 'transparent',
-              borderRadius: 6,
-              background: active ? SELECTED_BG : 'transparent',
-              boxShadow: active ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
-              color: active ? TEXT : MUTED,
-              fontFamily: FONT,
-              fontSize: 10.5,
-              fontWeight: 300,
-              letterSpacing: '-0.1px',
-              cursor: 'pointer',
-              transition: 'background 140ms ease, color 140ms ease',
-            }}
-          >
-            {o.glyph}
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+// Theme + surface toggles live in ./settings-quick-drawer/theme-rows.tsx
+// (extracted for the 800-line ceiling when the Glass row landed).
 
 export function SettingsQuickDrawer({
   open,
@@ -503,7 +434,7 @@ export function SettingsQuickDrawer({
   const [helpOpen, setHelpOpen] = useState(false);
   const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
   const auth = useO8Auth();
-  const { paletteId, setPalette } = useTheme();
+  const { paletteId, setPalette, surface, setReduceTransparency } = useTheme();
   // CLI token telemetry is Founders-mode content (epic #1450) — visibility
   // only; the /api/panel/cli-usage route stays gated the same either way.
   const { founder, plan } = useEntitlement();
@@ -654,6 +585,12 @@ export function SettingsQuickDrawer({
             <IconFrame><ThemeContrastGlyph /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Theme</span>
             <ThemeToggle paletteId={paletteId} setPalette={setPalette} />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 30, paddingLeft: 7, paddingRight: 7 }}>
+            <IconFrame><GlassGlyph /></IconFrame>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Glass</span>
+            <SurfaceToggle surface={surface} setReduceTransparency={setReduceTransparency} />
           </div>
 
           {foundersMode ? (
