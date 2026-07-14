@@ -90,15 +90,6 @@ interface WorkspaceHeaderStripProps {
     contextRailAvailable?: boolean;
     contextRailVisible?: boolean;
   }> | null;
-  /** Optional action callbacks for the `…` menu next to the title.
-   *  Items only render when the corresponding callback is provided —
-   *  the menu hides entirely when none are set. Rename specifically
-   *  is an *async submit* — clicking "Rename" flips the header label
-   *  into an inline input; on Enter/blur we call this callback with
-   *  the new value and it returns a promise the caller can throw on. */
-  onTitleRenameSubmit?: (newTitle: string) => Promise<void>;
-  onTitleArchive?: () => void;
-  onTitleShare?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -115,9 +106,6 @@ export function WorkspaceHeaderStrip({
   approvalCount = 0,
   onOpenInbox,
   headerLabel,
-  onTitleRenameSubmit,
-  onTitleArchive,
-  onTitleShare,
   headerTabs,
   workspaceId,
   headerActiveTabId,
@@ -135,8 +123,6 @@ export function WorkspaceHeaderStrip({
   // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.
   // Single 1 or 0 tabs → title + `…` menu.
   const usePillStrip = !isSplit && tabs.length > 1;
-  const hasTitleMenu = !isSplit && !usePillStrip && headerLabel && (onTitleRenameSubmit || onTitleArchive || onTitleShare);
-  const [renameMode, setRenameMode] = useState(false);
   return (
     <ColumnHeaderStrip
       drag
@@ -172,28 +158,11 @@ export function WorkspaceHeaderStrip({
           finishedTabCount={finishedTabCount}
         />
       ) : headerLabel ? (
+        // Just the name — Cursor-style. Rename / archive / delete live on the
+        // left session list's right-click menu (operator 2026-07-14), so the
+        // header needs no `…` actions button.
         <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-          {renameMode && onTitleRenameSubmit ? (
-            <HeaderLabelRenameInput
-              initial={headerLabel}
-              onSubmit={async (next) => {
-                setRenameMode(false);
-                await onTitleRenameSubmit(next);
-              }}
-              onCancel={() => setRenameMode(false)}
-            />
-          ) : (
-            <>
-              <HeaderLabelText label={headerLabel} />
-              {hasTitleMenu ? (
-                <TitleMenuButton
-                  onRename={onTitleRenameSubmit ? () => setRenameMode(true) : undefined}
-                  onArchive={onTitleArchive}
-                  onShare={onTitleShare}
-                />
-              ) : null}
-            </>
-          )}
+          <HeaderLabelText label={headerLabel} />
         </div>
       ) : null}
       right={
@@ -758,258 +727,6 @@ function significantWords(label: string, count: number): string {
   const tail = slash >= 0 ? label.slice(slash + 3) : label;
   const words = tail.trim().split(/\s+/);
   return words.slice(0, count).join(' ');
-}
-
-/** `…` overflow menu next to the workspace title. Codex puts a small
- *  action chevron right of the conversation name for Rename / Archive /
- *  Share. We render the matching three items, each gated on its handler
- *  prop so the dashboard can wire them piecemeal. */
-function TitleMenuButton({
-  onRename,
-  onArchive,
-  onShare,
-}: {
-  onRename?: () => void;
-  onArchive?: () => void;
-  onShare?: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const menuId = useId();
-
-  // Outside-click closes the menu.
-  useEffect(() => {
-    if (!open) return;
-    const onDocDown = (event: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', onDocDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDocDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  const handlePick = useCallback((action?: () => void) => () => {
-    setOpen(false);
-    action?.();
-  }, []);
-
-  return (
-    <div ref={wrapperRef} data-no-drag style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        aria-label="Conversation actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={menuId}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 22,
-          height: 22,
-          borderRadius: 6,
-          borderWidth: 0,
-          background: open || hovered ? 'var(--t-hover)' : 'transparent',
-          color: 'var(--t-text-secondary)',
-          cursor: 'pointer',
-          padding: 0,
-          transition: 'background 120ms ease',
-        }}
-      >
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="5" cy="12" r="1.2" />
-          <circle cx="12" cy="12" r="1.2" />
-          <circle cx="19" cy="12" r="1.2" />
-        </svg>
-      </button>
-      {/* Menu is always mounted (display toggles) so agents / a11y
-          tooling can enumerate the available actions from the DOM
-          without first clicking to open. */}
-      <div
-        id={menuId}
-        role="menu"
-        aria-label="Conversation actions"
-        style={{
-          display: open ? 'block' : 'none',
-          position: 'absolute',
-          top: '100%',
-          left: 0,
-          marginTop: 4,
-          minWidth: 168,
-          borderRadius: 8,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider)',
-          background: 'var(--t-panel)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-          paddingTop: 4,
-          paddingBottom: 4,
-          zIndex: 100,
-          fontFamily: 'var(--font-sans-system)',
-        }}
-      >
-        {onRename ? (
-          <TitleMenuItem label="Rename" onClick={handlePick(onRename)} />
-        ) : null}
-        {onArchive ? (
-          <TitleMenuItem label="Archive" onClick={handlePick(onArchive)} />
-        ) : null}
-        {onShare ? (
-          <TitleMenuItem label="Share session" onClick={handlePick(onShare)} />
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function TitleMenuItem({ label, onClick }: { label: string; onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'block',
-        width: '100%',
-        textAlign: 'left',
-        borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: 'var(--t-text)',
-        cursor: 'pointer',
-        paddingTop: 6,
-        paddingBottom: 6,
-        paddingLeft: 12,
-        paddingRight: 12,
-        fontSize: 13.5,
-        fontWeight: 300,
-        letterSpacing: '-0.1px',
-        lineHeight: 1.25,
-        fontFamily: 'var(--font-sans-system)',
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-/** Inline rename editor — replaces HeaderLabelText when the operator
- *  picks "Rename" from the title `…` menu. The input is pre-filled
- *  with the title-half of the label ("repo / title" → "title") so the
- *  operator edits just the conversation name, not the repo prefix. */
-function HeaderLabelRenameInput({
-  initial,
-  onSubmit,
-  onCancel,
-}: {
-  initial: string;
-  onSubmit: (next: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  // Split "repo / title" → keep repo as static prefix, edit the title half.
-  const separator = ' / ';
-  const sepIdx = initial.indexOf(separator);
-  const repoPrefix = sepIdx >= 0 ? initial.slice(0, sepIdx) : null;
-  const initialTitle = sepIdx >= 0 ? initial.slice(sepIdx + separator.length) : initial;
-
-  const [draft, setDraft] = useState(initialTitle);
-  const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const commit = async () => {
-    const trimmed = draft.trim();
-    if (!trimmed || trimmed === initialTitle) {
-      onCancel();
-      return;
-    }
-    setBusy(true);
-    try {
-      await onSubmit(trimmed);
-    } catch {
-      // best-effort — rename PATCH failed; fall back to the displayed label.
-      // The caller already exited rename mode in its own handler.
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <span
-      data-no-drag
-      style={{
-        display: 'inline-flex',
-        alignItems: 'baseline',
-        gap: 0,
-        minWidth: 0,
-        fontSize: 12,
-        fontFamily: 'var(--font-sans-system)',
-        letterSpacing: 0,
-      }}
-    >
-      {repoPrefix ? (
-        <>
-          <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{repoPrefix}</span>
-          <span style={{ color: 'var(--t-text-faint)', fontWeight: 400 }}>{separator}</span>
-        </>
-      ) : null}
-      <input
-        ref={inputRef}
-        type="text"
-        value={draft}
-        disabled={busy}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            void commit();
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
-        onBlur={() => { void commit(); }}
-        style={{
-          display: 'inline-block',
-          minWidth: 80,
-          maxWidth: 320,
-          width: `${Math.max(8, draft.length + 1)}ch`,
-          paddingTop: 2,
-          paddingBottom: 2,
-          paddingLeft: 6,
-          paddingRight: 6,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-accent-border, rgba(37, 99, 235, 0.3))',
-          borderRadius: 6,
-          background: 'var(--t-input-bg)',
-          color: 'var(--t-text-secondary)',
-          fontSize: 12,
-          fontWeight: 400,
-          fontFamily: 'var(--font-sans-system)',
-          letterSpacing: 0,
-          outline: 'none',
-        }}
-      />
-    </span>
-  );
 }
 
 // Codex-style "<repo> / <chat title>" split: repo gets emphasis, the
