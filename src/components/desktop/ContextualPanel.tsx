@@ -613,7 +613,16 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         flexDirection: 'column',
         overflow: 'hidden',
         background: 'var(--t-bg)',
-      }}>
+        // Own stacking context ABOVE unpositioned siblings: the workspace
+        // card's Lisse drop shadow was painting over the panel header in
+        // light glass, dimming the +/× controls into invisibility
+        // (Q report 2026-07-14 — "the shell + button is behind the
+        // workspace, I can see the shadow"). z 1 wins over shadow bleed
+        // from auto-stacked siblings without touching overlay layers.
+        position: 'relative',
+        zIndex: 1,
+        isolation: 'isolate',
+      } as React.CSSProperties}>
         {/* Header bar — single-line bottom panel chrome */}
         <div style={{
           display: 'flex',
