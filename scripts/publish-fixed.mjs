@@ -49,6 +49,7 @@ import {
   writePublished,
 } from './lib/fixed-reports.mjs';
 import { syncReports } from './sync-reports.mjs';
+import { publicTitle } from './lib/sanitize-title.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const rangeFlag = process.argv.indexOf('--range');
@@ -78,7 +79,8 @@ async function postFixed(webhookUrl, entry) {
     body: JSON.stringify({
       username: 'o8',
       embeds: [{
-        title: entry.title,
+        // Never entry.title — that is the user's raw prose.
+        title: entry.publicTitle || entry.title,
         description: credit,
         color: EMBED_COLOR,
         footer: { text: `report ${entry.id} · ${entry.sha}` },
@@ -124,9 +126,23 @@ export async function publishFixed({ range, dryRun = false } = {}) {
   const version = appVersion();
   const { entries, missing, published } = resolveNewFixes(resolvedRange, version);
 
+  // The reporter's raw prose is about to hit #fixed AND fixed.json, which is a
+  // world-readable URL. Clean it first: a free model rewrites it into a neutral
+  // bug title, over a deterministic redactor that always runs. The raw text stays
+  // in the private ledger for triage and is never published.
+  for (const entry of entries) {
+    const { title, via } = await publicTitle(entry.title);
+    entry.publicTitle = title;
+    if (via === 'redact' && !dryRun) {
+      console.warn(`  ⚠ ${entry.id}: title polish unavailable — publishing the redacted text`);
+    }
+  }
+
   for (const entry of entries) {
     if (dryRun) {
-      console.log(`  [dry-run] ${entry.id} · ${entry.title} — ${entry.reporter ? `@${entry.reporter}` : 'anonymous'} → v${version}`);
+      console.log(`  [dry-run] ${entry.id} → v${version} — ${entry.reporter ? `@${entry.reporter}` : 'anonymous'}`);
+      console.log(`            raw:    ${entry.title}`);
+      console.log(`            public: ${entry.publicTitle}`);
     } else {
       await postFixed(webhookUrl, entry);
     }
