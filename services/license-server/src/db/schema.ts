@@ -201,6 +201,9 @@ export const installLinks = pgTable('install_links', {
   installSub: text('install_sub').primaryKey(),
   /** Owning Clerk user id (also the `user_*` sub after sign-in). */
   clerkUserId: text('clerk_user_id').notNull(),
+  /** GitHub login at link time (via Clerk) — labels analytics for EVERY
+   * signed-in user, not just founders. Display-only, never trusted for auth. */
+  githubLogin: text('github_login'),
   linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

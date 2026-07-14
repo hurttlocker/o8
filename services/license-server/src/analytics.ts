@@ -322,7 +322,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
     select
       a.ident, a.last_seen, a.calls, a.events, a.spend_micro, a.devices,
       case when f.clerk_user_id is not null then 'founder' else coalesce(pl.plan, 'free') end as plan,
-      f.gh                       as github
+      coalesce(f.gh, il.gh)      as github
     from agg a
     left join ( select sub, max(plan) as plan from proxy_usage group by sub ) pl on pl.sub = a.ident
     left join (
@@ -333,6 +333,14 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       from founders where status = 'active'
     ) f
       on f.clerk_user_id = a.ident
+    left join (
+      -- EVERY signed-in user labels with their GitHub handle (captured at
+      -- link-install time via Clerk) — not just founders. clogginsdev showed
+      -- as an anonymous user_ row while actively dogfooding (live-hit 07-14).
+      select clerk_user_id, max(github_login) as gh
+      from install_links where github_login is not null group by clerk_user_id
+    ) il
+      on il.clerk_user_id = a.ident
     order by (a.calls + a.events) desc
     limit 20
   `)).map((r) => ({
