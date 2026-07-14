@@ -5,6 +5,7 @@ import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
 import { ShimmerLine } from './turn-line';
+import { mergeAdjacentToolOnlyEntries } from './ToolCallChipCluster';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -83,7 +84,7 @@ interface ChatMessageListProps {
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
-  displayMessages,
+  displayMessages: rawDisplayMessages,
   displayWaiting,
   repoPath,
   activeTargetLabel,
@@ -106,6 +107,11 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   suggestedRepliesPending = false,
   turnSummary = null,
 }, chatEndRef) {
+  // Parallel tool work emitted as separate tool-only assistant messages
+  // renders as ONE merged cluster (a single counted "Running N commands"
+  // line) instead of a stack of shimmer rows. Render-time derivation — the
+  // underlying message state is untouched.
+  const displayMessages = mergeAdjacentToolOnlyEntries(rawDisplayMessages);
   // Phase 4 — chips strip renders when EITHER chips arrived OR a fetch is in
   // flight / just failed (placeholder). Both share the same anchor under the
   // last assistant message. Without the placeholder branch the strip would
