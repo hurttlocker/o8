@@ -145,6 +145,7 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-bg-card': 'rgba(15, 23, 42, 0.04)',
   '--t-code-bg': 'rgba(15, 23, 42, 0.06)',
   '--t-drag-handle': 'rgba(15, 23, 42, 0.22)',
+  '--t-drag-handle-hover': '#94a3b8',
   '--t-search-border': 'rgba(15, 23, 42, 0.08)',
   '--t-btn-secondary-border': 'rgba(15, 23, 42, 0.12)',
   '--t-btn-secondary-hover': 'rgba(15, 23, 42, 0.06)',
@@ -227,6 +228,12 @@ const LIGHT_GLASS: Record<string, string> = {
   '--t-glass-muted-strong': 'rgba(244, 242, 237, 0.62)',
   '--t-glass-shadow':
     '0 32px 72px rgba(15, 23, 42, 0.12), 0 12px 32px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+  // Panel drag handles — light glass gets the DARK glass values verbatim
+  // (Q ruling 2026-07-14): the light-ink pill vanished into the vibrancy
+  // backdrop, which stays dark regardless of palette. Solid keeps the
+  // palette's own ink via the base tokens.
+  '--t-drag-handle': 'rgba(255, 255, 255, 0.22)',
+  '--t-drag-handle-hover': '#5f6b7a',
 };
 
 // Solid light: opaque paper. Slight elevation between layers via tonal
@@ -326,6 +333,7 @@ const DARK_BASE: Record<string, string> = {
   '--t-bg-card': 'rgba(255, 255, 255, 0.04)',
   '--t-code-bg': 'rgba(0, 0, 0, 0.24)',
   '--t-drag-handle': 'rgba(255, 255, 255, 0.22)',
+  '--t-drag-handle-hover': '#5f6b7a',
   '--t-search-border': 'rgba(255, 255, 255, 0.08)',
   '--t-btn-secondary-border': 'rgba(255, 255, 255, 0.1)',
   '--t-btn-secondary-hover': 'rgba(255, 255, 255, 0.06)',
