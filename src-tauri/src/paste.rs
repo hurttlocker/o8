@@ -1349,6 +1349,95 @@ fn wait_for_chord_release() {
 /// restore the user's original clipboard. Ported from aqua/Symon
 /// `reading.rs::grab_selection` — the 180ms/10ms/accept-rule are verbatim.
 #[cfg(target_os = "macos")]
+/// Read the frontmost terminal's VISIBLE text tail via AX — the "read what
+/// Claude just said" path. In a Claude Code TUI, mouse reporting eats
+/// drag-select so a selection rarely exists; the read chord's useful meaning
+/// there is "speak the latest output". Returns the trailing content block of
+/// the focused text area's AXValue with TUI chrome (box-drawing frames,
+/// status/shortcut lines) stripped, capped to TTS size. Raw AX — the CALLER
+/// must hop to the main thread (same rule as read_selected_text_via_accessibility).
+#[cfg(target_os = "macos")]
+pub(crate) fn read_terminal_tail_via_accessibility() -> Option<String> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+
+    let system = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() })?;
+    unsafe {
+        let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.3);
+    }
+    let focused_attr = ax_name("AXFocusedUIElement");
+    let focused = ax_copy_attribute_value(system.as_ptr(), focused_attr.as_concrete_TypeRef())?;
+    let value_attr = ax_name("AXValue");
+    let value = ax_copy_attribute_value(focused.as_CFTypeRef(), value_attr.as_concrete_TypeRef())?
+        .downcast::<CFString>()
+        .map(|v| v.to_string())?;
+
+    // Terminal.app's AXValue can be the entire scrollback (megabytes). Only
+    // the tail matters — slice to the last 16KB on a char boundary first.
+    let mut start = value.len().saturating_sub(16 * 1024);
+    while start > 0 && !value.is_char_boundary(start) {
+        start -= 1;
+    }
+    let tail = &value[start..];
+
+    // A line is TUI chrome when it is mostly box-drawing/frame characters or
+    // a known status line — not prose worth speaking.
+    fn is_chrome_line(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        let lower = trimmed.to_lowercase();
+        if lower.contains("? for shortcuts")
+            || lower.contains("esc to interrupt")
+            || lower.contains("auto-accept")
+            || lower.starts_with("bypassing permissions")
+        {
+            return true;
+        }
+        let chrome_chars = trimmed.chars().filter(|c| {
+            matches!(c, '─' | '│' | '╭' | '╮' | '╰' | '╯' | '┌' | '┐' | '└' | '┘'
+                | '═' | '║' | '╔' | '╗' | '╚' | '╝' | '━' | '┃' | '▔' | '▁' | '·' | '>' | '·')
+                || c.is_whitespace()
+        }).count();
+        chrome_chars * 10 >= trimmed.chars().count() * 6
+    }
+
+    // Walk lines from the end: skip trailing chrome (the composer frame +
+    // status bar), then collect the contiguous content block above it.
+    let lines: Vec<&str> = tail.lines().collect();
+    let mut idx = lines.len();
+    while idx > 0 && is_chrome_line(lines[idx - 1]) {
+        idx -= 1;
+    }
+    let mut collected: Vec<&str> = Vec::new();
+    let mut chars = 0usize;
+    const MAX_SPEAK_CHARS: usize = 1_600;
+    while idx > 0 && chars < MAX_SPEAK_CHARS {
+        let line = lines[idx - 1];
+        if is_chrome_line(line) && !collected.is_empty() {
+            // One blank/chrome line inside a paragraph is fine; a second
+            // consecutive one ends the block.
+            if collected.first().map(|l: &&str| is_chrome_line(l)).unwrap_or(false) {
+                break;
+            }
+        }
+        // Strip a leading/trailing box-drawing gutter (│ text │).
+        let cleaned = line.trim().trim_matches(|c| matches!(c, '│' | '┃' | '║')).trim();
+        collected.insert(0, cleaned);
+        chars += cleaned.len() + 1;
+        idx -= 1;
+    }
+    let text = collected
+        .into_iter()
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
 pub(crate) fn grab_selection() -> Option<String> {
     // ── Strategy 1: Accessibility (no clipboard clobber) ──
     // AX APIs SIGILL/return-nothing off the main thread on macOS 15.7+ (same
@@ -1376,8 +1465,22 @@ pub(crate) fn grab_selection() -> Option<String> {
         const AX_AUTHORITATIVE_TERMINALS: [&str; 2] =
             ["com.apple.Terminal", "com.googlecode.iterm2"];
         if AX_AUTHORITATIVE_TERMINALS.contains(&bundle_id.as_str()) {
+            // No selection in a terminal → speak the VISIBLE TAIL instead
+            // (operator ruling 2026-07-13: the read chord's best home is a
+            // Claude Code TUI, where mouse reporting eats drag-select so a
+            // selection almost never exists — "read what Claude just said"
+            // is the useful meaning). Chrome lines (box frames, status bar)
+            // are stripped; the Cmd+C fallback stays skipped so the chord
+            // still never rings the terminal bell (#1545).
+            if let Some(tail) = run_on_main_thread(read_terminal_tail_via_accessibility) {
+                log::info!(
+                    "[tts] grab_selection: no selection in {bundle_id} — speaking terminal tail ({} chars)",
+                    tail.len()
+                );
+                return Some(tail);
+            }
             log::info!(
-                "[tts] grab_selection: {bundle_id} has no AX selection — skipping Cmd+C fallback (terminal bell)"
+                "[tts] grab_selection: {bundle_id} has no AX selection or readable tail — skipping Cmd+C fallback (terminal bell)"
             );
             return None;
         }
