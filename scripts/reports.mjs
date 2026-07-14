@@ -1,0 +1,272 @@
+#!/usr/bin/env node
+/**
+ * reports — the agent-facing view of the user bug queue.
+ *
+ * The operator will not remember report ids or the `Fixes-Report:` trailer, and
+ * should not have to. An agent loads the `reports` skill, runs this, and sees the
+ * whole queue with what's been tried.
+ *
+ * A note is not bookkeeping. If we attempt a fix and fail, or can't reproduce, the
+ * person who filed it hears NOTHING — which is the same rot we refused to build a
+ * public board for, just hidden in a private channel. `needs-info` is how we ask
+ * them for help, and it reaches them in-app.
+ *
+ * Commands:
+ *   npm run reports                        # the queue: open first, oldest first
+ *   npm run reports -- show FYPPHK         # one report + its full note history
+ *   npm run reports -- note FYPPHK "tried X, popup still sticks"
+ *   npm run reports -- status FYPPHK needs-info --note "which OS + can you screen-record it?"
+ *   npm run reports -- status FYPPHK wont-fix --note "by design"
+ *
+ * Notes and status changes are mirrored to a THREAD on the original report message
+ * in the private intake channel — so the record lives where the report does, and
+ * survives this machine.
+ *
+ * `fixed` is NOT set here. It is set by the commit trailer at ship time, so the
+ * code and the announcement can never disagree. See scripts/publish-fixed.mjs.
+ */
+
+import {
+  PUBLIC_STATUSES,
+  STATUSES,
+  readLedger,
+  readPublished,
+  readStatus,
+  recordStatus,
+} from './lib/fixed-reports.mjs';
+import { syncReports } from './sync-reports.mjs';
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1511754310575460672';
+
+const DIM = '\x1b[2m';
+const BOLD = '\x1b[1m';
+const RESET = '\x1b[0m';
+const COLOR = {
+  open: '\x1b[33m',           // amber — needs a decision
+  triaged: '\x1b[36m',
+  attempted: '\x1b[35m',
+  'needs-info': '\x1b[34m',
+  'cant-reproduce': '\x1b[2m',
+  'wont-fix': '\x1b[2m',
+  fixed: '\x1b[32m',          // green
+};
+
+function botToken() {
+  const fromEnv = process.env.O8_DISCORD_BOT_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const file = path.join(process.env.O8_DATA_DIR || path.join(os.homedir(), '.o8'), 'discord-bot-token');
+    return readFileSync(file, 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Mirror a note onto a thread hanging off the original report message, so the
+ * trail lives next to the report itself instead of only in a local file.
+ * Best-effort — a Discord outage must not lose the note, which is already on disk.
+ */
+async function mirrorToDiscord(report, { status, note }) {
+  const token = botToken();
+  if (!token || !report.messageId) return { ok: false, why: !token ? 'no bot token' : 'no message id (run sync:reports)' };
+
+  const headers = { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' };
+  const api = 'https://discord.com/api/v10';
+
+  // Reuse the report's thread if it has one; otherwise start it FROM the message,
+  // so the thread reads as a reply to the report rather than a loose post.
+  let threadId = null;
+  const existing = await fetch(`${api}/channels/${CHANNEL_ID}/messages/${report.messageId}`, { headers });
+  if (existing.ok) {
+    const message = await existing.json();
+    threadId = message.thread?.id ?? null;
+  }
+
+  if (!threadId) {
+    const created = await fetch(`${api}/channels/${CHANNEL_ID}/messages/${report.messageId}/threads`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: `${report.id} · ${report.title}`.slice(0, 100), auto_archive_duration: 10080 }),
+    });
+    if (!created.ok) return { ok: false, why: `thread create HTTP ${created.status}` };
+    threadId = (await created.json()).id;
+  }
+
+  const parts = [];
+  if (status) parts.push(`**${status}**`);
+  if (note) parts.push(note);
+  const posted = await fetch(`${api}/channels/${threadId}/messages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ content: parts.join(' — ').slice(0, 1900) }),
+  });
+  return posted.ok ? { ok: true, threadId } : { ok: false, why: `post HTTP ${posted.status}` };
+}
+
+function age(ts) {
+  const days = Math.floor((Date.now() - ts) / 86_400_000);
+  if (days < 1) return 'today';
+  if (days === 1) return 'yesterday';
+  return `${days}d ago`;
+}
+
+/** Everything we know, joined: the report + its status + whether it shipped. */
+function queue() {
+  const reports = readLedger();
+  const status = readStatus();
+  const shipped = new Map(readPublished().map((entry) => [entry.id, entry]));
+
+  const rows = [];
+  for (const [id, report] of reports) {
+    const state = status.get(id);
+    const ship = shipped.get(id);
+    rows.push({
+      ...report,
+      status: ship ? 'fixed' : (state?.status ?? 'open'),
+      notes: state?.notes ?? [],
+      fixedIn: ship?.version ?? null,
+    });
+  }
+  return rows;
+}
+
+function printQueue() {
+  const rows = queue();
+  if (rows.length === 0) {
+    console.log('No reports. Run `npm run sync:reports` to pull the intake channel.');
+    return;
+  }
+
+  // Open first — those are the ones needing a decision. Then oldest first inside
+  // each bucket: the report that has waited longest is the most overdue.
+  const rank = { open: 0, 'needs-info': 1, triaged: 2, attempted: 3, 'cant-reproduce': 4, 'wont-fix': 5, fixed: 6 };
+  rows.sort((a, b) => (rank[a.status] - rank[b.status]) || (a.ts - b.ts));
+
+  const live = rows.filter((r) => r.status !== 'fixed' && r.status !== 'wont-fix').length;
+  console.log(`${BOLD}${rows.length} report(s) · ${live} still open${RESET}\n`);
+
+  for (const row of rows) {
+    const color = COLOR[row.status] ?? '';
+    const who = row.reporter ? `@${row.reporter}` : 'anonymous';
+    // Only flag "internal" once a decision has been RECORDED — an untouched
+    // report is trivially unseen, and saying so on every row is noise.
+    const decided = row.status !== 'open';
+    const pub = decided && !PUBLIC_STATUSES.has(row.status) ? `${DIM} · reporter not told${RESET}` : '';
+    console.log(`${color}${row.status.padEnd(15)}${RESET}${BOLD}${row.id}${RESET}  ${row.title}`);
+    console.log(`${DIM}                ${who} · v${row.version} · ${age(row.ts)}${row.fixedIn ? ` · fixed in v${row.fixedIn}` : ''}${RESET}${pub}`);
+    const last = [...row.notes].reverse().find((n) => n.note);
+    if (last) console.log(`${DIM}                ↳ ${last.note}${RESET}`);
+    console.log();
+  }
+
+  const open = rows.filter((r) => r.status === 'open');
+  if (open.length > 0) {
+    console.log(`${DIM}To close one: fix it, then put this in the commit body:${RESET}`);
+    console.log(`  ${BOLD}Fixes-Report: ${open[0].id}${RESET}`);
+    console.log(`${DIM}Tried and failed? Say so, so they aren't left in silence:${RESET}`);
+    console.log(`  npm run reports -- status ${open[0].id} needs-info --note "what would help"`);
+  }
+}
+
+function printOne(id) {
+  const row = queue().find((r) => r.id === id.toUpperCase());
+  if (!row) {
+    console.error(`No report ${id.toUpperCase()}. Run \`npm run sync:reports\` first.`);
+    process.exit(1);
+  }
+  console.log(`${BOLD}${row.id}${RESET}  ${row.title}\n`);
+  console.log(`  status    ${COLOR[row.status] ?? ''}${row.status}${RESET}${row.fixedIn ? ` (v${row.fixedIn})` : ''}`);
+  console.log(`  reporter  ${row.reporter ? `@${row.reporter}` : 'anonymous'}`);
+  console.log(`  version   ${row.version}`);
+  console.log(`  filed     ${new Date(row.ts).toISOString()} (${age(row.ts)})`);
+  if (row.notes.length > 0) {
+    console.log(`\n  ${BOLD}history${RESET}`);
+    for (const n of row.notes) {
+      console.log(`  ${DIM}${new Date(n.ts).toISOString().slice(0, 10)}${RESET}  ${n.status ? `[${n.status}] ` : ''}${n.note}`);
+    }
+  }
+}
+
+async function annotate(id, { status, note }) {
+  const upper = id.toUpperCase();
+  const report = readLedger().get(upper);
+  if (!report) {
+    console.error(`No report ${upper}. Run \`npm run sync:reports\` first.`);
+    process.exit(1);
+  }
+  if (status && !STATUSES.includes(status)) {
+    console.error(`Unknown status "${status}". One of: ${STATUSES.join(', ')}`);
+    process.exit(1);
+  }
+  if (status === 'fixed') {
+    console.error('Never set "fixed" by hand — put `Fixes-Report: ' + upper + '` in the commit body instead.');
+    console.error('That way the code and the announcement can never disagree.');
+    process.exit(1);
+  }
+
+  recordStatus({ id: upper, status: status ?? null, note: note ?? null, ts: Date.now() });
+  console.log(`${upper} → ${status ?? 'note added'}`);
+  if (note) console.log(`  ${DIM}${note}${RESET}`);
+
+  const mirrored = await mirrorToDiscord(report, { status, note });
+  console.log(mirrored.ok
+    ? `  ${DIM}mirrored to the report's thread${RESET}`
+    : `  ${DIM}not mirrored to Discord (${mirrored.why}) — recorded locally${RESET}`);
+
+  if (status && PUBLIC_STATUSES.has(status)) {
+    console.log(`\n  This reaches the reporter in-app on the next release.`);
+    if (status === 'needs-info' && !note) {
+      console.warn(`  ⚠ needs-info with no note says "we need something" without saying WHAT. Add --note.`);
+    }
+  } else if (status) {
+    console.log(`\n  ${DIM}Internal only — the reporter will not see this.${RESET}`);
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  // A leading flag (`--no-sync`) is not a command.
+  const command = argv[0]?.startsWith('--') ? 'list' : argv[0];
+  const rest = argv[0]?.startsWith('--') ? argv : argv.slice(1);
+
+  const noteFlag = rest.indexOf('--note');
+  const note = noteFlag >= 0 ? rest[noteFlag + 1] : null;
+  const positional = (noteFlag >= 0 ? rest.slice(0, noteFlag) : rest).filter((a) => !a.startsWith('--'));
+
+  switch (command) {
+    case undefined:
+    case 'list': {
+      if (!rest.includes('--no-sync')) {
+        try {
+          const { fresh } = await syncReports();
+          if (fresh.length > 0) console.log(`${DIM}pulled ${fresh.length} new report(s) from the intake channel${RESET}\n`);
+        } catch {
+          console.warn(`${DIM}(intake channel unreachable — showing the local ledger)${RESET}\n`);
+        }
+      }
+      printQueue();
+      break;
+    }
+    case 'show':
+      printOne(positional[0]);
+      break;
+    case 'note':
+      await annotate(positional[0], { note: note ?? positional.slice(1).join(' ') });
+      break;
+    case 'status':
+      await annotate(positional[0], { status: positional[1], note });
+      break;
+    default:
+      console.error(`Unknown command "${command}". Try: list | show <id> | note <id> "…" | status <id> <${STATUSES.join('|')}> [--note "…"]`);
+      process.exit(1);
+  }
+}
+
+main().catch((err) => {
+  console.error('✗ reports failed:', err instanceof Error ? err.message : err);
+  process.exit(1);
+});

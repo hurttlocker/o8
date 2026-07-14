@@ -112,3 +112,36 @@ describe('parseReportEmbed', () => {
     expect(record).toBeNull();
   });
 });
+
+describe('buildManifest — publish wins and asks, never wounds', () => {
+  it('publishes a fix and a needs-info ask, and NOTHING else', async () => {
+    // The manifest is a public download. A scrapeable list of "o8 won't fix these"
+    // is exactly the rot board we refused to build — so wounds stay internal.
+    // @ts-expect-error — plain .mjs build script, no types
+    const { buildManifest } = await import('../scripts/lib/fixed-reports.mjs');
+
+    const reports = new Map([
+      ['WIN111', { id: 'WIN111', title: 'the win', version: '0.1.592' }],
+      ['ASK222', { id: 'ASK222', title: 'the ask', version: '0.1.592' }],
+      ['WND333', { id: 'WND333', title: 'the wound', version: '0.1.592' }],
+      ['WND444', { id: 'WND444', title: 'another wound', version: '0.1.592' }],
+    ]);
+    const status = new Map([
+      ['ASK222', { status: 'needs-info', notes: [{ note: 'which OS?', ts: 2 }] }],
+      ['WND333', { status: 'wont-fix', notes: [{ note: 'by design', ts: 3 }] }],
+      ['WND444', { status: 'cant-reproduce', notes: [{ note: 'clean on 0.1.593', ts: 4 }] }],
+    ]);
+    const published = [{ id: 'WIN111', title: 'the win', version: '0.1.592' }];
+
+    const manifest = buildManifest(published, 'now', { status, reports });
+    const byId = Object.fromEntries(manifest.fixed.map((e: { id: string }) => [e.id, e]));
+
+    expect(byId.WIN111.status).toBe('fixed');
+    expect(byId.ASK222).toMatchObject({ status: 'needs-info', note: 'which OS?' });
+    expect(byId.WND333, 'wont-fix must never be published').toBeUndefined();
+    expect(byId.WND444, 'cant-reproduce must never be published').toBeUndefined();
+
+    // And no reporter handles, ever.
+    expect(JSON.stringify(manifest)).not.toContain('reporter');
+  });
+});

@@ -20,6 +20,10 @@ interface FixReceipt {
   title: string;
   version: string;
   reportedAt: number;
+  /** 'fixed' is a win; 'needs-info' is us asking them for help. */
+  status: 'fixed' | 'needs-info';
+  /** The ask, for needs-info. */
+  note?: string;
 }
 
 // The manifest only changes on release; the server caches for 6h anyway.
@@ -77,6 +81,9 @@ export function FixedReportCard() {
 
   if (!receipt) return null;
 
+  const asking = receipt.status === 'needs-info';
+  const accent = asking ? 'var(--t-warning, #d97706)' : 'var(--t-success, #16a34a)';
+
   const cardStyle: CSSProperties = {
     flexShrink: 0,
     marginLeft: 8,
@@ -120,7 +127,7 @@ export function FixedReportCard() {
             width: 7,
             height: 7,
             borderRadius: 999,
-            background: 'var(--t-success, #16a34a)',
+            background: accent,
             flexShrink: 0,
             marginTop: 4,
           }}
@@ -134,7 +141,7 @@ export function FixedReportCard() {
               color: 'var(--t-text)',
             }}
           >
-            You reported this — it&apos;s fixed
+            {asking ? 'You reported this — we need a bit more' : 'You reported this — it\u2019s fixed'}
           </span>
           {/* The operator's own words back at them. Wrapped, not truncated: this
               is the whole payload of the card. */}
@@ -149,6 +156,22 @@ export function FixedReportCard() {
           >
             {receipt.title}
           </span>
+          {/* The ask IS the payload of a needs-info card — without it there is
+              nothing to act on, which is why the server drops a note-less ask. */}
+          {asking && receipt.note ? (
+            <span
+              style={{
+                marginTop: 2,
+                fontSize: 11,
+                fontWeight: 320,
+                lineHeight: 1.45,
+                color: 'var(--t-text)',
+                wordBreak: 'break-word',
+              }}
+            >
+              {receipt.note}
+            </span>
+          ) : null}
           <span
             style={{
               fontSize: 9.5,
@@ -158,7 +181,8 @@ export function FixedReportCard() {
               fontFamily: '"SF Mono", ui-monospace, monospace',
             }}
           >
-            {receipt.id} · reported {relativeAge(receipt.reportedAt)} · fixed in v{receipt.version}
+            {receipt.id} · reported {relativeAge(receipt.reportedAt)}
+            {asking ? ' · press ⌘⇧E to reply' : ` · fixed in v${receipt.version}`}
           </span>
         </div>
         <button

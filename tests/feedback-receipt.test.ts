@@ -24,7 +24,7 @@ vi.mock('@/lib/feedback/report-ledger', async (importOriginal) => ({
 }));
 
 function entry(id: string, title = 'Diff panel went blank', version = '0.1.592'): FixedEntry {
-  return { id, title, version };
+  return { id, title, version, status: 'fixed' };
 }
 function report(id: string, ts = NOW - DAY): ReportRecord {
   return { id, ts, category: 'bug', title: 'whatever', reporter: null, version: '0.1.590' };
@@ -116,6 +116,37 @@ describe('GET /api/feedback/fixed — the real route', () => {
 
     const body = (await (await get()).json()) as { receipts: unknown[] };
     expect(body.receipts).toHaveLength(0);
+  });
+
+  it('shows a needs-info ask, carrying the note as the payload', async () => {
+    ledger.reports = [report('A7F3K2')];
+    manifest.body = { schema: 1, fixed: [
+      { id: 'A7F3K2', title: 'Diff panel went blank', version: '0.1.592', status: 'needs-info', note: 'which macOS? can you screen-record it?' },
+    ] };
+
+    const body = (await (await get()).json()) as { receipts: { status: string; note: string }[] };
+    expect(body.receipts[0].status).toBe('needs-info');
+    expect(body.receipts[0].note).toBe('which macOS? can you screen-record it?');
+  });
+
+  it('drops a needs-info ask with nothing to ask for', async () => {
+    // "We need something" without saying WHAT is worse than silence.
+    ledger.reports = [report('A7F3K2')];
+    manifest.body = { schema: 1, fixed: [
+      { id: 'A7F3K2', title: 'Diff panel went blank', version: '0.1.592', status: 'needs-info' },
+    ] };
+
+    const body = (await (await get()).json()) as { receipts: unknown[] };
+    expect(body.receipts).toHaveLength(0);
+  });
+
+  it('treats a pre-status manifest entry as a fix', async () => {
+    // The first shipped manifest had no `status` field at all.
+    ledger.reports = [report('A7F3K2')];
+    manifest.body = { schema: 1, fixed: [{ id: 'A7F3K2', title: 'old', version: '0.1.592' }] };
+
+    const body = (await (await get()).json()) as { receipts: { status: string }[] };
+    expect(body.receipts[0].status).toBe('fixed');
   });
 
   it('skips manifest rows missing a title or version', async () => {

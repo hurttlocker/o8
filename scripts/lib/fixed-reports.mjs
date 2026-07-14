@@ -18,7 +18,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -35,6 +35,67 @@ export function ledgerPath() {
 }
 export function publishedPath() {
   return path.join(feedbackDir(), 'published.json');
+}
+export function statusPath() {
+  return path.join(feedbackDir(), 'status.jsonl');
+}
+
+/**
+ * Report status. `fixed` is set by the `Fixes-Report:` trailer at ship time; the
+ * rest are set by hand (npm run reports).
+ *
+ * PUBLIC vs INTERNAL is the load-bearing distinction. The fix manifest is a public
+ * download, so we publish WINS and ASKS, never WOUNDS:
+ *   - fixed      → public. The win.
+ *   - needs-info → public. An ask for help, not an admission — and the single most
+ *                  valuable thing to say to someone whose bug we can't reproduce.
+ *   - everything else → INTERNAL. A publicly scrapeable list of "o8 won't fix
+ *                  these" is precisely the rot board we refused to build.
+ */
+export const STATUSES = ['open', 'triaged', 'attempted', 'needs-info', 'cant-reproduce', 'wont-fix', 'fixed'];
+export const PUBLIC_STATUSES = new Set(['fixed', 'needs-info']);
+
+/** Append a status event. Never throws. */
+export function recordStatus(event) {
+  try {
+    const dir = feedbackDir();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(statusPath(), `${JSON.stringify(event)}\n`, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Latest status per report + the full note history.
+ * Append-only: the file is the audit trail, this is the projection.
+ */
+export function readStatus() {
+  const byId = new Map();
+  try {
+    const file = statusPath();
+    if (!existsSync(file)) return byId;
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed);
+        if (!event?.id) continue;
+        const id = String(event.id).toUpperCase();
+        const current = byId.get(id) ?? { status: 'open', notes: [] };
+        if (event.status) current.status = event.status;
+        if (event.note) current.notes.push({ note: event.note, ts: event.ts, status: event.status ?? null });
+        current.ts = event.ts;
+        byId.set(id, current);
+      } catch {
+        // skip malformed line
+      }
+    }
+  } catch {
+    /* unreadable — everything reads as open */
+  }
+  return byId;
 }
 
 function git(args) {
@@ -194,12 +255,32 @@ export function resolveNewFixes(range, version) {
  * needs to answer "was MY report fixed, and in which version". Shipping a
  * GitHub-handle list to every install would be a needless identity leak.
  */
-export function buildManifest(published, generatedAt) {
-  return {
-    schema: MANIFEST_SCHEMA,
-    generatedAt,
-    fixed: published
-      .filter((entry) => entry.id && entry.title && entry.version)
-      .map((entry) => ({ id: entry.id, title: entry.title, version: entry.version })),
-  };
+export function buildManifest(published, generatedAt, { status = readStatus(), reports = readLedger() } = {}) {
+  const fixed = published
+    .filter((entry) => entry.id && entry.title && entry.version)
+    .map((entry) => ({ id: entry.id, title: entry.title, version: entry.version, status: 'fixed' }));
+
+  // Asks ride along with the wins. A reporter whose bug we cannot reproduce hears
+  // "we looked at this, can you tell us X" instead of silence — which is the whole
+  // reason the loop exists. Wounds (wont-fix / cant-reproduce / attempted) stay
+  // internal: see PUBLIC_STATUSES.
+  const announced = new Set(fixed.map((entry) => entry.id));
+  const asks = [];
+  for (const [id, state] of status) {
+    if (announced.has(id)) continue;               // already fixed — the win wins
+    if (!PUBLIC_STATUSES.has(state.status)) continue;
+    const report = reports.get(id);
+    if (!report?.title) continue;
+    const latest = [...state.notes].reverse().find((n) => n.note);
+    asks.push({
+      id,
+      title: report.title,
+      version: report.version ?? 'unknown',
+      status: state.status,
+      // The note IS the ask — without it the card has nothing to say.
+      ...(latest?.note ? { note: latest.note } : {}),
+    });
+  }
+
+  return { schema: MANIFEST_SCHEMA, generatedAt, fixed: [...fixed, ...asks] };
 }
