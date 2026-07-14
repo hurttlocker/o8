@@ -4831,7 +4831,7 @@ function DashboardInner() {
       {/* ── Left drag handle ── */}
       {showSidebarColumn && <div
         onMouseDown={startLeftDrag}
-        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-text-faint)'; }}
+        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle-hover, var(--t-text-faint))'; }}
         onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
         style={{
           width: 6,
@@ -4846,14 +4846,19 @@ function DashboardInner() {
         {/* Divider pill is ALWAYS visible (Q ruling 2026-07-12) — a
             hidden-until-hover handle reads as no affordance at all. Rest
             paints the drag-handle token at full strength; hover glows by
-            swapping to the stronger text-faint color, NOT by opacity (the
-            token's low alpha over glass made any opacity dance invisible). */}
+            swapping to the stronger drag-handle-hover color, NOT by opacity
+            (the token's low alpha over glass made any opacity dance
+            invisible). The translateX centers the pill in the VISIBLE gap:
+            the workspace card's marginLeft (workspaceInset) extends the gap
+            rightward past this 6px gutter, so a gutter-centered pill read
+            off-center (Q report 2026-07-14). */}
         <div style={{
           width: 3,
           height: 40,
           borderRadius: 2,
           backgroundColor: 'var(--t-drag-handle)',
           transition: 'background-color 150ms',
+          transform: `translateX(${workspaceInset / 2}px)`,
         }} />
       </div>}
 
@@ -5021,7 +5026,7 @@ function DashboardInner() {
           >
             <div
               onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
-              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-text-faint)'; }}
+              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle-hover, var(--t-text-faint))'; }}
               onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
               style={{
                 width: 6,
@@ -5034,13 +5039,17 @@ function DashboardInner() {
               }}
             >
               {/* Always-visible divider pill, color-glow on hover — same
-                  Q ruling as the left handle above. */}
+                  Q ruling as the left handle above. The translateX mirrors
+                  the left handle: the workspace card's marginRight
+                  (workspaceInset) extends the visible gap LEFTWARD past this
+                  gutter, so center the pill in the full gap. */}
               <div style={{
                 width: 3,
                 height: 40,
                 borderRadius: 2,
                 backgroundColor: 'var(--t-drag-handle)',
                 transition: 'background-color 150ms',
+                transform: `translateX(-${workspaceInset / 2}px)`,
               }} />
             </div>
 
