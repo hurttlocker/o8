@@ -83,7 +83,12 @@ export function ColumnHeaderStrip({
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
         {center}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, minWidth: 0, overflow: 'hidden' }}>
+      {/* Right slot stays overflow:visible — its buttons use marginTop:-3 to
+          nudge up, which pokes 3px above the auto-sized wrapper; a hidden
+          wrapper clipped the top of their rounded hover fill (operator:
+          "cut off at the top … when I hover"). The strip root still clips at
+          its own 36px bounds, so nothing bleeds past the strip. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, minWidth: 0, overflow: 'visible' }}>
         {right}
       </div>
     </div>
