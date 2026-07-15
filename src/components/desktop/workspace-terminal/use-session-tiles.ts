@@ -128,6 +128,8 @@ export interface UseSessionTilesReturn {
   ) => void;
   /** Drag-to-replace: swap the target leaf's content for a thread pane. */
   replaceLeafWithThreadPane: (targetLeafId: string, thread: ThreadPanePayload) => void;
+  /** Close any thread pane bound to this thread (main chat claimed it). */
+  pruneThreadPane: (threadId: string) => void;
 }
 
 export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs): UseSessionTilesReturn {
@@ -252,6 +254,13 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
     setLayout((current) => replaceLeafWithThread(current, targetLeafId, thread));
   }, []);
 
+  const pruneThreadPane = useCallback((threadId: string) => {
+    setLayout((current) => {
+      const dup = collectThreadLeaves(current.root).find((leaf) => leaf.threadId === threadId);
+      return dup ? closeSessionLeaf(current, dup.id) : current;
+    });
+  }, []);
+
   const autoTileSessions = useCallback((sessionKeys: string[]) => {
     if (sessionKeys.length === 0) return;
     setLayout((current) => {
@@ -291,6 +300,7 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
     autoTileSessions,
     splitLeafWithThreadPane,
     replaceLeafWithThreadPane,
+    pruneThreadPane,
   };
 }
 
