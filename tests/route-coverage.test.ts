@@ -94,6 +94,9 @@ const LOOPBACK_READ = [
   /^\/api\/browser\/proxy\/?$/,
   /^\/api\/browser\/engine\/view\/?$/,
   /^\/api\/panel\/proxy\/?$/,
+  // Boot-gate identity probe — the packaged boot page is static HTML that
+  // cannot attach a bearer (v0.1.600 stuck-boot incident).
+  /^\/api\/setup\/identity\/?$/,
 ];
 
 type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'gated';
