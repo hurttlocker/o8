@@ -191,6 +191,16 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // Smooth (typewriter) reveal for the in-flight assistant reply — paces out
   // bursty deltas so words flow in. No-op (returns full text) for user/history.
   const revealedText = useSmoothText(displayText, entry.role === 'assistant' && isStreaming);
+  // Markdown parsing is O(reply length). It used to be keyed on the per-FRAME
+  // reveal string, so renderLLMMarkdown re-ran ~60×/sec for the ENTIRE stream —
+  // pinning the WKWebView main thread so sidebar clicks / "New session" / any
+  // nav couldn't be serviced until the turn ended (Chris + Q video, 2026-07-15:
+  // "can't spawn a new orchestrator while one is working"). Fix: parse markdown
+  // ONCE, only after the turn settles; render cheap plain text during the
+  // streaming reveal (and the post-stream drain) so nothing parses per frame.
+  const isAssistantStreaming = entry.role === 'assistant' && isStreaming;
+  const revealSettled = revealedText.length >= displayText.length;
+  const showMarkdown = !isAssistantStreaming && revealSettled;
   const sanitizedThinking = useMemo(
     () => entry.thinking ? sanitizeTranscriptText(entry.thinking) : '',
     [entry.thinking],
@@ -321,15 +331,18 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // produce React nodes. Memoize per (text + handler identity) so renders
   // triggered by sibling state (e.g. hover on meta row) skip re-parsing.
   // Hook must live before any early returns to keep call order stable.
+  // Parse the FULL settled text (displayText), NOT the per-frame reveal string,
+  // and only once showMarkdown is true — during streaming this returns null
+  // cheaply, so renderLLMMarkdown never runs on the animation-frame hot path.
   const renderedMarkdown = useMemo(
-    () => hasText ? renderLLMMarkdown(revealedText, {
+    () => (hasText && showMarkdown) ? renderLLMMarkdown(displayText, {
       onApplyToFile,
       onApplyDiff: repoPath ? handleApplyDiff : undefined,
       onOpenInCanvas,
       onRunInTerminal,
       activeHighlightRange: activeRange ?? undefined,
     }) : null,
-    [hasText, revealedText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff, activeRange],
+    [hasText, showMarkdown, displayText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff, activeRange],
   );
 
   const handlePinToggle = useCallback(() => {
@@ -492,7 +505,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           border: entry.role === 'system' ? '1px solid var(--t-divider)' : 'none',
           boxShadow: entry.role === 'system' ? 'var(--t-panel-shadow)' : 'none',
         }}>
-          {renderedMarkdown}
+          {showMarkdown
+            ? renderedMarkdown
+            : <div style={{ whiteSpace: 'pre-wrap' }}>{revealedText}</div>}
         </div>
       ) : null}
 
