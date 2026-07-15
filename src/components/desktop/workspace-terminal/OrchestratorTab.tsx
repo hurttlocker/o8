@@ -283,23 +283,6 @@ function OrchestratorTabInner({
     spawnHandlers?.updateTabMode(tabId, { chatOpenrouterModel: slug });
   }, [spawnHandlers, tabId]);
 
-  // Context-rail width awareness (Sydney's minimized-workspace report,
-  // 2026-07-10): the 256px branch-details rail is flexShrink:0, so in a
-  // narrow window it crushed the chat column to unusability. Measure the
-  // body row and fold the rail whenever showing it would leave the chat
-  // less than ~480px (the composer's own compact threshold is 440).
-  const bodyRowRef = useRef<HTMLDivElement | null>(null);
-  const [railFits, setRailFits] = useState(true);
-  useEffect(() => {
-    const el = bodyRowRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      if (w > 0) setRailFits(w >= 256 + 480);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   // Branch-details rail reveal (Q 2026-07-14): the rail is always the collapsed
   // icon capsule in layout; the full card stack floats as a hover overlay. In
   // the new model `collapsed` is the PIN state — `true` = hover-only reveal
@@ -1035,12 +1018,11 @@ function OrchestratorTabInner({
 
   // Branch-details rail rendered to the RIGHT of the transcript (inside the
   // panel) so the composer spans full width even when the rail is up (Q ruling
-  // 2026-07-11). Same width-animation + railFits gating as before.
-  // The rail now coexists with the wide O8 panel (Q ruling 2026-07-11) — both
-  // can be open, or the user closes either. railFits (measured against the
-  // panel-relative body width, which already excludes the O8 panel) folds the
-  // rail smoothly via the 240ms width transition when the window gets too
-  // small, and restores it when there's room again.
+  // 2026-07-11). The rail is now a fixed COLLAPSED_BRANCH_RAIL_WIDTH capsule
+  // whose expanded card floats as a hover/click overlay (portal), so it never
+  // crowds the chat. The old railFits width-fold gate is gone (Q ruling
+  // 2026-07-14) — the capsule shows whenever projectContextRailVisible, at any
+  // window size.
   const branchRail = (
     <div
       style={{
@@ -1048,7 +1030,7 @@ function OrchestratorTabInner({
         // expanded card stack floats as a hover overlay (portal) instead of
         // widening this flex item, so revealing it never pushes the chat over
         // (Cursor-style git/environment popover, Q ruling 2026-07-14).
-        width: (projectContextRailVisible && railFits) ? COLLAPSED_BRANCH_RAIL_WIDTH : 0,
+        width: projectContextRailVisible ? COLLAPSED_BRANCH_RAIL_WIDTH : 0,
         flexShrink: 0,
         // minHeight:0 keeps this flex item bounded by the row height so the
         // rail's own overflowY:auto can engage — without it the rail sized to
@@ -1062,8 +1044,9 @@ function OrchestratorTabInner({
       }}
     >
       <BranchDetailsLauncher
-        visible={projectContextRailVisible && railFits}
+        visible={projectContextRailVisible}
         repoPath={repoPath ?? null}
+        threadId={chatChromeState.threadId}
         collapsed={branchRailCollapsed}
         onToggleCollapsed={toggleBranchRailCollapsed}
       />
@@ -1171,7 +1154,6 @@ function OrchestratorTabInner({
       {/* Body: chat (flex) | branch details (self-hides). Threads/Archive
           moved into LeftPanelProjectFocus → Chats + Agents tabs. */}
       <div
-        ref={bodyRowRef}
         style={{
           flex: 1,
           minHeight: 0,
