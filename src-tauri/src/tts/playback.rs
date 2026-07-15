@@ -621,6 +621,7 @@ fn provider_label(config: &TtsConfig) -> &'static str {
     match config.provider {
         super::TtsProvider::ElevenLabs => "ElevenLabs",
         super::TtsProvider::Google => "Google",
+        super::TtsProvider::EdgeFree => "Steffan (free)",
     }
 }
 

@@ -274,10 +274,16 @@ class TTSEngineImpl {
     utterance.rate = this._state.playbackRate;
     utterance.lang = 'en-US';
 
+    // Prefer a MALE voice to match the product's Steffan voice — the old
+    // Samantha-first pick was the "choppy female" a keyless machine heard when
+    // edge-tts was unavailable (Q report 2026-07-15). Fall through to any en-US
+    // only if no known male voice is installed.
     const voices = speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.name.includes('Samantha'))
+    const preferred = voices.find(v => v.name.includes('Alex'))
       ?? voices.find(v => v.name.includes('Daniel'))
-      ?? voices.find(v => v.lang === 'en-US' && v.localService);
+      ?? voices.find(v => v.name.includes('Fred'))
+      ?? voices.find(v => v.lang === 'en-US' && v.localService)
+      ?? voices.find(v => v.lang === 'en-US');
     if (preferred) utterance.voice = preferred;
 
     utterance.onend = () => {
