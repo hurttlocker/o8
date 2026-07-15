@@ -91,6 +91,13 @@ export function applyUiZoom(level: number): void {
   const root = document.documentElement;
   root.style.setProperty('zoom', String(level));
   root.style.setProperty('--ui-zoom', String(level));
+  // Inverse factor for NATIVE-anchored geometry (macOS traffic lights): the
+  // lights are drawn by the OS at fixed screen coords while CSS zoom scales
+  // everything else, so any spacer that clears them must be sized in screen
+  // pixels — width: calc(<px> * var(--zoom-inverse)). At 80% zoom the old
+  // fixed 64px spacer rendered 51px and the sidebar toggle overlapped the
+  // green light (operator screenshot 2026-07-15).
+  root.style.setProperty('--zoom-inverse', String(1 / level));
   if (level === 1) {
     root.style.removeProperty('width');
     root.style.removeProperty('height');
@@ -109,6 +116,7 @@ export function clearUiZoom(): void {
   root.style.removeProperty('width');
   root.style.removeProperty('height');
   root.style.setProperty('--ui-zoom', '1');
+  root.style.setProperty('--zoom-inverse', '1');
 }
 
 export function formatUiZoomPercent(level: number): string {

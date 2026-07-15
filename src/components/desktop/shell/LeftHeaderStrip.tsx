@@ -26,11 +26,10 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
   return (
     <ColumnHeaderStrip
       drag
-      // Strip height 32 — pulls the toggle pill up 1px to y=8 so it visually
-      // shifts higher in the card chrome after the traffic lights moved down
-      // to y=22. The workspace pills stay at y=9 (their strip is still 36),
-      // delta vs the toggle is now -1px (toggle slightly higher) which the
-      // operator wants given the new light position.
+      // Strip height 32 — the toggle pill centers at ~y=20. The traffic
+      // lights center on the same line (trafficLightPosition y=15 → 12px
+      // buttons centered at 21; was y=22/center 28, which sat 7px below the
+      // toggle — the 2026-07-15 stoplight alignment pass).
       height={32}
       left={
         <>
@@ -39,8 +38,11 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               shift). With the panel card's 5px paddingLeft + the strip's 8px
               paddingLeft, the strip content starts at window-x = 13. Spacer
               clears the lights and leaves the toggle pill ~10px right of the
-              green light, matching Claude's tight cluster. */}
-          <div style={{ width: 64, flexShrink: 0 }} />
+              green light, matching Claude's tight cluster. Sized in SCREEN
+              pixels (× --zoom-inverse): the lights are native and ignore CSS
+              zoom, so a fixed 64px shrank at 80% zoom and the toggle
+              overlapped the green light (2026-07-15). */}
+          <div style={{ width: 'calc(64px * var(--zoom-inverse, 1))', flexShrink: 0 }} />
           <SidebarTogglePill
             sidebarVisible={sidebarVisible}
             onClick={onToggleSidebar}

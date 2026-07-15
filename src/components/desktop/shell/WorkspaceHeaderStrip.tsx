@@ -131,8 +131,9 @@ export function WorkspaceHeaderStrip({
           {/* When this strip is leftmost (sidebar collapsed), pad past the
               macOS traffic lights — they're drawn at fixed window coords by
               the OS. 64px clears the green light (~x=62) plus the standard
-              ~10px breathing room before the toggle pill. */}
-          {leadingInset ? <div style={{ width: 64, flexShrink: 0 }} /> : null}
+              ~10px breathing room before the toggle pill. Screen pixels
+              (× --zoom-inverse), since the lights ignore CSS zoom. */}
+          {leadingInset ? <div style={{ width: 'calc(64px * var(--zoom-inverse, 1))', flexShrink: 0 }} /> : null}
           {onToggleSidebar ? (
             <SidebarTogglePill
               sidebarVisible={sidebarVisible}
