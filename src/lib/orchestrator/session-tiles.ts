@@ -29,6 +29,10 @@ export interface SessionTileLeaf {
   title?: string;
   /** Chat mode for a thread pane: orchestrator thread vs casual chat. */
   mode?: 'orchestrator' | 'chat';
+  /** Origin repo of the dragged thread. The Chats rail lists history across
+   *  repos, so a pane must run against ITS thread's repo — not the host
+   *  tab's — or sends/dispatch from the pane mis-scope silently. */
+  repoPath?: string;
 }
 
 export interface SessionTileSplit {
@@ -224,6 +228,9 @@ export interface ThreadPanePayload {
   threadId: string;
   title: string;
   mode: 'orchestrator' | 'chat';
+  /** Origin repo of the thread (null/undefined = unknown; pane falls back
+   *  to the host tab's repo). */
+  repoPath?: string | null;
 }
 
 /**
@@ -252,6 +259,7 @@ export function splitLeafWithThread(
         threadId: thread.threadId,
         title: thread.title,
         mode: thread.mode,
+        ...(thread.repoPath ? { repoPath: thread.repoPath } : {}),
       };
       return {
         type: 'split',
@@ -296,6 +304,7 @@ export function replaceLeafWithThread(
         threadId: thread.threadId,
         title: thread.title,
         mode: thread.mode,
+        ...(thread.repoPath ? { repoPath: thread.repoPath } : {}),
       };
     }
     const next0 = walk(node.children[0]);
@@ -411,6 +420,7 @@ function isPlainSessionLeaf(value: unknown): value is SessionTileLeaf {
     sessionKey?: unknown;
     threadId?: unknown;
     mode?: unknown;
+    repoPath?: unknown;
   };
   if (v.type !== 'leaf' || typeof v.id !== 'string') return false;
   if (v.kind !== 'chat' && v.kind !== 'session' && v.kind !== 'thread') return false;
@@ -418,6 +428,7 @@ function isPlainSessionLeaf(value: unknown): value is SessionTileLeaf {
   if (v.kind === 'thread') {
     if (typeof v.threadId !== 'string') return false;
     if (v.mode !== 'orchestrator' && v.mode !== 'chat') return false;
+    if (v.repoPath !== undefined && typeof v.repoPath !== 'string') return false;
   }
   return true;
 }
