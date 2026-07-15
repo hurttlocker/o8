@@ -30,11 +30,15 @@ pub(crate) fn app_handle() -> Option<&'static tauri::AppHandle> {
     APP_HANDLE.get()
 }
 
-/// The two shipping providers. (Edge → remapped to Google in aqua, Native is a
-/// perpetual stub — both omitted. `say` is the fallback, not a provider.)
+/// Shipping providers. `EdgeFree` (the free neural male Steffan voice) is the
+/// DEFAULT for every keyless user; ElevenLabs / Google are the key-gated
+/// upgrades. `say` is the always-works floor, not a provider.
 pub enum TtsProvider {
     ElevenLabs,
     Google,
+    /// Free neural male voice (edge-tts en-US-SteffanNeural) via the bundled
+    /// server's /api/tts — no key, works out of the box. The product's voice.
+    EdgeFree,
 }
 
 pub struct TtsConfig {
@@ -45,17 +49,22 @@ pub struct TtsConfig {
 }
 
 /// Resolve the active TTS config from prefs (`~/.o8/dictation.json`) + env.
-/// ElevenLabs is selected only when `tts_provider == "elevenlabs"` AND an
-/// ElevenLabs key resolves (its presence is the premium gate); everything else
-/// (google / edge / native / unset) falls to Google. When no Google key
-/// resolves either, the runtime fallback is the macOS `say` binary, so o8 always
-/// has a working voice out of the box with zero config.
+///
+/// The free neural male Steffan voice is the DEFAULT for everyone (Q ruling
+/// 2026-07-15). A premium provider is chosen ONLY when the user explicitly
+/// selected it AND its key resolves — the key is the upgrade gate. Everything
+/// else (unset, or a premium provider chosen without a key) uses `EdgeFree`, so
+/// Symon and every "play" button speak in the product's voice out of the box,
+/// with zero config, instead of the OS system voice.
 pub fn load_config() -> TtsConfig {
     let provider = match crate::stt::keys::config_string("tts_provider").as_deref() {
         Some("elevenlabs") if crate::stt::keys::get_elevenlabs_key().is_some() => {
             TtsProvider::ElevenLabs
         }
-        _ => TtsProvider::Google,
+        Some("google") if crate::stt::keys::get_google_tts_key().is_some() => {
+            TtsProvider::Google
+        }
+        _ => TtsProvider::EdgeFree,
     };
 
     let voice_id = match provider {
@@ -63,6 +72,8 @@ pub fn load_config() -> TtsConfig {
         TtsProvider::ElevenLabs => elevenlabs::configured_voice_id(),
         TtsProvider::Google => crate::stt::keys::config_string("tts_voice_id")
             .unwrap_or_else(|| "en-US-Neural2-J".to_string()),
+        // edge_local hardcodes the Steffan voice; this is for logging/parity.
+        TtsProvider::EdgeFree => "en-US-SteffanNeural".to_string(),
     };
 
     let speed = crate::stt::keys::config_string("reading_speed")
@@ -83,19 +94,27 @@ pub async fn speak(text: &str, config: &TtsConfig) -> Result<Vec<u8>, String> {
     let primary = match config.provider {
         TtsProvider::ElevenLabs => elevenlabs::synthesize(text, config).await,
         TtsProvider::Google => google::synthesize(text, config).await,
+        TtsProvider::EdgeFree => edge_local::synthesize(text).await,
     };
     match primary {
         Ok(bytes) => Ok(bytes),
-        // Keyless / failed cloud synth → the FREE neural male voice (local
-        // edge-tts Steffan) before the `say` floor. A keyless free machine
-        // previously skipped every neural voice here and read back in the
-        // macOS system default — a woman's voice (2026-07-12).
-        Err(primary_err) => match edge_local::synthesize(text).await {
-            Ok(bytes) => {
-                log::info!("[tts] cloud synth unavailable ({primary_err}); using local Steffan voice");
-                Ok(bytes)
+        Err(primary_err) => {
+            // EdgeFree already IS the free Steffan voice — don't retry it; let
+            // the playback layer's `say` floor take over. A premium provider that
+            // failed falls to Steffan first, then `say`. A keyless machine
+            // previously defaulted to Google (key-gated), failed, and only THEN
+            // reached Steffan — now EdgeFree is primary, so the common path has
+            // no failing cloud round-trip.
+            if matches!(config.provider, TtsProvider::EdgeFree) {
+                return Err(primary_err);
             }
-            Err(local_err) => Err(format!("{primary_err}; edge-local: {local_err}")),
-        },
+            match edge_local::synthesize(text).await {
+                Ok(bytes) => {
+                    log::info!("[tts] cloud synth unavailable ({primary_err}); using local Steffan voice");
+                    Ok(bytes)
+                }
+                Err(local_err) => Err(format!("{primary_err}; edge-local: {local_err}")),
+            }
+        }
     }
 }
