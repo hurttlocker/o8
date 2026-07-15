@@ -28,6 +28,7 @@
         },
         "decorations": true,
         "transparent": true,
+        "theme": "dark",
         "dragDropEnabled": false
       }
     ],
