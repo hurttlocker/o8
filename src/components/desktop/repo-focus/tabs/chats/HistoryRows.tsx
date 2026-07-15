@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { CheckCircle2, ChevronDown, ChevronRight } from '../../../lucide-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
@@ -215,10 +215,18 @@ export function HistoryChatRow({
   // threshold becomes a workspace drag; the trailing click is suppressed so
   // a real drag never ALSO opens the thread in place.
   const dragActivatedRef = useRef(false);
+  const dragDisposeRef = useRef<(() => void) | null>(null);
+  // If the row unmounts mid-drag (list refresh under the pointer), cancel the
+  // tracker explicitly instead of waiting for the next global pointerup.
+  useEffect(() => () => {
+    dragDisposeRef.current?.();
+    dragDisposeRef.current = null;
+  }, []);
   const handleDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || event.button !== 0) return;
     dragActivatedRef.current = false;
-    trackThreadDrag(
+    dragDisposeRef.current?.();
+    dragDisposeRef.current = trackThreadDrag(
       { clientX: event.clientX, clientY: event.clientY },
       {
         threadId: item.tabId,

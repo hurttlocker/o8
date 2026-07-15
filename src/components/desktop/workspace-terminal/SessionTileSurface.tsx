@@ -168,7 +168,10 @@ export function SessionTileSurface({
                   threadId={leaf.threadId}
                   title={leaf.title ?? 'Chat'}
                   mode={leaf.mode ?? 'orchestrator'}
-                  repoPath={repoPath}
+                  // The dragged thread's ORIGIN repo wins — the rail lists
+                  // history across repos, and a pane scoped to the host
+                  // tab's repo would mis-attribute its sends/dispatch.
+                  repoPath={leaf.repoPath ?? repoPath}
                   onClose={() => onCloseLeaf(leaf.id)}
                 />
               </div>

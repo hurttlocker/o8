@@ -66,7 +66,12 @@ interface HoverTarget {
 }
 
 function toPayload(payload: ThreadDragPayload): ThreadPanePayload {
-  return { threadId: payload.threadId, title: payload.title, mode: payload.mode };
+  return {
+    threadId: payload.threadId,
+    title: payload.title,
+    mode: payload.mode,
+    repoPath: payload.repoPath ?? null,
+  };
 }
 
 export function ThreadDropLayer({ active, layout, onDrop }: ThreadDropLayerProps) {
@@ -191,12 +196,22 @@ export function ThreadDropLayer({ active, layout, onDrop }: ThreadDropLayerProps
 
     // A drag may already be in flight when this tab becomes active. Adopt it
     // on the next tick — a synchronous setState inside the effect body would
-    // cascade a render before this commit settles.
+    // cascade a render before this commit settles. And when NO drag is in
+    // flight, clear any stale state: a tab-switch mid-drag deactivates this
+    // layer before the end event arrives, and without the clear the frozen
+    // "Add split"/"Open here" overlay re-renders on switch-back.
     const inFlight = getActiveThreadDrag();
     let adoptTimer: number | null = null;
     if (inFlight) {
       payloadRef.current = inFlight;
       adoptTimer = window.setTimeout(() => setDragPayload(inFlight), 0);
+    } else {
+      payloadRef.current = null;
+      hoverRef.current = null;
+      adoptTimer = window.setTimeout(() => {
+        setDragPayload(null);
+        setHover(null);
+      }, 0);
     }
 
     window.addEventListener(THREAD_DRAG_START_EVENT, handleStart);
