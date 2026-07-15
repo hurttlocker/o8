@@ -30,6 +30,7 @@ pub mod symon_task_bridge;
 pub mod term_watch;
 pub mod tools;
 pub mod worker_pulse;
+pub mod web_localization;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -299,9 +300,9 @@ pub(crate) fn conversation_context() -> Option<String> {
 /// the model the screenshot's pixel space and the `[POINT:x,y:label]` tag
 /// protocol (parsed + stripped by `point_overlay::parse_point_tags`; the tags
 /// animate the Symon Points overlay, never reach TTS).
-pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
-    format!(
-        "A screenshot of the user's current screen is attached ({img_w}x{img_h} \
+pub(crate) fn screen_prompt_section(screen: &screen::ScreenContext) -> String {
+    let mut prompt = format!(
+        "A screenshot of the user's current screen is attached ({}x{} \
          pixels). Use it to answer questions about what is on screen. You can \
          also POINT at the screen: include a tag like [POINT:x,y:label] inline \
          in your reply — x,y in screenshot pixels, label 1-3 words naming the \
@@ -331,8 +332,20 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          do NOT open a browser. There is no document or canvas to render into; \
          the ONLY way to show a picture is the [POINT]/[GUIDE]/[DRAW] tags above, \
          placed inline in the sentence you speak. Keep spoken sentences short \
-         and plain; never narrate the whole screen."
-    )
+         and plain; never narrate the whole screen.",
+        screen.img_w, screen.img_h
+    );
+    prompt.push_str(&crate::screen_localization::catalog_prompt(
+        &screen.ax_catalog,
+        (screen.mon_x, screen.mon_y, screen.mon_w, screen.mon_h),
+        (screen.img_w, screen.img_h),
+    ));
+    prompt.push_str(&web_localization::catalog_prompt(
+        &screen.web_catalog,
+        (screen.mon_x, screen.mon_y, screen.mon_w, screen.mon_h),
+        (screen.img_w, screen.img_h),
+    ));
+    prompt
 }
 
 /// Appended to the system prompt when editable text rides the request —
@@ -450,11 +463,26 @@ static LAST_DRAWING: Mutex<Option<(std::time::Instant, String)>> = Mutex::new(No
 /// Record the tags just drawn (canonical `[...]` form, space-joined) as the live
 /// drawing. Called right after `show_points` fires.
 pub fn record_last_drawing(tags: String) {
+    let mut slot = LAST_DRAWING.lock().unwrap_or_else(|p| p.into_inner());
     if tags.trim().is_empty() {
+        *slot = None;
         return;
     }
-    let mut slot = LAST_DRAWING.lock().unwrap_or_else(|p| p.into_inner());
     *slot = Some((std::time::Instant::now(), tags));
+}
+
+fn stable_drawing_tags(tags: &[crate::point_overlay::ParsedTag]) -> String {
+    tags.iter()
+        // Catalog ids are capture-local and can be reassigned on the next
+        // turn; points are transient guidance, not additive teaching ink.
+        .filter(|tag| {
+            tag.element_id.is_none()
+                && tag.web_element_id.is_none()
+                && tag.shape != crate::point_overlay::Shape::Point
+        })
+        .map(crate::point_overlay::tag_to_string)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The live drawing's tags, if a session is still fresh (else None).
@@ -897,13 +925,12 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     run_agent_inner(app, prompt, None, None, None).await
 }
 
-/// True when the resolved brain can accept inline images. Gemini (direct id, no
-/// `/`) always can; the Claude text-planner CLI never can; an OpenRouter id is
-/// gated on a conservative vision-model substring allowlist. Drives whether a
-/// spatial turn attaches the images or falls back to an honest "I can't see" note.
+/// True when the resolved brain can accept inline images. Direct Gemini and the
+/// Claude planner CLI can; OpenRouter ids use a conservative family allowlist.
+/// Drives attachment and the spatial honesty guard.
 pub(crate) fn model_can_see_images(model: &str) -> bool {
     if model.starts_with("claude") {
-        return false; // background text-planner CLI — no inline vision
+        return true; // Claude planner sends image blocks through stream-json.
     }
     if !model.contains('/') {
         return true; // direct Gemini id
@@ -918,7 +945,9 @@ pub(crate) fn model_can_see_images(model: &str) -> bool {
         "gemini",
         "claude-3",
         "claude-4",
+        "claude-5",
         "claude-sonnet-4",
+        "claude-sonnet-5",
         "claude-opus-4",
         "llama-3.2",
         "llama-4",
@@ -1012,18 +1041,22 @@ async fn run_agent_inner(
     // composite (strokes burned in) + crop are pre-built — use them and SKIP the
     // intent-gated live capture. Otherwise fall back to the dossier-#2 behavior.
     let (spatial_active, spatial_crop, prebuilt_screen) = match spatial {
-        Some(sc) => (true, sc.crop_png_base64, Some(std::sync::Arc::new(sc.screen))),
+        Some(sc) => (true, sc.crop_png_base64, Some(sc.screen)),
         None => (false, None, None),
     };
     let screen_wanted =
         spatial_active || screen::wants_screen(&prompt) || drawing_session_fresh();
-    let screen_ctx = if let Some(s) = prebuilt_screen {
+    let mut screen_ctx = if let Some(s) = prebuilt_screen {
         Some(s)
     } else if screen_wanted {
-        screen::capture(&app).map(std::sync::Arc::new)
+        screen::capture(&app)
     } else {
         None
     };
+    if let Some(screen) = screen_ctx.as_mut() {
+        web_localization::attach(&app, screen).await;
+    }
+    let screen_ctx = screen_ctx.map(std::sync::Arc::new);
     // Editable-noun capture (magic roadmap #1): selection or focused field,
     // only for edit verbs. Captured EARLY — the selection must be read before
     // anything could disturb it.
@@ -1090,15 +1123,17 @@ async fn run_agent_inner(
     // (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
     // `model_override` (Some for background Claude tasks) wins over the config.
     let model = model_override.unwrap_or_else(|| router::load_config().mac_native_action);
-    // Spatial honesty guard: the operator drew a region, but this brain can't see
-    // images (Claude text-planner, or a non-vision OpenRouter id). Tell it plainly
-    // so it never pretends to have looked at the mark.
-    if spatial_active && !model_can_see_images(&model) {
-        llm_prompt.push_str(
-            "\n\n(NOTE: the operator drew on the screen while speaking to mark a \
-             region, but THIS model cannot see images — you can NOT see what they \
-             marked. Say so briefly if the region matters to answering.)",
-        );
+    if ctx.screen.is_some() && !model_can_see_images(&model) {
+        let note = if spatial_active {
+            "\n\n(NOTE: the operator marked a screen region, but this model cannot \
+             accept images — you can NOT see what they marked. Say so briefly \
+             if the region matters to answering.)"
+        } else {
+            "\n\n(NOTE: this model cannot accept the captured screenshot — you can NOT \
+             see or point at the screen. Say so briefly if screen context is \
+             required to answer.)"
+        };
+        llm_prompt.push_str(note);
     }
     let loop_result = if model.starts_with("claude") {
         claude::run_loop(&model, &llm_prompt, &ctx).await
@@ -1132,18 +1167,48 @@ async fn run_agent_inner(
             // text is what gets stored, displayed, and spoken; the tags drive
             // the Symon Points overlay (dossier #1).
             let (clean_text, point_tags) = crate::point_overlay::parse_point_tags(&result.result_text);
+            if let Some(screen) = &ctx.screen {
+                let native_exact_tag_count = point_tags
+                    .iter()
+                    .filter(|tag| tag.element_id.is_some())
+                    .count();
+                let web_exact_tag_count = point_tags
+                    .iter()
+                    .filter(|tag| tag.web_element_id.is_some())
+                    .count();
+                log::info!(
+                    "[symon-localization] {}",
+                    serde_json::json!({
+                        "stage": "model",
+                        "trace": screen.trace_id,
+                        "model": &result.model_used,
+                        "catalogCount": screen.ax_catalog.len() + screen.web_catalog.len(),
+                        "axCatalogCount": screen.ax_catalog.len(),
+                        "webCatalogCount": screen.web_catalog.len(),
+                        "tagCount": point_tags.len(),
+                        "exactTagCount": native_exact_tag_count + web_exact_tag_count,
+                        "nativeExactTagCount": native_exact_tag_count,
+                        "webExactTagCount": web_exact_tag_count,
+                        "pixelTagCount": point_tags.len() - native_exact_tag_count - web_exact_tag_count,
+                    })
+                );
+            }
             #[cfg(target_os = "macos")]
             if !point_tags.is_empty() {
                 if let Some(screen) = &ctx.screen {
-                    crate::point_overlay::show_points(&app, screen, &point_tags);
+                    let refreshed = if point_tags.iter().any(|tag| tag.web_element_id.is_some()) {
+                        Some(web_localization::refresh_targets(&app, screen, &point_tags).await.0)
+                    } else {
+                        None
+                    };
+                    crate::point_overlay::show_points(
+                        &app,
+                        refreshed.as_ref().unwrap_or(screen),
+                        &point_tags,
+                    );
                     // Remember what we drew so the next turn can re-emit + extend
                     // it (additive teaching diagrams, #1251).
-                    let tag_src = point_tags
-                        .iter()
-                        .map(crate::point_overlay::tag_to_string)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    record_last_drawing(tag_src);
+                    record_last_drawing(stable_drawing_tags(&point_tags));
                 } else {
                     log::warn!("[symon-agent] model emitted POINT tags without screen context — ignored");
                 }
@@ -1285,6 +1350,45 @@ fn notify_done(app: &tauri::AppHandle, result: &str) {
     use tauri_plugin_notification::NotificationExt;
     let body: String = result.chars().take(160).collect();
     let _ = app.notification().builder().title("Symon").body(&body).show();
+}
+
+#[cfg(test)]
+mod model_vision_tests {
+    use super::*;
+
+    #[test]
+    fn direct_claude_and_known_openrouter_models_keep_screen_context() {
+        assert!(model_can_see_images("claude-sonnet-5"));
+        assert!(model_can_see_images("gemini-3-flash-preview"));
+        assert!(model_can_see_images("anthropic/claude-sonnet-5"));
+        assert!(!model_can_see_images("openai/gpt-3.5-turbo"));
+        assert_eq!(
+            crate::models::AGENT_MAC_NATIVE_ACTION_DEFAULT,
+            crate::models::CLAUDE_SONNET_5
+        );
+    }
+}
+
+#[cfg(test)]
+mod drawing_memory_tests {
+    use super::*;
+
+    #[test]
+    fn only_stable_pixel_drawings_survive_into_the_next_turn() {
+        let (_, tags) = crate::point_overlay::parse_point_tags(
+            "[POINT:web:2:Save] [GUIDE:el:3:Reply] [POINT:10,20:Here] \
+             [DRAW:line:1,2,3,4:edge] [DRAW:text:5,6:a²]",
+        );
+        assert_eq!(
+            stable_drawing_tags(&tags),
+            "[DRAW:line:1,2,3,4:edge] [DRAW:text:5,6:a²]"
+        );
+
+        record_last_drawing("[DRAW:line:1,2,3,4:edge]".into());
+        assert!(drawing_session_fresh());
+        record_last_drawing(String::new());
+        assert!(!drawing_session_fresh());
+    }
 }
 
 #[cfg(test)]

@@ -20,6 +20,8 @@ mod mac_perms;
 mod models;
 mod paste;
 mod point_overlay;
+#[cfg(target_os = "macos")]
+mod screen_localization;
 mod shell_env;
 mod sidecar_lifecycle;
 mod sound;

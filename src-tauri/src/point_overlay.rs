@@ -44,6 +44,11 @@ pub enum Shape {
 /// meaningful; `Rect`/`Arrow` also use (x2, y2) as the opposite corner / arrow
 /// head.
 pub struct ParsedTag {
+    /// Exact Accessibility-catalog target. When set, pixel coordinates are
+    /// ignored and the overlay resolves the current captured element frame.
+    pub element_id: Option<usize>,
+    /// Exact DOM-catalog target inside o8's embedded browser.
+    pub web_element_id: Option<usize>,
     pub x: f64,
     pub y: f64,
     /// Second point for Rect/Arrow (opposite corner / arrow head). Unused (0)
@@ -65,9 +70,9 @@ enum TagKind {
     Draw,
 }
 
-/// Parse and STRIP `[POINT:x,y:label]`, `[GUIDE:x,y:label]`, and
-/// `[DRAW:rect|arrow:x1,y1,x2,y2:label]` tags (each optionally `...:screenN` —
-/// the screen suffix is accepted and ignored in v1, single-monitor capture).
+/// Parse and STRIP pixel tags plus exact catalog tags such as
+/// `[POINT:el:12]`, `[GUIDE:el:12]`, and `[DRAW:el:12]` (each optionally
+/// labelled). A trailing `screenN` is accepted and ignored in v1.
 /// Returns the cleaned text (what gets spoken/stored) plus the tags in order.
 /// Malformed tags are stripped but skipped — garbage never reaches TTS.
 pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
@@ -126,6 +131,21 @@ pub fn tag_to_string(t: &ParsedTag) -> String {
             format!("{v}")
         }
     };
+    let exact_target = t
+        .web_element_id
+        .map(|id| ("web", id))
+        .or_else(|| t.element_id.map(|id| ("el", id)));
+    if let Some((kind, element_id)) = exact_target {
+        let exact = match t.shape {
+            Shape::Point if t.dwell => Some(format!("[GUIDE:{kind}:{element_id}:{}]", t.label)),
+            Shape::Point => Some(format!("[POINT:{kind}:{element_id}:{}]", t.label)),
+            Shape::Rect => Some(format!("[DRAW:{kind}:{element_id}:{}]", t.label)),
+            _ => None,
+        };
+        if let Some(exact) = exact {
+            return exact;
+        }
+    }
     match t.shape {
         Shape::Point if t.dwell => format!("[GUIDE:{},{}:{}]", c(t.x), c(t.y), t.label),
         Shape::Point => format!("[POINT:{},{}:{}]", c(t.x), c(t.y), t.label),
@@ -156,6 +176,26 @@ fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
         return None;
     }
     strip_screen_suffix(&mut segments);
+    let target_kind = segments.first()?.trim().to_ascii_lowercase();
+    if target_kind == "el" || target_kind == "web" {
+        segments.remove(0);
+        let element_id = segments.first()?.trim().parse::<usize>().ok()?;
+        if element_id == 0 {
+            return None;
+        }
+        segments.remove(0);
+        return Some(ParsedTag {
+            element_id: (target_kind == "el").then_some(element_id),
+            web_element_id: (target_kind == "web").then_some(element_id),
+            x: 0.0,
+            y: 0.0,
+            x2: 0.0,
+            y2: 0.0,
+            label: segments.join(":").trim().to_string(),
+            dwell,
+            shape: Shape::Point,
+        });
+    }
     let coords = segments.remove(0);
     let label = segments.join(":").trim().to_string();
     let (x_str, y_str) = coords.split_once(',')?;
@@ -164,7 +204,17 @@ fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
     if !x.is_finite() || !y.is_finite() {
         return None;
     }
-    Some(ParsedTag { x, y, x2: 0.0, y2: 0.0, label, dwell, shape: Shape::Point })
+    Some(ParsedTag {
+        element_id: None,
+        web_element_id: None,
+        x,
+        y,
+        x2: 0.0,
+        y2: 0.0,
+        label,
+        dwell,
+        shape: Shape::Point,
+    })
 }
 
 /// `rect|arrow:x1,y1,x2,y2:label` (optionally `...:screenN`) → a Rect/Arrow tag.
@@ -174,6 +224,26 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
         return None;
     }
     strip_screen_suffix(&mut segments);
+    let target_kind = segments.first()?.trim().to_ascii_lowercase();
+    if target_kind == "el" || target_kind == "web" {
+        segments.remove(0);
+        let element_id = segments.first()?.trim().parse::<usize>().ok()?;
+        if element_id == 0 {
+            return None;
+        }
+        segments.remove(0);
+        return Some(ParsedTag {
+            element_id: (target_kind == "el").then_some(element_id),
+            web_element_id: (target_kind == "web").then_some(element_id),
+            x: 0.0,
+            y: 0.0,
+            x2: 0.0,
+            y2: 0.0,
+            label: segments.join(":").trim().to_string(),
+            dwell: false,
+            shape: Shape::Rect,
+        });
+    }
     let shape = match segments.remove(0).trim().to_ascii_lowercase().as_str() {
         "rect" | "box" | "rectangle" => Shape::Rect,
         "arrow" => Shape::Arrow,
@@ -194,6 +264,8 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
             return None;
         }
         return Some(ParsedTag {
+            element_id: None,
+            web_element_id: None,
             x: nums[0],
             y: nums[1],
             x2: 0.0,
@@ -207,6 +279,8 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
         return None;
     }
     Some(ParsedTag {
+        element_id: None,
+        web_element_id: None,
         x: nums[0],
         y: nums[1],
         x2: nums[2],
@@ -218,190 +292,9 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
 }
 
 #[cfg(test)]
-mod parse_tests {
-    use super::*;
+#[path = "point_overlay/parse_tests.rs"]
+mod parse_tests;
 
-    #[test]
-    fn strips_single_tag_and_parses() {
-        let (clean, tags) =
-            parse_point_tags("It's right here. [POINT:640,360:Save button] Click it.");
-        assert_eq!(clean, "It's right here. Click it.");
-        assert_eq!(tags.len(), 1);
-        assert_eq!(tags[0].x, 640.0);
-        assert_eq!(tags[0].label, "Save button");
-    }
-
-    #[test]
-    fn accepts_screen_suffix_and_colon_labels() {
-        let (clean, tags) = parse_point_tags("[POINT:10,20:Step 1: open settings:screen2] go");
-        assert_eq!(clean, "go");
-        assert_eq!(tags[0].label, "Step 1: open settings");
-        assert_eq!(tags[0].y, 20.0);
-    }
-
-    #[test]
-    fn multiple_tags_in_order() {
-        let (clean, tags) = parse_point_tags("First [POINT:1,2:a] then [POINT:3,4:b] done");
-        assert_eq!(clean, "First then done");
-        assert_eq!(tags.len(), 2);
-        assert_eq!(tags[1].x, 3.0);
-    }
-
-    #[test]
-    fn malformed_tags_stripped_not_kept() {
-        let (clean, tags) = parse_point_tags("Hm [POINT:abc,def:bad] ok");
-        assert_eq!(clean, "Hm ok");
-        assert!(tags.is_empty());
-    }
-
-    #[test]
-    fn no_tags_passthrough() {
-        let (clean, tags) = parse_point_tags("Nothing to point at.");
-        assert_eq!(clean, "Nothing to point at.");
-        assert!(tags.is_empty());
-    }
-
-    #[test]
-    fn guide_tag_sets_dwell() {
-        let (clean, tags) = parse_point_tags("Right here. [GUIDE:320,200:Reply button]");
-        assert_eq!(clean, "Right here.");
-        assert_eq!(tags.len(), 1);
-        assert!(tags[0].dwell);
-        assert_eq!(tags[0].label, "Reply button");
-    }
-
-    #[test]
-    fn mixed_point_and_guide_in_order() {
-        let (clean, tags) = parse_point_tags("A [POINT:1,2:a] then [GUIDE:3,4:b] done");
-        assert_eq!(clean, "A then done");
-        assert_eq!(tags.len(), 2);
-        assert!(!tags[0].dwell);
-        assert!(tags[1].dwell);
-        assert_eq!(tags[1].x, 3.0);
-    }
-
-    #[test]
-    fn point_tags_default_to_point_shape() {
-        let (_, tags) = parse_point_tags("[POINT:1,2:a]");
-        assert!(tags[0].shape == Shape::Point);
-    }
-
-    #[test]
-    fn draw_rect_parses_both_corners() {
-        let (clean, tags) =
-            parse_point_tags("Here's the bug. [DRAW:rect:100,120,300,260:error banner]");
-        assert_eq!(clean, "Here's the bug.");
-        assert_eq!(tags.len(), 1);
-        assert!(tags[0].shape == Shape::Rect);
-        assert_eq!(tags[0].x, 100.0);
-        assert_eq!(tags[0].y, 120.0);
-        assert_eq!(tags[0].x2, 300.0);
-        assert_eq!(tags[0].y2, 260.0);
-        assert_eq!(tags[0].label, "error banner");
-    }
-
-    #[test]
-    fn draw_arrow_parses_with_screen_suffix() {
-        let (clean, tags) = parse_point_tags("[DRAW:arrow:10,10,90,90:to Save:screen1] go");
-        assert_eq!(clean, "go");
-        assert!(tags[0].shape == Shape::Arrow);
-        assert_eq!(tags[0].x2, 90.0);
-        assert_eq!(tags[0].label, "to Save");
-    }
-
-    #[test]
-    fn draw_box_alias_maps_to_rect() {
-        let (_, tags) = parse_point_tags("[DRAW:box:1,2,3,4:x]");
-        assert!(tags[0].shape == Shape::Rect);
-    }
-
-    #[test]
-    fn draw_bad_shape_or_arity_stripped() {
-        // unknown shape
-        let (c1, t1) = parse_point_tags("a [DRAW:blob:1,2,3,4:x] b");
-        assert_eq!(c1, "a b");
-        assert!(t1.is_empty());
-        // only two coords (needs four)
-        let (c2, t2) = parse_point_tags("a [DRAW:rect:1,2:x] b");
-        assert_eq!(c2, "a b");
-        assert!(t2.is_empty());
-    }
-
-    #[test]
-    fn draw_line_parses_two_points() {
-        let (clean, tags) = parse_point_tags("The hypotenuse: [DRAW:line:100,400,300,200:c]");
-        assert_eq!(clean, "The hypotenuse:");
-        assert_eq!(tags.len(), 1);
-        assert!(tags[0].shape == Shape::Line);
-        assert_eq!(tags[0].x, 100.0);
-        assert_eq!(tags[0].y2, 200.0);
-        assert_eq!(tags[0].label, "c");
-    }
-
-    #[test]
-    fn draw_text_parses_single_point_and_label() {
-        let (clean, tags) = parse_point_tags("[DRAW:text:150,300:a² + b² = c²] there");
-        assert_eq!(clean, "there");
-        assert_eq!(tags.len(), 1);
-        assert!(tags[0].shape == Shape::Text);
-        assert_eq!(tags[0].x, 150.0);
-        assert_eq!(tags[0].y, 300.0);
-        assert_eq!(tags[0].label, "a² + b² = c²");
-    }
-
-    #[test]
-    fn draw_text_requires_label_and_point_arity() {
-        // text with 4 coords (wrong arity for text) is stripped
-        let (c1, t1) = parse_point_tags("a [DRAW:text:1,2,3,4:x] b");
-        assert_eq!(c1, "a b");
-        assert!(t1.is_empty());
-        // text with no label is stripped
-        let (c2, t2) = parse_point_tags("a [DRAW:text:1,2:] b");
-        assert_eq!(c2, "a b");
-        assert!(t2.is_empty());
-    }
-
-    #[test]
-    fn label_alias_maps_to_text() {
-        let (_, tags) = parse_point_tags("[DRAW:label:5,6:side a]");
-        assert!(tags[0].shape == Shape::Text);
-        assert_eq!(tags[0].label, "side a");
-    }
-
-    #[test]
-    fn mixed_point_and_draw_in_order() {
-        let (clean, tags) =
-            parse_point_tags("First [POINT:1,2:a] then [DRAW:rect:5,6,7,8:b] done");
-        assert_eq!(clean, "First then done");
-        assert_eq!(tags.len(), 2);
-        assert!(tags[0].shape == Shape::Point);
-        assert!(tags[1].shape == Shape::Rect);
-        assert_eq!(tags[1].y2, 8.0);
-    }
-
-    #[test]
-    fn tag_to_string_round_trips_through_parse() {
-        // Every shape the brain can re-emit must survive to_string -> reparse so
-        // fed-back drawings stay valid (additive teaching, #1251).
-        let src = "[POINT:1,2:a] [GUIDE:3,4:b] [DRAW:rect:5,6,7,8:c] \
-                   [DRAW:arrow:9,10,11,12:d] [DRAW:line:13,14,15,16:e] \
-                   [DRAW:text:17,18:a² + b² = c²]";
-        let (_, tags) = parse_point_tags(src);
-        assert_eq!(tags.len(), 6);
-        let rebuilt = tags.iter().map(tag_to_string).collect::<Vec<_>>().join(" ");
-        let (_, reparsed) = parse_point_tags(&rebuilt);
-        assert_eq!(reparsed.len(), tags.len());
-        for (a, b) in tags.iter().zip(reparsed.iter()) {
-            assert!(a.shape == b.shape);
-            assert_eq!(a.x, b.x);
-            assert_eq!(a.y, b.y);
-            assert_eq!(a.x2, b.x2);
-            assert_eq!(a.y2, b.y2);
-            assert_eq!(a.dwell, b.dwell);
-            assert_eq!(a.label, b.label);
-        }
-    }
-}
 
 // ── macOS implementation ─────────────────────────────────────────────────────
 
@@ -433,7 +326,8 @@ mod overlay {
     /// degenerate) — the caller then keeps the model's vision-estimated pixel.
     /// This is what makes Symon's box land ON the button instead of near it.
     fn ax_snap_frame(screen: &ScreenContext, gx: f64, gy: f64) -> Option<(f64, f64, f64, f64)> {
-        let (fx, fy, fw, fh) = crate::paste::ax_frame_at_screen_point(gx, gy)?;
+        let (fx, fy, fw, fh) =
+            crate::screen_localization::actionable_frame_at_point(gx, gy)?;
         if fw < 8.0 || fh < 8.0 || fw * fh > 0.55 * screen.mon_w * screen.mon_h {
             return None;
         }
@@ -444,6 +338,151 @@ mod overlay {
         Some((lx, ly, lw, lh))
     }
 
+    fn catalog_frame(
+        screen: &ScreenContext,
+        element_id: usize,
+    ) -> Option<((f64, f64, f64, f64), &str)> {
+        let element = screen.ax_catalog.iter().find(|item| item.id == element_id)?;
+        let (fx, fy, fw, fh) = element.frame;
+        let lx = (fx - screen.mon_x).clamp(0.0, screen.mon_w);
+        let ly = (fy - screen.mon_y).clamp(0.0, screen.mon_h);
+        let lw = fw.min(screen.mon_w - lx);
+        let lh = fh.min(screen.mon_h - ly);
+        (lw >= 8.0 && lh >= 8.0).then_some(((lx, ly, lw, lh), element.label.as_str()))
+    }
+
+    fn web_catalog_frame(
+        screen: &ScreenContext,
+        element_id: usize,
+    ) -> Option<((f64, f64, f64, f64), &str)> {
+        let element = screen.web_catalog.iter().find(|item| item.id == element_id)?;
+        let (fx, fy, fw, fh) = element.frame;
+        let lx = (fx - screen.mon_x).clamp(0.0, screen.mon_w);
+        let ly = (fy - screen.mon_y).clamp(0.0, screen.mon_h);
+        let lw = fw.min(screen.mon_w - lx);
+        let lh = fh.min(screen.mon_h - ly);
+        (lw >= 4.0 && lh >= 4.0).then_some(((lx, ly, lw, lh), element.label.as_str()))
+    }
+
+    #[derive(Default)]
+    struct ResolutionStats {
+        exact_resolved: usize,
+        native_exact_resolved: usize,
+        web_exact_resolved: usize,
+        ax_snapped: usize,
+        direct_pixel: usize,
+        stale: usize,
+    }
+
+    fn resolve_points(
+        screen: &ScreenContext,
+        tags: &[ParsedTag],
+    ) -> (Vec<serde_json::Value>, ResolutionStats) {
+        let map_x = |v: f64| (v / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
+        let map_y = |v: f64| (v / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
+        let to_global = |lx: f64, ly: f64| (screen.mon_x + lx, screen.mon_y + ly);
+        let center = |(x, y, w, h): (f64, f64, f64, f64)| (x + w / 2.0, y + h / 2.0);
+        let mut stats = ResolutionStats::default();
+        let points = tags
+            .iter()
+            .filter_map(|t| {
+                let native_exact = t.element_id.and_then(|id| catalog_frame(screen, id));
+                let web_exact = t.web_element_id.and_then(|id| web_catalog_frame(screen, id));
+                let exact = native_exact.or(web_exact);
+                if (t.element_id.is_some() || t.web_element_id.is_some()) && exact.is_none() {
+                    stats.stale += 1;
+                    return None;
+                }
+                if exact.is_some() {
+                    stats.exact_resolved += 1;
+                    stats.native_exact_resolved += usize::from(native_exact.is_some());
+                    stats.web_exact_resolved += usize::from(web_exact.is_some());
+                }
+                let label = if t.label.is_empty() {
+                    exact.map(|(_, label)| label).unwrap_or_default()
+                } else {
+                    t.label.as_str()
+                };
+                let x = map_x(t.x);
+                let y = map_y(t.y);
+                let point = match t.shape {
+                    Shape::Point => {
+                        let (px, py) = match exact {
+                            Some((frame, _)) => center(frame),
+                            None => {
+                                let (gx, gy) = to_global(x, y);
+                                match ax_snap_frame(screen, gx, gy).map(center) {
+                                    Some(snapped) => {
+                                        stats.ax_snapped += 1;
+                                        snapped
+                                    }
+                                    None => {
+                                        stats.direct_pixel += 1;
+                                        (x, y)
+                                    }
+                                }
+                            }
+                        };
+                        json!({ "shape": "point", "x": px, "y": py, "label": label, "dwell": t.dwell })
+                    }
+                    Shape::Rect => {
+                        let (x2, y2) = (map_x(t.x2), map_y(t.y2));
+                        let snapped = exact.map(|(frame, _)| frame).or_else(|| {
+                            let (gcx, gcy) = to_global((x + x2) / 2.0, (y + y2) / 2.0);
+                            ax_snap_frame(screen, gcx, gcy)
+                        });
+                        match snapped {
+                            Some((lx, ly, lw, lh)) => {
+                                if exact.is_none() {
+                                    stats.ax_snapped += 1;
+                                }
+                                json!({
+                                    "shape": "rect", "x": lx, "y": ly,
+                                    "x2": lx + lw, "y2": ly + lh, "label": label
+                                })
+                            }
+                            None => {
+                                stats.direct_pixel += 1;
+                                json!({
+                                    "shape": "rect", "x": x, "y": y,
+                                    "x2": x2, "y2": y2, "label": label
+                                })
+                            }
+                        }
+                    }
+                    Shape::Arrow => {
+                        let (x2, y2) = (map_x(t.x2), map_y(t.y2));
+                        let (ghx, ghy) = to_global(x2, y2);
+                        let (hx, hy) = match ax_snap_frame(screen, ghx, ghy).map(center) {
+                            Some(snapped) => {
+                                stats.ax_snapped += 1;
+                                snapped
+                            }
+                            None => {
+                                stats.direct_pixel += 1;
+                                (x2, y2)
+                            }
+                        };
+                        json!({ "shape": "arrow", "x": x, "y": y, "x2": hx, "y2": hy, "label": label })
+                    }
+                    Shape::Line => {
+                        stats.direct_pixel += 1;
+                        json!({
+                            "shape": "line", "x": x, "y": y,
+                            "x2": map_x(t.x2), "y2": map_y(t.y2), "label": label
+                        })
+                    }
+                    Shape::Text => {
+                        stats.direct_pixel += 1;
+                        json!({ "shape": "text", "x": x, "y": y, "label": label })
+                    }
+                };
+                Some(point)
+            })
+            .collect();
+        (points, stats)
+    }
+
     /// Map screenshot-pixel tags onto the captured monitor and animate them.
     /// Fire-and-forget: spawns a worker thread that ensures the window (first
     /// use pays a route-load wait), emits `o8:point-show`, then auto-hides.
@@ -451,60 +490,25 @@ mod overlay {
         if tags.is_empty() {
             return;
         }
-        // Screenshot px → window-local logical points. The overlay window is
-        // positioned at the monitor origin with the monitor's logical size, so
-        // local = (tag / image_px) * monitor_logical, clamped into bounds.
-        let map_x = |v: f64| (v / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
-        let map_y = |v: f64| (v / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
-        // Monitor-local → global screen point (for the AX hit-test).
-        let to_global = |lx: f64, ly: f64| (screen.mon_x + lx, screen.mon_y + ly);
-        let center = |(x, y, w, h): (f64, f64, f64, f64)| (x + w / 2.0, y + h / 2.0);
-        let points: Vec<serde_json::Value> = tags
-            .iter()
-            .map(|t| {
-                let x = map_x(t.x);
-                let y = map_y(t.y);
-                match t.shape {
-                    Shape::Point => {
-                        // Snap the dot to the center of the element under the
-                        // guess; keep the vision pixel if AX can't help.
-                        let (gx, gy) = to_global(x, y);
-                        let (px, py) = ax_snap_frame(screen, gx, gy).map(center).unwrap_or((x, y));
-                        json!({ "shape": "point", "x": px, "y": py, "label": t.label, "dwell": t.dwell })
-                    }
-                    Shape::Rect => {
-                        // Hit-test the center of the guessed box; snap the whole
-                        // box to that element's frame (the precision win).
-                        let (x2, y2) = (map_x(t.x2), map_y(t.y2));
-                        let (gcx, gcy) = to_global((x + x2) / 2.0, (y + y2) / 2.0);
-                        match ax_snap_frame(screen, gcx, gcy) {
-                            Some((lx, ly, lw, lh)) => json!({
-                                "shape": "rect", "x": lx, "y": ly,
-                                "x2": lx + lw, "y2": ly + lh, "label": t.label
-                            }),
-                            None => json!({
-                                "shape": "rect", "x": x, "y": y, "x2": x2, "y2": y2, "label": t.label
-                            }),
-                        }
-                    }
-                    Shape::Arrow => {
-                        // Snap the arrow HEAD onto the target element's center;
-                        // the tail stays where the model drew it.
-                        let (x2, y2) = (map_x(t.x2), map_y(t.y2));
-                        let (ghx, ghy) = to_global(x2, y2);
-                        let (hx, hy) = ax_snap_frame(screen, ghx, ghy).map(center).unwrap_or((x2, y2));
-                        json!({ "shape": "arrow", "x": x, "y": y, "x2": hx, "y2": hy, "label": t.label })
-                    }
-                    // Teaching primitives (#1251) draw on blank space — straight
-                    // vision→monitor mapping, no AX snap.
-                    Shape::Line => json!({
-                        "shape": "line", "x": x, "y": y,
-                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": t.label
-                    }),
-                    Shape::Text => json!({ "shape": "text", "x": x, "y": y, "label": t.label }),
-                }
+        let (points, stats) = resolve_points(screen, tags);
+        log::info!(
+            "[symon-localization] {}",
+            serde_json::json!({
+                "stage": "overlay",
+                "trace": screen.trace_id,
+                "tagCount": tags.len(),
+                "outputCount": points.len(),
+                "exactResolved": stats.exact_resolved,
+                "nativeExactResolved": stats.native_exact_resolved,
+                "webExactResolved": stats.web_exact_resolved,
+                "axSnapped": stats.ax_snapped,
+                "directPixel": stats.direct_pixel,
+                "stale": stats.stale,
             })
-            .collect();
+        );
+        if points.is_empty() {
+            return;
+        }
         // GUIDE targets in window-local logical px — the proximity watcher
         // compares the live cursor against these instead of a fixed timer.
         let dwell_targets: Vec<(f64, f64)> = points
@@ -761,6 +765,10 @@ mod overlay {
             }
         });
     }
+
+    #[cfg(test)]
+    #[path = "localization_tests.rs"]
+    mod localization_tests;
 }
 
 #[cfg(target_os = "macos")]

@@ -42,20 +42,21 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         system_text.push_str("\n\n");
         system_text.push_str(&convo);
     }
-    // Symon Spatial Context: attach the composite + crop as image_url parts when
-    // the operator drew AND the model is a known vision family. On a non-vision
-    // model the honesty note was already folded into `intent` upstream, so we
-    // send text only and never pretend to have seen the mark.
-    let spatial_vision = ctx.spatial && super::model_can_see_images(model);
-    if spatial_vision {
+    // Every captured screen rides a known vision model. Spatial turns add the
+    // marked-region crop; ordinary screen questions still need the screenshot
+    // and exact Accessibility catalog instead of silently becoming text-only.
+    let screen_vision = ctx.screen.is_some() && super::model_can_see_images(model);
+    if screen_vision {
         if let Some(screen) = &ctx.screen {
             system_text.push_str("\n\n");
-            system_text.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
+            system_text.push_str(&super::screen_prompt_section(screen));
         }
+    }
+    if screen_vision && ctx.spatial {
         system_text.push_str("\n\n");
         system_text.push_str(&super::spatial_prompt_section(ctx.crop_png_base64.is_some()));
     }
-    let user_msg = if spatial_vision {
+    let user_msg = if screen_vision {
         let mut parts: Vec<Value> = vec![json!({ "type": "text", "text": intent })];
         if let Some(screen) = &ctx.screen {
             parts.push(json!({
@@ -63,11 +64,13 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                 "image_url": { "url": format!("data:image/png;base64,{}", screen.png_base64) }
             }));
         }
-        if let Some(crop) = &ctx.crop_png_base64 {
-            parts.push(json!({
-                "type": "image_url",
-                "image_url": { "url": format!("data:image/png;base64,{}", crop) }
-            }));
+        if ctx.spatial {
+            if let Some(crop) = &ctx.crop_png_base64 {
+                parts.push(json!({
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:image/png;base64,{}", crop) }
+                }));
+            }
         }
         json!({ "role": "user", "content": parts })
     } else {

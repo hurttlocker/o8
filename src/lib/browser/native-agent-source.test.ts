@@ -3,6 +3,7 @@ import { NATIVE_BROWSER_AGENT_SOURCE } from './native-agent-source';
 import { SELECTOR_FOR_SOURCE } from './selector';
 import { GRAB_PAYLOAD_SOURCE } from './grab';
 import { REACT_COMPONENT_NAME_SOURCE } from './react-fiber';
+import { BROWSER_LOCALIZATION_ROWS_SOURCE } from './localization';
 
 describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
   it('embeds the no-drift selectorFor + buildGrabbedElement + reactComponentName sources verbatim', () => {
@@ -11,6 +12,7 @@ describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
     expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(SELECTOR_FOR_SOURCE);
     expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(GRAB_PAYLOAD_SOURCE);
     expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(REACT_COMPONENT_NAME_SOURCE);
+    expect(NATIVE_BROWSER_AGENT_SOURCE).toContain(BROWSER_LOCALIZATION_ROWS_SOURCE);
   });
 
   it('parses as a standalone function body (createElement-only injected agent)', () => {
@@ -39,7 +41,7 @@ describe('NATIVE_BROWSER_AGENT_SOURCE', () => {
     run(win, doc, loc);
     const agent = win.__o8BrowserAgent as Record<string, unknown> | undefined;
     expect(agent).toBeTruthy();
-    for (const verb of ['read', 'click', 'type', 'probe', 'grab', 'drawmode', 'drawthumb', 'drawpending']) {
+    for (const verb of ['read', 'localize', 'rect', 'click', 'type', 'probe', 'grab', 'drawmode', 'drawthumb', 'drawpending']) {
       expect(typeof agent?.[verb]).toBe('function');
     }
 

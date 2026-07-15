@@ -61,7 +61,8 @@
     "sign-and-notarize": "node scripts/sign-and-notarize.mjs",
     "build:cli": "node cli/esbuild.config.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dogfood:symon-localization": "node scripts/watch-symon-localization.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.109",
