@@ -661,7 +661,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               fontFamily: 'var(--font-sans-system)',
               lineHeight: 1.4,
               boxSizing: 'border-box',
-              overflow: 'auto',
+              // X hidden, not auto: text wraps (pre-wrap) so horizontal
+              // overflow is never real — but WKWebView misreports textarea
+              // scrollWidth under fractional CSS zoom and painted a phantom
+              // h-scrollbar across the composer (operator screenshot
+              // 2026-07-15, 80% zoom) that also ate clicks along its band.
+              overflowX: 'hidden',
+              overflowY: 'auto',
             }}
           />
           <InputButtons
