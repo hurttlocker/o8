@@ -227,6 +227,38 @@ export function mergeSameThreadHistoryLoad(
   };
 }
 
+/**
+ * RC1 seam 2 — decide whether a history load may RESET the live stream.
+ *
+ * `handleLoadThread` fetches persisted history and applies it. When the loaded
+ * thread is the SAME thread already open and streaming, calling `orchStream.reset()`
+ * (which bumps the epoch, nulls the in-flight assistant, and clears the transcript)
+ * kills a still-running turn — its answer tokens are then dropped by the epoch
+ * guard (D7HY6S / RRB3ND). The server turn is durable and keeps streaming, so a
+ * same-thread load must be MERGE-ONLY: never reset, never wholesale-replace a live
+ * in-flight turn. A DIFFERENT thread is a genuine switch and resets as before.
+ *
+ * `mergeSameThreadHistoryLoad` still computes the merged entries; this decides the
+ * reset. The prior code reset whenever the merge found no live-only entries — which
+ * is exactly the mid-turn case where the incremental server persist already mirrored
+ * the live transcript (no live-only delta), so it reset a turn that was still live.
+ */
+export function resolveThreadLoadPlan(input: {
+  isSameOpenThread: boolean;
+  streamBusy: boolean;
+  merged: { entries: MobileTranscriptEntry[]; preservedLiveEntries: boolean };
+}): { entries: MobileTranscriptEntry[]; reset: boolean } {
+  // A live in-flight turn on the same thread is never reset — merge only.
+  if (input.isSameOpenThread && input.streamBusy) {
+    return { entries: input.merged.entries, reset: false };
+  }
+  // A same-thread load that already preserved live entries also stays merge-only.
+  if (input.isSameOpenThread && input.merged.preservedLiveEntries) {
+    return { entries: input.merged.entries, reset: false };
+  }
+  return { entries: input.merged.entries, reset: !input.merged.preservedLiveEntries };
+}
+
 export function generateSuggestions(agents: FleetAgent[], targets: AgentTarget[]): ContextSuggestion[] {
   const suggestions: ContextSuggestion[] = [];
   const targetBySessionKey = new Map(targets.map((target) => [target.key, target]));
