@@ -412,6 +412,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const inFlightLoadKeyRef = useRef<string | null>(null);
   const lastLoadKeyRef = useRef<string | null>(null);
   const lastLoadAtRef = useRef<number>(0);
+  // Monotonic load generation. Every loadThread call bumps it; the async body
+  // captures its value and refuses to APPLY results if a newer load has started
+  // meanwhile. Without this, loading thread B while A's fetch is still in flight
+  // let a late A response overwrite B — the tab showed the wrong conversation
+  // (adversarial review 2026-07-15).
+  const loadGenerationRef = useRef(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
@@ -1262,6 +1268,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     inFlightLoadKeyRef.current = tabId;
     lastLoadKeyRef.current = tabId;
     lastLoadAtRef.current = now;
+    const myGeneration = ++loadGenerationRef.current;
     try {
       // Bound history load with a timeout + one retry so socket starvation
       // cannot permanently wedge the thread on an empty state.
@@ -1290,6 +1297,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         backend?: OrchestratorBackendId | null;
         agent?: string | null;
       };
+      // A newer loadThread started while this one was awaiting the network — its
+      // results are stale and must NOT overwrite the newer thread's state.
+      if (loadGenerationRef.current !== myGeneration) {
+        console.log(`[orchestrator] loadThread ${tabId} — superseded by a newer load, discarding`);
+        return;
+      }
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? []);
       console.log(`[orchestrator] loadThread ${tabId} — applying ${msgs.length} messages`);
       const isSameOpenThread = threadIdRef.current === tabId;
