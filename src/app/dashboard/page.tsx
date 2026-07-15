@@ -1041,20 +1041,47 @@ function DashboardInner() {
     noteRightPanelManualIntent(false);
     setChatVisible(false);
   }, [noteRightPanelManualIntent]);
-  // Responsive auto-minimize removed (Q ruling 2026-07-11) — making the window
-  // smaller no longer auto-collapses the side panels; panel visibility is
-  // entirely the user's choice. This effect only heals state a prior build
-  // left auto-collapsed, then never touches visibility again on resize.
+  // Responsive auto-minimize — LEFT AgentPanel only (restored 2026-07-14 by
+  // operator request; the blanket removal was Q ruling 2026-07-11). Narrowing
+  // the window past RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH folds the AgentPanel to
+  // width 0 (showSidebarColumn === false) so the center workspace stays usable
+  // all the way down to a terminal-narrow window; widening back out restores it.
+  // A manual open while narrow (responsiveManualOpenRef.left, set by
+  // noteSidebarManualIntent) suppresses the auto-collapse so resize never fights
+  // the operator's toggle. The RIGHT panel stays a purely manual choice (per the
+  // 2026-07-11 ruling) — this effect only heals a stale right auto-collapse a
+  // prior build may have left set.
   useEffect(() => {
+    if (viewportWidth === null) return;
+
     if (responsiveAutoCollapsed.right) {
       setChatVisible(true);
       setResponsiveAutoCollapsed((current) => ({ ...current, right: false }));
     }
-    if (responsiveAutoCollapsed.left) {
-      setSidebarVisible(true);
-      setResponsiveAutoCollapsed((current) => ({ ...current, left: false }));
+
+    if (viewportWidth < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH) {
+      if (sidebarVisible && !responsiveManualOpenRef.current.left) {
+        setResponsiveAutoCollapsed((current) => (
+          current.left ? current : { ...current, left: true }
+        ));
+        setSidebarVisible(false);
+      }
+    } else {
+      responsiveManualOpenRef.current.left = false;
+      if (responsiveAutoCollapsed.left) {
+        setSidebarVisible(true);
+        setResponsiveAutoCollapsed((current) => (
+          current.left ? { ...current, left: false } : current
+        ));
+      }
     }
-  }, [responsiveAutoCollapsed.left, responsiveAutoCollapsed.right, setSidebarVisible]);
+  }, [
+    responsiveAutoCollapsed.left,
+    responsiveAutoCollapsed.right,
+    setSidebarVisible,
+    sidebarVisible,
+    viewportWidth,
+  ]);
   const [rightWidth, setRightWidth] = useState(() => {
     if (typeof window === 'undefined') return 280;
     try {

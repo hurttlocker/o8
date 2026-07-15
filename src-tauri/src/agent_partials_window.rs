@@ -43,6 +43,12 @@ pub const PARTIALS_LABEL: &str = "agent-partials";
 const PARTIALS_WIDTH: f64 = 820.0;
 #[cfg(target_os = "macos")]
 const PARTIALS_HEIGHT: f64 = 220.0;
+#[cfg(target_os = "macos")]
+const CARET_WIDTH: f64 = 460.0;
+#[cfg(target_os = "macos")]
+const CARET_HEIGHT: f64 = 138.0;
+#[cfg(target_os = "macos")]
+const CARET_GAP: f64 = 8.0;
 /// Bottom inset above the screen edge — clears the macOS Dock in most setups.
 /// Used by the SCREEN anchor (operator is NOT working in o8).
 #[cfg(target_os = "macos")]
@@ -116,7 +122,12 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
     };
 
     apply_macos_recipe(&window);
-    reposition(app, &window);
+    reposition(
+        app,
+        &window,
+        crate::live_dictation::PartialsSurface::Hud,
+        None,
+    );
     // FULLY click-through — no interactive elements on this surface, so every
     // click passes through to the app behind it. No per-element hit-testing.
     let _ = window.set_ignore_cursor_events(true);
@@ -130,12 +141,19 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
 /// agent-dictation start (belt-and-suspenders, and it makes the bar follow the
 /// main window's current monitor). No-op if the window is missing.
 #[cfg(target_os = "macos")]
-pub fn show(app: &tauri::AppHandle) {
+pub fn show(
+    app: &tauri::AppHandle,
+    surface: crate::live_dictation::PartialsSurface,
+    anchor: Option<crate::live_dictation::CaretAnchor>,
+) {
     use tauri::Manager;
     let Some(window) = app.get_webview_window(PARTIALS_LABEL) else {
         return;
     };
-    reposition(app, &window);
+    if surface == crate::live_dictation::PartialsSurface::Off {
+        return;
+    }
+    reposition(app, &window, surface, anchor);
     apply_macos_recipe(&window);
     let _ = window.set_ignore_cursor_events(true);
     order_front_nonactivating(&window);
@@ -217,19 +235,32 @@ fn order_front_nonactivating(window: &tauri::WebviewWindow) {
 /// Logical coordinates throughout. Runs on the main thread (NSScreen + window
 /// geometry reads touch AppKit).
 #[cfg(target_os = "macos")]
-fn reposition(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+fn reposition(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    surface: crate::live_dictation::PartialsSurface,
+    anchor: Option<crate::live_dictation::CaretAnchor>,
+) {
     use tauri::Manager;
     let win = window.clone();
     let app = app.clone();
     let _ = window.run_on_main_thread(move || {
         let main = app.get_webview_window("main");
 
-        // Prefer the monitor the MAIN window is on so the bar shows on the screen
-        // the operator is actually working on; degrade to this window's monitor,
-        // then the primary.
-        let monitor = main
-            .as_ref()
-            .and_then(|m| m.current_monitor().ok().flatten())
+        // Caret mode follows the monitor containing the captured AX caret. The
+        // legacy HUD keeps its main-window monitor behavior.
+        let anchor_monitor = anchor.and_then(|caret| {
+            win.available_monitors().ok()?.into_iter().find(|monitor| {
+                let scale = monitor.scale_factor();
+                let x = monitor.position().x as f64 / scale;
+                let y = monitor.position().y as f64 / scale;
+                let width = monitor.size().width as f64 / scale;
+                let height = monitor.size().height as f64 / scale;
+                caret.x >= x && caret.x < x + width && caret.y >= y && caret.y < y + height
+            })
+        });
+        let monitor = anchor_monitor
+            .or_else(|| main.as_ref().and_then(|m| m.current_monitor().ok().flatten()))
             .or_else(|| win.current_monitor().ok().flatten())
             .or_else(|| win.primary_monitor().ok().flatten());
         let Some(monitor) = monitor else {
@@ -240,6 +271,33 @@ fn reposition(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
         let mon_y = monitor.position().y as f64 / scale;
         let mon_w = monitor.size().width as f64 / scale;
         let mon_h = monitor.size().height as f64 / scale;
+
+        let (frame_width, frame_height) = if surface
+            == crate::live_dictation::PartialsSurface::Caret
+        {
+            (CARET_WIDTH, CARET_HEIGHT)
+        } else {
+            (PARTIALS_WIDTH, PARTIALS_HEIGHT)
+        };
+        let _ = win.set_size(tauri::LogicalSize::new(frame_width, frame_height));
+
+        if surface == crate::live_dictation::PartialsSurface::Caret {
+            if let Some(caret) = anchor {
+                let max_x = (mon_x + mon_w - frame_width).max(mon_x);
+                let max_y = (mon_y + mon_h - frame_height).max(mon_y);
+                let below = caret.y + caret.height + CARET_GAP;
+                let above = caret.y - frame_height - CARET_GAP;
+                let raw_y = if below + frame_height <= mon_y + mon_h {
+                    below
+                } else {
+                    above
+                };
+                let x = (caret.x + caret.width + CARET_GAP).clamp(mon_x, max_x);
+                let y = raw_y.clamp(mon_y, max_y);
+                let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+                return;
+            }
+        }
 
         // WINDOW anchor only when the operator is actively working in o8:
         // visible, not minimized, focused. Any read failure or false condition
@@ -265,17 +323,17 @@ fn reposition(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
             // The bar paints at the BOTTOM of the transparent PARTIALS frame, so
             // the frame's bottom edge is the bar's bottom edge. Put it
             // WINDOW_BOTTOM_GAP above the window's bottom.
-            let raw_x = win_x + (win_w - PARTIALS_WIDTH) / 2.0;
-            let raw_y = win_y + win_h - PARTIALS_HEIGHT - WINDOW_BOTTOM_GAP;
+            let raw_x = win_x + (win_w - frame_width) / 2.0;
+            let raw_y = win_y + win_h - frame_height - WINDOW_BOTTOM_GAP;
             // Clamp inside the monitor (never off the top/left, never past the
             // bottom-right where the frame would spill off-screen).
-            let max_x = (mon_x + mon_w - PARTIALS_WIDTH).max(mon_x);
-            let max_y = (mon_y + mon_h - PARTIALS_HEIGHT).max(mon_y);
+            let max_x = (mon_x + mon_w - frame_width).max(mon_x);
+            let max_y = (mon_y + mon_h - frame_height).max(mon_y);
             (raw_x.clamp(mon_x, max_x), raw_y.clamp(mon_y, max_y))
         } else {
             // Screen anchor — bottom-center of the main window's monitor.
-            let x = mon_x + (mon_w - PARTIALS_WIDTH) / 2.0;
-            let y = mon_y + mon_h - PARTIALS_HEIGHT - BOTTOM_MARGIN;
+            let x = mon_x + (mon_w - frame_width) / 2.0;
+            let y = mon_y + mon_h - frame_height - BOTTOM_MARGIN;
             (x, y)
         };
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));

@@ -141,10 +141,7 @@ export function VoiceTab() {
   const [groqKeySet, setGroqKeySet] = useState(false);
   const [groqKeyInput, setGroqKeyInput] = useState('');
   const [groqKeySaving, setGroqKeySaving] = useState(false);
-  // Opt-in on-screen partials bar during plain Fn dictation (`fn_hud_partials`,
-  // default OFF). Read back from the same dictation.json config the other voice
-  // prefs use.
-  const [fnHudPartials, setFnHudPartials] = useState(false);
+  const [partialsSurface, setPartialsSurface] = useState<'caret' | 'hud' | 'off'>('caret');
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -172,7 +169,9 @@ export function VoiceTab() {
       voicePrefsGet().catch(() => null),
     ]);
     setGroqKeySet(Boolean(prefs && (prefs as Record<string, unknown>).groq_api_key_set));
-    setFnHudPartials(Boolean(prefs && (prefs as Record<string, unknown>).fn_hud_partials));
+    const savedSurface = prefs
+      && (prefs as Record<string, unknown>).dictation_partials_surface;
+    setPartialsSurface(savedSurface === 'hud' || savedSurface === 'off' ? savedSurface : 'caret');
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -195,9 +194,9 @@ export function VoiceTab() {
     void agentSetEscalation(next);
   }, []);
 
-  const handleFnHudPartials = useCallback((next: boolean) => {
-    setFnHudPartials(next);
-    void voicePrefsSet('fn_hud_partials', next);
+  const handlePartialsSurface = useCallback((next: 'caret' | 'hud' | 'off') => {
+    setPartialsSurface(next);
+    void voicePrefsSet('dictation_partials_surface', next);
   }, []);
 
   const handleGroqKeySave = useCallback(async () => {
@@ -248,7 +247,7 @@ export function VoiceTab() {
     >
       <TabHeading
         title="voice"
-        subtitle="Hold the Fn key in any app to dictate — o8 transcribes, polishes, and pastes the text at the caret. These permissions and toggles control the system-wide voice path."
+        subtitle="Hold Fn in any app for live dictation. Hold Control+Fn to turn a spoken instruction and the visible screen into a polished reply, command, or prompt with Sonnet."
       />
 
       {!tauri ? (
@@ -341,10 +340,19 @@ export function VoiceTab() {
               />
               <SettingsRow
                 icon={<CaptionsIcon />}
-                label="On-screen partials bar"
-                subtitle="Show the live transcript in a bar at the bottom of the screen while you hold Fn to dictate"
-                checked={fnHudPartials}
-                onToggle={handleFnHudPartials}
+                label="Live dictation"
+                subtitle="At caret streams into verified text fields and follows the insertion point; Screen keeps the original bottom bar"
+                accessory={
+                  <SettingsSegmented
+                    value={partialsSurface}
+                    onChange={(v) => handlePartialsSurface(v as 'caret' | 'hud' | 'off')}
+                    options={[
+                      { value: 'caret', label: 'At caret' },
+                      { value: 'hud', label: 'Screen' },
+                      { value: 'off', label: 'Off' },
+                    ]}
+                  />
+                }
               />
             </SettingsGroup>
           </section>
@@ -483,7 +491,7 @@ export function VoiceTab() {
           letterSpacing: '0.04em',
         }}
       >
-        <span style={{ color: RAMS_ACCENT }}>FN</span> &nbsp; Hold to dictate, release to paste.
+        <span style={{ color: RAMS_ACCENT }}>FN</span> &nbsp; Dictate &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>⌃ FN</span> &nbsp; Smart Compose
       </p>
     </div>
   );

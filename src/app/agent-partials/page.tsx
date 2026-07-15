@@ -33,7 +33,7 @@
  * palette-independent (like the dock), so raw dark rgba is acceptable here.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
 
@@ -62,28 +62,60 @@ const SAFETY_MS = 60_000;
  *  time to land so the HUD never flashes over a composer that owns the partials. */
 const PAINT_GRACE_MS = 300;
 
+// Symon surfaces honor the app's Glass vs Solid appearance (the
+// reduce-transparency axis). This floating HUD lives at the SAME origin as the
+// main window (http://127.0.0.1:<port>), so it reads the very localStorage the
+// ThemeProvider writes — no second appearance system. Palette-independent by
+// design: a dark chip reads over any app in both light and dark (matching the
+// dock), so only the glass↔solid MATERIAL flips, never the geometry. Mirrors
+// ThemeProvider.resolveSurface: reduce-transparency 'on' → solid, 'off'/'system'
+// → glass; a truly fresh install (no theme pref at all) defaults to solid.
+type AppSurface = 'glass' | 'solid';
+function readAppSurface(): AppSurface {
+  if (typeof window === 'undefined') return 'glass';
+  try {
+    const pref = localStorage.getItem('cortex-reduce-transparency');
+    if (pref === 'on') return 'solid';
+    if (pref === 'off' || pref === 'system') return 'glass';
+    const hasThemePref =
+      localStorage.getItem('cortex-theme-palette') !== null ||
+      localStorage.getItem('cortex-theme') !== null;
+    return hasThemePref ? 'glass' : 'solid';
+  } catch {
+    return 'glass';
+  }
+}
+
 type Phase = 'listening' | 'final';
+type PartialsSurface = 'caret' | 'hud';
 
 interface SttPayload {
   type?: string;
   origin?: string;
   lane?: string;
   text?: string;
-  // Plain Fn dictation carries no lane, but when the operator has opted into the
-  // Fn partials HUD (`fn_hud_partials`), the Rust side tags its `system-start`
-  // with `hud: true` so this page latches for the Fn path too. Default OFF —
-  // absent means the HUD stays invisible during Fn dictation, as before.
+  // Plain Fn dictation carries no lane. The Rust side tags visible partials with
+  // `hud: true` and names the selected surface; new installs default to the
+  // cursor-local surface while the legacy screen bar remains selectable.
   hud?: boolean;
+  surface?: 'caret' | 'hud' | 'off';
+  mode?: 'dictation' | 'smart-compose';
 }
 
 interface HudState {
   phase: Phase;
   text: string;
+  surface: PartialsSurface;
+  mode: 'dictation' | 'smart-compose';
 }
 
 export default function AgentPartialsPage() {
   const prefersReducedMotion = useReducedMotion();
   const [state, setState] = useState<HudState | null>(null);
+  // App appearance (glass/solid). Read once from the shared theme localStorage,
+  // refreshed on the cross-window `storage` event and on each activation so a
+  // mid-session appearance change is honored.
+  const [appSurface, setAppSurface] = useState<AppSurface>(() => readAppSurface());
   // While the in-canvas composer owns the partials (Right-Option dictation with
   // o8 focused + the canvas visible), it claims the surface via
   // `o8:agent-partials-claim` and THIS HUD stops painting — single-surface rule,
@@ -101,6 +133,15 @@ export default function AgentPartialsPage() {
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep the material in sync with the app's Glass/Solid preference. The main
+  // window writes the theme keys; `storage` fires here (a different document),
+  // so the HUD flips glass↔solid without its own theme system.
+  useEffect(() => {
+    const sync = () => setAppSurface(readAppSurface());
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
   // The window is transparent at the OS level; the page html/body must NOT paint
   // a background or the window shows a solid rectangle instead of just the bar.
@@ -142,8 +183,12 @@ export default function AgentPartialsPage() {
         setState(null);
       }, DISMISS_DELAY_MS);
     };
-    const activate = () => {
+    const activate = (
+      surface: PartialsSurface,
+      mode: 'dictation' | 'smart-compose',
+    ) => {
       agentActiveRef.current = true;
+      setAppSurface(readAppSurface());
       clearDismiss();
       clearSafety();
       safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
@@ -160,7 +205,7 @@ export default function AgentPartialsPage() {
       }, PAINT_GRACE_MS);
       sessionStartedAtRef.current = Date.now();
       setElapsedSeconds(0);
-      setState({ phase: 'listening', text: '' });
+      setState({ phase: 'listening', text: '', surface, mode });
     };
     const showText = (phase: Phase, text: string) => {
       // A new frame of live text — keep the HUD alive (cancel any pending fade)
@@ -172,7 +217,12 @@ export default function AgentPartialsPage() {
       clearDismiss();
       clearSafety();
       safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
-      setState({ phase, text });
+      setState((current) => ({
+        phase,
+        text,
+        surface: current?.surface ?? 'caret',
+        mode: current?.mode ?? 'dictation',
+      }));
     };
 
     const handle = (p: SttPayload) => {
@@ -181,12 +231,17 @@ export default function AgentPartialsPage() {
       // the origin field is absent on some emit paths).
       if (p.origin !== 'system' && type !== 'system-pasted') return;
 
-      // Activate on an AGENT-lane system-start (Right-Option Symon agent) OR a
-      // plain Fn system-start explicitly tagged `hud: true` (the opt-in Fn
-      // partials HUD, `fn_hud_partials`). A plain Fn system-start with neither
-      // is ignored → Fn dictation stays invisible unless the operator opted in.
+      // Activate on an AGENT-lane system-start (Right-Option Symon agent) or a
+      // plain Fn system-start tagged `hud: true`. The surface field chooses the
+      // cursor-local default or the legacy screen bar.
       if (type === 'system-start') {
-        if (p.lane === 'agent' || p.hud === true) activate();
+        if (p.surface === 'off') return;
+        if (p.lane === 'agent' || p.hud === true) {
+          activate(
+            p.surface === 'hud' ? 'hud' : 'caret',
+            p.mode === 'smart-compose' ? 'smart-compose' : 'dictation',
+          );
+        }
         return;
       }
 
@@ -353,6 +408,7 @@ export default function AgentPartialsPage() {
     ? state.text || (state.phase === 'listening' ? 'Listening' : '')
     : '';
   const rise = prefersReducedMotion ? 0 : 4;
+  const caretLocal = state?.surface === 'caret';
 
   return (
     <div
@@ -360,10 +416,11 @@ export default function AgentPartialsPage() {
         position: 'fixed',
         inset: 0,
         display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-        paddingLeft: 24,
-        paddingRight: 24,
+        alignItems: caretLocal ? 'flex-start' : 'flex-end',
+        justifyContent: caretLocal ? 'flex-start' : 'center',
+        paddingLeft: caretLocal ? 6 : 24,
+        paddingRight: caretLocal ? 6 : 24,
+        paddingTop: caretLocal ? 6 : 0,
         paddingBottom: 6,
         boxSizing: 'border-box',
         background: 'transparent',
@@ -373,7 +430,7 @@ export default function AgentPartialsPage() {
       <AnimatePresence>
         {state && !suppressed && graceElapsed ? (
           <motion.div
-            key="agent-partials-bar"
+            key={`agent-partials-bar-${state.surface}`}
             role="status"
             aria-live="polite"
             initial={{ opacity: 0, y: rise }}
@@ -383,22 +440,31 @@ export default function AgentPartialsPage() {
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 8,
-              width: 'min(680px, calc(100vw - 56px))',
+              gap: caretLocal ? 5 : 8,
+              width: caretLocal
+                ? 'min(420px, calc(100vw - 12px))'
+                : 'min(680px, calc(100vw - 56px))',
               maxWidth: '100%',
               boxSizing: 'border-box',
-              paddingTop: 16,
-              paddingBottom: 16,
-              paddingLeft: 26,
-              paddingRight: 26,
-              borderRadius: 22,
-              background: 'rgba(9, 10, 13, 0.82)',
-              backdropFilter: 'blur(22px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(22px) saturate(140%)',
+              paddingTop: caretLocal ? 10 : 16,
+              paddingBottom: caretLocal ? 10 : 16,
+              paddingLeft: caretLocal ? 14 : 26,
+              paddingRight: caretLocal ? 14 : 26,
+              borderRadius: caretLocal ? 14 : 22,
+              // Glass = translucent tint + backdrop blur of the app behind it.
+              // Solid (reduce-transparency) = genuinely opaque, NO blur — the
+              // vestibular/accessibility path must not float a blurred chip.
+              // Dark in both palettes (a dark chip reads over any app), matching
+              // the dock. Geometry above is untouched by appearance.
+              background: appSurface === 'solid' ? 'rgb(20, 22, 28)' : 'rgba(9, 10, 13, 0.82)',
+              backdropFilter: appSurface === 'solid' ? undefined : 'blur(22px) saturate(140%)',
+              WebkitBackdropFilter: appSurface === 'solid' ? undefined : 'blur(22px) saturate(140%)',
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'rgba(255, 255, 255, 0.12)',
-              boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4)',
+              boxShadow: caretLocal
+                ? '0 10px 30px rgba(0, 0, 0, 0.38), 0 1px 5px rgba(0, 0, 0, 0.32)'
+                : '0 18px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4)',
               fontFamily: FONT,
               pointerEvents: 'none',
             } as React.CSSProperties}
@@ -430,9 +496,11 @@ export default function AgentPartialsPage() {
                   lineHeight: 1,
                 }}
               >
-                Symon · Listening
+                {state.mode === 'smart-compose'
+                  ? 'Symon · Compose'
+                  : caretLocal ? 'Symon' : 'Symon · Listening'}
               </span>
-              {state.phase === 'listening' && elapsedSeconds >= 10 ? (
+              {!caretLocal && state.phase === 'listening' && elapsedSeconds >= 10 ? (
                 <span
                   style={{
                     marginLeft: 'auto',
@@ -456,18 +524,22 @@ export default function AgentPartialsPage() {
             <div
               ref={scrollRef}
               style={{
-                maxHeight: 84,
+                maxHeight: caretLocal ? 48 : 84,
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 26px)',
-                maskImage: 'linear-gradient(to bottom, transparent 0px, black 26px)',
+                WebkitMaskImage: caretLocal
+                  ? undefined
+                  : 'linear-gradient(to bottom, transparent 0px, black 26px)',
+                maskImage: caretLocal
+                  ? undefined
+                  : 'linear-gradient(to bottom, transparent 0px, black 26px)',
               } as React.CSSProperties}
             >
               <span
                 style={{
-                  fontSize: 19,
+                  fontSize: caretLocal ? 14 : 19,
                   fontWeight: 400,
                   letterSpacing: '-0.1px',
                   lineHeight: 1.4,

@@ -14,6 +14,8 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod launch_updater;
+#[cfg(target_os = "macos")]
+mod live_dictation;
 mod mac_perms;
 mod models;
 mod paste;
@@ -1342,6 +1344,20 @@ fn spawn_bundled_ws_server(
         // Issue #935: same AI key forward for ws-server children.
         for (k, v) in ai_keys {
             ws_cmd.env(k, v);
+        }
+        // The ws-server hosts the in-app orchestrator sessions, and a turn
+        // GENERATES the orchestrator's Claude MCP config
+        // (orchestrator-session.ts → buildToolRegistry → resolve*McpServerPath).
+        // That resolver prefers the bundled .mjs only when O8_BUNDLED_MCP_PATH is
+        // set — otherwise it falls back to a dev `tsx …/*.ts` path that does NOT
+        // exist in the packaged bundle, so the orchestrator launches with ZERO
+        // o8/cortex tools ("MCP tool bridge is not live" + FALSE-DISPATCH). The
+        // next-server child gets these vars (~line 4975); the ws-server child
+        // needs the same parity or the in-app orchestrator is toothless.
+        let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
+        if bundled_operator_mcp.exists() {
+            ws_cmd.env("O8_BUNDLED_MCP_DIR", server_dir);
+            ws_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
         }
         match ws_cmd
             .stdout(child_stdio(ws_log))
@@ -3207,6 +3223,9 @@ mod stt_engine {
         let origin = origin_str();
         match event {
             TE::Partial { session_id, text } => {
+                if origin == "system" {
+                    crate::live_dictation::queue_partial(session_id, text.clone());
+                }
                 emit_stt(
                     app,
                     origin,
@@ -3221,6 +3240,9 @@ mod stt_engine {
                 );
             }
             TE::Final { session_id, text } => {
+                if origin == "system" {
+                    crate::live_dictation::queue_partial(session_id, text.clone());
+                }
                 // Stash Apple's transcript; the polished result is emitted once
                 // the AudioFile event lands (so polish can ground on the WAV).
                 // If the helper never emits audio_file/complete, fall back to
@@ -3267,7 +3289,13 @@ mod stt_engine {
             }
             TE::Error { session_id, text } => {
                 if origin == "system" {
+                    if let Some(session_id) = session_id {
+                        crate::live_dictation::cancel_session(session_id);
+                    } else {
+                        crate::live_dictation::cancel_active();
+                    }
                     crate::fn_hotkey::set_system_origin(false);
+                    let _ = crate::fn_hotkey::take_smart_compose_mode();
                     #[cfg(target_os = "macos")]
                     crate::audio_ducker::restore();
                     // Teardown path — restore ink click-through + clear strokes.
@@ -3379,6 +3407,7 @@ mod stt_engine {
             let _ = std::fs::remove_file(audio_file);
         }
         if crate::fn_hotkey::is_system_origin() {
+            crate::live_dictation::cancel_session(session_id);
             crate::fn_hotkey::set_system_origin(false);
             #[cfg(target_os = "macos")]
             crate::spatial_ink_window::disarm(app);
@@ -3427,6 +3456,10 @@ mod stt_engine {
             // Same for the Right-Option agent flag — routed at the bottom to the
             // Symon voice agent. Always false off the macOS agent path.
             let is_agent = crate::fn_hotkey::take_agent_mode();
+            // Control+Fn Smart Compose uses the same recognizer and target
+            // transaction, but routes the cleaned instruction through the
+            // subscription-billed Sonnet writer before committing at the caret.
+            let is_smart_compose = crate::fn_hotkey::take_smart_compose_mode();
 
             // ── Silence gate (net 1, BEFORE transcription) — #1544-adjacent ──
             // Parse the recorded WAV, compute RMS + duration; if it's below the
@@ -3480,7 +3513,10 @@ mod stt_engine {
             // Skip Whisper for SHORT dictations (Apple's live transcript is fine at command
             // length + it saves latency) — but NEVER for the agent path: a command the brain
             // is about to EXECUTE needs Whisper's accuracy more than the paste-latency win.
-            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12 && !is_agent;
+            let skip_whisper_short = apple_word_count > 0
+                && apple_word_count < 12
+                && !is_agent
+                && !is_smart_compose;
             if skip_whisper_short {
                 log::info!(
                     "[stt] whisper skipped: short utterance ({apple_word_count} words) — using Apple transcript"
@@ -3536,12 +3572,17 @@ mod stt_engine {
             // it. `is_system_origin()` is always false off the macOS system path.
             // Also skipped for an Ask question (`!is_ask`) — a spoken question
             // must reach Gemini verbatim, not be mangled by the command parser.
-            let raw_text = if crate::fn_hotkey::is_system_origin() && !is_ask && !is_agent {
+            let raw_text = if crate::fn_hotkey::is_system_origin()
+                && !is_ask
+                && !is_agent
+                && !is_smart_compose
+            {
                 match crate::stt::commands::process(&raw_text) {
                     crate::stt::commands::CommandResult::Text(t) => t,
                     crate::stt::commands::CommandResult::Cancel => {
                         // Cancelled — clear origin + morph the dock back to idle,
                         // no paste, no composer emit.
+                        crate::live_dictation::cancel_session(session_id);
                         crate::fn_hotkey::set_system_origin(false);
                         let _ = std::fs::remove_file(&audio_file);
                         #[cfg(target_os = "macos")]
@@ -3560,6 +3601,7 @@ mod stt_engine {
                     crate::stt::commands::CommandResult::Speak(t) => {
                         // "say <text>" — speak it aloud, don't paste. Clear origin
                         // + morph the dock back to idle.
+                        crate::live_dictation::cancel_session(session_id);
                         crate::fn_hotkey::set_system_origin(false);
                         let _ = std::fs::remove_file(&audio_file);
                         #[cfg(target_os = "macos")]
@@ -3593,6 +3635,7 @@ mod stt_engine {
             // the surrounding window's tone. Best-effort — empty/None for canvas /
             // Electron apps that don't expose AX text. (System-wide Symon fold P1.)
             let window_ctx = crate::paste::gather_window_context();
+            let compose_window_ctx = window_ctx.clone();
 
             let ctx = crate::stt::polish::PolishContext {
                 transcript: &raw_text,
@@ -3689,6 +3732,39 @@ mod stt_engine {
                 return;
             }
 
+            // ── Smart Compose (Control+Fn) — Sonnet writes, native target commits ──
+            // The model has NO tools in this lane: a terminal command is generated
+            // into the prompt but never executed. On failure we leave the field
+            // exactly as captured and surface the reason instead of pasting the
+            // spoken instruction as if it were the requested output.
+            #[cfg(target_os = "macos")]
+            let polished = if is_smart_compose {
+                let composing = serde_json::json!({
+                    "type": "status",
+                    "origin": "system",
+                    "sessionId": session_id,
+                    "text": "Composing with Sonnet…",
+                });
+                emit_stt(&app, "system", composing);
+                match crate::agent::smart_compose(&app, &polished, &compose_window_ctx) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        crate::live_dictation::cancel_session(session_id);
+                        crate::fn_hotkey::set_system_origin(false);
+                        let payload = serde_json::json!({
+                            "type": "error",
+                            "origin": "system",
+                            "sessionId": session_id,
+                            "text": format!("Smart Compose failed: {error}"),
+                        });
+                        emit_stt(&app, "system", payload);
+                        return;
+                    }
+                }
+            } else {
+                polished
+            };
+
             // ── Origin branch (system-wide Symon fold P2) ──
             // A dictation started by the GLOBAL Fn hotkey pastes the polished text
             // at the system caret and does NOT emit the composer-bound `polished`
@@ -3700,6 +3776,7 @@ mod stt_engine {
                 // session, then paste into whatever app the user is focused on.
                 crate::fn_hotkey::set_system_origin(false);
                 if polished.trim().is_empty() {
+                    crate::live_dictation::cancel_session(session_id);
                     // Nothing transcribed (silence / STT miss) — morph the
                     // always-on dock back to its idle capsule rather than flash a
                     // false "Pasted". Symon parity: never claim a paste it didn't
@@ -3720,7 +3797,18 @@ mod stt_engine {
                     // a real Cmd+V (o8_debug_paste) if it has nowhere to put
                     // the text. Fake keystrokes to ourselves are now a last
                     // resort, not the default.
-                    let paste_outcome = if crate::paste::frontmost_is_o8() {
+                    let live_outcome = crate::live_dictation::finish(session_id, &polished);
+                    let paste_outcome = if live_outcome
+                        == crate::live_dictation::FinishOutcome::Applied
+                    {
+                        log::info!(
+                            "[paste] outcome=caret-stream-final chars={} (AX transaction committed)",
+                            polished.len()
+                        );
+                        crate::paste::PasteOutcome::Pasted
+                    } else if let crate::live_dictation::FinishOutcome::Conflict(message) = live_outcome {
+                        crate::paste::PasteOutcome::Failed(message)
+                    } else if crate::paste::frontmost_is_o8() {
                         let fill = serde_json::json!({
                             "type": "system-fill",
                             "origin": "system",
@@ -3752,7 +3840,7 @@ mod stt_engine {
                     // Persist to dictation history so the operator can retrieve
                     // what they said if the paste landed in the wrong place.
                     crate::dictation_history::record(
-                        "dictation",
+                        if is_smart_compose { "smart-compose" } else { "dictation" },
                         &polished,
                         crate::paste::get_frontmost_bundle_id(),
                     );
@@ -5720,133 +5808,6 @@ pub fn run() {
                 }
             }
 
-            // ── Window Close → Hide to Tray ──
-            let app_handle = app.handle().clone();
-            if let Some(window) = app.get_webview_window("main") {
-                window_restore::schedule_launch_clamps(&app_handle);
-
-                #[cfg(target_os = "macos")]
-                if let Err(err) = apply_vibrancy(
-                    &window,
-                    chrome_vibrancy_material(),
-                    // Active (not focus-following): keep the chrome glassy when the
-                    // window loses key focus instead of flattening to grey (#1267).
-                    // Mirrors what the canvas surface already does (set_canvas_material).
-                    Some(window_vibrancy::NSVisualEffectState::Active),
-                    None,
-                ) {
-                    log::warn!("Failed to apply macOS vibrancy: {}", err);
-                }
-
-                // Boot-timing belt-and-braces (#1543): the effect view applied
-                // during setup can silently fail to render on macOS 26 AND
-                // 15.7.8 (observed live on both operator machines — a runtime
-                // clear+re-apply always cures it). Primary re-assert is
-                // webview-driven (ThemeProvider invokes set_canvas_material
-                // 'default' on mount — the frontend being alive proves the
-                // window is ready); this Rust retry loop is the fallback for
-                // boots where the webview never mounts. v0.1.582's version of
-                // this silently never ran because the dispatch error was
-                // swallowed — every failure logs now.
-                #[cfg(target_os = "macos")]
-                {
-                    let reassert = window.clone();
-                    std::thread::spawn(move || {
-                        for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
-                            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                            let target = reassert.clone();
-                            let dispatched = reassert.run_on_main_thread(move || {
-                                let _ = window_vibrancy::clear_vibrancy(&target);
-                                if let Err(e) = window_vibrancy::apply_vibrancy(
-                                    &target,
-                                    chrome_vibrancy_material(),
-                                    Some(window_vibrancy::NSVisualEffectState::Active),
-                                    None,
-                                ) {
-                                    log::warn!("[vibrancy] boot re-assert apply failed: {e}");
-                                } else {
-                                    log::info!("[vibrancy] boot re-assert applied");
-                                }
-                            });
-                            match dispatched {
-                                Ok(()) => break,
-                                Err(e) => log::warn!(
-                                    "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
-                                ),
-                            }
-                        }
-                    });
-                }
-
-                // Transparent windows lose macOS's automatic corner mask, so the
-                // webview's square corners poke past the vibrancy and read as a
-                // hard/pointed edge with the desktop showing through. Clip the
-                // content-view layer to round the vibrancy + webview together —
-                // a normal rounded Mac window. Tracks resize.
-                #[cfg(target_os = "macos")]
-                round_window_corners(&window, 12.0);
-
-                #[cfg(target_os = "windows")]
-                if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
-                    log::warn!("Failed to apply Windows blur: {}", err);
-                }
-
-                window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::CloseRequested { api, .. } => {
-                            // Hide instead of close — agents keep working
-                            api.prevent_close();
-                            if let Some(w) = app_handle.get_webview_window("main") {
-                                let _ = w.hide();
-                            }
-                            let _ = app_handle.emit("window-hidden", ());
-                        }
-                        // #1136 — bridge OS-level drag-drop into the webview as
-                        // window CustomEvents. With dragDropEnabled: true in
-                        // tauri.conf.json, HTML5 drop events no longer fire for
-                        // EXTERNAL drags (Finder → app), so this is the only
-                        // path that lets composers receive Finder file paths.
-                        // Internal webview drags (tile reorder, etc.) still
-                        // work through normal HTML5.
-                        tauri::WindowEvent::DragDrop(drag) => match drag {
-                            tauri::DragDropEvent::Enter { paths, position } => {
-                                let payload = serde_json::json!({
-                                    "paths": paths.iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect::<Vec<_>>(),
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
-                            }
-                            tauri::DragDropEvent::Over { position } => {
-                                let payload = serde_json::json!({
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
-                            }
-                            tauri::DragDropEvent::Drop { paths, position } => {
-                                let payload = serde_json::json!({
-                                    "paths": paths.iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect::<Vec<_>>(),
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop", payload);
-                            }
-                            tauri::DragDropEvent::Leave => {
-                                let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
-                            }
-                            _ => {}
-                        },
-                        tauri::WindowEvent::Resized(_)
-                        | tauri::WindowEvent::Moved(_)
-                        | tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                        }
-                        _ => {}
-                    }
-                });
-            }
 
             // ── Start bundled Next.js server ──
             let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
@@ -6046,6 +6007,144 @@ pub fn run() {
                 }
             }
             log::info!("[boot] main window created at {}ms — the loader can paint from here", boot_ms());
+
+            // ── Window Close → Hide to Tray ──
+            // MUST stay AFTER "── Window FIRST ──": the main window is built
+            // manually above (config create=false), so it does not exist
+            // earlier in setup. When this block ran before window creation
+            // (0.1.597–598) the guard below skipped silently and took boot
+            // vibrancy, the #1543 re-assert ladder, corner rounding, launch
+            // clamps, close-to-hide, and the #1136 drag-drop bridge with it.
+            let app_handle = app.handle().clone();
+            if let Some(window) = app.get_webview_window("main") {
+                window_restore::schedule_launch_clamps(&app_handle);
+
+                #[cfg(target_os = "macos")]
+                if let Err(err) = apply_vibrancy(
+                    &window,
+                    chrome_vibrancy_material(),
+                    // Active (not focus-following): keep the chrome glassy when the
+                    // window loses key focus instead of flattening to grey (#1267).
+                    // Mirrors what the canvas surface already does (set_canvas_material).
+                    Some(window_vibrancy::NSVisualEffectState::Active),
+                    None,
+                ) {
+                    log::warn!("Failed to apply macOS vibrancy: {}", err);
+                }
+
+                // Boot-timing belt-and-braces (#1543): the effect view applied
+                // during setup can silently fail to render on macOS 26 AND
+                // 15.7.8 (observed live on both operator machines — a runtime
+                // clear+re-apply always cures it). Primary re-assert is
+                // webview-driven (ThemeProvider invokes set_canvas_material
+                // 'default' on mount — the frontend being alive proves the
+                // window is ready); this Rust retry loop is the fallback for
+                // boots where the webview never mounts. v0.1.582's version of
+                // this silently never ran because the dispatch error was
+                // swallowed — every failure logs now.
+                #[cfg(target_os = "macos")]
+                {
+                    let reassert = window.clone();
+                    std::thread::spawn(move || {
+                        for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
+                            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                            let target = reassert.clone();
+                            let dispatched = reassert.run_on_main_thread(move || {
+                                let _ = window_vibrancy::clear_vibrancy(&target);
+                                if let Err(e) = window_vibrancy::apply_vibrancy(
+                                    &target,
+                                    chrome_vibrancy_material(),
+                                    Some(window_vibrancy::NSVisualEffectState::Active),
+                                    None,
+                                ) {
+                                    log::warn!("[vibrancy] boot re-assert apply failed: {e}");
+                                } else {
+                                    log::info!("[vibrancy] boot re-assert applied");
+                                }
+                            });
+                            match dispatched {
+                                Ok(()) => break,
+                                Err(e) => log::warn!(
+                                    "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
+                                ),
+                            }
+                        }
+                    });
+                }
+
+                // Transparent windows lose macOS's automatic corner mask, so the
+                // webview's square corners poke past the vibrancy and read as a
+                // hard/pointed edge with the desktop showing through. Clip the
+                // content-view layer to round the vibrancy + webview together —
+                // a normal rounded Mac window. Tracks resize.
+                #[cfg(target_os = "macos")]
+                round_window_corners(&window, 12.0);
+
+                #[cfg(target_os = "windows")]
+                if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
+                    log::warn!("Failed to apply Windows blur: {}", err);
+                }
+
+                window.on_window_event(move |event| {
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            // Hide instead of close — agents keep working
+                            api.prevent_close();
+                            if let Some(w) = app_handle.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                            let _ = app_handle.emit("window-hidden", ());
+                        }
+                        // #1136 — bridge OS-level drag-drop into the webview as
+                        // window CustomEvents. With dragDropEnabled: true in
+                        // tauri.conf.json, HTML5 drop events no longer fire for
+                        // EXTERNAL drags (Finder → app), so this is the only
+                        // path that lets composers receive Finder file paths.
+                        // Internal webview drags (tile reorder, etc.) still
+                        // work through normal HTML5.
+                        tauri::WindowEvent::DragDrop(drag) => match drag {
+                            tauri::DragDropEvent::Enter { paths, position } => {
+                                let payload = serde_json::json!({
+                                    "paths": paths.iter()
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .collect::<Vec<_>>(),
+                                    "position": { "x": position.x, "y": position.y },
+                                });
+                                let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
+                            }
+                            tauri::DragDropEvent::Over { position } => {
+                                let payload = serde_json::json!({
+                                    "position": { "x": position.x, "y": position.y },
+                                });
+                                let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
+                            }
+                            tauri::DragDropEvent::Drop { paths, position } => {
+                                let payload = serde_json::json!({
+                                    "paths": paths.iter()
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .collect::<Vec<_>>(),
+                                    "position": { "x": position.x, "y": position.y },
+                                });
+                                let _ = app_handle.emit("o8:tauri-file-drop", payload);
+                            }
+                            tauri::DragDropEvent::Leave => {
+                                let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
+                            }
+                            _ => {}
+                        },
+                        tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::Moved(_)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                            window_restore::schedule_event_clamp(&app_handle);
+                        }
+                        _ => {}
+                    }
+                });
+            } else {
+                // Loud, not silent — this skipping is exactly the 0.1.598
+                // glass/close-to-hide regression.
+                log::warn!("[main-window] lifecycle block skipped: main window missing at setup");
+            }
 
             // Bound the V8 compile cache. Worker thread; never on the boot path.
             prune_compile_cache();

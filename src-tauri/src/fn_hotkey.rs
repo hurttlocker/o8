@@ -108,6 +108,25 @@ pub fn last_voice_transcript() -> Option<String> {
 #[cfg(target_os = "macos")]
 const FN_FLAG: u64 = 0x800000;
 
+/// NSEventModifierFlagControl = 1 << 18. Holding Control with Fn turns the
+/// captured speech into a screen-aware Smart Compose instruction instead of
+/// inserting the instruction literally.
+#[cfg(target_os = "macos")]
+const CONTROL_FLAG: u64 = 0x40000;
+
+#[cfg(target_os = "macos")]
+static SMART_COMPOSE_MODE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+pub fn take_smart_compose_mode() -> bool {
+    SMART_COMPOSE_MODE.swap(false, Ordering::SeqCst)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn take_smart_compose_mode() -> bool {
+    false
+}
+
 /// Minimum Fn hold before we treat the press as a real dictation. A brush under
 /// this just flips the recognizer on and off with no paste — same failure mode
 /// as aqua's FN_TAP_PRIMER_MAX_MS.
@@ -402,7 +421,13 @@ extern "C" {
 /// then start the SHARED stt_engine daemon. Runs on a worker thread, never the
 /// tap callback.
 #[cfg(target_os = "macos")]
-fn begin_system_dictation() {
+fn begin_system_dictation(smart_compose: bool) {
+    if smart_compose {
+        // Boot Sonnet alongside capture. Spawning the CLI synchronously here can
+        // take seconds on Intel and would open the mic late enough to lose the
+        // operator's first words.
+        std::thread::spawn(crate::agent::claude_pool::prewarm_smart_compose);
+    }
     // Duck system audio so the mic hears over playing audio — including o8's
     // own TTS, so the user can talk back while it's still speaking (#1207).
     // Keep the handle: we wait (bounded) for the first volume-set to land
@@ -433,6 +458,9 @@ fn begin_system_dictation() {
     // nonactivating so it shouldn't steal focus, but capturing the frontmost
     // app first is the belt-and-suspenders guarantee for the paste target.
     crate::paste::save_frontmost_app();
+    let partials_surface = crate::live_dictation::begin(!smart_compose);
+    let caret_anchor = crate::live_dictation::current_anchor();
+    SMART_COMPOSE_MODE.store(smart_compose, Ordering::SeqCst);
     set_system_origin(true);
 
     // Morph the ALWAYS-ON screen dock pill into 'recording' (P3). The dock
@@ -443,27 +471,33 @@ fn begin_system_dictation() {
     // into 'recording' immediately so the user sees the waveform the instant they
     // hold Fn, before the daemon's first partial lands. Both run on the main
     // thread (window + emit).
-    // The on-screen partials HUD during PLAIN Fn dictation is opt-in
-    // (`fn_hud_partials`, default OFF). When enabled, tag the system-start with
-    // `hud: true` so the /agent-partials page latches (it otherwise only latches
-    // on `lane: agent`), deliver the start DIRECTLY to the HUD webview, and
-    // re-assert/re-anchor the HUD — mirrors the agent-dictation start path.
-    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", true);
+    // Visible partials follow the configured surface: cursor-local by default,
+    // legacy screen bar when selected, or fully off. Tag visible starts with
+    // `hud: true` so /agent-partials latches for plain Fn dictation too.
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                if hud_partials {
-                    // Re-anchor the HUD to the MAIN window's current monitor (and
-                    // window frame, if o8 is focused) for this session.
-                    crate::agent_partials_window::show(&app);
+                if partials_surface != crate::live_dictation::PartialsSurface::Off {
+                    crate::agent_partials_window::show(&app, partials_surface, caret_anchor);
                 }
-                let payload = if hud_partials {
-                    serde_json::json!({ "type": "system-start", "origin": "system", "hud": true })
+                let payload = if partials_surface != crate::live_dictation::PartialsSurface::Off {
+                    serde_json::json!({
+                        "type": "system-start",
+                        "origin": "system",
+                        "hud": true,
+                        "surface": partials_surface.as_str(),
+                        "mode": if smart_compose { "smart-compose" } else { "dictation" },
+                    })
                 } else {
-                    serde_json::json!({ "type": "system-start", "origin": "system" })
+                    serde_json::json!({
+                        "type": "system-start",
+                        "origin": "system",
+                        "surface": "off",
+                        "mode": if smart_compose { "smart-compose" } else { "dictation" },
+                    })
                 };
                 // Emit DIRECTLY to the dock window so the morph (idle → recording)
                 // always lands — the broadcast `app.emit` can miss the second
@@ -476,7 +510,7 @@ fn begin_system_dictation() {
                 );
                 // Direct delivery to the partials HUD too (same reliability reason
                 // as the dock) — only when the HUD is enabled for Fn dictation.
-                if hud_partials {
+                if partials_surface != crate::live_dictation::PartialsSurface::Off {
                     let _ = app.emit_to(
                         crate::agent_partials_window::PARTIALS_LABEL,
                         "o8:stt-event",
@@ -501,10 +535,13 @@ fn begin_system_dictation() {
     match crate::stt_engine::start_with_gate(Some(duck_gate)) {
         Ok(sid) => {
             CURRENT_PTT_SESSION_ID.store(sid, Ordering::SeqCst);
+            crate::live_dictation::bind_session(sid);
             tracing::info!("[fn-hotkey] system dictation started (session={sid})");
         }
         Err(e) => {
             tracing::error!("[fn-hotkey] failed to start dictation: {e}");
+            crate::live_dictation::cancel_active();
+            SMART_COMPOSE_MODE.store(false, Ordering::SeqCst);
             set_system_origin(false);
             // CURRENT_PTT_SESSION_ID is intentionally left at its previous value
             // here — a failed start has no live session to stop, and a later
@@ -660,6 +697,8 @@ fn end_system_dictation() {
 /// dock is NEVER hidden — it morphs back to idle.
 #[cfg(target_os = "macos")]
 fn discard_brush() {
+    crate::live_dictation::cancel_active();
+    SMART_COMPOSE_MODE.store(false, Ordering::SeqCst);
     set_system_origin(false);
     // Fence on the brush's OWN session — if a double-tap already promoted to a
     // long-form session, this late brush teardown must NOT stop it (stop_session
@@ -679,26 +718,36 @@ fn begin_long_form_dictation() {
     let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     crate::paste::save_frontmost_app();
+    let partials_surface = crate::live_dictation::begin(true);
+    let caret_anchor = crate::live_dictation::current_anchor();
+    SMART_COMPOSE_MODE.store(false, Ordering::SeqCst);
     set_system_origin(true);
 
     // Morph the always-on dock into 'recording' (same surface as push-to-talk —
     // the user sees the waveform). Emit DIRECTLY to the dock window. The Fn
-    // partials HUD is opt-in (`fn_hud_partials`, default OFF) — same treatment
-    // as push-to-talk so long-form Fn dictation shows the bar when enabled.
-    let hud_partials = crate::stt::keys::config_bool("fn_hud_partials", true);
+    // partials surface follows the same caret/screen/off setting as push-to-talk.
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                if hud_partials {
-                    crate::agent_partials_window::show(&app);
+                if partials_surface != crate::live_dictation::PartialsSurface::Off {
+                    crate::agent_partials_window::show(&app, partials_surface, caret_anchor);
                 }
-                let payload = if hud_partials {
-                    serde_json::json!({ "type": "system-start", "origin": "system", "hud": true })
+                let payload = if partials_surface != crate::live_dictation::PartialsSurface::Off {
+                    serde_json::json!({
+                        "type": "system-start",
+                        "origin": "system",
+                        "hud": true,
+                        "surface": partials_surface.as_str(),
+                    })
                 } else {
-                    serde_json::json!({ "type": "system-start", "origin": "system" })
+                    serde_json::json!({
+                        "type": "system-start",
+                        "origin": "system",
+                        "surface": "off",
+                    })
                 };
                 log::info!("[fn-hotkey] morph dock → recording (long-form start)");
                 let _ = app.emit_to(
@@ -706,7 +755,7 @@ fn begin_long_form_dictation() {
                     "o8:stt-event",
                     payload.clone(),
                 );
-                if hud_partials {
+                if partials_surface != crate::live_dictation::PartialsSurface::Off {
                     let _ = app.emit_to(
                         crate::agent_partials_window::PARTIALS_LABEL,
                         "o8:stt-event",
@@ -721,10 +770,12 @@ fn begin_long_form_dictation() {
     match crate::stt_engine::start() {
         Ok(sid) => {
             LONG_FORM_SESSION_ID.store(sid, Ordering::SeqCst);
+            crate::live_dictation::bind_session(sid);
             tracing::info!("[fn-hotkey] long-form dictation started (session={sid})");
         }
         Err(e) => {
             tracing::error!("[fn-hotkey] failed to start long-form dictation: {e}");
+            crate::live_dictation::cancel_active();
             // Roll the toggle back so a single tap doesn't try to finish a
             // session that never started.
             LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
@@ -782,6 +833,7 @@ pub fn finish_active_system_dictation() -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn cancel_long_form_dictation() {
     let sid = LONG_FORM_SESSION_ID.swap(0, Ordering::SeqCst);
+    crate::live_dictation::cancel_session(sid);
     set_system_origin(false);
     // Mark THIS session's finalize for discard, then stop it (fenced). Order
     // matters — the discard request must be set BEFORE stop() triggers the
@@ -928,6 +980,14 @@ fn begin_agent_dictation() {
     }
 
     AGENT_MODE.store(true, Ordering::SeqCst);
+    SMART_COMPOSE_MODE.store(false, Ordering::SeqCst);
+
+    let partials_surface = crate::live_dictation::configured_surface();
+    let caret_anchor = if partials_surface == crate::live_dictation::PartialsSurface::Caret {
+        crate::live_dictation::capture_caret_anchor()
+    } else {
+        None
+    };
 
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
@@ -943,11 +1003,18 @@ fn begin_agent_dictation() {
                 // Re-assert the outside-the-window partials HUD too, so it
                 // re-anchors to the MAIN window's current monitor and floats
                 // above the frontmost app for this agent session.
-                crate::agent_partials_window::show(&app);
+                if partials_surface != crate::live_dictation::PartialsSurface::Off {
+                    crate::agent_partials_window::show(&app, partials_surface, caret_anchor);
+                }
                 // `lane: agent` lets the dock distinguish this from a plain Fn
                 // paste dictation — mid-conversation the panel keeps the dock
                 // and renders the live transcript as a pending chat turn.
-                let payload = serde_json::json!({ "type": "system-start", "origin": "system", "lane": "agent" });
+                let payload = serde_json::json!({
+                    "type": "system-start",
+                    "origin": "system",
+                    "lane": "agent",
+                    "surface": partials_surface.as_str(),
+                });
                 log::info!("[fn-hotkey] morph dock → recording (agent start)");
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
                 // Direct delivery to the partials HUD too — its latch keys off
@@ -1210,6 +1277,7 @@ pub fn start(app: tauri::AppHandle) {
 
                     let flags = event.get_flags().bits();
                     let fn_is_down = (flags & FN_FLAG) != 0;
+                    let smart_compose = (flags & CONTROL_FLAG) != 0;
 
                     // TEMP #1534 gesture debug — every Fn-relevant FlagsChanged,
                     // raw. log:: so it reaches the log file in any build.
@@ -1252,6 +1320,9 @@ pub fn start(app: tauri::AppHandle) {
                             LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
                             fn_held_cb.store(false, Ordering::SeqCst);
                             std::thread::spawn(finish_long_form_dictation);
+                        } else if smart_compose {
+                            log::info!("[fn-edge] down → begin Smart Compose dictation (Control+Fn)");
+                            std::thread::spawn(|| begin_system_dictation(true));
                         } else if consume_double_tap_brush() {
                             // Promote to long-form. Set the toggle + clear the edge
                             // latch synchronously so THIS tap's Fn-up no-ops.
@@ -1261,7 +1332,7 @@ pub fn start(app: tauri::AppHandle) {
                             std::thread::spawn(begin_long_form_dictation);
                         } else {
                             log::info!("[fn-edge] down → begin system dictation (push-to-talk)");
-                            std::thread::spawn(begin_system_dictation);
+                            std::thread::spawn(|| begin_system_dictation(false));
                         }
                     } else if up_edge {
                         // Fn release during long-form is a NO-OP — long-form ends
@@ -1282,8 +1353,10 @@ pub fn start(app: tauri::AppHandle) {
                                     "[fn-edge] up after {}ms → BRUSH (< {FN_TAP_PRIMER_MAX_MS}ms) — discard + prime double-tap",
                                     hold.as_millis()
                                 );
-                                if let Ok(mut g) = LAST_FN_BRUSH.lock() {
-                                    *g = Some(std::time::Instant::now());
+                                if !SMART_COMPOSE_MODE.load(Ordering::SeqCst) {
+                                    if let Ok(mut g) = LAST_FN_BRUSH.lock() {
+                                        *g = Some(std::time::Instant::now());
+                                    }
                                 }
                                 std::thread::spawn(discard_brush);
                             } else {

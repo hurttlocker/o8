@@ -28,8 +28,9 @@
 //! turn 1 skips the ~1-2s CLI bootstrap), and each turn sends a single user
 //! frame while the model keeps its context. Turn 1 carries the full system
 //! prompt + tool schema + screenshot; follow-ups carry only the tool result — no
-//! re-boot, no transcript re-prefill. Built-in tools are held off by the planner
-//! contract (a `--disallowed-tools` hard lock is a follow-up).
+//! re-boot, no transcript re-prefill. Built-in tools are hard-locked off at
+//! spawn (`--tools ""`), not just discouraged by the planner contract, so a
+//! contract-ignoring turn still has nothing to execute.
 
 use super::{tools, LoopResult, TaskCtx};
 use serde_json::{json, Value};
@@ -268,6 +269,17 @@ impl ClaudeSession {
                 "--strict-mcp-config",
                 "--mcp-config",
                 mcp_cfg,
+                // Hard tool lock: `""` disables EVERY built-in tool (Bash, Read,
+                // Write, Edit, WebFetch, …). `--strict-mcp-config` + the empty
+                // `--mcp-config` already deny MCP tools; together the proc is
+                // fully tool-free. This is the enforced backstop the planner
+                // contract only *asked* for: even under `bypassPermissions` a
+                // model that ignores the contract has nothing to execute, so
+                // Smart Compose cannot run a generated terminal command and the
+                // planner cannot touch the disk. Also enforces "no repo
+                // retrieval yet" — Read/Glob/Grep are gone too.
+                "--tools",
+                "",
                 "--model",
                 model,
             ])
@@ -617,6 +629,21 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         tool_calls_json: Value::Array(tool_call_log).to_string(),
         brain_sources,
     })
+}
+
+/// One subscription-billed, tool-free Claude turn for Smart Compose. The
+/// caller owns the target transaction; this function only returns insertion
+/// text and cannot execute a command or mutate the Mac.
+pub(crate) fn compose_once(
+    model: &str,
+    prompt: &str,
+    image_b64: Option<&str>,
+) -> Result<String, String> {
+    let bin = claude_bin();
+    let mcp_cfg = ensure_empty_mcp_config()?;
+    let mut session = super::claude_pool::acquire(&bin, model, &mcp_cfg)
+        .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
+    session.send_turn(prompt, image_b64)
 }
 
 #[cfg(test)]

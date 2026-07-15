@@ -42,6 +42,7 @@ import {
   isRunnableCliSession,
   mergeSameThreadHistoryLoad,
   mergeTranscriptEntries,
+  resolveThreadLoadPlan,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
@@ -1289,7 +1290,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const mergedLoad = isSameOpenThread
         ? mergeSameThreadHistoryLoad(liveTranscript, msgs)
         : { entries: msgs, preservedLiveEntries: false };
-      setChatMessages(mergedLoad.entries);
+      // RC1 seam 2 — never reset() a live in-flight turn on a same-thread load.
+      // reset() bumps the stream epoch + nulls the assistant, and the durable
+      // server turn's remaining answer tokens are then discarded. A same-thread
+      // (esp. busy) load is merge-only; only a genuine thread switch resets.
+      const loadPlan = resolveThreadLoadPlan({
+        isSameOpenThread,
+        streamBusy: orchStream.status === 'busy',
+        merged: mergedLoad,
+      });
+      setChatMessages(loadPlan.entries);
       setPlanText(data.planText ?? null);
       setActiveThreadBackend(data.backend ?? null);
       setActiveThreadAgent(data.agent ?? null);
@@ -1297,10 +1307,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setThreadId(tabId);
       setWaitingForReply(false);
       clearPolling();
-      if (!mergedLoad.preservedLiveEntries) {
+      if (loadPlan.reset) {
         orchStream.reset();
       }
-      orchStream.replaceTranscript(mergedLoad.entries);
+      orchStream.replaceTranscript(loadPlan.entries);
       // A thread reload replaces the transcript wholesale, which would drop a
       // live-appended Mission-complete card. Re-assert any recorded card for
       // this repo so the reload can't clobber it (idempotent by id).

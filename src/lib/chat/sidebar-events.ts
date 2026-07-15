@@ -228,7 +228,7 @@ function normalizeHttpUrl(value: string | undefined): string | undefined {
   return undefined;
 }
 
-function extractLinksFromText(text: string): Array<{ label: string; href: string }> {
+export function extractLinksFromText(text: string): Array<{ label: string; href: string }> {
   const links: Array<{ label: string; href: string }> = [];
   const seen = new Set<string>();
 

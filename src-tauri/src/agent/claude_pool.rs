@@ -119,3 +119,13 @@ pub fn prewarm_agent() {
         Err(e) => log::warn!("[symon-agent] prewarm_agent: mcp config failed: {e}"),
     }
 }
+
+/// Control+Fn uses the fast Sonnet 5 subscription session for prompt adjustment.
+/// Repo-grounded composition can move back to Opus when that context is added.
+pub fn prewarm_smart_compose() {
+    let bin = super::claude::claude_bin();
+    match super::claude::ensure_empty_mcp_config() {
+        Ok(mcp) => prewarm(&bin, crate::models::CLAUDE_SONNET_5, &mcp),
+        Err(e) => log::warn!("[symon-agent] Smart Compose prewarm failed: {e}"),
+    }
+}
