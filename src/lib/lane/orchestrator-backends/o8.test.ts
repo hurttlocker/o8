@@ -234,6 +234,81 @@ describe('o8 backend tool gating (Composer parity) — through the real sendTurn
   });
 });
 
+// 2026-07-15 six-hour-timer incident: the turn's fetch and stream reads were
+// unbounded awaits, so a proxy that accepted the request and then went silent
+// wedged the turn forever — no error, no done, a busy latch that survived the
+// night. These drive the REAL sendTurn against a hung mock and assert the
+// inactivity watchdog terminalizes the turn visibly.
+describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Mock fetch honoring init.signal the way real fetch does for its body. */
+  function hungStreamFetch(framesBeforeHang: string[] = []) {
+    const encoder = new TextEncoder();
+    mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const frame of framesBeforeHang) controller.enqueue(encoder.encode(frame));
+          // …then never enqueue again and never close: the hang.
+          init.signal?.addEventListener('abort', () => {
+            controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+          });
+        },
+      });
+      return Promise.resolve({ ok: true, body } as unknown as Response);
+    });
+  }
+
+  it('a stream that goes silent forever is terminalized: watchdog error, then done', async () => {
+    hungStreamFetch();
+    const { events, onEvent } = collect();
+
+    const turn = o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await turn;
+
+    expect(events[0].type).toBe('error');
+    expect((events[0] as { error: string }).error).toMatch(/went silent/);
+    expect(events[events.length - 1].type).toBe('done');
+  });
+
+  it('a fetch that never returns headers is terminalized the same way', async () => {
+    mockFetch.mockImplementation((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      }));
+    const { events, onEvent } = collect();
+
+    const turn = o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await turn;
+
+    expect(events[0].type).toBe('error');
+    expect((events[0] as { error: string }).error).toMatch(/went silent/);
+    expect(events[events.length - 1].type).toBe('done');
+  });
+
+  it('received bytes re-arm the watchdog, and streamed text survives the eventual timeout', async () => {
+    hungStreamFetch([contentFrame('partial answer')]);
+    const { events, onEvent } = collect();
+
+    const turn = o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await turn;
+
+    expect(events).toContainEqual({ type: 'text', text: 'partial answer' });
+    expect(events.some((e) => e.type === 'error' && (e as { error: string }).error.match(/went silent/))).toBe(true);
+    expect(events[events.length - 1].type).toBe('done');
+  });
+});
+
 // Pure decision matrix — the exact gate sendTurn calls. New invariant: tools gate
 // on a scoped repo, NOT the plan — both free and founders edit files when a repo
 // is present, and NO repo means no tools for anyone.

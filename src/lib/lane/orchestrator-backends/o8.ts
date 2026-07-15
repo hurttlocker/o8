@@ -187,6 +187,15 @@ export function o8SystemPrompt(tier: 'low' | 'high', toolsEnabled: boolean, repo
 
 type ProxyMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
+// Inactivity ceiling for the proxy turn. This backend is a raw fetch — there is
+// no child process whose exit can terminalize a dead turn, so a proxy that
+// accepts the request and then hangs (or never returns headers) used to wedge
+// the turn FOREVER: no error, no done, a busy latch that survived the night
+// (2026-07-15 incident — a 6-hour "Working" timer). Five minutes of zero bytes
+// comfortably clears the founders-rail tool loop's longest silent stretch (a
+// server-side run_terminal_command) while still terminalizing a dead stream.
+const O8_TURN_INACTIVITY_TIMEOUT_MS = 300_000;
+
 /** Deterministic-name registry so `peekSession` mirrors an ensured session. */
 const ensured = new Set<string>();
 
@@ -221,7 +230,36 @@ async function sendToO8Orchestrator(
   const { tier, toolsEnabled } = o8TierAccess(paidPlan, options.thinkingEffort, hasRepo);
   const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier, toolsEnabled, repoName) }, ...history];
 
+  // Inactivity watchdog: every await below (the fetch AND each stream read) is
+  // otherwise unbounded. The watchdog aborts the request after
+  // O8_TURN_INACTIVITY_TIMEOUT_MS of silence; any received byte re-arms it. A
+  // user abort forwards through the same controller but stays distinguishable
+  // via options.signal so it keeps its silent-stop semantics.
+  const controller = new AbortController();
+  let watchdogFired = false;
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  const armWatchdog = () => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    watchdogTimer = setTimeout(() => {
+      watchdogFired = true;
+      controller.abort();
+    }, O8_TURN_INACTIVITY_TIMEOUT_MS);
+  };
+  const disarmWatchdog = () => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    watchdogTimer = null;
+  };
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
+  const watchdogError = () => {
+    onEvent({
+      type: 'error',
+      error: `The free o8 model went silent for ${Math.round(O8_TURN_INACTIVITY_TIMEOUT_MS / 60_000)} minutes — the turn was stopped so the chat doesn't hang. Re-send to retry.`,
+    });
+  };
+
   let response: Response;
+  armWatchdog();
   try {
     response = await fetch(`${getApiBase()}/api/v2/proxy/llm`, {
       method: 'POST',
@@ -244,12 +282,16 @@ async function sendToO8Orchestrator(
           ? { thinkingEffort: options.thinkingEffort === 'high' ? 'high' : 'low' }
           : {}),
       }),
-      signal: options.signal,
+      signal: controller.signal,
     });
   } catch (err) {
     // Reaching the proxy failed (or a user abort landed before the response). A
-    // clean stop is not an error line; anything else surfaces as one.
-    if (!options.signal?.aborted) {
+    // clean stop is not an error line; a watchdog abort and anything else
+    // surface as one so the turn always terminalizes visibly.
+    disarmWatchdog();
+    if (watchdogFired) {
+      watchdogError();
+    } else if (!options.signal?.aborted) {
       onEvent({
         type: 'error',
         error: `The free o8 model couldn't reach the model service: ${err instanceof Error ? err.message : String(err)}`,
@@ -261,6 +303,7 @@ async function sendToO8Orchestrator(
 
   // Non-2xx from the proxy is a JSON error body (`{ error }`), not an SSE stream.
   if (!response.ok || !response.body) {
+    disarmWatchdog();
     let detail = `HTTP ${response.status}`;
     try {
       const payload = await response.json() as { error?: unknown };
@@ -284,6 +327,7 @@ async function sendToO8Orchestrator(
   let buffer = '';
   try {
     for (;;) {
+      armWatchdog();
       const { done: streamDone, value } = await reader.read();
       if (streamDone) break;
       buffer += decoder.decode(value, { stream: true });
@@ -338,12 +382,17 @@ async function sendToO8Orchestrator(
         }
       }
     }
+    disarmWatchdog();
     done();
   } catch (err) {
-    // A user interrupt aborts the read — a clean stop, no error line. Any other
-    // failure surfaces as a system line. Either way emit the terminal `done` so
-    // the client "Working" latch releases (mirrors openclaw's error→done order).
-    if (!options.signal?.aborted) {
+    // A user interrupt aborts the read — a clean stop, no error line. A
+    // watchdog abort or any other failure surfaces as a system line. Either way
+    // emit the terminal `done` so the client "Working" latch releases (mirrors
+    // openclaw's error→done order).
+    disarmWatchdog();
+    if (watchdogFired) {
+      watchdogError();
+    } else if (!options.signal?.aborted) {
       onEvent({
         type: 'error',
         error: `The free o8 model hit an error: ${err instanceof Error ? err.message : String(err)}`,

@@ -58,6 +58,19 @@ export function ComposerStatusBar({
     }
   }, [turnLatched, awaitingReply, displayWaiting, hasRunningTools]);
 
+  // Stall ceiling (2026-07-15 six-hour-timer incident): a wedged turn that
+  // never produces a reply leaves the transcript ending in a dangling user
+  // message, so `awaitingReply` stays true FOREVER and the latch above never
+  // releases — the timer counted all night. When the latch is the SOLE thing
+  // keeping the bar alive (stream not busy, no running tools), give the reply
+  // two minutes to land and then let go. A normal turn never hits this: its
+  // reply flips awaitingReply false and the rAF unlatch above wins first.
+  useEffect(() => {
+    if (!(turnLatched && !displayWaiting && !hasRunningTools)) return;
+    const timeout = window.setTimeout(() => setTurnLatched(false), 120_000);
+    return () => window.clearTimeout(timeout);
+  }, [turnLatched, displayWaiting, hasRunningTools]);
+
   useEffect(() => {
     if (!active) {
       startedAtRef.current = null;
