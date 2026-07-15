@@ -54,7 +54,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     }
     if let Some(screen) = &ctx.screen {
         first_text.push_str("\n\n");
-        first_text.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
+        first_text.push_str(&super::screen_prompt_section(screen));
     }
     // Symon Spatial Context: teach the two-image + "this/here = marked region"
     // scaffold when the operator drew on the screen this turn.
