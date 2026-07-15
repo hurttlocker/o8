@@ -90,6 +90,7 @@ import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
+import { buildBackendSwitchCarryPrelude } from './lib/orchestrator/backend-switch-carry';
 import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
@@ -3580,6 +3581,14 @@ async function handleOrchestratorSendMsgOnce(
       activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
       threadId,
     );
+    // RC2 (69RMXR) — auto-carry prior transcript when the operator switched to a
+    // backend that has no CLI session on this thread yet. Computed BEFORE the
+    // current user message is persisted so it reflects PRIOR history only; folded
+    // into the outbound payload alone (the persisted transcript keeps raw message).
+    const carryPrelude = buildBackendSwitchCarryPrelude({ threadId, backend: activeBackend.id });
+    if (carryPrelude) {
+      console.log(`[backend-switch-carry] Injected prior transcript into first ${activeBackend.id} turn (thread=${threadId ?? 'none'})`);
+    }
     const updatedThread = appendMobileOrchestratorUserMessage({
       tabId: threadId,
       repoPath,
@@ -3605,7 +3614,8 @@ async function handleOrchestratorSendMsgOnce(
     // what got persisted to the transcript above; only the payload handed to
     // the backend carries the "Operator session rules (binding)" block. Applies
     // across ALL backends because they all forward this argument untouched.
-    const turnMessage = withSessionRules(message, threadId);
+    const turnBody = carryPrelude ? `${carryPrelude}\n\n${message}` : message;
+    const turnMessage = withSessionRules(turnBody, threadId);
     if (turnMessage !== message) {
       console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
     }
