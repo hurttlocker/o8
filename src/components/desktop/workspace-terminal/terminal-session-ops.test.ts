@@ -4,6 +4,7 @@ import {
   computeCliChatSession,
   resolveActiveChatSessionKey,
 } from './terminal-session-ops';
+import { buildQueuedContextCard } from './utils';
 import type { RegisteredRepo } from './types';
 
 const repo: RegisteredRepo = {
@@ -13,6 +14,25 @@ const repo: RegisteredRepo = {
 };
 
 describe('workspace terminal focused CLI session', () => {
+  it('keeps a captured design region on the staged context card', () => {
+    const previewImageDataUri = 'data:image/png;base64,captured-region';
+    const result = computeCliChatSession(
+      {
+        runtime: 'claude-code',
+        repo,
+        initialText: 'Tighten the spacing in this region.',
+        draftReason: 'design-draw',
+        previewImageDataUri,
+      },
+      [],
+      '',
+    );
+
+    const injection = result.tabs[0]?.chatDraftInjection;
+    expect(injection?.previewImageDataUri).toBe(previewImageDataUri);
+    expect(injection && buildQueuedContextCard(injection).previewImageDataUri).toBe(previewImageDataUri);
+  });
+
   it('moves the published active session key when focus switches to a spawned agent tab', () => {
     const first = computeCliChatSession(
       {

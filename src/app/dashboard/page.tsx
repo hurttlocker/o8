@@ -2909,12 +2909,13 @@ function DashboardInner() {
     };
     window.addEventListener('o8:orchestrator-inject', handler as EventListener);
     return () => window.removeEventListener('o8:orchestrator-inject', handler as EventListener);
-  }, [setThoughtsDraftInjection]);
+  }, [setThoughtsDraftInjection, workspaceTerminalHandlesRef]);
 
   const injectPayloadIntoRepoChat = useCallback((payload: AgentPanelChatInjectionPayload, repoOverride?: WorkspaceSidePanelRepo | null) => {
     const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
+      previewImageDataUri: payload.previewImageDataUri,
     };
     // Previously this short-circuited into the thoughts tile draft; that tile
     // no longer exists, so we always route injections through the workspace
@@ -2946,6 +2947,7 @@ function DashboardInner() {
         workspaceTarget.handle.injectIntoCliChat(payload.text, {
           repo: targetRepo ?? undefined,
           draftReason: payload.reason,
+          previewImageDataUri: payload.previewImageDataUri,
           targetSessionKey: preferredChatTargetKey,
         });
         return;
@@ -2978,7 +2980,7 @@ function DashboardInner() {
       }>).detail;
       const text = detail?.text?.trim();
       if (!text) return;
-      const finish = (shotPath: string | null, cropPath: string | null) => {
+      const finish = (shotPath: string | null, cropPath: string | null, cropBase64: string | null) => {
         const rect = detail?.rect;
         const region = rect
           ? `${Math.round(rect.width)}×${Math.round(rect.height)} region at (${Math.round(rect.left)}, ${Math.round(rect.top)})`
@@ -2991,6 +2993,7 @@ function DashboardInner() {
         injectPayloadIntoRepoChat({
           reason: 'design-draw',
           text: `${text}\n\n[Design Mode drawing — ${region}]${elements}${shot}${crop}`,
+          previewImageDataUri: cropBase64 ? `data:image/png;base64,${cropBase64}` : undefined,
         }, null);
         closeDesignMode();
       };
@@ -3009,13 +3012,16 @@ function DashboardInner() {
         // Full page always; the crop of the stroke bounds when we have a rect.
         const cropPromise = detail?.rect
           ? cropRegionBase64(screenshot, detail.rect, detail.viewport ?? null, { pad: 8 })
-              .then((cropB64) => (cropB64 ? persist(cropB64, 'crop') : null))
-          : Promise.resolve<string | null>(null);
+              .then(async (cropB64) => ({
+                cropBase64: cropB64,
+                cropPath: cropB64 ? await persist(cropB64, 'crop') : null,
+              }))
+          : Promise.resolve({ cropBase64: null, cropPath: null });
         void Promise.all([persist(screenshot, 'full'), cropPromise])
-          .then(([shotPath, cropPath]) => finish(shotPath, cropPath))
-          .catch(() => finish(null, null));
+          .then(([shotPath, cropResult]) => finish(shotPath, cropResult.cropPath, cropResult.cropBase64))
+          .catch(() => finish(null, null, null));
       } else {
-        finish(null, null);
+        finish(null, null, null);
       }
     };
     window.addEventListener('o8:design-draw-native', onNativeDraw);

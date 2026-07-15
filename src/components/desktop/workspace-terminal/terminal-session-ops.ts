@@ -170,6 +170,7 @@ export function computeCliChatSession(
     text: options.initialText,
     reason: options.draftReason,
     autoSend: options.autoSend,
+    previewImageDataUri: options.previewImageDataUri,
   } : undefined;
 
   if (matchingExisting) {
@@ -259,6 +260,7 @@ export interface LlmChatSessionOptions {
   repo?: RegisteredRepo;
   initialText?: string;
   draftReason?: string;
+  previewImageDataUri?: string;
   autoSend?: boolean;
   createNew?: boolean;
   label?: string;
@@ -331,6 +333,7 @@ export function computeLlmChatSession(
     text: options.initialText,
     reason: options.draftReason,
     autoSend: options.autoSend,
+    previewImageDataUri: options.previewImageDataUri,
   } : undefined;
 
   if (matchingExisting) {
@@ -367,6 +370,7 @@ export function buildLlmInjection(options: LlmChatSessionOptions) {
     text: options.initialText,
     reason: options.draftReason,
     autoSend: options.autoSend,
+    previewImageDataUri: options.previewImageDataUri,
   } : undefined;
 }
 

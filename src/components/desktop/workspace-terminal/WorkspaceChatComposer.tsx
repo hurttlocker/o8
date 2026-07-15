@@ -1,3 +1,5 @@
+/* eslint-disable @next/next/no-img-element -- composer previews are transient local data URIs */
+/* eslint-disable react-hooks/refs -- the hook return is composer state, though the rule treats the typed object as a ref */
 'use client';
 
 import { memo, useCallback, useRef } from 'react';
@@ -184,21 +186,36 @@ function WorkspaceChatComposerBase({
                   background: THEME_BG_CARD,
                 }}
               >
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 28,
-                    height: 28,
-                    borderRadius: 9,
-                    background: THEME_ACCENT_SOFT,
-                    color: THEME_ACCENT,
-                    flexShrink: 0,
-                  }}
-                >
-                  <MessageSquare size={14} />
-                </div>
+                {card.previewImageDataUri ? (
+                  <img
+                    src={card.previewImageDataUri}
+                    alt="Captured design region"
+                    style={{
+                      width: 72,
+                      height: 54,
+                      borderRadius: 9,
+                      border: '1px solid var(--t-border)',
+                      objectFit: 'cover',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 9,
+                      background: THEME_ACCENT_SOFT,
+                      color: THEME_ACCENT,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <MessageSquare size={14} />
+                  </div>
+                )}
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: THEME_ACCENT }}>
                     Staged Context
@@ -260,7 +277,6 @@ function WorkspaceChatComposerBase({
           >
             {attachments.attachedImages.map((image, index) => (
               <div key={`${image.name}-${index}`} style={{ position: 'relative', width: 66, flexShrink: 0 }}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- data URI, not a remote asset */}
                 <img
                   src={image.dataUri}
                   alt={image.name}

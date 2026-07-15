@@ -403,7 +403,7 @@ export function fallbackWorkspaceChatSessionKey(
   return `${runtime}:ide-tab-${scope}-${tabId}`;
 }
 
-export function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
+export function buildQueuedContextCard(injection: { id: string; text: string; reason?: string; previewImageDataUri?: string }): QueuedContextCard {
   const lines = injection.text
     .split('\n')
     .map((line) => line.trim())
@@ -431,6 +431,7 @@ export function buildQueuedContextCard(injection: { id: string; text: string; re
     title,
     meta,
     preview,
+    previewImageDataUri: injection.previewImageDataUri,
   };
 }
 
