@@ -1364,7 +1364,7 @@ mod model_vision_tests {
         assert!(!model_can_see_images("openai/gpt-3.5-turbo"));
         assert_eq!(
             crate::models::AGENT_MAC_NATIVE_ACTION_DEFAULT,
-            crate::models::CLAUDE_SONNET_5
+            crate::models::CLAUDE_OPUS_4_8
         );
     }
 }
