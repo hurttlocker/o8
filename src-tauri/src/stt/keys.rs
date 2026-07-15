@@ -28,6 +28,26 @@ const SECRET_PREF_KEYS: [&str; 5] = [
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.o8.desktop.voice-provider-keys";
 
+// Security.framework's documented `errSecItemNotFound` OSStatus. Keep this
+// local rather than adding the low-level security-framework-sys crate solely
+// for one comparison.
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
+#[cfg(target_os = "macos")]
+fn keychain_delete_error_is_ignorable(code: i32) -> bool {
+    code == ERR_SEC_ITEM_NOT_FOUND
+}
+
+#[cfg(target_os = "macos")]
+fn delete_keychain_secret(key: &str) -> Result<(), String> {
+    match security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, key) {
+        Ok(()) => Ok(()),
+        Err(error) if keychain_delete_error_is_ignorable(error.code()) => Ok(()),
+        Err(error) => Err(format!("delete {key} from macOS Keychain: {error}")),
+    }
+}
+
 /// Canonical o8 data dir (`~/.o8`, overridable via env). Mirrors the resolver
 /// in `lib.rs` but does NOT trigger the cortex-ide → o8 migration — STT only
 /// reads a single config file, so the lighter resolver keeps it dependency-free.
@@ -173,11 +193,10 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
         {
             if secret.is_empty() {
                 // Deleting a missing item is harmless from the caller's point
-                // of view; the plaintext legacy field is removed below too.
-                let _ = security_framework::passwords::delete_generic_password(
-                    KEYCHAIN_SERVICE,
-                    key,
-                );
+                // of view. Every other Keychain failure must stop the settings
+                // write so the UI cannot claim a secret was cleared when it
+                // remains in secure storage.
+                delete_keychain_secret(key)?;
             } else {
                 security_framework::passwords::set_generic_password(
                     KEYCHAIN_SERVICE,
@@ -321,4 +340,16 @@ pub fn get_google_tts_key() -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| stored_secret("google_tts_api_key"))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{keychain_delete_error_is_ignorable, ERR_SEC_ITEM_NOT_FOUND};
+
+    #[test]
+    fn only_missing_keychain_items_are_ignored_on_delete() {
+        assert!(keychain_delete_error_is_ignorable(ERR_SEC_ITEM_NOT_FOUND));
+        assert!(!keychain_delete_error_is_ignorable(-25293));
+        assert!(!keychain_delete_error_is_ignorable(-50));
+    }
 }

@@ -70,12 +70,12 @@ async function systemLookup(hostname: string): Promise<LookupAddress[]> {
   return lookup(hostname, { all: true, verbatim: true });
 }
 
-/**
- * Validate an engine-tier URL before Chrome can request it. Every DNS answer
- * must be public; mixed public/private answers are rejected so an attacker
- * cannot choose the private result through DNS rebinding or resolver order.
- */
-export async function assertPublicHttpUrl(rawUrl: string, lookupAll: LookupAll = systemLookup): Promise<URL> {
+async function assertPublicUrl(
+  rawUrl: string,
+  allowedProtocols: readonly string[],
+  protocolError: string,
+  lookupAll: LookupAll,
+): Promise<URL> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -83,8 +83,8 @@ export async function assertPublicHttpUrl(rawUrl: string, lookupAll: LookupAll =
     throw new Error('Browser URL is invalid.');
   }
 
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Browser URL must use HTTP or HTTPS.');
+  if (!allowedProtocols.includes(url.protocol)) {
+    throw new Error(protocolError);
   }
   if (url.username || url.password) {
     throw new Error('Browser URLs cannot contain credentials.');
@@ -108,4 +108,28 @@ export async function assertPublicHttpUrl(rawUrl: string, lookupAll: LookupAll =
     throw new Error('The browser target resolves to a private or non-routable address.');
   }
   return url;
+}
+
+/**
+ * Validate an engine-tier URL before Chrome can request it. Every DNS answer
+ * must be public; mixed public/private answers are rejected so an attacker
+ * cannot choose the private result through DNS rebinding or resolver order.
+ */
+export async function assertPublicHttpUrl(rawUrl: string, lookupAll: LookupAll = systemLookup): Promise<URL> {
+  return assertPublicUrl(
+    rawUrl,
+    ['http:', 'https:'],
+    'Browser URL must use HTTP or HTTPS.',
+    lookupAll,
+  );
+}
+
+/** Apply the same public-network boundary to page-created WebSockets. */
+export async function assertPublicWebSocketUrl(rawUrl: string, lookupAll: LookupAll = systemLookup): Promise<URL> {
+  return assertPublicUrl(
+    rawUrl,
+    ['ws:', 'wss:'],
+    'Browser WebSocket URL must use WS or WSS.',
+    lookupAll,
+  );
 }

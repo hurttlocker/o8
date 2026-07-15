@@ -10,10 +10,13 @@
 
 import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
 import { safeJoinReal } from '@/lib/fs/safe-path';
 import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
+import { resolveTerminalWorkingDirectory } from '@/lib/llm/terminal-working-directory';
+
+export { canonicalizeTerminalToolArgs, terminalApprovalSummary } from '@/lib/llm/terminal-working-directory';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 50_000; // 50KB
@@ -578,20 +581,9 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
     return { content: `🔴 Command blocked: ${classification.reason}\n\nThis command is not allowed to run from the chat for safety reasons.` };
   }
 
-  // Resolve working directory
-  if (!requireRepoScope(repoRoot)) {
-    return { content: 'Error: No repository is scoped to this chat' };
-  }
-
-  let workDir = repoRoot;
-  if (cwd) {
-    const resolved = join(repoRoot, cwd);
-    const rel = relative(repoRoot, resolved);
-    if (rel.startsWith('..') || rel.startsWith('/')) {
-      return { content: 'Error: Working directory must be within the repository' };
-    }
-    workDir = resolved;
-  }
+  const workingDirectory = resolveTerminalWorkingDirectory(repoRoot, cwd);
+  if ('error' in workingDirectory) return { content: workingDirectory.error };
+  const workDir = workingDirectory.path;
 
   try {
     const output = execSync(command, {
@@ -613,7 +605,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
 
     return {
       content: result || '(command completed with no output)',
-      sources: [{ title: `$ ${command}`, path: cwd || '.' }],
+      sources: [{ title: `$ ${command}`, path: workingDirectory.relativePath }],
     };
   } catch (err) {
     // execSync throws on non-zero exit code — capture both stdout and stderr

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertPublicHttpUrl, isPublicNetworkAddress } from './safe-url';
+import { assertPublicHttpUrl, assertPublicWebSocketUrl, isPublicNetworkAddress } from './safe-url';
 
 describe('public network URL validation', () => {
   it.each([
@@ -49,4 +49,27 @@ describe('public network URL validation', () => {
     'rejects unsafe browser targets: %s',
     async (url) => expect(assertPublicHttpUrl(url, async () => [])).rejects.toThrow(),
   );
+
+  it.each([
+    'ws://localhost:47125',
+    'ws://127.0.0.1:47125',
+    'wss://169.254.169.254/socket',
+    'ws://[::1]/socket',
+    'https://example.test/socket',
+  ])(
+    'rejects unsafe or non-WebSocket browser targets: %s',
+    async (url) => expect(assertPublicWebSocketUrl(url, async () => [])).rejects.toThrow(),
+  );
+
+  it('accepts a WebSocket only when every DNS answer is public', async () => {
+    const url = await assertPublicWebSocketUrl('wss://socket.example.test/live', async () => [
+      { address: '93.184.216.34', family: 4 },
+    ]);
+    expect(url.toString()).toBe('wss://socket.example.test/live');
+
+    await expect(assertPublicWebSocketUrl('wss://rebind.example.test/live', async () => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.8', family: 4 },
+    ])).rejects.toThrow('private or non-routable');
+  });
 });

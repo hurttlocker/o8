@@ -17,7 +17,7 @@ import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { anthropicPricingForModel } from '@/lib/llm/pricing';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
-import { executeTool, type ToolResult } from '@/lib/llm/tools';
+import { canonicalizeTerminalToolArgs, executeTool, terminalApprovalSummary, type ToolResult } from '@/lib/llm/tools';
 import { resolvePromptCachingEnabledSync } from '@/lib/operator/defaults';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -46,7 +46,6 @@ type AnthropicUsageTotals = {
   cacheReadTokens: number;
   cacheWriteTokens: number;
 };
-
 function jsonError(message: string, status: number) {
   return new Response(
     JSON.stringify({ error: message }),
@@ -761,6 +760,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             }
 
             if (policyResult.requiresApproval) {
+              const approvalArgs = toolCall.name === 'run_terminal_command' ? canonicalizeTerminalToolArgs(effectiveRepoRoot, toolCall.args) : toolCall.args;
               const command = toolCall.name === 'run_terminal_command' ? (toolCall.args.command as string) : '';
               let summary = `Execute ${toolCall.name}`;
               let diff: { before?: string; after?: string; path?: string } | undefined;
@@ -770,7 +770,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               } else if (toolCall.name === 'create_pull_request') {
                 summary = `Create PR: "${toolCall.args.title}" on branch ${toolCall.args.branch}`;
               } else if (toolCall.name === 'run_terminal_command') {
-                summary = `Run command: ${command}`;
+                summary = terminalApprovalSummary(effectiveRepoRoot, approvalArgs);
               } else if (toolCall.name === 'write_file') {
                 const filePath = String(toolCall.args.path || '');
                 const content = String(toolCall.args.content || '');
@@ -798,7 +798,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                     description: summary,
                     summary,
                     toolName: toolCall.name,
-                    args: toolCall.args,
+                    args: approvalArgs,
                     command: command || undefined,
                     editable: toolCall.name === 'run_terminal_command',
                     diff,
@@ -826,7 +826,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                 type: 'approval_required',
                 id: approval?.id,
                 name: toolCall.name,
-                args: toolCall.args,
+                args: approvalArgs,
                 editable: toolCall.name === 'run_terminal_command',
                 summary,
                 diff,

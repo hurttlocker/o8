@@ -129,7 +129,12 @@ export class RateLimiter {
 
   private record(key: string, limit: number, now: number): boolean {
     const arr = (this.connects.get(key) ?? []).filter((t) => now - t < this.opts.windowMs);
-    arr.push(now);
+    // Accepted timestamps are sufficient for an exact sliding-window limiter.
+    // Once the window holds `limit` entries, every later attempt is denied
+    // until one expires, so retaining denied attempts only creates unbounded
+    // memory growth without changing the admission decision.
+    const allowed = arr.length < limit;
+    if (allowed) arr.push(now);
     this.connects.set(key, arr);
 
     const maxTrackedKeys = this.opts.maxTrackedKeys ?? DEFAULT_RATE_LIMITS.maxTrackedKeys!;
@@ -146,7 +151,7 @@ export class RateLimiter {
       }
       if (oldestKey) this.connects.delete(oldestKey);
     }
-    return arr.length <= limit;
+    return allowed;
   }
 
   /** Record + check routing-id, source-IP, and global connect windows. Every

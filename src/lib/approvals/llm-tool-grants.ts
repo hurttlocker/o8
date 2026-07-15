@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { randomBytes } from 'node:crypto';
+import { canonicalizeTerminalToolArgs } from '@/lib/llm/terminal-working-directory';
 
 interface LlmToolGrant {
   tabId: string;
@@ -29,6 +30,17 @@ export function toolArgsEqual(left: Record<string, unknown>, right: Record<strin
   return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 }
 
+function canonicalizeGrantArgs(
+  repoPath: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const scopedArgs = toolName === 'run_terminal_command'
+    ? canonicalizeTerminalToolArgs(repoPath, args)
+    : args;
+  return canonicalize(scopedArgs) as Record<string, unknown>;
+}
+
 function reapExpired(now: number): void {
   for (const [token, grant] of grants) {
     if (grant.expiresAt <= now) grants.delete(token);
@@ -48,7 +60,7 @@ export function issueLlmToolGrant(input: {
     tabId: input.tabId,
     repoPath: input.repoPath,
     toolName: input.toolName,
-    args: canonicalize(input.args) as Record<string, unknown>,
+    args: canonicalizeGrantArgs(input.repoPath, input.toolName, input.args),
     expiresAt: now + GRANT_TTL_MS,
   });
   return token;
@@ -77,7 +89,7 @@ export function consumeLlmToolGrant(input: {
   return grant.expiresAt > now
     && grant.tabId === input.tabId
     && grant.repoPath === input.repoPath
-    && toolArgsEqual(grant.args, input.args);
+    && toolArgsEqual(grant.args, canonicalizeGrantArgs(input.repoPath, input.toolName, input.args));
 }
 
 export function clearLlmToolGrantsForTests(): void {

@@ -13,7 +13,12 @@ export class BoundedRateLimiter {
   allow(key: string, limit: number, windowMs: number, now = Date.now()): boolean {
     const prior = this.entries.get(key);
     const timestamps = (prior?.timestamps ?? []).filter((timestamp) => now - timestamp < windowMs);
-    timestamps.push(now);
+    // Denied attempts do not need their own timestamp: once `limit` accepted
+    // attempts are in the sliding window, every later attempt is denied until
+    // one expires. Keeping only accepted timestamps preserves that behavior
+    // while bounding each key to at most `limit` numbers under an attack flood.
+    const allowed = timestamps.length < limit;
+    if (allowed) timestamps.push(now);
     this.entries.set(key, { timestamps, lastSeen: now });
 
     if (this.entries.size > this.maxKeys) {
@@ -28,7 +33,7 @@ export class BoundedRateLimiter {
       if (oldestKey) this.entries.delete(oldestKey);
     }
 
-    return timestamps.length <= limit;
+    return allowed;
   }
 }
 
