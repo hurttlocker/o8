@@ -78,10 +78,10 @@ function loadPanelToken(): string | null {
  * Paths that are allowed to pass through the middleware without auth.
  * Keep this list MINIMAL. These must be safe to expose unauthenticated.
  *
- * IMPORTANT: `/api/setup/*` is ONLY allowlisted for read methods (GET/HEAD).
- * Writes (POST/PATCH/DELETE) still go through the loopback gate so a
- * cross-origin POST can't silently write to the user's Claude config or
- * flip setupComplete before the desktop app is ready.
+ * NOTE: `/api/setup/*` is NOT allowlisted (hardening #1562) — setup GETs
+ * expose machine configuration and stay behind the operator bearer. The one
+ * setup endpoint the pre-app boot page needs (`/api/setup/identity`) passes
+ * via LOOPBACK_READ_CAPABILITIES below, never from LAN.
  */
 const ALLOWLIST_READ_ONLY: RegExp[] = [
   // Health check for the Tauri shell to know the bundled server is up.
@@ -137,6 +137,17 @@ const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
   /^\/api\/browser\/proxy\/?$/,
   /^\/api\/browser\/engine\/view\/?$/,
   /^\/api\/panel\/proxy\/?$/,
+  // Boot-gate identity probe (v0.1.600 stuck-boot incident): the packaged
+  // boot page is static HTML served by the Tauri shell — it CANNOT attach a
+  // bearer, and it must confirm "this port is MY server" before navigating to
+  // the app (its route even sets Access-Control-Allow-Origin:* for exactly
+  // this cross-origin probe). GET/HEAD only via the gate below; LAN callers
+  // still hit the default deny (socket truth in packaged, Host heuristics in
+  // dev). Hardening #1562 removed the old blanket /api/setup/* allowlist and
+  // this probe went down with it — every packaged boot then stalled on the
+  // boot screen. Real-path tests: tests/middleware-gate.test.ts "boot-gate
+  // identity probe".
+  /^\/api\/setup\/identity\/?$/,
 ];
 
 /**
