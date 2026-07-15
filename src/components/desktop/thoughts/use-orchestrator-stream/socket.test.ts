@@ -17,6 +17,12 @@ function makeHarness(initial: {
   messages?: MobileTranscriptEntry[];
   current?: CurrentAssistantStreamState | null;
   lastSeq?: number;
+  epoch?: number;
+  // Wall-clock of the last real activity. Defaults to now — the realistic state
+  // of a client that just sent/received (send() stamps lastEventAt). The RC1
+  // seam-3 stale-busy reconcile keys off this; a test simulates a dropped
+  // terminal by passing an OLD value.
+  lastEventAt?: number;
 }) {
   const ws = {} as WebSocket;
   const statusRef = { current: initial.status };
@@ -24,6 +30,8 @@ function makeHarness(initial: {
   const messagesRef = { current: initial.messages ?? [] };
   const lastSeqRef = { current: initial.lastSeq ?? 0 };
   const lastBackendRef = { current: null as string | null };
+  const resetEpochRef = { current: initial.epoch ?? 0 };
+  const lastEventAtRef = { current: initial.lastEventAt ?? Date.now() };
   const setStatus = vi.fn();
   const setMessages = vi.fn();
   const scheduleFlushCurrentAssistant = vi.fn();
@@ -41,9 +49,9 @@ function makeHarness(initial: {
     flushCurrentAssistant,
     scheduleFlushCurrentAssistant,
     lastBackendRef,
-    lastEventAtRef: { current: 0 },
+    lastEventAtRef,
     messagesRef,
-    resetEpochRef: { current: 0 },
+    resetEpochRef,
     setMessages,
     setStatus,
     statusRef,
@@ -60,6 +68,8 @@ function makeHarness(initial: {
     messagesRef,
     lastSeqRef,
     lastBackendRef,
+    resetEpochRef,
+    lastEventAtRef,
     setStatus,
     setMessages,
     scheduleFlushCurrentAssistant,
@@ -157,6 +167,53 @@ describe('orchestrator socket — first-turn streaming race', () => {
     const h = makeHarness({ status: 'busy', messages: [userMsg] });
 
     h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'dead', snapshot: true } });
+    expect(h.statusRef.current).toBe('busy');
+  });
+});
+
+describe('orchestrator socket — RC1 seam 1: epoch bump must not drop answer tokens', () => {
+  it('a mid-stream reset() (epoch bump) keeps rendering the durable turn instead of dropping it', () => {
+    // Turn is live; the assistant entry is stamped to epoch 0.
+    const h = makeHarness({ status: 'busy', messages: [userMsg], epoch: 0 });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'thinking done, answer: ' } });
+    expect(h.currentAssistantRef.current?.chunks).toContain('thinking done, answer: ');
+
+    // A same-thread load / clear bumps the reset epoch mid-turn (D7HY6S). The
+    // server turn is durable and keeps streaming answer tokens on this socket.
+    h.resetEpochRef.current += 1;
+
+    // Pre-fix: this token hit the epoch guard, nulled the assistant and `break`ed
+    // — the rest of the answer was silently lost ("thinking shown, no answer").
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: '42' } });
+    expect(h.currentAssistantRef.current).not.toBeNull();
+    expect(h.currentAssistantRef.current?.chunks).toContain('42'); // NOT dropped
+    expect(h.currentAssistantRef.current?.epoch).toBe(1); // re-stamped to the live epoch
+    expect(h.statusRef.current).toBe('busy');
+  });
+});
+
+describe('orchestrator socket — RC1 seam 3: stale-busy reconcile (latched composer heal)', () => {
+  it('a snapshot ready clears a STALE local busy (dropped terminal) so the next send is not swallowed', () => {
+    // Terminal 'ready' never reached the client; local busy has been silent well
+    // past the reconcile window. The composer guard reads orchStream.status ===
+    // 'busy' (J4FHM2 "second turns don't fire"); clearing it unlatches the send.
+    const h = makeHarness({ status: 'busy', messages: [userMsg], lastEventAt: Date.now() - 60_000 });
+
+    h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'ready', snapshot: true } });
+    expect(h.statusRef.current).toBe('ready'); // composer unlatched
+  });
+
+  it('a snapshot ready does NOT clear a FRESH busy — the first-turn re-subscribe race guard still holds', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg], lastEventAt: Date.now() });
+
+    h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'ready', snapshot: true } });
+    expect(h.statusRef.current).toBe('busy'); // preserved — turn is legitimately live
+  });
+
+  it('a snapshot busy still resyncs an idle client UP to busy (reattach reflects the working turn)', () => {
+    const h = makeHarness({ status: 'connecting' });
+
+    h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'busy', snapshot: true } });
     expect(h.statusRef.current).toBe('busy');
   });
 });

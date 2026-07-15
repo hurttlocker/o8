@@ -72,6 +72,17 @@ interface CreateOrchestratorMessageHandlerOptions {
 /** Backends whose text events are token slices, not complete blocks. */
 const VERBATIM_STREAM_BACKENDS = new Set(['o8']);
 
+// RC1 seam 3 — stale-busy reconcile window. A subscribe/reconnect snapshot must
+// NOT downgrade a genuinely live 'busy' (the first-turn re-subscribe race: a
+// snapshot 'ready' can land right after send() optimistically set 'busy', before
+// the first token). But if the local turn has gone quiet longer than this window
+// — the terminal 'ready' was dropped by a socket flap and never reached us — the
+// busy is STALE and permanently latches the composer (J4FHM2 "second turns don't
+// fire"). Past this window we trust the server snapshot to clear it. A recent
+// send OR event keeps lastEventAt fresh (send() stamps it), preserving the race
+// guard; only a truly silent turn heals.
+const ORCH_SNAPSHOT_BUSY_RECONCILE_MS = 6000;
+
 function createAssistantState(
   resetEpochRef: RefLike<number>,
   assistantMessageId?: unknown,
@@ -245,21 +256,29 @@ export function createOrchestratorMessageHandler(
           }
         }
 
-        if (!options.currentAssistantRef.current) {
+        if (
+          !options.currentAssistantRef.current
+          || options.currentAssistantRef.current.epoch !== options.resetEpochRef.current
+        ) {
           // Output arriving IS proof the turn is live — never drop it on a
           // status mismatch. The first-turn re-subscribe race (threadId mints
           // mid-turn → re-subscribe → the server's snapshot status can land as
           // non-'busy' right as the first tokens arrive) used to `break` here
           // and silently kill the entire stream until a reload. Promote to busy
           // and render instead. 2026-06-18.
+          //
+          // RC1 seam 1 — the same applies on an EPOCH mismatch: a mid-turn
+          // reset() bumps resetEpochRef, and the answer tokens of a still-running
+          // server turn kept arriving on the same socket. The old branch nulled
+          // the assistant and `break`ed, discarding every remaining answer token
+          // (D7HY6S "thinking shown, no answer"). Instead of dropping, open a
+          // fresh assistant entry stamped to the current epoch and keep rendering
+          // the answer into it. The server turn is durable — the tokens are real.
           if (options.statusRef.current !== 'busy') {
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
           options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
-        } else if (options.currentAssistantRef.current.epoch !== options.resetEpochRef.current) {
-          options.currentAssistantRef.current = null;
-          break;
         }
 
         if (isThinking) {
@@ -297,7 +316,21 @@ export function createOrchestratorMessageHandler(
         const isSnapshot = msg.data?.snapshot === true;
         if (newStatus === 'ready' || newStatus === 'busy' || newStatus === 'dead') {
           if (isSnapshot) {
-            if (options.statusRef.current === 'busy' && newStatus !== 'busy') break;
+            if (options.statusRef.current === 'busy' && newStatus !== 'busy') {
+              // RC1 seam 3/4 — a snapshot terminal (ready/dead) normally must NOT
+              // downgrade a live busy (first-turn re-subscribe race). But when the
+              // local turn has been silent past the reconcile window, our busy is
+              // stale: the terminal 'ready' was dropped by a flap/remount and the
+              // composer is latched (J4FHM2). The server only reports a terminal
+              // snapshot when its session is not-busy (or it healed a stale-busy),
+              // so on a quiescent local turn trust it and clear the latch. A recent
+              // send/event keeps lastEventAt fresh and preserves the race guard.
+              const quietForMs = observedAt - options.lastEventAtRef.current;
+              if (quietForMs < ORCH_SNAPSHOT_BUSY_RECONCILE_MS) break;
+              // Drop the orphaned in-flight assistant so the next turn's first
+              // token opens a clean entry instead of appending to a dead stream.
+              options.currentAssistantRef.current = null;
+            }
             options.statusRef.current = newStatus;
             options.setStatus(newStatus);
             break;
