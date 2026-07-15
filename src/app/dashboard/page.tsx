@@ -35,6 +35,7 @@ import { useProjects, type ProjectRecord } from '@/components/desktop/repo-regis
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
+import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
@@ -5473,6 +5474,11 @@ function DashboardInner() {
           }}
         />
       ) : null}
+
+      {/* Drag-to-split ghost pill — follows the cursor while a chat/thread
+          row is dragged from the left rail (split-screen parity). Renders
+          nothing when idle. */}
+      <ThreadDragGhost />
 
     </div>
     </DictationHost>

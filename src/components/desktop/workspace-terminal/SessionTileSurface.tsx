@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
+import { ThreadChatPane } from '@/components/desktop/workspace-terminal/ThreadChatPane';
 import {
   collectAllLeaves,
   computeSessionTileLayout,
@@ -25,6 +26,8 @@ interface SessionTileSurfaceProps {
   layout: SessionTileLayout;
   focusedSessionKey: string | null;
   chatSlot: ReactNode;
+  /** Repo scope inherited by thread panes (drag-to-split). */
+  repoPath?: string | null;
   onResizeSplit: (splitId: string, ratio: number) => void;
   onCloseLeaf: (leafId: string) => void;
   onFocusSession: (sessionKey: string) => void;
@@ -36,6 +39,7 @@ export function SessionTileSurface({
   layout,
   focusedSessionKey,
   chatSlot,
+  repoPath,
   onResizeSplit,
   onCloseLeaf,
   onFocusSession,
@@ -145,6 +149,28 @@ export function SessionTileSurface({
                 }}
               >
                 {chatSlot}
+              </div>
+            ) : leaf.kind === 'thread' && leaf.threadId ? (
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  paddingTop: 8,
+                  paddingRight: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 8,
+                }}
+              >
+                <ThreadChatPane
+                  threadId={leaf.threadId}
+                  title={leaf.title ?? 'Chat'}
+                  mode={leaf.mode ?? 'orchestrator'}
+                  repoPath={repoPath}
+                  onClose={() => onCloseLeaf(leaf.id)}
+                />
               </div>
             ) : leaf.sessionKey ? (
               <div
