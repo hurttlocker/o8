@@ -33,7 +33,7 @@
  * palette-independent (like the dock), so raw dark rgba is acceptable here.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
 
@@ -63,22 +63,26 @@ const SAFETY_MS = 60_000;
 const PAINT_GRACE_MS = 300;
 
 type Phase = 'listening' | 'final';
+type PartialsSurface = 'caret' | 'hud';
 
 interface SttPayload {
   type?: string;
   origin?: string;
   lane?: string;
   text?: string;
-  // Plain Fn dictation carries no lane, but when the operator has opted into the
-  // Fn partials HUD (`fn_hud_partials`), the Rust side tags its `system-start`
-  // with `hud: true` so this page latches for the Fn path too. Default OFF —
-  // absent means the HUD stays invisible during Fn dictation, as before.
+  // Plain Fn dictation carries no lane. The Rust side tags visible partials with
+  // `hud: true` and names the selected surface; new installs default to the
+  // cursor-local surface while the legacy screen bar remains selectable.
   hud?: boolean;
+  surface?: 'caret' | 'hud' | 'off';
+  mode?: 'dictation' | 'smart-compose';
 }
 
 interface HudState {
   phase: Phase;
   text: string;
+  surface: PartialsSurface;
+  mode: 'dictation' | 'smart-compose';
 }
 
 export default function AgentPartialsPage() {
@@ -142,7 +146,10 @@ export default function AgentPartialsPage() {
         setState(null);
       }, DISMISS_DELAY_MS);
     };
-    const activate = () => {
+    const activate = (
+      surface: PartialsSurface,
+      mode: 'dictation' | 'smart-compose',
+    ) => {
       agentActiveRef.current = true;
       clearDismiss();
       clearSafety();
@@ -160,7 +167,7 @@ export default function AgentPartialsPage() {
       }, PAINT_GRACE_MS);
       sessionStartedAtRef.current = Date.now();
       setElapsedSeconds(0);
-      setState({ phase: 'listening', text: '' });
+      setState({ phase: 'listening', text: '', surface, mode });
     };
     const showText = (phase: Phase, text: string) => {
       // A new frame of live text — keep the HUD alive (cancel any pending fade)
@@ -172,7 +179,12 @@ export default function AgentPartialsPage() {
       clearDismiss();
       clearSafety();
       safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
-      setState({ phase, text });
+      setState((current) => ({
+        phase,
+        text,
+        surface: current?.surface ?? 'caret',
+        mode: current?.mode ?? 'dictation',
+      }));
     };
 
     const handle = (p: SttPayload) => {
@@ -181,12 +193,17 @@ export default function AgentPartialsPage() {
       // the origin field is absent on some emit paths).
       if (p.origin !== 'system' && type !== 'system-pasted') return;
 
-      // Activate on an AGENT-lane system-start (Right-Option Symon agent) OR a
-      // plain Fn system-start explicitly tagged `hud: true` (the opt-in Fn
-      // partials HUD, `fn_hud_partials`). A plain Fn system-start with neither
-      // is ignored → Fn dictation stays invisible unless the operator opted in.
+      // Activate on an AGENT-lane system-start (Right-Option Symon agent) or a
+      // plain Fn system-start tagged `hud: true`. The surface field chooses the
+      // cursor-local default or the legacy screen bar.
       if (type === 'system-start') {
-        if (p.lane === 'agent' || p.hud === true) activate();
+        if (p.surface === 'off') return;
+        if (p.lane === 'agent' || p.hud === true) {
+          activate(
+            p.surface === 'hud' ? 'hud' : 'caret',
+            p.mode === 'smart-compose' ? 'smart-compose' : 'dictation',
+          );
+        }
         return;
       }
 
@@ -353,6 +370,7 @@ export default function AgentPartialsPage() {
     ? state.text || (state.phase === 'listening' ? 'Listening' : '')
     : '';
   const rise = prefersReducedMotion ? 0 : 4;
+  const caretLocal = state?.surface === 'caret';
 
   return (
     <div
@@ -360,10 +378,11 @@ export default function AgentPartialsPage() {
         position: 'fixed',
         inset: 0,
         display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-        paddingLeft: 24,
-        paddingRight: 24,
+        alignItems: caretLocal ? 'flex-start' : 'flex-end',
+        justifyContent: caretLocal ? 'flex-start' : 'center',
+        paddingLeft: caretLocal ? 6 : 24,
+        paddingRight: caretLocal ? 6 : 24,
+        paddingTop: caretLocal ? 6 : 0,
         paddingBottom: 6,
         boxSizing: 'border-box',
         background: 'transparent',
@@ -373,7 +392,7 @@ export default function AgentPartialsPage() {
       <AnimatePresence>
         {state && !suppressed && graceElapsed ? (
           <motion.div
-            key="agent-partials-bar"
+            key={`agent-partials-bar-${state.surface}`}
             role="status"
             aria-live="polite"
             initial={{ opacity: 0, y: rise }}
@@ -383,22 +402,26 @@ export default function AgentPartialsPage() {
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 8,
-              width: 'min(680px, calc(100vw - 56px))',
+              gap: caretLocal ? 5 : 8,
+              width: caretLocal
+                ? 'min(420px, calc(100vw - 12px))'
+                : 'min(680px, calc(100vw - 56px))',
               maxWidth: '100%',
               boxSizing: 'border-box',
-              paddingTop: 16,
-              paddingBottom: 16,
-              paddingLeft: 26,
-              paddingRight: 26,
-              borderRadius: 22,
+              paddingTop: caretLocal ? 10 : 16,
+              paddingBottom: caretLocal ? 10 : 16,
+              paddingLeft: caretLocal ? 14 : 26,
+              paddingRight: caretLocal ? 14 : 26,
+              borderRadius: caretLocal ? 14 : 22,
               background: 'rgba(9, 10, 13, 0.82)',
               backdropFilter: 'blur(22px) saturate(140%)',
               WebkitBackdropFilter: 'blur(22px) saturate(140%)',
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'rgba(255, 255, 255, 0.12)',
-              boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4)',
+              boxShadow: caretLocal
+                ? '0 10px 30px rgba(0, 0, 0, 0.38), 0 1px 5px rgba(0, 0, 0, 0.32)'
+                : '0 18px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4)',
               fontFamily: FONT,
               pointerEvents: 'none',
             } as React.CSSProperties}
@@ -430,9 +453,11 @@ export default function AgentPartialsPage() {
                   lineHeight: 1,
                 }}
               >
-                Symon · Listening
+                {state.mode === 'smart-compose'
+                  ? 'Symon · Compose'
+                  : caretLocal ? 'Symon' : 'Symon · Listening'}
               </span>
-              {state.phase === 'listening' && elapsedSeconds >= 10 ? (
+              {!caretLocal && state.phase === 'listening' && elapsedSeconds >= 10 ? (
                 <span
                   style={{
                     marginLeft: 'auto',
@@ -456,18 +481,22 @@ export default function AgentPartialsPage() {
             <div
               ref={scrollRef}
               style={{
-                maxHeight: 84,
+                maxHeight: caretLocal ? 48 : 84,
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 26px)',
-                maskImage: 'linear-gradient(to bottom, transparent 0px, black 26px)',
+                WebkitMaskImage: caretLocal
+                  ? undefined
+                  : 'linear-gradient(to bottom, transparent 0px, black 26px)',
+                maskImage: caretLocal
+                  ? undefined
+                  : 'linear-gradient(to bottom, transparent 0px, black 26px)',
               } as React.CSSProperties}
             >
               <span
                 style={{
-                  fontSize: 19,
+                  fontSize: caretLocal ? 14 : 19,
                   fontWeight: 400,
                   letterSpacing: '-0.1px',
                   lineHeight: 1.4,

@@ -70,6 +70,11 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // magic). A frontmost-app guard refuses misdirected writes, and the
         // tool only fires when the prompt carried an explicit edit verb.
         "apply_text_edit" => SafetyClass::ReadOnly,
+        // Operator-installed SKILL.md guidance only. Activation is a local,
+        // bounded prompt preference and is immediately reversible.
+        "symon_skills_list" => SafetyClass::ReadOnly,
+        "symon_skill_activate" => SafetyClass::ReadOnly,
+        "symon_skill_deactivate" => SafetyClass::ReadOnly,
         // o8 bridge (Tier-2). Reads are autonomous. o8_dispatch launches an
         // autonomous coding worker (compute + tokens) → Reversible so it ALWAYS
         // shows the spoken-confirm card in V1 (blanket consent is hardcoded OFF).

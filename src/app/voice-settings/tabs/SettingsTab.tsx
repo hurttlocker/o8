@@ -71,6 +71,7 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
   const locale = prefStr(prefs, 'dictation_locale', 'en-US');
   const tone = prefStr(prefs, 'output_tone', 'auto');
   const highAccuracy = prefBool(prefs, 'whisper_stt_enabled', true);
+  const partialsSurface = prefStr(prefs, 'dictation_partials_surface', 'caret');
 
   // ── Voice Output ──
   const voiceId = prefStr(prefs, 'tts_voice_id', 'en-US-Neural2-J');
@@ -110,6 +111,22 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
           detail="Keeps live words instant, then cleans the final text with Whisper. Falls back automatically if unavailable."
           checked={highAccuracy} onChange={(v) => setPref('whisper_stt_enabled', v)}
         />
+        <ControlRow
+          label="Live dictation"
+          stacked
+          detail="At caret streams provisional words only into verified editable fields. Screen keeps the original bottom transcript bar."
+        >
+          <Segmented
+            value={partialsSurface}
+            onChange={(v) => setPref('dictation_partials_surface', v)}
+            options={[
+              { value: 'caret', label: 'At caret' },
+              { value: 'hud', label: 'Screen bar' },
+              { value: 'off', label: 'Off' },
+            ]}
+            full
+          />
+        </ControlRow>
         <ControlRow label="Dictation language" detail="Language the recognizer expects.">
           <Select value={locale} onChange={onLocale} options={LOCALE_OPTIONS} width={200} />
         </ControlRow>

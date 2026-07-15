@@ -947,6 +947,33 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["repo"]
             }
         }),
+        json!({
+            "name": "symon_skills_list",
+            "description": "List local SKILL.md capabilities Symon can use, including which ones are active. Use when the user asks what skills are installed or wants a writing style/skill but has not named it exactly.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "symon_skill_activate",
+            "description": "Activate one installed skill by name for future Symon agent and Smart Compose writing turns. This changes only local Symon prompt guidance and can be undone immediately.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Installed skill name, from symon_skills_list when uncertain." }
+                },
+                "required": ["name"]
+            }
+        }),
+        json!({
+            "name": "symon_skill_deactivate",
+            "description": "Deactivate one currently active Symon skill by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Active skill name." }
+                },
+                "required": ["name"]
+            }
+        }),
     ]
 }
 
@@ -1120,6 +1147,15 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "git_log" => git_github::git_log(args).await,
         "gh_pr_list" => git_github::pr_list(args).await,
         "gh_issue_list" => git_github::issue_list(args).await,
+        "symon_skills_list" => Ok(crate::agent::skills::list_json()),
+        "symon_skill_activate" => {
+            let name = args.get("name").and_then(|value| value.as_str()).unwrap_or("");
+            crate::agent::skills::activate(name)
+        }
+        "symon_skill_deactivate" => {
+            let name = args.get("name").and_then(|value| value.as_str()).unwrap_or("");
+            crate::agent::skills::deactivate(name)
+        }
         other => Err(format!("Unknown tool: {other}")),
     }
 }
