@@ -357,7 +357,11 @@ export function ModelThinkingChip({
   const isO8Backend = activeBackend === 'o8';
   const { plan: entitlementPlan } = useEntitlement();
   const isFreePlan = entitlementPlan === 'free';
-  const hideEffortUi = isO8Backend && isFreePlan;
+  // Hide the effort UI when the free o8 rail is active OR the backend has no
+  // steerable thinking and isn't o8 (o8 keeps its own Low/High tier UI for
+  // founders). OpenClaw/Hermes accept no effort, so the slider must not render
+  // and pretend otherwise (adversarial review 2026-07-15).
+  const hideEffortUi = (isO8Backend && isFreePlan) || (!thinkingKnown && !isO8Backend);
   const useSplit = split && !compact;
 
   // Effort slider stops (Q ruling 2026-07-11): one per selectable effort, then
@@ -594,15 +598,19 @@ export function ModelThinkingChip({
                               // Codex/Sol keeps ultra available; Terra + any Claude
                               // model cap at max — drop a stale ultra selection.
                               if (option.model !== MODEL_IDS.raw.openAiGpt56Sol && effort === 'ultra') onEffortChange?.('max');
-                              // The o8 model has no fan-out: clear Collide/Swarm
-                              // so the turn actually routes to the o8 backend (a live
-                              // `collide` flag forces the collide backend downstream).
-                              // Auto tier (Q ruling 2026-07-12): founders land on
+                              // Backends without fan-out must clear Collide/Swarm:
+                              // a persisted `collide` flag replaces the selected
+                              // backend with 'collide' at send time, so the turn
+                              // would never reach o8/OpenClaw/Hermes (adversarial
+                              // review 2026-07-15).
+                              if (option.backend === 'o8' || option.backend === 'openclaw' || option.backend === 'hermes') {
+                                onSetCollide?.(false);
+                                onSetSwarm?.(false);
+                              }
+                              // o8 auto tier (Q ruling 2026-07-12): founders land on
                               // High, free lands on Low — the server enforces the
                               // same gate regardless.
                               if (option.backend === 'o8') {
-                                onSetCollide?.(false);
-                                onSetSwarm?.(false);
                                 onEffortChange?.(isFreePlan ? 'low' : 'high');
                               }
                               setOpen(false);

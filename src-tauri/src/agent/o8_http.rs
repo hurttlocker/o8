@@ -33,7 +33,7 @@ fn api_port() -> u16 {
 }
 
 /// The cross-origin auth token written by the sidecar (empty string if absent).
-fn ws_token() -> String {
+pub(crate) fn ws_token() -> String {
     let path = super::agent_data_dir().join("ws-token");
     std::fs::read_to_string(&path)
         .map(|s| s.trim().to_string())

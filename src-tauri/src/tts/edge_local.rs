@@ -21,9 +21,19 @@ pub async fn synthesize(text: &str) -> Result<Vec<u8>, String> {
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("edge-local client: {e}"))?;
-    let resp = client
+    // Attach the ws-token bearer: /api/tts is behind the default-deny middleware
+    // gate, and the loopback-socket heuristic does NOT reliably pass a Rust
+    // server-side POST — without the token this 401s and Steffan silently falls
+    // through to the macOS `say` floor, defeating the free-voice default
+    // (adversarial review 2026-07-15, same class as the o8 free-rail 401).
+    let token = crate::agent::o8_http::ws_token();
+    let mut req = client
         .post(&url)
-        .json(&serde_json::json!({ "text": text, "voice": STEFFAN_VOICE }))
+        .json(&serde_json::json!({ "text": text, "voice": STEFFAN_VOICE }));
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req
         .send()
         .await
         .map_err(|e| format!("edge-local request: {e}"))?;
