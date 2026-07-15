@@ -622,6 +622,18 @@ function OrchestratorTabInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comparisonGroups, sessionTiles.autoTileSessions]);
 
+  // One thread, one view: whenever the MAIN chat binds a thread (restore,
+  // history click, auto-restore), close any thread pane holding the same
+  // thread. The drop-time same-thread check reads a chrome snapshot that can
+  // lag a mount-time restore (live-hit 2026-07-15: drop landed mid-restore
+  // and the same thread ended up with two composers).
+  useEffect(() => {
+    const tid = chatChromeState.threadId;
+    if (!tid) return;
+    sessionTiles.pruneThreadPane(tid);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatChromeState.threadId, sessionTiles.pruneThreadPane]);
+
   // Drag-to-split drop actions (Claude Code split-screen parity). Split and
   // replace land in the session tile tree as 'thread' panes; a drop on the
   // main chat's header loads the thread in place instead — the chat leaf
