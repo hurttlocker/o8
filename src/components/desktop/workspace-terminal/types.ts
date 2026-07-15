@@ -28,6 +28,12 @@ export interface RegisteredRepo {
   worktreeStatus?: string | null;
 }
 
+export interface OrchestratorTurnInjection {
+  id: string;
+  text: string;
+  previewImageDataUri?: string;
+}
+
 export interface TerminalTab {
   id: string;
   label: string;
@@ -70,6 +76,7 @@ export interface TerminalTab {
   chatContinueLatest?: boolean;
   chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string; previewImageDataUri?: string };
   llmDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string; previewImageDataUri?: string };
+  orchestratorTurnInjection?: OrchestratorTurnInjection;
   chatMessages?: MobileTranscriptEntry[];
   llmSummary?: string | null;
   chatCheckpoints?: PersistedChatCheckpoint[];
@@ -181,6 +188,9 @@ export interface TerminalTabHandle {
     supervisorStatus?: string | null;
     autoArchiveOnIdle?: boolean;
   }) => string;
+  injectIntoOrchestrator: (tabId: string, text: string, options?: {
+    previewImageDataUri?: string;
+  }) => boolean;
   focusTab: (tabId: string) => boolean;
   focusTabRelative: (delta: number) => boolean;
   focusTabAtIndex: (oneBasedIndex: number) => boolean;
@@ -192,6 +202,9 @@ export interface TerminalTabHandle {
       kind: TerminalTab['kind'];
       sessionKey?: string;
       orchestratorThreadId?: string;
+      repoPath?: string;
+      lastActivity: number;
+      mode?: OrchestrationMode;
     }>;
     activeTabId: string;
   };

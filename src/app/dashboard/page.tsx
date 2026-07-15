@@ -164,7 +164,10 @@ import { useMissionCompleteDetector } from '@/components/desktop/thoughts/missio
 import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import { DashboardHydrationMarker } from './DashboardHydrationMarker';
-import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
+import {
+  selectRepoOrchestratorConversation,
+  type AgentPanelChatInjectionPayload,
+} from '@/lib/chat/injection';
 import {
   type DetectedLocalhostPreview,
   formatPreviewSelectionContext,
@@ -2931,6 +2934,45 @@ function DashboardInner() {
           }
         : null);
       const targetRepoPath = targetRepo?.localPath ?? '__global__';
+      if (payload.reason === 'design-draw') {
+        try {
+          const preferredThreadId = activeSessionKey?.startsWith('llm-chat:')
+            ? activeSessionKey.slice('llm-chat:'.length)
+            : null;
+          const loadedTarget = targetRepo?.localPath
+            ? selectRepoOrchestratorConversation(
+                Array.from(workspaceTerminalHandlesRef.current.entries()).map(([tileId, handle]) => ({
+                  tileId,
+                  ...handle.getTabsSnapshot(),
+                })),
+                targetRepo.localPath,
+                preferredThreadId,
+              )
+            : null;
+          const workspaceTarget = loadedTarget
+            ? {
+                tileId: loadedTarget.tileId,
+                handle: workspaceTerminalHandlesRef.current.get(loadedTarget.tileId),
+              }
+            : await waitForWorkspaceTerminalTarget({
+                repoPath: targetRepo?.localPath ?? null,
+                activate: false,
+              });
+          if (!workspaceTarget.handle) {
+            throw new Error('The selected orchestrator workspace is no longer mounted.');
+          }
+          const tabId = loadedTarget?.tabId
+            ?? workspaceTarget.handle.openOrchestratorTab(targetRepo ?? undefined);
+          if (!workspaceTarget.handle.injectIntoOrchestrator(tabId, payload.text, {
+            previewImageDataUri: payload.previewImageDataUri,
+          })) {
+            throw new Error('The orchestrator conversation could not accept the design turn.');
+          }
+        } catch (error) {
+          console.error('[design-draw] orchestrator injection failed:', error);
+        }
+        return;
+      }
       const preferredChatTargetKey = workspaceChatTargetKeyByRepoPath[targetRepoPath]
         ?? (workspaceChatTargets.some((target) => target.sessionKey === activeWorkspaceChatSessionKey)
           ? activeWorkspaceChatSessionKey
@@ -2956,7 +2998,7 @@ function DashboardInner() {
       setRightPanelMode('chat');
       setDesktopDraftInjection(nextInjection);
     })();
-  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, openRightPanelFromUser, setActiveWorkspace, setDesktopDraftInjection, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
+  }, [activeSessionKey, activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, openRightPanelFromUser, setActiveWorkspace, setDesktopDraftInjection, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets, workspaceTerminalHandlesRef]);
 
   const handleAgentPanelChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     injectPayloadIntoRepoChat(payload, null);

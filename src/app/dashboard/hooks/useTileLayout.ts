@@ -71,6 +71,7 @@ interface UseTileLayoutArgs {
     repoPath?: string | null;
     preferredTileId?: string | null;
     fallbackToAnyExisting?: boolean;
+    activate?: boolean;
   }) => Promise<WorkspaceTerminalTarget>;
 }
 
