@@ -14,7 +14,7 @@
  */
 export type SessionTileSplitDirection = 'horizontal' | 'vertical';
 
-export type SessionTileLeafKind = 'chat' | 'session';
+export type SessionTileLeafKind = 'chat' | 'session' | 'thread';
 
 export interface SessionTileLeaf {
   type: 'leaf';
@@ -22,6 +22,13 @@ export interface SessionTileLeaf {
   kind: SessionTileLeafKind;
   /** Required when kind === 'session'. Identifies the agent transcript. */
   sessionKey?: string;
+  /** Required when kind === 'thread'. Chat-history tabId of the thread the
+   *  pane hosts — a full independent chat (drag-to-split, #1571 parity). */
+  threadId?: string;
+  /** Display title for a thread pane header. */
+  title?: string;
+  /** Chat mode for a thread pane: orchestrator thread vs casual chat. */
+  mode?: 'orchestrator' | 'chat';
 }
 
 export interface SessionTileSplit {
@@ -192,6 +199,114 @@ export function splitSessionWithSession(
   return { ...layout, root: walk(layout.root) };
 }
 
+export function findThreadLeafByThreadId(
+  node: SessionTileNode,
+  threadId: string,
+): SessionTileLeaf | null {
+  if (isSessionTileLeaf(node)) {
+    return node.kind === 'thread' && node.threadId === threadId ? node : null;
+  }
+  return findThreadLeafByThreadId(node.children[0], threadId)
+    ?? findThreadLeafByThreadId(node.children[1], threadId);
+}
+
+export function collectThreadLeaves(node: SessionTileNode): SessionTileLeaf[] {
+  if (isSessionTileLeaf(node)) {
+    return node.kind === 'thread' ? [node] : [];
+  }
+  return [
+    ...collectThreadLeaves(node.children[0]),
+    ...collectThreadLeaves(node.children[1]),
+  ];
+}
+
+export interface ThreadPanePayload {
+  threadId: string;
+  title: string;
+  mode: 'orchestrator' | 'chat';
+}
+
+/**
+ * Split ANY leaf with a new thread pane (drag-to-split). The target leaf
+ * keeps the first slot (left/top); the thread pane lands second. No-op if
+ * the thread is already open in the tree.
+ */
+export function splitLeafWithThread(
+  layout: SessionTileLayout,
+  targetLeafId: string,
+  thread: ThreadPanePayload,
+  direction: SessionTileSplitDirection,
+  ratio = 0.5,
+): SessionTileLayout {
+  if (findThreadLeafByThreadId(layout.root, thread.threadId)) {
+    return layout;
+  }
+
+  function walk(node: SessionTileNode): SessionTileNode {
+    if (isSessionTileLeaf(node)) {
+      if (node.id !== targetLeafId) return node;
+      const threadLeaf: SessionTileLeaf = {
+        type: 'leaf',
+        id: makeId('leaf'),
+        kind: 'thread',
+        threadId: thread.threadId,
+        title: thread.title,
+        mode: thread.mode,
+      };
+      return {
+        type: 'split',
+        id: makeId('split'),
+        direction,
+        ratio: clampRatio(ratio),
+        children: [node, threadLeaf],
+      };
+    }
+    const next0 = walk(node.children[0]);
+    const next1 = walk(node.children[1]);
+    if (next0 === node.children[0] && next1 === node.children[1]) return node;
+    return { ...node, children: [next0, next1] };
+  }
+
+  return { ...layout, root: walk(layout.root) };
+}
+
+/**
+ * Replace a leaf's content with a thread pane (drop on a pane header —
+ * "Open here"). Replacing the chat leaf is NOT handled here: callers route
+ * that to the main chat's loadThread instead so the orchestrator chat pane
+ * never leaves the tree. A fresh leaf id is minted so React fully remounts
+ * the pane (a thread pane's chat state must never bleed across threads).
+ */
+export function replaceLeafWithThread(
+  layout: SessionTileLayout,
+  targetLeafId: string,
+  thread: ThreadPanePayload,
+): SessionTileLayout {
+  if (findThreadLeafByThreadId(layout.root, thread.threadId)) {
+    return layout;
+  }
+
+  function walk(node: SessionTileNode): SessionTileNode {
+    if (isSessionTileLeaf(node)) {
+      if (node.id !== targetLeafId || node.kind === 'chat') return node;
+      return {
+        type: 'leaf',
+        id: makeId('leaf'),
+        kind: 'thread',
+        threadId: thread.threadId,
+        title: thread.title,
+        mode: thread.mode,
+      };
+    }
+    const next0 = walk(node.children[0]);
+    const next1 = walk(node.children[1]);
+    if (next0 === node.children[0] && next1 === node.children[1]) return node;
+    return { ...node, children: [next0, next1] };
+  }
+
+  return { ...layout, root: walk(layout.root) };
+}
+
 /** Remove the leaf identified by leafId. Closing the chat leaf is a no-op. */
 export function closeSessionLeaf(
   layout: SessionTileLayout,
@@ -278,14 +393,32 @@ export function hasAnySessionLeaf(layout: SessionTileLayout): boolean {
   return collectSessionLeaves(layout.root).length > 0;
 }
 
+/** True when the tree holds anything beyond the bare chat leaf — session
+ *  transcripts OR thread panes. Drives surface mount + persistence. */
+export function hasAnyAuxLeaf(layout: SessionTileLayout): boolean {
+  return collectSessionLeaves(layout.root).length > 0
+    || collectThreadLeaves(layout.root).length > 0;
+}
+
 // --- Persistence ---
 
 function isPlainSessionLeaf(value: unknown): value is SessionTileLeaf {
   if (!value || typeof value !== 'object') return false;
-  const v = value as { type?: unknown; id?: unknown; kind?: unknown; sessionKey?: unknown };
+  const v = value as {
+    type?: unknown;
+    id?: unknown;
+    kind?: unknown;
+    sessionKey?: unknown;
+    threadId?: unknown;
+    mode?: unknown;
+  };
   if (v.type !== 'leaf' || typeof v.id !== 'string') return false;
-  if (v.kind !== 'chat' && v.kind !== 'session') return false;
+  if (v.kind !== 'chat' && v.kind !== 'session' && v.kind !== 'thread') return false;
   if (v.kind === 'session' && typeof v.sessionKey !== 'string') return false;
+  if (v.kind === 'thread') {
+    if (typeof v.threadId !== 'string') return false;
+    if (v.mode !== 'orchestrator' && v.mode !== 'chat') return false;
+  }
   return true;
 }
 

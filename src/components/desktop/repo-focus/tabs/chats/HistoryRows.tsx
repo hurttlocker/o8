@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, type MouseEvent } from 'react';
+import { useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { CheckCircle2, ChevronDown, ChevronRight } from '../../../lucide-shims';
+import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
 import { HISTORY_ROW_TONES } from './constants';
 import {
@@ -210,6 +211,24 @@ export function HistoryChatRow({
   onToggleOwned?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  // Drag-to-split (Claude Code parity): a pointerdown that travels past the
+  // threshold becomes a workspace drag; the trailing click is suppressed so
+  // a real drag never ALSO opens the thread in place.
+  const dragActivatedRef = useRef(false);
+  const handleDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (disabled || event.button !== 0) return;
+    dragActivatedRef.current = false;
+    trackThreadDrag(
+      { clientX: event.clientX, clientY: event.clientY },
+      {
+        threadId: item.tabId,
+        title: item.title,
+        mode: historySection(item) === 'orchestrator' ? 'orchestrator' : 'chat',
+        repoPath: item.repoPath ?? null,
+      },
+      { onActivate: () => { dragActivatedRef.current = true; } },
+    );
+  };
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
@@ -230,6 +249,10 @@ export function HistoryChatRow({
       role="button"
       tabIndex={disabled ? -1 : 0}
       onClick={() => {
+        if (dragActivatedRef.current) {
+          dragActivatedRef.current = false;
+          return;
+        }
         if (!disabled) onOpen();
       }}
       onKeyDown={(event) => {
@@ -238,6 +261,7 @@ export function HistoryChatRow({
         event.preventDefault();
         onOpen();
       }}
+      onPointerDown={handleDragPointerDown}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onContextMenu={(event) => {
