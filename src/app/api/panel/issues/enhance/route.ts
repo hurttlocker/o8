@@ -5,7 +5,7 @@ import { ensureGitHubIssues, fetchGitHubLabels, resolveRepoSlug } from '@/lib/gi
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.0-flash';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -66,7 +66,7 @@ Rules:
   try {
     const res = await fetch(GEMINI_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY ?? '' },
       body: JSON.stringify({
         contents: [
           { role: 'user', parts: [{ text: `${systemPrompt}\n\nUser's rough input:\n${rawInput}` }] },

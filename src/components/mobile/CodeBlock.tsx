@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, createElement, memo } from 'react';
+import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
 
 interface CodeBlockProps {
   code: string;
@@ -67,7 +68,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         const id = `mermaid-m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { svg } = await mermaid.render(id, code);
 
-        if (!cancelled) setSvgHtml(svg);
+        if (!cancelled) setSvgHtml(sanitizeAgentHtml(svg));
       } catch (err) {
         if (!cancelled) setError(String(err));
       }

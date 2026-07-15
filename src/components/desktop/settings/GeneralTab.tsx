@@ -305,7 +305,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       <section style={{ marginTop: tauri ? 28 : 0 }}>
         <SettingsGroup
           header="Privacy"
-          footnote="Usage data is coarse counts only — which features get used, never your code, prompts, or repo names. Crash reports carry the error stack trace and app version; home paths, query strings, and identity are scrubbed before anything leaves your machine."
+          footnote="Usage data is coarse counts only. Crash reports can contain error messages, stack frames, repo-relative paths, and nearby runtime context; direct identity, home-directory usernames, credentials, and URL query strings are scrubbed before transmission. Both controls are optional."
         >
           <SettingsRow
             icon={<ShieldIcon />}
@@ -320,7 +320,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
               <SettingsRow
                 icon={<ShieldIcon />}
                 label="Crash & error reports"
-                subtitle={lockedSub('crashReportsEnabled', 'Send anonymous crash reports to help fix issues faster. Never includes your code, file paths, or identity.')}
+                subtitle={lockedSub('crashReportsEnabled', 'Send scrubbed error messages and stack traces. These may include repo-relative paths or nearby runtime context.')}
                 checked={values.crashReportsEnabled}
                 disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}
                 onToggle={(next) => { void updateField('crashReportsEnabled', next); }}
@@ -329,7 +329,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
               <SettingsRow
                 icon={<ShieldIcon />}
                 label="Send local crash log to the o8 team"
-                subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log — stack traces + app version only')}
+                subtitle={lockedSub('telemetryOptIn', 'Upload the local ~/.o8/telemetry crash log, including stored error messages and stack traces')}
                 checked={values.telemetryOptIn}
                 disabled={envLocked('telemetryOptIn') || busyField === 'telemetryOptIn'}
                 onToggle={(next) => { void updateField('telemetryOptIn', next); }}

@@ -47,8 +47,11 @@ export async function POST(request: NextRequest) {
   // otherwise a worker could omit the flag and take the direct-merge path
   // (SECURITY_AUDIT_2026-07-02 §HIGH-4). The body flag is retained as an
   // additional signal for older CLIs.
-  const isWorkerContext = record.requestedByWorker === true
-    || resolveRequestPrincipal(request) === 'worker';
+  const principal = resolveRequestPrincipal(request);
+  if (principal !== 'operator' && principal !== 'worker') {
+    return operatorError('forbidden', 'Merging packets requires an operator or dispatched-worker credential.', 403);
+  }
+  const isWorkerContext = record.requestedByWorker === true || principal === 'worker';
   if (isWorkerContext) {
     const { findLaneByPacket } = await import('@/lib/lane/registry');
     const lane = findLaneByPacket(packetId);

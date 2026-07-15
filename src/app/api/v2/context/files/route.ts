@@ -8,8 +8,8 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
+import { safeJoinReal } from '@/lib/fs/safe-path';
 
 const MAX_FILE_SIZE = 100_000; // 100KB max per file
 const MAX_FILES = 5; // max files per request
@@ -70,9 +70,8 @@ export async function POST(request: NextRequest) {
 
   for (const filePath of paths) {
     // Security: prevent path traversal
-    const resolved = join(repoRoot, filePath);
-    const rel = relative(repoRoot, resolved);
-    if (rel.startsWith('..') || rel.startsWith('/')) {
+    const resolved = safeJoinReal(repoRoot, filePath);
+    if (!resolved) {
       results.push({ path: filePath, content: '', truncated: false, error: 'Path outside repo' });
       continue;
     }

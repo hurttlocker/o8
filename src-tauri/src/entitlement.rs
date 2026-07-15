@@ -118,8 +118,9 @@ pub fn is_founder() -> bool {
 
 /// Where a Gemini `generateContent` call should go.
 pub enum GeminiTarget {
-    /// Direct Google API — the key is already in the URL; send the body unchanged.
-    Direct { url: String },
+    /// Direct Google API — authenticate in a header so diagnostics never carry
+    /// the provider key as part of a URL.
+    Direct { url: String, api_key: String },
     /// Managed proxy — Bearer plan token; the caller MUST add a top-level
     /// `model` field to the JSON body (Google's model lives in the URL we own).
     Proxy { url: String, token: String },
@@ -130,9 +131,8 @@ pub enum GeminiTarget {
 pub fn resolve_gemini(model: &str) -> Option<GeminiTarget> {
     if let Some(key) = crate::stt::keys::get_gemini_key() {
         return Some(GeminiTarget::Direct {
-            url: format!(
-                "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-            ),
+            url: format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"),
+            api_key: key,
         });
     }
     let token = read_license_token()?;

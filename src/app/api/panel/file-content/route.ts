@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
-import { expandHome, safeJoin } from '@/lib/fs/safe-path';
+import { expandHome, safeJoinReal } from '@/lib/fs/safe-path';
 
 export async function GET(request: Request) {
   try {
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     }
 
     // Normalize + confine: the file must stay inside the resolved root.
-    const fullPath = safeJoin(root, filePath);
+    const fullPath = safeJoinReal(root, filePath);
     if (!fullPath) {
       return NextResponse.json({ content: null, error: 'Path traversal not allowed' }, { status: 403 });
     }

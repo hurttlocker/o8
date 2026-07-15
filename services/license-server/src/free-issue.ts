@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import { db } from './db/client.js';
 import { productEvents } from './db/schema.js';
 import { mintLicense } from './mint.js';
+import { BoundedRateLimiter, clientAddress } from './rate-limit.js';
 
 /**
  * POST /issue-free — public first-run issuance of a FREE account token
@@ -15,14 +16,17 @@ import { mintLicense } from './mint.js';
  * It mints a free-plan license bound to the install's stable id, so re-issuing
  * for the same install returns the same account (stable `sub`) rather than a new
  * one. Abuse is bounded: the mint itself costs nothing, and a free account's
- * proxy spend is capped per-day server-side — add rate-limiting if it's ever
- * scripted. No paid lever is granted (free plan only).
+ * proxy spend is capped per-day server-side. Admission is also bounded per IP,
+ * install id, and process so rotating attacker-chosen ids cannot mint without a
+ * ceiling. No paid lever is granted (free plan only).
  *
- * Body: { installId?: string }. A missing/invalid id falls back to a random one
- * so first-run never hard-fails.
+ * Body: { installId: string }. Missing/invalid ids fail closed; silently minting
+ * a random identity lets one caller create unlimited independent quota buckets.
  */
 
 const FREE_DAYS = 365;
+const HOUR_MS = 60 * 60 * 1000;
+const limiter = new BoundedRateLimiter();
 
 /** Accept a client-stable install id (UUID-ish). Reject anything that isn't a
  *  short, plain token so a caller can't smuggle structure into the `sub`. */
@@ -42,7 +46,19 @@ export async function handleIssueFree(c: Context): Promise<Response> {
     body = {};
   }
 
-  const installId = sanitizeInstallId(body.installId) ?? `anon-${randomUUID()}`;
+  const installId = sanitizeInstallId(body.installId);
+  if (!installId) {
+    return c.json({ error: 'valid installId required' }, 400);
+  }
+
+  const ip = clientAddress(c);
+  const allowed = limiter.allow(`free:install:${installId}`, 5, HOUR_MS)
+    && limiter.allow(`free:ip:${ip}`, 30, HOUR_MS)
+    && limiter.allow('free:global', 10_000, HOUR_MS);
+  if (!allowed) {
+    c.header('Retry-After', '3600');
+    return c.json({ error: 'rate_limited' }, 429);
+  }
   const sub = `install:${installId}`;
 
   const license = await mintLicense({ plan: 'free', sub, days: FREE_DAYS });

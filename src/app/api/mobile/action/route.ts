@@ -28,13 +28,12 @@ import { writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmC
 import type { RuntimeId } from '@/lib/runtimes';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
-
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
 const MOBILE_ACTION_IDEMPOTENCY_VERB = 'mobile-action';
 const MOBILE_ACTION_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
-
 function previewMessage(message?: string) {
   if (!message) return '';
   return message.trim().replace(/\s+/g, ' ').slice(0, 160);
@@ -104,6 +103,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
   const res = await fetch(new URL('/api/v2/proxy/llm', request.url), {
     method: 'POST',
     headers: {
+      Authorization: `Bearer ${getOrCreateWsToken()}`,
       'Content-Type': 'application/json',
       'x-tab-id': tabId,
     },

@@ -4,6 +4,7 @@ import {
   PREVIEW_MESSAGE_SOURCE,
   PREVIEW_PROXY_ROUTE,
 } from '@/lib/panel/preview';
+import { isSensitivePreviewRequestHeader, parseLocalPreviewTarget } from '@/lib/panel/preview-proxy-security';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
@@ -35,16 +36,7 @@ const BASE_TAG_RE = /<base\b[^>]*>/gi;
 const FRAME_BUSTING_META_RE = /<meta\b[^>]*http-equiv=(?:"|')?(?:content-security-policy|x-frame-options)(?:"|')?[^>]*>/gi;
 
 function parseLocalTarget(targetUrl: string | null): URL | null {
-  if (!targetUrl) return null;
-
-  try {
-    const parsed = new URL(targetUrl);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-    if (!LOCAL_HOSTS.has(parsed.hostname)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+  return parseLocalPreviewTarget(targetUrl);
 }
 
 function isSameLocalApp(candidate: URL, target: URL): boolean {
@@ -783,6 +775,7 @@ function buildUpstreamHeaders(req: NextRequest, targetUrl: URL): Headers {
   req.headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase();
     if (HOP_BY_HOP_REQUEST_HEADERS.has(lowerKey)) return;
+    if (isSensitivePreviewRequestHeader(lowerKey)) return;
     if (lowerKey.startsWith('sec-')) return;
     if (lowerKey.startsWith('x-forwarded-')) return;
 

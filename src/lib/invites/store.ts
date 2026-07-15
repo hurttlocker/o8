@@ -10,9 +10,9 @@
  * that only resolves codes generated on THIS install.
  */
 
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, ne } from 'drizzle-orm';
 import os from 'node:os';
-import { randomInt } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { getDb } from '@/lib/db';
 import { betaInvites, githubInstallations } from '@/lib/db/schema';
 
@@ -28,13 +28,13 @@ function db() {
   return d;
 }
 
-/** A `NNN-NNN` code, avoiding any already-issued one. */
+/** A 128-bit URL-safe bearer code, avoiding any already-issued one. */
 function genCode(taken: Set<string>): string {
   for (let i = 0; i < 50; i++) {
-    const code = `${String(randomInt(0, 1000)).padStart(3, '0')}-${String(randomInt(0, 1000)).padStart(3, '0')}`;
+    const code = `o8_${randomBytes(16).toString('base64url')}`;
     if (!taken.has(code)) return code;
   }
-  return `${String(randomInt(0, 1000)).padStart(3, '0')}-${String(randomInt(0, 1000)).padStart(3, '0')}`;
+  return `o8_${randomBytes(16).toString('base64url')}`;
 }
 
 /**
@@ -101,10 +101,11 @@ export function redeemInvite(code: string, redeemedBy: string): { ok: boolean; r
   const row = d.select().from(betaInvites).where(eq(betaInvites.code, code)).get();
   if (!row) return { ok: false, reason: 'unknown_code' };
   if (row.status === 'redeemed') return { ok: false, reason: 'already_redeemed', invite: row };
-  d.update(betaInvites)
+  const updated = d.update(betaInvites)
     .set({ status: 'redeemed', redeemedAt: new Date().toISOString(), redeemedBy: redeemedBy || null })
-    .where(eq(betaInvites.code, code))
+    .where(and(eq(betaInvites.code, code), ne(betaInvites.status, 'redeemed')))
     .run();
+  if (updated.changes !== 1) return { ok: false, reason: 'already_redeemed', invite: row };
   return { ok: true, invite: d.select().from(betaInvites).where(eq(betaInvites.code, code)).get() ?? undefined };
 }
 

@@ -54,7 +54,7 @@ function ApprovalBannerBase({
             autoFocus
             style={{ width: '100%', paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, borderRadius: 8, border: '1px solid rgba(59,130,246,0.3)', background: 'rgba(255,255,255,0.8)', color: '#0f172a', fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, monospace', outline: 'none', boxSizing: 'border-box' }}
           />
-          {pendingApproval.args.cwd ? <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>Working directory: {String(pendingApproval.args.cwd)}</div> : null}
+          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>{pendingApproval.summary}</div>
         </div>
       ) : (
         <>

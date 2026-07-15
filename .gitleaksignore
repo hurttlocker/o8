@@ -1,0 +1,8 @@
+# Reviewed false positives. Keep these commit-scoped so a future real value at
+# the same source location still fails the scan.
+642e13c16e0fa0c2636a852b4d070d37a88bb083:src/lib/lane/orchestrator-backends/fable-config.ts:generic-api-key:24
+4bf5bf53c63d4fda1f71ee90d371677aa364b8ea:docs/research/fable-succession/hard-task/raw-batch.txt:generic-api-key:1119
+36a4ffd85bfbbfc39419519dce6b090373f1e50a:src/lib/mcp/operator-handlers/approve.ts:generic-api-key:54
+16e61e37e0b0acd1f45d8777e8f93b52ac7a440b:src/lib/mcp/operator-handlers/approve.ts:generic-api-key:54
+c1d8632e5cecd33a184f0257d9d8df334bb6ef81:src/lib/mcp/operator-handlers/approve.ts:generic-api-key:54
+f0c24f641ad25ef8a202a392af8ec7959f139f01:src/lib/tts/edge-ws.ts:generic-api-key:12

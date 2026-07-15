@@ -14,6 +14,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 
 import { SignJWT, importPKCS8, importSPKI, jwtVerify } from 'jose';
+import { BoundedRateLimiter } from '../src/rate-limit.js';
 
 type Plan = 'free' | 'pro' | 'team';
 
@@ -83,6 +84,18 @@ async function main() {
     rejected = true;
   }
   assert(rejected, 'wrong-key token is rejected (signature check works)');
+
+  // 5) A blocked-client flood must not grow one key's sliding-window state.
+  const limiter = new BoundedRateLimiter();
+  let allowed = 0;
+  for (let i = 0; i < 20_000; i++) {
+    if (limiter.allow('flood', 5, 60_000, nowSec * 1_000)) allowed += 1;
+  }
+  const entries = (limiter as unknown as {
+    entries: Map<string, { timestamps: number[] }>;
+  }).entries;
+  assert(allowed === 5, 'rate limiter admits only the configured attempts');
+  assert(entries.get('flood')?.timestamps.length === 5, 'blocked flood state stays bounded at the configured limit');
 
   console.log('\n[contract-test] OK — server tokens pass the M4 desktop verifier.\n');
   console.log(`  exp (epoch): ${payload.exp}  (~${new Date((payload.exp as number) * 1000).toISOString()})`);

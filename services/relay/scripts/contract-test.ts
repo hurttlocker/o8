@@ -129,6 +129,37 @@ function testRateLimits(): void {
   // Different routingId is independent.
   assert(rl.allowConnect('r2', t0 + 5), 'a different routingId is not rate-limited');
 
+  const rotating = new RateLimiter({
+    ...DEFAULT_RATE_LIMITS,
+    maxPerIpPerMin: 4,
+    maxGlobalPerMin: 100,
+  });
+  let rotatingAllowed = 0;
+  for (let i = 0; i < 8; i++) {
+    if (rotating.allowConnect(`rotated-${i}`, t0 + i, '203.0.113.10')) rotatingAllowed += 1;
+  }
+  assert(rotatingAllowed === 4, 'rotating routing ids cannot bypass the source-IP limit');
+
+  const flood = new RateLimiter(DEFAULT_RATE_LIMITS);
+  for (let i = 0; i < 20_000; i++) {
+    flood.allowConnect('flood-route', t0, '203.0.113.20');
+  }
+  const floodWindows = (flood as unknown as {
+    connects: Map<string, number[]>;
+  }).connects;
+  assert(
+    floodWindows.get('route:flood-route')?.length === DEFAULT_RATE_LIMITS.maxPerMin,
+    'blocked route flood state stays bounded at the route limit',
+  );
+  assert(
+    floodWindows.get('ip:203.0.113.20')?.length === DEFAULT_RATE_LIMITS.maxPerIpPerMin,
+    'blocked route flood state stays bounded at the source-IP limit',
+  );
+  assert(
+    floodWindows.get('global')?.length === DEFAULT_RATE_LIMITS.maxGlobalPerMin,
+    'blocked route flood state stays bounded at the global limit',
+  );
+
   const rl2 = new RateLimiter(DEFAULT_RATE_LIMITS);
   let pending = 0;
   for (let i = 0; i < 12; i++) if (rl2.admitPending('r1')) pending += 1;
