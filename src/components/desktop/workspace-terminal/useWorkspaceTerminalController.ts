@@ -29,6 +29,7 @@ import {
   deriveFocusedLaneRepo,
   generateLlmChatTabId,
   isReusableBlankOrchestratorTab,
+  WORKSPACE_THREAD_ID_EVENT,
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
@@ -372,8 +373,8 @@ export function useWorkspaceTerminalController(
         return next;
       });
     };
-    window.addEventListener('o8:workspace-thread-id', handler as EventListener);
-    return () => window.removeEventListener('o8:workspace-thread-id', handler as EventListener);
+    window.addEventListener(WORKSPACE_THREAD_ID_EVENT, handler as EventListener);
+    return () => window.removeEventListener(WORKSPACE_THREAD_ID_EVENT, handler as EventListener);
   }, []);
 
   // Dashboard repo picker → re-bind the active orchestrator tab's repo (#1265).
