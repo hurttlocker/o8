@@ -451,7 +451,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             onSelectSession={onSelectSession}
             onOpenHistoryChat={onOpenHistoryChat}
             variant="mini"
-            limit={8}
             hideWhenEmpty
             sectionLabel={null}
             sections={PROJECT_HISTORY_SECTIONS}

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { REPO_FOCUS_FONT } from '../../utils';
 import { historyKindLabel, historyRepoLabel } from './helpers';
 import type { HistoryActionMenuState } from './types';
@@ -14,6 +15,7 @@ export function HistoryActionMenu({
   onTogglePin,
   onArchive,
   onDelete,
+  onRename,
 }: {
   state: HistoryActionMenuState;
   busy: boolean;
@@ -23,7 +25,12 @@ export function HistoryActionMenu({
   onTogglePin: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  onRename: (title: string) => void;
 }) {
+  const [renaming, setRenaming] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(state.item.title);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -32,8 +39,12 @@ export function HistoryActionMenu({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.select();
+  }, [renaming]);
+
   const menuWidth = 190;
-  const menuHeight = 180;
+  const menuHeight = 209;
   const panelRect = typeof document === 'undefined'
     ? null
     : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
@@ -55,7 +66,22 @@ export function HistoryActionMenu({
     action();
   };
 
-  return (
+  const submitRename = () => {
+    const next = draftTitle.trim();
+    if (next && next !== state.item.title) {
+      run(() => onRename(next));
+      return;
+    }
+    setRenaming(false);
+  };
+
+  if (typeof document === 'undefined') return null;
+
+  // Portaled to <body>: the rail is a chrome-surface scope whose glass-mode
+  // token overrides force panel tokens transparent — this menu must paint
+  // OPAQUE (drawer-style) in every palette × surface combination, so it
+  // renders outside that scope and reads the root tokens directly.
+  return createPortal(
     <>
       <button
         type="button"
@@ -80,19 +106,54 @@ export function HistoryActionMenu({
           width: menuWidth,
           borderRadius: 13,
           border: '1px solid var(--t-divider-subtle)',
-          background: 'color-mix(in srgb, var(--t-bg-elevated, #ffffff) 86%, transparent)',
+          background: 'var(--t-panel-solid)',
           boxShadow: '0 18px 48px rgba(15, 23, 42, 0.12)',
-          backdropFilter: 'blur(18px) saturate(145%)',
-          WebkitBackdropFilter: 'blur(18px) saturate(145%)',
           padding: 7,
           color: 'var(--t-text)',
           fontFamily: REPO_FOCUS_FONT,
         }}
       >
         <div style={{ padding: '4px 7px 7px' }}>
-          <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {state.item.title}
-          </div>
+          {renaming ? (
+            <input
+              ref={renameInputRef}
+              value={draftTitle}
+              disabled={busy}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  submitRename();
+                } else if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setDraftTitle(state.item.title);
+                  setRenaming(false);
+                }
+              }}
+              onBlur={submitRename}
+              aria-label="Rename chat"
+              style={{
+                width: '100%',
+                border: '1px solid var(--t-input-border)',
+                borderRadius: 7,
+                background: 'var(--t-input-bg)',
+                color: 'var(--t-text)',
+                fontFamily: REPO_FOCUS_FONT,
+                fontSize: 11.25,
+                lineHeight: '15px',
+                fontWeight: 620,
+                paddingTop: 3,
+                paddingRight: 6,
+                paddingBottom: 3,
+                paddingLeft: 6,
+                outline: 'none',
+              }}
+            />
+          ) : (
+            <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {state.item.title}
+            </div>
+          )}
           <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10, lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {historyRepoLabel(state.item)} - {historyKindLabel(state.item)}
           </div>
@@ -100,11 +161,13 @@ export function HistoryActionMenu({
         <div style={{ display: 'grid', gap: 2 }}>
           <HistoryMenuRow label="Open chat" disabled={!canOpen || busy} onClick={() => run(onOpen)} />
           <HistoryMenuRow label={state.item.pinned ? 'Unpin' : 'Pin'} disabled={busy} onClick={() => run(onTogglePin)} />
+          <HistoryMenuRow label="Rename" disabled={busy || renaming} onClick={() => setRenaming(true)} />
           <HistoryMenuRow label={state.archived ? 'Restore' : 'Archive'} disabled={busy} onClick={() => run(onArchive)} />
           <HistoryMenuRow label="Delete" danger disabled={busy} onClick={() => run(onDelete)} />
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
