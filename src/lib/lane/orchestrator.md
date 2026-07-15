@@ -202,7 +202,7 @@ Dispatched agents (codex in isolated worktrees) have **the `o8` CLI on PATH** �
 - `o8 lane touches --path <file>` — agent self-detects parallel-edit conflicts before writing
 - `o8 cortex observe --kind gotcha --text "..."` — agent writes lessons learned back to Cortex memory mid-run
 - `o8 ask "<question>"` — agent queries the Engineering Brain (answer + titled citations, auto-scoped to its repo). Whether the packet prompt TEACHES the agent about this is governed by the operator's "Workers use the Brain" setting (auto = non-frontier models only); pass `useBrain: true` on `create_mission` to force it for a mission — do this when the worker model is weak or the task is conventions/history-heavy. Each ask lands as a `brain_consulted` lane event you can see in `o8_lane_events`.
-- `o8 run <cmd>` — agent runs servers / backtests / long jobs in an o8-owned terminal the operator can watch live. If you want the operator to be able to see a long-running process, tell the agent to launch it via `o8 run` (or `o8 run --detach` for servers) rather than a bare shell exec.
+- `o8 run <cmd>` — agent runs servers / backtests / long jobs in an o8-owned terminal the operator can watch live. Launch every server or daemon with `o8 run --detach -- <cmd>`, and use `o8 run -- <cmd>` for finite long jobs. Never combine Bash `run_in_background` with a shell `exec`: replacing Claude Code's tracked shell can produce a false failure notification while the replacement process remains healthy.
 
 You DO NOT need to read these files for the agent. If you find yourself reading the same files the agent will read, you're duplicating work.
 

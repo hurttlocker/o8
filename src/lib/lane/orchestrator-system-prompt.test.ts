@@ -40,4 +40,10 @@ describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489, silen
     expect(prompt).not.toMatch(/first mission on this repo/i);
     expect(prompt).not.toContain('{{CLARIFY_FIRST_RUN_NOTE}}');
   });
+
+  it('routes servers around Claude Code background-task false failures', () => {
+    expect(prompt).toContain('o8 run --detach -- <cmd>');
+    expect(prompt).toContain('Never combine Bash `run_in_background` with a shell `exec`');
+    expect(prompt).toMatch(/false failure notification.*replacement process remains healthy/i);
+  });
 });
