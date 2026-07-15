@@ -76,6 +76,33 @@ export function isReusableBlankOrchestratorTab(tab: TerminalTab): boolean {
   );
 }
 
+/**
+ * OrchestratorTab → controller/dashboard bridge: "this tab is bound to thread
+ * X". The controller stamps it onto the tab record (tab.orchestratorThreadId),
+ * which is what the reuse gate above and per-tab thread persistence key on.
+ */
+export const WORKSPACE_THREAD_ID_EVENT = 'o8:workspace-thread-id';
+
+/**
+ * Publish a tab⇄thread binding. Called from TWO places in OrchestratorTab:
+ * the chrome effect (after a thread load LANDS) and the restore claim (the
+ * moment a tab COMMITS to restoring the global last-active thread).
+ *
+ * The claim-time call is the durable half of report D3YPBP round 2
+ * (2026-07-15): if the restore's history fetch fails silently (server boot
+ * race — worst on slow Rosetta/Apple Silicon boots), a tab stamped only
+ * after the load lands stays invisible to the reuse gate, and every
+ * "+ New session" click reuses the broken half-restored tab instead of
+ * spawning fresh. Stamping the INTENT makes the gate exclude it no matter
+ * what the fetch does.
+ */
+export function publishWorkspaceThreadBinding(tabId: string, threadId: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(WORKSPACE_THREAD_ID_EVENT, {
+    detail: { tabId, threadId },
+  }));
+}
+
 export function shortenPath(value: string) {
   const userPath = value.replace(/^\/Users\/[^/]+/, '~');
   if (userPath !== value) return userPath;

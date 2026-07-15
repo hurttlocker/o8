@@ -56,6 +56,7 @@ import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextM
 import { SessionTileSurface } from './SessionTileSurface';
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
+import { publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 // Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
 // row. The old layout component is no longer imported here.
 
@@ -361,7 +362,7 @@ function OrchestratorTabInner({
     if (typeof window === 'undefined') return;
     if (!active) return;
     if (!publishWorkspaceThread) return;
-    window.dispatchEvent(new CustomEvent('o8:workspace-thread-id', {
+    window.dispatchEvent(new CustomEvent(WORKSPACE_THREAD_ID_EVENT, {
       detail: { tabId, threadId: chatChromeState.threadId },
     }));
   }, [active, publishWorkspaceThread, tabId, chatChromeState.threadId]);
@@ -536,9 +537,22 @@ function OrchestratorTabInner({
       // fails SILENTLY when a reload races a dev recompile or booting server
       // (2026-07-15 — the tab restored its TITLE over an empty transcript).
       // The panel dedups repeat loads, so re-asking is safe.
+      if (restoredThreadRef.current !== restored) {
+        restoredThreadRef.current = restored;
+        globalLastThreadRestoreClaimed = true;
+        // Stamp the restore INTENT onto the tab record NOW — not only after
+        // the history load lands (the chrome-driven publish effect above).
+        // If the load fails silently (server boot race — worst on slow
+        // Rosetta/Apple Silicon boots), an unstamped tab still matches the
+        // blank-spawn reuse gate and every "New session" click reuses the
+        // broken tab instead of spawning fresh (report D3YPBP round 2,
+        // 2026-07-15). The controller's duplicate-owner dedupe also runs
+        // sooner, which is the intended behavior, just earlier.
+        if (publishWorkspaceThread) {
+          publishWorkspaceThreadBinding(tabId, restored);
+        }
+      }
       handle.loadThread(restored);
-      restoredThreadRef.current = restored;
-      globalLastThreadRestoreClaimed = true;
       loadRetries += 1;
       if (loadRetries < 20) timer = window.setTimeout(tryLoad, 1000);
     };
@@ -547,7 +561,7 @@ function OrchestratorTabInner({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [active, initialThreadId, restoreLastThread, repoPath]);
+  }, [active, initialThreadId, restoreLastThread, repoPath, publishWorkspaceThread, tabId]);
 
   // Drop the restoring flag once messages arrive (hasMessages flips
   // true). Also bail out if the restore has been running for ~3s —

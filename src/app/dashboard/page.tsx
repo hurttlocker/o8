@@ -10,7 +10,7 @@ import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
-import { mergeTranscriptEntries } from '@/components/desktop/workspace-terminal/utils';
+import { mergeTranscriptEntries, WORKSPACE_THREAD_ID_EVENT } from '@/components/desktop/workspace-terminal/utils';
 import { readAnyXtermSelection } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
@@ -872,8 +872,8 @@ function DashboardInner() {
         setActiveSessionKey(`llm-chat:${detail.threadId}`);
       }
     };
-    window.addEventListener('o8:workspace-thread-id', handler as EventListener);
-    return () => window.removeEventListener('o8:workspace-thread-id', handler as EventListener);
+    window.addEventListener(WORKSPACE_THREAD_ID_EVENT, handler as EventListener);
+    return () => window.removeEventListener(WORKSPACE_THREAD_ID_EVENT, handler as EventListener);
   }, [setActiveSessionKey]);
 
   // Bottom DesktopStatusBar pill — branch + lane state.
