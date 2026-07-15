@@ -35,7 +35,7 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
   const [chrome, setChrome] = useState<ThoughtsChatPanelChromeState | null>(null);
   const [closeHover, setCloseHover] = useState(false);
 
-  const agents = data?.agents ?? [];
+  const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const sessionTargets = useMemo(
     () => buildAgentTargets(agents, 'codex'),
     [agents],
