@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
+import { registerPaneThread, unregisterPaneThread } from '@/lib/orchestrator/pane-thread-registry';
 import { ThoughtsChatPanel } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import type {
   ThoughtsChatPanelChromeState,
@@ -39,6 +40,13 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
     () => buildAgentTargets(agents, 'codex'),
     [agents],
   );
+
+  // Claim the thread for this pane so other chat views on the same repo
+  // drop its stream events (the empty-main-chat hijack, 2026-07-15).
+  useEffect(() => {
+    registerPaneThread(threadId);
+    return () => unregisterPaneThread(threadId);
+  }, [threadId]);
 
   // Load the bound thread once the panel handle exists. Mirrors the
   // OrchestratorTab tab-bound retry loop: on a cold mount the imperative

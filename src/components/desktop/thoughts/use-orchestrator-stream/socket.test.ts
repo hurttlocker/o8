@@ -23,6 +23,8 @@ function makeHarness(initial: {
   // seam-3 stale-busy reconcile keys off this; a test simulates a dropped
   // terminal by passing an OLD value.
   lastEventAt?: number;
+  /** Thread this view is bound to (thread-scope ingest guard). */
+  threadId?: string | null;
 }) {
   const ws = {} as WebSocket;
   const statusRef = { current: initial.status };
@@ -55,6 +57,7 @@ function makeHarness(initial: {
     setMessages,
     setStatus,
     statusRef,
+    threadIdRef: { current: initial.threadId ?? null },
     wsRef: { current: ws },
   });
 
@@ -402,5 +405,43 @@ describe('orchestrator socket — backend tracking (Fable Slice 4)', () => {
 
     h.fire({ channel: 'supervisor', event: 'agent-update', data: { surfaceId: 's1', backend: 'fable' } });
     expect(h.lastBackendRef.current).toBeNull();
+  });
+});
+
+describe('orchestrator socket — thread-scope ingest guard (drag-to-split)', () => {
+  it('a view bound to thread X drops events stamped with thread Y', () => {
+    const h = makeHarness({ status: 'ready', threadId: 'thoughts-mine' });
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'leak', threadId: 'thoughts-other' } });
+    expect(h.currentAssistantRef.current).toBeNull();
+    expect(h.setStatus).not.toHaveBeenCalled();
+
+    // Its OWN thread's tokens still stream.
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'mine', threadId: 'thoughts-mine' } });
+    expect(h.currentAssistantRef.current?.chunks).toContain('mine');
+  });
+
+  it('an UNBOUND view drops events for a pane-owned thread but still reattaches to unowned turns', async () => {
+    const { registerPaneThread, unregisterPaneThread } = await import('@/lib/orchestrator/pane-thread-registry');
+    registerPaneThread('thoughts-pane');
+    try {
+      const h = makeHarness({ status: 'ready', threadId: null });
+
+      // Pane-owned turn: must NOT hijack the empty view.
+      h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'pane-turn', threadId: 'thoughts-pane' } });
+      expect(h.currentAssistantRef.current).toBeNull();
+
+      // Unowned in-flight turn: durable-turn recovery still applies.
+      h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'recovered', threadId: 'thoughts-unowned' } });
+      expect(h.currentAssistantRef.current?.chunks).toContain('recovered');
+    } finally {
+      unregisterPaneThread('thoughts-pane');
+    }
+  });
+
+  it('events without a threadId are unaffected by the guard', () => {
+    const h = makeHarness({ status: 'ready', threadId: 'thoughts-mine' });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'legacy' } });
+    expect(h.currentAssistantRef.current?.chunks).toContain('legacy');
   });
 });
