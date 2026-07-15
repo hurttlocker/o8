@@ -338,31 +338,33 @@ mod overlay {
         (lw >= 8.0 && lh >= 8.0).then_some(((lx, ly, lw, lh), element.label.as_str()))
     }
 
-    /// Map screenshot-pixel tags onto the captured monitor and animate them.
-    /// Fire-and-forget: spawns a worker thread that ensures the window (first
-    /// use pays a route-load wait), emits `o8:point-show`, then auto-hides.
-    pub fn show_points(app: &tauri::AppHandle, screen: &ScreenContext, tags: &[ParsedTag]) {
-        if tags.is_empty() {
-            return;
-        }
-        // Screenshot px → window-local logical points. The overlay window is
-        // positioned at the monitor origin with the monitor's logical size, so
-        // local = (tag / image_px) * monitor_logical, clamped into bounds.
+    #[derive(Default)]
+    struct ResolutionStats {
+        exact_resolved: usize,
+        ax_snapped: usize,
+        direct_pixel: usize,
+        stale: usize,
+    }
+
+    fn resolve_points(
+        screen: &ScreenContext,
+        tags: &[ParsedTag],
+    ) -> (Vec<serde_json::Value>, ResolutionStats) {
         let map_x = |v: f64| (v / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
         let map_y = |v: f64| (v / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
-        // Monitor-local → global screen point (for the AX hit-test).
         let to_global = |lx: f64, ly: f64| (screen.mon_x + lx, screen.mon_y + ly);
         let center = |(x, y, w, h): (f64, f64, f64, f64)| (x + w / 2.0, y + h / 2.0);
-        let points: Vec<serde_json::Value> = tags
+        let mut stats = ResolutionStats::default();
+        let points = tags
             .iter()
             .filter_map(|t| {
                 let exact = t.element_id.and_then(|id| catalog_frame(screen, id));
                 if t.element_id.is_some() && exact.is_none() {
-                    log::warn!(
-                        "[point-overlay] skipped stale native element id {:?}",
-                        t.element_id
-                    );
+                    stats.stale += 1;
                     return None;
+                }
+                if exact.is_some() {
+                    stats.exact_resolved += 1;
                 }
                 let label = if t.label.is_empty() {
                     exact.map(|(_, label)| label).unwrap_or_default()
@@ -377,7 +379,16 @@ mod overlay {
                             Some((frame, _)) => center(frame),
                             None => {
                                 let (gx, gy) = to_global(x, y);
-                                ax_snap_frame(screen, gx, gy).map(center).unwrap_or((x, y))
+                                match ax_snap_frame(screen, gx, gy).map(center) {
+                                    Some(snapped) => {
+                                        stats.ax_snapped += 1;
+                                        snapped
+                                    }
+                                    None => {
+                                        stats.direct_pixel += 1;
+                                        (x, y)
+                                    }
+                                }
                             }
                         };
                         json!({ "shape": "point", "x": px, "y": py, "label": label, "dwell": t.dwell })
@@ -389,34 +400,78 @@ mod overlay {
                             ax_snap_frame(screen, gcx, gcy)
                         });
                         match snapped {
-                            Some((lx, ly, lw, lh)) => json!({
-                                "shape": "rect", "x": lx, "y": ly,
-                                "x2": lx + lw, "y2": ly + lh, "label": label
-                            }),
-                            None => json!({
-                                "shape": "rect", "x": x, "y": y, "x2": x2, "y2": y2, "label": label
-                            }),
+                            Some((lx, ly, lw, lh)) => {
+                                if exact.is_none() {
+                                    stats.ax_snapped += 1;
+                                }
+                                json!({
+                                    "shape": "rect", "x": lx, "y": ly,
+                                    "x2": lx + lw, "y2": ly + lh, "label": label
+                                })
+                            }
+                            None => {
+                                stats.direct_pixel += 1;
+                                json!({
+                                    "shape": "rect", "x": x, "y": y,
+                                    "x2": x2, "y2": y2, "label": label
+                                })
+                            }
                         }
                     }
                     Shape::Arrow => {
-                        // Snap the arrow HEAD onto the target element's center;
-                        // the tail stays where the model drew it.
                         let (x2, y2) = (map_x(t.x2), map_y(t.y2));
                         let (ghx, ghy) = to_global(x2, y2);
-                        let (hx, hy) = ax_snap_frame(screen, ghx, ghy).map(center).unwrap_or((x2, y2));
+                        let (hx, hy) = match ax_snap_frame(screen, ghx, ghy).map(center) {
+                            Some(snapped) => {
+                                stats.ax_snapped += 1;
+                                snapped
+                            }
+                            None => {
+                                stats.direct_pixel += 1;
+                                (x2, y2)
+                            }
+                        };
                         json!({ "shape": "arrow", "x": x, "y": y, "x2": hx, "y2": hy, "label": label })
                     }
-                    // Teaching primitives (#1251) draw on blank space — straight
-                    // vision→monitor mapping, no AX snap.
-                    Shape::Line => json!({
-                        "shape": "line", "x": x, "y": y,
-                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": label
-                    }),
-                    Shape::Text => json!({ "shape": "text", "x": x, "y": y, "label": label }),
+                    Shape::Line => {
+                        stats.direct_pixel += 1;
+                        json!({
+                            "shape": "line", "x": x, "y": y,
+                            "x2": map_x(t.x2), "y2": map_y(t.y2), "label": label
+                        })
+                    }
+                    Shape::Text => {
+                        stats.direct_pixel += 1;
+                        json!({ "shape": "text", "x": x, "y": y, "label": label })
+                    }
                 };
                 Some(point)
             })
             .collect();
+        (points, stats)
+    }
+
+    /// Map screenshot-pixel tags onto the captured monitor and animate them.
+    /// Fire-and-forget: spawns a worker thread that ensures the window (first
+    /// use pays a route-load wait), emits `o8:point-show`, then auto-hides.
+    pub fn show_points(app: &tauri::AppHandle, screen: &ScreenContext, tags: &[ParsedTag]) {
+        if tags.is_empty() {
+            return;
+        }
+        let (points, stats) = resolve_points(screen, tags);
+        log::info!(
+            "[symon-localization] {}",
+            serde_json::json!({
+                "stage": "overlay",
+                "trace": screen.trace_id,
+                "tagCount": tags.len(),
+                "outputCount": points.len(),
+                "exactResolved": stats.exact_resolved,
+                "axSnapped": stats.ax_snapped,
+                "directPixel": stats.direct_pixel,
+                "stale": stats.stale,
+            })
+        );
         if points.is_empty() {
             return;
         }
@@ -675,6 +730,47 @@ mod overlay {
                 }
             }
         });
+    }
+
+    #[cfg(test)]
+    mod localization_tests {
+        use super::*;
+
+        #[test]
+        fn exact_tags_flow_through_production_resolver() {
+            let screen = ScreenContext {
+                trace_id: 42,
+                png_base64: String::new(),
+                img_w: 400,
+                img_h: 200,
+                mon_x: 100.0,
+                mon_y: 200.0,
+                mon_w: 200.0,
+                mon_h: 100.0,
+                ax_catalog: vec![crate::screen_localization::ActionableElement {
+                    id: 7,
+                    role: "AXButton".into(),
+                    label: "Save".into(),
+                    frame: (110.0, 220.0, 40.0, 20.0),
+                }],
+            };
+            let (_, tags) = super::super::parse_point_tags(
+                "[GUIDE:el:7] [DRAW:el:7:Save] [POINT:el:99:stale]",
+            );
+            let (points, stats) = resolve_points(&screen, &tags);
+
+            assert_eq!(points.len(), 2);
+            assert_eq!(points[0]["x"], 30.0);
+            assert_eq!(points[0]["y"], 30.0);
+            assert_eq!(points[0]["label"], "Save");
+            assert_eq!(points[0]["dwell"], true);
+            assert_eq!(points[1]["x"], 10.0);
+            assert_eq!(points[1]["x2"], 50.0);
+            assert_eq!(stats.exact_resolved, 2);
+            assert_eq!(stats.stale, 1);
+            assert_eq!(stats.ax_snapped, 0);
+            assert_eq!(stats.direct_pixel, 0);
+        }
     }
 }
 

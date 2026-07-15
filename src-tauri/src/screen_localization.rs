@@ -5,6 +5,7 @@
 
 use core_foundation::base::{CFType, CFTypeRef, TCFType};
 use core_foundation::string::{CFString, CFStringRef};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 type AXUIElementRef = CFTypeRef;
 
@@ -15,6 +16,7 @@ const MAX_AX_DEPTH: usize = 8;
 const MAX_AX_VISITED: usize = 600;
 const MAX_AX_CANDIDATES: usize = 320;
 const MAX_ACTIONABLE_ELEMENTS: usize = 80;
+static NEXT_TRACE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActionableElement {
@@ -23,6 +25,41 @@ pub struct ActionableElement {
     pub label: String,
     /// Global logical points in the same top-left coordinate space as Tauri.
     pub frame: (f64, f64, f64, f64),
+}
+
+#[derive(Debug)]
+pub struct CatalogSnapshot {
+    pub elements: Vec<ActionableElement>,
+    pub status: &'static str,
+    pub elapsed_ms: u64,
+    pub visited: usize,
+    pub candidates: usize,
+}
+
+impl CatalogSnapshot {
+    fn empty(status: &'static str) -> Self {
+        Self {
+            elements: Vec::new(),
+            status,
+            elapsed_ms: 0,
+            visited: 0,
+            candidates: 0,
+        }
+    }
+
+    pub fn thread_failed() -> Self {
+        Self::empty("thread_failed")
+    }
+}
+
+impl Default for CatalogSnapshot {
+    fn default() -> Self {
+        Self::empty("main_dispatch_failed")
+    }
+}
+
+pub fn next_trace_id() -> u64 {
+    NEXT_TRACE_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 #[repr(C)]
@@ -251,7 +288,7 @@ pub fn actionable_frame_at_point(gx: f64, gy: f64) -> Option<(f64, f64, f64, f64
     })
 }
 
-pub fn enumerate_actionable_elements(monitor: (f64, f64, f64, f64)) -> Vec<ActionableElement> {
+fn enumerate_actionable_elements(monitor: (f64, f64, f64, f64)) -> CatalogSnapshot {
     run_on_main_thread(move || {
         fn walk(
             element: &CFType,
@@ -311,22 +348,23 @@ pub fn enumerate_actionable_elements(monitor: (f64, f64, f64, f64)) -> Vec<Actio
         }
 
         let Some(system) = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() }) else {
-            return Vec::new();
+            return CatalogSnapshot::empty("system_unavailable");
         };
         unsafe { AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2) };
         let Some(app) = copy_attribute(system.as_ptr(), "AXFocusedApplication") else {
-            return Vec::new();
+            return CatalogSnapshot::empty("no_focused_app");
         };
         unsafe { AXUIElementSetMessagingTimeout(app.as_CFTypeRef(), 0.2) };
         let Some(window) = copy_attribute(app.as_CFTypeRef(), "AXFocusedWindow")
             .or_else(|| copy_attribute(app.as_CFTypeRef(), "AXMainWindow"))
         else {
-            return Vec::new();
+            return CatalogSnapshot::empty("no_focused_window");
         };
 
         let mut elements = Vec::new();
         let mut visited = 0;
         walk(&window, 0, monitor, &mut visited, &mut elements);
+        let candidates = elements.len();
         elements.sort_by(|left, right| {
             role_priority(&left.role)
                 .cmp(&role_priority(&right.role))
@@ -337,14 +375,25 @@ pub fn enumerate_actionable_elements(monitor: (f64, f64, f64, f64)) -> Vec<Actio
         for (index, element) in elements.iter_mut().enumerate() {
             element.id = index + 1;
         }
-        elements
+        CatalogSnapshot {
+            elements,
+            status: "ready",
+            elapsed_ms: 0,
+            visited,
+            candidates,
+        }
     })
 }
 
 pub fn catalog_in_background(
     monitor: (f64, f64, f64, f64),
-) -> std::thread::JoinHandle<Vec<ActionableElement>> {
-    std::thread::spawn(move || enumerate_actionable_elements(monitor))
+) -> std::thread::JoinHandle<CatalogSnapshot> {
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let mut snapshot = enumerate_actionable_elements(monitor);
+        snapshot.elapsed_ms = started.elapsed().as_millis() as u64;
+        snapshot
+    })
 }
 
 pub fn catalog_prompt(
@@ -434,6 +483,7 @@ mod tests {
     #[test]
     fn agent_screen_prompt_includes_exact_catalog() {
         let screen = crate::agent::screen::ScreenContext {
+            trace_id: 1,
             png_base64: String::new(),
             img_w: 400,
             img_h: 200,
