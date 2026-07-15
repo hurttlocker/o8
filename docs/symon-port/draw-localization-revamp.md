@@ -1,7 +1,9 @@
 # Symon draw-localization revamp — Clicky-quality "draw on screen"
 
-**Status:** planned (2026-06-17). Operator chose "write the revamp plan" after live testing showed the
-vision-guess box landing on the wrong window / over-covering web content.
+**Status:** Phase 0 + Phase 1 implemented (2026-07-14); Phase 2 + Phase 3 remain planned. Automated
+verification covers role policy, catalog mapping/prompt injection, exact-tag parsing/round trips, the
+full Rust library suite, and the Symon tool bridge. Native Mail/Settings dogfood remains the merge-time
+visual gate because the currently running `/Applications/o8.app` intentionally wasn't replaced mid-run.
 
 ## The problem
 
@@ -21,8 +23,9 @@ guess but has two structural failures (both seen live on x.com-in-Chrome):
    55%-area gate was too loose. *Root cause: snapping to a container role + a web surface with no
    per-element AX.*
 
-**Claude is not in this path.** Gemini alone is the eyes; Claude is only the async background brain.
-So this is purely a localization-method problem, not a "mixing models" problem.
+When this plan was written Gemini was the only vision front brain. The current Control+Fn default is
+Claude Sonnet 5 and it receives the screenshot directly, but the diagnosis is unchanged: this is a
+localization-method problem, independent of which vision-capable model chooses the target.
 
 ## The target (what Clicky does)
 
@@ -49,22 +52,21 @@ vision demoted to last resort:
 Today the model emits coordinates. After the revamp it is handed a **catalog** and references entries:
 
 - Native: catalog = `[{ id, role, label, frame_global_pts }]` built from the AX walk. Injected into the
-  prompt as a compact list (`[12] button "Post"`, `[13] link "Home"`, …). The screenshot still rides
+  prompt as a compact list (`[el:12] Button "Post" rect=…`, `[el:13] Link "Home" rect=…`). The screenshot still rides
   along for disambiguation, but the model emits `[DRAW:el:12]` / `[POINT:el:12]`, not pixels.
 - Web: catalog = the `interactive: [{ selector, tag, label }]` array `o8_browser_read` **already
   returns**. Model emits `[DRAW:web:<selector>]` / `[POINT:web:<selector>]`.
 - Fallback: the existing `[DRAW:rect:px…]` / `[POINT:x,y]` pixel forms stay valid for when no catalog
   entry matches (Tier 3).
 
-`point_overlay::parse_point_tags` gains `TagKind::Element { id }` and `TagKind::Web { selector }`
-variants; `show_points` resolves a catalog id directly to its frame (no hit-test) and a web selector via
+`point_overlay::ParsedTag` now carries an optional native `element_id`; Phase 2 adds a web target.
+`show_points` resolves a catalog id directly to its frame (no hit-test) and a web selector via
 a new page-agent rect call. The pixel path is unchanged.
 
 ### Tier 1 — native AX enumeration
 
-Reuse the depth-first walk in `paste::gather_window_context` (`paste.rs:592–723`), which already
-descends `AXFocusedWindow → AXChildren` reading `AXRole`/`AXValue`. New variant
-`paste::enumerate_actionable(window) -> Vec<AxElement>` that, for actionable roles, records
+The implementation isolates a bounded depth-first AX walk in `screen_localization.rs`, following the
+same `AXFocusedWindow → AXChildren` approach used by paste context. For actionable roles it records
 `{ id, role, label, frame }`:
 
 - **Actionable roles:** `AXButton`, `AXLink`, `AXTextField`, `AXTextArea`, `AXMenuItem`,
@@ -97,10 +99,10 @@ straight back to the raw vision pixel. This alone kills the "boxed the whole win
 
 ## Phases (each with a verify gate)
 
-- **Phase 0 — stopgap (cheap, ship first).** Role-filter the shipped AX-snap (Tier-3 fix). *Verify:*
+- **Phase 0 — stopgap (implemented 2026-07-14).** Role-filter the shipped AX-snap (Tier-3 fix). *Verify:*
   "box the Edit Profile button" on x.com no longer boxes the window (falls back to the point); native
   apps unaffected. ~30 lines in `point_overlay.rs` + a role read.
-- **Phase 1 — native catalog (the big win).** `enumerate_actionable`, catalog → prompt injection,
+- **Phase 1 — native catalog (implemented 2026-07-14).** `enumerate_actionable`, catalog → prompt injection,
   `[el:id]` tag + resolver. *Verify:* in Mail/Settings, "box the Send button" / "point at Search" lands
   on the exact control, repeatably, with no screenshot-pixel guess in the path.
 - **Phase 2 — web DOM.** `o8_browser_rect` + iframe→screen map + `[web:selector]` tag. *Verify:* open
@@ -111,8 +113,11 @@ straight back to the raw vision pixel. This alone kills the "boxed the whole win
 
 ## Files
 
-- `src-tauri/src/paste.rs` — `enumerate_actionable` (reuses the AX walk + the 0.1.374 AXPosition/AXSize
-  reads); role lists.
+- `src-tauri/src/screen_localization.rs` — bounded AX walk, role policy, frame/label catalog, compact
+  prompt serialization, and the role-filtered point hit-test. This owns localization instead of
+  adding more unrelated behavior to the already-large paste module.
+- `src-tauri/src/paste.rs` — retains the edit/window-context AX paths; the old unfiltered pointer
+  hit-test moved into the localization domain.
 - `src-tauri/src/point_overlay.rs` — `TagKind::Element`/`Web`, catalog resolver, role-filtered Tier-3
   snap, parse tests.
 - `src-tauri/src/agent/mod.rs` / `screen.rs` — build the catalog when a draw/point is likely; inject the

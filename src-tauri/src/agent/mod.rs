@@ -299,9 +299,9 @@ pub(crate) fn conversation_context() -> Option<String> {
 /// the model the screenshot's pixel space and the `[POINT:x,y:label]` tag
 /// protocol (parsed + stripped by `point_overlay::parse_point_tags`; the tags
 /// animate the Symon Points overlay, never reach TTS).
-pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
-    format!(
-        "A screenshot of the user's current screen is attached ({img_w}x{img_h} \
+pub(crate) fn screen_prompt_section(screen: &screen::ScreenContext) -> String {
+    let mut prompt = format!(
+        "A screenshot of the user's current screen is attached ({}x{} \
          pixels). Use it to answer questions about what is on screen. You can \
          also POINT at the screen: include a tag like [POINT:x,y:label] inline \
          in your reply — x,y in screenshot pixels, label 1-3 words naming the \
@@ -331,8 +331,15 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          do NOT open a browser. There is no document or canvas to render into; \
          the ONLY way to show a picture is the [POINT]/[GUIDE]/[DRAW] tags above, \
          placed inline in the sentence you speak. Keep spoken sentences short \
-         and plain; never narrate the whole screen."
-    )
+         and plain; never narrate the whole screen.",
+        screen.img_w, screen.img_h
+    );
+    prompt.push_str(&crate::screen_localization::catalog_prompt(
+        &screen.ax_catalog,
+        (screen.mon_x, screen.mon_y, screen.mon_w, screen.mon_h),
+        (screen.img_w, screen.img_h),
+    ));
+    prompt
 }
 
 /// Appended to the system prompt when editable text rides the request —
@@ -897,13 +904,12 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     run_agent_inner(app, prompt, None, None, None).await
 }
 
-/// True when the resolved brain can accept inline images. Gemini (direct id, no
-/// `/`) always can; the Claude text-planner CLI never can; an OpenRouter id is
-/// gated on a conservative vision-model substring allowlist. Drives whether a
-/// spatial turn attaches the images or falls back to an honest "I can't see" note.
+/// True when the resolved brain can accept inline images. Direct Gemini and the
+/// Claude planner CLI can; OpenRouter ids use a conservative family allowlist.
+/// Drives attachment and the spatial honesty guard.
 pub(crate) fn model_can_see_images(model: &str) -> bool {
     if model.starts_with("claude") {
-        return false; // background text-planner CLI — no inline vision
+        return true; // Claude planner sends image blocks through stream-json.
     }
     if !model.contains('/') {
         return true; // direct Gemini id
@@ -918,7 +924,9 @@ pub(crate) fn model_can_see_images(model: &str) -> bool {
         "gemini",
         "claude-3",
         "claude-4",
+        "claude-5",
         "claude-sonnet-4",
+        "claude-sonnet-5",
         "claude-opus-4",
         "llama-3.2",
         "llama-4",
@@ -1090,15 +1098,17 @@ async fn run_agent_inner(
     // (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
     // `model_override` (Some for background Claude tasks) wins over the config.
     let model = model_override.unwrap_or_else(|| router::load_config().mac_native_action);
-    // Spatial honesty guard: the operator drew a region, but this brain can't see
-    // images (Claude text-planner, or a non-vision OpenRouter id). Tell it plainly
-    // so it never pretends to have looked at the mark.
-    if spatial_active && !model_can_see_images(&model) {
-        llm_prompt.push_str(
-            "\n\n(NOTE: the operator drew on the screen while speaking to mark a \
-             region, but THIS model cannot see images — you can NOT see what they \
-             marked. Say so briefly if the region matters to answering.)",
-        );
+    if ctx.screen.is_some() && !model_can_see_images(&model) {
+        let note = if spatial_active {
+            "\n\n(NOTE: the operator marked a screen region, but this model cannot \
+             accept images — you can NOT see what they marked. Say so briefly \
+             if the region matters to answering.)"
+        } else {
+            "\n\n(NOTE: this model cannot accept the captured screenshot — you can NOT \
+             see or point at the screen. Say so briefly if screen context is \
+             required to answer.)"
+        };
+        llm_prompt.push_str(note);
     }
     let loop_result = if model.starts_with("claude") {
         claude::run_loop(&model, &llm_prompt, &ctx).await
@@ -1285,6 +1295,23 @@ fn notify_done(app: &tauri::AppHandle, result: &str) {
     use tauri_plugin_notification::NotificationExt;
     let body: String = result.chars().take(160).collect();
     let _ = app.notification().builder().title("Symon").body(&body).show();
+}
+
+#[cfg(test)]
+mod model_vision_tests {
+    use super::*;
+
+    #[test]
+    fn direct_claude_and_known_openrouter_models_keep_screen_context() {
+        assert!(model_can_see_images("claude-sonnet-5"));
+        assert!(model_can_see_images("gemini-3-flash-preview"));
+        assert!(model_can_see_images("anthropic/claude-sonnet-5"));
+        assert!(!model_can_see_images("openai/gpt-3.5-turbo"));
+        assert_eq!(
+            crate::models::AGENT_MAC_NATIVE_ACTION_DEFAULT,
+            crate::models::CLAUDE_SONNET_5
+        );
+    }
 }
 
 #[cfg(test)]
