@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars -- registry dependencies are supplied through one stable render contract */
 
 import { Suspense, type Dispatch, type SetStateAction } from 'react';
 import { toast } from '@/components/shared/ConfirmToastHost';
@@ -299,6 +300,7 @@ export function createTileRegistry({
             autoCreateDefaultTab={isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0}
             conversationNavigation={isPrimaryWorkspaceTile ? 'sidebar' : 'tabs'}
             preferredRepo={tilePreferredRepo}
+            selectedRepo={workspaceTerminalPreferredRepo}
             splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
             availableRepos={workspaceScopeEntries}
             openRepoPaths={openRepoPaths}
