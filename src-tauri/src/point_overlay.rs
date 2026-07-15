@@ -47,6 +47,8 @@ pub struct ParsedTag {
     /// Exact Accessibility-catalog target. When set, pixel coordinates are
     /// ignored and the overlay resolves the current captured element frame.
     pub element_id: Option<usize>,
+    /// Exact DOM-catalog target inside o8's embedded browser.
+    pub web_element_id: Option<usize>,
     pub x: f64,
     pub y: f64,
     /// Second point for Rect/Arrow (opposite corner / arrow head). Unused (0)
@@ -129,11 +131,15 @@ pub fn tag_to_string(t: &ParsedTag) -> String {
             format!("{v}")
         }
     };
-    if let Some(element_id) = t.element_id {
+    let exact_target = t
+        .web_element_id
+        .map(|id| ("web", id))
+        .or_else(|| t.element_id.map(|id| ("el", id)));
+    if let Some((kind, element_id)) = exact_target {
         let exact = match t.shape {
-            Shape::Point if t.dwell => Some(format!("[GUIDE:el:{element_id}:{}]", t.label)),
-            Shape::Point => Some(format!("[POINT:el:{element_id}:{}]", t.label)),
-            Shape::Rect => Some(format!("[DRAW:el:{element_id}:{}]", t.label)),
+            Shape::Point if t.dwell => Some(format!("[GUIDE:{kind}:{element_id}:{}]", t.label)),
+            Shape::Point => Some(format!("[POINT:{kind}:{element_id}:{}]", t.label)),
+            Shape::Rect => Some(format!("[DRAW:{kind}:{element_id}:{}]", t.label)),
             _ => None,
         };
         if let Some(exact) = exact {
@@ -170,7 +176,8 @@ fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
         return None;
     }
     strip_screen_suffix(&mut segments);
-    if segments.first().is_some_and(|part| part.eq_ignore_ascii_case("el")) {
+    let target_kind = segments.first()?.trim().to_ascii_lowercase();
+    if target_kind == "el" || target_kind == "web" {
         segments.remove(0);
         let element_id = segments.first()?.trim().parse::<usize>().ok()?;
         if element_id == 0 {
@@ -178,7 +185,8 @@ fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
         }
         segments.remove(0);
         return Some(ParsedTag {
-            element_id: Some(element_id),
+            element_id: (target_kind == "el").then_some(element_id),
+            web_element_id: (target_kind == "web").then_some(element_id),
             x: 0.0,
             y: 0.0,
             x2: 0.0,
@@ -198,6 +206,7 @@ fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
     }
     Some(ParsedTag {
         element_id: None,
+        web_element_id: None,
         x,
         y,
         x2: 0.0,
@@ -215,7 +224,8 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
         return None;
     }
     strip_screen_suffix(&mut segments);
-    if segments.first().is_some_and(|part| part.eq_ignore_ascii_case("el")) {
+    let target_kind = segments.first()?.trim().to_ascii_lowercase();
+    if target_kind == "el" || target_kind == "web" {
         segments.remove(0);
         let element_id = segments.first()?.trim().parse::<usize>().ok()?;
         if element_id == 0 {
@@ -223,7 +233,8 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
         }
         segments.remove(0);
         return Some(ParsedTag {
-            element_id: Some(element_id),
+            element_id: (target_kind == "el").then_some(element_id),
+            web_element_id: (target_kind == "web").then_some(element_id),
             x: 0.0,
             y: 0.0,
             x2: 0.0,
@@ -254,6 +265,7 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
         }
         return Some(ParsedTag {
             element_id: None,
+            web_element_id: None,
             x: nums[0],
             y: nums[1],
             x2: 0.0,
@@ -268,6 +280,7 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
     }
     Some(ParsedTag {
         element_id: None,
+        web_element_id: None,
         x: nums[0],
         y: nums[1],
         x2: nums[2],
@@ -338,9 +351,24 @@ mod overlay {
         (lw >= 8.0 && lh >= 8.0).then_some(((lx, ly, lw, lh), element.label.as_str()))
     }
 
+    fn web_catalog_frame(
+        screen: &ScreenContext,
+        element_id: usize,
+    ) -> Option<((f64, f64, f64, f64), &str)> {
+        let element = screen.web_catalog.iter().find(|item| item.id == element_id)?;
+        let (fx, fy, fw, fh) = element.frame;
+        let lx = (fx - screen.mon_x).clamp(0.0, screen.mon_w);
+        let ly = (fy - screen.mon_y).clamp(0.0, screen.mon_h);
+        let lw = fw.min(screen.mon_w - lx);
+        let lh = fh.min(screen.mon_h - ly);
+        (lw >= 4.0 && lh >= 4.0).then_some(((lx, ly, lw, lh), element.label.as_str()))
+    }
+
     #[derive(Default)]
     struct ResolutionStats {
         exact_resolved: usize,
+        native_exact_resolved: usize,
+        web_exact_resolved: usize,
         ax_snapped: usize,
         direct_pixel: usize,
         stale: usize,
@@ -358,13 +386,17 @@ mod overlay {
         let points = tags
             .iter()
             .filter_map(|t| {
-                let exact = t.element_id.and_then(|id| catalog_frame(screen, id));
-                if t.element_id.is_some() && exact.is_none() {
+                let native_exact = t.element_id.and_then(|id| catalog_frame(screen, id));
+                let web_exact = t.web_element_id.and_then(|id| web_catalog_frame(screen, id));
+                let exact = native_exact.or(web_exact);
+                if (t.element_id.is_some() || t.web_element_id.is_some()) && exact.is_none() {
                     stats.stale += 1;
                     return None;
                 }
                 if exact.is_some() {
                     stats.exact_resolved += 1;
+                    stats.native_exact_resolved += usize::from(native_exact.is_some());
+                    stats.web_exact_resolved += usize::from(web_exact.is_some());
                 }
                 let label = if t.label.is_empty() {
                     exact.map(|(_, label)| label).unwrap_or_default()
@@ -467,6 +499,8 @@ mod overlay {
                 "tagCount": tags.len(),
                 "outputCount": points.len(),
                 "exactResolved": stats.exact_resolved,
+                "nativeExactResolved": stats.native_exact_resolved,
+                "webExactResolved": stats.web_exact_resolved,
                 "axSnapped": stats.ax_snapped,
                 "directPixel": stats.direct_pixel,
                 "stale": stats.stale,
@@ -733,45 +767,8 @@ mod overlay {
     }
 
     #[cfg(test)]
-    mod localization_tests {
-        use super::*;
-
-        #[test]
-        fn exact_tags_flow_through_production_resolver() {
-            let screen = ScreenContext {
-                trace_id: 42,
-                png_base64: String::new(),
-                img_w: 400,
-                img_h: 200,
-                mon_x: 100.0,
-                mon_y: 200.0,
-                mon_w: 200.0,
-                mon_h: 100.0,
-                ax_catalog: vec![crate::screen_localization::ActionableElement {
-                    id: 7,
-                    role: "AXButton".into(),
-                    label: "Save".into(),
-                    frame: (110.0, 220.0, 40.0, 20.0),
-                }],
-            };
-            let (_, tags) = super::super::parse_point_tags(
-                "[GUIDE:el:7] [DRAW:el:7:Save] [POINT:el:99:stale]",
-            );
-            let (points, stats) = resolve_points(&screen, &tags);
-
-            assert_eq!(points.len(), 2);
-            assert_eq!(points[0]["x"], 30.0);
-            assert_eq!(points[0]["y"], 30.0);
-            assert_eq!(points[0]["label"], "Save");
-            assert_eq!(points[0]["dwell"], true);
-            assert_eq!(points[1]["x"], 10.0);
-            assert_eq!(points[1]["x2"], 50.0);
-            assert_eq!(stats.exact_resolved, 2);
-            assert_eq!(stats.stale, 1);
-            assert_eq!(stats.ax_snapped, 0);
-            assert_eq!(stats.direct_pixel, 0);
-        }
-    }
+    #[path = "localization_tests.rs"]
+    mod localization_tests;
 }
 
 #[cfg(target_os = "macos")]

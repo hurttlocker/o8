@@ -497,6 +497,7 @@ mod tests {
                 label: "Save".into(),
                 frame: (110.0, 220.0, 40.0, 20.0),
             }],
+            web_catalog: Vec::new(),
         };
         let prompt = crate::agent::screen_prompt_section(&screen);
         assert!(prompt.contains("A screenshot of the user's current screen is attached"));

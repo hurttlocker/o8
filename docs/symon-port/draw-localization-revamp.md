@@ -1,9 +1,9 @@
 # Symon draw-localization revamp — Clicky-quality "draw on screen"
 
-**Status:** Phase 0 + Phase 1 implemented (2026-07-14); Phase 2 + Phase 3 remain planned. Automated
+**Status:** Phase 0 + Phase 1 + Phase 2 implemented (2026-07-15); Phase 3 remains planned. Automated
 verification covers role policy, catalog mapping/prompt injection, exact-tag parsing/round trips, the
-full Rust library suite, and the Symon tool bridge. Native Mail/Settings dogfood remains the merge-time
-visual gate because the currently running `/Applications/o8.app` intentionally wasn't replaced mid-run.
+full Rust library suite, browser-agent route, and the Symon tool bridge. Native Mail/Settings plus o8
+Browser dogfood remain the visual gates because the running `/Applications/o8.app` wasn't replaced mid-run.
 
 ## The problem
 
@@ -63,6 +63,8 @@ Control+Fn is smart compose. The command passes only when one trace proves AX ca
 
 Use `--expect fallback` on an external browser, video, or canvas to prove the pixel route still renders
 without snapping to a container. Then visually confirm the mark is tight rather than a window-sized box.
+Use `--expect web` with a local page visible in o8's Browser panel or canvas to prove DOM catalog capture,
+an exact `[web:id]` model choice, a live selector refresh, and production overlay resolution as one trace.
 For `GUIDE`, move the cursor to the rendered target and confirm the dwell/release behavior; repeat the
 exact test on a second display to cover monitor mapping. These two visual assertions remain manual because
 the structured gate deliberately records geometry counts rather than private screen contents.
@@ -103,15 +105,16 @@ same `AXFocusedWindow → AXChildren` approach used by paste context. For action
 
 ### Tier 2 — embedded-browser DOM
 
-The canvas browser cards (`browser-card.tsx`, `<iframe data-o8-browser="canvas">`) and the Browser tab
-(`O8BrowserPane.tsx`, `data-o8-browser="panel"`) are same-origin/proxied iframes with reachable DOM.
-`page-agent.ts` `read()` already computes `getBoundingClientRect` to filter visibility but discards it.
+Canvas browser cards use the same-origin/proxied iframe agent; the Browser panel normally uses o8's
+host-owned native child webview, whose injected agent can inspect any origin without giving the page
+Tauri capability. Both now return the same bounded geometry envelope.
 
-- Add page-agent verb **`rect(selector)`** (or `read({ includeRects:true })`) returning iframe-local
-  `{ left, top, width, height }`. Expose as `o8_browser_rect` for parity.
-- Screen-map in the overlay: `iframeScreenRect = querySelector('iframe[data-o8-browser]').getBoundingClientRect()`
-  (+ canvas `zoom`/`pan` for canvas cards) → `screen = iframeScreenRect.origin + elementRect.origin`.
-  The element picker (`browser-card.tsx:242–291`) already does the rect+scroll math — reuse it.
+- Page-agent verb **`rect(selector)`** returns current element geometry and is exposed as
+  `o8_browser_rect`; `localize` returns the bounded catalog Symon captures before the model turn.
+- Iframe targets are transformed into the main-webview viewport, including canvas/card transforms and
+  clipping. Native targets stay in page-viewport coordinates until Rust anchors them to the child window.
+- Rust maps both envelopes into global logical points, rejects hidden or unfocused surfaces, and refreshes
+  the chosen selector after the model turn so a layout shift cannot silently reuse stale geometry.
 
 ### Tier 3 — vision fallback (hardened)
 
@@ -127,7 +130,8 @@ straight back to the raw vision pixel. This alone kills the "boxed the whole win
 - **Phase 1 — native catalog (implemented 2026-07-14).** `enumerate_actionable`, catalog → prompt injection,
   `[el:id]` tag + resolver. *Verify:* in Mail/Settings, "box the Send button" / "point at Search" lands
   on the exact control, repeatably, with no screenshot-pixel guess in the path.
-- **Phase 2 — web DOM.** `o8_browser_rect` + iframe→screen map + `[web:selector]` tag. *Verify:* open
+- **Phase 2 — web DOM (implemented; native dogfood pending).** Browser-agent geometry + iframe/native
+  viewport→screen map + numeric `[web:id]` tags with a live selector refresh. *Verify:* open
   x.com **in o8's browser**, "box the Post button" snaps tight to the button.
 - **Phase 3 — protocol + UX polish.** Unify the tag protocol + fallback ordering; add Clicky's
   continuous-narrate-while-drawing and labeled pointer-arrow vocabulary. *Verify:* the Farza

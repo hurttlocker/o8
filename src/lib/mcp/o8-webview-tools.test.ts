@@ -73,3 +73,15 @@ describe('o8 webview composite tools', () => {
     expect(() => new Function(`return ${buildPickMenuOptionScript('Orchestrator')};`)).not.toThrow();
   });
 });
+
+describe('o8 browser geometry tool', () => {
+  it('registers a strict selector-to-rect schema and handler', () => {
+    const tool = O8_WEBVIEW_TOOLS.find((candidate) => candidate.name === 'o8_browser_rect');
+    expect(tool?.inputSchema).toMatchObject({ type: 'object', required: ['selector'] });
+    expect(tool?.inputSchema).toHaveProperty('properties');
+    const handlers = createO8WebviewToolHandlers(() => {
+      throw new Error('HTTP-backed handler does not use the webview client directly');
+    });
+    expect(typeof handlers.o8_browser_rect).toBe('function');
+  });
+});

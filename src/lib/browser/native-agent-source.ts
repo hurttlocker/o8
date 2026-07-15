@@ -28,6 +28,7 @@
 import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 import { GRAB_PAYLOAD_SOURCE } from '@/lib/browser/grab';
 import { REACT_COMPONENT_NAME_SOURCE } from '@/lib/browser/react-fiber';
+import { BROWSER_LOCALIZATION_ROWS_SOURCE } from '@/lib/browser/localization';
 
 /**
  * Self-contained IIFE that installs `window.__o8BrowserAgent` in the page it is
@@ -42,6 +43,7 @@ export const NATIVE_BROWSER_AGENT_SOURCE = [
   SELECTOR_FOR_SOURCE,
   GRAB_PAYLOAD_SOURCE,
   REACT_COMPONENT_NAME_SOURCE,
+  BROWSER_LOCALIZATION_ROWS_SOURCE,
   '',
   '  // ── helpers ──',
   '  function labelFor(el) {',
@@ -123,6 +125,18 @@ export const NATIVE_BROWSER_AGENT_SOURCE = [
   "      text: text.length > maxChars ? text.slice(0, maxChars) + '\\u2026 [truncated ' + (text.length - maxChars) + ' chars]' : text,",
   '      interactive: interactive,',
   '    };',
+  '  }',
+  '',
+  '  function localize() {',
+  "    if (!document.body) return { ok: false, error: 'page has no body yet' };",
+  '    return { ok: true, url: location.href, surface: "native", coordinateSpace: "page-viewport", viewport: { width: innerWidth, height: innerHeight }, interactive: collectBrowserLocalizationRows(document.body, selectorFor, labelFor) };',
+  '  }',
+  '  function rect(args) {',
+  '    args = args || {}; var el = args.selector ? document.querySelector(args.selector) : null;',
+  "    if (!el) return { ok: false, error: 'no element matches ' + args.selector };",
+  '    var rows = collectBrowserLocalizationRows({ ownerDocument: document, querySelectorAll: function () { return [el]; } }, selectorFor, labelFor, 1);',
+  "    if (!rows.length) return { ok: false, error: 'element is not visibly actionable: ' + args.selector };",
+  '    var row = rows[0]; row.ok = true; row.surface = "native"; row.coordinateSpace = "page-viewport"; row.viewport = { width: innerWidth, height: innerHeight }; return row;',
   '  }',
   '',
   '  function click(args) {',
@@ -267,6 +281,6 @@ export const NATIVE_BROWSER_AGENT_SOURCE = [
   '    __designGrab = null;',
   '  }',
   '',
-  '  window.__o8BrowserAgent = { read: read, click: click, type: type, probe: probe, grab: grab, drawmode: startDesignDraw, drawthumb: setDrawThumb, drawpending: getDrawPending, startDesignGrab: startDesignGrab, stopDesignGrab: stopDesignGrab };',
+  '  window.__o8BrowserAgent = { read: read, localize: localize, rect: rect, click: click, type: type, probe: probe, grab: grab, drawmode: startDesignDraw, drawthumb: setDrawThumb, drawpending: getDrawPending, startDesignGrab: startDesignGrab, stopDesignGrab: stopDesignGrab };',
   '})();',
 ].join('\n');

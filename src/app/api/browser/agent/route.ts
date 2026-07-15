@@ -7,7 +7,7 @@ import { getBrowserEngine } from '@/lib/browser-engine/engine';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 
-type EmbeddedVerb = 'read' | 'click' | 'type' | 'probe' | 'grab';
+type EmbeddedVerb = 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab';
 
 /**
  * Try a verb against the NATIVE browser-view window (Stage 4). The host evals the
@@ -110,7 +110,7 @@ async function stopNativeDesignGrab(client: O8WebviewClient): Promise<void> {
  * trail as a `browser_acted` event.
  */
 
-const VERBS = new Set(['read', 'click', 'type', 'probe', 'grab', 'open', 'close', 'designgrab', 'stopdesigngrab', 'drawmode', 'drawresult', 'drawpending', 'drawthumb']);
+const VERBS = new Set(['read', 'localize', 'rect', 'click', 'type', 'probe', 'grab', 'open', 'close', 'designgrab', 'stopdesigngrab', 'drawmode', 'drawresult', 'drawpending', 'drawthumb']);
 
 interface AgentBody {
   verb?: unknown;
@@ -250,7 +250,7 @@ export async function POST(request: NextRequest) {
   const engine = getBrowserEngine();
   const wantsEngine = args.surface === 'engine'
     || (verb === 'open' && typeof args.url === 'string' && args.url.trim() !== '' && !isLocalUrl(args.url.trim()))
-    || (verb !== 'open' && args.surface === undefined && engine.hasSession(scope))
+    || (verb !== 'open' && verb !== 'localize' && verb !== 'rect' && args.surface === undefined && engine.hasSession(scope))
     || verb === 'close';
 
   try {
@@ -275,7 +275,7 @@ export async function POST(request: NextRequest) {
     // native path is up. Skips 'canvas' (browser cards stay on the iframe path),
     // and falls back to the iframe path below when the native window isn't open.
     if (
-      (verb === 'read' || verb === 'click' || verb === 'type' || verb === 'grab' || verb === 'probe')
+      (verb === 'read' || verb === 'localize' || verb === 'rect' || verb === 'click' || verb === 'type' || verb === 'grab' || verb === 'probe')
       && args.surface !== 'canvas'
     ) {
       const native = await tryNativeVerb(client, verb, args);
@@ -300,7 +300,7 @@ export async function POST(request: NextRequest) {
       const result = await client.evalJs(browserAgentEval('probe', args));
       return new NextResponse(result.result, { headers: { 'content-type': 'application/json' } });
     }
-    const result = await client.evalJs(browserAgentEval(verb as 'read' | 'click' | 'type' | 'grab', args));
+    const result = await client.evalJs(browserAgentEval(verb as EmbeddedVerb, args));
     let ok = false;
     let url: string | undefined;
     try {
