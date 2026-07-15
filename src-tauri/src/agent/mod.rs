@@ -1142,6 +1142,24 @@ async fn run_agent_inner(
             // text is what gets stored, displayed, and spoken; the tags drive
             // the Symon Points overlay (dossier #1).
             let (clean_text, point_tags) = crate::point_overlay::parse_point_tags(&result.result_text);
+            if let Some(screen) = &ctx.screen {
+                let exact_tag_count = point_tags
+                    .iter()
+                    .filter(|tag| tag.element_id.is_some())
+                    .count();
+                log::info!(
+                    "[symon-localization] {}",
+                    serde_json::json!({
+                        "stage": "model",
+                        "trace": screen.trace_id,
+                        "model": &result.model_used,
+                        "catalogCount": screen.ax_catalog.len(),
+                        "tagCount": point_tags.len(),
+                        "exactTagCount": exact_tag_count,
+                        "pixelTagCount": point_tags.len() - exact_tag_count,
+                    })
+                );
+            }
             #[cfg(target_os = "macos")]
             if !point_tags.is_empty() {
                 if let Some(screen) = &ctx.screen {
