@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 
+import {
+  createO8WebviewBrowserHandlers,
+  O8_WEBVIEW_BROWSER_TOOLS,
+} from '@/lib/mcp/o8-webview-browser-tools';
 import {
   createO8WebviewCompositeHandlers,
   O8_WEBVIEW_COMPOSITE_TOOLS,
@@ -372,6 +374,7 @@ async function withStructuredErrors(
 
 export const O8_WEBVIEW_TOOLS: McpTool[] = [
   ...O8_WEBVIEW_COMPOSITE_TOOLS,
+  ...O8_WEBVIEW_BROWSER_TOOLS,
   {
     name: 'o8_view_screenshot',
     description: 'USE THIS WHEN the user asks what their o8 screen looks like, wants you to debug a visual bug, or says "look at o8 / take a screenshot / what do you see". Returns base64 PNG of the running o8 desktop app window. The Rust-side capture works even when the JS thread is busy.',
@@ -535,75 +538,6 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
       required: ['selector'],
     },
   },
-  // ── o8_browser_* — drive the page INSIDE o8's embedded browser ──
-  // (canvas browser cards / the Browser tab), not the o8 UI itself.
-  // Same-origin pages only, which with the embedded browser's live proxy
-  // means any localhost page. Actions paint a ghost cursor so the operator
-  // sees the agent working.
-  {
-    name: 'o8_browser_read',
-    description: "Read the page INSIDE o8's embedded browser (canvas browser card or Browser tab): returns { url, title, text, interactive } where interactive lists clickable/typable elements with CSS selectors — the vocabulary for o8_browser_click / o8_browser_type. Use this FIRST to see the page before acting. Localhost pages only (cross-origin pages return an error envelope).",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: "Which browser surface — 'canvas' (browser cards), 'panel' (Browser tab), or 'engine' (headless installed-Chrome for external URLs). Omit to auto-route: the engine while its page is open, else the most recently active embedded surface." },
-        selector: { type: 'string', description: 'Optional CSS selector — read only this subtree.' },
-        maxChars: { type: 'number', description: 'Text cap (default 6000, max 14000).' },
-      },
-    },
-  },
-  {
-    name: 'o8_browser_click',
-    description: "Click an element INSIDE o8's embedded browser by CSS selector (from o8_browser_read's interactive list or a Design Mode grab). Fires the full pointer/mouse sequence so React apps respond, and paints a ghost cursor + ripple the operator can see.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector of the element to click.' },
-        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
-      },
-      required: ['selector'],
-    },
-  },
-  {
-    name: 'o8_browser_type',
-    description: "Type into an input/textarea INSIDE o8's embedded browser by CSS selector. Uses the native value setter + input/change events so controlled (React) inputs accept it. Set submit:true to press Enter / submit the form after.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector of the input or textarea.' },
-        text: { type: 'string', description: 'Text to type.' },
-        submit: { type: 'boolean', description: 'Press Enter / requestSubmit after typing.' },
-        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
-      },
-      required: ['selector', 'text'],
-    },
-  },
-  {
-    name: 'o8_browser_grab',
-    description: "Design-Mode grab — capture ONE element INSIDE o8's embedded browser by CSS selector and return its rich payload: { tagName, cssSelector, computedStyles (color/type/box/layout), accessibility (role/name/aria-*), attributes, innerHTML, outerHTML, parentChain, boundingRect }. Use to hand the agent exactly what a UI element looks like — the structure + design tokens — instead of a screenshot guess. Localhost pages (embedded) or the headless engine (external URLs).",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector of the element to grab.' },
-        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
-      },
-      required: ['selector'],
-    },
-  },
-  {
-    name: 'o8_browser_wait',
-    description: "Poll the page INSIDE o8's embedded browser until a CSS selector resolves (optionally with a text substring) — the settle gate between o8_browser_click and o8_browser_read.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector to wait for inside the framed page.' },
-        text: { type: 'string', description: 'Optional substring the element must contain.' },
-        timeoutMs: { type: 'number', description: 'Max wait in milliseconds (default 10000, capped at 25000).' },
-        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
-      },
-      required: ['selector'],
-    },
-  },
 ];
 
 /**
@@ -615,7 +549,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
  * a pending eval by `cid`. See `native_browser_view_security`.
  */
 export function buildNativeVerbEval(
-  verb: 'read' | 'click' | 'type' | 'probe' | 'grab',
+  verb: 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab',
   args: Record<string, unknown>,
   cid: string,
   resultUrl: string,
@@ -641,7 +575,7 @@ export function buildNativeVerbEval(
  * the verb returns a plain object and the host pulls the JSON back. This replaces
  * the in-page `fetch` POST channel, which HTTPS pages mixed-content block.
  */
-export function nativeReturnEval(verb: 'read' | 'click' | 'type' | 'probe' | 'grab', args: Record<string, unknown>): string {
+export function nativeReturnEval(verb: 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab', args: Record<string, unknown>): string {
   return `(function(){
     var a = window.__o8BrowserAgent;
     if (!a) return { ok: false, error: 'native browser agent not installed yet' };
@@ -651,7 +585,7 @@ export function nativeReturnEval(verb: 'read' | 'click' | 'type' | 'probe' | 'gr
 }
 
 /** Eval snippet calling one in-page browser-agent verb; returns a JSON string. */
-export function browserAgentEval(verb: 'read' | 'click' | 'type' | 'probe' | 'grab', args: Record<string, unknown>): string {
+export function browserAgentEval(verb: 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab', args: Record<string, unknown>): string {
   return `(() => {
     const agent = window.__o8BrowserAgent;
     if (!agent) return JSON.stringify({ ok: false, error: 'browser agent not installed — open a browser card (canvas) or the Browser tab first' });
@@ -722,65 +656,10 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
   })()`;
 }
 
-function parseAgentResult(raw: string): McpToolResult {
-  try {
-    return jsonResult(JSON.parse(raw));
-  } catch {
-    return textResult(raw);
-  }
-}
-
-// ── Browser-verb bridge over HTTP ──
-//
-// The o8_browser_* handlers POST /api/browser/agent instead of eval'ing the
-// socket directly: the route owns tier routing (embedded iframe vs the
-// playwright-core engine in the Next server), so MCP, CLI, and Symon all
-// share one brain. Small dupe of resolveApiBase/readToken with
-// operator-mission-tools.ts — this file must stay importable without
-// Next-specific deps.
-function browserApiBase(): string {
-  try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
-    const portFile = join(dataDir, 'api-port');
-    if (existsSync(portFile)) {
-      const port = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
-      if (Number.isInteger(port) && port > 0 && port < 65536) return `http://127.0.0.1:${port}`;
-    }
-  } catch { /* fall through */ }
-  const envBase = process.env.O8_API_BASE?.trim();
-  if (envBase) return envBase;
-  const envPort = process.env.O8_API_PORT?.trim();
-  if (envPort) return `http://127.0.0.1:${envPort}`;
-  return `http://localhost:${DEFAULT_API_PORT}`;
-}
-
-function browserApiToken(): string | null {
-  try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
-    const tokenPath = join(dataDir, 'ws-token');
-    if (!existsSync(tokenPath)) return null;
-    return readFileSync(tokenPath, 'utf-8').trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-async function browserAgentPost(verb: string, args: Record<string, unknown>): Promise<McpToolResult> {
-  const token = browserApiToken();
-  const response = await fetch(`${browserApiBase()}/api/browser/agent`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ verb, args }),
-  });
-  return parseAgentResult(await response.text());
-}
-
 export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): Record<string, ToolHandler> {
   return {
     ...createO8WebviewCompositeHandlers(getClient),
+    ...createO8WebviewBrowserHandlers(),
     o8_view_screenshot: async () => withStructuredErrors(async () => {
       const screenshot = await getClient().screenshot();
       const path = persistScreenshot(screenshot.imageBase64, screenshot.mimeType);
@@ -886,67 +765,5 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       return jsonResult(result);
     }),
 
-    // The o8_browser_* family rides the HTTP bridge (/api/browser/agent) so
-    // tier routing — embedded iframe vs headless-Chrome engine — lives in ONE
-    // place, shared with the `o8 browser` CLI and Symon.
-    o8_browser_read: async (args) => withStructuredErrors(async () => {
-      const agentArgs: Record<string, unknown> = {};
-      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
-      if (typeof args.selector === 'string' && args.selector) agentArgs.selector = args.selector;
-      const maxChars = parseOptionalNumber(args.maxChars);
-      if (maxChars) agentArgs.maxChars = maxChars;
-      const result = await browserAgentPost('read', agentArgs);
-      const text = result.content[0];
-      return text?.type === 'text' ? capText(text.text, READ_RESULT_BYTE_CAP) : result;
-    }),
-
-    o8_browser_click: async (args) => withStructuredErrors(async () => {
-      const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
-      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
-      return browserAgentPost('click', agentArgs);
-    }),
-
-    o8_browser_type: async (args) => withStructuredErrors(async () => {
-      const agentArgs: Record<string, unknown> = {
-        selector: requiredString(args, 'selector'),
-        text: requiredString(args, 'text'),
-      };
-      if (args.submit === true) agentArgs.submit = true;
-      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
-      return browserAgentPost('type', agentArgs);
-    }),
-
-    o8_browser_grab: async (args) => withStructuredErrors(async () => {
-      const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
-      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
-      const result = await browserAgentPost('grab', agentArgs);
-      const text = result.content[0];
-      return text?.type === 'text' ? capText(text.text, READ_RESULT_BYTE_CAP) : result;
-    }),
-
-    o8_browser_wait: async (args) => withStructuredErrors(async () => {
-      const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
-      if (typeof args.text === 'string' && args.text) agentArgs.text = args.text;
-      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
-      const timeoutMs = Math.min(25_000, Math.max(500, parseOptionalNumber(args.timeoutMs) ?? 10_000));
-      const deadline = Date.now() + timeoutMs;
-      // Probes are one-shot — poll here until found/timeout.
-      let last: unknown = { ok: false, error: 'never probed' };
-      while (Date.now() < deadline) {
-        const result = await browserAgentPost('probe', agentArgs);
-        const text = result.content[0];
-        if (text?.type !== 'text') return result;
-        try {
-          const parsed = JSON.parse(text.text) as { ok?: boolean; pending?: boolean };
-          last = parsed;
-          if (parsed.ok) return jsonResult(parsed);
-          if (!parsed.pending) return jsonResult(parsed); // hard error — stop polling
-        } catch {
-          // unparseable — keep polling
-        }
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
-      return jsonResult({ ok: false, timedOut: true, timeoutMs, last });
-    }),
   };
 }

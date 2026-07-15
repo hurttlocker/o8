@@ -40,6 +40,7 @@ fn request_screen_permission() {
 
 /// Everything the request builder and the pointer transform need from one
 /// capture: the image itself plus the monitor's logical geometry.
+#[derive(Clone)]
 pub struct ScreenContext {
     pub trace_id: u64,
     pub png_base64: String,
@@ -53,6 +54,8 @@ pub struct ScreenContext {
     pub mon_h: f64,
     /// Exact native controls visible in the focused window at capture time.
     pub ax_catalog: Vec<crate::screen_localization::ActionableElement>,
+    /// Exact DOM controls visible inside o8's browser surfaces.
+    pub web_catalog: Vec<super::web_localization::WebActionableElement>,
 }
 
 /// Downscale ceiling — 1440px wide keeps UI text legible to the model while
@@ -251,6 +254,7 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
         mon_w: monitor_frame.2,
         mon_h: monitor_frame.3,
         ax_catalog: catalog.elements,
+        web_catalog: Vec::new(),
     };
     log::info!(
         "[symon-screen] captured {}x{} px ({} KB) of monitor at {},{} ({}x{} pt), {} native element(s)",
@@ -602,6 +606,7 @@ pub fn composite_strokes(raw: &RawCapture, strokes: &[Vec<(f64, f64)>]) -> Optio
         mon_w: raw.mon_w,
         mon_h: raw.mon_h,
         ax_catalog: raw.ax_catalog.clone(),
+        web_catalog: Vec::new(),
     };
     log::info!(
         "[spatial-context] composited {stroke_count} stroke(s): composite {cw}x{ch}, crop={}",

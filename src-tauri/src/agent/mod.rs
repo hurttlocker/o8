@@ -30,6 +30,7 @@ pub mod symon_task_bridge;
 pub mod term_watch;
 pub mod tools;
 pub mod worker_pulse;
+pub mod web_localization;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -339,6 +340,11 @@ pub(crate) fn screen_prompt_section(screen: &screen::ScreenContext) -> String {
         (screen.mon_x, screen.mon_y, screen.mon_w, screen.mon_h),
         (screen.img_w, screen.img_h),
     ));
+    prompt.push_str(&web_localization::catalog_prompt(
+        &screen.web_catalog,
+        (screen.mon_x, screen.mon_y, screen.mon_w, screen.mon_h),
+        (screen.img_w, screen.img_h),
+    ));
     prompt
 }
 
@@ -457,11 +463,26 @@ static LAST_DRAWING: Mutex<Option<(std::time::Instant, String)>> = Mutex::new(No
 /// Record the tags just drawn (canonical `[...]` form, space-joined) as the live
 /// drawing. Called right after `show_points` fires.
 pub fn record_last_drawing(tags: String) {
+    let mut slot = LAST_DRAWING.lock().unwrap_or_else(|p| p.into_inner());
     if tags.trim().is_empty() {
+        *slot = None;
         return;
     }
-    let mut slot = LAST_DRAWING.lock().unwrap_or_else(|p| p.into_inner());
     *slot = Some((std::time::Instant::now(), tags));
+}
+
+fn stable_drawing_tags(tags: &[crate::point_overlay::ParsedTag]) -> String {
+    tags.iter()
+        // Catalog ids are capture-local and can be reassigned on the next
+        // turn; points are transient guidance, not additive teaching ink.
+        .filter(|tag| {
+            tag.element_id.is_none()
+                && tag.web_element_id.is_none()
+                && tag.shape != crate::point_overlay::Shape::Point
+        })
+        .map(crate::point_overlay::tag_to_string)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The live drawing's tags, if a session is still fresh (else None).
@@ -1020,18 +1041,22 @@ async fn run_agent_inner(
     // composite (strokes burned in) + crop are pre-built — use them and SKIP the
     // intent-gated live capture. Otherwise fall back to the dossier-#2 behavior.
     let (spatial_active, spatial_crop, prebuilt_screen) = match spatial {
-        Some(sc) => (true, sc.crop_png_base64, Some(std::sync::Arc::new(sc.screen))),
+        Some(sc) => (true, sc.crop_png_base64, Some(sc.screen)),
         None => (false, None, None),
     };
     let screen_wanted =
         spatial_active || screen::wants_screen(&prompt) || drawing_session_fresh();
-    let screen_ctx = if let Some(s) = prebuilt_screen {
+    let mut screen_ctx = if let Some(s) = prebuilt_screen {
         Some(s)
     } else if screen_wanted {
-        screen::capture(&app).map(std::sync::Arc::new)
+        screen::capture(&app)
     } else {
         None
     };
+    if let Some(screen) = screen_ctx.as_mut() {
+        web_localization::attach(&app, screen).await;
+    }
+    let screen_ctx = screen_ctx.map(std::sync::Arc::new);
     // Editable-noun capture (magic roadmap #1): selection or focused field,
     // only for edit verbs. Captured EARLY — the selection must be read before
     // anything could disturb it.
@@ -1143,9 +1168,13 @@ async fn run_agent_inner(
             // the Symon Points overlay (dossier #1).
             let (clean_text, point_tags) = crate::point_overlay::parse_point_tags(&result.result_text);
             if let Some(screen) = &ctx.screen {
-                let exact_tag_count = point_tags
+                let native_exact_tag_count = point_tags
                     .iter()
                     .filter(|tag| tag.element_id.is_some())
+                    .count();
+                let web_exact_tag_count = point_tags
+                    .iter()
+                    .filter(|tag| tag.web_element_id.is_some())
                     .count();
                 log::info!(
                     "[symon-localization] {}",
@@ -1153,25 +1182,33 @@ async fn run_agent_inner(
                         "stage": "model",
                         "trace": screen.trace_id,
                         "model": &result.model_used,
-                        "catalogCount": screen.ax_catalog.len(),
+                        "catalogCount": screen.ax_catalog.len() + screen.web_catalog.len(),
+                        "axCatalogCount": screen.ax_catalog.len(),
+                        "webCatalogCount": screen.web_catalog.len(),
                         "tagCount": point_tags.len(),
-                        "exactTagCount": exact_tag_count,
-                        "pixelTagCount": point_tags.len() - exact_tag_count,
+                        "exactTagCount": native_exact_tag_count + web_exact_tag_count,
+                        "nativeExactTagCount": native_exact_tag_count,
+                        "webExactTagCount": web_exact_tag_count,
+                        "pixelTagCount": point_tags.len() - native_exact_tag_count - web_exact_tag_count,
                     })
                 );
             }
             #[cfg(target_os = "macos")]
             if !point_tags.is_empty() {
                 if let Some(screen) = &ctx.screen {
-                    crate::point_overlay::show_points(&app, screen, &point_tags);
+                    let refreshed = if point_tags.iter().any(|tag| tag.web_element_id.is_some()) {
+                        Some(web_localization::refresh_targets(&app, screen, &point_tags).await.0)
+                    } else {
+                        None
+                    };
+                    crate::point_overlay::show_points(
+                        &app,
+                        refreshed.as_ref().unwrap_or(screen),
+                        &point_tags,
+                    );
                     // Remember what we drew so the next turn can re-emit + extend
                     // it (additive teaching diagrams, #1251).
-                    let tag_src = point_tags
-                        .iter()
-                        .map(crate::point_overlay::tag_to_string)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    record_last_drawing(tag_src);
+                    record_last_drawing(stable_drawing_tags(&point_tags));
                 } else {
                     log::warn!("[symon-agent] model emitted POINT tags without screen context — ignored");
                 }
@@ -1329,6 +1366,28 @@ mod model_vision_tests {
             crate::models::AGENT_MAC_NATIVE_ACTION_DEFAULT,
             crate::models::CLAUDE_SONNET_5
         );
+    }
+}
+
+#[cfg(test)]
+mod drawing_memory_tests {
+    use super::*;
+
+    #[test]
+    fn only_stable_pixel_drawings_survive_into_the_next_turn() {
+        let (_, tags) = crate::point_overlay::parse_point_tags(
+            "[POINT:web:2:Save] [GUIDE:el:3:Reply] [POINT:10,20:Here] \
+             [DRAW:line:1,2,3,4:edge] [DRAW:text:5,6:a²]",
+        );
+        assert_eq!(
+            stable_drawing_tags(&tags),
+            "[DRAW:line:1,2,3,4:edge] [DRAW:text:5,6:a²]"
+        );
+
+        record_last_drawing("[DRAW:line:1,2,3,4:edge]".into());
+        assert!(drawing_session_fresh());
+        record_last_drawing(String::new());
+        assert!(!drawing_session_fresh());
     }
 }
 
