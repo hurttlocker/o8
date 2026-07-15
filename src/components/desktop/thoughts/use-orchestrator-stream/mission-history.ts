@@ -113,32 +113,38 @@ export async function archiveMissionThread(
   options: ArchiveMissionThreadOptions,
 ): Promise<void> {
   const hasArchivableMessages = options.transcript.some((entry) => entry.role === 'user');
-  if (hasArchivableMessages) {
-    const currentTabId = await findStoredThoughtsThreadTabId(options.transcript, options.repoPath);
-    const archiveTabId = `thoughts-${Date.now()}-archive`;
-    const archiveResponse = await fetch('/api/v2/chat-history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tabId: archiveTabId,
-        messages: serializeThoughtsHistoryMessages(options.transcript),
-        model: 'claude-code',
-        title: buildMissionArchiveTitle({
-          missionSummary: detail.summary,
-          compactionSummary: extractLatestCompactionSummary(options.transcript),
-          mergedCount: detail.mergedCount,
-          completedAt: detail.completedAt,
-        }),
-        planText: options.planText ?? undefined,
-        repoPath: options.repoPath,
+  // Empty transcript → full no-op. Mission-completed re-fires on boot (WS
+  // reconnect / incremental packet load oscillates non-terminal→terminal) used
+  // to fall through to reset(): each one minted an empty thoughts-* placeholder,
+  // repointed the live thread ref, suppressed reload-restore, and killed the
+  // warm backend session — the 2026-07-14 "my chats vanished" storm (10 empty
+  // files in one boot). Nothing to archive means nothing to rotate.
+  if (!hasArchivableMessages) return;
+
+  const currentTabId = await findStoredThoughtsThreadTabId(options.transcript, options.repoPath);
+  const archiveTabId = `thoughts-${Date.now()}-archive`;
+  const archiveResponse = await fetch('/api/v2/chat-history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tabId: archiveTabId,
+      messages: serializeThoughtsHistoryMessages(options.transcript),
+      model: 'claude-code',
+      title: buildMissionArchiveTitle({
+        missionSummary: detail.summary,
+        compactionSummary: extractLatestCompactionSummary(options.transcript),
+        mergedCount: detail.mergedCount,
+        completedAt: detail.completedAt,
       }),
-    });
-    if (!archiveResponse.ok) {
-      throw new Error('Unable to archive the completed mission thread.');
-    }
-    if (currentTabId) {
-      await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { method: 'DELETE' }).catch(() => null);
-    }
+      planText: options.planText ?? undefined,
+      repoPath: options.repoPath,
+    }),
+  });
+  if (!archiveResponse.ok) {
+    throw new Error('Unable to archive the completed mission thread.');
+  }
+  if (currentTabId) {
+    await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { method: 'DELETE' }).catch(() => null);
   }
 
   await fetch('/api/orchestrator/reset-session', {
