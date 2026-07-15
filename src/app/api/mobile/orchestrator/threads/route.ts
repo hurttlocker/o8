@@ -49,8 +49,13 @@ export async function GET(request: NextRequest) {
   }
   const backend = rawBackend as MobileOrchestratorBackend | null;
 
+  // ?limit=N — the lister already supports it (default stays 20); the desktop
+  // rail passes a higher ceiling so long histories aren't silently truncated.
+  const rawLimit = Number.parseInt(request.nextUrl.searchParams.get('limit') ?? '', 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 500) : undefined;
+
   try {
-    const threads = listMobileOrchestratorThreads({ backend });
+    const threads = listMobileOrchestratorThreads({ backend, limit });
     return NextResponse.json({ threads }, { headers: NO_STORE });
   } catch (error) {
     console.log('[mobile-orchestrator] thread list failed', error);

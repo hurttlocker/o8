@@ -67,6 +67,11 @@ export type {
   OrchestratorTokenUsageDetail,
 } from './use-orchestrator-stream/shared';
 
+// Mission ids whose completed-thread rotation already ran this app session —
+// module-level so remounts (tab flaps) can't re-rotate a mission whose
+// completion event re-fires from boot-time state oscillation.
+const rotatedMissionIds = new Set<string>();
+
 interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
   planText: string | null;
@@ -450,10 +455,20 @@ export function useOrchestratorStream(
     if (!activeRepoPath || (eventRepoPath && eventRepoPath !== activeRepoPath)) {
       return;
     }
+    // A mission completes ONCE — rotate at most once per missionId per app
+    // session. The completed event re-fires when mission state oscillates
+    // non-terminal→terminal on boot (WS reconnect / incremental packet load);
+    // without this, a re-fire against a RESTORED transcript archived and
+    // deleted the live thread again (the 2026-07-14 storm's second casualty).
+    const missionId = detail.missionId?.trim();
+    if (missionId && rotatedMissionIds.has(missionId)) return;
     if (missionRotationInFlightRef.current) {
+      // Stash WITHOUT marking — the drain re-enters here and must pass the
+      // dedupe; duplicate storms of the same id collapse on the check above.
       pendingMissionCompletionRef.current = detail;
       return;
     }
+    if (missionId) rotatedMissionIds.add(missionId);
 
     missionRotationInFlightRef.current = true;
     try {
