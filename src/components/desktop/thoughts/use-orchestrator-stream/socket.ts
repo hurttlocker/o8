@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
+import { isPaneOwnedThread } from '@/lib/orchestrator/pane-thread-registry';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import {
   formatTimestampLabel,
@@ -55,6 +56,13 @@ interface CreateOrchestratorMessageHandlerOptions {
   activeTurnBackendRef?: RefLike<string | null>;
   /** Transcript-bearing events observed during the locally active turn. */
   turnTranscriptEventCountRef?: RefLike<number>;
+  /**
+   * The thread this view is bound to (null = unbound fresh view). Drives the
+   * thread-scope ingest guard: with drag-to-split, several live chat views
+   * share one repo, and an event stamped with ANOTHER view's threadId must
+   * never paint into this transcript.
+   */
+  threadIdRef?: RefLike<string | null>;
   lastEventAtRef: RefLike<number>;
   messagesRef: RefLike<MobileTranscriptEntry[]>;
   onOrchestratorActivity?: (event: {
@@ -146,6 +154,25 @@ export function createOrchestratorMessageHandler(
     }
 
     if (msg.channel !== 'orchestrator') return;
+
+    // Thread-scope ingest guard (drag-to-split, 2026-07-15). Every ws-server
+    // orchestrator emission stamps data.threadId. With several live chat
+    // views on one repo:
+    // - a view bound to thread X drops events for thread Y outright;
+    // - an UNBOUND view (fresh empty chat) still reattaches to in-flight
+    //   turns (durable-turn recovery) UNLESS the turn's thread is owned by a
+    //   thread pane — without this, a pane's send hijacked the empty main
+    //   chat (title + transcript + busy state).
+    {
+      const evtThreadId = typeof msg.data?.threadId === 'string' && msg.data.threadId
+        ? msg.data.threadId
+        : null;
+      if (evtThreadId) {
+        const ownThreadId = options.threadIdRef?.current ?? null;
+        if (ownThreadId && evtThreadId !== ownThreadId) return;
+        if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
+      }
+    }
 
     const observedAt = Date.now();
     options.onOrchestratorActivity?.({

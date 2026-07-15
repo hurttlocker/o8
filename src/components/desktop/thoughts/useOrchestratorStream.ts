@@ -668,6 +668,7 @@ export function useOrchestratorStream(
       currentWs: ws,
       currentAssistantRef,
       eventCountRef,
+      threadIdRef,
       finalizeFirstTurnPlanCapture,
       firstTurnPlanChunksRef,
       firstTurnPlanStartedRef,
