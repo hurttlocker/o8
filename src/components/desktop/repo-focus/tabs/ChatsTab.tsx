@@ -267,6 +267,10 @@ export function ChatsTab({
     withHistoryBusy(item.tabId, () => patchHistoryItem(item.tabId, { pinned: !item.pinned, starred: !item.pinned ? true : item.starred }))
   ), [patchHistoryItem, withHistoryBusy]);
 
+  const renameHistoryItem = useCallback((item: ChatHistoryItem, title: string) => (
+    withHistoryBusy(item.tabId, () => patchHistoryItem(item.tabId, { title }))
+  ), [patchHistoryItem, withHistoryBusy]);
+
   const deleteHistoryItem = useCallback((item: ChatHistoryItem) => {
     void (async () => {
       const confirmed = await requestConfirm({
@@ -926,6 +930,7 @@ export function ChatsTab({
             }
           }}
           onDelete={() => deleteHistoryItem(historyActionMenu.item)}
+          onRename={(title) => { void renameHistoryItem(historyActionMenu.item, title); }}
         />
       ) : null}
     </div>
