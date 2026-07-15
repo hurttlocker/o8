@@ -186,22 +186,18 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
     };
   }).__TAURI_INTERNALS__;
 
-  // Pin the native window appearance to the palette (glass-slab root cause,
-  // 2026-07-14): NSVisualEffectView materials render their LIGHT or DARK
-  // variant from the window's effectiveAppearance, which otherwise follows
-  // the SYSTEM appearance. A dark system under the light palette rendered
-  // every glass material as the heavy dark slab ("I hit glass and it's
-  // still opaque"). Palette-pinned appearance makes glass deterministic —
-  // a system appearance change (manual or sunset auto-switch) can never
-  // flip the chrome material again. Applies in solid mode too so the
-  // titlebar/traffic-light chrome always matches the palette.
-  if (inTauri) {
-    const label = internals?.metadata?.currentWindow?.label ?? 'main';
-    internals?.invoke?.('plugin:window|set_theme', {
-      label,
-      value: theme.paletteId === 'light' ? 'light' : 'dark',
-    })?.catch((err: unknown) => console.warn('[theme] window appearance pin failed', err));
-  }
+  // Native window appearance is pinned DARK declaratively in tauri.conf.json
+  // ("theme": "dark" on the main window). The glass design assumes the dark
+  // vibrancy variant in BOTH palettes (chrome-flip white text below), and
+  // materials render from the WINDOW's effectiveAppearance — so a light-mode
+  // OS would otherwise flip the chrome to light materials and break it.
+  // Don't re-pin from here: plugin:window|set_theme is not in the packaged
+  // ACL, and the conf-level pin applies at window creation anyway.
+  //
+  // If glass ever looks like an opaque slab ON SCREEN, check for a window/app
+  // capture first (OBS window source, screen-sharing a single window): macOS
+  // stops backdrop sampling for a window-captured vibrancy window, on the
+  // real display too. Display capture doesn't do this. (Live-hit 2026-07-14.)
 
   // Vibrancy passthrough — only in Tauri AND glass surface mode. In solid
   // mode the chrome tokens are fully opaque and we WANT them painted on
