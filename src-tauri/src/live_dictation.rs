@@ -281,16 +281,46 @@ fn focused_element_for_pid(pid: i32) -> Option<(CFType, CFType)> {
     Some((app, focused))
 }
 
-fn capture_target_on_main() -> Option<Target> {
+/// Resolve the focused editable ONCE and derive both the caret anchor and (when
+/// `want_target`) the streaming target from it. This merges what used to be two
+/// separate main-thread round-trips — one per derived value, each re-resolving
+/// the frontmost app + focused element + selection — into a single pass. That
+/// halves the dispatch_sync and AX round-trips on the pre-mic critical path, the
+/// Intel mic-open latency win.
+fn capture_focused_on_main(want_target: bool) -> (Option<Target>, Option<CaretAnchor>) {
     use objc2_app_kit::NSWorkspace;
 
-    let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+    let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
+        return (None, None);
+    };
     let pid = app.processIdentifier();
     if pid <= 0 {
-        return None;
+        return (None, None);
     }
-    let (_, focused) = focused_element_for_pid(pid)?;
+    let Some((_, focused)) = focused_element_for_pid(pid) else {
+        return (None, None);
+    };
     let element = focused.as_CFTypeRef();
+    // Read the selection once and share it: the anchor needs it for
+    // AXBoundsForRange, the target for the prefix/suffix split.
+    let selection_value = copy_attribute(element, "AXSelectedTextRange");
+    let anchor = anchor_for(element, selection_value.as_ref().map(|v| v.as_CFTypeRef()));
+    let target = if want_target {
+        capture_target_from_element(element, pid, selection_value.as_ref())
+    } else {
+        None
+    };
+    (target, anchor)
+}
+
+/// Build the streaming target from an already-resolved focused element. Only a
+/// settable text element with a valid in-range selection qualifies; anything
+/// else returns None so the caller keeps the visual-only preview + final paste.
+fn capture_target_from_element(
+    element: AXUIElementRef,
+    pid: i32,
+    selection_value: Option<&CFType>,
+) -> Option<Target> {
     let role = string_attribute(element, "AXRole").unwrap_or_default();
     let text_role = matches!(role.as_str(), "AXTextArea" | "AXTextField" | "AXComboBox");
     if !text_role
@@ -303,8 +333,7 @@ fn capture_target_on_main() -> Option<Target> {
     if value.encode_utf16().count() > MAX_FIELD_UTF16 {
         return None;
     }
-    let selection_value = copy_attribute(element, "AXSelectedTextRange")?;
-    let selection = ax_range(selection_value.as_CFTypeRef())?;
+    let selection = ax_range(selection_value?.as_CFTypeRef())?;
     let utf16_len = value.encode_utf16().count();
     let start = selection.location as usize;
     let end = start.checked_add(selection.length as usize)?;
@@ -322,20 +351,8 @@ fn capture_target_on_main() -> Option<Target> {
 }
 
 fn capture_anchor_on_main() -> Option<CaretAnchor> {
-    use objc2_app_kit::NSWorkspace;
-
-    let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-    let pid = app.processIdentifier();
-    if pid <= 0 {
-        return None;
-    }
-    let (_, focused) = focused_element_for_pid(pid)?;
-    let element = focused.as_CFTypeRef();
-    let selection = copy_attribute(element, "AXSelectedTextRange");
-    anchor_for(
-        element,
-        selection.as_ref().map(|value| value.as_CFTypeRef()),
-    )
+    // Right-Option agent path: the anchor only, no streaming target.
+    capture_focused_on_main(false).1
 }
 
 fn run_on_main_thread<F, R>(work: F) -> R
@@ -504,15 +521,14 @@ fn rollback(transaction: &Transaction) {
 pub(crate) fn begin(stream_partials: bool) -> PartialsSurface {
     cancel_active();
     let surface = configured_surface();
-    let anchor = if surface == PartialsSurface::Caret {
-        run_on_main_thread(capture_anchor_on_main)
+    // One main-thread round-trip resolves the focused element and derives both
+    // the caret anchor and (unless o8's own webview owns the field) the
+    // streaming target — captured BEFORE any o8 surface is ordered front.
+    let (target, anchor) = if surface == PartialsSurface::Caret {
+        let want_target = !crate::paste::frontmost_is_o8();
+        run_on_main_thread(move || capture_focused_on_main(want_target))
     } else {
-        None
-    };
-    let target = if surface == PartialsSurface::Caret && !crate::paste::frontmost_is_o8() {
-        run_on_main_thread(capture_target_on_main)
-    } else {
-        None
+        (None, None)
     };
     let (original_value, original_selection, prefix, suffix) = target
         .as_ref()
