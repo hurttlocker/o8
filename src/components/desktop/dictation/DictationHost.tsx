@@ -108,16 +108,29 @@ export function DictationHost({ children }: DictationHostProps) {
           if (e.payload?.type !== 'system-fill') return;
           const text = e.payload.text ?? '';
           if (!text) return;
-          if (fillRef.current) {
-            fillRef.current(text);
-            return;
-          }
+          // Deliver to the field the operator is actually in. A DIFFERENT in-app
+          // editable (e.g. the error-report dialog, SXHV68) must win over the
+          // sticky-registered orchestrator composer — otherwise its text is
+          // hijacked into the composer. The composer only gets the React-aware
+          // fill when IT holds focus, or when no editable does (the #1542 case
+          // where a synthetic Cmd+V lost the first-responder race).
           const el = document.activeElement as HTMLElement | null;
           const editable = !!el && (
             el.tagName === 'TEXTAREA' ||
             el.tagName === 'INPUT' ||
             el.isContentEditable
           );
+          const composerNode = anchorRef.current;
+          const focusedIsComposer =
+            editable && !!composerNode && (composerNode === el || composerNode.contains(el));
+          if (editable && !focusedIsComposer) {
+            document.execCommand('insertText', false, text);
+            return;
+          }
+          if (fillRef.current) {
+            fillRef.current(text);
+            return;
+          }
           if (editable) {
             document.execCommand('insertText', false, text);
             return;
