@@ -4438,6 +4438,62 @@ fn round_window_corners(win: &tauri::WebviewWindow, radius: f64) {
     }
 }
 
+/// Make the native Zoom (maximize / restore-down) instant instead of animated.
+///
+/// WKWebView cannot repaint during an animated NSWindow frame change — the web
+/// content freezes at the old layout, slides/clips behind the animating frame,
+/// then snaps into place when the animation ends (operator video 2026-07-15;
+/// Electron apps repaint per animation frame, WKWebView has no public hook).
+/// The honest fix is to drop the animation: `-[NSWindow zoom:]` reads its
+/// duration from `animationResizeTime:`, so overriding that to 0 on tao's
+/// window class makes frame + content change together in a single repaint.
+/// The class is shared by every o8 window in this process — intended; zoom
+/// behaves identically everywhere. Manual drag-resize is unaffected (no
+/// animation involved).
+#[cfg(target_os = "macos")]
+fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    let object = match win.ns_window() {
+        Ok(p) if !p.is_null() => p as *mut AnyObject,
+        _ => {
+            log::warn!("[zoom-anim] ns_window unavailable; zoom stays animated");
+            return;
+        }
+    };
+    // CGRect by value — 4 contiguous f64s; identical ABI to the nested
+    // {CGPoint,CGSize} layout on both x86_64 (memory class) and arm64 (HFA).
+    #[repr(C)]
+    struct CGRectRaw {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    }
+    unsafe extern "C-unwind" fn zero_resize_time(
+        _this: *mut AnyObject,
+        _cmd: Sel,
+        _target_frame: CGRectRaw,
+    ) -> f64 {
+        0.0
+    }
+    unsafe {
+        let cls = (*object).class();
+        let replaced = objc2::ffi::class_replaceMethod(
+            (cls as *const AnyClass).cast_mut(),
+            objc2::sel!(animationResizeTime:),
+            std::mem::transmute::<
+                unsafe extern "C-unwind" fn(*mut AnyObject, Sel, CGRectRaw) -> f64,
+                Imp,
+            >(zero_resize_time),
+            c"d@:{CGRect={CGPoint=dd}{CGSize=dd}}".as_ptr(),
+        );
+        log::info!(
+            "[zoom-anim] native zoom animation disabled (instant maximize/restore, replaced_existing={})",
+            replaced.is_some()
+        );
+    }
+}
+
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
 #[tauri::command]
@@ -6079,6 +6135,12 @@ pub fn run() {
                 // a normal rounded Mac window. Tracks resize.
                 #[cfg(target_os = "macos")]
                 round_window_corners(&window, 12.0);
+
+                // Zoom (maximize/restore) must be instant — WKWebView can't
+                // repaint during the animated frame change, so the animation
+                // reads as frozen-content-then-snap (2026-07-15 polish pass).
+                #[cfg(target_os = "macos")]
+                make_window_zoom_instant(&window);
 
                 #[cfg(target_os = "windows")]
                 if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
