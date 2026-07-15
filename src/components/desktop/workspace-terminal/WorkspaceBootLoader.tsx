@@ -38,9 +38,13 @@ function WorkspaceBootLoaderBase() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Theme-aware: read the resolved surface + ink tokens once on mount.
+    // Theme-aware: read the resolved surface + ink tokens once on mount. In
+    // glass surface the overlay carries the boot splash's translucent tint
+    // (set on the wrapper below), so the canvas CLEARS instead of painting an
+    // opaque slab and the ink goes white — identical to the bundled splash.
+    const glass = document.documentElement.dataset.surface === 'glass';
     const bg = readVar('--t-chat-surface-bg', '#0a0a0a');
-    const ink = readVar('--t-text', '#f4f4f5');
+    const ink = glass ? '#ffffff' : readVar('--t-text', '#f4f4f5');
 
     let dpr = 1;
     let cssW = 0;
@@ -48,7 +52,13 @@ function WorkspaceBootLoaderBase() {
     let cols = 0;
     let rows = 0;
     let lum = new Float32Array(0);
+    let cx = -1;
+    let cy = -1;
     const off = document.createElement('canvas');
+    const onPointerMove = (e: PointerEvent) => { cx = e.clientX / CELL; cy = e.clientY / CELL; };
+    const onPointerLeave = () => { cx = -1; cy = -1; };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerleave', onPointerLeave);
 
     function build() {
       const rect = canvas!.getBoundingClientRect();
@@ -100,8 +110,14 @@ function WorkspaceBootLoaderBase() {
       if (!start) start = ts;
       const t = (ts - start) / 1000;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx!.fillStyle = bg;
-      ctx!.fillRect(0, 0, cssW, cssH);
+      if (glass) {
+        // Transparent canvas — the wrapper's glass tint (and the vibrancy
+        // beneath the transparent chrome) reads through between glyphs.
+        ctx!.clearRect(0, 0, cssW, cssH);
+      } else {
+        ctx!.fillStyle = bg;
+        ctx!.fillRect(0, 0, cssW, cssH);
+      }
       ctx!.fillStyle = ink;
       ctx!.font = `${CELL}px ui-monospace, Menlo, monospace`;
       ctx!.textBaseline = 'top';
@@ -110,6 +126,11 @@ function WorkspaceBootLoaderBase() {
       const span = cols + rows * 0.4;
       const edge = ((t * 0.25) % 1.4) * span;
       const bw2 = 2 * (cols * 0.1) * (cols * 0.1);
+      // Pointer ripple — same recipe as the bundled boot splash (ripple 0.66,
+      // radiusFrac 0.04) so the two loaders read as one continuous surface.
+      const rad = 0.04 * Math.min(cols, rows);
+      const rad2 = 2 * rad * rad;
+      const inside = cx >= 0;
 
       for (let j = 0; j < rows; j++) {
         const y = j * CELL;
@@ -120,6 +141,14 @@ function WorkspaceBootLoaderBase() {
           const dist = i + j * 0.4 - edge;
           const crest = Math.exp(-(dist * dist) / bw2);
           let val = base * (0.5 + crest * 0.85);
+          if (inside) {
+            const dx = i - cx;
+            const dy = j - cy;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < rad2 * 3) {
+              val += base * (33 / 50) * Math.exp(-d2 / rad2) * Math.sin(Math.sqrt(d2) * 0.7 - t * 7);
+            }
+          }
           if (val <= 0.02) continue;
           if (val > 1) val = 1;
           const idx = Math.round(Math.pow(val, 1.2) * last);
@@ -137,6 +166,8 @@ function WorkspaceBootLoaderBase() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerleave', onPointerLeave);
     };
   }, []);
 
@@ -148,7 +179,12 @@ function WorkspaceBootLoaderBase() {
         position: 'fixed',
         inset: 0,
         zIndex: 180,
-        background: 'var(--t-chat-surface-bg)',
+        // Glass surface: the boot splash's translucent tint, so the vibrancy
+        // reads through and boot → workspace is one continuous glass. Solid
+        // keeps the opaque paper.
+        background: document.documentElement.dataset.surface === 'glass'
+          ? 'linear-gradient(180deg, rgba(32, 36, 42, 0.62) 0%, rgba(18, 20, 24, 0.58) 100%)'
+          : 'var(--t-chat-surface-bg)',
         animation: 'o8BootBackdropIn 200ms ease-out both',
       }}
       aria-label="Loading workspace"
