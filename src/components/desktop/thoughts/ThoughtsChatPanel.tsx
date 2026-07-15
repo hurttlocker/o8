@@ -1038,10 +1038,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     orchStream.reset();
     setActiveThreadBackend(composerBackendTurnOverride(orchestratorBackend) ?? null);
     setActiveThreadAgent(null);
-    // #597 — immediately mint a fresh threadId and persist an empty
-    // placeholder row so History shows the slot even before the first
-    // message. The title becomes `New thread · HH:MM` server-side until
-    // the first user message replaces it.
+    // #597 minted a fresh threadId AND eagerly persisted an empty placeholder
+    // file "so History shows the slot before typing" — but the list route now
+    // HIDES empty unpinned threads (and GCs them after an hour), so the eager
+    // file was invisible churn: every reset trigger (thread deleted while
+    // open, mission rotation, /clear) wrote a junk thoughts-*.json. The id
+    // still mints here; the FILE is written by the persist effect on the
+    // first real message.
     const placeholderId = isOrchestratorMode ? `thoughts-${Date.now()}` : `chat-${Date.now()}`;
     threadIdRef.current = placeholderId;
     setThreadId(placeholderId);
@@ -1052,11 +1055,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     cancelPendingPersist();
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
-    if (isOrchestratorMode) {
-      void persistThreadNow([], placeholderId, null);
-    }
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, orchestratorBackend, persistThreadNow]);
+  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, orchestratorBackend]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
