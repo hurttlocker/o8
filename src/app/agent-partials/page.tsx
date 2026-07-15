@@ -62,6 +62,30 @@ const SAFETY_MS = 60_000;
  *  time to land so the HUD never flashes over a composer that owns the partials. */
 const PAINT_GRACE_MS = 300;
 
+// Symon surfaces honor the app's Glass vs Solid appearance (the
+// reduce-transparency axis). This floating HUD lives at the SAME origin as the
+// main window (http://127.0.0.1:<port>), so it reads the very localStorage the
+// ThemeProvider writes — no second appearance system. Palette-independent by
+// design: a dark chip reads over any app in both light and dark (matching the
+// dock), so only the glass↔solid MATERIAL flips, never the geometry. Mirrors
+// ThemeProvider.resolveSurface: reduce-transparency 'on' → solid, 'off'/'system'
+// → glass; a truly fresh install (no theme pref at all) defaults to solid.
+type AppSurface = 'glass' | 'solid';
+function readAppSurface(): AppSurface {
+  if (typeof window === 'undefined') return 'glass';
+  try {
+    const pref = localStorage.getItem('cortex-reduce-transparency');
+    if (pref === 'on') return 'solid';
+    if (pref === 'off' || pref === 'system') return 'glass';
+    const hasThemePref =
+      localStorage.getItem('cortex-theme-palette') !== null ||
+      localStorage.getItem('cortex-theme') !== null;
+    return hasThemePref ? 'glass' : 'solid';
+  } catch {
+    return 'glass';
+  }
+}
+
 type Phase = 'listening' | 'final';
 type PartialsSurface = 'caret' | 'hud';
 
@@ -88,6 +112,10 @@ interface HudState {
 export default function AgentPartialsPage() {
   const prefersReducedMotion = useReducedMotion();
   const [state, setState] = useState<HudState | null>(null);
+  // App appearance (glass/solid). Read once from the shared theme localStorage,
+  // refreshed on the cross-window `storage` event and on each activation so a
+  // mid-session appearance change is honored.
+  const [appSurface, setAppSurface] = useState<AppSurface>(() => readAppSurface());
   // While the in-canvas composer owns the partials (Right-Option dictation with
   // o8 focused + the canvas visible), it claims the surface via
   // `o8:agent-partials-claim` and THIS HUD stops painting — single-surface rule,
@@ -105,6 +133,15 @@ export default function AgentPartialsPage() {
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep the material in sync with the app's Glass/Solid preference. The main
+  // window writes the theme keys; `storage` fires here (a different document),
+  // so the HUD flips glass↔solid without its own theme system.
+  useEffect(() => {
+    const sync = () => setAppSurface(readAppSurface());
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
   // The window is transparent at the OS level; the page html/body must NOT paint
   // a background or the window shows a solid rectangle instead of just the bar.
@@ -151,6 +188,7 @@ export default function AgentPartialsPage() {
       mode: 'dictation' | 'smart-compose',
     ) => {
       agentActiveRef.current = true;
+      setAppSurface(readAppSurface());
       clearDismiss();
       clearSafety();
       safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
@@ -413,9 +451,14 @@ export default function AgentPartialsPage() {
               paddingLeft: caretLocal ? 14 : 26,
               paddingRight: caretLocal ? 14 : 26,
               borderRadius: caretLocal ? 14 : 22,
-              background: 'rgba(9, 10, 13, 0.82)',
-              backdropFilter: 'blur(22px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(22px) saturate(140%)',
+              // Glass = translucent tint + backdrop blur of the app behind it.
+              // Solid (reduce-transparency) = genuinely opaque, NO blur — the
+              // vestibular/accessibility path must not float a blurred chip.
+              // Dark in both palettes (a dark chip reads over any app), matching
+              // the dock. Geometry above is untouched by appearance.
+              background: appSurface === 'solid' ? 'rgb(20, 22, 28)' : 'rgba(9, 10, 13, 0.82)',
+              backdropFilter: appSurface === 'solid' ? undefined : 'blur(22px) saturate(140%)',
+              WebkitBackdropFilter: appSurface === 'solid' ? undefined : 'blur(22px) saturate(140%)',
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'rgba(255, 255, 255, 0.12)',
