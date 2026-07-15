@@ -362,7 +362,11 @@ function WorkspaceChatComposerBase({
               lineHeight: 1.4,
               resize: 'none',
               boxSizing: 'border-box',
-              overflow: 'auto',
+              // X hidden: wrapped textarea never h-scrolls, but WKWebView
+              // misreports scrollWidth under fractional CSS zoom → phantom
+              // h-scrollbar (2026-07-15, 80% zoom). See ComposerArea.tsx.
+              overflowX: 'hidden',
+              overflowY: 'auto',
             }}
           />
         </div>
