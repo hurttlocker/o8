@@ -70,6 +70,10 @@ export function trackThreadDrag(
   const handleMove = (event: PointerEvent) => {
     if (disposed) return;
     if (!active) {
+      // Never activate a second drag while one is in flight (overlapping
+      // pointerdowns via multi-touch/trackpad) — the module-level payload is
+      // a singleton and two live drags would corrupt each other's end state.
+      if (activePayload) return;
       const dx = event.clientX - startX;
       const dy = event.clientY - startY;
       if (dx * dx + dy * dy < threshold * threshold) return;
