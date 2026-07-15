@@ -303,13 +303,20 @@ async function sendToO8Orchestrator(
 
   // Non-2xx from the proxy is a JSON error body (`{ error }`), not an SSE stream.
   if (!response.ok || !response.body) {
-    disarmWatchdog();
     let detail = `HTTP ${response.status}`;
     try {
+      // Keep the watchdog ARMED across the error-body read. A proxy that sends
+      // error headers (502/503) and then hangs the body would otherwise wedge
+      // here forever — response.json() is an unbounded await too (adversarial
+      // review 2026-07-15). A watchdog abort rejects the read; we fall back to
+      // the status-code detail. Disarm only after the read settles.
+      armWatchdog();
       const payload = await response.json() as { error?: unknown };
       if (typeof payload?.error === 'string' && payload.error.trim()) detail = payload.error;
     } catch {
-      // Non-JSON body — keep the status-code detail.
+      // Non-JSON body, or the watchdog aborted a hung body — keep status detail.
+    } finally {
+      disarmWatchdog();
     }
     onEvent({ type: 'error', error: `The free o8 model is unavailable: ${detail}` });
     done();

@@ -218,6 +218,29 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
   return false;
 }
 
+/**
+ * Loopback-read routes pass on socket-truth loopback alone — but socket truth
+ * only proves the TCP peer is on this host, NOT that the CALLER is trusted. A
+ * malicious web page the user has open can `fetch('http://127.0.0.1:<port>/…')`;
+ * that request rides a loopback socket, so socket truth stamps it loopback. For
+ * /api/setup/identity (which sets Access-Control-Allow-Origin:* so the boot page
+ * can read it cross-origin) that let any origin read the instance id / boot id /
+ * ports (adversarial review 2026-07-15). Require the Origin, when present, to be
+ * local: the real boot page is `tauri://localhost`, in-app pages are loopback,
+ * and curl / same-origin navigations send no Origin at all. Only a genuine
+ * cross-site page sends a non-local Origin — deny it.
+ */
+function readOriginIsLocalOrAbsent(req: NextRequest): boolean {
+  const origin = req.headers.get('origin');
+  if (!origin) return true;
+  if (origin === 'tauri://localhost') return true;
+  try {
+    return isLoopbackHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Constant-time token comparison (length leak is fine — tokens are fixed-size). */
 function tokenMatches(presented: string, expected: string): boolean {
   const a = Buffer.from(presented, 'utf-8');
@@ -298,6 +321,7 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
     (method === 'GET' || method === 'HEAD')
     && LOOPBACK_READ_CAPABILITIES.some((pattern) => pattern.test(pathname))
     && isTrustedLocalRequest(req)
+    && readOriginIsLocalOrAbsent(req)
   ) {
     return NextResponse.next();
   }

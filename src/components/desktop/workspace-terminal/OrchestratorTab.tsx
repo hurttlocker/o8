@@ -672,6 +672,9 @@ function OrchestratorTabInner({
   const handleThreadDrop = useCallback((action: ThreadDropAction) => {
     if (action.kind === 'replace-chat') {
       if (chatChromeState.threadId === action.thread.threadId) return;
+      if (publishWorkspaceThread) {
+        publishWorkspaceThreadBinding(tabId, action.thread.threadId);
+      }
       chatPanelRef.current?.loadThread(action.thread.threadId);
       return;
     }
@@ -688,6 +691,8 @@ function OrchestratorTabInner({
     chatChromeState.threadId,
     sessionTiles.replaceLeafWithThreadPane,
     sessionTiles.splitLeafWithThreadPane,
+    publishWorkspaceThread,
+    tabId,
   ]);
 
   const handleSetSwarm = useCallback((enabled: boolean) => {
@@ -756,12 +761,21 @@ function OrchestratorTabInner({
       } else if (!active) {
         return;
       }
+      // Publish the switch INTENT before the load resolves. Otherwise this tab
+      // keeps advertising its PREVIOUS thread through the whole load window, and
+      // a concurrently-restoring tab that claims the same previous thread sees
+      // this tab as the stale owner and closes itself — the thread then has no
+      // tab at all (adversarial review 2026-07-15). Advertising the target now
+      // makes the controller's owner-dedupe reason about where we're GOING.
+      if (publishWorkspaceThread) {
+        publishWorkspaceThreadBinding(tabId, detail.historyTabId);
+      }
       chatPanelRef.current?.loadThread(detail.historyTabId);
       window.setTimeout(() => chatPanelRef.current?.focusInput(), 40);
     };
     window.addEventListener('o8:load-history-thread', handleLoadHistoryThread);
     return () => window.removeEventListener('o8:load-history-thread', handleLoadHistoryThread);
-  }, [acceptHistoryThreadLoads, active, tabId]);
+  }, [acceptHistoryThreadLoads, active, tabId, publishWorkspaceThread]);
 
   const handleQuickAction = useCallback((prompt: string) => {
     chatPanelRef.current?.sendNow(prompt);

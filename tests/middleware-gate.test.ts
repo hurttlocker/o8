@@ -559,4 +559,59 @@ describe('panelGateMiddleware — boot-gate identity probe (v0.1.600 stuck-boot 
     );
     expect(res.status).toBe(401);
   });
+
+  // Adversarial review 2026-07-15: a malicious page the user has open can fetch
+  // 127.0.0.1, which rides a LOOPBACK socket — socket truth alone would stamp it
+  // trusted and (because the identity route sets ACAO:*) leak instance/boot ids.
+  it('DENIES the identity probe from a hostile cross-site Origin over a loopback socket', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'https://evil.example',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('still passes the identity probe from the tauri boot-page origin', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'tauri://localhost',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('still passes the identity probe from a loopback page origin (dev bridge)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:3001/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:3001',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'http://localhost:3001',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('also denies the browser/proxy loopback-read from a hostile Origin (defense in depth)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/browser/proxy?url=http%3A%2F%2Flocalhost%3A3005', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'https://evil.example',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
 });
