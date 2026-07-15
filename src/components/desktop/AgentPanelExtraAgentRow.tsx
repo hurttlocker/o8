@@ -6,7 +6,7 @@ import { formatElapsedAgo, shimmerTextStyle } from './repo-focus/tabs/chats/help
 
 export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
-export type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_human' | 'awaiting_orchestrator' | 'recovering' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
+export type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_human' | 'awaiting_orchestrator' | 'recovering' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'merged' | 'released' | 'archived';
 
 export interface ExtraAgentRow {
   key: string;
@@ -68,7 +68,10 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
 
 function rowDotState(row: ExtraAgentRow): AgentDotState {
   const lane = row.laneStatus;
-  if (lane === 'completed') return 'merged';
+  // 'merged'/'released' are real lane terminal states (the DB carries them) —
+  // they were missing here, so a merged packet's row kept the reviewing dot
+  // (operator report 2026-07-15).
+  if (lane === 'completed' || lane === 'merged' || lane === 'released') return 'merged';
   if (lane === 'failed' || lane === 'recovering') return 'failed';
   if (lane === 'archived') return 'idle';
   // A declined review reads as 'rejected' — checked before the generic review
@@ -90,7 +93,7 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   if (lane === 'awaiting_orchestrator') return 'escalated';
   if (lane === 'failed' || lane === 'recovering') return 'failed';
   if (lane === 'archived') return 'archived';
-  if (lane === 'completed') return 'merged';
+  if (lane === 'completed' || lane === 'merged' || lane === 'released') return 'merged';
   if (lane === 'launching' || lane === 'running' || lane === 'merging') return 'running';
   if (lane === 'paused' || lane === 'idle') return 'idle';
   if (row.status === 'running') return 'running';
