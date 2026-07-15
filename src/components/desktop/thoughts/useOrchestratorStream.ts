@@ -267,12 +267,20 @@ export function useOrchestratorStream(
   // 2026-06-22 latch audit: was 300_000 (5 min) — too long, an operator watched
   // a dead turn count "Working" up for minutes. The server now synthesizes a
   // terminal 'ready' when the stream resolves without 'done', so this client
-  // watchdog only has to catch the rarer truly-wedged child that never closes
-  // (await never resolves). 120s is below the felt-pain threshold yet still well
-  // clear of a slow cold-start that's silent before its first token (the warm
-  // REPL pool keeps real cold starts fast). Any stream event resets the clock,
-  // so an active-but-slow turn never heals.
+  // watchdog only has to catch the rarer truly-wedged child that never closes.
+  // 120s applies to a turn that produced NOTHING (accepted, not even a thinking
+  // token) — a genuinely dead start, safe to heal fast.
   const HEAL_STALE_AFTER_MS = 120_000;
+  // But once a turn HAS emitted transcript (thinking / a tool-use), it is
+  // demonstrably alive — a founders-rail tool loop goes silent for the whole
+  // duration of a server-side run_terminal_command (build/test), which routinely
+  // exceeds 120s. Healing then falsely tells the operator to resend, and the
+  // resend ABORTS the still-running server turn mid-edit (adversarial review
+  // 2026-07-15, HIGH). For an active-but-silent turn, wait past the SERVER's own
+  // authoritative inactivity watchdog (o8 backend = 5 min) so the server
+  // terminalizes first with a real error; this client timer is only the backstop
+  // for a dropped terminal event (socket flap).
+  const HEAL_ACTIVE_TURN_STALE_MS = 390_000;
   const HEAL_POLL_INTERVAL_MS = 15_000;
 
   useEffect(() => {
@@ -863,8 +871,14 @@ export function useOrchestratorStream(
     const interval = setInterval(() => {
       if (statusRef.current !== 'busy') return;
       const quietFor = Date.now() - lastEventAtRef.current;
-      if (quietFor >= HEAL_STALE_AFTER_MS) {
-        if (turnTranscriptEventCountRef.current === 0) {
+      // A turn that already produced transcript is alive but may be mid-tool
+      // (silent server-side command). Only heal it well past the server's own
+      // inactivity watchdog so we never pre-empt real work; a turn that emitted
+      // nothing at all is a dead start and heals at the short deadline.
+      const sawTranscript = turnTranscriptEventCountRef.current > 0;
+      const deadline = sawTranscript ? HEAL_ACTIVE_TURN_STALE_MS : HEAL_STALE_AFTER_MS;
+      if (quietFor >= deadline) {
+        if (!sawTranscript) {
           const at = Date.now();
           setMessages((prev) => {
             const next = [...prev, {
@@ -878,7 +892,7 @@ export function useOrchestratorStream(
             return next;
           });
         }
-        healStaleBusyState(`no events for ${Math.round(quietFor / 1000)}s while status=busy`);
+        healStaleBusyState(`no events for ${Math.round(quietFor / 1000)}s while status=busy (deadline ${Math.round(deadline / 1000)}s)`);
       }
     }, HEAL_POLL_INTERVAL_MS);
 

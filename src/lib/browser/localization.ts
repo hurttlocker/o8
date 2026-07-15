@@ -37,6 +37,14 @@ export function collectBrowserLocalizationRows(
   for (const element of root.querySelectorAll(query)) {
     if (rows.length >= limit) break;
     if (element.getAttribute('aria-hidden') === 'true') continue;
+    // Skip elements that occupy a rectangle but aren't actually visible —
+    // visibility:hidden/collapse or fully transparent. Returning them as
+    // "actionable" makes Symon localize or click a surface the user can't see
+    // (adversarial review 2026-07-15). Kept to computed visibility/opacity: a
+    // full occlusion hit-test is heavier than this LOW warrants and risks
+    // false-negatives on legitimately-stacked controls.
+    const style = view?.getComputedStyle?.(element);
+    if (style && (style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0')) continue;
     const raw = element.getBoundingClientRect();
     const left = Math.max(0, raw.left);
     const top = Math.max(0, raw.top);
