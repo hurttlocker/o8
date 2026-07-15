@@ -445,3 +445,28 @@ describe('orchestrator socket — thread-scope ingest guard (drag-to-split)', ()
     expect(h.currentAssistantRef.current?.chunks).toContain('legacy');
   });
 });
+
+describe('orchestrator socket — stall clock scoping (six-hour-timer incident)', () => {
+  it("an UNSTAMPED event paints on a bound view but does NOT reset its stall clock", () => {
+    const h = makeHarness({ status: 'busy', threadId: 'thoughts-mine', lastEventAt: 12345 });
+
+    // Session-wide broadcast with no threadId (e.g. supervisor auto-queue):
+    // still renders, but if it fed the clock a wedged turn's #539 stall
+    // watchdog could be starved forever.
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'broadcast' } });
+    expect(h.currentAssistantRef.current?.chunks).toContain('broadcast');
+    expect(h.lastEventAtRef.current).toBe(12345);
+  });
+
+  it("the view's OWN turn events still reset the stall clock", () => {
+    const h = makeHarness({ status: 'busy', threadId: 'thoughts-mine', lastEventAt: 12345 });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'mine', threadId: 'thoughts-mine' } });
+    expect(h.lastEventAtRef.current).toBeGreaterThan(12345);
+  });
+
+  it('an unbound view keeps stamping the clock from any passing event', () => {
+    const h = makeHarness({ status: 'busy', threadId: null, lastEventAt: 12345 });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'recovered', threadId: 'thoughts-unowned' } });
+    expect(h.lastEventAtRef.current).toBeGreaterThan(12345);
+  });
+});

@@ -163,15 +163,13 @@ export function createOrchestratorMessageHandler(
     //   turns (durable-turn recovery) UNLESS the turn's thread is owned by a
     //   thread pane — without this, a pane's send hijacked the empty main
     //   chat (title + transcript + busy state).
-    {
-      const evtThreadId = typeof msg.data?.threadId === 'string' && msg.data.threadId
-        ? msg.data.threadId
-        : null;
-      if (evtThreadId) {
-        const ownThreadId = options.threadIdRef?.current ?? null;
-        if (ownThreadId && evtThreadId !== ownThreadId) return;
-        if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
-      }
+    const evtThreadId = typeof msg.data?.threadId === 'string' && msg.data.threadId
+      ? msg.data.threadId
+      : null;
+    if (evtThreadId) {
+      const ownThreadId = options.threadIdRef?.current ?? null;
+      if (ownThreadId && evtThreadId !== ownThreadId) return;
+      if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
     }
 
     const observedAt = Date.now();
@@ -204,14 +202,24 @@ export function createOrchestratorMessageHandler(
     // activity. Counting them advances the reconnect-heal guard AND keeps
     // resetting the stale-busy watchdog, so a 'busy' snapshot for a dead session
     // would pin the "Working" timer forever. Only live events advance these. (#1282)
+    //
+    // Same guard, thread axis (2026-07-15 six-hour-timer incident): a BOUND
+    // view's stall clock only listens to its OWN turn's events. Every real
+    // turn emission stamps data.threadId, so on a bound view an UNSTAMPED
+    // event (session-wide broadcasts, e.g. the supervisor auto-queue) still
+    // paints below but must not keep resetting the #539 stall watchdog — that
+    // starvation is how a wedged turn's busy latch survives indefinitely.
     if (msg.data?.snapshot !== true) {
-      options.eventCountRef.current += 1;
-      options.lastEventAtRef.current = observedAt;
-      if (
-        options.turnTranscriptEventCountRef
-        && (msg.event === 'output' || msg.event === 'tool-use' || msg.event === 'tool-result' || msg.event === 'error')
-      ) {
-        options.turnTranscriptEventCountRef.current += 1;
+      const ownThreadId = options.threadIdRef?.current ?? null;
+      if (!ownThreadId || evtThreadId === ownThreadId) {
+        options.eventCountRef.current += 1;
+        options.lastEventAtRef.current = observedAt;
+        if (
+          options.turnTranscriptEventCountRef
+          && (msg.event === 'output' || msg.event === 'tool-use' || msg.event === 'tool-result' || msg.event === 'error')
+        ) {
+          options.turnTranscriptEventCountRef.current += 1;
+        }
       }
     }
 
