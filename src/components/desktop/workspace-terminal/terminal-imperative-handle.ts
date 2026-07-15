@@ -138,6 +138,27 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
             autoArchiveOnIdle: options?.autoArchiveOnIdle,
           })
     ),
+    injectIntoOrchestrator: (tabId, text, options) => {
+      const target = deps.tabsRef.current.find((tab) => tab.id === tabId && tab.kind === 'orchestrator');
+      const nextText = text.trim();
+      if (!target || !nextText) return false;
+      const nextTabs = deps.tabsRef.current.map((tab) => (
+        tab.id === tabId
+          ? {
+              ...tab,
+              lastActivity: Date.now(),
+              orchestratorTurnInjection: {
+                id: `orchestrator-turn-${Date.now()}`,
+                text: nextText,
+                previewImageDataUri: options?.previewImageDataUri,
+              },
+            }
+          : tab
+      ));
+      deps.tabsRef.current = nextTabs;
+      deps.setTabs(nextTabs);
+      return true;
+    },
     focusTab: (tabId) => {
       const exists = deps.tabsRef.current.some((tab) => tab.id === tabId);
       if (!exists) return false;
@@ -184,6 +205,9 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
         kind: tab.kind,
         sessionKey: tab.chatSessionKey,
         orchestratorThreadId: tab.orchestratorThreadId,
+        repoPath: tab.repo?.localPath,
+        lastActivity: tab.lastActivity,
+        mode: tab.mode,
       })),
       activeTabId: deps.activeTabId,
     }),

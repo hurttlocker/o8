@@ -113,6 +113,7 @@ function WorkspaceTerminalPanelsBase({
               projectContextRailVisible={projectContextRailVisible}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
               restoreLastThread={!tab.freshSpawn}
+              turnInjection={tab.orchestratorTurnInjection}
             />
           </Suspense>
         ) : tab.kind === 'llm-chat' ? (

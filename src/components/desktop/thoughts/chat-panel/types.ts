@@ -6,6 +6,10 @@ export interface ThoughtsOrchestratorBusyState {
   latestToolLabel: string | null;
 }
 
+export interface ThoughtsSendNowOptions {
+  attachments?: Array<{ dataUri: string; name: string }>;
+}
+
 export interface ThoughtsChatPanelHandle {
   focusInput: () => void;
   reset: () => void;
@@ -15,7 +19,7 @@ export interface ThoughtsChatPanelHandle {
    * the input first then sends. Used by Orchestrator quick-action cards
    * that click-to-dispatch.
    */
-  sendNow: (text?: string) => void;
+  sendNow: (text?: string, options?: ThoughtsSendNowOptions) => boolean;
   /**
    * Drop text into the composer at the current caret without sending.
    * Used by dictation: the user can review the polished transcript and
