@@ -122,9 +122,10 @@ export const env = {
 
   // Authorized parties for Clerk session verification (audit #4). Comma-separated
   // origins that legitimately mint our sessions (e.g. "https://o8.run,tauri://localhost").
-  // When set, verifyClerkSession requires the token's `azp` to match one — blocks
+  // verifyClerkSession requires the token's `azp` to match one — blocks
   // a same-instance token minted by a sibling subdomain from being redeemed here
-  // for a repo-write GitHub token. Empty (default) = no check (unchanged behavior).
+  // for a repo-write GitHub token. Empty disables Clerk session verification
+  // even if CLERK_ISSUER is present, so a production misconfiguration fails closed.
   CLERK_AUTHORIZED_PARTIES: optional('CLERK_AUTHORIZED_PARTIES', '')
     .split(',')
     .map((s) => s.trim())

@@ -16,7 +16,10 @@ const activeServers = new Map<string, {
 }>();
 
 // GET — list active dev servers
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (resolveRequestPrincipal(req) !== 'operator') {
+    return NextResponse.json({ error: 'Dev server controls are operator-only.' }, { status: 403 });
+  }
   const servers = Array.from(activeServers.entries()).map(([id, srv]) => ({
     id,
     pid: srv.pid,
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
   // Operator-only: this spawns an arbitrary shell (`sh -c <command>` below). A
   // dispatched worker (local-worker token) must never reach this RCE primitive
   // (SECURITY_AUDIT_2026-07-02 §HIGH-3). Only the desktop repo-card UI calls it.
-  if (resolveRequestPrincipal(req) === 'worker') {
+  if (resolveRequestPrincipal(req) !== 'operator') {
     return NextResponse.json({ error: 'Starting a dev server is operator-only.' }, { status: 403 });
   }
   try {
@@ -136,6 +139,9 @@ export async function POST(req: NextRequest) {
 
 // DELETE — stop a dev server
 export async function DELETE(req: NextRequest) {
+  if (resolveRequestPrincipal(req) !== 'operator') {
+    return NextResponse.json({ error: 'Stopping a dev server is operator-only.' }, { status: 403 });
+  }
   try {
     const body = await req.json() as { repoPath: string };
     const id = `dev-${body.repoPath}`;

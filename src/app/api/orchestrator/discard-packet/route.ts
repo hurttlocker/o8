@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  if (resolveRequestPrincipal(request) === 'worker') {
+  if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Discarding packets is operator-only; a dispatched worker cannot call this.', 403);
   }
 

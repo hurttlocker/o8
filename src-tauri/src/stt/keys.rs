@@ -3,8 +3,8 @@
 //! This is the de-Symonized replacement for aqua's `keys.rs` /
 //! `product_mode.rs` / license logic. There is NO proxy, NO license token,
 //! NO product-mode gate — both resolvers read an environment variable first,
-//! then fall back to a small JSON config under `~/.o8`. They are UN-GATED so
-//! they work in release builds (signed, Finder-launched).
+//! then fall back to macOS Keychain. Non-secret preferences live in a small JSON
+//! config under `~/.o8`; legacy plaintext keys migrate on first use.
 //!
 //! `GEMINI_API_KEY` powers transcript polish; `OPENROUTER_API_KEY` powers the
 //! optional Whisper re-transcription pass. The Tauri sidecar already forwards
@@ -12,9 +12,41 @@
 //! `load_ai_keys_from_login_shell` in `lib.rs`), so a key in `~/.zshenv`
 //! reaches a Finder-launched build without any extra config file.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
+
+const SECRET_PREF_KEYS: [&str; 5] = [
+    "gemini_api_key",
+    "openrouter_api_key",
+    "elevenlabs_api_key",
+    "google_tts_api_key",
+    "groq_api_key",
+];
+
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE: &str = "ai.o8.desktop.voice-provider-keys";
+
+// Security.framework's documented `errSecItemNotFound` OSStatus. Keep this
+// local rather than adding the low-level security-framework-sys crate solely
+// for one comparison.
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
+#[cfg(target_os = "macos")]
+fn keychain_delete_error_is_ignorable(code: i32) -> bool {
+    code == ERR_SEC_ITEM_NOT_FOUND
+}
+
+#[cfg(target_os = "macos")]
+fn delete_keychain_secret(key: &str) -> Result<(), String> {
+    match security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, key) {
+        Ok(()) => Ok(()),
+        Err(error) if keychain_delete_error_is_ignorable(error.code()) => Ok(()),
+        Err(error) => Err(format!("delete {key} from macOS Keychain: {error}")),
+    }
+}
 
 /// Canonical o8 data dir (`~/.o8`, overridable via env). Mirrors the resolver
 /// in `lib.rs` but does NOT trigger the cortex-ide → o8 migration — STT only
@@ -129,21 +161,11 @@ pub fn config_replacements() -> Vec<crate::stt::commands::ReplacementRule> {
 pub fn config_public() -> serde_json::Value {
     let mut value = config();
     if let Some(obj) = value.as_object_mut() {
-        for secret in [
-            "gemini_api_key",
-            "openrouter_api_key",
-            "elevenlabs_api_key",
-            "google_tts_api_key",
-            "groq_api_key",
-        ] {
+        for secret in SECRET_PREF_KEYS {
             // Redacted presence flag: the settings UI shows "you have a key
-            // saved" without ever receiving the value. Emit `<key>_set` BEFORE
-            // removing the secret.
-            let is_set = obj
-                .get(secret)
-                .and_then(|v| v.as_str())
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
+            // saved" without ever receiving the value. `stored_secret` also
+            // migrates a legacy plaintext value into Keychain on macOS.
+            let is_set = stored_secret(secret).is_some();
             obj.insert(format!("{secret}_set"), serde_json::Value::Bool(is_set));
             obj.remove(secret);
         }
@@ -160,17 +182,111 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
-    obj.insert(key.to_string(), value);
+
+    if SECRET_PREF_KEYS.contains(&key) {
+        let secret = value
+            .as_str()
+            .ok_or_else(|| format!("{key} must be a string"))?
+            .trim();
+
+        #[cfg(target_os = "macos")]
+        {
+            if secret.is_empty() {
+                // Deleting a missing item is harmless from the caller's point
+                // of view. Every other Keychain failure must stop the settings
+                // write so the UI cannot claim a secret was cleared when it
+                // remains in secure storage.
+                delete_keychain_secret(key)?;
+            } else {
+                security_framework::passwords::set_generic_password(
+                    KEYCHAIN_SERVICE,
+                    key,
+                    secret.as_bytes(),
+                )
+                .map_err(|e| format!("store {key} in macOS Keychain: {e}"))?;
+            }
+            obj.remove(key);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Cross-platform secure storage is not wired yet. Preserve current
+            // behavior off macOS, but the file writer below constrains access.
+            obj.insert(key.to_string(), serde_json::Value::String(secret.to_string()));
+        }
+    } else {
+        obj.insert(key.to_string(), value);
+    }
     let serialized =
         serde_json::to_string_pretty(&serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        if path.exists() {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("secure dictation.json permissions: {e}"))?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("open dictation.json: {e}"))?;
+        file.write_all(serialized.as_bytes())
+            .map_err(|e| format!("write dictation.json: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("sync dictation.json: {e}"))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("secure dictation.json permissions: {e}"))?;
+    }
+    #[cfg(not(unix))]
     std::fs::write(&path, serialized).map_err(|e| format!("write dictation.json: {e}"))?;
     if let Ok(mut guard) = CONFIG_CACHE.lock() {
         *guard = None;
     }
     Ok(())
+}
+
+/// Read a provider secret without exposing it to the webview. On macOS the
+/// Keychain is authoritative. A value left by an older release is migrated on
+/// first use and then removed from the JSON preferences file.
+fn stored_secret(key: &str) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(raw) = security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, key) {
+            if let Ok(value) = String::from_utf8(raw) {
+                let value = value.trim().to_string();
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+
+        let legacy = config_string(key)?;
+        if security_framework::passwords::set_generic_password(
+            KEYCHAIN_SERVICE,
+            key,
+            legacy.as_bytes(),
+        )
+        .is_ok()
+        {
+            // Best-effort cleanup. The secret remains usable from Keychain even
+            // if a damaged preferences file cannot be rewritten immediately.
+            let _ = set_pref(key, serde_json::Value::String(legacy.clone()));
+        }
+        return Some(legacy);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        config_string(key)
+    }
 }
 
 /// Resolve the Gemini API key. Env-first (`GEMINI_API_KEY`), then the o8
@@ -181,7 +297,7 @@ pub fn get_gemini_key() -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| config_string("gemini_api_key"))
+        .or_else(|| stored_secret("gemini_api_key"))
 }
 
 /// Resolve the Groq API key (fast Whisper transcription — the latency A/B vs
@@ -192,7 +308,7 @@ pub fn get_groq_key() -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| config_string("groq_api_key"))
+        .or_else(|| stored_secret("groq_api_key"))
 }
 
 /// Resolve the OpenRouter API key. Env-first (`OPENROUTER_API_KEY`), then the
@@ -202,7 +318,7 @@ pub fn get_openrouter_key() -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| config_string("openrouter_api_key"))
+        .or_else(|| stored_secret("openrouter_api_key"))
 }
 
 /// Resolve the ElevenLabs API key for premium read-aloud / Ask voices (voice P4
@@ -213,7 +329,7 @@ pub fn get_elevenlabs_key() -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| config_string("elevenlabs_api_key"))
+        .or_else(|| stored_secret("elevenlabs_api_key"))
 }
 
 /// Resolve the Google Cloud TTS API key (voice P4 TTS, direct — no proxy).
@@ -223,5 +339,17 @@ pub fn get_google_tts_key() -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| config_string("google_tts_api_key"))
+        .or_else(|| stored_secret("google_tts_api_key"))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{keychain_delete_error_is_ignorable, ERR_SEC_ITEM_NOT_FOUND};
+
+    #[test]
+    fn only_missing_keychain_items_are_ignored_on_delete() {
+        assert!(keychain_delete_error_is_ignorable(ERR_SEC_ITEM_NOT_FOUND));
+        assert!(!keychain_delete_error_is_ignorable(-25293));
+        assert!(!keychain_delete_error_is_ignorable(-50));
+    }
 }

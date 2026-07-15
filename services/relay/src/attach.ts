@@ -14,6 +14,7 @@ import type { RelayServer } from './relay.js';
  */
 
 const DEVICE_RE = /^\/device\/([A-Za-z0-9]{1,64})\/?$/;
+const MAX_FRAME_BYTES = 1024 * 1024;
 
 export interface UpgradableServer {
   on(event: 'upgrade', cb: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): void;
@@ -34,8 +35,14 @@ function refuse(socket: Duplex, status: number, message: string): void {
 }
 
 export function attachRelayUpgrade(server: UpgradableServer, relay: RelayServer): void {
-  const macWss = new WebSocketServer({ noServer: true });
-  const deviceWss = new WebSocketServer({ noServer: true });
+  const wsOptions = {
+    noServer: true,
+    maxPayload: MAX_FRAME_BYTES,
+    perMessageDeflate: false,
+    clientTracking: false,
+  } as const;
+  const macWss = new WebSocketServer(wsOptions);
+  const deviceWss = new WebSocketServer(wsOptions);
 
   server.on('upgrade', (req, socket, head) => {
     let pathname = '';
@@ -57,7 +64,7 @@ export function attachRelayUpgrade(server: UpgradableServer, relay: RelayServer)
     if (m) {
       const routingId = m[1]!;
       // Per-minute connect gate BEFORE accepting the socket (cheapest refusal).
-      if (!relay.allowDeviceConnect(routingId)) {
+      if (!relay.allowDeviceConnect(routingId, req.socket.remoteAddress)) {
         refuse(socket, 429, 'Too Many Requests');
         return;
       }

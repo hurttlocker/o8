@@ -196,8 +196,8 @@ export function resolveEmbedRoute(model: string): InferenceRoute | null {
   const localKey = resolveGeminiKey();
   if (localKey) {
     return {
-      url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${localKey}`,
-      headers: { 'Content-Type': 'application/json' },
+      url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent`,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': localKey },
       via: 'direct',
     };
   }

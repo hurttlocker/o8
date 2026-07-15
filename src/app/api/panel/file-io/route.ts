@@ -31,7 +31,11 @@ import { isPathInRegisteredRepo } from '@/lib/llm/repo-scope';
  * keeps full arbitrary-path access (this card is a terminal-grade operator tool).
  */
 async function denyWorkerOutsideRepo(request: Request, absPath: string): Promise<NextResponse | null> {
-  if (resolveRequestPrincipal(request) !== 'worker') return null;
+  const principal = resolveRequestPrincipal(request);
+  if (principal === 'anonymous' || principal === 'device') {
+    return NextResponse.json({ error: 'File access requires an operator or dispatched-worker credential.' }, { status: 403 });
+  }
+  if (principal !== 'worker') return null;
   if (await isPathInRegisteredRepo(absPath)) return null;
   return NextResponse.json(
     { error: 'Workers may only access files inside a registered repository.' },
@@ -133,6 +137,9 @@ export async function PUT(request: Request) {
 /** POST {action:'pick'} — native macOS choose-file dialog (osascript, the
  *  browse-folder pattern). Returns { path } or { path: null } on cancel. */
 export async function POST(request: Request) {
+  if (resolveRequestPrincipal(request) !== 'operator') {
+    return NextResponse.json({ error: 'Choosing arbitrary local files is operator-only.' }, { status: 403 });
+  }
   let body: { action?: string };
   try {
     body = await request.json();

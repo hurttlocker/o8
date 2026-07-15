@@ -106,9 +106,8 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
   };
   const deletePreset = (id: string) => setPref('voice_library', library.filter((p) => p.id !== id));
 
-  // ElevenLabs key: persisted to dictation.json (`elevenlabs_api_key`), which is
-  // exactly where Rust resolves it (`stt::keys::get_elevenlabs_key`, env-first).
-  // Un-gated — anyone can add their own key here; no key = the Google default.
+  // ElevenLabs key: persisted by Rust in macOS Keychain. The webview only gets
+  // a redacted presence flag back; no key means the Google default.
   const saveElevenKey = () => {
     const k = elevenKeyInput.trim();
     if (!k) return;

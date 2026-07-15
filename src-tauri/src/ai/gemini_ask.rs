@@ -83,7 +83,10 @@ pub async fn ask(question: &str, context: Option<&str>) -> Result<String, String
 
     let client = reqwest::Client::new();
     let request = match &target {
-        crate::entitlement::GeminiTarget::Direct { url } => client.post(url).json(&body),
+        crate::entitlement::GeminiTarget::Direct { url, api_key } => client
+            .post(url)
+            .header("x-goog-api-key", api_key)
+            .json(&body),
         crate::entitlement::GeminiTarget::Proxy { url, token } => {
             body["model"] = serde_json::json!(DIRECT_MODEL);
             client.post(url).bearer_auth(token).json(&body)

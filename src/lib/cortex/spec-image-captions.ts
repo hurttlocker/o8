@@ -22,8 +22,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 // the rest of the repo already pressures). Resolves to gemini-3.1-flash-lite
 // as of 2026-05. Switching to a different provider would mean a new SDK + key.
 const GEMINI_MODEL = 'gemini-flash-lite-latest';
-const GEMINI_URL = (apiKey: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+const GEMINI_URL =
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const CAPTION_PROMPT =
   'Describe this image in 2-3 sentences, focusing on UI structure, text content, and visual hierarchy. Max 400 characters.';
@@ -116,9 +116,9 @@ async function captionViaGemini(absPath: string, apiKey: string): Promise<string
 
   let res: Response;
   try {
-    res = await fetch(GEMINI_URL(apiKey), {
+    res = await fetch(GEMINI_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [
           {

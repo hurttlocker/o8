@@ -105,8 +105,8 @@ export class RelayServer {
 
   // ── Rate-limit pre-check (called by the upgrade router before accepting) ──
   /** Per-minute connect gate for a /device upgrade. False → refuse (HTTP 429). */
-  allowDeviceConnect(routingId: string): boolean {
-    return this.limiter.allowConnect(routingId, this.deps.now());
+  allowDeviceConnect(routingId: string, clientAddress?: string): boolean {
+    return this.limiter.allowConnect(routingId, this.deps.now(), clientAddress);
   }
 
   // ── Mac connector (/mac) ──────────────────────────────────────────────────

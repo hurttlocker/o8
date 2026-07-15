@@ -1,5 +1,6 @@
 import type { ApprovalDecisionResult, ApprovalRecord } from '@/lib/approvals/types';
 import { getApproval, recordApprovalAudit } from '@/lib/approvals/store';
+import { issueLlmToolGrant } from '@/lib/approvals/llm-tool-grants';
 import {
   readPersistedLlmChat,
   writePersistedLlmChat,
@@ -7,6 +8,7 @@ import {
   type PersistedLlmChatMessage,
 } from '@/lib/llm/chat-history-store';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 function cleanProxyContent(text: string) {
   return text
@@ -77,12 +79,17 @@ export async function resumeLlmApproval(
 
   const tabId = continuation.tabId;
   ensureHistoryContainsMessages(tabId, continuation.messages);
-  const nextApprovedTools = Array.from(new Set([
-    ...(continuation.approvedTools ?? []),
-    approval.toolName ?? '',
-  ].filter(Boolean)));
-  const toolOverrides = approval.toolName === 'run_terminal_command' && options.editedCommand?.trim()
-    ? { [approval.toolName]: { command: options.editedCommand.trim() } }
+  const approvedArgs = { ...(approval.args ?? {}) };
+  if (approval.toolName === 'run_terminal_command' && options.editedCommand?.trim()) {
+    approvedArgs.command = options.editedCommand.trim();
+  }
+  const approvalGrant = approval.toolName
+    ? issueLlmToolGrant({
+        tabId,
+        repoPath: continuation.repoPath ?? '',
+        toolName: approval.toolName,
+        args: approvedArgs,
+      })
     : undefined;
 
   let responseText = '';
@@ -98,6 +105,7 @@ export async function resumeLlmApproval(
   const response = await fetch(new URL('/api/v2/proxy/llm', requestUrl), {
     method: 'POST',
     headers: {
+      Authorization: `Bearer ${getOrCreateWsToken()}`,
       'Content-Type': 'application/json',
       'x-tab-id': tabId,
     },
@@ -105,9 +113,8 @@ export async function resumeLlmApproval(
       model: continuation.model,
       provider: continuation.provider,
       messages: continuation.messages,
-      approvedTools: nextApprovedTools,
       repoPath: continuation.repoPath,
-      toolOverrides,
+      approvalGrant,
     }),
     cache: 'no-store',
   });

@@ -9,6 +9,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { revokeDevice } from '@/lib/mobile/device-registry';
 
 interface RevokeBody {
@@ -16,6 +17,9 @@ interface RevokeBody {
 }
 
 export async function POST(req: NextRequest) {
+  if (resolveRequestPrincipal(req) !== 'operator') {
+    return NextResponse.json({ error: 'Paired-device administration is operator-only.' }, { status: 403 });
+  }
   let body: RevokeBody;
   try {
     body = (await req.json()) as RevokeBody;

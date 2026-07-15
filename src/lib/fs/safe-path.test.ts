@@ -1,7 +1,9 @@
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, it, expect } from 'vitest';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { safeJoin, confineToRoots, expandHome } from './safe-path';
+import { safeJoin, safeJoinReal, confineToRoots, expandHome } from './safe-path';
 
 describe('safeJoin', () => {
   it('joins a relative path inside the root', () => {
@@ -27,6 +29,33 @@ describe('safeJoin', () => {
     expect(safeJoin('/repo', '/etc/passwd')).toBeNull();
     expect(safeJoin(join(homedir(), 'myrepo'), join(homedir(), '.o8/ws-token'))).toBeNull();
     expect(safeJoin(join(homedir(), 'myrepo'), join(homedir(), '.tauri/cortex-ide.key'))).toBeNull();
+  });
+});
+
+describe('safeJoinReal', () => {
+  it('allows existing files and new paths whose real ancestors remain in the root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-safe-root-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src', 'existing.ts'), 'ok');
+
+    expect(safeJoinReal(root, 'src/existing.ts')).toBe(join(root, 'src', 'existing.ts'));
+    expect(safeJoinReal(root, 'src/new.ts', { allowMissing: true })).toBe(join(root, 'src', 'new.ts'));
+  });
+
+  it('rejects reads and writes through a symlink that escapes the root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-safe-root-'));
+    const outside = mkdtempSync(join(tmpdir(), 'o8-safe-outside-'));
+    writeFileSync(join(outside, 'secret'), 'secret');
+    symlinkSync(outside, join(root, 'escape'));
+
+    expect(safeJoinReal(root, 'escape/secret')).toBeNull();
+    expect(safeJoinReal(root, 'escape/new-file', { allowMissing: true })).toBeNull();
+  });
+
+  it('rejects a broken target symlink instead of treating it as a new file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-safe-root-'));
+    symlinkSync('/definitely/missing/o8-target', join(root, 'broken'));
+    expect(safeJoinReal(root, 'broken', { allowMissing: true })).toBeNull();
   });
 });
 

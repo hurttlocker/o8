@@ -4,8 +4,9 @@ import { NextRequest } from 'next/server';
 import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { extname, relative, resolve } from 'node:path';
+import { extname } from 'node:path';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
+import { safeJoinReal } from '@/lib/fs/safe-path';
 
 const MAX_PREVIEW_BYTES = 50 * 1024 * 1024;
 
@@ -33,13 +34,6 @@ async function resolveRoot(workspace?: string | null) {
   return repoRoot;
 }
 
-function safePath(root: string, path: string): string | null {
-  const resolved = resolve(root, path);
-  const rel = relative(root, resolved);
-  if (rel.startsWith('..') || rel.startsWith('/')) return null;
-  return resolved;
-}
-
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path');
   if (!path) {
@@ -51,7 +45,7 @@ export async function GET(request: NextRequest) {
     return new Response('Workspace is not registered', { status: 400 });
   }
 
-  const resolved = safePath(root, path);
+  const resolved = safeJoinReal(root, path);
   if (!resolved) {
     return new Response('Path outside repository', { status: 400 });
   }

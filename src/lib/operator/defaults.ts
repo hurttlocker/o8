@@ -313,7 +313,7 @@ export interface OperatorDefaults {
    */
   telemetryIngestUrl: string;
   /**
-   * Sentry crash/error reporting — "Crash & error reports" toggle. **On by
+   * Sentry crash/error reporting — "Crash & error reports" toggle. **Off by
    * default.** Only ever active in a PACKAGED build that had a DSN baked in
    * (dev stays silent regardless). Scrubs home paths, query strings, and
    * identity before send; carries the app version + plan + a founder boolean,
@@ -420,9 +420,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Crash telemetry OFF by default — local capture only, nothing uploaded.
   telemetryOptIn: false,
   telemetryIngestUrl: '',
-  // Sentry crash/error reports ON by default — but dormant unless a packaged
-  // build baked a DSN, so a fresh clone / dev run ships zero behavior change.
-  crashReportsEnabled: true,
+  // Sentry crash/error reports OFF by default. Operators must affirmatively
+  // enable transmission even when a packaged build has a DSN.
+  crashReportsEnabled: false,
   // Byte-identical to the previous hardcoded `issue/` branch literal.
   branchPrefix: 'issue',
   // Agent commit attribution OFF — commits carry the raw message as before.

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { NextResponse } from 'next/server';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 
 type GitHubAuthAction = 'switch' | 'logout' | 'login_token';
 
@@ -25,6 +26,9 @@ function errorMessage(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  if (resolveRequestPrincipal(request) !== 'operator') {
+    return NextResponse.json({ error: 'GitHub credential changes are operator-only.' }, { status: 403 });
+  }
   try {
     const payload = await request.json().catch(() => null) as {
       action?: GitHubAuthAction;

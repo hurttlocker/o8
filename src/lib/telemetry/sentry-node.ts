@@ -62,7 +62,7 @@ export async function initSentryNode(surface: NodeSurface): Promise<boolean> {
       // Errors only — no performance/tracing, no profiling, no replay.
       tracesSampleRate: 0,
       sampleRate: 1.0,
-      beforeSend: (event) => (resolveCrashReportsToggle() ? (scrubSentryEvent(event as SentryEventLike) as typeof event) : null),
+      beforeSend: (event) => (resolveCrashReportsToggle() ? (scrubSentryEvent(event as SentryEventLike) as typeof event | null) : null),
     });
 
     Sentry.setTags({

@@ -1,6 +1,6 @@
 //! Google Cloud TTS (ported from aqua/Symon `tts/google.rs`, de-Symonized to the
 //! DIRECT branch only — the Symon proxy / license-token half is deleted). Key
-//! via `stt::keys::get_google_tts_key()` (env-first → `~/.o8/dictation.json`).
+//! via `stt::keys::get_google_tts_key()` (env-first → macOS Keychain).
 //! Returns MP3 bytes.
 
 use serde::{Deserialize, Serialize};
@@ -88,12 +88,12 @@ pub async fn synthesize(text: &str, config: &TtsConfig) -> Result<Vec<u8>, Strin
     };
 
     let api_key = crate::stt::keys::get_google_tts_key().ok_or_else(|| {
-        "Missing GOOGLE_TTS_API_KEY — set it in ~/.o8/dictation.json or the environment".to_string()
+        "Missing GOOGLE_TTS_API_KEY — add it in Voice settings or the environment".to_string()
     })?;
-    let url = format!("{ENDPOINT}?key={api_key}");
 
     let response = reqwest::Client::new()
-        .post(&url)
+        .post(ENDPOINT)
+        .header("x-goog-api-key", api_key)
         .json(&request_body)
         .send()
         .await

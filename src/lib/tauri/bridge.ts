@@ -427,8 +427,8 @@ export async function backgroundModeSet(enabled: boolean): Promise<boolean> {
   return result ?? enabled;
 }
 
-/** Voice preferences (`~/.o8/dictation.json`, secrets stripped). mtime-cached
- * server-side, so a `voicePrefsSet` write applies live with no relaunch. */
+/** Voice preferences (`~/.o8/dictation.json`, secrets stripped). Provider keys
+ * live in macOS Keychain; non-secret prefs remain mtime-cached in the JSON file. */
 export async function voicePrefsGet(): Promise<Record<string, unknown> | null> {
   return invoke<Record<string, unknown>>('voice_prefs_get');
 }

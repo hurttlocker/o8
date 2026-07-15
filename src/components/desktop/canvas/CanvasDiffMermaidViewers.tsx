@@ -3,6 +3,7 @@ import type React from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Clipboard, RotateCcw, Trash2 } from '../lucide-shims';
 import { DiffStatusIcon, renderDiffLines } from '@/components/desktop/diff-utils';
+import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
 interface ChangedFile {
   path: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked';
@@ -27,7 +28,6 @@ function MermaidViewerBase({ code }: { code: string }) {
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
-
   useEffect(() => {
     let cancelled = false;
     async function render() {
@@ -63,7 +63,7 @@ function MermaidViewerBase({ code }: { code: string }) {
         });
         const id = `mermaid-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { svg } = await mermaid.render(id, code);
-        if (!cancelled) setSvgHtml(svg);
+        if (!cancelled) setSvgHtml(sanitizeAgentHtml(svg));
       } catch (err) {
         if (!cancelled) setError(String(err));
       }

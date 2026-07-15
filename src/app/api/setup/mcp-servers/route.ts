@@ -47,7 +47,15 @@ function parseEnv(value: unknown): Record<string, string> | null {
 
 export async function GET() {
   try {
-    return NextResponse.json({ servers: listExternalMcpServers() });
+    const servers = listExternalMcpServers().map((server) => ({
+      ...server,
+      env: null,
+      envJson: null,
+      oauthToken: null,
+      hasEnv: Boolean(server.env && Object.keys(server.env).length > 0),
+      hasOAuthToken: Boolean(server.oauthToken),
+    }));
+    return NextResponse.json({ servers });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to load MCP servers', detail: error instanceof Error ? error.message : String(error) },
