@@ -24,6 +24,7 @@ import {
 } from './BranchDetailsOverlay';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
+import { useThreadSources } from './use-thread-sources';
 import { useBranchPr } from './useBranchPr';
 import { usePrDetail } from './pr-panel/usePrDetail';
 import type { PrCheck } from './pr-panel/types';
@@ -105,9 +106,11 @@ function pickTarget(
 
 const NOOP = () => {};
 
-export function BranchDetailsLauncher({ visible = true, repoPath = null, collapsed = false, onToggleCollapsed }: {
+export function BranchDetailsLauncher({ visible = true, repoPath = null, threadId = null, collapsed = false, onToggleCollapsed }: {
   visible?: boolean;
   repoPath?: string | null;
+  /** Active orchestrator thread — scopes the Sources card to this conversation. */
+  threadId?: string | null;
   /** Open state (inverted): `false` = the drawer overlay is open; `true` = closed to the capsule. Toggled by click. */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
@@ -162,6 +165,8 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
   // state instead of resolving nothing (or, pre-scoping, a foreign repo).
   const resolvedRepoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? repoPath ?? null;
   const changes = useWorkspaceChanges(resolvedRepoPath);
+  // Sources card: the links the operator put into THIS conversation.
+  const sources = useThreadSources(threadId);
   // PR for the current branch, surfaced inline so the operator sees status
   // without opening the PRs tab (Q ruling 2026-07-11). Keyed by repo NAME (the
   // list API resolves slug/name, not a local path). Null on main/master or
@@ -189,6 +194,17 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
 
   const open = (tab: OverlayPanelTab) => {
     data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
+  };
+
+  // Open a source link in the right-side browser panel. Reveal the Browser tab
+  // first, then push the URL once the pane has mounted (the o8:open-browser
+  // listener switches to the tab + navigates — see O8Panel / O8BrowserPane).
+  const openSource = (href: string) => {
+    data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab: 'browser' });
+    if (typeof window === 'undefined') return;
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: href } }));
+    }, 250);
   };
 
   return (
@@ -279,6 +295,8 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
             if (activePacket?.lane?.sessionKey) data.onSelectSession?.(activePacket.lane.sessionKey);
           }}
           browserHost={typeof window === 'undefined' ? undefined : window.location.host}
+          sources={sources}
+          onOpenSource={openSource}
           runtimeLabelText={runtimeLabel(packetRuntime)}
           onOpenTab={open}
         />
