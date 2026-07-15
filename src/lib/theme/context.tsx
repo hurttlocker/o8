@@ -179,6 +179,30 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
 
   const inTauri = root.dataset.tauri === 'true';
 
+  const internals = (window as unknown as {
+    __TAURI_INTERNALS__?: {
+      invoke?: (cmd: string, args: unknown) => Promise<unknown>;
+      metadata?: { currentWindow?: { label?: string } };
+    };
+  }).__TAURI_INTERNALS__;
+
+  // Pin the native window appearance to the palette (glass-slab root cause,
+  // 2026-07-14): NSVisualEffectView materials render their LIGHT or DARK
+  // variant from the window's effectiveAppearance, which otherwise follows
+  // the SYSTEM appearance. A dark system under the light palette rendered
+  // every glass material as the heavy dark slab ("I hit glass and it's
+  // still opaque"). Palette-pinned appearance makes glass deterministic —
+  // a system appearance change (manual or sunset auto-switch) can never
+  // flip the chrome material again. Applies in solid mode too so the
+  // titlebar/traffic-light chrome always matches the palette.
+  if (inTauri) {
+    const label = internals?.metadata?.currentWindow?.label ?? 'main';
+    internals?.invoke?.('plugin:window|set_theme', {
+      label,
+      value: theme.paletteId === 'light' ? 'light' : 'dark',
+    })?.catch((err: unknown) => console.warn('[theme] window appearance pin failed', err));
+  }
+
   // Vibrancy passthrough — only in Tauri AND glass surface mode. In solid
   // mode the chrome tokens are fully opaque and we WANT them painted on
   // top of whatever vibrancy material the OS still has applied (a Phase 2
@@ -192,9 +216,6 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
     // mounting IS the proof the window is fully live, so re-assert from
     // here: 'default' maps to the per-OS chrome material on the Rust side.
     // Idempotent, and re-running on theme changes is desirable.
-    const internals = (window as unknown as {
-      __TAURI_INTERNALS__?: { invoke?: (cmd: string, args: unknown) => Promise<unknown> };
-    }).__TAURI_INTERNALS__;
     internals?.invoke?.('set_canvas_material', { material: 'default' })
       ?.catch((err: unknown) => console.warn('[theme] vibrancy re-assert failed', err));
     root.style.setProperty('--t-chrome', 'transparent');
