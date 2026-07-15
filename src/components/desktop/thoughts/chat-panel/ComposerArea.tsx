@@ -165,12 +165,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     }
     return [];
   }, [chatMessages, isOrchestratorMode]);
-  const latestUserMessageId = useMemo<string | null>(() => {
+  const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
-      if (chatMessages[i].role === 'user') return chatMessages[i].id;
+      if (chatMessages[i].role === 'user') return chatMessages[i];
     }
     return null;
   }, [chatMessages]);
+  const latestUserMessageId = latestUserEntry?.id ?? null;
   // True while the latest message is the user's own — the orchestrator has been
   // handed the turn but hasn't streamed a reply yet (the "thinking" gap). The
   // working indicator must persist through this gap even though orchStream.status
@@ -314,6 +315,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           runningTools={runningTools}
           activeTargetLabel={activeTargetLabel}
           latestUserMessageId={latestUserMessageId}
+          latestUserMessageAt={latestUserEntry?.timestamp ?? null}
           awaitingReply={awaitingReply}
         />
       ) : null}

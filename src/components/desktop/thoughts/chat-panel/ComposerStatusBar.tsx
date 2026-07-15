@@ -16,12 +16,15 @@ export function ComposerStatusBar({
   runningTools,
   activeTargetLabel,
   latestUserMessageId,
+  latestUserMessageAt,
   awaitingReply,
 }: {
   displayWaiting: boolean;
   runningTools: MobileTranscriptToolCall[];
   activeTargetLabel: string;
   latestUserMessageId: string | null;
+  /** Timestamp (ms) of that message — gates the latch to FRESH sends. */
+  latestUserMessageAt?: number | null;
   awaitingReply: boolean;
 }) {
   const startedAtRef = useRef<number | null>(null);
@@ -37,8 +40,14 @@ export function ComposerStatusBar({
 
   useEffect(() => {
     const risingEdge = displayWaiting && !prevDisplayWaitingRef.current;
+    // A "new" user message only latches when it is FRESH. A history load that
+    // applies a transcript ending in a dangling user message (a turn that
+    // never got a reply) also flips the id — without the recency gate every
+    // pane/tab restore of such a thread started a phantom working timer
+    // (2026-07-15, the six-hour-timer incident's little sibling).
     const newUserMessage = latestUserMessageId !== null
-      && latestUserMessageId !== prevLatestUserMessageIdRef.current;
+      && latestUserMessageId !== prevLatestUserMessageIdRef.current
+      && (latestUserMessageAt == null || Date.now() - latestUserMessageAt < 30_000);
     prevDisplayWaitingRef.current = displayWaiting;
     prevLatestUserMessageIdRef.current = latestUserMessageId;
     if (risingEdge || newUserMessage) {
@@ -49,7 +58,7 @@ export function ComposerStatusBar({
       });
       return () => window.cancelAnimationFrame(frame);
     }
-  }, [displayWaiting, latestUserMessageId]);
+  }, [displayWaiting, latestUserMessageId, latestUserMessageAt]);
 
   useEffect(() => {
     if (turnLatched && !awaitingReply && !displayWaiting && !hasRunningTools) {
