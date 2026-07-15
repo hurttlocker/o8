@@ -483,3 +483,80 @@ describe('panelGateMiddleware — default-deny (RF-2: no fail-open)', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('panelGateMiddleware — boot-gate identity probe (v0.1.600 stuck-boot regression)', () => {
+  // The packaged boot page (out/frontend/index.html, served by the Tauri shell)
+  // probes GET /api/setup/identity to find its own server before navigating to
+  // /dashboard. It is static HTML — it CANNOT attach a bearer. Hardening #1562
+  // removed the blanket /api/setup/* allowlist and took this probe down with
+  // it: every packaged boot of v0.1.600 stalled on the boot screen. These
+  // replay the REAL request shapes end to end through the gate.
+
+  it('passes the packaged boot probe (tauri origin + socket-truth loopback)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          origin: 'tauri://localhost',
+          'x-o8-client-addr': '127.0.0.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('passes a bare loopback GET (curl / dev-shape, no origin, no sec-fetch)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:3001/api/setup/identity', {
+        headers: { host: '127.0.0.1:3001' },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('still denies the identity probe from LAN (socket truth wins)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '192.168.1.50',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('still denies the identity probe from a LAN host in dev (no socket truth)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/setup/identity', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('still denies non-GET identity requests even from loopback', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('other setup GETs stay gated from loopback without a bearer (#1562 posture)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/status', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
