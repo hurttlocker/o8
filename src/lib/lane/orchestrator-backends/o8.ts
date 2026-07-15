@@ -35,6 +35,7 @@ import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readOrchestratorThreadMessages } from '@/lib/mobile/orchestrator-thread-history';
 import { getApiBase } from '@/lib/panel/api-port';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type {
   OrchestratorBackend,
@@ -263,7 +264,18 @@ async function sendToO8Orchestrator(
   try {
     response = await fetch(`${getApiBase()}/api/v2/proxy/llm`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Belt-and-suspenders auth (the ws-server → Next pattern, see
+        // lib/ws-server/next-fetch.ts). This backend runs in the ws-server and
+        // called the GATED proxy over loopback with NO bearer, relying purely on
+        // the middleware's loopback-socket heuristic — which intermittently
+        // failed, returning the gate's own `{error:'Unauthorized'}` and killing
+        // every free turn ("free o8 model unavailable: Unauthorized", root of
+        // the 6-hour-timer + Q's 2026-07-15 screenshot). The ws-token authorizes
+        // via the token path regardless of loopback detection.
+        Authorization: `Bearer ${getOrCreateWsToken()}`,
+      },
       body: JSON.stringify({
         model: 'o8-operator',
         provider: 'operator',
