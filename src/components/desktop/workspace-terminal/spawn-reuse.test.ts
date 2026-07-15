@@ -1,11 +1,48 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import {
+  deriveNewOrchestratorRepo,
   isReusableBlankOrchestratorTab,
   publishWorkspaceThreadBinding,
   WORKSPACE_THREAD_ID_EVENT,
 } from './utils';
 import type { TerminalTab } from './types';
+
+const o8Repo = { name: 'o8', localPath: '/repos/o8' };
+const selectedRepo = { name: 'repo-x', localPath: '/repos/repo-x' };
+
+describe('deriveNewOrchestratorRepo', () => {
+  it('prefers the current sidebar selection over a focused lane and tile default', () => {
+    const focusedLane = orchestratorTab({
+      id: 'lane-repo',
+      kind: 'chat',
+      repo: o8Repo,
+    });
+
+    expect(deriveNewOrchestratorRepo(
+      [focusedLane],
+      focusedLane.id,
+      selectedRepo,
+      o8Repo,
+    )).toBe(selectedRepo);
+  });
+
+  it('keeps the focused-lane fallback when no sidebar repo is selected', () => {
+    const focusedRepo = { name: 'focused', localPath: '/repos/focused' };
+    const focusedLane = orchestratorTab({
+      id: 'lane-focused',
+      kind: 'chat',
+      repo: focusedRepo,
+    });
+
+    expect(deriveNewOrchestratorRepo(
+      [focusedLane],
+      focusedLane.id,
+      null,
+      o8Repo,
+    )).toBe(focusedRepo);
+  });
+});
 
 // Report D3YPBP / Q repro 2026-07-14: "+ New session → Orchestrator" did
 // nothing once an orchestrator conversation existed — the spawn's reuse gate

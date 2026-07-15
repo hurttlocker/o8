@@ -221,6 +221,9 @@ export interface WorkspaceTerminalProps {
   defaultTab: 'llm-chat' | 'terminal';
   autoCreateDefaultTab?: boolean;
   preferredRepo?: RegisteredRepo | null;
+  /** Current Projects/sidebar selection. New sessions inherit this before
+   *  falling back to the focused lane or the tile's persisted repo scope. */
+  selectedRepo?: RegisteredRepo | null;
   splitCreated?: boolean;
   availableRepos?: RegisteredRepo[];
   openRepoPaths?: string[];

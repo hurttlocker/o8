@@ -56,6 +56,21 @@ export function deriveFocusedLaneRepo(
   return null;
 }
 
+/** Resolve the implicit repo for a newly-created orchestrator session. The
+ *  operator's Projects/sidebar selection is the active intent; a focused
+ *  worker lane remains the fallback when no project is selected, followed by
+ *  the workspace tile's persisted repo scope. */
+export function deriveNewOrchestratorRepo(
+  tabs: TerminalTab[],
+  activeTabId: string,
+  selectedRepo: RegisteredRepo | null,
+  preferredRepo: RegisteredRepo | null,
+): RegisteredRepo | null {
+  return selectedRepo
+    ?? deriveFocusedLaneRepo(tabs, activeTabId)
+    ?? preferredRepo;
+}
+
 /**
  * "+ New session → Orchestrator" reuse gate: a tab only counts as a blank
  * spawn when NOTHING has bound to it — no packet, no draft, and crucially no
