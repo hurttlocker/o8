@@ -53,7 +53,7 @@ type ComposerModelOption = {
 };
 
 type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'o8';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8';
   label: string;
   options: ComposerModelOption[];
 };
@@ -78,6 +78,20 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     options: [
       { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: 'Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
+    ],
+  },
+  {
+    key: 'openclaw',
+    label: 'OpenClaw',
+    options: [
+      { value: 'openclaw', label: 'OpenClaw', triggerLabel: 'OpenClaw', backend: 'openclaw' },
+    ],
+  },
+  {
+    key: 'hermes',
+    label: 'Hermes',
+    options: [
+      { value: 'hermes', label: 'Hermes', triggerLabel: 'Hermes', backend: 'hermes' },
     ],
   },
   // The free house (operator ruling 2026-07-12): one conversational model that
@@ -316,7 +330,7 @@ export function ModelThinkingChip({
   // label only when nothing matches (e.g. a fresh 'auto' session before a pick).
   const activeModelOption = COMPOSER_MODEL_GROUPS
     .flatMap((g) => g.options)
-    .find((o) => activeBackend === o.backend && normalizedModelId === o.model);
+    .find((o) => activeBackend === o.backend && (!o.model || normalizedModelId === o.model));
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? modelLabel;
   // Collide's aggregator is now the model you actually picked (Q ruling
   // 2026-07-11) — the label follows it, not a hardcoded house.
@@ -325,8 +339,10 @@ export function ModelThinkingChip({
   const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Ultracode' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'o8'>(
-    activeBackend === 'codex' ? 'codex' : activeBackend === 'o8' ? 'o8' : 'claude',
+  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8'>(
+    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8'
+      ? activeBackend
+      : 'claude',
   );
   // Thinking levels are only KNOWN for the Claude-family and Codex backends
   // ('auto' resolves to one of them). Every other runtime uses its default
@@ -526,7 +542,7 @@ export function ModelThinkingChip({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {COMPOSER_MODEL_GROUPS.map((group) => {
                   const houseOpen = openHouse === group.key;
-                  const houseHasActive = group.options.some((o) => activeBackend === o.backend && normalizedModelId === o.model);
+                  const houseHasActive = group.options.some((o) => activeBackend === o.backend && (!o.model || normalizedModelId === o.model));
                   return (
                     <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {/* Drawer header — click to expand this house. */}
@@ -565,7 +581,7 @@ export function ModelThinkingChip({
                       </button>
                       {/* Models nested under the open house. */}
                       {houseOpen ? group.options.map((option) => {
-                        const active = activeBackend === option.backend && normalizedModelId === option.model;
+                        const active = activeBackend === option.backend && (!option.model || normalizedModelId === option.model);
                         return (
                           <button
                             key={option.value}
