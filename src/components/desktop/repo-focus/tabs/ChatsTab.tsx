@@ -27,7 +27,6 @@ import {
 } from './chats/helpers';
 import {
   ArchivedLaneCompactRow,
-  CompactSessionRow,
   HistoryChatRow,
   MergedPacketRow,
   OwnedWorkerRow,
@@ -912,15 +911,7 @@ export function ChatsTab({
         <HistoryActionMenu
           state={historyActionMenu}
           busy={busyHistoryIds.has(historyActionMenu.item.tabId)}
-          canOpen={Boolean(onOpenHistoryChat)}
           onClose={() => setHistoryActionMenu(null)}
-          onOpen={() => {
-            onOpenHistoryChat?.(
-              historyActionMenu.item.tabId,
-              historyActionMenu.item.title,
-              historyRepoContext(historyActionMenu.item),
-            );
-          }}
           onTogglePin={() => { void togglePinnedHistoryItem(historyActionMenu.item); }}
           onArchive={() => {
             if (historyActionMenu.archived) {
