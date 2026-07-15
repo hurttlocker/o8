@@ -50,6 +50,8 @@ pub struct ScreenContext {
     pub mon_y: f64,
     pub mon_w: f64,
     pub mon_h: f64,
+    /// Exact native controls visible in the focused window at capture time.
+    pub ax_catalog: Vec<crate::screen_localization::ActionableElement>,
 }
 
 /// Downscale ceiling — 1440px wide keeps UI text legible to the model while
@@ -140,6 +142,14 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
         })
         .or_else(|| app.primary_monitor().ok().flatten())
         .or_else(|| monitors.first().cloned())?;
+    let scale = monitor.scale_factor();
+    let monitor_frame = (
+        monitor.position().x as f64 / scale,
+        monitor.position().y as f64 / scale,
+        monitor.size().width as f64 / scale,
+        monitor.size().height as f64 / scale,
+    );
+    let ax_catalog = crate::screen_localization::catalog_in_background(monitor_frame);
 
     // screencapture writes display 1 → first file, display 2 → second, in
     // CGDisplay order. That order isn't guaranteed to match Tauri's monitor
@@ -197,25 +207,27 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
     let bytes = std::fs::read(&path).ok()?;
     cleanup(&files);
 
-    let scale = monitor.scale_factor();
+    let ax_catalog = ax_catalog.join().unwrap_or_default();
     let ctx = ScreenContext {
         png_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
         img_w,
         img_h,
-        mon_x: monitor.position().x as f64 / scale,
-        mon_y: monitor.position().y as f64 / scale,
-        mon_w: monitor.size().width as f64 / scale,
-        mon_h: monitor.size().height as f64 / scale,
+        mon_x: monitor_frame.0,
+        mon_y: monitor_frame.1,
+        mon_w: monitor_frame.2,
+        mon_h: monitor_frame.3,
+        ax_catalog,
     };
     log::info!(
-        "[symon-screen] captured {}x{} px ({} KB) of monitor at {},{} ({}x{} pt)",
+        "[symon-screen] captured {}x{} px ({} KB) of monitor at {},{} ({}x{} pt), {} native element(s)",
         ctx.img_w,
         ctx.img_h,
         bytes.len() / 1024,
         ctx.mon_x,
         ctx.mon_y,
         ctx.mon_w,
-        ctx.mon_h
+        ctx.mon_h,
+        ctx.ax_catalog.len()
     );
     Some(ctx)
 }
@@ -319,6 +331,7 @@ pub struct RawCapture {
     pub mon_y: f64,
     pub mon_w: f64,
     pub mon_h: f64,
+    pub ax_catalog: Vec<crate::screen_localization::ActionableElement>,
 }
 
 /// The two images a spatial turn carries: `screen` is the full-screen composite
@@ -356,6 +369,14 @@ pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
         })
         .or_else(|| app.primary_monitor().ok().flatten())
         .or_else(|| monitors.first().cloned())?;
+    let scale = monitor.scale_factor();
+    let monitor_frame = (
+        monitor.position().x as f64 / scale,
+        monitor.position().y as f64 / scale,
+        monitor.size().width as f64 / scale,
+        monitor.size().height as f64 / scale,
+    );
+    let ax_catalog = crate::screen_localization::catalog_in_background(monitor_frame);
 
     let tmp = std::env::temp_dir();
     let stamp = std::process::id();
@@ -405,21 +426,22 @@ pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
     let bytes = std::fs::read(&path).ok()?;
     cleanup(&files);
 
-    let scale = monitor.scale_factor();
+    let ax_catalog = ax_catalog.join().unwrap_or_default();
     log::info!(
         "[spatial-context] captured {}x{} px ({} KB) of monitor at {},{}",
         img_w,
         img_h,
         bytes.len() / 1024,
-        monitor.position().x as f64 / scale,
-        monitor.position().y as f64 / scale
+        monitor_frame.0,
+        monitor_frame.1
     );
     Some(RawCapture {
         png_bytes: bytes,
-        mon_x: monitor.position().x as f64 / scale,
-        mon_y: monitor.position().y as f64 / scale,
-        mon_w: monitor.size().width as f64 / scale,
-        mon_h: monitor.size().height as f64 / scale,
+        mon_x: monitor_frame.0,
+        mon_y: monitor_frame.1,
+        mon_w: monitor_frame.2,
+        mon_h: monitor_frame.3,
+        ax_catalog,
     })
 }
 
@@ -510,6 +532,7 @@ pub fn composite_strokes(raw: &RawCapture, strokes: &[Vec<(f64, f64)>]) -> Optio
         mon_y: raw.mon_y,
         mon_w: raw.mon_w,
         mon_h: raw.mon_h,
+        ax_catalog: raw.ax_catalog.clone(),
     };
     log::info!(
         "[spatial-context] composited {stroke_count} stroke(s): composite {cw}x{ch}, crop={}",
@@ -695,34 +718,8 @@ pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Resul
 }
 
 #[cfg(test)]
-mod wants_screen_tests {
-    use super::wants_screen;
-
-    #[test]
-    fn screen_questions_trigger() {
-        assert!(wants_screen("What's this error on my screen?"));
-        assert!(wants_screen("Where do I click to export?"));
-        assert!(wants_screen("Can you see this dialog?"));
-        assert!(wants_screen("Point to the save button"));
-    }
-
-    #[test]
-    fn draw_and_teach_intents_trigger() {
-        // These need a capture so the overlay has a coordinate system to draw in.
-        assert!(wants_screen("Can you draw that as an illustration?"));
-        assert!(wants_screen("Teach me the Pythagorean theorem"));
-        assert!(wants_screen("Sketch a triangle for me"));
-        assert!(wants_screen("Draw a diagram of how this works"));
-        assert!(wants_screen("Annotate the chart"));
-    }
-
-    #[test]
-    fn non_screen_prompts_do_not() {
-        assert!(!wants_screen("Remind me to call Q at 3pm"));
-        assert!(!wants_screen("Where is my meeting tomorrow?"));
-        assert!(!wants_screen("What's shipping in o8?"));
-    }
-}
+#[path = "screen/wants_screen_tests.rs"]
+mod wants_screen_tests;
 
 #[cfg(test)]
 mod composite_tests {
@@ -738,6 +735,7 @@ mod composite_tests {
             mon_y: 0.0,
             mon_w: w as f64,
             mon_h: h as f64,
+            ax_catalog: Vec::new(),
         }
     }
 

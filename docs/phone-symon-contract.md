@@ -19,7 +19,7 @@ Original intent preserved below for the still-proposed sections. Desktop seams w
 - Symon's safety confirms (`confirm_if_needed`) render dock cards **on the Mac only**, answered by Tauri cmd `agent_confirm(task_id, allow)`; unanswered confirms auto-decline at 2 min. The mobile approvals system (`/api/mobile/action`, `@/lib/approvals/store`, ApprovalStack) is a separate system, not wired to Symon.
 - Cancel: `TaskCtx.cancel: AtomicBool` exists; **no remote cancel command**.
 - Transport: paired mobile WS (port 3002), one master ws-token, `/api/mobile/*` middleware-gated (loopback OR Bearer). Existing conversation shapes: `/api/mobile/chat` (streaming, persisted, approvalRequired) and `/api/mobile/orchestrator/threads`.
-- Brain selection is GLOBAL (`~/.o8/agent_models.json` `mac_native_action`, default `claude-opus-4-8`); no per-session override exists.
+- Brain selection is GLOBAL (`~/.o8/agent_models.json` `mac_native_action`, default `claude-sonnet-5`); no per-session override exists.
 
 ## v1 contract (phone-text-first)
 
