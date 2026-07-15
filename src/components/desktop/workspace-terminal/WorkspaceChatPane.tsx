@@ -654,7 +654,11 @@ function WorkspaceChatPaneBase({
         </div>
       ) : null}
 
-      {laneRetired ? (
+      {/* Merged lanes skip the banner — the green MERGED transcript card plus
+          the composer's read-only placeholder already say it, and the triple
+          stack read as clutter (operator, 2026-07-15). Failed/archived lanes
+          keep theirs: they have no green card carrying the outcome. */}
+      {laneRetired && !retirement.merged ? (
         <div
           style={{
             display: 'flex',
@@ -666,20 +670,14 @@ function WorkspaceChatPaneBase({
             paddingLeft: 20,
             paddingRight: 20,
             borderTop: '1px solid var(--t-divider)',
-            background: retirement.merged
-              ? 'linear-gradient(180deg, rgba(34, 197, 94, 0.06), rgba(34, 197, 94, 0.02))'
-              : 'var(--t-panel)',
+            background: 'var(--t-panel)',
             color: 'var(--t-text-secondary)',
             fontSize: 12,
             fontWeight: 600,
             letterSpacing: '-0.005em',
           }}
         >
-          {retirement.merged ? (
-            <CheckCircle2 size={14} style={{ color: retirement.tone, flexShrink: 0 }} />
-          ) : (
-            <AlertCircle size={14} style={{ color: retirement.tone, flexShrink: 0 }} />
-          )}
+          <AlertCircle size={14} style={{ color: retirement.tone, flexShrink: 0 }} />
           <span>{retirement.bannerLabel}</span>
           <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>
             {retirement.bannerSub}
