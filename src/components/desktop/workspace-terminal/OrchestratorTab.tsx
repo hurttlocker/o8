@@ -300,12 +300,14 @@ function OrchestratorTabInner({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // Codex-style collapse for the branch-details rail (Q 2026-07-13): the »
-  // control below the header folds the 256px rail to a 44px icon column
-  // instead of hiding it. Persists across reloads.
+  // Branch-details rail reveal (Q 2026-07-14): the rail is always the collapsed
+  // icon capsule in layout; the full card stack floats as a hover overlay. In
+  // the new model `collapsed` is the PIN state — `true` = hover-only reveal
+  // (the default: the operator wants "just hover"), `false` = pinned open
+  // persistently. Persists across reloads; unset defaults to hover-only.
   const [branchRailCollapsed, setBranchRailCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('o8:branch-rail:collapsed') === '1';
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('o8:branch-rail:collapsed') !== '0';
   });
   const toggleBranchRailCollapsed = useCallback(() => {
     setBranchRailCollapsed((prev) => {
@@ -1042,7 +1044,11 @@ function OrchestratorTabInner({
   const branchRail = (
     <div
       style={{
-        width: (projectContextRailVisible && railFits) ? (branchRailCollapsed ? COLLAPSED_BRANCH_RAIL_WIDTH : 256) : 0,
+        // The rail is ALWAYS the collapsed capsule width in layout now — the
+        // expanded card stack floats as a hover overlay (portal) instead of
+        // widening this flex item, so revealing it never pushes the chat over
+        // (Cursor-style git/environment popover, Q ruling 2026-07-14).
+        width: (projectContextRailVisible && railFits) ? COLLAPSED_BRANCH_RAIL_WIDTH : 0,
         flexShrink: 0,
         // minHeight:0 keeps this flex item bounded by the row height so the
         // rail's own overflowY:auto can engage — without it the rail sized to
