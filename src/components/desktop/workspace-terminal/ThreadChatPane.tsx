@@ -31,8 +31,8 @@ interface ThreadChatPaneProps {
 export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: ThreadChatPaneProps) {
   const data = useOrchestratorData();
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
-  const loadedThreadRef = useRef<string | null>(null);
   const [chrome, setChrome] = useState<ThoughtsChatPanelChromeState | null>(null);
+  const chromeRef = useRef<ThoughtsChatPanelChromeState | null>(null);
   const [closeHover, setCloseHover] = useState(false);
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
@@ -48,33 +48,42 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
     return () => unregisterPaneThread(threadId);
   }, [threadId]);
 
-  // Load the bound thread once the panel handle exists. Mirrors the
-  // OrchestratorTab tab-bound retry loop: on a cold mount the imperative
-  // handle is null at t=0, and a single-shot load would silently drop.
+  // Load the bound thread and KEEP nudging until the load verifiably lands
+  // (the panel's chrome reports our threadId). Fire-once wasn't enough:
+  // loadThread's internal history fetch fails SILENTLY when a reload races a
+  // dev recompile or a booting server (2026-07-15 — panes restored with their
+  // titles over empty transcripts). The panel dedups repeat loads, so
+  // re-asking every second until confirmation is safe; ~20s covers the
+  // slowest cold compile without leaving a permanent zombie loop.
   useEffect(() => {
-    if (loadedThreadRef.current === threadId) return;
+    if (chromeRef.current?.threadId === threadId) return;
     let cancelled = false;
-    let attempts = 0;
+    let mountPolls = 0;
+    let loadRetries = 0;
+    let timer: number | null = null;
     const tryLoad = () => {
       if (cancelled) return;
-      if (loadedThreadRef.current === threadId) return;
+      if (chromeRef.current?.threadId === threadId) return;
       const handle = chatPanelRef.current;
-      if (handle) {
-        loadedThreadRef.current = threadId;
-        handle.loadThread(threadId);
+      if (!handle) {
+        // Mount race: the imperative handle is null at t=0. Poll fast, bounded.
+        mountPolls += 1;
+        if (mountPolls < 50) timer = window.setTimeout(tryLoad, 100);
         return;
       }
-      attempts += 1;
-      if (attempts < 40) window.setTimeout(tryLoad, 50);
+      void handle.loadThread(threadId);
+      loadRetries += 1;
+      if (loadRetries < 20) timer = window.setTimeout(tryLoad, 1000);
     };
-    const timer = window.setTimeout(tryLoad, 0);
+    timer = window.setTimeout(tryLoad, 0);
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [threadId]);
 
   const handleChromeChange = useCallback((state: ThoughtsChatPanelChromeState) => {
+    chromeRef.current = state;
     setChrome(state);
   }, []);
 

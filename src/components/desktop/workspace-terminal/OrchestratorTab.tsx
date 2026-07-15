@@ -328,6 +328,13 @@ function OrchestratorTabInner({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
+  // Render-independent mirror of chatChromeState.threadId — the restore retry
+  // loops below poll it from timeouts to confirm a loadThread actually landed.
+  const loadedThreadIdRef = useRef<string | null>(null);
+  const handleChromeChange = useCallback((state: ThoughtsChatPanelChromeState) => {
+    loadedThreadIdRef.current = state.threadId;
+    setChatChromeState(state);
+  }, []);
   const loadedInitialThreadRef = useRef<string | null>(null);
   const autoTiledComparisonGroupIdRef = useRef<string | null>(null);
 
@@ -510,25 +517,35 @@ function OrchestratorTabInner({
     // above, so this only blocks *other* tabs.)
     if (globalLastThreadRestoreClaimed) return;
     let cancelled = false;
-    let attempts = 0;
+    let mountPolls = 0;
+    let loadRetries = 0;
+    let timer: number | null = null;
     const tryLoad = () => {
       if (cancelled) return;
-      if (restoredThreadRef.current === restored) return;
-      if (globalLastThreadRestoreClaimed) return; // claimed by another tab mid-wait
+      if (restoredThreadRef.current !== restored && globalLastThreadRestoreClaimed) return; // claimed by another tab mid-wait
+      // Confirmed landed — the panel's chrome reports the restored thread.
+      if (loadedThreadIdRef.current === restored) return;
       const handle = chatPanelRef.current;
-      if (handle) {
-        handle.loadThread(restored);
-        restoredThreadRef.current = restored;
-        globalLastThreadRestoreClaimed = true;
+      if (!handle) {
+        mountPolls += 1;
+        if (mountPolls < 50) timer = window.setTimeout(tryLoad, 100);
         return;
       }
-      attempts += 1;
-      if (attempts < 40) window.setTimeout(tryLoad, 50);
+      // Claim on FIRST call (one tab adopts the global last-thread), then keep
+      // nudging until the load verifiably lands: loadThread's history fetch
+      // fails SILENTLY when a reload races a dev recompile or booting server
+      // (2026-07-15 — the tab restored its TITLE over an empty transcript).
+      // The panel dedups repeat loads, so re-asking is safe.
+      handle.loadThread(restored);
+      restoredThreadRef.current = restored;
+      globalLastThreadRestoreClaimed = true;
+      loadRetries += 1;
+      if (loadRetries < 20) timer = window.setTimeout(tryLoad, 1000);
     };
-    const timer = window.setTimeout(tryLoad, 0);
+    timer = window.setTimeout(tryLoad, 0);
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [active, initialThreadId, restoreLastThread, repoPath]);
 
@@ -681,30 +698,37 @@ function OrchestratorTabInner({
   useEffect(() => {
     if (!active || !initialThreadId) return;
     if (loadedInitialThreadRef.current === initialThreadId) return;
-    // Retry until the chat panel's imperative handle exists — on a cold reload
-    // the ref is still null at t=0 (hydration lag), and a single-shot load
-    // stamped the guard ref anyway, silently dropping the restore. The tab
-    // then wore the thread's TITLE (persisted label) over an empty transcript.
-    // Mirrors the localStorage-restore effect's retry loop above.
+    // Retry until the load verifiably LANDS (the panel's chrome reports the
+    // thread), not merely until the imperative handle exists — loadThread's
+    // history fetch fails SILENTLY when a reload races a dev recompile or a
+    // booting server, and a fire-once loop left the tab wearing the thread's
+    // TITLE over an empty transcript (2026-07-15). The panel dedups repeat
+    // loads, so nudging once a second until confirmation is safe.
     let cancelled = false;
-    let attempts = 0;
+    let mountPolls = 0;
+    let loadRetries = 0;
+    let timer: number | null = null;
     const tryLoad = () => {
       if (cancelled) return;
-      if (loadedInitialThreadRef.current === initialThreadId) return;
-      const handle = chatPanelRef.current;
-      if (handle) {
-        console.log(`[orchestrator] loading tab-bound thread ${initialThreadId} (attempt ${attempts})`);
+      if (loadedThreadIdRef.current === initialThreadId) {
         loadedInitialThreadRef.current = initialThreadId;
-        handle.loadThread(initialThreadId);
         return;
       }
-      attempts += 1;
-      if (attempts < 40) window.setTimeout(tryLoad, 50);
+      const handle = chatPanelRef.current;
+      if (!handle) {
+        mountPolls += 1;
+        if (mountPolls < 50) timer = window.setTimeout(tryLoad, 100);
+        return;
+      }
+      console.log(`[orchestrator] loading tab-bound thread ${initialThreadId} (retry ${loadRetries})`);
+      handle.loadThread(initialThreadId);
+      loadRetries += 1;
+      if (loadRetries < 20) timer = window.setTimeout(tryLoad, 1000);
     };
-    const timer = window.setTimeout(tryLoad, 0);
+    timer = window.setTimeout(tryLoad, 0);
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [active, initialThreadId]);
 
@@ -1139,7 +1163,7 @@ function OrchestratorTabInner({
       composerLeadingExtras={composerLeadingExtras}
       onMissionStateChange={data.onMissionStateChange}
       onLaunchPacket={data.onLaunchPacket}
-      onChromeChange={setChatChromeState}
+      onChromeChange={handleChromeChange}
     />
   );
 
