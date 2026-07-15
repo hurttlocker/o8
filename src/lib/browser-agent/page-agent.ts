@@ -19,6 +19,7 @@
 
 import { selectorFor } from '@/lib/browser/selector';
 import { buildGrabbedElement } from '@/lib/browser/grab';
+import { collectBrowserLocalizationRows, type BrowserLocalizationRect } from '@/lib/browser/localization';
 
 export interface BrowserAgentTarget {
   /** 'canvas' (browser cards) or 'panel' (default-side Browser tab). */
@@ -174,6 +175,66 @@ function read(args?: BrowserAgentTarget & { selector?: string; maxChars?: number
   };
 }
 
+function hostRect(frame: HTMLIFrameElement, rect: BrowserLocalizationRect): BrowserLocalizationRect {
+  const outer = frame.getBoundingClientRect();
+  const doc = frameDoc(frame);
+  const pageWidth = doc?.defaultView?.innerWidth ?? outer.width;
+  const pageHeight = doc?.defaultView?.innerHeight ?? outer.height;
+  const scaleX = pageWidth > 0 ? outer.width / pageWidth : 1;
+  const scaleY = pageHeight > 0 ? outer.height / pageHeight : 1;
+  const left = Math.max(0, outer.left + rect.left * scaleX);
+  const top = Math.max(0, outer.top + rect.top * scaleY);
+  const right = Math.min(window.innerWidth, outer.left + (rect.left + rect.width) * scaleX);
+  const bottom = Math.min(window.innerHeight, outer.top + (rect.top + rect.height) * scaleY);
+  return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+}
+
+function localize(args?: BrowserAgentTarget) {
+  const frame = pickFrame(args);
+  if (!frame) return noFrame(args);
+  const doc = frameDoc(frame);
+  if (!doc?.body) return crossOrigin(frame);
+  const interactive = collectBrowserLocalizationRows(doc.body, selectorFor, labelFor)
+    .map((row) => ({ ...row, rect: hostRect(frame, row.rect) }))
+    .filter((row) => row.rect.width >= 4 && row.rect.height >= 4);
+  return {
+    ok: true as const,
+    url: realUrl(frame.src),
+    surface: frame.dataset.o8Browser ?? null,
+    coordinateSpace: 'host-viewport',
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    interactive,
+  };
+}
+
+function rect(args: BrowserAgentTarget & { selector: string }) {
+  const frame = pickFrame(args);
+  if (!frame) return noFrame(args);
+  const doc = frameDoc(frame);
+  if (!doc?.body) return crossOrigin(frame);
+  const element = doc.querySelector(args.selector);
+  if (!element) return { ok: false as const, error: `no element matches ${args.selector}` };
+  const row = collectBrowserLocalizationRows(
+    { ownerDocument: doc, querySelectorAll: () => [element] } as unknown as ParentNode,
+    selectorFor,
+    labelFor,
+    1,
+  )[0];
+  if (!row) return { ok: false as const, error: `element is not visibly actionable: ${args.selector}` };
+  const mappedRect = hostRect(frame, row.rect);
+  if (mappedRect.width < 4 || mappedRect.height < 4) {
+    return { ok: false as const, error: `element is outside the visible browser surface: ${args.selector}` };
+  }
+  return {
+    ok: true as const,
+    surface: frame.dataset.o8Browser ?? null,
+    coordinateSpace: 'host-viewport',
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    ...row,
+    rect: mappedRect,
+  };
+}
+
 function click(args: BrowserAgentTarget & { selector: string }) {
   const frame = pickFrame(args);
   if (!frame) return noFrame(args);
@@ -253,6 +314,8 @@ function grab(args: BrowserAgentTarget & { selector: string }) {
 
 export interface O8BrowserAgent {
   read: typeof read;
+  localize: typeof localize;
+  rect: typeof rect;
   click: typeof click;
   type: typeof type;
   probe: typeof probe;
@@ -268,5 +331,5 @@ declare global {
 /** Idempotent — both browser surfaces call this on mount. */
 export function installBrowserAgent(): void {
   if (typeof window === 'undefined' || window.__o8BrowserAgent) return;
-  window.__o8BrowserAgent = { read, click, type, probe, grab };
+  window.__o8BrowserAgent = { read, localize, rect, click, type, probe, grab };
 }
