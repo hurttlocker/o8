@@ -257,32 +257,41 @@ impl ClaudeSession {
     /// makes the CLI run its SessionStart hooks and exit without processing.
     pub(crate) fn spawn(bin: &str, model: &str, mcp_cfg: &str) -> Result<Self, String> {
         use std::process::{Command, Stdio};
+        let mut args: Vec<&str> = vec![
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--permission-mode",
+            "bypassPermissions",
+            "--strict-mcp-config",
+            "--mcp-config",
+            mcp_cfg,
+            // Hard tool lock: `""` disables EVERY built-in tool (Bash, Read,
+            // Write, Edit, WebFetch, …). `--strict-mcp-config` + the empty
+            // `--mcp-config` already deny MCP tools; together the proc is
+            // fully tool-free. This is the enforced backstop the planner
+            // contract only *asked* for: even under `bypassPermissions` a
+            // model that ignores the contract has nothing to execute, so
+            // Smart Compose cannot run a generated terminal command and the
+            // planner cannot touch the disk. Also enforces "no repo
+            // retrieval yet" — Read/Glob/Grep are gone too.
+            "--tools",
+            "",
+            "--model",
+            model,
+        ];
+        // Opus runs at full reasoning power (Q ruling 2026-07-15: "let me feel
+        // it at full power; if it's slow when we ship we adjust"). Sonnet paths
+        // (Smart Compose) keep the CLI default for latency. Effort is a pure
+        // function of the model, so the model-keyed warm pool stays coherent —
+        // a warm Opus proc is always a high-effort proc.
+        if model.starts_with("claude-opus") {
+            args.extend_from_slice(&["--effort", "high"]);
+        }
         let mut child = Command::new(bin)
-            .args([
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--permission-mode",
-                "bypassPermissions",
-                "--strict-mcp-config",
-                "--mcp-config",
-                mcp_cfg,
-                // Hard tool lock: `""` disables EVERY built-in tool (Bash, Read,
-                // Write, Edit, WebFetch, …). `--strict-mcp-config` + the empty
-                // `--mcp-config` already deny MCP tools; together the proc is
-                // fully tool-free. This is the enforced backstop the planner
-                // contract only *asked* for: even under `bypassPermissions` a
-                // model that ignores the contract has nothing to execute, so
-                // Smart Compose cannot run a generated terminal command and the
-                // planner cannot touch the disk. Also enforces "no repo
-                // retrieval yet" — Read/Glob/Grep are gone too.
-                "--tools",
-                "",
-                "--model",
-                model,
-            ])
+            .args(&args)
             .env("FORCE_COLOR", "0")
             .env("NO_COLOR", "1")
             // npm-installed claude is a node shim — see path_with_node_runtime.
