@@ -68,8 +68,8 @@ export interface TerminalTab {
   claudeSessionId?: string;
   chatModel?: string;
   chatContinueLatest?: boolean;
-  chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
-  llmDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
+  chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string; previewImageDataUri?: string };
+  llmDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string; previewImageDataUri?: string };
   chatMessages?: MobileTranscriptEntry[];
   llmSummary?: string | null;
   chatCheckpoints?: PersistedChatCheckpoint[];
@@ -141,6 +141,7 @@ export interface TerminalTabHandle {
     modelId?: string;
     initialText?: string;
     draftReason?: string;
+    previewImageDataUri?: string;
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
@@ -153,6 +154,7 @@ export interface TerminalTabHandle {
     repo?: RegisteredRepo;
     initialText?: string;
     draftReason?: string;
+    previewImageDataUri?: string;
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
@@ -170,6 +172,7 @@ export interface TerminalTabHandle {
     repo?: RegisteredRepo;
     modelId?: string;
     draftReason?: string;
+    previewImageDataUri?: string;
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
@@ -264,4 +267,5 @@ export interface QueuedContextCard {
   title: string;
   meta: string[];
   preview?: string;
+  previewImageDataUri?: string;
 }

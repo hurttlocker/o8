@@ -36,7 +36,11 @@ export function useUIChrome() {
   const [searchOpen, setSearchOpen] = useState(false);
 
   // ── Draft injections ──
-  const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
+  const [desktopDraftInjection, setDesktopDraftInjection] = useState<{
+    id: string;
+    text: string;
+    previewImageDataUri?: string;
+  } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsImageInjection, setThoughtsImageInjection] = useState<{ id: string; dataUri: string; name: string; mimeType: string } | null>(null);
 

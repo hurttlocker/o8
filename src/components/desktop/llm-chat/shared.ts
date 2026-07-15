@@ -66,6 +66,7 @@ export interface QueuedContextCard {
   title: string;
   meta: string[];
   preview?: string;
+  previewImageDataUri?: string;
 }
 
 export interface HistoryConversationItem {
@@ -162,7 +163,7 @@ export interface LLMChatProps {
   tabId: string;
   preferredRepo?: PreferredRepoContext | null;
   linkedIssue?: LinkedIssueRef | null;
-  draftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string } | null;
+  draftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string; previewImageDataUri?: string } | null;
   onSummaryChange?: (tabId: string, summary: string | null) => void;
   onConsumeDraftInjection?: (injectionId: string) => void;
   onLinkedIssueChange?: (issue: LinkedIssueRef | null) => void;
@@ -325,7 +326,7 @@ export const SUGGESTED_PROMPTS = [
   { iconKey: 'search' as const, text: 'What needs my attention?', description: 'Surface blockers, failures, and stale work' },
 ];
 
-export function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
+export function buildQueuedContextCard(injection: { id: string; text: string; reason?: string; previewImageDataUri?: string }): QueuedContextCard {
   const lines = injection.text
     .split('\n')
     .map((line) => line.trim())
@@ -342,7 +343,7 @@ export function buildQueuedContextCard(injection: { id: string; text: string; re
         ? 'Deploy context'
         : header;
 
-  return { id: injection.id, reason: injection.reason, text: injection.text, title, meta, preview };
+  return { id: injection.id, reason: injection.reason, text: injection.text, title, meta, preview, previewImageDataUri: injection.previewImageDataUri };
 }
 
 export function buildConversationSummary(messages: LLMMessage[]) {

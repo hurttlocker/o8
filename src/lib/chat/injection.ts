@@ -1,6 +1,7 @@
 export interface AgentPanelChatInjectionPayload {
   reason: string;
   text: string;
+  previewImageDataUri?: string;
 }
 
 interface ReviewCommentContext {

@@ -44,7 +44,7 @@ export function useLLMChatLifecycle({
   allModels: ModelOption[];
   buildPersistedMessages: (baseMessages?: LLMMessage[], partialContent?: string) => LLMMessage[];
   abortRef: React.RefObject<AbortController | null>;
-  draftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string } | null;
+  draftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string; previewImageDataUri?: string } | null;
   handledDraftInjectionRef: React.RefObject<string | null>;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   isStreaming: boolean;
