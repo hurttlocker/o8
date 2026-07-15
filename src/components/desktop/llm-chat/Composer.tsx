@@ -1,6 +1,7 @@
+/* eslint-disable @next/next/no-img-element -- composer previews are transient local data URIs */
 import { memo } from 'react';
 import type React from 'react';
-import { AlertCircle, ArrowUp, Eye, GitPullRequest, Globe, Lightbulb, Pencil, Plus, Search, Sparkles, Square, Terminal, Trash2, Wrench, X } from '../lucide-shims';
+import { AlertCircle, ArrowUp, Eye, GitPullRequest, Globe, Lightbulb, Pencil, Plus, Search, Sparkles, Square, Terminal, Wrench, X } from '../lucide-shims';
 
 import type { LinkedIssueRef } from '../IssueLinkPicker';
 import { ApprovalBanner } from './ApprovalBanner';
@@ -183,7 +184,11 @@ function ComposerBase({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, borderBottom: '1px solid var(--t-divider-subtle)' }}>
               {queuedContextCards.map((card) => (
                 <div key={card.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, borderRadius: 12, border: '1px solid var(--t-panel-border)', background: THEME_BG_CARD }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 9, background: THEME_ACCENT_SOFT, color: THEME_ACCENT, flexShrink: 0 }}><Pencil size={14} /></div>
+                  {card.previewImageDataUri ? (
+                    <img src={card.previewImageDataUri} alt="Captured design region" style={{ width: 72, height: 54, borderRadius: 9, border: '1px solid var(--t-border)', objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 9, background: THEME_ACCENT_SOFT, color: THEME_ACCENT, flexShrink: 0 }}><Pencil size={14} /></div>
+                  )}
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: THEME_ACCENT }}>Staged Context</div>
                     <div style={{ marginTop: 3, fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{card.title}</div>

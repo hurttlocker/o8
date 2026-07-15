@@ -41,6 +41,7 @@ export interface ImperativeHandleDeps {
     createNew?: boolean;
     label?: string;
     draftReason?: string;
+    previewImageDataUri?: string;
     targetSessionKey?: string;
   }) => string;
   openWorkspaceOrchestratorTab: (repo?: RegisteredRepo | null) => string;
@@ -118,6 +119,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
             createNew: options?.createNew ?? false,
             label: options?.label,
             draftReason: options?.draftReason,
+            previewImageDataUri: options?.previewImageDataUri,
             targetSessionKey: options?.targetSessionKey,
           })
         : deps.openWorkspaceCliChatSession({
@@ -129,6 +131,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
             createNew: options?.createNew ?? false,
             label: options?.label,
             draftReason: options?.draftReason,
+            previewImageDataUri: options?.previewImageDataUri,
             targetSessionKey: options?.targetSessionKey,
             orchestrationPacket: options?.orchestrationPacket,
             supervisorStatus: options?.supervisorStatus,
