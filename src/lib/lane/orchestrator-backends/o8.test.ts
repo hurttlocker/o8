@@ -13,6 +13,9 @@ const mockEntitlement = vi.fn();
 vi.mock('@/lib/panel/api-port', () => ({
   getApiBase: () => 'http://127.0.0.1:3001',
 }));
+vi.mock('@/lib/ws-auth', () => ({
+  getOrCreateWsToken: () => 'test-ws-token-abc',
+}));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
   readOrchestratorThreadMessages: (...args: unknown[]) => mockReadMessages(...args),
 }));
@@ -74,6 +77,16 @@ describe('o8 backend event mapping', () => {
       { type: 'text', text: 'lo' },
       { type: 'done', sessionId: expect.any(String), cost: 0 },
     ]);
+  });
+
+  it('attaches the ws-token bearer so the gated proxy authorizes by token, not the flaky loopback heuristic', async () => {
+    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
+    const { onEvent } = collect();
+
+    await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
+
+    const init = mockFetch.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(init.headers.Authorization).toBe('Bearer test-ws-token-abc');
   });
 
   it('surfaces an in-stream proxy error frame as an error event, then done', async () => {
