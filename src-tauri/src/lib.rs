@@ -14,6 +14,8 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod launch_updater;
+#[cfg(target_os = "macos")]
+mod live_dictation;
 mod mac_perms;
 mod models;
 mod paste;
@@ -3221,6 +3223,9 @@ mod stt_engine {
         let origin = origin_str();
         match event {
             TE::Partial { session_id, text } => {
+                if origin == "system" {
+                    crate::live_dictation::queue_partial(session_id, text.clone());
+                }
                 emit_stt(
                     app,
                     origin,
@@ -3235,6 +3240,9 @@ mod stt_engine {
                 );
             }
             TE::Final { session_id, text } => {
+                if origin == "system" {
+                    crate::live_dictation::queue_partial(session_id, text.clone());
+                }
                 // Stash Apple's transcript; the polished result is emitted once
                 // the AudioFile event lands (so polish can ground on the WAV).
                 // If the helper never emits audio_file/complete, fall back to
@@ -3281,7 +3289,13 @@ mod stt_engine {
             }
             TE::Error { session_id, text } => {
                 if origin == "system" {
+                    if let Some(session_id) = session_id {
+                        crate::live_dictation::cancel_session(session_id);
+                    } else {
+                        crate::live_dictation::cancel_active();
+                    }
                     crate::fn_hotkey::set_system_origin(false);
+                    let _ = crate::fn_hotkey::take_smart_compose_mode();
                     #[cfg(target_os = "macos")]
                     crate::audio_ducker::restore();
                     // Teardown path — restore ink click-through + clear strokes.
@@ -3393,6 +3407,7 @@ mod stt_engine {
             let _ = std::fs::remove_file(audio_file);
         }
         if crate::fn_hotkey::is_system_origin() {
+            crate::live_dictation::cancel_session(session_id);
             crate::fn_hotkey::set_system_origin(false);
             #[cfg(target_os = "macos")]
             crate::spatial_ink_window::disarm(app);
@@ -3441,6 +3456,10 @@ mod stt_engine {
             // Same for the Right-Option agent flag — routed at the bottom to the
             // Symon voice agent. Always false off the macOS agent path.
             let is_agent = crate::fn_hotkey::take_agent_mode();
+            // Control+Fn Smart Compose uses the same recognizer and target
+            // transaction, but routes the cleaned instruction through the
+            // subscription-billed Sonnet writer before committing at the caret.
+            let is_smart_compose = crate::fn_hotkey::take_smart_compose_mode();
 
             // ── Silence gate (net 1, BEFORE transcription) — #1544-adjacent ──
             // Parse the recorded WAV, compute RMS + duration; if it's below the
@@ -3494,7 +3513,10 @@ mod stt_engine {
             // Skip Whisper for SHORT dictations (Apple's live transcript is fine at command
             // length + it saves latency) — but NEVER for the agent path: a command the brain
             // is about to EXECUTE needs Whisper's accuracy more than the paste-latency win.
-            let skip_whisper_short = apple_word_count > 0 && apple_word_count < 12 && !is_agent;
+            let skip_whisper_short = apple_word_count > 0
+                && apple_word_count < 12
+                && !is_agent
+                && !is_smart_compose;
             if skip_whisper_short {
                 log::info!(
                     "[stt] whisper skipped: short utterance ({apple_word_count} words) — using Apple transcript"
@@ -3550,12 +3572,17 @@ mod stt_engine {
             // it. `is_system_origin()` is always false off the macOS system path.
             // Also skipped for an Ask question (`!is_ask`) — a spoken question
             // must reach Gemini verbatim, not be mangled by the command parser.
-            let raw_text = if crate::fn_hotkey::is_system_origin() && !is_ask && !is_agent {
+            let raw_text = if crate::fn_hotkey::is_system_origin()
+                && !is_ask
+                && !is_agent
+                && !is_smart_compose
+            {
                 match crate::stt::commands::process(&raw_text) {
                     crate::stt::commands::CommandResult::Text(t) => t,
                     crate::stt::commands::CommandResult::Cancel => {
                         // Cancelled — clear origin + morph the dock back to idle,
                         // no paste, no composer emit.
+                        crate::live_dictation::cancel_session(session_id);
                         crate::fn_hotkey::set_system_origin(false);
                         let _ = std::fs::remove_file(&audio_file);
                         #[cfg(target_os = "macos")]
@@ -3574,6 +3601,7 @@ mod stt_engine {
                     crate::stt::commands::CommandResult::Speak(t) => {
                         // "say <text>" — speak it aloud, don't paste. Clear origin
                         // + morph the dock back to idle.
+                        crate::live_dictation::cancel_session(session_id);
                         crate::fn_hotkey::set_system_origin(false);
                         let _ = std::fs::remove_file(&audio_file);
                         #[cfg(target_os = "macos")]
@@ -3607,6 +3635,7 @@ mod stt_engine {
             // the surrounding window's tone. Best-effort — empty/None for canvas /
             // Electron apps that don't expose AX text. (System-wide Symon fold P1.)
             let window_ctx = crate::paste::gather_window_context();
+            let compose_window_ctx = window_ctx.clone();
 
             let ctx = crate::stt::polish::PolishContext {
                 transcript: &raw_text,
@@ -3703,6 +3732,39 @@ mod stt_engine {
                 return;
             }
 
+            // ── Smart Compose (Control+Fn) — Sonnet writes, native target commits ──
+            // The model has NO tools in this lane: a terminal command is generated
+            // into the prompt but never executed. On failure we leave the field
+            // exactly as captured and surface the reason instead of pasting the
+            // spoken instruction as if it were the requested output.
+            #[cfg(target_os = "macos")]
+            let polished = if is_smart_compose {
+                let composing = serde_json::json!({
+                    "type": "status",
+                    "origin": "system",
+                    "sessionId": session_id,
+                    "text": "Composing with Sonnet…",
+                });
+                emit_stt(&app, "system", composing);
+                match crate::agent::smart_compose(&app, &polished, &compose_window_ctx) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        crate::live_dictation::cancel_session(session_id);
+                        crate::fn_hotkey::set_system_origin(false);
+                        let payload = serde_json::json!({
+                            "type": "error",
+                            "origin": "system",
+                            "sessionId": session_id,
+                            "text": format!("Smart Compose failed: {error}"),
+                        });
+                        emit_stt(&app, "system", payload);
+                        return;
+                    }
+                }
+            } else {
+                polished
+            };
+
             // ── Origin branch (system-wide Symon fold P2) ──
             // A dictation started by the GLOBAL Fn hotkey pastes the polished text
             // at the system caret and does NOT emit the composer-bound `polished`
@@ -3714,6 +3776,7 @@ mod stt_engine {
                 // session, then paste into whatever app the user is focused on.
                 crate::fn_hotkey::set_system_origin(false);
                 if polished.trim().is_empty() {
+                    crate::live_dictation::cancel_session(session_id);
                     // Nothing transcribed (silence / STT miss) — morph the
                     // always-on dock back to its idle capsule rather than flash a
                     // false "Pasted". Symon parity: never claim a paste it didn't
@@ -3734,7 +3797,18 @@ mod stt_engine {
                     // a real Cmd+V (o8_debug_paste) if it has nowhere to put
                     // the text. Fake keystrokes to ourselves are now a last
                     // resort, not the default.
-                    let paste_outcome = if crate::paste::frontmost_is_o8() {
+                    let live_outcome = crate::live_dictation::finish(session_id, &polished);
+                    let paste_outcome = if live_outcome
+                        == crate::live_dictation::FinishOutcome::Applied
+                    {
+                        log::info!(
+                            "[paste] outcome=caret-stream-final chars={} (AX transaction committed)",
+                            polished.len()
+                        );
+                        crate::paste::PasteOutcome::Pasted
+                    } else if let crate::live_dictation::FinishOutcome::Conflict(message) = live_outcome {
+                        crate::paste::PasteOutcome::Failed(message)
+                    } else if crate::paste::frontmost_is_o8() {
                         let fill = serde_json::json!({
                             "type": "system-fill",
                             "origin": "system",
@@ -3766,7 +3840,7 @@ mod stt_engine {
                     // Persist to dictation history so the operator can retrieve
                     // what they said if the paste landed in the wrong place.
                     crate::dictation_history::record(
-                        "dictation",
+                        if is_smart_compose { "smart-compose" } else { "dictation" },
                         &polished,
                         crate::paste::get_frontmost_bundle_id(),
                     );

@@ -27,6 +27,9 @@ pub struct EditContext {
     /// typed between apply and revert).
     pub field_value: Option<String>,
     pub field_settable: bool,
+    /// Exact AX field captured with the noun. Revert uses this identity and the
+    /// post-edit value, never whichever field is focused after clicking the dock.
+    pub field_target: Option<crate::paste::FocusedField>,
     /// Frontmost bundle id at capture time.
     pub app: String,
     /// True when the noun lives inside o8's OWN webview: a WKWebView exposes
@@ -58,6 +61,11 @@ const EDIT_CUES: &[&str] = &[
     "polish this",
     "polish it",
     "polish that",
+    "tune this up",
+    "tune it up",
+    "tune that up",
+    "improve this writing",
+    "improve this message",
     "proofread",
     "fix the grammar",
     "fix grammar",
@@ -109,16 +117,21 @@ pub fn capture(app_handle: &tauri::AppHandle) -> Option<EditContext> {
             original: crate::utf8_head(&sel, 12 * 1024).to_string(),
             field_value: field.as_ref().map(|f| f.value.clone()),
             field_settable: field.as_ref().map(|f| f.settable).unwrap_or(false),
+            field_target: field,
             app,
             via_webview: false,
         }),
-        _ => field.map(|f| EditContext {
-            mode: EditMode::Field,
-            original: f.value.clone(),
-            field_value: Some(f.value),
-            field_settable: f.settable,
-            app,
-            via_webview: false,
+        _ => field.map(|f| {
+            let value = f.value.clone();
+            EditContext {
+                mode: EditMode::Field,
+                original: value.clone(),
+                field_value: Some(value),
+                field_settable: f.settable,
+                field_target: Some(f),
+                app,
+                via_webview: false,
+            }
         }),
     }
 }
@@ -225,6 +238,7 @@ fn capture_from_webview(app_handle: &tauri::AppHandle) -> Option<EditContext> {
             original: crate::utf8_head(&sel, 12 * 1024).to_string(),
             field_settable: state.field_editable && field_value.is_some(),
             field_value,
+            field_target: None,
             app,
             via_webview: true,
         }),
@@ -235,6 +249,7 @@ fn capture_from_webview(app_handle: &tauri::AppHandle) -> Option<EditContext> {
                 original: crate::utf8_head(&value, 12 * 1024).to_string(),
                 field_value: Some(value),
                 field_settable: true,
+                field_target: None,
                 app,
                 via_webview: true,
             })
@@ -267,8 +282,12 @@ fn apply_via_webview(
 // ── revert buffer ────────────────────────────────────────────────────────────
 
 enum Restore {
-    /// Whole-field restore — clean and exact while the user hasn't typed.
-    FieldValue { value: String, settable: bool },
+    /// Whole-field restore anchored to the exact field and post-edit value.
+    FieldValue {
+        value: String,
+        expected_value: String,
+        target: crate::paste::FocusedField,
+    },
     /// Whole-field restore through the o8 webview (the WKWebView lane).
     WebviewField { value: String },
     /// Last resort: put the original on the clipboard for a manual paste.
@@ -293,6 +312,37 @@ fn friendly_app(bundle_id: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => last.to_string(),
     }
+}
+
+/// Observe the full post-edit field value after a selection paste. Synthetic
+/// Cmd+V is delivered asynchronously in some apps, especially on Intel, so the
+/// revert anchor waits briefly instead of guessing how the selected slice was
+/// normalized inside the field.
+fn observe_applied_field_value(
+    target: &crate::paste::FocusedField,
+    previous_value: &str,
+) -> Option<String> {
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(700);
+    while std::time::Instant::now() < deadline {
+        if let Some(current) = crate::paste::read_focused_field() {
+            if crate::paste::same_focused_field(target, &current)
+                && current.value != previous_value
+            {
+                return Some(current.value);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    None
+}
+
+fn copy_restore_fallback(value: &str) {
+    let _ = crate::paste::copy_to_clipboard(value);
+    crate::tts::playback::play_thread(
+        "I couldn't restore it in place — the original is on your clipboard.".to_string(),
+        crate::tts::load_config(),
+    );
 }
 
 /// Apply the replacement in place. Selection mode pastes over the live
@@ -346,10 +396,32 @@ pub fn apply(
         }
     }
 
-    let restore = match &ctx.field_value {
-        Some(v) if ctx.via_webview => Restore::WebviewField { value: v.clone() },
-        Some(v) => Restore::FieldValue { value: v.clone(), settable: ctx.field_settable },
-        None => Restore::Clipboard { original: ctx.original.clone() },
+    let observed_field_value = match (&ctx.field_target, &ctx.field_value) {
+        (Some(target), Some(previous)) => {
+            let observed = observe_applied_field_value(target, previous);
+            match ctx.mode {
+                EditMode::Field => observed.or_else(|| Some(new_text.to_string())),
+                EditMode::Selection => observed,
+            }
+        }
+        _ => None,
+    };
+    let restore = match (
+        &ctx.field_value,
+        &ctx.field_target,
+        observed_field_value,
+    ) {
+        (Some(value), _, _) if ctx.via_webview => {
+            Restore::WebviewField { value: value.clone() }
+        }
+        (Some(value), Some(target), Some(expected_value)) => Restore::FieldValue {
+            value: value.clone(),
+            expected_value,
+            target: target.clone(),
+        },
+        _ => Restore::Clipboard {
+            original: ctx.original.clone(),
+        },
     };
     {
         let mut slot = LAST_EDIT.lock().unwrap_or_else(|p| p.into_inner());
@@ -378,32 +450,50 @@ pub fn revert(app_handle: &tauri::AppHandle) -> Result<(), String> {
     };
 
     match edit.restore {
-        Restore::FieldValue { value, settable } => {
-            if !(settable && crate::paste::write_focused_field_value(&value)) {
-                crate::paste::select_all_in_focused();
-                std::thread::sleep(std::time::Duration::from_millis(120));
-                crate::paste::paste_text(&value);
+        Restore::FieldValue {
+            value,
+            expected_value,
+            target,
+        } => {
+            let activated = crate::paste::activate_app_target(&edit.app, target.process_id);
+            let restored = activated
+                && (crate::paste::write_focused_field_value_if_matches(
+                    &target,
+                    &expected_value,
+                    &value,
+                ) || {
+                    // Some text surfaces expose AXValue for reads but refuse
+                    // writes. Verify the exact target again, then use a direct
+                    // paste that cannot reactivate PREVIOUS_APP.
+                    if !crate::paste::focused_field_matches(&target, &expected_value) {
+                        false
+                    } else {
+                        crate::paste::select_all_in_focused();
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                        crate::paste::focused_field_matches(&target, &expected_value)
+                            && crate::paste::paste_text_in_current_field(&value).did_paste()
+                    }
+                });
+            if restored {
+                log::info!("[symon-edit] reverted in {}", friendly_app(&edit.app));
+            } else {
+                copy_restore_fallback(&value);
+                log::warn!(
+                    "[symon-edit] target changed or restore failed in {}; original copied",
+                    friendly_app(&edit.app)
+                );
             }
-            log::info!("[symon-edit] reverted in {}", friendly_app(&edit.app));
         }
         Restore::WebviewField { value } => {
             if let Err(e) = apply_via_webview(app_handle, "field", &value) {
-                let _ = crate::paste::copy_to_clipboard(&value);
-                crate::tts::playback::play_thread(
-                    "I couldn't restore it in place — the original is on your clipboard.".to_string(),
-                    crate::tts::load_config(),
-                );
+                copy_restore_fallback(&value);
                 log::warn!("[symon-edit] webview revert failed ({e}); fell back to clipboard");
             } else {
                 log::info!("[symon-edit] reverted in o8");
             }
         }
         Restore::Clipboard { original } => {
-            let _ = crate::paste::copy_to_clipboard(&original);
-            crate::tts::playback::play_thread(
-                "I couldn't restore it in place — the original is on your clipboard.".to_string(),
-                crate::tts::load_config(),
-            );
+            copy_restore_fallback(&original);
             log::info!("[symon-edit] revert fell back to clipboard");
         }
     }
