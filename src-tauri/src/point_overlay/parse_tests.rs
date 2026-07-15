@@ -79,6 +79,19 @@ fn exact_element_tags_parse_and_reject_zero() {
 }
 
 #[test]
+fn exact_web_tags_parse_and_reject_zero() {
+    let (_, tags) = parse_point_tags(
+        "[POINT:web:12:Save] [GUIDE:web:7:Reply] [DRAW:web:3:Total]",
+    );
+    assert_eq!(tags.len(), 3);
+    assert_eq!(tags[0].web_element_id, Some(12));
+    assert_eq!(tags[1].web_element_id, Some(7));
+    assert!(tags[1].dwell);
+    assert_eq!(tags[2].web_element_id, Some(3));
+    assert!(parse_point_tags("[POINT:web:0:bad]").1.is_empty());
+}
+
+#[test]
 fn draw_rect_parses_both_corners() {
     let (clean, tags) =
         parse_point_tags("Here's the bug. [DRAW:rect:100,120,300,260:error banner]");
@@ -171,15 +184,16 @@ fn tag_to_string_round_trips_through_parse() {
     let src = "[POINT:1,2:a] [GUIDE:3,4:b] [DRAW:rect:5,6,7,8:c] \
                [DRAW:arrow:9,10,11,12:d] [DRAW:line:13,14,15,16:e] \
                [DRAW:text:17,18:a² + b² = c²] [POINT:el:19:Save] \
-               [GUIDE:el:20:Reply] [DRAW:el:21:Total]";
+               [GUIDE:el:20:Reply] [DRAW:el:21:Total] [POINT:web:22:Post]";
     let (_, tags) = parse_point_tags(src);
-    assert_eq!(tags.len(), 9);
+    assert_eq!(tags.len(), 10);
     let rebuilt = tags.iter().map(tag_to_string).collect::<Vec<_>>().join(" ");
     let (_, reparsed) = parse_point_tags(&rebuilt);
     assert_eq!(reparsed.len(), tags.len());
     for (a, b) in tags.iter().zip(reparsed.iter()) {
         assert!(a.shape == b.shape);
         assert_eq!(a.element_id, b.element_id);
+        assert_eq!(a.web_element_id, b.web_element_id);
         assert_eq!(a.x, b.x);
         assert_eq!(a.y, b.y);
         assert_eq!(a.x2, b.x2);

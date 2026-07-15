@@ -19,8 +19,8 @@ function parseArgs(argv) {
     else if (arg === '--self-test') options.selfTest = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
-  if (!['exact', 'fallback', 'any'].includes(options.expect)) {
-    throw new Error('--expect must be exact, fallback, or any');
+  if (!['exact', 'web', 'fallback', 'any'].includes(options.expect)) {
+    throw new Error('--expect must be exact, web, fallback, or any');
   }
   if (!Number.isFinite(options.timeout) || options.timeout <= 0) {
     throw new Error('--timeout must be a positive number of seconds');
@@ -29,7 +29,7 @@ function parseArgs(argv) {
 }
 
 function verdict(stages, expected) {
-  const { capture, model, overlay } = stages;
+  const { capture, model, overlay, 'web-catalog': webCatalog, 'web-refresh': webRefresh } = stages;
   if (capture?.status === 'screen_capture_failed') {
     return { state: 'fail', reason: 'Screen capture failed. Grant Screen Recording and relaunch o8.' };
   }
@@ -42,10 +42,22 @@ function verdict(stages, expected) {
   if (expected === 'exact' && model && model.exactTagCount === 0) {
     return { state: 'fail', reason: 'The model emitted no exact element tag; inspect prompt/model selection.' };
   }
+  if (expected === 'web' && webCatalog && webCatalog.catalogCount === 0) {
+    return { state: 'fail', reason: 'No embedded-browser DOM targets were visible. Open a page in o8 Browser and keep it on screen.' };
+  }
+  if (expected === 'web' && model && model.webExactTagCount === 0) {
+    return { state: 'fail', reason: 'The model emitted no exact web tag; inspect the DOM catalog prompt and target label.' };
+  }
+  if (expected === 'web' && webRefresh?.failedSurfaces > 0) {
+    return { state: 'fail', reason: 'The live DOM selector refresh failed; the overlay used only capture-time geometry.' };
+  }
+  if (expected === 'web' && webRefresh?.missing > 0) {
+    return { state: 'fail', reason: 'The selected DOM target disappeared before the overlay resolved it.' };
+  }
   if (overlay?.stale > 0) {
     return { state: 'fail', reason: `The overlay rejected ${overlay.stale} stale catalog target(s).` };
   }
-  if (!capture || !model || !overlay) return { state: 'waiting' };
+  if (!capture || !model || !overlay || (expected === 'web' && (!webCatalog || !webRefresh))) return { state: 'waiting' };
 
   const hasOutput = overlay.outputCount > 0;
   if (expected === 'exact') {
@@ -60,14 +72,22 @@ function verdict(stages, expected) {
       ? { state: 'pass', reason: 'Pixel fallback -> role-filtered overlay resolver passed.' }
       : { state: 'fail', reason: 'The fallback stages completed without a usable pixel target.' };
   }
+  if (expected === 'web') {
+    const pass = webCatalog.catalogCount > 0 && model.webExactTagCount > 0 && webRefresh.refreshed > 0 && overlay.webExactResolved > 0 && hasOutput;
+    return pass
+      ? { state: 'pass', reason: 'DOM catalog -> exact web tag -> refreshed production overlay resolver passed.' }
+      : { state: 'fail', reason: 'The web localization stages completed without an exact DOM overlay target.' };
+  }
   return hasOutput
     ? { state: 'pass', reason: 'Capture -> model -> overlay completed with a rendered target.' }
     : { state: 'fail', reason: 'All stages completed, but the overlay produced no target.' };
 }
 
-function timeoutReason(stages) {
+function timeoutReason(stages, expected) {
   if (!stages.capture) return 'No capture trace: this o8 process may not contain the branch build, or the screen-agent gesture did not fire.';
+  if (expected === 'web' && !stages['web-catalog']) return 'Screen capture completed, but the embedded-browser DOM catalog did not return.';
   if (!stages.model) return 'Capture completed, but no model trace arrived: the agent turn did not finish.';
+  if (expected === 'web' && !stages['web-refresh']) return 'The model selected a web target, but no live DOM selector refresh arrived.';
   if (!stages.overlay) return 'Model completed, but no overlay trace arrived: it emitted no target tags or the overlay path was not reached.';
   return 'The trace completed without satisfying the selected expectation.';
 }
@@ -96,8 +116,16 @@ function selfTest() {
     model: { stage: 'model', exactTagCount: 0, pixelTagCount: 1 },
     overlay: { stage: 'overlay', exactResolved: 0, axSnapped: 0, directPixel: 1, stale: 0, outputCount: 1 },
   };
+  const web = {
+    capture,
+    'web-catalog': { stage: 'web-catalog', status: 'ready', catalogCount: 3 },
+    model: { stage: 'model', exactTagCount: 1, nativeExactTagCount: 0, webExactTagCount: 1, pixelTagCount: 0 },
+    'web-refresh': { stage: 'web-refresh', requested: 1, refreshed: 1, missing: 0, failedSurfaces: 0 },
+    overlay: { stage: 'overlay', exactResolved: 1, nativeExactResolved: 0, webExactResolved: 1, axSnapped: 0, directPixel: 0, stale: 0, outputCount: 1 },
+  };
   assert.equal(verdict(exact, 'exact').state, 'pass');
   assert.equal(verdict(fallback, 'fallback').state, 'pass');
+  assert.equal(verdict(web, 'web').state, 'pass');
   assert.equal(verdict({ capture }, 'exact').state, 'waiting');
   assert.equal(verdict({ capture: { ...capture, catalogCount: 0 } }, 'exact').state, 'fail');
   assert.equal(verdict({ ...exact, overlay: { ...exact.overlay, stale: 1 } }, 'exact').state, 'fail');
@@ -121,7 +149,10 @@ async function run(options) {
 
   console.log(`Watching ${options.log}`);
   console.log(`Expectation: ${options.expect}; timeout: ${options.timeout}s; new events only: ${!options.fromStart}`);
-  console.log('Exact test: focus Notes or System Settings, hold Right Option, say "Point at the Search field", then release.');
+  const instruction = options.expect === 'web'
+    ? 'Web test: open a local page in o8 Browser, hold Right Option, say "Point at the Save button", then release.'
+    : 'Exact test: focus Notes or System Settings, hold Right Option, say "Point at the Search field", then release.';
+  console.log(instruction);
   console.log('Fn is dictation; Control+Fn is smart compose.');
 
   const traces = new Map();
@@ -147,7 +178,7 @@ async function run(options) {
       carry = lines.pop() ?? '';
       for (const line of lines) {
         const event = parseEvent(line);
-        if (!event || !event.trace || !['capture', 'model', 'overlay'].includes(event.stage)) continue;
+        if (!event || !event.trace || !['capture', 'web-catalog', 'model', 'web-refresh', 'overlay'].includes(event.stage)) continue;
         const trace = String(event.trace);
         latestTrace = trace;
         const stages = traces.get(trace) ?? {};
@@ -165,7 +196,7 @@ async function run(options) {
     await sleep(250);
   }
   const stages = latestTrace ? traces.get(latestTrace) ?? {} : {};
-  throw new Error(`Timed out. ${timeoutReason(stages)}`);
+  throw new Error(`Timed out. ${timeoutReason(stages, options.expect)}`);
 }
 
 try {
