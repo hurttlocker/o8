@@ -45,11 +45,7 @@ import { OrchestratorContextResidencyProvider } from '@/components/desktop/orche
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
 import { COLLAPSED_BRANCH_RAIL_WIDTH } from '@/components/desktop/branch-rail-geometry';
-import {
-  ThoughtsChatPanel,
-  type ThoughtsChatPanelChromeState,
-  type ThoughtsChatPanelHandle,
-} from '@/components/desktop/thoughts/ThoughtsChatPanel';
+import { ThoughtsChatPanel, type ThoughtsChatPanelChromeState, type ThoughtsChatPanelHandle } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
@@ -57,6 +53,8 @@ import { SessionTileSurface } from './SessionTileSurface';
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 import { publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
+import type { OrchestratorTurnInjection } from './types';
+import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection';
 // Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
 // row. The old layout component is no longer imported here.
 
@@ -90,8 +88,8 @@ interface OrchestratorTabProps {
   publishWorkspaceThread?: boolean;
   /** Disable updating the global last-active orchestrator thread. */
   persistLastThread?: boolean;
+  turnInjection?: OrchestratorTurnInjection;
 }
-
 function swarmStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-swarm:tab:${tabId}`;
 }
@@ -270,6 +268,7 @@ function OrchestratorTabInner({
   restoreLastThread = true,
   publishWorkspaceThread = true,
   persistLastThread = true,
+  turnInjection,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
   const spawnHandlers = useWorkspaceSpawn();
@@ -336,6 +335,7 @@ function OrchestratorTabInner({
     loadedThreadIdRef.current = state.threadId;
     setChatChromeState(state);
   }, []);
+  useOrchestratorTurnInjection(chatPanelRef, turnInjection, initialThreadId, chatChromeState.threadId, chatChromeState.waitingForReply);
   const loadedInitialThreadRef = useRef<string | null>(null);
   const autoTiledComparisonGroupIdRef = useRef<string | null>(null);
 

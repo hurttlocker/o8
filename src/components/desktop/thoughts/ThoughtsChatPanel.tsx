@@ -91,6 +91,7 @@ import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
   ThoughtsChatPermissionMode,
+  ThoughtsSendNowOptions,
 } from './chat-panel/types';
 import {
   fetchThoughtsOperatorDefaults,
@@ -1952,20 +1953,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
 
-  const sendNow = useCallback((text?: string) => {
+  const sendNow = useCallback((text?: string, options?: ThoughtsSendNowOptions) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
-    if (!msg) return;
-
+    if (!msg) return false;
     if (isChatMode) {
-      if (waitingForReply) return;
+      if (waitingForReply) return false;
       setInput(msg);
       latestInputRef.current = msg;
       setTimeout(() => { void handleTaskSend(msg); }, 0);
-      return;
+      return true;
     }
-
     if (isOrchestratorMode) {
-      if (orchStream.status === 'busy') return;
+      if (orchStream.status === 'busy') return false;
       void (async () => {
         if (await runLocalOrchestratorSlash(msg)) {
           setInput('');
@@ -1974,9 +1973,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         }
         setInput('');
         latestInputRef.current = '';
-        const attachments = attachedImages.length > 0
+        const attachments = options?.attachments ?? (attachedImages.length > 0
           ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
-          : undefined;
+          : undefined);
         orchStream.send(msg, {
           permissionMode,
           backend: composerBackendTurnOverride(orchestratorBackend),
@@ -1987,14 +1986,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           collide: collideEnabled,
           ...(attachments ? { attachments } : {}),
         });
-        clearAttachments();
+        if (!options?.attachments) clearAttachments();
       })();
-      return;
+      return true;
     }
 
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
+    return true;
   }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
   queuedSteerSendNowRef.current = sendNow;
 

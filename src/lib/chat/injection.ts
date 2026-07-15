@@ -4,6 +4,56 @@ export interface AgentPanelChatInjectionPayload {
   previewImageDataUri?: string;
 }
 
+export interface OrchestratorConversationWorkspaceSnapshot {
+  tileId: string;
+  activeTabId: string;
+  tabs: Array<{
+    id: string;
+    kind: string;
+    repoPath?: string;
+    orchestratorThreadId?: string;
+    lastActivity: number;
+    mode?: string;
+  }>;
+}
+
+export interface OrchestratorConversationTarget {
+  tileId: string;
+  tabId: string;
+}
+
+export function selectRepoOrchestratorConversation(
+  workspaces: OrchestratorConversationWorkspaceSnapshot[],
+  repoPath: string,
+  preferredThreadId?: string | null,
+): OrchestratorConversationTarget | null {
+  const candidates = workspaces.flatMap((workspace) => workspace.tabs
+    .filter((tab) => (
+      tab.kind === 'orchestrator'
+      && tab.repoPath === repoPath
+      && Boolean(tab.orchestratorThreadId)
+      && (tab.mode === undefined || tab.mode === 'fleet')
+    ))
+    .map((tab) => ({
+      tileId: workspace.tileId,
+      tabId: tab.id,
+      threadId: tab.orchestratorThreadId,
+      active: tab.id === workspace.activeTabId,
+      lastActivity: tab.lastActivity,
+    })));
+
+  candidates.sort((left, right) => {
+    const leftPreferred = preferredThreadId && left.threadId === preferredThreadId ? 1 : 0;
+    const rightPreferred = preferredThreadId && right.threadId === preferredThreadId ? 1 : 0;
+    if (leftPreferred !== rightPreferred) return rightPreferred - leftPreferred;
+    if (left.active !== right.active) return Number(right.active) - Number(left.active);
+    return right.lastActivity - left.lastActivity;
+  });
+
+  const target = candidates[0];
+  return target ? { tileId: target.tileId, tabId: target.tabId } : null;
+}
+
 interface ReviewCommentContext {
   prNumber: number;
   repo?: string;

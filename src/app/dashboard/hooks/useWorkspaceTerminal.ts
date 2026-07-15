@@ -463,14 +463,14 @@ export function useWorkspaceTerminal({
     setTerminalTileRepoScope(firstUnscopedLeaf.id, preferredRepoPath);
   }, [setTerminalTileRepoScope, tileLayout.root, workspaceTerminalPreferredRepo?.localPath]);
 
-  const ensureWorkspaceTerminalTile = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
+  const ensureWorkspaceTerminalTile = useCallback((repoPath?: string | null, preferredTileId?: string | null, activate = true) => {
     const normalizedRepoPath = repoPath ?? null;
     const preferredTile = findPreferredWorkspaceTerminalTileId(normalizedRepoPath, preferredTileId);
     if (preferredTile) {
       if (normalizedRepoPath) {
         setTerminalTileRepoScope(preferredTile, normalizedRepoPath);
       }
-      setActiveTileId(preferredTile);
+      if (activate) setActiveTileId(preferredTile);
       return preferredTile;
     }
 
@@ -483,7 +483,7 @@ export function useWorkspaceTerminal({
           repoPath: normalizedRepoPath,
         }),
       }));
-      setActiveTileId(workspaceTarget.id);
+      if (activate) setActiveTileId(workspaceTarget.id);
       return workspaceTarget.id;
     }
 
@@ -505,7 +505,7 @@ export function useWorkspaceTerminal({
       ...current,
       root: result.root,
     }));
-    setActiveTileId(result.newTileId);
+    if (activate) setActiveTileId(result.newTileId);
     return result.newTileId;
   }, [findInsertionTarget, findPreferredWorkspaceTerminalTileId, findWorkspaceTarget, setActiveTileId, setTerminalTileRepoScope, setTileLayout, tileLayout.root]);
 
@@ -584,23 +584,23 @@ export function useWorkspaceTerminal({
     repoPath?: string | null;
     preferredTileId?: string | null;
     fallbackToAnyExisting?: boolean;
+    activate?: boolean;
   }): Promise<WorkspaceTerminalTarget> => {
     const repoPath = options?.repoPath ?? null;
     const preferredTileId = options?.preferredTileId ?? null;
+    const activate = options?.activate ?? true;
     const initial = getPreferredWorkspaceTerminalTarget(repoPath, preferredTileId);
     if (initial) {
-      setActiveTileId(initial.tileId);
+      if (activate) setActiveTileId(initial.tileId);
       return initial;
     }
-
     const fallbackExisting = workspaceTerminalHandlesRef.current.entries().next().value as [string, TerminalTabHandle] | undefined;
     if (options?.fallbackToAnyExisting !== false && fallbackExisting) {
       const [tileId, handle] = fallbackExisting;
-      setActiveTileId(tileId);
+      if (activate) setActiveTileId(tileId);
       return { tileId, handle };
     }
-
-    const ensuredTileId = ensureWorkspaceTerminalTile(repoPath, preferredTileId);
+    const ensuredTileId = ensureWorkspaceTerminalTile(repoPath, preferredTileId, activate);
 
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 100));
@@ -609,7 +609,7 @@ export function useWorkspaceTerminal({
         if (repoPath) {
           setTerminalTileRepoScope(target.tileId, repoPath);
         }
-        setActiveTileId(target.tileId);
+        if (activate) setActiveTileId(target.tileId);
         return target;
       }
     }
@@ -630,7 +630,7 @@ export function useWorkspaceTerminal({
         if (repoPath) {
           setTerminalTileRepoScope(ensuredTileId, repoPath);
         }
-        setActiveTileId(ensuredTileId);
+        if (activate) setActiveTileId(ensuredTileId);
         return { tileId: ensuredTileId, handle: awaitedHandle };
       }
     }
