@@ -619,6 +619,21 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     })
 }
 
+/// One subscription-billed, tool-free Claude turn for Smart Compose. The
+/// caller owns the target transaction; this function only returns insertion
+/// text and cannot execute a command or mutate the Mac.
+pub(crate) fn compose_once(
+    model: &str,
+    prompt: &str,
+    image_b64: Option<&str>,
+) -> Result<String, String> {
+    let bin = claude_bin();
+    let mcp_cfg = ensure_empty_mcp_config()?;
+    let mut session = super::claude_pool::acquire(&bin, model, &mcp_cfg)
+        .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
+    session.send_turn(prompt, image_b64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

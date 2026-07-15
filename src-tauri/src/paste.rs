@@ -548,6 +548,112 @@ pub struct FocusedField {
     /// Whether AXValue is writable — the clean replacement path. When false,
     /// the fallback is select-all + paste.
     pub settable: bool,
+    /// Stable-enough identity for an immediate edit/revert transaction. The
+    /// identifier wins when an app exposes one; frame + role are the fallback.
+    pub process_id: i32,
+    pub identifier: Option<String>,
+    pub frame: Option<(f64, f64, f64, f64)>,
+}
+
+#[cfg(target_os = "macos")]
+fn focused_field_snapshot(
+    element: AXUIElementRef,
+    process_id: i32,
+) -> Option<FocusedField> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+
+    let role = ax_copy_attribute_value(element, ax_name("AXRole").as_concrete_TypeRef())
+        .and_then(|value| value.downcast::<CFString>().map(|value| value.to_string()))
+        .unwrap_or_default();
+    let value_attr = ax_name("AXValue");
+    let value = ax_copy_attribute_value(element, value_attr.as_concrete_TypeRef())?
+        .downcast::<CFString>()
+        .map(|value| value.to_string())?;
+    if value.trim().is_empty() || value.len() > 12 * 1024 {
+        return None;
+    }
+
+    let mut settable_raw = 0_u8;
+    let settable = unsafe {
+        AXUIElementIsAttributeSettable(
+            element,
+            value_attr.as_concrete_TypeRef(),
+            &mut settable_raw,
+        ) == AX_ERROR_SUCCESS
+            && settable_raw != 0
+    };
+    let texty = matches!(role.as_str(), "AXTextArea" | "AXTextField" | "AXComboBox");
+    if !texty && !settable {
+        return None;
+    }
+
+    let identifier = ax_copy_attribute_value(
+        element,
+        ax_name("AXIdentifier").as_concrete_TypeRef(),
+    )
+    .and_then(|value| value.downcast::<CFString>().map(|value| value.to_string()))
+    .filter(|value| !value.is_empty());
+    let frame = (|| {
+        let position = ax_copy_attribute_value(
+            element,
+            ax_name("AXPosition").as_concrete_TypeRef(),
+        )?;
+        let size = ax_copy_attribute_value(element, ax_name("AXSize").as_concrete_TypeRef())?;
+        let mut point = CGPoint { x: 0.0, y: 0.0 };
+        let mut size_value = CGSize {
+            width: 0.0,
+            height: 0.0,
+        };
+        let got_position = unsafe {
+            AXValueGetValue(
+                position.as_CFTypeRef(),
+                K_AX_VALUE_TYPE_CGPOINT,
+                &mut point as *mut _ as *mut std::ffi::c_void,
+            )
+        };
+        let got_size = unsafe {
+            AXValueGetValue(
+                size.as_CFTypeRef(),
+                K_AX_VALUE_TYPE_CGSIZE,
+                &mut size_value as *mut _ as *mut std::ffi::c_void,
+            )
+        };
+        (got_position != 0 && got_size != 0).then_some((
+            point.x,
+            point.y,
+            size_value.width,
+            size_value.height,
+        ))
+    })();
+
+    Some(FocusedField {
+        value,
+        role,
+        settable,
+        process_id,
+        identifier,
+        frame,
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn same_focused_field(expected: &FocusedField, current: &FocusedField) -> bool {
+    if expected.process_id != current.process_id || expected.role != current.role {
+        return false;
+    }
+    if let Some(identifier) = expected.identifier.as_deref() {
+        return current.identifier.as_deref() == Some(identifier);
+    }
+    match (expected.frame, current.frame) {
+        (Some(a), Some(b)) => {
+            (a.0 - b.0).abs() < 2.0
+                && (a.1 - b.1).abs() < 2.0
+                && (a.2 - b.2).abs() < 2.0
+                && (a.3 - b.3).abs() < 2.0
+        }
+        _ => false,
+    }
 }
 
 /// Read the focused element's text value + role + writability. Returns None
@@ -558,7 +664,8 @@ pub struct FocusedField {
 pub(crate) fn read_focused_field() -> Option<FocusedField> {
     run_on_main_thread(|| {
         use core_foundation::base::TCFType;
-        use core_foundation::string::CFString;
+
+        let process_id = native_frontmost_app_info()?.process_id;
 
         let system = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() })?;
         unsafe {
@@ -566,39 +673,62 @@ pub(crate) fn read_focused_field() -> Option<FocusedField> {
         }
         let focused_attr = ax_name("AXFocusedUIElement");
         let focused = ax_copy_attribute_value(system.as_ptr(), focused_attr.as_concrete_TypeRef())?;
+        focused_field_snapshot(focused.as_CFTypeRef(), process_id)
+    })
+}
 
-        let role_attr = ax_name("AXRole");
-        let role = ax_copy_attribute_value(focused.as_CFTypeRef(), role_attr.as_concrete_TypeRef())
-            .and_then(|r| r.downcast::<CFString>().map(|v| v.to_string()))
-            .unwrap_or_default();
+#[cfg(target_os = "macos")]
+pub(crate) fn focused_field_matches(expected: &FocusedField, expected_value: &str) -> bool {
+    read_focused_field()
+        .map(|current| same_focused_field(expected, &current) && current.value == expected_value)
+        .unwrap_or(false)
+}
 
-        let value_attr = ax_name("AXValue");
-        let value =
-            ax_copy_attribute_value(focused.as_CFTypeRef(), value_attr.as_concrete_TypeRef())
-                .and_then(|v| v.downcast::<CFString>().map(|s| s.to_string()))?;
-        if value.trim().is_empty() || value.len() > 12 * 1024 {
-            return None;
-        }
+/// Replace AXValue only when the process, field identity, and current value
+/// still match the captured edit transaction.
+#[cfg(target_os = "macos")]
+pub(crate) fn write_focused_field_value_if_matches(
+    expected: &FocusedField,
+    expected_value: &str,
+    text: &str,
+) -> bool {
+    let expected = expected.clone();
+    let expected_value = expected_value.to_string();
+    let text = text.to_string();
+    run_on_main_thread(move || {
+        use core_foundation::base::TCFType;
+        use core_foundation::string::CFString;
 
-        let mut settable_raw: u8 = 0;
-        let settable_err = unsafe {
-            AXUIElementIsAttributeSettable(
-                focused.as_CFTypeRef(),
-                value_attr.as_concrete_TypeRef(),
-                &mut settable_raw,
-            )
+        let Some(frontmost) = native_frontmost_app_info() else {
+            return false;
         };
-        let settable = settable_err == AX_ERROR_SUCCESS && settable_raw != 0;
-
-        let texty = role == "AXTextArea" || role == "AXTextField" || role == "AXComboBox";
-        if !texty && !settable {
-            return None;
+        let Some(system) = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() }) else {
+            return false;
+        };
+        unsafe {
+            let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2);
         }
-        Some(FocusedField {
-            value,
-            role,
-            settable,
-        })
+        let Some(focused) = ax_copy_attribute_value(
+            system.as_ptr(),
+            ax_name("AXFocusedUIElement").as_concrete_TypeRef(),
+        ) else {
+            return false;
+        };
+        let Some(current) = focused_field_snapshot(focused.as_CFTypeRef(), frontmost.process_id)
+        else {
+            return false;
+        };
+        if !same_focused_field(&expected, &current) || current.value != expected_value {
+            return false;
+        }
+        let new_value = CFString::new(&text);
+        unsafe {
+            AXUIElementSetAttributeValue(
+                focused.as_CFTypeRef(),
+                ax_name("AXValue").as_concrete_TypeRef(),
+                new_value.as_CFTypeRef(),
+            ) == AX_ERROR_SUCCESS
+        }
     })
 }
 
@@ -910,6 +1040,39 @@ fn native_activate_app(app: &SavedApp) -> bool {
     })
 }
 
+/// Reactivate one explicit app for a short-lived edit transaction. Unlike the
+/// general dictation paste path, this never consults PREVIOUS_APP, so clicking
+/// Symon's Revert chip cannot redirect the restore into a stale dictation app.
+#[cfg(target_os = "macos")]
+pub(crate) fn activate_app_target(bundle_id: &str, process_id: i32) -> bool {
+    if native_frontmost_app_info()
+        .map(|current| current.bundle_id == bundle_id && current.process_id == process_id)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let target = SavedApp {
+        bundle_id: bundle_id.to_string(),
+        process_id,
+    };
+    if !native_activate_app(&target) {
+        return false;
+    }
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(FOCUS_SETTLE_MAX_MS);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(FOCUS_SETTLE_POLL_MS));
+        if native_frontmost_app_info()
+            .map(|current| current.bundle_id == bundle_id && current.process_id == process_id)
+            .unwrap_or(false)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(FOCUS_SETTLE_GRACE_MS));
+            return true;
+        }
+    }
+    false
+}
+
 /// Wait for a shifted activation to actually land before posting Cmd+V: poll
 /// the frontmost app until it reports the saved paste target (or the cap
 /// expires), then one short grace sleep for key-focus handover. See the
@@ -1037,6 +1200,19 @@ pub fn paste_text(text: &str) -> bool {
 /// can surface a truthful dock error instead of a silent or misleading success.
 #[cfg(target_os = "macos")]
 pub fn paste_text_with_status(text: &str) -> PasteOutcome {
+    paste_text_impl(text, true)
+}
+
+/// Paste into the field that is focused right now without consulting the
+/// general dictation target. Callers must verify and reactivate their exact
+/// target first; this is used by the anchored edit Revert transaction.
+#[cfg(target_os = "macos")]
+pub(crate) fn paste_text_in_current_field(text: &str) -> PasteOutcome {
+    paste_text_impl(text, false)
+}
+
+#[cfg(target_os = "macos")]
+fn paste_text_impl(text: &str, activate_dictation_target: bool) -> PasteOutcome {
     if text.is_empty() {
         tracing::debug!("paste: skipping — empty text");
         return PasteOutcome::Failed("No text was transcribed.".to_string());
@@ -1098,7 +1274,11 @@ pub fn paste_text_with_status(text: &str) -> PasteOutcome {
     // Step 2: Activate the correct paste target. If the user clicked a
     // different app during dictation, smart_activate() detects this and
     // pastes there instead of the stale saved target.
-    let activation = smart_activate();
+    let activation = if activate_dictation_target {
+        smart_activate()
+    } else {
+        ActivationOutcome::FocusUnchanged
+    };
 
     // Step 3: Make sure keyboard focus is live before we post the synthetic
     // Cmd+V. Pre-activation already handled the slow part; this poll exits
@@ -1632,10 +1812,43 @@ pub(crate) fn simulate_cmd_c() {}
 mod tests {
     use super::PasteOutcome;
 
+    #[cfg(target_os = "macos")]
+    use super::{same_focused_field, FocusedField};
+
     #[test]
     fn paste_outcome_reports_only_real_paste_as_pasted() {
         assert!(PasteOutcome::Pasted.did_paste());
         assert!(!PasteOutcome::ClipboardOnly.did_paste());
         assert!(!PasteOutcome::Failed("clipboard unavailable".to_string()).did_paste());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn edit_field_identity_prefers_identifier_and_rejects_other_processes() {
+        let field = |process_id, identifier: Option<&str>, x| FocusedField {
+            value: "draft".to_string(),
+            role: "AXTextArea".to_string(),
+            settable: false,
+            process_id,
+            identifier: identifier.map(str::to_string),
+            frame: Some((x, 20.0, 300.0, 120.0)),
+        };
+        let expected = field(42, Some("composer"), 10.0);
+        assert!(same_focused_field(
+            &expected,
+            &field(42, Some("composer"), 999.0)
+        ));
+        assert!(!same_focused_field(
+            &expected,
+            &field(43, Some("composer"), 10.0)
+        ));
+        assert!(!same_focused_field(
+            &expected,
+            &field(42, Some("subject"), 10.0)
+        ));
+        assert!(same_focused_field(
+            &field(42, None, 10.0),
+            &field(42, None, 10.8)
+        ));
     }
 }
