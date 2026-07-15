@@ -1378,7 +1378,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeBackendIdentity = isOrchestratorMode
-    ? (activeThreadBackend ?? composerBackendTurnOverride(orchestratorBackend) ?? null)
+    ? (composerBackendTurnOverride(orchestratorBackend) ?? orchestratorBackend ?? activeThreadBackend ?? null)
     : null;
   const activeBackendLabel = activeBackendIdentity
     ? orchestratorBackendDisplayLabel({ backend: activeBackendIdentity, agent: activeThreadAgent })
