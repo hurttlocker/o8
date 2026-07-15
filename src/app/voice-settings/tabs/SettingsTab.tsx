@@ -142,7 +142,7 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
       <SectionCard>
         <SectionTitle icon={ICONS.speakerHigh}>Voice Output</SectionTitle>
         <SectionHint>How o8 reads answers and selected text aloud.</SectionHint>
-        <ControlRow label="Read-aloud voice" detail="Used for Ask answers and read-aloud. Cloud voices honor this; the system fallback uses the default voice.">
+        <ControlRow label="Read-aloud voice" detail="o8 uses its free Steffan (male) voice by default. Add your own Google or ElevenLabs key to upgrade — this picker chooses the Google voice when a key is set.">
           <Select value={voiceId} onChange={(v) => setPref('tts_voice_id', v)} options={VOICE_OPTIONS} width={200} />
         </ControlRow>
         <ControlRow label="Preview voice" detail="Speaks a short sample with the selected voice + speed.">
