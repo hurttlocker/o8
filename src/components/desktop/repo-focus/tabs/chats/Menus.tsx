@@ -9,9 +9,7 @@ import type { HistoryActionMenuState } from './types';
 export function HistoryActionMenu({
   state,
   busy,
-  canOpen,
   onClose,
-  onOpen,
   onTogglePin,
   onArchive,
   onDelete,
@@ -19,9 +17,7 @@ export function HistoryActionMenu({
 }: {
   state: HistoryActionMenuState;
   busy: boolean;
-  canOpen: boolean;
   onClose: () => void;
-  onOpen: () => void;
   onTogglePin: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -44,7 +40,7 @@ export function HistoryActionMenu({
   }, [renaming]);
 
   const menuWidth = 190;
-  const menuHeight = 209;
+  const menuHeight = 180;
   const panelRect = typeof document === 'undefined'
     ? null
     : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
@@ -159,7 +155,6 @@ export function HistoryActionMenu({
           </div>
         </div>
         <div style={{ display: 'grid', gap: 2 }}>
-          <HistoryMenuRow label="Open chat" disabled={!canOpen || busy} onClick={() => run(onOpen)} />
           <HistoryMenuRow label={state.item.pinned ? 'Unpin' : 'Pin'} disabled={busy} onClick={() => run(onTogglePin)} />
           <HistoryMenuRow label="Rename" disabled={busy || renaming} onClick={() => setRenaming(true)} />
           <HistoryMenuRow label={state.archived ? 'Restore' : 'Archive'} disabled={busy} onClick={() => run(onArchive)} />

@@ -35,6 +35,7 @@ import { useProjects, type ProjectRecord } from '@/components/desktop/repo-regis
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
+import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
@@ -4474,6 +4475,7 @@ function DashboardInner() {
     <DictationHost>
       <AttendanceHeartbeat />
       <FileOpenBridge onOpenFile={handleOpenFileInWorkspace} />
+      <ThemeLab />
       <UiZoomLayer />
       <RealtimeVoiceHost />
       <ReportIssueHost />
