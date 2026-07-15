@@ -963,7 +963,13 @@ function DashboardInner() {
   // match (no hydration mismatch).
   const [chatVisible, setChatVisible] = useState(false);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
-  const [viewportWidth, setViewportWidth] = useState<number | null>(null);
+  // Resize perf: never store the raw window width in state — a live drag-resize
+  // fires per-frame and a changing number re-renders this entire page tree every
+  // frame (the top-chrome "lags then snaps" jank, 2026-07-15). Only the derived
+  // threshold BANDS live in state; the functional setState returns the previous
+  // object between crossings so React bails out of the render entirely. The raw
+  // number lives in viewportWidthRef for imperative reads.
+  const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
   const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false, right: false });
   const responsiveManualOpenRef = useRef({ left: false, right: false });
@@ -987,7 +993,15 @@ function DashboardInner() {
     const update = () => {
       const next = window.innerWidth;
       viewportWidthRef.current = next;
-      setViewportWidth(next);
+      const compact = next < RESPONSIVE_COMPACT_SHELL_WIDTH;
+      const belowLeftCollapse = next < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
+      setViewportBands((current) => (
+        current !== null
+          && current.compact === compact
+          && current.belowLeftCollapse === belowLeftCollapse
+          ? current
+          : { compact, belowLeftCollapse }
+      ));
     };
     update();
     // rAF-throttle: coalesce a burst of resize events into one state update per
@@ -1007,7 +1021,7 @@ function DashboardInner() {
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
-  const compactShell = viewportWidth !== null && viewportWidth < RESPONSIVE_COMPACT_SHELL_WIDTH;
+  const compactShell = viewportBands?.compact ?? false;
   const getResponsiveViewportWidth = useCallback(() => (
     viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
   ), []);
@@ -1053,14 +1067,14 @@ function DashboardInner() {
   // 2026-07-11 ruling) — this effect only heals a stale right auto-collapse a
   // prior build may have left set.
   useEffect(() => {
-    if (viewportWidth === null) return;
+    if (viewportBands === null) return;
 
     if (responsiveAutoCollapsed.right) {
       setChatVisible(true);
       setResponsiveAutoCollapsed((current) => ({ ...current, right: false }));
     }
 
-    if (viewportWidth < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH) {
+    if (viewportBands.belowLeftCollapse) {
       if (sidebarVisible && !responsiveManualOpenRef.current.left) {
         setResponsiveAutoCollapsed((current) => (
           current.left ? current : { ...current, left: true }
@@ -1081,7 +1095,7 @@ function DashboardInner() {
     responsiveAutoCollapsed.right,
     setSidebarVisible,
     sidebarVisible,
-    viewportWidth,
+    viewportBands,
   ]);
   const [rightWidth, setRightWidth] = useState(() => {
     if (typeof window === 'undefined') return 280;
