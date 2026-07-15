@@ -183,15 +183,6 @@ extern "C" {
         attribute: core_foundation::string::CFStringRef,
         settable: *mut u8,
     ) -> i32;
-    // Hit-test: the deepest AX element at a global screen point (top-left
-    // origin, points) — the basis for snapping Symon's draw box to the real UI
-    // element under the model's guessed pixel (Clicky-style precision).
-    fn AXUIElementCopyElementAtPosition(
-        application: AXUIElementRef,
-        x: f32,
-        y: f32,
-        element: *mut AXUIElementRef,
-    ) -> i32;
     // Unwrap an AXValueRef (CGPoint / CGSize) into a plain C struct. Returns
     // false (0) if the value isn't the requested type.
     fn AXValueGetValue(
@@ -421,66 +412,6 @@ fn ax_copy_attribute_value(
         return None;
     }
     Some(unsafe { CFType::wrap_under_create_rule(value) })
-}
-
-/// Hit-test the AX element at a global screen point and return its frame as
-/// `(x, y, w, h)` in global logical points (top-left origin) — the same space
-/// as a captured monitor's bounds. `None` when Accessibility is denied, nothing
-/// resolves, or the element exposes no position/size (e.g. raw web/canvas
-/// content) — the caller then falls back to the model's guessed pixel.
-///
-/// This is how Symon snaps its draw box to the real button/field/label under
-/// the model's guess instead of trusting the vision-estimated pixel.
-#[cfg(target_os = "macos")]
-pub(crate) fn ax_frame_at_screen_point(gx: f64, gy: f64) -> Option<(f64, f64, f64, f64)> {
-    use core_foundation::base::TCFType;
-    run_on_main_thread(move || {
-        let system = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() })?;
-        // Cap blocking AX messaging — an unresponsive target must not hang the
-        // overlay (same 0.2s budget as native_raise_front_window).
-        unsafe {
-            let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2);
-        }
-        let mut hit: AXUIElementRef = std::ptr::null();
-        let err = unsafe {
-            AXUIElementCopyElementAtPosition(system.as_ptr(), gx as f32, gy as f32, &mut hit)
-        };
-        if err != AX_ERROR_SUCCESS || hit.is_null() {
-            return None;
-        }
-        let element = OwnedAxElement::new(hit)?;
-
-        let pos_val = ax_copy_attribute_value(
-            element.as_ptr(),
-            ax_name("AXPosition").as_concrete_TypeRef(),
-        )?;
-        let size_val =
-            ax_copy_attribute_value(element.as_ptr(), ax_name("AXSize").as_concrete_TypeRef())?;
-
-        let mut pt = CGPoint { x: 0.0, y: 0.0 };
-        let mut sz = CGSize {
-            width: 0.0,
-            height: 0.0,
-        };
-        let got_pos = unsafe {
-            AXValueGetValue(
-                pos_val.as_CFTypeRef(),
-                K_AX_VALUE_TYPE_CGPOINT,
-                &mut pt as *mut _ as *mut std::ffi::c_void,
-            )
-        };
-        let got_size = unsafe {
-            AXValueGetValue(
-                size_val.as_CFTypeRef(),
-                K_AX_VALUE_TYPE_CGSIZE,
-                &mut sz as *mut _ as *mut std::ffi::c_void,
-            )
-        };
-        if got_pos == 0 || got_size == 0 || sz.width <= 0.0 || sz.height <= 0.0 {
-            return None;
-        }
-        Some((pt.x, pt.y, sz.width, sz.height))
-    })
 }
 
 #[cfg(target_os = "macos")]

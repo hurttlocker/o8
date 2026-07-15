@@ -1,7 +1,9 @@
 # Symon draw-localization revamp — Clicky-quality "draw on screen"
 
-**Status:** planned (2026-06-17). Operator chose "write the revamp plan" after live testing showed the
-vision-guess box landing on the wrong window / over-covering web content.
+**Status:** Phase 0 + Phase 1 + Phase 2 implemented (2026-07-15); Phase 3 remains planned. Automated
+verification covers role policy, catalog mapping/prompt injection, exact-tag parsing/round trips, the
+full Rust library suite, browser-agent route, and the Symon tool bridge. Native Mail/Settings plus o8
+Browser dogfood remain the visual gates because the running `/Applications/o8.app` wasn't replaced mid-run.
 
 ## The problem
 
@@ -21,8 +23,9 @@ guess but has two structural failures (both seen live on x.com-in-Chrome):
    55%-area gate was too loose. *Root cause: snapping to a container role + a web surface with no
    per-element AX.*
 
-**Claude is not in this path.** Gemini alone is the eyes; Claude is only the async background brain.
-So this is purely a localization-method problem, not a "mixing models" problem.
+When this plan was written Gemini was the only vision front brain. The current Control+Fn default is
+Claude Sonnet 5 and it receives the screenshot directly, but the diagnosis is unchanged: this is a
+localization-method problem, independent of which vision-capable model chooses the target.
 
 ## The target (what Clicky does)
 
@@ -42,6 +45,30 @@ vision demoted to last resort:
 **External Chrome web pages are explicitly out of scope** — no DOM access, no AX. The product answer is
 "do web tasks in o8's browser," where Tier 2 applies.
 
+## End-to-end dogfood gate
+
+The native path now emits three correlated, privacy-safe events: capture reports only AX/capture counts
+and timing, model reports only exact-versus-pixel tag counts, and overlay reports only resolver outcomes.
+No labels, screen text, prompts, images, or model responses enter these events. Start the gate before the
+gesture so old log entries cannot produce a false pass:
+
+```bash
+npm run dogfood:symon-localization -- --expect exact
+```
+
+Focus a native surface such as Notes or System Settings, hold **Right Option**, say “Point at the Search
+field,” and release. Right Option is the screen-aware Symon agent; Fn is ordinary dictation and
+Control+Fn is smart compose. The command passes only when one trace proves AX catalog capture, an exact
+`[el:id]` model choice, and resolution through the production overlay code with no stale id.
+
+Use `--expect fallback` on an external browser, video, or canvas to prove the pixel route still renders
+without snapping to a container. Then visually confirm the mark is tight rather than a window-sized box.
+Use `--expect web` with a local page visible in o8's Browser panel or canvas to prove DOM catalog capture,
+an exact `[web:id]` model choice, a live selector refresh, and production overlay resolution as one trace.
+For `GUIDE`, move the cursor to the rendered target and confirm the dwell/release behavior; repeat the
+exact test on a second display to cover monitor mapping. These two visual assertions remain manual because
+the structured gate deliberately records geometry counts rather than private screen contents.
+
 ## Architecture
 
 ### The catalog + the tag-protocol change
@@ -49,22 +76,21 @@ vision demoted to last resort:
 Today the model emits coordinates. After the revamp it is handed a **catalog** and references entries:
 
 - Native: catalog = `[{ id, role, label, frame_global_pts }]` built from the AX walk. Injected into the
-  prompt as a compact list (`[12] button "Post"`, `[13] link "Home"`, …). The screenshot still rides
+  prompt as a compact list (`[el:12] Button "Post" rect=…`, `[el:13] Link "Home" rect=…`). The screenshot still rides
   along for disambiguation, but the model emits `[DRAW:el:12]` / `[POINT:el:12]`, not pixels.
 - Web: catalog = the `interactive: [{ selector, tag, label }]` array `o8_browser_read` **already
   returns**. Model emits `[DRAW:web:<selector>]` / `[POINT:web:<selector>]`.
 - Fallback: the existing `[DRAW:rect:px…]` / `[POINT:x,y]` pixel forms stay valid for when no catalog
   entry matches (Tier 3).
 
-`point_overlay::parse_point_tags` gains `TagKind::Element { id }` and `TagKind::Web { selector }`
-variants; `show_points` resolves a catalog id directly to its frame (no hit-test) and a web selector via
+`point_overlay::ParsedTag` now carries an optional native `element_id`; Phase 2 adds a web target.
+`show_points` resolves a catalog id directly to its frame (no hit-test) and a web selector via
 a new page-agent rect call. The pixel path is unchanged.
 
 ### Tier 1 — native AX enumeration
 
-Reuse the depth-first walk in `paste::gather_window_context` (`paste.rs:592–723`), which already
-descends `AXFocusedWindow → AXChildren` reading `AXRole`/`AXValue`. New variant
-`paste::enumerate_actionable(window) -> Vec<AxElement>` that, for actionable roles, records
+The implementation isolates a bounded depth-first AX walk in `screen_localization.rs`, following the
+same `AXFocusedWindow → AXChildren` approach used by paste context. For actionable roles it records
 `{ id, role, label, frame }`:
 
 - **Actionable roles:** `AXButton`, `AXLink`, `AXTextField`, `AXTextArea`, `AXMenuItem`,
@@ -79,15 +105,16 @@ descends `AXFocusedWindow → AXChildren` reading `AXRole`/`AXValue`. New varian
 
 ### Tier 2 — embedded-browser DOM
 
-The canvas browser cards (`browser-card.tsx`, `<iframe data-o8-browser="canvas">`) and the Browser tab
-(`O8BrowserPane.tsx`, `data-o8-browser="panel"`) are same-origin/proxied iframes with reachable DOM.
-`page-agent.ts` `read()` already computes `getBoundingClientRect` to filter visibility but discards it.
+Canvas browser cards use the same-origin/proxied iframe agent; the Browser panel normally uses o8's
+host-owned native child webview, whose injected agent can inspect any origin without giving the page
+Tauri capability. Both now return the same bounded geometry envelope.
 
-- Add page-agent verb **`rect(selector)`** (or `read({ includeRects:true })`) returning iframe-local
-  `{ left, top, width, height }`. Expose as `o8_browser_rect` for parity.
-- Screen-map in the overlay: `iframeScreenRect = querySelector('iframe[data-o8-browser]').getBoundingClientRect()`
-  (+ canvas `zoom`/`pan` for canvas cards) → `screen = iframeScreenRect.origin + elementRect.origin`.
-  The element picker (`browser-card.tsx:242–291`) already does the rect+scroll math — reuse it.
+- Page-agent verb **`rect(selector)`** returns current element geometry and is exposed as
+  `o8_browser_rect`; `localize` returns the bounded catalog Symon captures before the model turn.
+- Iframe targets are transformed into the main-webview viewport, including canvas/card transforms and
+  clipping. Native targets stay in page-viewport coordinates until Rust anchors them to the child window.
+- Rust maps both envelopes into global logical points, rejects hidden or unfocused surfaces, and refreshes
+  the chosen selector after the model turn so a layout shift cannot silently reuse stale geometry.
 
 ### Tier 3 — vision fallback (hardened)
 
@@ -97,13 +124,14 @@ straight back to the raw vision pixel. This alone kills the "boxed the whole win
 
 ## Phases (each with a verify gate)
 
-- **Phase 0 — stopgap (cheap, ship first).** Role-filter the shipped AX-snap (Tier-3 fix). *Verify:*
+- **Phase 0 — stopgap (implemented 2026-07-14).** Role-filter the shipped AX-snap (Tier-3 fix). *Verify:*
   "box the Edit Profile button" on x.com no longer boxes the window (falls back to the point); native
   apps unaffected. ~30 lines in `point_overlay.rs` + a role read.
-- **Phase 1 — native catalog (the big win).** `enumerate_actionable`, catalog → prompt injection,
+- **Phase 1 — native catalog (implemented 2026-07-14).** `enumerate_actionable`, catalog → prompt injection,
   `[el:id]` tag + resolver. *Verify:* in Mail/Settings, "box the Send button" / "point at Search" lands
   on the exact control, repeatably, with no screenshot-pixel guess in the path.
-- **Phase 2 — web DOM.** `o8_browser_rect` + iframe→screen map + `[web:selector]` tag. *Verify:* open
+- **Phase 2 — web DOM (implemented; native dogfood pending).** Browser-agent geometry + iframe/native
+  viewport→screen map + numeric `[web:id]` tags with a live selector refresh. *Verify:* open
   x.com **in o8's browser**, "box the Post button" snaps tight to the button.
 - **Phase 3 — protocol + UX polish.** Unify the tag protocol + fallback ordering; add Clicky's
   continuous-narrate-while-drawing and labeled pointer-arrow vocabulary. *Verify:* the Farza
@@ -111,8 +139,11 @@ straight back to the raw vision pixel. This alone kills the "boxed the whole win
 
 ## Files
 
-- `src-tauri/src/paste.rs` — `enumerate_actionable` (reuses the AX walk + the 0.1.374 AXPosition/AXSize
-  reads); role lists.
+- `src-tauri/src/screen_localization.rs` — bounded AX walk, role policy, frame/label catalog, compact
+  prompt serialization, and the role-filtered point hit-test. This owns localization instead of
+  adding more unrelated behavior to the already-large paste module.
+- `src-tauri/src/paste.rs` — retains the edit/window-context AX paths; the old unfiltered pointer
+  hit-test moved into the localization domain.
 - `src-tauri/src/point_overlay.rs` — `TagKind::Element`/`Web`, catalog resolver, role-filtered Tier-3
   snap, parse tests.
 - `src-tauri/src/agent/mod.rs` / `screen.rs` — build the catalog when a draw/point is likely; inject the

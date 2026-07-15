@@ -138,7 +138,7 @@ pub(crate) fn ensure_empty_mcp_config() -> Result<String, String> {
 /// context + the tool schema + the JSON-action contract + the user's request.
 /// When a screenshot rides the turn it is sent as an image block (see
 /// `ClaudeSession::send_turn`) and this prompt teaches the screen + draw
-/// protocol — Opus 4.8 sees the screen directly (#1252), no Gemini middleman.
+/// protocol — the selected Claude model sees it directly, with no Gemini middleman.
 fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
     let mut s = super::system_prompt();
     if let Some(convo) = super::conversation_context() {
@@ -151,7 +151,7 @@ fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
     }
     if let Some(screen) = &ctx.screen {
         s.push_str("\n\n");
-        s.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
+        s.push_str(&super::screen_prompt_section(screen));
         // Planner-path rule: the [POINT]/[DRAW] tags must ride INSIDE the `say`
         // string of the final {"done": true, "say": "..."} action — never as
         // loose text outside the JSON, or extract_action won't see them.

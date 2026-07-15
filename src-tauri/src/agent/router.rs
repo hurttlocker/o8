@@ -2,10 +2,10 @@
 //!
 //! The tool-calling loop's model is config-driven so the brain is a one-flip
 //! change: edit `~/.o8/agent_models.json` and set `mac_native_action`. The
-//! default ships on `claude-opus-4-8` — the strongest model, and it SEES the
-//! screenshot directly via the CLI stream-json image block (#1252), sub-billed
-//! on the user's Claude subscription. Set `gemini-3-flash-preview` for the
-//! fast-path (lower latency, no vision-on-the-front). A model id containing `/`
+//! default ships on `claude-sonnet-5` for the low-context Control+Fn lane, and
+//! it sees screenshots directly via the CLI stream-json image block (#1252),
+//! sub-billed on the user's Claude subscription. Set `gemini-3-flash-preview`
+//! for the fast-path. A model id containing `/`
 //! routes to OpenRouter — the one-flip A/B.
 
 use serde::{Deserialize, Serialize};

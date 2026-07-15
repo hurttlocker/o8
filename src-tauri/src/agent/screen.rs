@@ -40,7 +40,9 @@ fn request_screen_permission() {
 
 /// Everything the request builder and the pointer transform need from one
 /// capture: the image itself plus the monitor's logical geometry.
+#[derive(Clone)]
 pub struct ScreenContext {
+    pub trace_id: u64,
     pub png_base64: String,
     /// Screenshot dimensions in IMAGE pixels (post-downscale).
     pub img_w: u32,
@@ -50,6 +52,10 @@ pub struct ScreenContext {
     pub mon_y: f64,
     pub mon_w: f64,
     pub mon_h: f64,
+    /// Exact native controls visible in the focused window at capture time.
+    pub ax_catalog: Vec<crate::screen_localization::ActionableElement>,
+    /// Exact DOM controls visible inside o8's browser surfaces.
+    pub web_catalog: Vec<super::web_localization::WebActionableElement>,
 }
 
 /// Downscale ceiling — 1440px wide keeps UI text legible to the model while
@@ -140,6 +146,16 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
         })
         .or_else(|| app.primary_monitor().ok().flatten())
         .or_else(|| monitors.first().cloned())?;
+    let trace_id = crate::screen_localization::next_trace_id();
+    let capture_started = std::time::Instant::now();
+    let scale = monitor.scale_factor();
+    let monitor_frame = (
+        monitor.position().x as f64 / scale,
+        monitor.position().y as f64 / scale,
+        monitor.size().width as f64 / scale,
+        monitor.size().height as f64 / scale,
+    );
+    let ax_catalog = crate::screen_localization::catalog_in_background(monitor_frame);
 
     // screencapture writes display 1 → first file, display 2 → second, in
     // CGDisplay order. That order isn't guaranteed to match Tauri's monitor
@@ -159,6 +175,18 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
     }
     let output = cmd.output().ok()?;
     if !output.status.success() {
+        let catalog = ax_catalog
+            .join()
+            .unwrap_or_else(|_| crate::screen_localization::CatalogSnapshot::thread_failed());
+        log::warn!(
+            "[symon-localization] {}",
+            serde_json::json!({
+                "stage": "capture", "trace": trace_id, "source": "screen",
+                "status": "screen_capture_failed",
+                "totalMs": capture_started.elapsed().as_millis() as u64,
+                "axMs": catalog.elapsed_ms, "catalogCount": catalog.elements.len(),
+            })
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
         log::warn!(
             "[symon-screen] screencapture exited with {}: {} — if this is a \
@@ -197,25 +225,47 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
     let bytes = std::fs::read(&path).ok()?;
     cleanup(&files);
 
-    let scale = monitor.scale_factor();
+    let catalog = ax_catalog
+        .join()
+        .unwrap_or_else(|_| crate::screen_localization::CatalogSnapshot::thread_failed());
+    log::info!(
+        "[symon-localization] {}",
+        serde_json::json!({
+            "stage": "capture",
+            "trace": trace_id,
+            "source": "screen",
+            "status": catalog.status,
+            "totalMs": capture_started.elapsed().as_millis() as u64,
+            "axMs": catalog.elapsed_ms,
+            "visited": catalog.visited,
+            "candidates": catalog.candidates,
+            "catalogCount": catalog.elements.len(),
+            "imageWidth": img_w,
+            "imageHeight": img_h,
+        })
+    );
     let ctx = ScreenContext {
+        trace_id,
         png_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
         img_w,
         img_h,
-        mon_x: monitor.position().x as f64 / scale,
-        mon_y: monitor.position().y as f64 / scale,
-        mon_w: monitor.size().width as f64 / scale,
-        mon_h: monitor.size().height as f64 / scale,
+        mon_x: monitor_frame.0,
+        mon_y: monitor_frame.1,
+        mon_w: monitor_frame.2,
+        mon_h: monitor_frame.3,
+        ax_catalog: catalog.elements,
+        web_catalog: Vec::new(),
     };
     log::info!(
-        "[symon-screen] captured {}x{} px ({} KB) of monitor at {},{} ({}x{} pt)",
+        "[symon-screen] captured {}x{} px ({} KB) of monitor at {},{} ({}x{} pt), {} native element(s)",
         ctx.img_w,
         ctx.img_h,
         bytes.len() / 1024,
         ctx.mon_x,
         ctx.mon_y,
         ctx.mon_w,
-        ctx.mon_h
+        ctx.mon_h,
+        ctx.ax_catalog.len()
     );
     Some(ctx)
 }
@@ -314,11 +364,13 @@ const SPATIAL_CROP_MAX: u32 = 1568;
 /// A raw, undownscaled-to-composite screen grab kept around between the first
 /// stroke and finalize so strokes can be burned into it after the fact.
 pub struct RawCapture {
+    pub trace_id: u64,
     pub png_bytes: Vec<u8>,
     pub mon_x: f64,
     pub mon_y: f64,
     pub mon_w: f64,
     pub mon_h: f64,
+    pub ax_catalog: Vec<crate::screen_localization::ActionableElement>,
 }
 
 /// The two images a spatial turn carries: `screen` is the full-screen composite
@@ -356,6 +408,16 @@ pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
         })
         .or_else(|| app.primary_monitor().ok().flatten())
         .or_else(|| monitors.first().cloned())?;
+    let trace_id = crate::screen_localization::next_trace_id();
+    let capture_started = std::time::Instant::now();
+    let scale = monitor.scale_factor();
+    let monitor_frame = (
+        monitor.position().x as f64 / scale,
+        monitor.position().y as f64 / scale,
+        monitor.size().width as f64 / scale,
+        monitor.size().height as f64 / scale,
+    );
+    let ax_catalog = crate::screen_localization::catalog_in_background(monitor_frame);
 
     let tmp = std::env::temp_dir();
     let stamp = std::process::id();
@@ -370,6 +432,18 @@ pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
     }
     let output = cmd.output().ok()?;
     if !output.status.success() {
+        let catalog = ax_catalog
+            .join()
+            .unwrap_or_else(|_| crate::screen_localization::CatalogSnapshot::thread_failed());
+        log::warn!(
+            "[symon-localization] {}",
+            serde_json::json!({
+                "stage": "capture", "trace": trace_id, "source": "spatial",
+                "status": "screen_capture_failed",
+                "totalMs": capture_started.elapsed().as_millis() as u64,
+                "axMs": catalog.elapsed_ms, "catalogCount": catalog.elements.len(),
+            })
+        );
         log::warn!(
             "[spatial-context] screencapture failed ({}): {} — grant o8 Screen \
              Recording in System Settings if this is a permission denial",
@@ -405,21 +479,41 @@ pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
     let bytes = std::fs::read(&path).ok()?;
     cleanup(&files);
 
-    let scale = monitor.scale_factor();
+    let catalog = ax_catalog
+        .join()
+        .unwrap_or_else(|_| crate::screen_localization::CatalogSnapshot::thread_failed());
+    log::info!(
+        "[symon-localization] {}",
+        serde_json::json!({
+            "stage": "capture",
+            "trace": trace_id,
+            "source": "spatial",
+            "status": catalog.status,
+            "totalMs": capture_started.elapsed().as_millis() as u64,
+            "axMs": catalog.elapsed_ms,
+            "visited": catalog.visited,
+            "candidates": catalog.candidates,
+            "catalogCount": catalog.elements.len(),
+            "imageWidth": img_w,
+            "imageHeight": img_h,
+        })
+    );
     log::info!(
         "[spatial-context] captured {}x{} px ({} KB) of monitor at {},{}",
         img_w,
         img_h,
         bytes.len() / 1024,
-        monitor.position().x as f64 / scale,
-        monitor.position().y as f64 / scale
+        monitor_frame.0,
+        monitor_frame.1
     );
     Some(RawCapture {
+        trace_id,
         png_bytes: bytes,
-        mon_x: monitor.position().x as f64 / scale,
-        mon_y: monitor.position().y as f64 / scale,
-        mon_w: monitor.size().width as f64 / scale,
-        mon_h: monitor.size().height as f64 / scale,
+        mon_x: monitor_frame.0,
+        mon_y: monitor_frame.1,
+        mon_w: monitor_frame.2,
+        mon_h: monitor_frame.3,
+        ax_catalog: catalog.elements,
     })
 }
 
@@ -503,6 +597,7 @@ pub fn composite_strokes(raw: &RawCapture, strokes: &[Vec<(f64, f64)>]) -> Optio
     let png = encode_png(&composite)?;
 
     let screen = ScreenContext {
+        trace_id: raw.trace_id,
         png_base64: base64::engine::general_purpose::STANDARD.encode(&png),
         img_w: cw,
         img_h: ch,
@@ -510,6 +605,8 @@ pub fn composite_strokes(raw: &RawCapture, strokes: &[Vec<(f64, f64)>]) -> Optio
         mon_y: raw.mon_y,
         mon_w: raw.mon_w,
         mon_h: raw.mon_h,
+        ax_catalog: raw.ax_catalog.clone(),
+        web_catalog: Vec::new(),
     };
     log::info!(
         "[spatial-context] composited {stroke_count} stroke(s): composite {cw}x{ch}, crop={}",
@@ -695,100 +792,9 @@ pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Resul
 }
 
 #[cfg(test)]
-mod wants_screen_tests {
-    use super::wants_screen;
-
-    #[test]
-    fn screen_questions_trigger() {
-        assert!(wants_screen("What's this error on my screen?"));
-        assert!(wants_screen("Where do I click to export?"));
-        assert!(wants_screen("Can you see this dialog?"));
-        assert!(wants_screen("Point to the save button"));
-    }
-
-    #[test]
-    fn draw_and_teach_intents_trigger() {
-        // These need a capture so the overlay has a coordinate system to draw in.
-        assert!(wants_screen("Can you draw that as an illustration?"));
-        assert!(wants_screen("Teach me the Pythagorean theorem"));
-        assert!(wants_screen("Sketch a triangle for me"));
-        assert!(wants_screen("Draw a diagram of how this works"));
-        assert!(wants_screen("Annotate the chart"));
-    }
-
-    #[test]
-    fn non_screen_prompts_do_not() {
-        assert!(!wants_screen("Remind me to call Q at 3pm"));
-        assert!(!wants_screen("Where is my meeting tomorrow?"));
-        assert!(!wants_screen("What's shipping in o8?"));
-    }
-}
+#[path = "screen/wants_screen_tests.rs"]
+mod wants_screen_tests;
 
 #[cfg(test)]
-mod composite_tests {
-    use super::{composite_strokes, encode_png, RawCapture};
-    use base64::Engine;
-
-    /// A plain white RawCapture of the given pixel size (the "screenshot").
-    fn white_capture(w: u32, h: u32) -> RawCapture {
-        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
-        RawCapture {
-            png_bytes: encode_png(&img).expect("encode white png"),
-            mon_x: 0.0,
-            mon_y: 0.0,
-            mon_w: w as f64,
-            mon_h: h as f64,
-        }
-    }
-
-    fn decode(b64: &str) -> image::RgbaImage {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("valid base64");
-        image::load_from_memory(&bytes).expect("valid png").to_rgba8()
-    }
-
-    #[test]
-    fn no_strokes_yields_none() {
-        let raw = white_capture(200, 160);
-        assert!(composite_strokes(&raw, &[]).is_none());
-        assert!(composite_strokes(&raw, &[vec![]]).is_none());
-    }
-
-    #[test]
-    fn burns_orange_ink_and_cuts_a_crop() {
-        let raw = white_capture(400, 300);
-        // A diagonal stroke through the middle (normalized 0.25,0.25 → 0.6,0.6).
-        let strokes = vec![vec![(0.25, 0.25), (0.4, 0.4), (0.6, 0.6)]];
-        let sc = composite_strokes(&raw, &strokes).expect("composited");
-
-        // Composite decodes and is bounded to the token ceiling.
-        let composite = decode(&sc.screen.png_base64);
-        assert!(composite.width().max(composite.height()) <= 1568);
-        assert_eq!(composite.width(), sc.screen.img_w);
-        assert_eq!(composite.height(), sc.screen.img_h);
-        // Monitor geometry rides through unchanged (drives POINT-back mapping).
-        assert_eq!(sc.screen.mon_w, 400.0);
-
-        // At least one pixel near the stroke path is warm ember-orange, i.e.
-        // clearly not the white background (R high, B distinctly lower than R).
-        let mut found_ink = false;
-        for py in 0..composite.height() {
-            for px in 0..composite.width() {
-                let p = composite.get_pixel(px, py).0;
-                if p[0] > 200 && (p[2] as u16) + 40 < p[0] as u16 {
-                    found_ink = true;
-                    break;
-                }
-            }
-            if found_ink {
-                break;
-            }
-        }
-        assert!(found_ink, "expected orange ink burned into the composite");
-
-        // The marked region was cropped and is strictly smaller than the source.
-        let crop = decode(sc.crop_png_base64.as_ref().expect("crop present"));
-        assert!(crop.width() < composite.width() || crop.height() < composite.height());
-    }
-}
+#[path = "screen/composite_tests.rs"]
+mod composite_tests;
