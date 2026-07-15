@@ -406,7 +406,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const [activeThreadBackend, setActiveThreadBackend] = useState<OrchestratorBackendId | null>(null);
-  const [activeThreadAgent, setActiveThreadAgent] = useState<string | null>(null);
+  // Stored on thread load but no longer read for the composer label — the chip
+  // predicts the next turn, which runs the backend's default agent (see the
+  // activeBackendLabel note). Kept as a setter-only slot for the load pipeline.
+  const [, setActiveThreadAgent] = useState<string | null>(null);
   // Sidebar trampoline guard: history load, restoreLastThread, and initialThreadId
   // can race. Block re-entry for the same tab while loading and briefly after.
   const inFlightLoadKeyRef = useRef<string | null>(null);
@@ -1381,7 +1384,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     ? (composerBackendTurnOverride(orchestratorBackend) ?? orchestratorBackend ?? activeThreadBackend ?? null)
     : null;
   const activeBackendLabel = activeBackendIdentity
-    ? orchestratorBackendDisplayLabel({ backend: activeBackendIdentity, agent: activeThreadAgent })
+    // No agent: the composer chip predicts the NEXT turn, and sends carry no
+    // agent — ws-server resolves the backend's DEFAULT. Passing the loaded
+    // thread's historical agent (e.g. an old OpenClaw 'mister-scribe' thread)
+    // mislabels a turn that will actually run as the default agent (adversarial
+    // review 2026-07-15). The label falls back to the default (OpenClaw → 'main').
+    ? orchestratorBackendDisplayLabel({ backend: activeBackendIdentity, agent: null })
     : null;
   const activeTargetLabel = isChatMode
     ? selectedChatModel.label

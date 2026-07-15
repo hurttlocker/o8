@@ -27,14 +27,15 @@
  * are reconstructed from the persisted thread transcript on every send (the user
  * message is already on disk by the time ws-server calls `sendTurn`).
  *
- * The fetch targets the loopback API base (`getApiBase()`), and ws-server runs
- * on loopback, so the middleware passes it without a bearer token.
+ * The fetch targets the ws-server → Next origin (`buildNextUrl`, honoring
+ * NEXT_ORIGIN for the dev-bridge) and carries the ws-token bearer so the gate
+ * authorizes by token — the loopback heuristic alone intermittently 401'd.
  */
 
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readOrchestratorThreadMessages } from '@/lib/mobile/orchestrator-thread-history';
-import { getApiBase } from '@/lib/panel/api-port';
+import { buildNextUrl } from '@/lib/ws-server/next-fetch';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type {
@@ -262,7 +263,7 @@ async function sendToO8Orchestrator(
   let response: Response;
   armWatchdog();
   try {
-    response = await fetch(`${getApiBase()}/api/v2/proxy/llm`, {
+    response = await fetch(buildNextUrl('/api/v2/proxy/llm'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
