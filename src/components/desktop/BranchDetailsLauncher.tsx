@@ -1,9 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SmoothCorners } from '@lisse/react';
-import { CollapsedRailIcon, ChevronsLeftIcon, ChevronsRightIcon } from './branch-rail-collapse';
+import { CollapsedRailIcon, ChevronsLeftIcon } from './branch-rail-collapse';
 import {
   COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
   COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
@@ -11,15 +10,24 @@ import {
   COLLAPSED_BRANCH_RAIL_WIDTH,
   WORKSPACE_RAIL_CORNER_SMOOTHING,
 } from './branch-rail-geometry';
+import {
+  BranchDetailsOverlay,
+  ChecksIcon,
+  DiffIcon,
+  GhIcon,
+  GlobeIcon,
+  SquaresIcon,
+  WorkerIcon,
+  type OverlayPanelTab,
+  type ProgressRowData,
+  type PrChecksSummary,
+} from './BranchDetailsOverlay';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
 import { useBranchPr } from './useBranchPr';
 import { usePrDetail } from './pr-panel/usePrDetail';
 import type { PrCheck } from './pr-panel/types';
 import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
-
-const ROW_HEIGHT = 28;
-const CHECK_ROW_HEIGHT = 24;
 
 function normalizePath(path: string | null | undefined): string | null {
   if (!path) return null;
@@ -95,16 +103,48 @@ function pickTarget(
   return targets[0] ?? null;
 }
 
+const NOOP = () => {};
+
 export function BranchDetailsLauncher({ visible = true, repoPath = null, collapsed = false, onToggleCollapsed }: {
   visible?: boolean;
   repoPath?: string | null;
-  /** Codex-style fold: inset icon column instead of the full 256px card stack. */
+  /** Open state (inverted): `false` = the drawer overlay is open; `true` = closed to the capsule. Toggled by click. */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
   const data = useOrchestratorData();
   const [progressOpen, setProgressOpen] = useState(false);
   const [environmentOpen, setEnvironmentOpen] = useState(true);
+
+  // Click-to-open overlay (Q ruling 2026-07-14). The capsule stays in layout
+  // (never pushes the chat); CLICKING it toggles the full card stack open as a
+  // portal overlay that FLOATS over the chat. `collapsed === false` = open.
+  // NOT hover-triggered — the operator wants the same click trigger as before,
+  // with the drawer floating over the chat instead of widening the rail.
+  const capsuleRef = useRef<HTMLElement | null>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+
+  const measure = useCallback(() => {
+    const el = capsuleRef.current;
+    if (el) setAnchorRect(el.getBoundingClientRect());
+  }, []);
+
+  const isOpen = !collapsed;
+
+  // Measure the capsule on mount + keep the overlay glued to it. The overlay is
+  // always mounted (it cross-fades / morphs on open+close), so we measure
+  // regardless of open state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    measure();
+    const onScrollResize = () => measure();
+    window.addEventListener('scroll', onScrollResize, true);
+    window.addEventListener('resize', onScrollResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollResize, true);
+      window.removeEventListener('resize', onScrollResize);
+    };
+  }, [measure]);
 
   const activePacket = useMemo(
     () => pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath),
@@ -135,7 +175,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
   // self-hides when it's open; the caller's railFits gating handles space.
   if (!data || !visible) return null;
 
-  const prChecks = summarizePrChecks(prDetail?.statusCheckRollup ?? []);
+  const prChecks: PrChecksSummary = summarizePrChecks(prDetail?.statusCheckRollup ?? []);
   const prCommentCount = prDetail
     ? prDetail.issueComments.length + prDetail.reviewComments.length
     : 0;
@@ -147,16 +187,17 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
   const progressRows = buildProgressRows(activePacket, activeTarget, branch);
   const hasDiff = changes.totalAdditions > 0 || changes.totalDeletions > 0;
 
-  const open = (tab: NonNullable<Parameters<NonNullable<typeof data.onOpenO8Panel>>[0]['tab']>) => {
+  const open = (tab: OverlayPanelTab) => {
     data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
   };
 
-  // Collapsed — an inset icon column (Codex parity, Q 2026-07-13): one icon per
-  // card, « to expand below the stack. Icons act as jump-ins: browser opens
-  // the Browser tab directly; the rest expand the rail.
-  if (collapsed) {
-    return (
+  return (
+    <>
+      {/* Always-in-layout trigger: the collapsed icon capsule (Codex parity, Q
+          2026-07-13). Clicking an icon floats the full card stack as an overlay
+          — the capsule width never changes, so the chat is never pushed. */}
       <aside
+        ref={capsuleRef}
         className="hide-scrollbar"
         style={{
           width: COLLAPSED_BRANCH_RAIL_WIDTH,
@@ -174,7 +215,6 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
           scrollbarWidth: 'none',
         }}
       >
-        {/* Codex parity: the collapsed icons sit on a rounded drawer capsule. */}
         <SmoothCorners
           corners={{ radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
           innerBorder={{ width: 1, color: 'var(--t-divider-subtle)', opacity: 1 }}
@@ -194,147 +234,56 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, collaps
             borderColor: 'transparent',
             background: 'var(--t-bg-card)',
             flexShrink: 0,
+            // Morph: the capsule fades out as the card scales up out of its
+            // corner, so the two never coexist (Q ruling 2026-07-14).
+            opacity: isOpen ? 0 : 1,
+            pointerEvents: isOpen ? 'none' : 'auto',
+            transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}>
-        <CollapsedRailIcon title="Expand" onClick={() => onToggleCollapsed?.()}><ChevronsLeftIcon /></CollapsedRailIcon>
-        <CollapsedRailIcon title="Progress" onClick={() => onToggleCollapsed?.()}><ChecksIcon /></CollapsedRailIcon>
-        <CollapsedRailIcon title="Environment" onClick={() => onToggleCollapsed?.()}><DiffIcon /></CollapsedRailIcon>
-        {prDetail ? (
-          <CollapsedRailIcon title={`Pull request #${prDetail.number}`} onClick={() => open('prs')}><GhIcon /></CollapsedRailIcon>
-        ) : null}
-        <CollapsedRailIcon title="Subagents" onClick={() => onToggleCollapsed?.()}><WorkerIcon /></CollapsedRailIcon>
-        <CollapsedRailIcon title="Browser" onClick={() => open('browser')}><GlobeIcon /></CollapsedRailIcon>
-        <CollapsedRailIcon title="Sources" onClick={() => onToggleCollapsed?.()}><SquaresIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Expand" onClick={() => onToggleCollapsed?.()}><ChevronsLeftIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Progress" onClick={() => onToggleCollapsed?.()}><ChecksIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Environment" onClick={() => onToggleCollapsed?.()}><DiffIcon /></CollapsedRailIcon>
+          {prDetail ? (
+            <CollapsedRailIcon title={`Pull request #${prDetail.number}`} onClick={() => open('prs')}><GhIcon /></CollapsedRailIcon>
+          ) : null}
+          <CollapsedRailIcon title="Subagents" onClick={() => onToggleCollapsed?.()}><WorkerIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Browser" onClick={() => open('browser')}><GlobeIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Sources" onClick={() => onToggleCollapsed?.()}><SquaresIcon /></CollapsedRailIcon>
         </SmoothCorners>
       </aside>
-    );
-  }
 
-  return (
-    <aside
-      className="hide-scrollbar"
-      style={{
-        width: 256,
-        height: '100%',
-        flexShrink: 0,
-        paddingTop: 8,
-        paddingRight: 14,
-        paddingBottom: 14,
-        paddingLeft: 6,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        minHeight: 0,
-        overflowY: 'auto',
-        scrollbarWidth: 'none',
-      }}
-    >
-      {/* Collapse control sits below the window header, right-aligned — the
-          » folds the rail to the icon column (Codex parity, Q video). */}
-      {onToggleCollapsed ? (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-          <CollapsedRailIcon title="Collapse" onClick={onToggleCollapsed}><ChevronsRightIcon /></CollapsedRailIcon>
-        </div>
-      ) : null}
-      <Card>
-        <SectionHeader
-          label="Progress"
-          hint={activePacket?.referenceLabel ?? activeTarget?.label ?? 'Workspace'}
-          open={progressOpen}
-          onClick={() => setProgressOpen((value) => !value)}
+      {anchorRect ? (
+        <BranchDetailsOverlay
+          open={isOpen}
+          anchorRect={anchorRect}
+          onMouseEnter={NOOP}
+          onMouseLeave={NOOP}
+          onToggleCollapsed={onToggleCollapsed}
+          progressHint={activePacket?.referenceLabel ?? activeTarget?.label ?? 'Workspace'}
+          progressRows={progressRows}
+          progressOpen={progressOpen}
+          onToggleProgress={() => setProgressOpen((value) => !value)}
+          environmentOpen={environmentOpen}
+          onToggleEnvironment={() => setEnvironmentOpen((value) => !value)}
+          hasDiff={hasDiff}
+          additions={changes.totalAdditions}
+          deletions={changes.totalDeletions}
+          changesFileCount={changes.files.length}
+          branch={branch}
+          prDetail={prDetail ?? null}
+          prChecks={prChecks}
+          prCommentCount={prCommentCount}
+          subagentLabel={subagentLabel}
+          subagentDanger={activePacket?.status === 'blocked' || activePacket?.status === 'failed'}
+          onSelectSubagent={() => {
+            if (activePacket?.lane?.sessionKey) data.onSelectSession?.(activePacket.lane.sessionKey);
+          }}
+          browserHost={typeof window === 'undefined' ? undefined : window.location.host}
+          runtimeLabelText={runtimeLabel(packetRuntime)}
+          onOpenTab={open}
         />
-        {progressOpen ? (
-          <div style={{ paddingTop: 2, paddingBottom: 4 }}>
-            {progressRows.map((row) => (
-              <ProgressRow key={row.label} label={row.label} done={row.done} muted={row.muted} />
-            ))}
-          </div>
-        ) : null}
-      </Card>
-
-      <Card>
-        <SectionHeader
-          label="Environment"
-          open={environmentOpen}
-          onClick={() => setEnvironmentOpen((value) => !value)}
-          metric={hasDiff ? <DiffStats additions={changes.totalAdditions} deletions={changes.totalDeletions} /> : null}
-          action={<GearIcon />}
-        />
-        {environmentOpen ? (
-          <div style={{ paddingTop: 2, paddingBottom: 3 }}>
-            <Row icon={<DiffIcon />} label="Changes" detail={changes.files.length > 0 ? `${changes.files.length}` : undefined} onClick={() => open('workspace')} />
-            <Row icon={<LaptopIcon />} label="Local" onClick={() => open('workspace')} />
-            <Row icon={<BranchIcon />} label={branch} onClick={() => open('workspace')} />
-            <Row icon={<CommitIcon />} label="Commit" onClick={() => open('workspace')} />
-            <Row icon={<GhIcon />} label="Create pull request" onClick={() => open('prs')} />
-          </div>
-        ) : null}
-      </Card>
-
-      {prDetail ? (
-        <Card>
-          <StaticHeader label="Pull request" />
-          <Row
-            icon={<GhIcon />}
-            label={`#${prDetail.number} ${prDetail.title}`}
-            onClick={() => open('prs')}
-          />
-          <Row
-            icon={<DiffIcon />}
-            label={`+${prDetail.additions} −${prDetail.deletions}`}
-            detail={`${prDetail.changedFiles} file${prDetail.changedFiles === 1 ? '' : 's'}`}
-            onClick={() => open('prs')}
-          />
-          {!prDetail.mergeable ? (
-            <Row icon={<ConflictIcon />} label="Conflicts with base" tone="danger" onClick={() => open('prs')} />
-          ) : null}
-          {prChecks ? (
-            prChecks.danger ? (
-              <Row icon={<ChecksIcon />} label={prChecks.label} tone="danger" onClick={() => open('prs')} />
-            ) : (
-              <StaticRow icon={<ChecksIcon />} label={prChecks.label} />
-            )
-          ) : null}
-          {prCommentCount > 0 ? (
-            <Row
-              icon={<CommentIcon />}
-              label={`${prCommentCount} comment${prCommentCount === 1 ? '' : 's'}`}
-              onClick={() => open('prs')}
-            />
-          ) : null}
-        </Card>
       ) : null}
-
-      <Card>
-        <StaticHeader label="Subagents" />
-        {subagentLabel ? (
-          <Row
-            icon={<WorkerIcon />}
-            label={`${subagentLabel} (worker)`}
-            onClick={() => {
-              if (activePacket?.lane?.sessionKey) data.onSelectSession?.(activePacket.lane.sessionKey);
-            }}
-            tone={activePacket?.status === 'blocked' || activePacket?.status === 'failed' ? 'danger' : undefined}
-          />
-        ) : (
-          <StaticRow icon={<WorkerIcon />} label="No active subagents" muted />
-        )}
-      </Card>
-
-      <Card>
-        <StaticHeader label="Browser" />
-        <Row icon={<GlobeIcon />} label="o8" detail={typeof window === 'undefined' ? undefined : window.location.host} onClick={() => open('browser')} />
-      </Card>
-
-      <Card>
-        <StaticHeader label="Sources" />
-        <StaticRow icon={<SquaresIcon />} label="O8" muted />
-        <Row icon={<SquaresIcon />} label="Playwright" onClick={() => open('browser')} muted />
-        <Row icon={<SquaresIcon />} label="Chrome Devtools" onClick={() => open('browser')} muted />
-        <StaticRow icon={<GlobeIcon />} label="Web search" muted />
-      </Card>
-
-      <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabel(packetRuntime)} />
-    </aside>
+    </>
   );
 }
 
@@ -342,7 +291,7 @@ function buildProgressRows(
   activePacket: OrchestratorPacket | null,
   activeTarget: OrchestratorWorkspaceTarget | null,
   branch: string,
-) {
+): ProgressRowData[] {
   if (!activePacket) {
     return [
       { label: `${activeTarget?.label ?? 'Workspace'} selected`, done: true, muted: false },
@@ -365,415 +314,4 @@ function summarizePrChecks(rollup: PrCheck[]): { label: string; danger: boolean 
   const pending = rollup.some((c) => ['in_progress', 'queued', 'pending', 'waiting', 'requested'].includes((c.status ?? '').toLowerCase()));
   if (pending) return { label: 'Checks running', danger: false };
   return { label: 'All checks passed', danger: false };
-}
-
-function Card({ children }: { children: ReactNode }) {
-  return (
-    <div
-      style={{
-        borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 55%, transparent)',
-        background: 'color-mix(in srgb, var(--t-bg-card) 70%, transparent)',
-        paddingTop: 6,
-        paddingBottom: 4,
-        paddingLeft: 4,
-        paddingRight: 4,
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function StaticHeader({
-  label,
-}: {
-  label: string;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        minHeight: 22,
-        paddingLeft: 10,
-        paddingRight: 10,
-        paddingBottom: 4,
-        fontSize: 10,
-        fontWeight: 300,
-        letterSpacing: '-0.1px',
-        lineHeight: '14px',
-        color: 'var(--t-text-faint)',
-      }}
-    >
-      {label}
-    </div>
-  );
-}
-
-function SectionHeader({
-  label,
-  hint,
-  action,
-  metric,
-  open,
-  onClick,
-}: {
-  label: string;
-  hint?: string;
-  action?: ReactNode;
-  metric?: ReactNode;
-  open: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        width: '100%',
-        minHeight: 24,
-        paddingLeft: 10,
-        paddingRight: 10,
-        paddingTop: 0,
-        paddingBottom: 4,
-        border: 0,
-        borderRadius: 8,
-        background: 'transparent',
-        fontSize: 10,
-        fontWeight: 300,
-        letterSpacing: '-0.1px',
-        lineHeight: '14px',
-        color: 'var(--t-text-faint)',
-        fontFamily: 'inherit',
-        textAlign: 'left',
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'color-mix(in srgb, var(--t-text-muted) 7%, transparent)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent';
-      }}
-    >
-      <span>{label}</span>
-      <span
-        style={{
-          display: 'inline-flex',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)',
-          color: 'var(--t-text-muted)',
-          opacity: 0.8,
-        }}
-      >
-        <ChevronIcon />
-      </span>
-      {hint ? (
-        <span
-          style={{
-            fontSize: 9.5,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-            color: 'var(--t-text-faint)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-            flex: 1,
-            textAlign: 'right',
-          }}
-          title={hint}
-        >
-          {hint}
-        </span>
-      ) : null}
-      {metric ? (
-        <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
-          {metric}
-        </span>
-      ) : null}
-      {action ? (
-        <span
-          onClick={(event) => event.stopPropagation()}
-          style={{ display: 'inline-flex', color: 'var(--t-text-muted)' }}
-        >
-          {action}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function DiffStats({ additions, deletions }: { additions: number; deletions: number }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        fontSize: 9.5,
-        fontWeight: 300,
-        letterSpacing: '-0.2px',
-        fontVariantNumeric: 'tabular-nums',
-      }}
-    >
-      <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)' }}>+{additions}</span>
-      <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{deletions}</span>
-    </span>
-  );
-}
-
-function ProgressRow({ label, done, muted }: { label: string; done: boolean; muted?: boolean }) {
-  return (
-    <div
-      style={{
-        minHeight: CHECK_ROW_HEIGHT,
-        paddingLeft: 10,
-        paddingRight: 10,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 9,
-        color: muted ? 'var(--t-text-faint)' : 'var(--t-text)',
-        fontSize: 13.5,
-        fontWeight: 300,
-        lineHeight: 1.25,
-        letterSpacing: '-0.1px',
-      }}
-    >
-      <span
-        style={{
-          width: 12,
-          height: 12,
-          borderRadius: 999,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          color: done ? 'var(--t-bg-card)' : 'var(--t-text-faint)',
-          background: done
-            ? 'color-mix(in srgb, var(--t-text-muted) 72%, transparent)'
-            : 'color-mix(in srgb, var(--t-text-muted) 10%, transparent)',
-        }}
-      >
-        {done ? <CheckIcon /> : null}
-      </span>
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-    </div>
-  );
-}
-
-const ROW_BASE: CSSProperties = {
-  height: ROW_HEIGHT,
-  paddingLeft: 10,
-  paddingRight: 10,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  borderRadius: 8,
-  borderWidth: 0,
-  background: 'transparent',
-  cursor: 'pointer',
-  textAlign: 'left',
-  fontSize: 13.5,
-  fontWeight: 300,
-  letterSpacing: '-0.1px',
-  lineHeight: 1.25,
-  color: 'var(--t-text)',
-  fontFamily: 'inherit',
-};
-
-function Row({
-  icon,
-  label,
-  detail,
-  onClick,
-  muted = false,
-  tone,
-}: {
-  icon: ReactNode;
-  label: string;
-  detail?: string;
-  onClick: () => void;
-  muted?: boolean;
-  tone?: 'danger';
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        ...ROW_BASE,
-        color: tone === 'danger' ? '#dc2626' : muted ? 'var(--t-text-muted)' : 'var(--t-text)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--t-panel-hover)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent';
-      }}
-    >
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: muted ? 'var(--t-text-muted)' : 'var(--t-text-secondary)' }}>{icon}</span>
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-      {detail ? <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', whiteSpace: 'nowrap' }}>{detail}</span> : null}
-    </button>
-  );
-}
-
-function StaticRow({ icon, label, muted = false }: { icon: ReactNode; label: string; muted?: boolean }) {
-  return (
-    <div
-      style={{
-        ...ROW_BASE,
-        cursor: 'default',
-        color: muted ? 'var(--t-text-muted)' : 'var(--t-text)',
-      }}
-    >
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--t-text-muted)' }}>{icon}</span>
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-    </div>
-  );
-}
-
-function svgProps(size = 15): { width: number; height: number; viewBox: string; fill: string; stroke: string; strokeWidth: number; strokeLinecap: 'round'; strokeLinejoin: 'round' } {
-  return { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' };
-}
-
-function DiffIcon() {
-  return (
-    <svg {...svgProps()}>
-      <rect x="4" y="4" width="16" height="16" rx="3" />
-      <path d="M12 8v8M8 12h8" />
-    </svg>
-  );
-}
-
-function LaptopIcon() {
-  return (
-    <svg {...svgProps()}>
-      <rect x="4" y="5" width="16" height="11" rx="2" />
-      <path d="M3 19h18" />
-      <path d="M8 16h8" />
-    </svg>
-  );
-}
-
-function BranchIcon() {
-  return (
-    <svg {...svgProps()}>
-      <circle cx="6" cy="6" r="2" />
-      <circle cx="6" cy="18" r="2" />
-      <circle cx="18" cy="8" r="2" />
-      <path d="M6 8v8" />
-      <path d="M18 10v2a4 4 0 0 1-4 4H8" />
-    </svg>
-  );
-}
-
-function CommitIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M3 12h6" />
-      <circle cx="12" cy="12" r="3" />
-      <path d="M15 12h6" />
-    </svg>
-  );
-}
-
-function WorkerIcon() {
-  return (
-    <svg {...svgProps()}>
-      <rect x="7" y="4" width="10" height="8" rx="3" />
-      <circle cx="9.5" cy="8" r=".6" fill="currentColor" stroke="none" />
-      <circle cx="14.5" cy="8" r=".6" fill="currentColor" stroke="none" />
-      <path d="M8 18a4 4 0 0 1 8 0" />
-      <path d="M12 12v2" />
-    </svg>
-  );
-}
-
-function GhIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M9 19c-4 1.5-4-2-6-2" />
-      <path d="M15 21v-3.4a3 3 0 0 0-.84-2.32C17.06 14.92 19 13.46 19 9.5a4.65 4.65 0 0 0-.88-3 4.3 4.3 0 0 0-.12-3s-1-.32-3.3 1.24a11.4 11.4 0 0 0-6 0C6.4 3.16 5.4 3.5 5.4 3.5a4.3 4.3 0 0 0-.12 3A4.65 4.65 0 0 0 4.4 9.5c0 3.95 1.93 5.42 4.84 5.78A3 3 0 0 0 8.4 17.6V21" />
-    </svg>
-  );
-}
-
-function GlobeIcon() {
-  return (
-    <svg {...svgProps()}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
-    </svg>
-  );
-}
-
-function ChecksIcon() {
-  return (
-    <svg {...svgProps()}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="m8.5 12 2.5 2.5 4.5-5" />
-    </svg>
-  );
-}
-
-function ConflictIcon() {
-  return (
-    <svg {...svgProps()}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 8v4" />
-      <path d="M12 16h.01" />
-    </svg>
-  );
-}
-
-function CommentIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H4a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V4a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.24.35.44.68.6 1H20a2 2 0 1 1 0 4h-.08c-.16.32-.36.65-.52 1Z" />
-    </svg>
-  );
-}
-
-function ChevronIcon() {
-  return (
-    <svg {...svgProps(14)}>
-      <path d="m9 18 6-6-6-6" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m5 12 4 4 10-10" />
-    </svg>
-  );
-}
-
-function SquaresIcon() {
-  return (
-    <svg {...svgProps()}>
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
-  );
 }
