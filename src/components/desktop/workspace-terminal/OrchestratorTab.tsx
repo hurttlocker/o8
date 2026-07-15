@@ -54,6 +54,7 @@ import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/c
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
 import { SessionTileSurface } from './SessionTileSurface';
+import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 // Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
 // row. The old layout component is no longer imported here.
@@ -621,6 +622,31 @@ function OrchestratorTabInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comparisonGroups, sessionTiles.autoTileSessions]);
 
+  // Drag-to-split drop actions (Claude Code split-screen parity). Split and
+  // replace land in the session tile tree as 'thread' panes; a drop on the
+  // main chat's header loads the thread in place instead — the chat leaf
+  // never leaves the tree.
+  const handleThreadDrop = useCallback((action: ThreadDropAction) => {
+    if (action.kind === 'replace-chat') {
+      if (chatChromeState.threadId === action.thread.threadId) return;
+      chatPanelRef.current?.loadThread(action.thread.threadId);
+      return;
+    }
+    // Dropping the thread the main chat already shows would open the same
+    // conversation twice — two live composers on one thread is a trap.
+    if (chatChromeState.threadId === action.thread.threadId) return;
+    if (action.kind === 'replace') {
+      sessionTiles.replaceLeafWithThreadPane(action.leafId, action.thread);
+      return;
+    }
+    sessionTiles.splitLeafWithThreadPane(action.leafId, action.thread, action.direction);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    chatChromeState.threadId,
+    sessionTiles.replaceLeafWithThreadPane,
+    sessionTiles.splitLeafWithThreadPane,
+  ]);
+
   const handleSetSwarm = useCallback((enabled: boolean) => {
     setSwarmEnabled(enabled);
     persistSwarm(tabId, enabled);
@@ -1171,16 +1197,29 @@ function OrchestratorTabInner({
             position: 'relative',
           }}
         >
-          {sessionTiles.isTiled ? (
-            <SessionTileSurface
-              layout={sessionTiles.layout}
-              focusedSessionKey={sessionTiles.focusedSessionKey}
-              chatSlot={thoughtsChatPanel}
-              onResizeSplit={sessionTiles.resizeSplit}
-              onCloseLeaf={sessionTiles.closeSessionLeafById}
-              onFocusSession={sessionTiles.setFocusedSessionKey}
-            />
-          ) : thoughtsChatPanel}
+          {/* ALWAYS render through the tile surface — even a lone chat leaf.
+              The old `isTiled ? surface : panel` ternary moved the chat
+              panel between tree positions on every tile/untile flip, which
+              REMOUNTED ThoughtsChatPanel: transcript flash + a fresh
+              auto-restore pass that could adopt whatever thread was touched
+              seconds ago (hit live 2026-07-15 when closing a dragged-in
+              thread pane). A single-leaf surface renders the same visual. */}
+          <SessionTileSurface
+            layout={sessionTiles.layout}
+            focusedSessionKey={sessionTiles.focusedSessionKey}
+            chatSlot={thoughtsChatPanel}
+            repoPath={repoPath ?? null}
+            onResizeSplit={sessionTiles.resizeSplit}
+            onCloseLeaf={sessionTiles.closeSessionLeafById}
+            onFocusSession={sessionTiles.setFocusedSessionKey}
+          />
+          {/* Drag-to-split drop targets — only paints while a thread drag
+              from the left rail is in flight (split-screen parity). */}
+          <ThreadDropLayer
+            active={active}
+            layout={sessionTiles.layout}
+            onDrop={handleThreadDrop}
+          />
         </div>
         {/* Branch-details rail moved INSIDE the panel (transcriptSideRail) so
             it sits beside the transcript, not the composer — see branchRail. */}

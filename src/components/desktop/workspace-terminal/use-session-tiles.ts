@@ -19,14 +19,20 @@ import {
   closeSessionLeaf,
   collectSessionKeys,
   collectSessionLeaves,
+  collectThreadLeaves,
   createDefaultSessionTileLayout,
   deserializeSessionTileLayout,
+  hasAnyAuxLeaf,
   pruneStaleSessions,
+  replaceLeafWithThread,
   resizeSessionSplit,
   serializeSessionTileLayout,
   splitChatWithSession,
+  splitLeafWithThread,
   splitSessionWithSession,
   type SessionTileLayout,
+  type SessionTileSplitDirection,
+  type ThreadPanePayload,
 } from '@/lib/orchestrator/session-tiles';
 
 function sessionTileStorageKey(tabId: string): string {
@@ -114,6 +120,14 @@ export interface UseSessionTilesReturn {
   splitSessionFromMenu: (sessionKey: string, direction: 'horizontal' | 'vertical') => void;
   /** Auto-tile N sessions side-by-side (Best-of-N comparison group). */
   autoTileSessions: (sessionKeys: string[]) => void;
+  /** Drag-to-split: add a thread pane by splitting the target leaf. */
+  splitLeafWithThreadPane: (
+    targetLeafId: string,
+    thread: ThreadPanePayload,
+    direction: SessionTileSplitDirection,
+  ) => void;
+  /** Drag-to-replace: swap the target leaf's content for a thread pane. */
+  replaceLeafWithThreadPane: (targetLeafId: string, thread: ThreadPanePayload) => void;
 }
 
 export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs): UseSessionTilesReturn {
@@ -127,7 +141,10 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
 
   const tiledSessions = useMemo(() => collectSessionKeys(layout.root), [layout.root]);
   const sessionLeaves = useMemo(() => collectSessionLeaves(layout.root), [layout.root]);
-  const isTiled = tiledSessions.length > 0;
+  const threadLeaves = useMemo(() => collectThreadLeaves(layout.root), [layout.root]);
+  // Tiled = anything beyond the bare chat: session transcripts OR thread
+  // panes (drag-to-split). Both need the SessionTileSurface mounted.
+  const isTiled = tiledSessions.length > 0 || threadLeaves.length > 0;
 
   // Persist whenever the layout changes — but NOT the default/empty layout.
   // Pre-fix (2026-06-22) every orchestrator tab wrote a `…:session-tiles:tab:*`
@@ -136,7 +153,7 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
   // those keys forever (the 10+/80+ dead keys piling up). Now an empty layout
   // writes nothing and clears any stale prior key.
   useEffect(() => {
-    if (collectSessionKeys(layout.root).length === 0) {
+    if (!hasAnyAuxLeaf(layout)) {
       clearSessionTileStorage(tabId);
       return;
     }
@@ -220,6 +237,21 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
     setFocusedSessionKey(sessionKey);
   }, []);
 
+  const splitLeafWithThreadPane = useCallback((
+    targetLeafId: string,
+    thread: ThreadPanePayload,
+    direction: SessionTileSplitDirection,
+  ) => {
+    setLayout((current) => splitLeafWithThread(current, targetLeafId, thread, direction));
+  }, []);
+
+  const replaceLeafWithThreadPane = useCallback((
+    targetLeafId: string,
+    thread: ThreadPanePayload,
+  ) => {
+    setLayout((current) => replaceLeafWithThread(current, targetLeafId, thread));
+  }, []);
+
   const autoTileSessions = useCallback((sessionKeys: string[]) => {
     if (sessionKeys.length === 0) return;
     setLayout((current) => {
@@ -257,6 +289,8 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
     closePillContextMenu,
     splitSessionFromMenu,
     autoTileSessions,
+    splitLeafWithThreadPane,
+    replaceLeafWithThreadPane,
   };
 }
 

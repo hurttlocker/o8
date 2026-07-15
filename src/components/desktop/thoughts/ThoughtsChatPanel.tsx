@@ -219,6 +219,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // can stash it on the tab record and the tab strip can show a 3-word
   // summary instead of the generic "Chat" label.
   onChatSummary?: (text: string) => void;
+  // Isolated mounts (drag-to-split thread panes) bind to an explicit thread
+  // via the imperative handle. The mount-time auto-restore pass must never
+  // run for them — it could adopt an unrelated recently-touched thread in
+  // the race window before loadThread lands.
+  suppressAutoRestore?: boolean;
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
@@ -258,6 +263,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onLaunchPacket,
   onChromeChange,
   onChatSummary,
+  suppressAutoRestore = false,
 }, ref) {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
@@ -1148,6 +1154,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     transcriptTouchedRef.current = orchStream.messages.length > 0 || chatMessages.length > 0;
   }, [orchStream.messages, chatMessages]);
   useEffect(() => {
+    if (suppressAutoRestore) return;
     if (!isOrchestratorMode || isChatMode) return;
     if (autoRestoreAttemptedRef.current) return;
     if (orchStream.messages.length > 0 || chatMessages.length > 0) return;
@@ -1225,7 +1232,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // silent
       }
     })();
-  }, [chatMessages.length, isChatMode, isOrchestratorMode, orchStream]);
+  }, [chatMessages.length, isChatMode, isOrchestratorMode, orchStream, suppressAutoRestore]);
 
   const { showClearToast, handleClearCommand } = useClearCommand({
     isOrchestratorMode,
