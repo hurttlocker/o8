@@ -77,9 +77,10 @@ export function ThreadDropLayer({ active, layout, onDrop }: ThreadDropLayerProps
   const payloadRef = useRef<ThreadDragPayload | null>(null);
 
   const leaves = useMemo(() => {
-    const { leafRects } = computeSessionTileLayout(layout.root);
+    const root = layout.root;
+    const { leafRects } = computeSessionTileLayout(root);
     const list: Array<{ leaf: SessionTileLeaf; rect: SessionTileRect }> = [];
-    const walk = (node: typeof layout.root): void => {
+    const walk = (node: typeof root): void => {
       if (isSessionTileLeaf(node)) {
         const rect = leafRects.get(node.id);
         if (rect) list.push({ leaf: node, rect });
@@ -88,11 +89,13 @@ export function ThreadDropLayer({ active, layout, onDrop }: ThreadDropLayerProps
       walk(node.children[0]);
       walk(node.children[1]);
     };
-    walk(layout.root);
+    walk(root);
     return list;
   }, [layout.root]);
   const leavesRef = useRef(leaves);
-  leavesRef.current = leaves;
+  useEffect(() => {
+    leavesRef.current = leaves;
+  }, [leaves]);
 
   const resolveTarget = useCallback((clientX: number, clientY: number): HoverTarget | null => {
     const host = hostRef.current;
