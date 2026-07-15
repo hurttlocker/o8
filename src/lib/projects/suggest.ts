@@ -263,9 +263,9 @@ async function postGeminiOnce(apiKey: string, body: unknown): Promise<globalThis
   const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
   try {
-    return await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+    return await fetch(GEMINI_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify(body),
       signal: controller.signal,
     });

@@ -115,7 +115,7 @@ function scrubString(value: unknown): string | undefined {
  * dropped), and breadcrumbs; removes identity fields (`user`, `server_name`) and
  * PII-keyed extra/contexts. Mutates + returns the event. Never throws.
  */
-export function scrubSentryEvent<T extends SentryEventLike>(event: T, opts: ScrubOptions = {}): T {
+export function scrubSentryEvent<T extends SentryEventLike>(event: T, opts: ScrubOptions = {}): T | null {
   try {
     if (typeof event.message === 'string') event.message = scrubString(event.message);
 
@@ -169,8 +169,8 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T, opts: Scru
     if (event.extra) event.extra = dropPiiKeys(event.extra) as Record<string, unknown>;
     if (event.contexts) event.contexts = dropPiiKeys(event.contexts) as Record<string, unknown>;
   } catch {
-    // A scrub failure must never block/observe-break; drop the event to be safe.
-    return event;
+    // Privacy is fail-closed: an event we could not fully inspect never leaves.
+    return null;
   }
   return event;
 }

@@ -3577,7 +3577,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.598"
+version = "0.1.599"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -3599,6 +3599,7 @@ dependencies = [
  "reqwest 0.13.2",
  "rodio",
  "rusqlite",
+ "security-framework",
  "sentry",
  "sentry-rust-minidump",
  "serde",

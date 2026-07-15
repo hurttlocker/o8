@@ -101,7 +101,12 @@ describe('POST /api/feedback/report', () => {
   it('attaches recent crashes as a file and a Crashes field', async () => {
     crashRecords.current = [crash()];
 
-    const res = await postReport({ category: 'bug', message: 'diff panel went blank', route: '/dashboard' });
+    const res = await postReport({
+      category: 'bug',
+      message: 'diff panel went blank',
+      route: '/dashboard',
+      includeDiagnostics: true,
+    });
     expect(res.status).toBe(200);
 
     const form = captured.form;
@@ -128,6 +133,15 @@ describe('POST /api/feedback/report', () => {
     expect(payload.embeds[0].fields.some((f) => f.name === 'Crashes')).toBe(false);
   });
 
+  it('does not attach local crashes without explicit per-report consent', async () => {
+    crashRecords.current = [crash()];
+    const res = await postReport({ category: 'bug', message: 'no diagnostics please', route: '/dashboard' });
+    expect(res.status).toBe(200);
+    expect(captured.form).toBeNull();
+    const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
+    expect(payload.embeds[0].fields.some((f) => f.name === 'Crashes')).toBe(false);
+  });
+
   it('ignores crashes older than the 24h window', async () => {
     crashRecords.current = [crash({ ts: Date.now() - 48 * 60 * 60 * 1000 })];
 
@@ -142,6 +156,7 @@ describe('POST /api/feedback/report', () => {
       category: 'bug',
       message: 'collision',
       route: '/dashboard',
+      includeDiagnostics: true,
       images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', name: 'crashes.txt' }],
     });
 

@@ -34,7 +34,7 @@ export function requirePanelAuth(req: NextRequest): NextResponse | null {
 
   const panelApiToken = getOrCreateWsToken().trim();
   const auth = req.headers.get('authorization');
-  const token = (auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token'))?.trim() ?? '';
+  const token = (auth?.startsWith('Bearer ') ? auth.slice(7) : '')?.trim() ?? '';
   if (!panelApiToken || !tokenMatches(token, panelApiToken)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

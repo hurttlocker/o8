@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
   // Operator/orchestrator-only control verb — a dispatched worker cannot rerun
   // any packet (§HIGH-4).
-  if (resolveRequestPrincipal(request) === 'worker') {
+  if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Rerunning packets is operator-only; a dispatched worker cannot call this.', 403);
   }
 

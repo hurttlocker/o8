@@ -103,7 +103,10 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         });
 
         let req = match &target {
-            crate::entitlement::GeminiTarget::Direct { url } => client.post(url).json(&body),
+            crate::entitlement::GeminiTarget::Direct { url, api_key } => client
+                .post(url)
+                .header("x-goog-api-key", api_key)
+                .json(&body),
             crate::entitlement::GeminiTarget::Proxy { url, token } => {
                 // The proxy owns the model in the URL — pass it in the body.
                 body["model"] = json!(model);
@@ -278,7 +281,10 @@ pub async fn vision_extract(model: &str, prompt: &str, png_base64: &str) -> Resu
     });
 
     let req = match &target {
-        crate::entitlement::GeminiTarget::Direct { url } => client.post(url).json(&body),
+        crate::entitlement::GeminiTarget::Direct { url, api_key } => client
+            .post(url)
+            .header("x-goog-api-key", api_key)
+            .json(&body),
         crate::entitlement::GeminiTarget::Proxy { url, token } => {
             body["model"] = json!(model);
             client.post(url).bearer_auth(token).json(&body)

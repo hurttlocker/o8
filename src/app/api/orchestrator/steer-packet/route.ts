@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   // Operator/orchestrator-only: steering a packet is a control-plane verb; a
   // dispatched worker has no business steering any packet (incl. others'). It
   // presents the local-worker token via its CLI (§HIGH-4).
-  if (resolveRequestPrincipal(request) === 'worker') {
+  if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Steering packets is operator-only; a dispatched worker cannot call this.', 403);
   }
 

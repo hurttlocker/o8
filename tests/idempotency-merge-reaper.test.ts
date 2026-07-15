@@ -78,7 +78,11 @@ const URL = 'http://localhost:3001/api/orchestrator/merge';
 function post(body: unknown): NextRequest {
   return new NextRequest(URL, {
     method: 'POST',
-    headers: { host: 'localhost:3001', 'content-type': 'application/json' },
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${WS_TOKEN}`,
+      'content-type': 'application/json',
+    },
     body: JSON.stringify(body),
   });
 }

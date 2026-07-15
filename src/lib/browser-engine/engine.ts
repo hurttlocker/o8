@@ -14,6 +14,8 @@ import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
 import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
+import { assertPublicHttpUrl } from '@/lib/network/safe-url';
+import { BROWSER_NETWORK_CONTEXT_OPTIONS, installBrowserNetworkPolicy } from '@/lib/browser-engine/network-policy';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -146,7 +148,10 @@ class BrowserEngine {
       return existing;
     }
     const browser = await this.browser();
-    const context = await browser.newContext({ viewport: VIEWPORT });
+    // Service workers can bypass Playwright request routing, so engine contexts
+    // disable them rather than leaving a second, unguarded fetch path.
+    const context = await browser.newContext({ viewport: VIEWPORT, ...BROWSER_NETWORK_CONTEXT_OPTIONS });
+    await installBrowserNetworkPolicy(context);
     const page = await context.newPage();
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
     const session: EngineSession = { context, page, lastUsedAt: Date.now() };
@@ -190,8 +195,9 @@ class BrowserEngine {
 
   async open(scope: string, url: string): Promise<EngineEnvelope> {
     const target = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    const validated = await assertPublicHttpUrl(target);
     const session = await this.session(scope);
-    await session.page.goto(target, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+    await session.page.goto(validated.toString(), { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     return { ok: true, url: session.page.url(), title: await session.page.title().catch(() => ''), surface: 'engine' };
   }
 

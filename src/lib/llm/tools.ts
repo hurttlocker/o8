@@ -10,8 +10,13 @@
 
 import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
+import { safeJoinReal } from '@/lib/fs/safe-path';
+import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
+import { resolveTerminalWorkingDirectory } from '@/lib/llm/terminal-working-directory';
+
+export { canonicalizeTerminalToolArgs, terminalApprovalSummary } from '@/lib/llm/terminal-working-directory';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 50_000; // 50KB
@@ -221,20 +226,6 @@ export const APPROVAL_REQUIRED_TOOLS = new Set([
 
 // ── Terminal Command Safety Tiers ──
 
-// 🟢 Auto-run: read-only commands that can never cause damage
-const SAFE_COMMANDS = new Set([
-  'ls', 'cat', 'head', 'tail', 'wc', 'echo', 'pwd', 'which', 'whoami',
-  'find', 'grep', 'rg', 'ag', 'tree', 'file', 'stat', 'du', 'df',
-  'git status', 'git log', 'git diff', 'git branch', 'git remote',
-  'git show', 'git stash list', 'git tag',
-  'node -v', 'node --version', 'npm list', 'npm ls', 'npm --version',
-  'npx tsc --noEmit', 'npx tsc --version',
-  'go version', 'go test', 'python3 --version', 'rustc --version',
-  'cortex stats', 'cortex doctor', 'cortex health', 'cortex search',
-  'gh issue list', 'gh pr list', 'gh repo view',
-  'date', 'uptime', 'hostname', 'env',
-]);
-
 // 🟡 Needs approval: mutation commands
 const MUTATION_PREFIXES = [
   'npm install', 'npm run', 'npm ci', 'npm update', 'npm uninstall',
@@ -288,15 +279,6 @@ export function classifyCommand(command: string): { safety: CommandSafety; reaso
     }
   }
 
-  // Check safe commands (exact match on the base command)
-  const baseCmd = trimmed.split(/\s+/).slice(0, 3).join(' '); // "git status", "npm list"
-  const baseCmdTwo = trimmed.split(/\s+/).slice(0, 2).join(' ');
-  const baseCmdOne = trimmed.split(/\s+/)[0];
-
-  if (SAFE_COMMANDS.has(baseCmd) || SAFE_COMMANDS.has(baseCmdTwo) || SAFE_COMMANDS.has(baseCmdOne)) {
-    return { safety: 'safe', reason: 'Read-only command' };
-  }
-
   // Check mutation prefixes
   for (const prefix of MUTATION_PREFIXES) {
     if (trimmed.startsWith(prefix)) {
@@ -304,8 +286,11 @@ export function classifyCommand(command: string): { safety: CommandSafety; reaso
     }
   }
 
-  // Default: anything unknown needs approval
-  return { safety: 'needs_approval', reason: 'Unknown command — requires approval' };
+  // Shell strings are never intrinsically read-only: `cat` can read credentials,
+  // `env` can expose provider keys, and separators/substitutions can append a
+  // mutation to an innocent-looking prefix. Every non-blocked command therefore
+  // requires an exact, one-shot operator approval.
+  return { safety: 'needs_approval', reason: 'Shell command requires exact one-shot approval' };
 }
 
 // ── Tool Execution ──
@@ -450,7 +435,10 @@ function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT)
     return { error: 'Error: No repository is scoped to this chat' };
   }
 
-  const resolved = join(repoRoot, path);
+  const resolved = safeJoinReal(repoRoot, path, { allowMissing: true });
+  if (!resolved) {
+    return { error: 'Error: Path must resolve within the repository' };
+  }
   const rel = relative(repoRoot, resolved);
   if (rel.startsWith('..') || rel.startsWith('/')) {
     return { error: 'Error: Path must be within the repository' };
@@ -593,20 +581,9 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
     return { content: `🔴 Command blocked: ${classification.reason}\n\nThis command is not allowed to run from the chat for safety reasons.` };
   }
 
-  // Resolve working directory
-  if (!requireRepoScope(repoRoot)) {
-    return { content: 'Error: No repository is scoped to this chat' };
-  }
-
-  let workDir = repoRoot;
-  if (cwd) {
-    const resolved = join(repoRoot, cwd);
-    const rel = relative(repoRoot, resolved);
-    if (rel.startsWith('..') || rel.startsWith('/')) {
-      return { content: 'Error: Working directory must be within the repository' };
-    }
-    workDir = resolved;
-  }
+  const workingDirectory = resolveTerminalWorkingDirectory(repoRoot, cwd);
+  if ('error' in workingDirectory) return { content: workingDirectory.error };
+  const workDir = workingDirectory.path;
 
   try {
     const output = execSync(command, {
@@ -614,7 +591,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
       timeout: COMMAND_TIMEOUT,
       cwd: workDir,
       maxBuffer: 1024 * 1024, // 1MB buffer
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, // no ANSI
+      env: { ...terminalToolEnv(), FORCE_COLOR: '0', NO_COLOR: '1' }, // no ANSI or inherited credentials
       shell: '/bin/zsh',
     });
 
@@ -628,7 +605,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
 
     return {
       content: result || '(command completed with no output)',
-      sources: [{ title: `$ ${command}`, path: cwd || '.' }],
+      sources: [{ title: `$ ${command}`, path: workingDirectory.relativePath }],
     };
   } catch (err) {
     // execSync throws on non-zero exit code — capture both stdout and stderr
@@ -695,7 +672,10 @@ function readFile(path: string, startLine?: number, endLine?: number, repoRoot: 
       return { content: 'Error: No repository is scoped to this chat' };
     }
 
-    const resolved = join(repoRoot, path);
+    const resolved = safeJoinReal(repoRoot, path);
+    if (!resolved) {
+      return { content: 'Error: Path must resolve within the repository' };
+    }
     const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..') || rel.startsWith('/')) {
       return { content: 'Error: Path outside repository' };
@@ -730,7 +710,10 @@ function listFiles(dirPath?: string, pattern?: string, repoRoot: string | null =
       return { content: 'Error: No repository is scoped to this chat' };
     }
 
-    const resolved = join(repoRoot, dirPath || '.');
+    const resolved = safeJoinReal(repoRoot, dirPath || '.');
+    if (!resolved) {
+      return { content: 'Error: Path must resolve within the repository' };
+    }
     const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..')) {
       return { content: 'Error: Path outside repository' };

@@ -81,37 +81,41 @@ const routes = routeFiles.map((file) => ({ file, pathname: fileToPathname(file) 
 
 const SELF_AUTH = [/^\/api\/worker(\/|$)/, /^\/api\/cloud(\/|$)/, /^\/api\/github\/webhook(\/|$)/];
 const PUBLIC_ANY = [
-  /^\/api\/panel\/github-device(\/|$)/,
-  /^\/api\/panel\/github-auth(\/|$)/,
   /^\/api\/v2\/auth(\/|$)/,
   /^\/api\/mobile\/enroll(\/|$)/,
 ];
 const PUBLIC_READ = [
-  /^\/api\/setup(\/|$)/,
-  /^\/api\/panel\/github-device(\/|$)/,
-  /^\/api\/panel\/github-auth(\/|$)/,
   /^\/api\/panel\/status(\/|$)/,
   /^\/api\/v2\/auth(\/|$)/,
   /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
   /^\/api\/mobile\/push\/public-key(\/|$)/,
 ];
+const LOOPBACK_READ = [
+  /^\/api\/browser\/proxy\/?$/,
+  /^\/api\/browser\/engine\/view\/?$/,
+  /^\/api\/panel\/proxy\/?$/,
+];
 
-type Policy = 'self-auth' | 'public-any' | 'public-read' | 'gated';
+type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'gated';
 
 function expectedPolicy(pathname: string): Policy {
   if (SELF_AUTH.some((p) => p.test(pathname))) return 'self-auth';
   if (PUBLIC_ANY.some((p) => p.test(pathname))) return 'public-any';
   if (PUBLIC_READ.some((p) => p.test(pathname))) return 'public-read';
+  if (LOOPBACK_READ.some((p) => p.test(pathname))) return 'loopback-read';
   return 'gated';
 }
 
 const LAN = '192.168.1.50:3001';
 const LOOPBACK = 'localhost:3001';
 
-function status(pathname: string, method: string, host: string): number {
+function status(pathname: string, method: string, host: string, bearer?: string): number {
   const req = new NextRequest(`http://${host.split(':')[0]}:3001${pathname}`, {
     method,
-    headers: { host },
+    headers: {
+      host,
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+    },
   });
   return panelGateMiddleware(req).status;
 }
@@ -130,9 +134,9 @@ describe('route-coverage — every /api route resolves to an explicit middleware
       const getLan = status(pathname, 'GET', LAN);
       const postLan = status(pathname, 'POST', LAN);
 
-      // Operator surface is ALWAYS reachable from loopback — no route is left in
-      // an implicit "denied to everyone" limbo.
-      expect(status(pathname, 'GET', LOOPBACK)).toBe(200);
+      // An authenticated operator can reach every route. Loopback is transport
+      // context, not an identity, so it never replaces the operator bearer.
+      expect(status(pathname, 'GET', LOOPBACK, TEST_TOKEN)).toBe(200);
 
       if (policy === 'self-auth' || policy === 'public-any') {
         // Reachable off-host by design (self-authing handler or OAuth handshake).
@@ -142,12 +146,20 @@ describe('route-coverage — every /api route resolves to an explicit middleware
         // GET is public; writes still hit the gate.
         expect(getLan).toBe(200);
         expect(postLan).toBe(401);
+      } else if (policy === 'loopback-read') {
+        // Iframe navigation cannot attach a bearer, so these three read-only
+        // resources use socket-truth loopback while writes remain gated.
+        expect(getLan).toBe(401);
+        expect(postLan).toBe(401);
+        expect(status(pathname, 'GET', LOOPBACK)).toBe(200);
+        expect(status(pathname, 'POST', LOOPBACK)).toBe(401);
       } else {
         // GATED — the default. A route that reaches this branch but is silently
         // public from LAN means someone added a public route without listing it
         // in the manifest above: this assertion reddens.
         expect(getLan).toBe(401);
         expect(postLan).toBe(401);
+        expect(status(pathname, 'GET', LOOPBACK)).toBe(401);
       }
     },
   );
@@ -155,7 +167,7 @@ describe('route-coverage — every /api route resolves to an explicit middleware
   it('every public/self-auth manifest entry maps to a real route on disk (no stale allowlist)', () => {
     // A manifest pattern that matches NO real route is dead config that hides
     // intent — force it to be pruned.
-    const allPublic = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ];
+    const allPublic = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ, ...LOOPBACK_READ];
     for (const pattern of allPublic) {
       const matched = routes.some((r) => pattern.test(r.pathname));
       expect(matched, `manifest pattern ${pattern} matches no route file`).toBe(true);
@@ -189,7 +201,7 @@ describe('route-coverage — path-boundary safety (trailing-slash / prefix confu
   });
 
   it('a public-read prefix does NOT leak writes on a look-alike sibling', () => {
-    expect(status('/api/setup/status', 'GET', LAN)).toBe(200); // real public read
-    expect(status('/api/setupfoo', 'GET', LAN)).toBe(401); // sibling is gated
+    expect(status('/api/panel/status', 'GET', LAN)).toBe(200); // real public read
+    expect(status('/api/panel/statusfoo', 'GET', LAN)).toBe(401); // sibling is gated
   });
 });

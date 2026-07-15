@@ -1,7 +1,7 @@
 //! ElevenLabs text-to-speech (ported from aqua/Symon `tts/elevenlabs.rs`,
 //! de-Symonized). DIRECT to api.elevenlabs.io — there is NO proxy. The key is
 //! resolved un-gated via `stt::keys::get_elevenlabs_key()` (env-first →
-//! `~/.o8/dictation.json`); its PRESENCE is the de-facto premium gate.
+//! macOS Keychain); its PRESENCE is the de-facto premium gate.
 //!
 //! Returns raw MP3 bytes for `playback::play_thread` to decode + play.
 

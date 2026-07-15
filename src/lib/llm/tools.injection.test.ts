@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeTool } from './tools';
+import { classifyCommand, executeTool, terminalApprovalSummary } from './tools';
 
 // Regression guard for SECURITY_AUDIT_2026-07-02 §HIGH-2: search_code / list_files
 // must pass query/pattern as argv tokens (execFile), never a shell string.
@@ -34,5 +34,48 @@ describe('search_code / list_files command injection', () => {
   it('still performs a normal code search (functionality intact)', async () => {
     const res = await executeTool('search_code', { query: 'greeting' }, repo);
     expect(res.content).toContain('a.ts');
+  });
+});
+
+describe('terminal command approval classification', () => {
+  it.each([
+    'env',
+    'cat ~/.o8/ws-token',
+    'echo $OPENAI_API_KEY',
+    'echo ok; touch /tmp/o8-proof',
+    'find / -name id_rsa',
+    'git status',
+  ])('requires approval for %s', (command) => {
+    expect(classifyCommand(command).safety).toBe('needs_approval');
+  });
+
+  it('still blocks destructive shell commands', () => {
+    expect(classifyCommand('rm -rf /tmp/example').safety).toBe('blocked');
+  });
+});
+
+describe('terminal command working directory confinement', () => {
+  it('rejects an in-repo symlink whose target escapes the repository', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'o8-terminal-repo-'));
+    const outside = mkdtempSync(join(tmpdir(), 'o8-terminal-outside-'));
+    symlinkSync(outside, join(repo, 'escape'));
+
+    const result = await executeTool('run_terminal_command', { command: 'pwd', cwd: 'escape' }, repo);
+    expect(result.content).toContain('must resolve within the repository');
+    expect(terminalApprovalSummary(repo, { command: 'pwd', cwd: 'escape' }))
+      .toBe('Run command in escape (invalid): pwd');
+  });
+
+  it('executes from the canonical target of an in-repo directory symlink', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'o8-terminal-repo-'));
+    const actual = join(repo, 'packages', 'app');
+    mkdirSync(actual, { recursive: true });
+    symlinkSync(actual, join(repo, 'app-link'));
+
+    const result = await executeTool('run_terminal_command', { command: 'pwd', cwd: 'app-link' }, repo);
+    expect(result.content).toBe(realpathSync.native(actual));
+    expect(result.sources?.[0]?.path).toBe('packages/app');
+    expect(terminalApprovalSummary(repo, { command: 'pwd', cwd: 'app-link' }))
+      .toBe('Run command in packages/app: pwd');
   });
 });

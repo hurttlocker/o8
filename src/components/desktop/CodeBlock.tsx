@@ -14,6 +14,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight, Play } from './lucide-shims';
+import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
 
 interface CodeBlockProps {
   code: string;
@@ -304,7 +305,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
         const { svg } = await mermaid.render(id, code);
 
         if (!cancelled) {
-          setSvgHtml(svg);
+          setSvgHtml(sanitizeAgentHtml(svg));
         }
       } catch (err) {
         if (!cancelled) {

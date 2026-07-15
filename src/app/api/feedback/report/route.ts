@@ -36,6 +36,7 @@ interface FeedbackBody {
   userAgent?: unknown;
   image?: unknown;
   images?: unknown;
+  includeDiagnostics?: unknown;
 }
 
 const MAX_IMAGES = 5;
@@ -360,9 +361,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const diagnostics = await buildDiagnostics(validated.route, validated.userAgent);
-    // Join the human's report to the machine's crashes — Sentry gets these too,
-    // but only in packaged builds, and only the team ever sees them there.
-    const crashes = collectCrashDigest();
+    // Local crash history is a separate disclosure from the text/screenshot the
+    // operator chose to submit. Attach it only after an affirmative per-report
+    // choice; old clients omit the field and therefore send no crash records.
+    const crashes: CrashDigest = body.includeDiagnostics === true
+      ? collectCrashDigest()
+      : { count: 0, records: [], summary: '', text: '' };
     const report: Report = { id: newReportId(), reporter: await resolveReporter(request) };
 
     const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, report);
