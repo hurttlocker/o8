@@ -12,7 +12,6 @@ import React, { useState, useCallback, useEffect, useRef, useMemo, memo } from '
 import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from './lucide-shims';
 import { DiffCard } from './DiffCard';
 import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
-
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
 const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';

@@ -19,6 +19,15 @@ describe('preview HTML confinement', () => {
     expect(document).toContain("script-src 'unsafe-inline'");
   });
 
+  it('ignores fake head tags inside comments and protects the real head', () => {
+    const document = hardenPreviewDocument(
+      '<html><!-- <head> --><head><script>void 0</script></head><body>ok</body></html>',
+      { allowScripts: true },
+    );
+    expect(document).toContain('<!-- <head> --><head><meta http-equiv="Content-Security-Policy"');
+    expect(document.indexOf('Content-Security-Policy')).toBeLessThan(document.indexOf('<script>'));
+  });
+
   it('disables scripts in standalone blob documents', () => {
     const document = hardenPreviewDocument('<h1>shareable</h1>');
     expect(document).toContain("script-src 'none'");

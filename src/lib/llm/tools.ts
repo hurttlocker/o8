@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSyn
 import { join, relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
 import { safeJoinReal } from '@/lib/fs/safe-path';
+import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 50_000; // 50KB
@@ -569,21 +570,6 @@ function deleteFile(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): 
 
 const MAX_OUTPUT = 10_000; // 10KB output cap for LLM
 const COMMAND_TIMEOUT = 30_000; // 30s timeout
-
-function terminalToolEnv(): NodeJS.ProcessEnv {
-  return {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !(
-        /(?:^|_)(?:API_?)?KEY$/i.test(key)
-        || /(?:^|_)(?:TOKEN|SECRET|PASSWORD|COOKIE|CREDENTIALS?|PRIVATE_KEY)$/i.test(key)
-        || /^(?:AWS|AZURE|GOOGLE|GCP|OPENAI|ANTHROPIC|OPENROUTER|GEMINI|XAI)_/i.test(key)
-        || key === 'O8_ANALYTICS_TOKEN'
-        || key === 'WS_TOKEN'
-      )),
-    ),
-    NODE_ENV: process.env.NODE_ENV ?? 'development',
-  };
-}
 
 function runTerminalCommand(command: string, cwd?: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
   const classification = classifyCommand(command);

@@ -28,7 +28,6 @@ function MermaidViewerBase({ code }: { code: string }) {
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
-
   useEffect(() => {
     let cancelled = false;
     async function render() {

@@ -8,6 +8,7 @@ import {
   type PersistedLlmChatMessage,
 } from '@/lib/llm/chat-history-store';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 function cleanProxyContent(text: string) {
   return text
@@ -104,6 +105,7 @@ export async function resumeLlmApproval(
   const response = await fetch(new URL('/api/v2/proxy/llm', requestUrl), {
     method: 'POST',
     headers: {
+      Authorization: `Bearer ${getOrCreateWsToken()}`,
       'Content-Type': 'application/json',
       'x-tab-id': tabId,
     },

@@ -38,6 +38,24 @@ function isPublicIpv6(address: string): boolean {
 
   const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (mapped) return isPublicIpv4(mapped[1]);
+
+  // IPv4-mapped IPv6 also has a legal hexadecimal spelling, e.g.
+  // ::ffff:7f00:1 for 127.0.0.1. Expand the address before inspecting the
+  // final 32 bits so alternate text forms cannot bypass the IPv4 policy.
+  const halves = normalized.split('::');
+  if (halves.length <= 2) {
+    const left = halves[0] ? halves[0].split(':') : [];
+    const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+    const zeros = halves.length === 2 ? 8 - left.length - right.length : 0;
+    const words = [...left, ...Array(Math.max(0, zeros)).fill('0'), ...right];
+    if (words.length === 8 && words.every((word) => /^[0-9a-f]{1,4}$/.test(word))) {
+      const values = words.map((word) => Number.parseInt(word, 16));
+      if (values.slice(0, 5).every((word) => word === 0) && values[5] === 0xffff) {
+        const ipv4 = [values[6] >> 8, values[6] & 0xff, values[7] >> 8, values[7] & 0xff].join('.');
+        return isPublicIpv4(ipv4);
+      }
+    }
+  }
   return true;
 }
 
@@ -72,7 +90,10 @@ export async function assertPublicHttpUrl(rawUrl: string, lookupAll: LookupAll =
     throw new Error('Browser URLs cannot contain credentials.');
   }
 
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+  // WHATWG URL keeps brackets around IPv6 hostnames in Node. Strip them before
+  // net.isIP/DNS handling so literal IPv6 targets cannot fall into hostname
+  // resolution with a different policy path.
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
   if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
     throw new Error('The external browser cannot access local hosts.');
   }

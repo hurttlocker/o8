@@ -329,6 +329,17 @@ describe('panelGateMiddleware — per-device capability scope', () => {
   });
 
   it.each([
+    ['/api/mobile/devices', 'GET'],
+    ['/api/mobile/devices/revoke', 'POST'],
+    ['/api/mobile/push-url', 'POST'],
+    ['/api/mobile/symon/tool', 'POST'],
+    ['/api/mobile/ws-token', 'GET'],
+    ['/api/mobile/some-future-route', 'POST'],
+  ])('denies operator/internal mobile routes to a paired device: %s', (pathname, method) => {
+    expect(deviceRequest(pathname, method).status).toBe(403);
+  });
+
+  it.each([
     '/api/browser/agent',
     '/api/panel/file-io?path=/etc/hosts',
     '/api/panel/github-auth',

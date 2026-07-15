@@ -219,12 +219,20 @@ export function hardenPreviewDocument(
 ): string {
   const csp = previewContentSecurityPolicy({ allowScripts: options.allowScripts === true });
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  // Search a same-length comment-masked copy so an attacker-controlled
+  // `<!-- <head> -->` cannot capture the injection while leaving the real head
+  // unprotected. Match offsets remain valid against the original document.
+  const searchable = html.replace(/<!--[\s\S]*?-->/g, (comment) => ' '.repeat(comment.length));
 
-  if (/<head(?:\s[^>]*)?>/i.test(html)) {
-    return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${meta}`);
+  const head = /<head(?:\s[^>]*)?>/i.exec(searchable);
+  if (head?.index !== undefined) {
+    const insertAt = head.index + head[0].length;
+    return `${html.slice(0, insertAt)}${meta}${html.slice(insertAt)}`;
   }
-  if (/<html(?:\s[^>]*)?>/i.test(html)) {
-    return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${meta}</head>`);
+  const root = /<html(?:\s[^>]*)?>/i.exec(searchable);
+  if (root?.index !== undefined) {
+    const insertAt = root.index + root[0].length;
+    return `${html.slice(0, insertAt)}<head>${meta}</head>${html.slice(insertAt)}`;
   }
   return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
 }

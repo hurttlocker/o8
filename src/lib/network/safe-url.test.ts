@@ -12,6 +12,10 @@ describe('public network URL validation', () => {
     'fc00::1',
     'fe80::1',
     '::ffff:127.0.0.1',
+    '::ffff:7f00:1',
+    '0:0:0:0:0:ffff:a00:1',
+    '::ffff:ac10:1',
+    '::ffff:c0a8:101',
   ])('rejects private, metadata, and loopback addresses: %s', (address) => {
     expect(isPublicNetworkAddress(address)).toBe(false);
   });
@@ -35,7 +39,13 @@ describe('public network URL validation', () => {
     expect(url.toString()).toBe('https://example.test/path');
   });
 
-  it.each(['http://localhost:3000', 'http://169.254.169.254/latest', 'file:///etc/passwd'])(
+  it.each([
+    'http://localhost:3000',
+    'http://169.254.169.254/latest',
+    'http://[::1]/',
+    'http://[::ffff:7f00:1]/',
+    'file:///etc/passwd',
+  ])(
     'rejects unsafe browser targets: %s',
     async (url) => expect(assertPublicHttpUrl(url, async () => [])).rejects.toThrow(),
   );
