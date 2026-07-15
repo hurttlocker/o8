@@ -45,6 +45,28 @@ vision demoted to last resort:
 **External Chrome web pages are explicitly out of scope** — no DOM access, no AX. The product answer is
 "do web tasks in o8's browser," where Tier 2 applies.
 
+## End-to-end dogfood gate
+
+The native path now emits three correlated, privacy-safe events: capture reports only AX/capture counts
+and timing, model reports only exact-versus-pixel tag counts, and overlay reports only resolver outcomes.
+No labels, screen text, prompts, images, or model responses enter these events. Start the gate before the
+gesture so old log entries cannot produce a false pass:
+
+```bash
+npm run dogfood:symon-localization -- --expect exact
+```
+
+Focus a native surface such as Notes or System Settings, hold **Right Option**, say “Point at the Search
+field,” and release. Right Option is the screen-aware Symon agent; Fn is ordinary dictation and
+Control+Fn is smart compose. The command passes only when one trace proves AX catalog capture, an exact
+`[el:id]` model choice, and resolution through the production overlay code with no stale id.
+
+Use `--expect fallback` on an external browser, video, or canvas to prove the pixel route still renders
+without snapping to a container. Then visually confirm the mark is tight rather than a window-sized box.
+For `GUIDE`, move the cursor to the rendered target and confirm the dwell/release behavior; repeat the
+exact test on a second display to cover monitor mapping. These two visual assertions remain manual because
+the structured gate deliberately records geometry counts rather than private screen contents.
+
 ## Architecture
 
 ### The catalog + the tag-protocol change
