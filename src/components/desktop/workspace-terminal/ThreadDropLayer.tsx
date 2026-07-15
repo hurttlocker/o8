@@ -189,11 +189,14 @@ export function ThreadDropLayer({ active, layout, onDrop }: ThreadDropLayerProps
       setHover(null);
     };
 
-    // A drag may already be in flight when this tab becomes active.
+    // A drag may already be in flight when this tab becomes active. Adopt it
+    // on the next tick — a synchronous setState inside the effect body would
+    // cascade a render before this commit settles.
     const inFlight = getActiveThreadDrag();
+    let adoptTimer: number | null = null;
     if (inFlight) {
       payloadRef.current = inFlight;
-      setDragPayload(inFlight);
+      adoptTimer = window.setTimeout(() => setDragPayload(inFlight), 0);
     }
 
     window.addEventListener(THREAD_DRAG_START_EVENT, handleStart);
@@ -201,6 +204,7 @@ export function ThreadDropLayer({ active, layout, onDrop }: ThreadDropLayerProps
     window.addEventListener(THREAD_DRAG_END_EVENT, handleEnd);
     window.addEventListener(THREAD_DRAG_CANCEL_EVENT, handleCancel);
     return () => {
+      if (adoptTimer !== null) window.clearTimeout(adoptTimer);
       window.removeEventListener(THREAD_DRAG_START_EVENT, handleStart);
       window.removeEventListener(THREAD_DRAG_MOVE_EVENT, handleMove);
       window.removeEventListener(THREAD_DRAG_END_EVENT, handleEnd);
