@@ -56,6 +56,11 @@ export interface BranchDetailsOverlayProps {
   onSelectSubagent: () => void;
   // Browser card
   browserHost?: string;
+  // Sources card — the links the USER put into THIS conversation (not agent
+  // tool integrations). Empty when the chat has no sources.
+  sources?: Array<{ label: string; href: string }>;
+  /** Open a source link in the right-side browser panel. */
+  onOpenSource?: (href: string) => void;
   // Hidden audit hook
   runtimeLabelText: string;
   onOpenTab: (tab: OverlayPanelTab) => void;
@@ -98,6 +103,8 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     subagentDanger,
     onSelectSubagent,
     browserHost,
+    sources = [],
+    onOpenSource,
     runtimeLabelText,
     onOpenTab,
   } = props;
@@ -248,10 +255,18 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
 
       <Card>
         <StaticHeader label="Sources" />
-        <StaticRow icon={<SquaresIcon />} label="O8" muted />
-        <Row icon={<SquaresIcon />} label="Playwright" onClick={() => onOpenTab('browser')} muted />
-        <Row icon={<SquaresIcon />} label="Chrome Devtools" onClick={() => onOpenTab('browser')} muted />
-        <StaticRow icon={<GlobeIcon />} label="Web search" muted />
+        {sources.length === 0 ? (
+          <StaticRow icon={<LinkIcon />} label="No sources yet" muted />
+        ) : (
+          sources.map((source) => (
+            <Row
+              key={source.href}
+              icon={<LinkIcon />}
+              label={source.label}
+              onClick={() => onOpenSource?.(source.href)}
+            />
+          ))
+        )}
       </Card>
 
       <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabelText} />
@@ -583,6 +598,15 @@ export function WorkerIcon() {
       <circle cx="14.5" cy="8" r=".6" fill="currentColor" stroke="none" />
       <path d="M8 18a4 4 0 0 1 8 0" />
       <path d="M12 12v2" />
+    </svg>
+  );
+}
+
+export function LinkIcon() {
+  return (
+    <svg {...svgProps()}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   );
 }
