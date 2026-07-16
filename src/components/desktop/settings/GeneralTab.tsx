@@ -84,6 +84,7 @@ function ArrowUpIcon() {
 }
 
 export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
+  void onNavigateTab;
   const tauri = isTauri();
 
   // ── Account (identity + plan) ──
@@ -319,7 +320,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
             <>
               <SettingsRow
                 icon={<ShieldIcon />}
-                label="Crash & error reports"
+                label="Share crash & error data — also required to send bug reports"
                 subtitle={lockedSub('crashReportsEnabled', 'Send scrubbed error messages and stack traces. These may include repo-relative paths or nearby runtime context.')}
                 checked={values.crashReportsEnabled}
                 disabled={envLocked('crashReportsEnabled') || busyField === 'crashReportsEnabled'}

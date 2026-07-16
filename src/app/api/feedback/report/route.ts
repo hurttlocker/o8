@@ -6,9 +6,11 @@ import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-digest';
+import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
 import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
 import { resolveFeedbackWebhook } from '@/lib/feedback/webhooks';
 import { verifyToken } from '@/lib/auth/jwt';
+import { resolveCrashReportsEnabledSync } from '@/lib/operator/defaults';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -163,8 +165,8 @@ async function resolveReporter(request: NextRequest): Promise<string | null> {
 
 let cachedVersion: string | null = null;
 
-function jsonError(error: string, status = 400) {
-  return NextResponse.json({ ok: false, error }, { status });
+function jsonError(error: string, status = 400, message?: string) {
+  return NextResponse.json({ ok: false, error, ...(message ? { message } : {}) }, { status });
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -452,6 +454,16 @@ async function postDiscordReport(category: FeedbackCategory, message: string, di
 }
 
 export async function POST(request: NextRequest) {
+  let dataSharingEnabled = false;
+  try {
+    dataSharingEnabled = resolveCrashReportsEnabledSync();
+  } catch {
+    // Privacy-first: an unreadable preference can never fall through to a send.
+  }
+  if (!dataSharingEnabled) {
+    return jsonError(REPORT_DATA_SHARING_OFF_ERROR, 403, REPORT_DATA_SHARING_OFF_MESSAGE);
+  }
+
   let body: FeedbackBody;
   try {
     body = (await request.json()) as FeedbackBody;

@@ -10,7 +10,9 @@ import {
   ACCENT, ACCENT_GLOW, DANGER_RED, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, SF,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS,
 } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, Segmented, AccentButton, GhostButton, Icon, PageHeader } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, Segmented, AccentButton, Icon, PageHeader } from '../primitives';
+import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
+import { useReportDataSharing } from '@/lib/feedback/report-data-sharing-client';
 
 const MAX_IMAGES = 5;
 
@@ -42,6 +44,15 @@ export default function ReportTab() {
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const idRef = useRef(0);
+  const {
+    status: dataSharingStatus,
+    error: dataSharingError,
+    enabling: dataSharingEnabling,
+    enabled: dataSharingEnabled,
+    check: checkDataSharing,
+    enable: enableDataSharing,
+    markDisabled: markDataSharingDisabled,
+  } = useReportDataSharing();
 
   const attach = (files: FileList | File[] | null) => {
     if (!files) return;
@@ -71,6 +82,7 @@ export default function ReportTab() {
   const submit = async () => {
     const message = [summary.trim(), details.trim()].filter(Boolean).join('\n\n');
     if (!message) { setStatus('error'); setError('Add a short report before sending.'); return; }
+    if (!await checkDataSharing(false)) return;
     setStatus('sending'); setError('');
     try {
       const res = await fetch('/api/feedback/report', {
@@ -81,12 +93,14 @@ export default function ReportTab() {
           images: shots.map((s) => ({ dataUrl: s.dataUrl, name: s.name })),
         }),
       });
-      const data = await res.json().catch(() => ({ ok: res.ok }));
+      const data = await res.json().catch(() => ({ ok: res.ok })) as { ok?: boolean; error?: string; message?: string };
       if (res.ok && data?.ok !== false) {
         setStatus('sent'); setSummary(''); setDetails(''); setShots([]);
         setTimeout(() => setStatus('idle'), 3000);
       } else {
-        setStatus('error'); setError(typeof data?.error === 'string' ? data.error : 'Could not send — try again.');
+        if (data?.error === REPORT_DATA_SHARING_OFF_ERROR) markDataSharingDisabled();
+        setStatus('error');
+        setError(data?.message || data?.error || 'Could not send — try again.');
       }
     } catch {
       setStatus('error'); setError('Could not reach the feedback service.');
@@ -98,6 +112,27 @@ export default function ReportTab() {
       <PageHeader icon={ICONS.warning} title="Report Issue" />
       <SectionCard>
         <SectionTitle icon={ICONS.warning}>Tell us what happened</SectionTitle>
+        {dataSharingStatus === 'checking' ? (
+          <div style={{ paddingTop: 10, paddingBottom: 10, color: TEXT_TERTIARY, fontSize: 12.5, fontFamily: SF, lineHeight: 1.55 }}>
+            Checking data-sharing settings…
+          </div>
+        ) : !dataSharingEnabled ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, paddingTop: 10 }}>
+            <div style={{ color: TEXT_PRIMARY, fontSize: 12.5, fontFamily: SF, lineHeight: 1.55 }}>
+              {REPORT_DATA_SHARING_OFF_MESSAGE}
+            </div>
+            {dataSharingError ? (
+              <div style={{ color: DANGER_RED, fontSize: 11.5, fontFamily: SF, lineHeight: 1.45 }}>
+                {dataSharingError}
+              </div>
+            ) : null}
+            <AccentButton
+              label={dataSharingEnabling ? 'Enabling…' : 'Enable sharing'}
+              onClick={() => { if (!dataSharingEnabling) void enableDataSharing(); }}
+            />
+          </div>
+        ) : (
+          <>
         <SectionHint>Voice glitch or any o8 bug — it goes straight to the o8 team in Discord with your app version + OS attached.</SectionHint>
 
         <div style={{ marginBottom: 14 }}>
@@ -144,6 +179,8 @@ export default function ReportTab() {
           {status === 'sent' ? <span style={{ fontSize: 12.5, color: OK_GREEN }}>Sent — thank you.</span> : null}
           {status === 'error' ? <span style={{ fontSize: 12.5, color: DANGER_RED }}>{error}</span> : null}
         </div>
+          </>
+        )}
       </SectionCard>
     </div>
   );

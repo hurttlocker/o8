@@ -24,6 +24,8 @@ import {
   type ReportCategory,
   type ReportImage,
 } from '@/lib/feedback/report-client';
+import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
+import { useReportDataSharing } from '@/lib/feedback/report-data-sharing-client';
 
 type SendState = 'idle' | 'sending' | 'sent' | 'error';
 
@@ -36,6 +38,15 @@ export function ReportIssueHost() {
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const {
+    status: dataSharingStatus,
+    error: dataSharingError,
+    enabling: dataSharingEnabling,
+    enabled: dataSharingEnabled,
+    check: checkDataSharing,
+    enable: enableDataSharing,
+    markDisabled: markDataSharingDisabled,
+  } = useReportDataSharing();
 
   const reset = useCallback(() => {
     setMessage('');
@@ -49,12 +60,18 @@ export function ReportIssueHost() {
   // not this modal), then open with it attached. Falls back to opening empty
   // when capture is unavailable (web) or denied — the user can paste/drop.
   const openWithCapture = useCallback(async () => {
-    const shot = await captureAppWindow();
     setState('idle');
     setError(null);
+    const enabled = await checkDataSharing();
+    if (!enabled) {
+      setImage(null);
+      setOpen(true);
+      return;
+    }
+    const shot = await captureAppWindow();
     setImage(shot);
     setOpen(true);
-  }, []);
+  }, [checkDataSharing]);
 
   // Global hotkey — Cmd/Ctrl+Shift+E, the SAME combo the canvas uses, so
   // "report from anywhere" is one muscle-memory keystroke across surfaces.
@@ -114,6 +131,7 @@ export function ReportIssueHost() {
   const send = useCallback(async () => {
     const trimmed = message.trim();
     if (!trimmed) { setState('error'); setError('Add a short note first.'); return; }
+    if (!await checkDataSharing(false)) return;
     setState('sending');
     setError(null);
     const route = typeof window !== 'undefined' ? `${window.location.pathname}${window.location.hash}` : 'dashboard';
@@ -124,12 +142,13 @@ export function ReportIssueHost() {
       setMessage('');
       setImage(null);
     } else {
+      if (result.code === REPORT_DATA_SHARING_OFF_ERROR) markDataSharingDisabled();
       setState('error');
       setError(result.error);
     }
-  }, [category, message, image]);
+  }, [category, checkDataSharing, image, markDataSharingDisabled, message]);
 
-  const canSend = message.trim().length > 0 && state !== 'sending';
+  const canSend = dataSharingEnabled && message.trim().length > 0 && state !== 'sending';
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -191,6 +210,45 @@ export function ReportIssueHost() {
           </span>
         </div>
 
+        {dataSharingStatus === 'checking' ? (
+          <div style={{ paddingTop: 18, paddingBottom: 18, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.5 }}>
+            Checking data-sharing settings…
+          </div>
+        ) : !dataSharingEnabled ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 12, paddingBottom: 8 }}>
+            <div style={{ color: 'var(--t-text)', fontSize: 13, fontWeight: 300, lineHeight: 1.55 }}>
+              {REPORT_DATA_SHARING_OFF_MESSAGE}
+            </div>
+            {dataSharingError ? (
+              <div style={{ color: 'var(--t-danger, #ef4444)', fontSize: 12, fontWeight: 300, lineHeight: 1.45 }}>
+                {dataSharingError}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => { void enableDataSharing(); }}
+              disabled={dataSharingEnabling}
+              style={{
+                alignSelf: 'flex-start',
+                minHeight: 34,
+                paddingLeft: 16,
+                paddingRight: 16,
+                borderRadius: 9,
+                borderWidth: 0,
+                background: 'var(--t-accent)',
+                color: '#ffffff',
+                opacity: dataSharingEnabling ? 0.6 : 1,
+                cursor: dataSharingEnabling ? 'default' : 'pointer',
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 12.5,
+                fontWeight: 500,
+              }}
+            >
+              {dataSharingEnabling ? 'Enabling…' : 'Enable sharing'}
+            </button>
+          </div>
+        ) : (
+          <>
         {/* bug / request */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 4, borderRadius: 10, background: 'var(--t-hover)' }}>
           {(['bug', 'request'] as const).map((value) => (
@@ -312,6 +370,8 @@ export function ReportIssueHost() {
             </button>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   ), document.body);
