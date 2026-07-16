@@ -27,8 +27,6 @@ mod sidecar_lifecycle;
 mod sound;
 mod speech_text;
 #[cfg(target_os = "macos")]
-mod traffic_lights;
-#[cfg(target_os = "macos")]
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
@@ -5470,8 +5468,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_desktop_info,
-            #[cfg(target_os = "macos")]
-            traffic_lights::set_traffic_light_center,
             check_port,
             restart_app,
             start_ws_server,
@@ -6148,13 +6144,6 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 make_window_zoom_instant(&window);
 
-                // Traffic lights onto the chrome centerline (default 100%-zoom
-                // value; the UI zoom layer re-invokes with centerline × zoom
-                // once the frontend hydrates). Replaces the static conf inset —
-                // see traffic_lights.rs.
-                #[cfg(target_os = "macos")]
-                traffic_lights::apply(&window);
-
                 #[cfg(target_os = "windows")]
                 if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
                     log::warn!("Failed to apply Windows blur: {}", err);
@@ -6211,15 +6200,6 @@ pub fn run() {
                         | tauri::WindowEvent::Moved(_)
                         | tauri::WindowEvent::ScaleFactorChanged { .. } => {
                             window_restore::schedule_event_clamp(&app_handle);
-                            // AppKit re-lays-out the standard window buttons on
-                            // frame changes — re-assert our centerline so the
-                            // lights never snap back to the default position
-                            // (this replaces tao's draw_rect re-assert, which
-                            // only served the removed conf inset).
-                            #[cfg(target_os = "macos")]
-                            if let Some(w) = app_handle.get_webview_window("main") {
-                                traffic_lights::apply(&w);
-                            }
                         }
                         _ => {}
                     }
