@@ -105,6 +105,29 @@ export function applyUiZoom(level: number): void {
     root.style.setProperty('width', `${100 / level}vw`);
     root.style.setProperty('height', `${100 / level}vh`);
   }
+  syncTrafficLights(level);
+}
+
+// The strip's sidebar-toggle pill centers at 20 CSS px from the window top
+// (32px LeftHeaderStrip + card padding + pill nudges — measured live,
+// 2026-07-15). CSS zoom moves that centerline in PHYSICAL points while the
+// native traffic lights stay put, so no static conf inset can align them at
+// more than one zoom level. Instead the Rust side owns light positioning
+// (traffic_lights.rs) and we drive it with centerline × zoom here — glued at
+// every zoom step (Q report 0.1.604: ~5pt off at 100%, worse elsewhere).
+const CHROME_STOPLIGHT_CENTER_CSS = 20;
+const CHROME_STOPLIGHT_X = 14;
+
+function syncTrafficLights(level: number): void {
+  if (typeof window === 'undefined') return;
+  import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke('set_traffic_light_center', {
+      x: CHROME_STOPLIGHT_X,
+      centerY: CHROME_STOPLIGHT_CENTER_CSS * level,
+    }))
+    .catch(() => {
+      /* browser mode / non-macOS — native lights don't exist */
+    });
 }
 
 // Drop the inline zoom override (used on IDE unmount so the IDE zoom never leaks
@@ -117,6 +140,7 @@ export function clearUiZoom(): void {
   root.style.removeProperty('height');
   root.style.setProperty('--ui-zoom', '1');
   root.style.setProperty('--zoom-inverse', '1');
+  syncTrafficLights(1);
 }
 
 export function formatUiZoomPercent(level: number): string {
