@@ -565,10 +565,28 @@ export function ensureOpenclawProfile(): void {
   mkdirSync(join(homedir(), '.o8'), { recursive: true });
   writeFileSync(OPENCLAW_PROFILE_SCHEMA_FILE, `${O8_PROFILE_SCHEMA}\n`, 'utf8');
 
-  // Copy credentials so the isolated profile can resolve model auth.
+  // Seed credentials so the isolated profile can resolve model auth.
+  //
+  // SEED, don't sync (2026-07-16): OAuth refresh tokens are SINGLE-USE. The
+  // old copy-on-every-regen guaranteed a recurring death spiral — the o8
+  // profile refreshes (its copy advances, the source's token is now consumed),
+  // then the next regen pastes the source's DEAD token back over the o8
+  // profile's working one ("Your refresh token has already been used…",
+  // live-hit during the runtime sweep). Copy only when the destination is
+  // missing OR the source file is strictly newer (= the operator re-logged-in
+  // at the source profile and we should adopt the fresh credential).
+  const seedIfMissingOrNewer = (srcFile: string, destFile: string): void => {
+    if (!existsSync(srcFile)) return;
+    if (existsSync(destFile) && statSync(srcFile).mtimeMs <= statSync(destFile).mtimeMs) return;
+    mkdirSync(join(destFile, '..'), { recursive: true });
+    cpSync(srcFile, destFile, { recursive: true });
+    try { chmodSync(destFile, 0o600); } catch { /* directories keep their mode */ }
+  };
+
   const sourceCredentials = join(OPENCLAW_SOURCE_HOME, 'credentials');
-  if (existsSync(sourceCredentials)) {
-    cpSync(sourceCredentials, join(OPENCLAW_O8_HOME, 'credentials'), { recursive: true });
+  const destCredentials = join(OPENCLAW_O8_HOME, 'credentials');
+  if (existsSync(sourceCredentials) && !existsSync(destCredentials)) {
+    cpSync(sourceCredentials, destCredentials, { recursive: true });
   }
 
   // Carry each governed agent's per-agent auth — the credential index that
@@ -582,12 +600,7 @@ export function ensureOpenclawProfile(): void {
     const srcAgentDir = join(OPENCLAW_SOURCE_HOME, 'agents', agentId, 'agent');
     const destAgentDir = join(OPENCLAW_O8_HOME, 'agents', agentId, 'agent');
     for (const file of ['auth-profiles.json', 'auth-state.json']) {
-      const srcFile = join(srcAgentDir, file);
-      if (!existsSync(srcFile)) continue;
-      mkdirSync(destAgentDir, { recursive: true });
-      const destFile = join(destAgentDir, file);
-      cpSync(srcFile, destFile);
-      chmodSync(destFile, 0o600);
+      seedIfMissingOrNewer(join(srcAgentDir, file), join(destAgentDir, file));
     }
   }
 
