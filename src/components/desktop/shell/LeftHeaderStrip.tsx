@@ -42,8 +42,13 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               ones (they scale with CSS zoom like everything else — Q ruling
               2026-07-16); legacy screen-pixel spacer clearing the native
               lights on older shells. Same yNudge as the toggle pill so both
-              centers ride the same line. See TrafficLights.tsx. */}
-          <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} />
+              centers ride the same line. leadInPx 6 (not the default 1): the
+              left column is FLUSH to the window edge now (dock ruling
+              2026-07-16), so strip content starts at window-x 8, and 8+6
+              puts the first light back at 14 — matching the workspace strip
+              so the cluster doesn't jump when the sidebar collapses.
+              See TrafficLights.tsx. */}
+          <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} />
           <SidebarTogglePill
             sidebarVisible={sidebarVisible}
             onClick={onToggleSidebar}
