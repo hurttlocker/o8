@@ -1175,6 +1175,15 @@ function OrchestratorTabInner({
       ref={chatPanelRef}
       transcriptSideRail={branchRail}
       open={active}
+      // The panel's #1459 crash-recovery auto-restore (adopt the latest thread
+      // when it was modified <60s ago) belongs ONLY to the boot-restore tab.
+      // On a fresh "+ New session" tab (restoreLastThread=false) or a tab bound
+      // to an explicit thread, that recovery adopted the ALREADY-OPEN thread —
+      // the controller's one-tab-per-thread dedupe then closed the new tab as a
+      // duplicate, which read as "New session does nothing" (GQXEZD saga;
+      // live-caught 2026-07-16: fresh tab emitted the old thread id ~450ms
+      // after mount, then vanished).
+      suppressAutoRestore={!restoreLastThread || Boolean(initialThreadId)}
       draftInjection={effectiveDraftInjection}
       imageInjection={data?.imageInjection ?? null}
       onImageInjectionConsumed={data?.onImageInjectionConsumed}
