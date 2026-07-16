@@ -5,7 +5,9 @@ import { createPortal } from 'react-dom';
 import { SmoothCorners } from '@lisse/react';
 import { CollapsedRailIcon, ChevronsRightIcon } from './branch-rail-collapse';
 import {
+  BRANCH_RAIL_CARD_RADIUS,
   COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
+  WORKSPACE_RAIL_CORNER_RADIUS,
   WORKSPACE_RAIL_CORNER_SMOOTHING,
 } from './branch-rail-geometry';
 import type { PrDetail } from './pr-panel/types';
@@ -73,6 +75,10 @@ export interface BranchDetailsOverlayProps {
 
 const OVERLAY_WIDTH = 256;
 const OVERLAY_MARGIN = 8;
+/** Pulls the card off the workspace card's top + right edges so its shadow has
+ *  room to land on those sides instead of dying flush against them, and the card
+ *  reads as floating on all four (Q 2026-07-16). */
+const OVERLAY_EDGE_GAP = 7;
 const OVERLAY_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /**
@@ -118,22 +124,19 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
 
   const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
-  const top = Math.max(OVERLAY_MARGIN, anchorRect.top);
-  const right = Math.max(OVERLAY_MARGIN, viewportWidth - anchorRect.right);
+  const top = Math.max(OVERLAY_MARGIN, anchorRect.top) + OVERLAY_EDGE_GAP;
+  const right = Math.max(OVERLAY_MARGIN, viewportWidth - anchorRect.right) + OVERLAY_EDGE_GAP;
   const maxHeight = Math.max(160, viewportHeight - top - OVERLAY_MARGIN);
 
   return createPortal(
-    // Lisse squircle, same smoothing as the workspace card corner it floats
-    // over — radius 18 nests concentrically inside the workspace's 26-radius
-    // corner at the overlay's ~8px inset, so the two edges read as one system
-    // in glass mode (Q, 0.1.604: the plain 14px CSS corner clashed against
-    // the Lisse corner behind it). box-shadow strategy: native CSS shadow on
-    // a sibling — immune to WebKit's SVG-filter rasterisation bug.
-    <SmoothCorners
-      corners={{ radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-      innerBorder={{ width: 1, color: 'var(--t-border-subtle, var(--t-border))', opacity: 1 }}
-      shadowStrategy="box-shadow"
-      className="hide-scrollbar"
+    // The positioning lives on THIS wrapper, not on the SmoothCorners element.
+    // The "box-shadow" strategy renders the shadow into an `inset: 0` sibling
+    // inside a `position: relative` wrapper Lisse owns — so the shadowed
+    // element has to be in normal flow. Positioning it `fixed` took it out of
+    // flow, Lisse's wrapper collapsed to zero height, and the shadow painted as
+    // a full-width strip at the bottom of the viewport (measured). Hence: fixed
+    // wrapper, in-flow card (Q 2026-07-16 — "the edge still has no shadow").
+    <div
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
@@ -141,26 +144,11 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         top,
         right,
         width: OVERLAY_WIDTH,
-        maxHeight,
         zIndex: 10000,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        paddingTop: 8,
-        paddingRight: 10,
-        paddingBottom: 12,
-        paddingLeft: 10,
-        overflowY: 'auto',
-        scrollbarWidth: 'none',
-        // Opaque paper surface so the chat never bleeds through (--t-chat-surface-bg
-        // is pinned solid in every palette × surface). The card reads as an
-        // elevated panel over the chat, not a translucent scrim.
-        background: 'var(--t-chat-surface-bg)',
-        boxShadow: 'var(--t-panel-shadow), 0 8px 30px rgba(15, 23, 42, 0.18)',
-        color: 'var(--t-text)',
         // Morph: scale up out of the capsule's top-right corner on open, and back
         // down into it on close (the capsule cross-fades in the launcher). The
-        // overlay stays mounted so both directions animate.
+        // overlay stays mounted so both directions animate. On the wrapper so the
+        // shadow morphs with the card instead of hanging behind it.
         opacity: open ? 1 : 0,
         transform: open ? 'scale(1)' : 'scale(0.9)',
         transformOrigin: 'top right',
@@ -168,10 +156,48 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         pointerEvents: open ? 'auto' : 'none',
       }}
     >
+      {/* Lisse squircle, same smoothing as the workspace card corner it floats
+          over (Q, 0.1.604: the plain 14px CSS corner clashed against the Lisse
+          corner behind it).
+
+          Top-right carries the workspace card's radius rather than the
+          capsule's, so the card's corner reads as the same size as the chat
+          corner it sits against. The other three stay at the capsule radius
+          they morph out of (Q 2026-07-16). */}
+      <SmoothCorners
+        corners={{
+          topLeft: { radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING },
+          topRight: { radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING },
+          bottomRight: { radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING },
+          bottomLeft: { radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING },
+        }}
+        innerBorder={{ width: 1, color: 'var(--t-border-subtle, var(--t-border))', opacity: 1 }}
+        shadowStrategy="box-shadow"
+        className="hide-scrollbar"
+        style={{
+          width: '100%',
+          maxHeight,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          paddingTop: 8,
+          paddingRight: 10,
+          paddingBottom: 12,
+          paddingLeft: 10,
+          overflowY: 'auto',
+          scrollbarWidth: 'none',
+          // Opaque paper surface so the chat never bleeds through (--t-chat-surface-bg
+          // is pinned solid in every palette × surface). The card reads as an
+          // elevated panel over the chat, not a translucent scrim.
+          background: 'var(--t-chat-surface-bg)',
+          boxShadow: 'var(--t-panel-shadow), 0 8px 30px rgba(15, 23, 42, 0.18)',
+          color: 'var(--t-text)',
+        }}
+      >
       {/* » folds the overlay away (unpins → collapsed=true). */}
       {onToggleCollapsed ? (
         <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-          <CollapsedRailIcon title="Collapse" onClick={onToggleCollapsed}><ChevronsRightIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Collapse" onClick={onToggleCollapsed} resting="card"><ChevronsRightIcon /></CollapsedRailIcon>
         </div>
       ) : null}
 
@@ -279,20 +305,27 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         )}
       </Card>
 
-      <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabelText} />
-    </SmoothCorners>,
+        <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabelText} />
+      </SmoothCorners>
+    </div>,
     document.body,
   );
 }
 
 function Card({ children }: { children: ReactNode }) {
   return (
-    <div
+    // Lisse squircle, same smoothing as the overlay + workspace card. A plain
+    // CSS corner at the same radius reads harder than the squircles around it
+    // — the same clash the 0.1.604 ruling caught one level up (Q 2026-07-16).
+    <SmoothCorners
+      corners={{ radius: BRANCH_RAIL_CARD_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
+      innerBorder={{
+        width: 1,
+        color: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 55%, transparent)',
+        opacity: 1,
+      }}
+      autoEffects={false}
       style={{
-        borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 55%, transparent)',
         background: 'color-mix(in srgb, var(--t-bg-card) 70%, transparent)',
         paddingTop: 6,
         paddingBottom: 4,
@@ -304,7 +337,7 @@ function Card({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-    </div>
+    </SmoothCorners>
   );
 }
 
