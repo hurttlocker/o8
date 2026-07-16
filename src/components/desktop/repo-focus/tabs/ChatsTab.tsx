@@ -145,20 +145,16 @@ export function ChatsTab({
   }, []);
   const [loading, setLoading] = useState(true);
   const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
-  // Optimistic click-time map — clicking a chat in the sidebar should
-  // bubble it to the top of the Today bucket immediately, before the file
-  // mtime updates from the server. Keyed by tabId, value = Date.now() of
-  // the click. Used to override item.modifiedAt in the sort comparator
-  // when building date / repo / flat groups.
-  const [clickedAtByTab, setClickedAtByTab] = useState<Record<string, number>>({});
-  const markClickedAt = useCallback((tabId: string) => {
-    setClickedAtByTab((prev) => ({ ...prev, [tabId]: Date.now() }));
-  }, []);
+  // Rail recency = the last time the conversation SPOKE (Q ruling
+  // 2026-07-16). The previous ChatGPT-style click-bump (an optimistic
+  // clickedAt map that overrode modifiedAt so an opened chat popped to the
+  // top) is deliberately GONE — clicking a chat must not reorder the rail;
+  // only a new message does. modifiedAt itself is last-message-derived
+  // server-side (chat-history/list + the mobile lister) for the same reason.
   const effectiveModifiedAtMs = useCallback((item: ChatHistoryItem) => {
     const ts = Date.parse(item.modifiedAt);
-    const clicked = clickedAtByTab[item.tabId] ?? 0;
-    return Math.max(Number.isFinite(ts) ? ts : 0, clicked);
-  }, [clickedAtByTab]);
+    return Number.isFinite(ts) ? ts : 0;
+  }, []);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<HistoryGroupKey, boolean>>({
     chat: false,
     orchestrator: false,
@@ -636,7 +632,7 @@ export function ChatsTab({
                       disabled={!onOpenHistoryChat}
                       active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                       tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                      onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
+                      onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                       onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                     />
                   ))}
@@ -656,7 +652,7 @@ export function ChatsTab({
                         disabled={!onOpenHistoryChat}
                         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                         tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                        onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
+                        onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                         onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                       />
                     ))}
@@ -696,7 +692,7 @@ export function ChatsTab({
                                   disabled={!onOpenHistoryChat}
                                   active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                                   tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                                  onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
+                                  onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                                   onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                                   ownedCount={ownedPackets.length}
                                   ownedExpanded={ownedExpanded}
@@ -802,7 +798,7 @@ export function ChatsTab({
                   disabled={!onOpenHistoryChat}
                   active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                   tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                  onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
+                  onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                   onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                 />
               ))}
@@ -846,7 +842,7 @@ export function ChatsTab({
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                 tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
+                onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                 onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
               />
             ))
@@ -880,7 +876,7 @@ export function ChatsTab({
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                 tone={HISTORY_ROW_TONES.neutral}
-                onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
+                onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                 onOpenMenu={(event) => setHistoryActionMenu({ item, archived: true, x: event.clientX, y: event.clientY })}
               />
             ))

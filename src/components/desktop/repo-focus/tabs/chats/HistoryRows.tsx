@@ -12,7 +12,6 @@ import {
   packetRepoLabel,
   packetStateTone,
   packetTimestamp,
-  shimmerTextStyle,
 } from './helpers';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
@@ -283,7 +282,10 @@ export function HistoryChatRow({
         display: 'flex',
         alignItems: 'center',
         gap: compact ? 6 : 8,
-        background: active ? rowTone.background : hovered ? 'var(--t-hover)' : rowTone.background,
+        // Selection + hover both paint on the rounded inset layer below —
+        // the row itself stays transparent so the fill never hits the rail's
+        // edges sharp (Q ruling 2026-07-16: rounded selector, no shimmer).
+        background: 'transparent',
         color: 'var(--t-text)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.72 : 1,
@@ -302,6 +304,29 @@ export function HistoryChatRow({
         transition: 'background 180ms ease, opacity 180ms ease',
       }}
     >
+      {/* Rounded selection/hover layer (Q ruling 2026-07-16): the selected
+          chat gets a soft rounded fill — var(--t-input-bg), the same active
+          vocabulary as the workspace tab pill — readable in light AND dark,
+          glass AND solid, replacing the 07-14 title-shimmer experiment
+          (invisible in light mode). Hover shares the geometry with the
+          lighter var(--t-hover) fill so sibling states stay cohesive. Inset
+          so the fill never touches the rail edges; text X stays exactly 37
+          (the hurttlocker indent is untouched — this layer is behind it). */}
+      {(active || hovered) ? (
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: 2,
+            bottom: 2,
+            left: 6,
+            right: 6,
+            borderRadius: compact ? 8 : 10,
+            background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
+            zIndex: 0,
+          }}
+        />
+      ) : null}
       {/* Status dot leads the row in the 37px indent gutter (Q 2026-07-12,
           Claude-style): you scan states down the LEFT edge before reading a
           word. Title X stays exactly 37 — the hurttlocker indent is untouched;
@@ -319,9 +344,8 @@ export function HistoryChatRow({
       >
         <AgentStatusDot state={dotState} />
       </span>
-      <span style={{ flex: 1, minWidth: 0 }}>
+      <span style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         <span
-          className={active ? 'o8-text-shimmer' : undefined}
           style={{
             display: 'block',
             fontSize: 13.5,
@@ -331,10 +355,6 @@ export function HistoryChatRow({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            // Focused-row title shimmer — with the selection pill off, the
-            // shimmer alone carries "you are here". Flare: orange on light
-            // (--t-shimmer-flare), ice-white ink fallback on dark (Q 2026-07-14).
-            ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-shimmer-flare, var(--t-text))') : {}),
           }}
         >
           {item.title}
@@ -377,6 +397,9 @@ export function HistoryChatRow({
           fontSize: 9.5,
           fontWeight: 260,
           letterSpacing: '-0.4px',
+          // Above the rounded selection layer (positioned siblings stack in
+          // DOM order; unpositioned content would paint beneath it).
+          position: 'relative',
         }}
       >
         {/* Variant-B affordance: faint "N agents" count doubles as the
