@@ -71,6 +71,75 @@ export function fileToReportImage(
   });
 }
 
+export interface ClientDiagnostics {
+  ui: {
+    innerW: number;
+    innerH: number;
+    dpr: number;
+    uiZoom: string;
+    bodyScrollTop: number;
+    docScrollTop: number;
+    /** Top of the dashboard root rect — a non-zero value means the whole app
+     *  shell is shifted out of the window (the 0.1.605/607 body-scroll bug
+     *  read as dashboardTop −491). */
+    dashboardTop: number | null;
+    palette: string;
+    surface: string;
+  } | null;
+  /** Tail of the Rust-side webview error ring buffer (console.error +
+   *  window error/unhandledrejection — includes non-crash forensics like the
+   *  swallowed [workspace-spawn] failures). */
+  consoleErrors: Array<{ message: string; source: string; lineno: number; timestamp: number }>;
+  platform: string;
+}
+
+/**
+ * Snapshot the client-side state that crash-only telemetry can never see:
+ * layout/geometry drift, zoom, theme, and the console-error ring buffer.
+ * Every field is best-effort — a diagnostics failure must never block the
+ * report itself.
+ */
+export async function collectClientDiagnostics(): Promise<ClientDiagnostics> {
+  const result: ClientDiagnostics = { ui: null, consoleErrors: [], platform: 'unknown' };
+  try {
+    result.platform = typeof navigator !== 'undefined' ? navigator.platform || 'unknown' : 'unknown';
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const dash = document.querySelector('[data-mcp-scope="dashboard"]');
+      const rootStyle = getComputedStyle(document.documentElement);
+      result.ui = {
+        innerW: window.innerWidth,
+        innerH: window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+        uiZoom: rootStyle.getPropertyValue('--ui-zoom').trim() || '1',
+        bodyScrollTop: document.body?.scrollTop ?? 0,
+        docScrollTop: document.documentElement.scrollTop,
+        dashboardTop: dash ? Math.round(dash.getBoundingClientRect().top) : null,
+        palette: document.documentElement.dataset.palette ?? '',
+        surface: document.documentElement.dataset.surface ?? '',
+      };
+    }
+  } catch {
+    /* geometry unavailable — report still goes */
+  }
+  try {
+    if (isTauri()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const buffer = await invoke<{ errors?: Array<{ message?: string; source?: string; lineno?: number; timestamp?: number }> }>('o8_view_console_errors');
+      result.consoleErrors = (buffer?.errors ?? [])
+        .slice(-20)
+        .map((entry) => ({
+          message: String(entry?.message ?? '').slice(0, 600),
+          source: String(entry?.source ?? '').slice(0, 200),
+          lineno: Number(entry?.lineno ?? 0),
+          timestamp: Number(entry?.timestamp ?? 0),
+        }));
+    }
+  } catch {
+    /* ring buffer unavailable — report still goes */
+  }
+  return result;
+}
+
 /**
  * POST a report to the private team intake. `route` records where it fired.
  *
@@ -78,14 +147,22 @@ export function fileToReportImage(
  * receipt: a commit carrying `Fixes-Report: <id>` announces the fix in the public
  * #fixed channel, credited to them. Show it — an id they never saw is a fix they
  * can never connect back to the thing they reported.
+ *
+ * Diagnostics ride along by DEFAULT (Q ruling 2026-07-15 — "when he sends a
+ * screenshot we get the logs"): the crash digest (server-side), the console
+ * ring buffer, and the UI-state snapshot. Reports are private at intake.
+ * Callers can pass `includeDiagnostics: false` to opt a report out.
  */
 export async function submitReport(input: {
   category: ReportCategory;
   message: string;
   route: string;
   image?: ReportImage | null;
+  includeDiagnostics?: boolean;
 }): Promise<{ ok: true; reportId: string | null } | { ok: false; error: string }> {
   try {
+    const includeDiagnostics = input.includeDiagnostics !== false;
+    const client = includeDiagnostics ? await collectClientDiagnostics() : null;
     const response = await fetch('/api/feedback/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -95,6 +172,8 @@ export async function submitReport(input: {
         route: input.route,
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
         image: input.image ? { dataUrl: input.image.dataUrl, name: input.image.name } : undefined,
+        includeDiagnostics,
+        client: client ?? undefined,
       }),
     });
     const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; reportId?: string } | null;
