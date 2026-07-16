@@ -218,6 +218,8 @@ export function AppearanceTab() {
     palettes,
     reduceTransparency,
     setReduceTransparency,
+    workspaceGlass,
+    setWorkspaceGlass,
   } = useTheme();
   const [timelineVisible, setTimelineVisible] = useTimelineVisible();
   const { founder, plan } = useEntitlement();
@@ -289,6 +291,20 @@ export function AppearanceTab() {
                 ]}
               />
             }
+            divider
+          />
+          {/* All Glass (experimental, Q 2026-07-16): the workspace CENTER goes
+              translucent too — the one exception to the center-is-always-solid
+              doctrine. Lives HERE, not in the quick drawer's Appearance row
+              (operator's call: settings-page only until the values are tuned
+              with the development sliders). While on, palette has no effect
+              (the mode pins dark ink over glass); drawers keep their palette. */}
+          <SettingsRow
+            icon={<LayersIcon />}
+            label="All glass"
+            subtitle="Experimental — the workspace surface goes translucent too; the whole window follows your wallpaper"
+            checked={workspaceGlass}
+            onToggle={setWorkspaceGlass}
           />
         </SettingsGroup>
       </section>
