@@ -237,6 +237,44 @@ describe('POST /api/feedback/report', () => {
     expect(text).toContain('[workspace-spawn] orchestrator spawn failed: boom');
   });
 
+  it('renders the workspace snapshot and spawn journal into the diagnostics file (GQXEZD forensics)', async () => {
+    const res = await postReport({
+      category: 'bug',
+      message: 'new session does nothing',
+      route: '/dashboard',
+      includeDiagnostics: true,
+      client: {
+        ui: null,
+        consoleErrors: [],
+        platform: 'MacIntel',
+        workspace: {
+          layout: {
+            activeTileId: 'tile-a',
+            leaves: [{ id: 'tile-a', kind: 'terminal', repoPath: null }, { id: 'tile-b', kind: 'terminal', repoPath: '/repo' }],
+            handleTileIds: ['tile-b'],
+          },
+          'tabs:x1y2z3': { stateScope: 'workspace', tabs: [] },
+        },
+        spawnJournal: [
+          { ts: 1784168000000, event: 'orchestrator:requested activeTile=tile-a' },
+          { ts: 1784168000500, event: 'orchestrator:done tile=tile-b tab=tab-123' },
+        ],
+      },
+    });
+    expect(res.status).toBe(200);
+
+    const form = captured.form;
+    expect(form, 'workspace forensics must force the multipart path').not.toBeNull();
+    const file = form!.get('files[0]') as File;
+    expect(file.name).toBe('diagnostics.txt');
+    const text = await file.text();
+    expect(text).toContain('SPAWN JOURNAL');
+    expect(text).toContain('orchestrator:done tile=tile-b tab=tab-123');
+    expect(text).toContain('WORKSPACE SNAPSHOT');
+    expect(text).toContain('"handleTileIds"');
+    expect(text).toContain('tabs:x1y2z3');
+  });
+
   it('drops client diagnostics when includeDiagnostics is absent', async () => {
     const res = await postReport({
       category: 'bug',

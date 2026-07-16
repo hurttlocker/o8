@@ -64,6 +64,7 @@ import {
   computeUpdatedChatSessionKey,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import { useWorkspaceTabCleanup } from '@/components/desktop/workspace-terminal/useWorkspaceTabCleanup';
+import { recordSpawnEvent, registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 
 type ControllerProps = WorkspaceTerminalProps;
 
@@ -195,6 +196,32 @@ export function useWorkspaceTerminalController(
     () => visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null,
     [effectiveActiveTabId, visibleTabs],
   );
+
+  // Report-time forensics (GQXEZD): this controller's tab truth — per
+  // workspace instance — so a "New session did nothing" report shows whether
+  // the tab was ever appended, where it went, and what the restore did.
+  const introspectRef = useRef({ tabs, activeTabId, effectiveActiveTabId, restoreCompletedKey, stateScope });
+  introspectRef.current = { tabs, activeTabId, effectiveActiveTabId, restoreCompletedKey, stateScope };
+  useEffect(() => {
+    const instance = `tabs:${Math.random().toString(36).slice(2, 8)}`;
+    return registerIntrospectionContributor(instance, () => {
+      const s = introspectRef.current;
+      return {
+        stateScope: s.stateScope,
+        restoreCompletedKey: s.restoreCompletedKey,
+        activeTabId: s.activeTabId,
+        effectiveActiveTabId: s.effectiveActiveTabId,
+        tabs: s.tabs.map((tab) => ({
+          id: tab.id,
+          kind: tab.kind,
+          fresh: tab.freshSpawn === true || undefined,
+          thread: tab.orchestratorThreadId ? true : undefined,
+          repo: tab.repo?.name,
+        })),
+      };
+    });
+    // stateScope changes are visible through the ref; registration is per-mount.
+  }, []);
   // Mirror the focused tab id into a ref so the (event-driven) orchestrator
   // spawn callbacks can read the CURRENT focus at click time without taking
   // effectiveActiveTabId as a dep (which would churn the imperative handle on
@@ -533,6 +560,7 @@ export function useWorkspaceTerminalController(
         setTabs(nextTabs);
       }
       setActiveTabIdFromUser(emptyExisting.id);
+      recordSpawnEvent(`orchestrator:reused tab=${emptyExisting.id} scope=${stateScope} tabs=${tabsRef.current.length}`);
       return emptyExisting.id;
     }
     // User-initiated spawn via + New session — pass fresh=true so the
@@ -548,6 +576,7 @@ export function useWorkspaceTerminalController(
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
     setActiveTabIdFromUser(newTab.id);
+    recordSpawnEvent(`orchestrator:fresh tab=${newTab.id} scope=${stateScope} tabs=${nextTabs.length}`);
     return newTab.id;
   }, [createDefaultOrchestratorTab, setActiveTabIdFromUser]);
 

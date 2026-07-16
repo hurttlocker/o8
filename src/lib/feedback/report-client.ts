@@ -12,6 +12,11 @@
 import { isTauri } from '@/lib/tauri/bridge';
 import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
 import { readReportDataSharingEnabled } from '@/lib/feedback/report-data-sharing-client';
+import {
+  collectWorkspaceIntrospection,
+  readSpawnJournal,
+  type SpawnJournalEntry,
+} from '@/lib/feedback/workspace-introspect';
 
 export const MAX_REPORT_MESSAGE = 4000;
 export const MAX_REPORT_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -93,6 +98,12 @@ export interface ClientDiagnostics {
    *  swallowed [workspace-spawn] failures). */
   consoleErrors: Array<{ message: string; source: string; lineno: number; timestamp: number }>;
   platform: string;
+  /** Workspace tile/tab truth at report time (GQXEZD forensics): which tiles
+   *  exist, which have live handles, what tabs each workspace holds. */
+  workspace: Record<string, unknown> | null;
+  /** Breadcrumbs from the session-spawn paths — proves whether a "New session
+   *  did nothing" click reached the handler and where the tab went. */
+  spawnJournal: SpawnJournalEntry[];
 }
 
 /**
@@ -102,7 +113,14 @@ export interface ClientDiagnostics {
  * report itself.
  */
 export async function collectClientDiagnostics(): Promise<ClientDiagnostics> {
-  const result: ClientDiagnostics = { ui: null, consoleErrors: [], platform: 'unknown' };
+  const result: ClientDiagnostics = { ui: null, consoleErrors: [], platform: 'unknown', workspace: null, spawnJournal: [] };
+  try {
+    const workspace = collectWorkspaceIntrospection();
+    result.workspace = Object.keys(workspace).length > 0 ? workspace : null;
+    result.spawnJournal = readSpawnJournal();
+  } catch {
+    /* introspection unavailable — report still goes */
+  }
   try {
     result.platform = typeof navigator !== 'undefined' ? navigator.platform || 'unknown' : 'unknown';
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
