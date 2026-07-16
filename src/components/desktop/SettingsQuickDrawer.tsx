@@ -32,7 +32,7 @@ import { useTheme } from '@/lib/theme/context';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
-import { ThemeContrastGlyph, GlassGlyph, ThemeToggle, SurfaceToggle } from './settings-quick-drawer/theme-rows';
+import { ThemeContrastGlyph, AppearanceControl } from './settings-quick-drawer/theme-rows';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -417,8 +417,8 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
   );
 }
 
-// Theme + surface toggles live in ./settings-quick-drawer/theme-rows.tsx
-// (extracted for the 800-line ceiling when the Glass row landed).
+// The merged Appearance control (palette segments + glass latch) lives in
+// ./settings-quick-drawer/theme-rows.tsx (extracted for the 800-line ceiling).
 
 export function SettingsQuickDrawer({
   open,
@@ -580,16 +580,14 @@ export function SettingsQuickDrawer({
             <span style={{ color: FAINT, fontFamily: MONO, fontSize: 10, fontWeight: 300, letterSpacing: '0.5px' }}>⌘,</span>
           </RowButton>
 
+          {/* ONE merged Appearance row (Q ruling 2026-07-16): the Light/Dark
+              segments carry the palette, the icon latch after the divider
+              carries glass. Replaced the separate Theme + Glass rows — one
+              row shorter, same one-click reach for every state. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 30, paddingLeft: 7, paddingRight: 7 }}>
             <IconFrame><ThemeContrastGlyph /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Theme</span>
-            <ThemeToggle paletteId={paletteId} setPalette={setPalette} />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 30, paddingLeft: 7, paddingRight: 7 }}>
-            <IconFrame><GlassGlyph /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Glass</span>
-            <SurfaceToggle surface={surface} setReduceTransparency={setReduceTransparency} />
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Appearance</span>
+            <AppearanceControl paletteId={paletteId} setPalette={setPalette} surface={surface} setReduceTransparency={setReduceTransparency} />
           </div>
 
           {foundersMode ? (
