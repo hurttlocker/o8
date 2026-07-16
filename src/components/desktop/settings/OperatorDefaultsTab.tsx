@@ -412,7 +412,10 @@ export function OperatorDefaultsTab() {
                   { value: 'auto', label: 'Auto' },
                   { value: 'codex', label: 'Codex' },
                   { value: 'claude', label: 'Claude' },
-                  { value: 'openclaw', label: 'OpenClaw' },
+                  // OpenClaw hidden from the picker (Q ruling 2026-07-16, not
+                  // one-click yet); shown only if it's already the selection so
+                  // an existing choice stays visible + escapable.
+                  ...(values.orchestratorBackend === 'openclaw' ? [{ value: 'openclaw', label: 'OpenClaw' }] : []),
                   ...(hermesAvailable || values.orchestratorBackend === 'hermes' ? [{ value: 'hermes', label: 'Hermes' }] : []),
                   { value: 'collide', label: 'Collide' },
                 ]}

@@ -80,13 +80,12 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
     ],
   },
-  {
-    key: 'openclaw',
-    label: 'OpenClaw',
-    options: [
-      { value: 'openclaw', label: 'OpenClaw', triggerLabel: 'OpenClaw', backend: 'openclaw' },
-    ],
-  },
+  // OpenClaw pulled from the picker (Q ruling 2026-07-16): not on the
+  // one-click path the official CLIs are — its governed clone needs its own
+  // gateway + credential story that broke three ways in one night (invalid
+  // config key, model allowlist, SQLite auth migration). The backend module
+  // stays registered so existing openclaw threads keep working and it can
+  // return when its setup story is one-click.
   {
     key: 'hermes',
     label: 'Hermes',
