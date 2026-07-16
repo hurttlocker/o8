@@ -624,6 +624,7 @@ export function createOrchestratorMessageHandler(
           id: `orch-error-${Date.now()}`,
           role: 'system',
           text: `Orchestrator error: ${error}`,
+          isError: true,
           timestamp: Date.now(),
           timestampLabel: formatTimestampLabel(Date.now()),
         }]);

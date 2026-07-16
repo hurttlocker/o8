@@ -885,6 +885,7 @@ export function useOrchestratorStream(
               id: `orch-stale-no-events-${at}`,
               role: 'system' as const,
               text: 'Orchestrator error: This turn produced no transcript events before the client watchdog expired. Re-send to retry.',
+              isError: true,
               timestamp: at,
               timestampLabel: formatTimestampLabel(at),
             }];

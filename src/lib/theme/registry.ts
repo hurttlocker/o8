@@ -166,6 +166,17 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-chat-surface-text-secondary': '#475569',
   '--t-chat-surface-text-muted': '#64748b',
   '--t-chat-surface-border': 'rgba(15, 23, 42, 0.08)',
+  // Operator prompt fill — one step off the paper so the user's turn separates
+  // from the flat agent text without leaving the paper family. Pinned solid
+  // like the rest of this family: a translucent fill composites back to the
+  // paper underneath and reads as an empty outline.
+  '--t-chat-user-bg': '#ECE9E2',
+  // In-chat error notices. Warning orange held at a tint — enough to read as
+  // "this turn broke" at a glance, not enough to become a red alert box in a
+  // paper transcript. Alpha is safe here (unlike the user fill): an orange
+  // wash over the paper composites to a real tint, not back to the paper.
+  '--t-chat-error-bg': 'rgba(249, 115, 22, 0.07)',
+  '--t-chat-error-border': 'rgba(249, 115, 22, 0.24)',
   '--t-chat-surface-input-bg': '#F4F2ED',
   '--t-chat-surface-input-border': 'rgba(15, 23, 42, 0.12)',
   '--t-chat-surface-card-bg': 'rgba(15, 23, 42, 0.04)',
@@ -356,6 +367,16 @@ const DARK_BASE: Record<string, string> = {
   '--t-chat-surface-text-secondary': '#8b95a3',
   '--t-chat-surface-text-muted': '#5f6b7a',
   '--t-chat-surface-border': 'rgba(255, 255, 255, 0.06)',
+  // See the light-palette note — one step up from the #242424 paper. Dark needs
+  // a wider step than light's: the same delta reads as less separation against
+  // a dark ground.
+  '--t-chat-user-bg': '#353535',
+  // See the light-palette note. Deliberately the SAME orange as light rather
+  // than the dark palette's amber `--t-warning` — amber reads gold on ink, and
+  // this needs to read orange in both. Carried a little stronger: the same
+  // wash separates less against a dark ground.
+  '--t-chat-error-bg': 'rgba(249, 115, 22, 0.10)',
+  '--t-chat-error-border': 'rgba(249, 115, 22, 0.30)',
   '--t-chat-surface-input-bg': 'rgba(42, 42, 42, 0.5)',
   '--t-chat-surface-input-border': 'rgba(255, 255, 255, 0.1)',
   '--t-chat-surface-card-bg': 'rgba(255, 255, 255, 0.04)',
