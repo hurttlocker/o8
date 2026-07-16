@@ -50,7 +50,10 @@ export function CollapsiblePlanCard({ text, compact = false }: CollapsiblePlanCa
         borderColor: 'var(--t-glass-border-strong, rgba(148, 163, 184, 0.2))',
         borderRadius: compact ? 14 : 16,
         backgroundColor: 'var(--t-panel, rgba(255, 255, 255, 0.82))',
-        boxShadow: 'var(--t-glass-shadow, 0 18px 38px rgba(15, 23, 42, 0.08))',
+        // Flat. --t-glass-shadow is chrome elevation (0 18px 38px) and it read
+        // as a stuck hover against the transcript's flat text — the same call
+        // as the system cards above it (Q 2026-07-16).
+        boxShadow: 'none',
         overflow: 'hidden',
       }}
     >
