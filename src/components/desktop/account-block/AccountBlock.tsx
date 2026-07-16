@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { ChromeButton } from '../chrome/ChromeButton';
-import { DeviceMobileIcon, GearSixIcon } from '../desktop-status-bar/status-bar-icons';
+import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { WhatsNewCard } from './WhatsNewCard';
 
@@ -205,6 +205,9 @@ export function AccountBlock({
                 </span>
               </span>
             </button>
+            {/* Pair-mobile is the row's ONLY trailing icon (Q ruling
+                2026-07-16): the gear was a duplicate affordance — clicking
+                the account row itself already opens the settings drawer. */}
             {onOpenMobilePairing ? (
               <ChromeButton
                 icon={<DeviceMobileIcon size={14} color="var(--t-text-muted)" />}
@@ -214,14 +217,6 @@ export function AccountBlock({
                 radius={6}
               />
             ) : null}
-            <ChromeButton
-              icon={<GearSixIcon size={14} color="var(--t-text-muted)" />}
-              label="Account settings"
-              active={popover !== null}
-              onClick={toggleMenu}
-              size={22}
-              radius={6}
-            />
           </>
         ) : null}
       </div>

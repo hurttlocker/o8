@@ -4944,13 +4944,15 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-style floating card with a 5px buffer on top/left/right.
-            // Bottom is FLUSH (Q ruling 2026-07-16): the status bar no longer
-            // runs under this column, so the panel stretches to the window
-            // bottom — square bottom corners, the window's own corner mask
-            // shapes the bottom-left.
+            // Left DOCK (Q ruling 2026-07-16): flush to the window's left edge
+            // AND bottom (the status bar no longer runs under this column) —
+            // buffer only on top + right. Left-side + bottom-right corners are
+            // hard; the window's own corner mask shapes the bottom-left, and
+            // only the top-right keeps the card curve. The header strips
+            // compensate the lost 5px lead-in via TrafficLightsOrSpacer
+            // leadInPx so the lights cluster keeps its window-x.
             paddingTop: 5,
-            paddingLeft: 5,
+            paddingLeft: 0,
             paddingRight: 5,
             paddingBottom: 0,
           }}
@@ -4965,7 +4967,11 @@ function DashboardInner() {
               {leftHeader}
               <SmoothCorners
                 data-chrome-surface="true"
-                corners={{ radius: 14, smoothing: 0.6 }}
+                // Dock corners (Q ruling 2026-07-16): flush left edge + flush
+                // bottom → left side and bottom-right are HARD; only the
+                // top-right keeps the card curve. The window's own 12px
+                // corner mask shapes the bottom-left.
+                corners={{ topLeft: 0, topRight: 14, bottomLeft: 0, bottomRight: 0, smoothing: 0.6 }}
                 autoEffects={false}
                 style={{
                   flex: 1,
@@ -4989,10 +4995,12 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                borderTopLeftRadius: 14,
+                // Dock corners (Q ruling 2026-07-16): flush left + flush
+                // bottom → hard everywhere except the top-right card curve.
+                borderTopLeftRadius: 0,
                 borderTopRightRadius: 14,
-                borderBottomLeftRadius: 14,
-                borderBottomRightRadius: 14,
+                borderBottomLeftRadius: 0,
+                borderBottomRightRadius: 0,
                 background: 'var(--t-panel-solid)',
                 // Flat by operator ruling (2026-07-13) — the in-column rail is
                 // not a floating surface; a drop shadow read as a seam against
