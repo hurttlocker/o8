@@ -119,9 +119,17 @@ export async function GET(request: NextRequest) {
           if (model === 'o8-operator' || model === 'claude-code') continue;
         }
 
-        const messages = (data.messages ?? []) as { role: string; content: string }[];
+        const messages = (data.messages ?? []) as { role: string; content: string; timestamp?: number }[];
         const firstUserMsg = messages.find(m => m.role === 'user');
         const lastMsg = messages[messages.length - 1];
+        // "Last spoke", not "last touched" (Q ruling 2026-07-16): merely
+        // OPENING a thread re-persists its file, so mtime-ordered rails bumped
+        // every clicked thread to the top. The newest message timestamp is the
+        // truthful recency; mtime remains the fallback for messages that
+        // predate timestamps and for empty threads.
+        const lastSpokeMs = messages.reduce((max, m) => (
+          Number.isFinite(m.timestamp) && (m.timestamp as number) > max ? (m.timestamp as number) : max
+        ), 0);
         const isEmpty = messages.length === 0;
         const archivedAt = typeof data.archivedAt === 'string' && data.archivedAt.trim()
           ? data.archivedAt
@@ -184,7 +192,7 @@ export async function GET(request: NextRequest) {
           messageCount: messages.length,
           model: inferOrchestratorModel(tabId, data),
           savedAt: data.savedAt || stat.mtime.toISOString(),
-          modifiedAt: stat.mtime.toISOString(),
+          modifiedAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : stat.mtime.toISOString(),
           starred: data.starred || false,
           pinned: data.pinned === true,
           planText: typeof data.planText === 'string' && data.planText.trim() ? data.planText : null,
