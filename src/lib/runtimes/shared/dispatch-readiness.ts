@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 const DEFAULT_PROBE_TIMEOUT_MS = 1_500;
 const DEFAULT_MAX_WAIT_MS = 20_000;
@@ -62,8 +63,15 @@ export async function isDispatchBackendReady(
   };
 
   try {
+    // Hardening #1562 requires an affirmative principal on EVERY gated API
+    // call, loopback included — a bare probe now 401s forever and every
+    // claude-code launch dies as "backend still warming (http_401)"
+    // (live-hit 2026-07-16 during the runtime spawn sweep). This is a
+    // server-side internal call, so present the operator ws-token like the
+    // o8 backend does (ws-auth, the 603 fix).
     const response = await fetch(readinessUrl(apiBase), {
       cache: 'no-store',
+      headers: { Authorization: `Bearer ${getOrCreateWsToken()}` },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (response.ok) {
