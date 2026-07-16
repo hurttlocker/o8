@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { IconColumns, IconGitDiff, IconPanelRightCollapse } from './icons';
+import { useChromeTooltip } from './chrome-tooltip';
 
 export function RightPanelMorphButton({
   workspacePanelVisible,
@@ -27,30 +26,10 @@ export function RightPanelMorphButton({
   const label = state === 'collapsed' ? 'Open O8 panel' : 'Close panel';
   const handleClick = onToggleO8Panel;
 
-  // Custom portal tooltip instead of the native `title`. This button lives in
-  // the topmost header strip, so a native tooltip (or any overflow:hidden
-  // ancestor) clips it off the top edge — operator saw "Open O…". We portal to
-  // document.body and open DOWNWARD, right-anchored (it's the rightmost
-  // control), so the label is always fully visible.
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const showTimer = useRef<number | undefined>(undefined);
-  const [tip, setTip] = useState<{ top: number; right: number } | null>(null);
-
-  const openTip = () => {
-    const el = btnRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setTip({ top: r.bottom + 6, right: Math.max(6, window.innerWidth - r.right) });
-  };
-  const scheduleTip = () => {
-    window.clearTimeout(showTimer.current);
-    showTimer.current = window.setTimeout(openTip, 320);
-  };
-  const closeTip = () => {
-    window.clearTimeout(showTimer.current);
-    setTip(null);
-  };
-  useEffect(() => () => window.clearTimeout(showTimer.current), []);
+  const { ref: btnRef, handlers: tipHandlers, close: closeTip, tooltip } = useChromeTooltip({
+    label,
+    keybind: '⌘⌥B',
+  });
 
   return (
     <motion.button
@@ -58,10 +37,7 @@ export function RightPanelMorphButton({
       type="button"
       aria-label={label}
       onClick={() => { closeTip(); handleClick?.(); }}
-      onMouseEnter={scheduleTip}
-      onMouseLeave={closeTip}
-      onFocus={openTip}
-      onBlur={closeTip}
+      {...tipHandlers}
       data-no-drag
       initial={false}
       animate="rest"
@@ -141,44 +117,7 @@ export function RightPanelMorphButton({
           <IconPanelRightCollapse />
         </motion.span>
       </span>
-      {tip && typeof document !== 'undefined'
-        ? createPortal(
-            <div
-              role="tooltip"
-              style={{
-                position: 'fixed',
-                top: tip.top,
-                right: tip.right,
-                zIndex: 2147483000,
-                pointerEvents: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                whiteSpace: 'nowrap',
-                background: 'var(--t-bg-card)',
-                color: 'var(--t-text)',
-                borderWidth: '0.5px',
-                borderStyle: 'solid',
-                borderColor: 'var(--t-border)',
-                borderRadius: 8,
-                paddingTop: 4,
-                paddingBottom: 4,
-                paddingLeft: 8,
-                paddingRight: 8,
-                fontFamily: 'var(--font-sans-system)',
-                fontSize: 11,
-                fontWeight: 400,
-                lineHeight: 1.3,
-                letterSpacing: '-0.1px',
-                boxShadow: 'var(--t-glass-shadow, 0 8px 20px rgba(15, 23, 42, 0.22))',
-              }}
-            >
-              <span>{label}</span>
-              <span style={{ color: 'var(--t-text-muted)' }}>⌘⌥B</span>
-            </div>,
-            document.body,
-          )
-        : null}
+      {tooltip}
     </motion.button>
   );
 }

@@ -24,6 +24,23 @@ import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
 
+/** Right-edge inset that lands the header's rightmost control on the branch rail
+ *  capsule's centre, one row below. Measured, not guessed.
+ *
+ *  This is ONE number only because CanvasModeButton and RightPanelMorphButton
+ *  are both 30px wide — the margin sets the button's right edge, so its centre
+ *  lands at `nudge + width/2` from the header's edge. If either button's width
+ *  changes, this stops being a shared constant and both centres need
+ *  re-measuring against the capsule. */
+const RAIL_COLUMN_ALIGN_NUDGE = 4;
+
+/** The header cluster's own flex gap. Cancelled between the canvas button and
+ *  the panel toggle so the pair sits tight: each carries ~7px of internal
+ *  padding, so the 4px box gap reads as 18px of ink-to-ink air (measured) and
+ *  the two look unrelated. Closed, they read ~14.6px apart — the same rhythm
+ *  the rail capsule's stacked glyphs already use (Q 2026-07-16). */
+const HEADER_CLUSTER_GAP = 4;
+
 interface WorkspaceHeaderStripProps {
   /** Render the 78px macOS traffic-light spacer — set when this strip is leftmost. */
   leadingInset?: boolean;
@@ -194,14 +211,32 @@ export function WorkspaceHeaderStrip({
             {/* Sits immediately before the panel toggle — the header's
                 "leaves this view" slot (Q 2026-07-16, mirroring Cursor's
                 `IDE ↗`). Moved off the bottom-left status bar: these little
-                buttons carry weight and belong where they're reached for. */}
-            <CanvasModeButton onClick={() => { window.location.assign('/preview/canvas-glass'); }} />
+                buttons carry weight and belong where they're reached for.
+
+                The nudge rides whichever control is RIGHTMOST, because that's
+                the one sitting over the rail capsule. With the panel closed
+                that's the toggle; open, the toggle isn't rendered here at all
+                (it moves into the panel's own strip) and the canvas button
+                inherits the column — and the misalignment with it
+                (Q 2026-07-16). */}
+            <div
+              style={{
+                display: 'inline-flex',
+                // Rightmost → carry the rail nudge. Otherwise cancel the cluster
+                // gap so it sits tight against the toggle beside it.
+                marginRight: showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE,
+              }}
+            >
+              <CanvasModeButton onClick={() => { window.location.assign('/preview/canvas-glass'); }} />
+            </div>
             {showRightPanelFallbackToggle ? (
-              <RightPanelMorphButton
-                workspacePanelVisible={false}
-                o8PanelVisible={false}
-                onToggleO8Panel={onToggleRightPanel}
-              />
+              <div style={{ display: 'inline-flex', marginRight: RAIL_COLUMN_ALIGN_NUDGE }}>
+                <RightPanelMorphButton
+                  workspacePanelVisible={false}
+                  o8PanelVisible={false}
+                  onToggleO8Panel={onToggleRightPanel}
+                />
+              </div>
             ) : null}
           </>
       }

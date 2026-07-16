@@ -11,6 +11,7 @@ import {
   WORKSPACE_RAIL_CORNER_SMOOTHING,
 } from './branch-rail-geometry';
 import type { PrDetail } from './pr-panel/types';
+import type { O8BrowserTab } from './use-o8-browser-tabs';
 
 const ROW_HEIGHT = 28;
 const CHECK_ROW_HEIGHT = 24;
@@ -57,12 +58,11 @@ export interface BranchDetailsOverlayProps {
   prDetail: PrDetail | null;
   prChecks: PrChecksSummary;
   prCommentCount: number;
-  // Subagents card
-  subagentLabel: string | null | undefined;
-  subagentDanger: boolean;
-  onSelectSubagent: () => void;
-  // Browser card
-  browserHost?: string;
+  // Browser card — the pages o8 OWNS in its browser pane, never o8 itself.
+  // Empty hides the card (Q 2026-07-16).
+  browserTabs?: O8BrowserTab[];
+  /** Focus an o8-owned page in the browser panel. */
+  onOpenBrowserTab?: (url: string) => void;
   // Sources card — the links the USER put into THIS conversation (not agent
   // tool integrations). Empty when the chat has no sources.
   sources?: Array<{ label: string; href: string }>;
@@ -110,10 +110,8 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     prDetail,
     prChecks,
     prCommentCount,
-    subagentLabel,
-    subagentDanger,
-    onSelectSubagent,
-    browserHost,
+    browserTabs = [],
+    onOpenBrowserTab,
     sources = [],
     onOpenSource,
     runtimeLabelText,
@@ -270,24 +268,26 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         </Card>
       ) : null}
 
-      <Card>
-        <StaticHeader label="Subagents" />
-        {subagentLabel ? (
-          <Row
-            icon={<WorkerIcon />}
-            label={`${subagentLabel} (worker)`}
-            onClick={onSelectSubagent}
-            tone={subagentDanger ? 'danger' : undefined}
-          />
-        ) : (
-          <StaticRow icon={<WorkerIcon />} label="No active subagents" muted />
-        )}
-      </Card>
+      {/* Subagents live on the left rail — a second copy here was redundant
+          (Q 2026-07-16). */}
 
-      <Card>
-        <StaticHeader label="Browser" />
-        <Row icon={<GlobeIcon />} label="o8" detail={browserHost} onClick={() => onOpenTab('browser')} />
-      </Card>
+      {/* Only the pages o8 OWNS, and only when it owns some. The card used to
+          hardcode a single "o8" row pointed at window.location.host — o8's own
+          address, which is not a page it opened (Q 2026-07-16). */}
+      {browserTabs.length > 0 ? (
+        <Card>
+          <StaticHeader label="Browser" />
+          {browserTabs.map((tab) => (
+            <Row
+              key={tab.id}
+              icon={<GlobeIcon />}
+              label={tab.title}
+              detail={tab.host}
+              onClick={() => (onOpenBrowserTab ? onOpenBrowserTab(tab.url) : onOpenTab('browser'))}
+            />
+          ))}
+        </Card>
+      ) : null}
 
       <Card>
         <StaticHeader label="Sources" />

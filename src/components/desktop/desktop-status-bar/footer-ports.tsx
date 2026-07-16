@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
 import { Internet, Server as ServerIcon } from 'iconoir-react';
@@ -37,6 +37,10 @@ type ActionTarget = { port: number; url: string; repo: string; label: string };
 type ActionToast = { tone: 'success' | 'error'; message: string } | null;
 
 type FooterPortsOnPortPreview = (port: number, url: string, repo?: string) => void;
+
+/** Fixed-position coords for the popover — which edges are set depends on
+ *  `placement`, so the shape carries all four as optional. */
+type PopoverPos = { top?: number; bottom?: number; left?: number; right?: number };
 
 // 44px min-height per Apple HIG — a generous click target for opening a dev server.
 const PAGE_ROW_STYLE = {
@@ -90,11 +94,34 @@ const PORT_NUM_STYLE = {
   fontFamily: '"SF Mono", ui-monospace, monospace',
 } as const;
 
-export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPortPreview }) {
+export function FooterPorts({
+  onPortPreview,
+  placement = 'footer',
+  renderTrigger,
+  onTriggerClick,
+}: {
+  onPortPreview?: FooterPortsOnPortPreview;
+  /**
+   * Where the popover opens from. `footer` anchors above the status bar (its
+   * original home); `rail` anchors to the LEFT of the trigger, for the branch
+   * rail on the window's right edge (Q 2026-07-16).
+   */
+  placement?: 'footer' | 'rail';
+  /**
+   * Supply the trigger instead of the default count badge. The rail passes its
+   * globe button, so the ports hover rides a control that already exists rather
+   * than adding a second one. A custom trigger ALWAYS renders — unlike the
+   * badge, it has its own job (opening the browser) and can't vanish just
+   * because no dev server is up.
+   */
+  renderTrigger?: (state: { pageCount: number }) => ReactNode;
+  /** Click behavior for a custom trigger. Defaults to toggling the popover. */
+  onTriggerClick?: () => void;
+}) {
   const [ports, setPorts] = useState<PortEntry[]>([]);
   const [open, setOpen] = useState(false);
   const [servicesExpanded, setServicesExpanded] = useState(false);
-  const [popoverLeft, setPopoverLeft] = useState(120);
+  const [popoverPos, setPopoverPos] = useState<PopoverPos>({ bottom: 48, left: 120 });
   const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
   const [actionToast, setActionToast] = useState<ActionToast>(null);
   const [sending, setSending] = useState(false);
@@ -222,13 +249,28 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
   const pages = ports.filter((p) => p.kind === 'page');
   const services = ports.filter((p) => p.kind === 'service');
 
-  if (pages.length === 0 && services.length === 0) return null;
+  const hasAnyPort = pages.length > 0 || services.length > 0;
+  // The default badge is nothing but a ports readout, so it hides when there's
+  // nothing to read. A custom trigger owns its own action and must stay.
+  if (!hasAnyPort && !renderTrigger) return null;
 
   const showPopover = () => {
     if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
-    if (anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setPopoverLeft(Math.max(8, rect.left - 4));
+    // Nothing to show — don't open an empty card over the rail.
+    if (!hasAnyPort) return;
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (rect) {
+      setPopoverPos(
+        placement === 'rail'
+          // Opens leftward: the rail hugs the window's right edge, so anchoring
+          // left would run the card off-screen. Top-aligned to the trigger,
+          // clamped so a tall list can't push it past the bottom.
+          ? {
+              top: Math.max(8, Math.min(rect.top, window.innerHeight - 260)),
+              right: Math.max(8, window.innerWidth - rect.left + 8),
+            }
+          : { bottom: 48, left: Math.max(8, rect.left - 4) },
+      );
     }
     setOpen(true);
   };
@@ -338,43 +380,49 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
       onMouseLeave={scheduleHide}
       style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
     >
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        title={ariaLabel}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minWidth: 36,
-          height: 26,
-          paddingLeft: 7,
-          paddingRight: 7,
-          borderRadius: 7,
-          borderWidth: 0,
-          flexShrink: 0,
-          background: hasPages ? 'var(--t-success-soft)' : 'var(--t-panel-hover)',
-          color: hasPages ? 'var(--t-success)' : 'var(--t-text-faint)',
-          fontSize: 11,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          cursor: 'pointer',
-          lineHeight: 1,
-          whiteSpace: 'nowrap',
-          transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {hasPages ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <Internet width={12} height={12} color="var(--t-success)" strokeWidth={2} />
-            {pages.length}
-          </span>
-        ) : (
-          <Internet width={13} height={13} color="var(--t-text-faint)" strokeWidth={2} />
-        )}
-      </button>
+      {renderTrigger ? (
+        <div onClick={onTriggerClick ?? (() => setOpen((v) => !v))} style={{ display: 'inline-flex' }}>
+          {renderTrigger({ pageCount: pages.length })}
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          title={ariaLabel}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 36,
+            height: 26,
+            paddingLeft: 7,
+            paddingRight: 7,
+            borderRadius: 7,
+            borderWidth: 0,
+            flexShrink: 0,
+            background: hasPages ? 'var(--t-success-soft)' : 'var(--t-panel-hover)',
+            color: hasPages ? 'var(--t-success)' : 'var(--t-text-faint)',
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            cursor: 'pointer',
+            lineHeight: 1,
+            whiteSpace: 'nowrap',
+            transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {hasPages ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Internet width={12} height={12} color="var(--t-success)" strokeWidth={2} />
+              {pages.length}
+            </span>
+          ) : (
+            <Internet width={13} height={13} color="var(--t-text-faint)" strokeWidth={2} />
+          )}
+        </button>
+      )}
       {open && typeof document !== 'undefined' ? createPortal(
         <div
           data-stationary-chrome="true"
@@ -382,8 +430,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           onMouseLeave={scheduleHide}
           style={{
             position: 'fixed',
-            bottom: 48,
-            left: popoverLeft,
+            ...popoverPos,
             minWidth: 220,
             maxWidth: 320,
             padding: 6,
