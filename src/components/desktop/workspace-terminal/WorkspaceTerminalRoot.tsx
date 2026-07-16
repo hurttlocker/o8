@@ -326,6 +326,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
 
         <WorkspaceTerminalPanels
           visibleTabs={controller.visibleTabs}
+          restoreSettled={controller.primaryRestoreSettled}
           effectiveActiveTabId={controller.effectiveActiveTabId}
           termWsConnected={controller.termWsConnected}
           panelRefs={controller.panelRefs}

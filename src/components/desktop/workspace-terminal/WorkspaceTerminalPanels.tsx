@@ -20,6 +20,11 @@ const LazyFleetCanvasTab = retryingLazy(() => import('@/components/desktop/works
 
 interface WorkspaceTerminalPanelsProps {
   visibleTabs: TerminalTab[];
+  /** True once the tab restore for the CURRENT restore key has landed. While
+   *  false, a zero-tab workspace is "not restored yet", never "empty" — the
+   *  CTA must not render a clickable surface whose spawns a landing restore
+   *  would clobber (GQXEZD). */
+  restoreSettled: boolean;
   effectiveActiveTabId: string;
   termWsConnected: boolean;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
@@ -79,6 +84,7 @@ function WorkspaceTerminalPanelsBase({
   onInjectChatContext,
   onSelectCommit,
   onLaunchWorkspaceTask,
+  restoreSettled,
 }: WorkspaceTerminalPanelsProps) {
   // Track whether this workspace has EVER shown a tab. On a fresh mount
   // (page reload) tabs hydrate async, so visibleTabs is momentarily 0 — that's
@@ -213,7 +219,7 @@ function WorkspaceTerminalPanelsBase({
       ))}
 
       {visibleTabs.length === 0 ? (
-        <EmptyWorkspaceState hasEverHadTabs={hasEverHadTabsRef.current} />
+        <EmptyWorkspaceState hasEverHadTabs={hasEverHadTabsRef.current} restoreSettled={restoreSettled} />
       ) : null}
     </div>
   );
@@ -228,14 +234,20 @@ function WorkspaceTerminalPanelsBase({
  *    the "Start a new session" CTA is the right thing to show.
  *  A long fallback grace covers the rare workspace that truly never spawns a
  *  tab, so we don't sit on the loader forever. */
-function EmptyWorkspaceState({ hasEverHadTabs }: { hasEverHadTabs: boolean }) {
+function EmptyWorkspaceState({ hasEverHadTabs, restoreSettled }: { hasEverHadTabs: boolean; restoreSettled: boolean }) {
   const [graceExpired, setGraceExpired] = useState(false);
   useEffect(() => {
-    if (hasEverHadTabs) return;
-    const timer = window.setTimeout(() => setGraceExpired(true), 4000);
+    if (hasEverHadTabs && restoreSettled) return;
+    // While a restore is unsettled, a zero-tab workspace is a boot/re-restore
+    // window, NOT genuinely empty — spawns clicked into a premature CTA get
+    // clobbered by the landing restore (GQXEZD, wide on Rosetta). Hold the
+    // loader with a long fail-open grace so a restore that never settles
+    // still surfaces the CTA eventually instead of a forever-spinner.
+    setGraceExpired(false);
+    const timer = window.setTimeout(() => setGraceExpired(true), restoreSettled ? 4000 : 15000);
     return () => window.clearTimeout(timer);
-  }, [hasEverHadTabs]);
-  return (hasEverHadTabs || graceExpired) ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoaderClaim />;
+  }, [hasEverHadTabs, restoreSettled]);
+  return ((hasEverHadTabs && restoreSettled) || graceExpired) ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoaderClaim />;
 }
 
 /** Centered three-way CTA for the empty workspace state. Operator
