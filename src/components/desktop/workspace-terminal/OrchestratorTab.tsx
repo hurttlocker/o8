@@ -36,7 +36,7 @@ import {
   type WorktreeMode,
   type OrchestratorEmptyKind,
 } from '@/components/desktop/OrchestratorEmptyState';
-import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
+import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { OrchestratorRunStrip } from '@/components/desktop/orchestrator/OrchestratorRunStrip';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
@@ -84,6 +84,11 @@ interface OrchestratorTabProps {
   acceptHistoryThreadLoads?: boolean;
   /** Disable restoring the last top-level orchestrator thread for isolated mounts. */
   restoreLastThread?: boolean;
+  /** True when `initialThreadId` is a PERSISTED binding being restored across a
+   *  reload (the tab record carried an orchestratorThreadId) — gates the boot
+   *  loader over the history load so the empty greeting never flashes before
+   *  the conversation lands (Q video, 0.1.604). Fresh spawns leave it false. */
+  restoringPersistedThread?: boolean;
   /** Disable broadcasting workspace-thread id changes from isolated mounts. */
   publishWorkspaceThread?: boolean;
   /** Disable updating the global last-active orchestrator thread. */
@@ -108,6 +113,13 @@ function swarmStorageKey(tabId: string): string {
 // Resets on a full reload (module re-eval), so the default tab still restores
 // your last conversation on boot.
 let globalLastThreadRestoreClaimed = false;
+
+// Tab ids that have already mounted once this app load. The persisted-thread
+// boot loader (restoringPersistedThread) must only cover the FIRST mount — a
+// mid-session remount (drag-to-split restructure, pane moves) would otherwise
+// flash the full-screen loader over an already-loaded conversation. Resets on
+// reload (module re-eval), which is exactly the boot case it should cover.
+const tabIdsMountedThisLoad = new Set<string>();
 
 // Persistence helpers for the cross-reload thread restore live in a
 // shared module so the workspace controller can read the same values
@@ -266,6 +278,7 @@ function OrchestratorTabInner({
   onChatSummary,
   acceptHistoryThreadLoads = true,
   restoreLastThread = true,
+  restoringPersistedThread = false,
   publishWorkspaceThread = true,
   persistLastThread = true,
   turnInjection,
@@ -496,6 +509,13 @@ function OrchestratorTabInner({
   const restoreShownAtRef = useRef<number | null>(null);
   const [isRestoringThread, setIsRestoringThread] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
+    // A persisted thread binding reloading across an app restart is ALSO a
+    // restore — without this the tab rendered the empty greeting while the
+    // history loaded, so boot read as loader → greeting flash → conversation
+    // (Q video, 0.1.604). First mount per app load only (the set guard) so a
+    // pane-move remount never re-covers a loaded conversation. The finish
+    // effect below resolves it the same way (hasMessages, 3s empty bail).
+    if (restoringPersistedThread && initialThreadId && !tabIdsMountedThisLoad.has(tabId)) return true;
     if (!restoreLastThread) return false;
     // Only orchestrator tabs in default mode (no explicit initialThreadId)
     // participate in the restore path.
@@ -505,6 +525,12 @@ function OrchestratorTabInner({
     if (globalLastThreadRestoreClaimed) return false;
     return Boolean(readLastOrchestratorThreadId(repoPath ?? null));
   });
+  // Mark AFTER the initializer ran (effects run post-render, and StrictMode's
+  // double-invoked initializer both see the unmarked set) — remounts of this
+  // tab id skip the persisted-thread boot loader from here on.
+  useEffect(() => {
+    tabIdsMountedThisLoad.add(tabId);
+  }, [tabId]);
   useEffect(() => {
     if (!active) return;
     if (!restoreLastThread) return;
@@ -1054,13 +1080,14 @@ function OrchestratorTabInner({
     ],
   );
 
-  // Restoring shimmer — swaps in for the "Good morning" empty state
-  // while we're loading the last-active thread from localStorage. Keeps
-  // the operator from seeing a confusing empty greeting that immediately
-  // gets replaced with a real conversation.
+  // Restoring claim — swaps in for the "Good morning" empty state while
+  // we're loading the restored thread. A CLAIM on the shared boot loader
+  // (not a loader of its own) so the panels-level boot loader and this one
+  // are the same continuously-mounted overlay — no unmount/remount flash
+  // between boot phases (Q video, 0.1.604).
   const restoringShimmerNode = useMemo(
     () => (
-      <WorkspaceBootLoader />
+      <WorkspaceBootLoaderClaim />
     ),
     [],
   );
