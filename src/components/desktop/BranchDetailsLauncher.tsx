@@ -12,12 +12,9 @@ import {
 } from './branch-rail-geometry';
 import {
   BranchDetailsOverlay,
-  ChecksIcon,
-  DiffIcon,
   GhIcon,
   GlobeIcon,
   SquaresIcon,
-  WorkerIcon,
   type OverlayPanelTab,
   type ProgressRowData,
   type PrChecksSummary,
@@ -25,6 +22,10 @@ import {
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
 import { useThreadSources } from './use-thread-sources';
+import { useO8BrowserTabs } from './use-o8-browser-tabs';
+import { FooterPorts } from './desktop-status-bar/footer-ports';
+import { Mail, MailOpen, PageEdit } from 'iconoir-react';
+import { openSupervisorInboxTab, useSupervisorInboxCount } from './desktop-status-bar/supervisor-inbox-store';
 import { useBranchPr } from './useBranchPr';
 import { usePrDetail } from './pr-panel/usePrDetail';
 import type { PrCheck } from './pr-panel/types';
@@ -33,6 +34,27 @@ import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarg
 function normalizePath(path: string | null | undefined): string | null {
   if (!path) return null;
   return path.replace(/\/+$/, '');
+}
+
+/** Environment section: closed unless the operator opened it before. */
+const ENVIRONMENT_OPEN_KEY = 'o8:branch-rail:environment-open';
+
+function readEnvironmentOpen(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(ENVIRONMENT_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeEnvironmentOpen(open: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ENVIRONMENT_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    // localStorage unavailable — the section just falls back to closed.
+  }
 }
 
 function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId: string | null | undefined): OrchestratorPacket | null {
@@ -117,7 +139,8 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
 }) {
   const data = useOrchestratorData();
   const [progressOpen, setProgressOpen] = useState(false);
-  const [environmentOpen, setEnvironmentOpen] = useState(true);
+  // Spawns closed and stays wherever the operator last put it (Q 2026-07-16).
+  const [environmentOpen, setEnvironmentOpen] = useState(readEnvironmentOpen);
 
   // Click-to-open overlay (Q ruling 2026-07-14). The capsule stays in layout
   // (never pushes the chat); CLICKING it toggles the full card stack open as a
@@ -195,6 +218,10 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   const changes = useWorkspaceChanges(resolvedRepoPath);
   // Sources card: the links the operator put into THIS conversation.
   const sources = useThreadSources(threadId);
+  // Browser card: the pages o8 owns in the right panel's pane, o8 itself filtered out.
+  const browserTabs = useO8BrowserTabs();
+  // Supervisor inbox: same count + states the bottom status bar's badge shows.
+  const inboxCount = useSupervisorInboxCount();
   // PR for the current branch, surfaced inline so the operator sees status
   // without opening the PRs tab (Q ruling 2026-07-11). Keyed by repo NAME (the
   // list API resolves slug/name, not a local path). Null on main/master or
@@ -214,10 +241,11 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
     : 0;
 
   const packetRuntime = activePacket?.runtime ?? data.agents.find((agent) => agent.status === 'running' || agent.currentTask)?.runtime;
-  const subagentLabel = activePacket
-    ? runtimeLabel(activePacket.runtime)
-    : data.agents.find((agent) => agent.currentTask || agent.status === 'running')?.name;
   const progressRows = buildProgressRows(activePacket, activeTarget, branch);
+  const inboxActive = inboxCount > 0;
+  const inboxTitle = inboxActive
+    ? `${inboxCount} human-required inbox item${inboxCount === 1 ? '' : 's'}`
+    : 'Supervisor inbox';
   const hasDiff = changes.totalAdditions > 0 || changes.totalDeletions > 0;
 
   const open = (tab: OverlayPanelTab) => {
@@ -284,14 +312,42 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
             pointerEvents: isOpen ? 'none' : 'auto',
             transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}>
+          {/* The arrow opens the drawer. Every other glyph here used to ALSO
+              just open the drawer — five buttons for one action. They carry
+              their own destinations now (Q 2026-07-16). */}
           <CollapsedRailIcon title="Expand" onClick={() => onToggleCollapsed?.()}><ChevronsLeftIcon /></CollapsedRailIcon>
-          <CollapsedRailIcon title="Progress" onClick={() => onToggleCollapsed?.()}><ChecksIcon /></CollapsedRailIcon>
-          <CollapsedRailIcon title="Environment" onClick={() => onToggleCollapsed?.()}><DiffIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon
+            title={inboxTitle}
+            onClick={openSupervisorInboxTab}
+            tone={inboxActive ? 'warning' : 'default'}
+          >
+            {inboxActive
+              ? <Mail width={14} height={14} color="currentColor" strokeWidth={2} />
+              : <MailOpen width={14} height={14} color="currentColor" strokeWidth={2} />}
+          </CollapsedRailIcon>
+          <CollapsedRailIcon title="o8.md" onClick={() => open('spec')}><PageEdit width={14} height={14} color="currentColor" strokeWidth={2} /></CollapsedRailIcon>
           {prDetail ? (
             <CollapsedRailIcon title={`Pull request #${prDetail.number}`} onClick={() => open('prs')}><GhIcon /></CollapsedRailIcon>
           ) : null}
-          <CollapsedRailIcon title="Subagents" onClick={() => onToggleCollapsed?.()}><WorkerIcon /></CollapsedRailIcon>
-          <CollapsedRailIcon title="Browser" onClick={() => open('browser')}><GlobeIcon /></CollapsedRailIcon>
+          {/* The globe carries the dev-server hover that used to sit in the
+              status bar (Q 2026-07-16). Hover lists the local pages; clicking
+              the globe opens the browser; clicking a page in the list opens
+              THAT url in it. */}
+          <FooterPorts
+            placement="rail"
+            // Clicking a page in the hover opens that url in o8's browser —
+            // the same path the Sources rows already take.
+            onPortPreview={(_port, url) => openSource(url)}
+            onTriggerClick={() => open('browser')}
+            renderTrigger={({ pageCount }) => (
+              <CollapsedRailIcon
+                title={pageCount > 0 ? `Browser · ${pageCount} local page${pageCount === 1 ? '' : 's'}` : 'Browser'}
+                onClick={() => open('browser')}
+              >
+                <GlobeIcon />
+              </CollapsedRailIcon>
+            )}
+          />
           <CollapsedRailIcon title="Sources" onClick={() => onToggleCollapsed?.()}><SquaresIcon /></CollapsedRailIcon>
         </SmoothCorners>
       </aside>
@@ -308,7 +364,11 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
           progressOpen={progressOpen}
           onToggleProgress={() => setProgressOpen((value) => !value)}
           environmentOpen={environmentOpen}
-          onToggleEnvironment={() => setEnvironmentOpen((value) => !value)}
+          onToggleEnvironment={() => setEnvironmentOpen((value) => {
+            const next = !value;
+            writeEnvironmentOpen(next);
+            return next;
+          })}
           hasDiff={hasDiff}
           additions={changes.totalAdditions}
           deletions={changes.totalDeletions}
@@ -317,12 +377,8 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
           prDetail={prDetail ?? null}
           prChecks={prChecks}
           prCommentCount={prCommentCount}
-          subagentLabel={subagentLabel}
-          subagentDanger={activePacket?.status === 'blocked' || activePacket?.status === 'failed'}
-          onSelectSubagent={() => {
-            if (activePacket?.lane?.sessionKey) data.onSelectSession?.(activePacket.lane.sessionKey);
-          }}
-          browserHost={typeof window === 'undefined' ? undefined : window.location.host}
+          browserTabs={browserTabs}
+          onOpenBrowserTab={openSource}
           sources={sources}
           onOpenSource={openSource}
           runtimeLabelText={runtimeLabel(packetRuntime)}

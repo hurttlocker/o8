@@ -1,74 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import { Mail, MailOpen } from 'iconoir-react';
-import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
+import { openSupervisorInboxTab, useSupervisorInboxCount } from './supervisor-inbox-store';
 
 export function SupervisorInboxBadge() {
-  const [humanRequiredCount, setHumanRequiredCount] = useState(0);
-
-  const refresh = useCallback(async () => {
-    try {
-      const response = await fetch('/api/panel/supervisor-inbox?scope=all', { cache: 'no-store' });
-      if (!response.ok) return;
-      const payload = await response.json().catch(() => ({})) as {
-        summary?: {
-          humanRequired?: unknown;
-          active?: unknown;
-        };
-      };
-      const nextCount = payload.summary?.humanRequired ?? payload.summary?.active;
-      if (typeof nextCount === 'number' && Number.isFinite(nextCount)) {
-        setHumanRequiredCount(Math.max(0, Math.floor(nextCount)));
-      }
-    } catch {
-      // The status bar should not surface transient API failures as UI noise.
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleUpdate = (event: Event) => {
-      const detail = (event as CustomEvent<{ data?: { humanRequiredCount?: unknown } }>).detail;
-      const nextCount = detail?.data?.humanRequiredCount;
-      if (typeof nextCount === 'number' && Number.isFinite(nextCount)) {
-        setHumanRequiredCount(Math.max(0, Math.floor(nextCount)));
-      } else {
-        void refresh();
-      }
-    };
-    const handleFocus = () => {
-      void refresh();
-    };
-
-    window.addEventListener('o8:supervisor-inbox', handleUpdate);
-    window.addEventListener('focus', handleFocus);
-    let rICHandle: SafeIdleCallbackHandle | undefined;
-    let timeoutHandle: number | undefined;
-    rICHandle = safeRequestIdleCallback(() => {
-      rICHandle = undefined;
-      if (timeoutHandle !== undefined) {
-        window.clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
-      }
-      void refresh();
-    }, { timeout: 2500, fallbackDelayMs: 1200 });
-    timeoutHandle = window.setTimeout(() => {
-      timeoutHandle = undefined;
-      if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
-      rICHandle = undefined;
-      void refresh();
-    }, 1200);
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 15000);
-    return () => {
-      window.removeEventListener('o8:supervisor-inbox', handleUpdate);
-      window.removeEventListener('focus', handleFocus);
-      if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
-      if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
-      window.clearInterval(timer);
-    };
-  }, [refresh]);
+  // Count + polling live in the shared store — the branch rail's capsule shows
+  // the same number, and two owners meant two pollers for one value.
+  const humanRequiredCount = useSupervisorInboxCount();
 
   const active = humanRequiredCount > 0;
   // 2026-05-27 — operator wants no full-pill orange fill on active. Only
@@ -78,15 +16,10 @@ export function SupervisorInboxBadge() {
   const countBackground = 'transparent';
   const countColor = active ? 'var(--t-warning)' : 'var(--t-text-muted)';
 
-  const openInboxTab = () => {
-    if (typeof window === 'undefined') return;
-    window.dispatchEvent(new CustomEvent('o8:open-inbox-tab'));
-  };
-
   return (
     <button
       type="button"
-      onClick={openInboxTab}
+      onClick={openSupervisorInboxTab}
       aria-label={`Supervisor inbox${active ? `, ${humanRequiredCount} human-required item${humanRequiredCount === 1 ? '' : 's'}` : ''}`}
       title={active ? `${humanRequiredCount} human-required inbox item${humanRequiredCount === 1 ? '' : 's'}` : 'Supervisor inbox'}
       style={{

@@ -63,6 +63,7 @@ const SECTIONS: ShortcutSection[] = [
     rows: [
       { label: 'Toggle left sidebar', chords: [['⌘', 'B']] },
       { label: 'Toggle right panel', chords: [['⌘', '⌥', 'B']] },
+      { label: 'Canvas mode', chords: [['⌘', '⌥', 'C']] },
       { label: 'Toggle terminal', chords: [['⌘', 'J']] },
     ],
   },

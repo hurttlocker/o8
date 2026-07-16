@@ -12,6 +12,7 @@ export function CollapsedRailIcon({
   onClick,
   children,
   resting = 'bare',
+  tone = 'default',
 }: {
   title: string;
   onClick: () => void;
@@ -23,10 +24,16 @@ export function CollapsedRailIcon({
    * overlay's paper, where a bare glyph reads as inline text (Q 2026-07-16).
    */
   resting?: 'bare' | 'card';
+  /** `warning` tints the glyph like the status bar's inbox badge does when
+   *  something needs a human — informational, never a filled alarm pill. */
+  tone?: 'default' | 'warning';
 }) {
   const restBg = resting === 'card' ? 'var(--t-bg-card)' : 'transparent';
   const restBorder = resting === 'card' ? 'var(--t-divider-subtle, var(--t-divider))' : 'transparent';
-  const restColor = resting === 'card' ? 'var(--t-text)' : 'var(--t-text-muted)';
+  const restColor = tone === 'warning'
+    ? 'var(--t-warning)'
+    : resting === 'card' ? 'var(--t-text)' : 'var(--t-text-muted)';
+  const hoverColor = tone === 'warning' ? 'var(--t-warning)' : 'var(--t-text)';
   return (
     <button
       type="button"
@@ -57,7 +64,7 @@ export function CollapsedRailIcon({
       onMouseEnter={(event) => {
         event.currentTarget.style.backgroundColor = 'var(--t-hover)';
         event.currentTarget.style.borderColor = 'var(--t-divider, var(--t-divider-subtle))';
-        event.currentTarget.style.color = 'var(--t-text)';
+        event.currentTarget.style.color = hoverColor;
       }}
       onMouseLeave={(event) => {
         event.currentTarget.style.backgroundColor = restBg;
