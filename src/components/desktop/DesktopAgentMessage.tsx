@@ -21,6 +21,8 @@ import { ToolCallChipCluster, describeToolRollupParts } from '@/components/deskt
 import { BrainFeedCard } from '@/components/desktop/thoughts/chat-panel/BrainFeedCard';
 import { isMeteredBrainFeedCall } from '@/components/desktop/thoughts/brain-feed';
 import { useSmoothText } from '@/components/desktop/thoughts/chat-panel/use-smooth-text';
+import { parseDesignDrawContext } from '@/components/desktop/thoughts/chat-panel/design-draw-context';
+import { DesignDrawContextCard } from '@/components/desktop/thoughts/chat-panel/DesignDrawContextCard';
 import { OrchestratorStatusCard } from '@/components/desktop/thoughts/chat-panel/OrchestratorStatusCard';
 import { detectOrchestratorStatusEvent } from '@/lib/orchestrator/status-events';
 import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
@@ -205,6 +207,14 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     () => entry.thinking ? sanitizeTranscriptText(entry.thinking) : '',
     [entry.thinking],
   );
+  // Design Mode draw turns embed the machine context (region/elements/shot
+  // paths) inline in the text for the model — the transcript renders just the
+  // prompt plus a compact expandable strip instead of the raw dump.
+  const designDrawContext = useMemo(
+    () => (isUser ? parseDesignDrawContext(displayText) : null),
+    [isUser, displayText],
+  );
+  const userPromptText = designDrawContext ? designDrawContext.prompt : displayText;
   const hasText = Boolean(displayText.trim());
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
@@ -266,7 +276,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // estimate against a conservative wide measure — an UNDER-estimate of height
   // is safe (content grows), an over-estimate leaves blank space.
   const userTextHeight = usePretextHeight(
-    isUser ? displayText : '',
+    isUser ? userPromptText : '',
     'small', // 13px matches user row fontSize
     640 - 28, // conservative column width minus card padding
     1.55,
@@ -403,7 +413,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       }}>
         {evictedEyebrow}
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
-        {hasText ? (
+        {hasText && userPromptText.trim() ? (
           <div style={{
             width: '100%',
             paddingTop: 10,
@@ -425,9 +435,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             // Pretext: explicit minHeight eliminates reflow in z-9999 stacking context
             ...(userTextHeight > 0 ? { minHeight: userTextHeight } : {}),
           }}>
-            {displayText}
+            {userPromptText}
           </div>
         ) : null}
+        {designDrawContext ? <DesignDrawContextCard context={designDrawContext} /> : null}
         {renderMetaRow('flex-end')}
       </div>
     );
