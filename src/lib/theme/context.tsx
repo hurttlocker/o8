@@ -86,15 +86,19 @@ const LEGACY_THEME_KEY = 'cortex-theme';
 /**
  * All Glass center overrides — applied ON TOP of the dark-glass theme when
  * the mode is on. These three tokens are the "center is always solid"
- * doctrine; All Glass is the sanctioned exception. FIRST-PASS values
- * borrowed from the chrome's dark-glass tints (Q 2026-07-16: "you have all
- * the glass values") — the operator tunes them with the development sliders
- * next; don't hand-polish here.
+ * doctrine; All Glass is the sanctioned exception.
+ *
+ * They point at --t-bg — THE SAME token the left sidebar and right O8Panel
+ * cards paint — so the center is literally the same glass as the sides
+ * (Q 2026-07-16: "we want it all glass the same glass"; the first-pass
+ * rgba fog read as a different, heavier material). In dark-glass --t-bg is
+ * transparent = pure vibrancy, and when the operator tunes --t-bg with the
+ * development sliders the center follows automatically.
  */
 const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
-  '--t-chat-surface-bg': 'rgba(28, 30, 34, 0.52)',
-  '--t-terminal-bg': 'rgba(22, 24, 28, 0.55)',
-  '--t-canvas-bg': 'rgba(32, 32, 32, 0.44)',
+  '--t-chat-surface-bg': 'var(--t-bg)',
+  '--t-terminal-bg': 'var(--t-bg)',
+  '--t-canvas-bg': 'var(--t-bg)',
 };
 
 function readWorkspaceGlass(): boolean {
