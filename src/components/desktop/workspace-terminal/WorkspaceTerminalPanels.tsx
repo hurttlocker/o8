@@ -7,7 +7,7 @@ import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/Works
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
-import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
+import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
@@ -100,7 +100,12 @@ function WorkspaceTerminalPanelsBase({
           // 2026-07-06). Dedicated single-runtime tabs are kind:'chat' below;
           // an orchestrator tab starts in its persisted mode but stays
           // switchable.
-          <Suspense key={tab.id} fallback={null}>
+          // Suspense fallback for the ACTIVE tab claims the shared boot
+          // loader so the lazy chunk load is covered by the same overlay the
+          // boot path shows — a null fallback here blanked the workspace for
+          // a beat between the panels loader and the tab mounting (Q video,
+          // 0.1.604). Background tabs keep null (nothing to cover).
+          <Suspense key={tab.id} fallback={tab.id === effectiveActiveTabId ? <WorkspaceBootLoaderClaim /> : null}>
             <LazyOrchestratorTab
               tabId={tab.id}
               active={tab.id === effectiveActiveTabId}
@@ -110,6 +115,10 @@ function WorkspaceTerminalPanelsBase({
               initialSingleRuntime={tab.singleRuntime}
               initialChatModelId={tab.chatModelId}
               initialThreadId={tab.orchestratorThreadId ?? (tab.id.startsWith('thoughts-') ? tab.id : undefined)}
+              // A persisted binding rehydrating across a reload is a restore —
+              // the tab holds the boot loader over the history load instead of
+              // flashing the empty greeting first.
+              restoringPersistedThread={Boolean(tab.orchestratorThreadId)}
               projectContextRailVisible={projectContextRailVisible}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
               restoreLastThread={!tab.freshSpawn}
@@ -226,7 +235,7 @@ function EmptyWorkspaceState({ hasEverHadTabs }: { hasEverHadTabs: boolean }) {
     const timer = window.setTimeout(() => setGraceExpired(true), 4000);
     return () => window.clearTimeout(timer);
   }, [hasEverHadTabs]);
-  return (hasEverHadTabs || graceExpired) ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoader />;
+  return (hasEverHadTabs || graceExpired) ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoaderClaim />;
 }
 
 /** Centered three-way CTA for the empty workspace state. Operator

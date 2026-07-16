@@ -36,6 +36,7 @@ import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalet
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
+import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
@@ -5527,6 +5528,12 @@ function DashboardInner() {
           row is dragged from the left rail (split-screen parity). Renders
           nothing when idle. */}
       <ThreadDragGhost />
+
+      {/* ONE boot loader for the whole boot/restore sequence — stays mounted
+          while any phase (tab hydration, lazy tab chunk, thread restore)
+          holds a claim, so the phases never flash the greeting/blank between
+          handoffs (Q video, 0.1.604). See workspace-boot-loader-claim.tsx. */}
+      <WorkspaceBootLoaderHost />
 
     </div>
     </DictationHost>
