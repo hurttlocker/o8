@@ -78,16 +78,17 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
 
 // Status palette (Q ruling 2026-07-11 — "cool the human states"): the decision
 // states that wait on a human move OFF the warm band so they stop colliding with
-// the orange working orb. Awaiting-review → cool grey ("your turn"). Rejected and
-// failed BOTH wear the brand orange (Q final lock 2026-07-12: "our patented
-// orange" — the one-orange doctrine): same Gravity mark, same hue; the label
-// carries the distinction, the click is the same either way. Keep in sync with
-// the /preview/motion Status-vocabulary board + repo-focus packetStatusColor.
+// the orange working orb. Awaiting-review → cool grey ("your turn"). Rejected
+// wears the brand orange; FAILED wears bright red (Q ruling 2026-07-16,
+// superseding the 2026-07-12 one-orange lock: a crashed run must be
+// distinguishable from a declined review at a glance). Same Gravity mark,
+// color = severity. Keep in sync with the /preview/motion Status-vocabulary
+// board + repo-focus packetStatusColor.
 const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
   running: 'var(--t-accent)',
   review: '#94a3b8',
   rejected: '#F97316',
-  failed: '#F97316',
+  failed: '#FF3B30',
 };
 
 /**
