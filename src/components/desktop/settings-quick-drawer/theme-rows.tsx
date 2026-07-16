@@ -1,10 +1,12 @@
 'use client';
 
 /**
- * Theme + surface rows for SettingsQuickDrawer — the palette (Light/Dark)
- * segmented toggle and the Glass (On/Off) surface toggle. Extracted from
- * SettingsQuickDrawer.tsx to respect the 800-line ceiling when the Glass
- * row landed (operator dogfood request 2026-07-14).
+ * Appearance row for SettingsQuickDrawer — ONE merged control for the theme
+ * system's two axes (Q ruling 2026-07-16, replacing the separate Theme and
+ * Glass rows): the labeled Light/Dark segments carry the palette DECISION,
+ * and an icon-only latch at the pill's right end carries the glass MODIFIER.
+ * One row instead of two; every palette × surface state stays one click.
+ * Extracted from SettingsQuickDrawer.tsx for the 800-line ceiling.
  */
 
 import type { ReactNode } from 'react';
@@ -46,88 +48,113 @@ export function ThemeContrastGlyph() {
 }
 
 /** Two offset panes, the front one translucent — reads as "glass layers". */
-export function GlassGlyph() {
+export function GlassGlyph({ size = 13 }: { size?: number }) {
   return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
       <rect x="3" y="3" width="13" height="13" rx="2.5" />
       <rect x="8" y="8" width="13" height="13" rx="2.5" fill="currentColor" fillOpacity={0.22} />
     </svg>
   );
 }
 
-function SegmentedPair({
-  options,
+/**
+ * AppearanceControl — the merged palette + surface pill. Left/labeled half is
+ * the Light/Dark segmented pair; a hairline divider separates the icon-only
+ * glass latch on the right. The latch shows the EFFECTIVE surface (a 'system'
+ * preference still reads correctly) and picking it pins an explicit
+ * preference: glass = reduceTransparency 'off' (vibrancy chrome), off =
+ * 'on' (opaque/solid chrome, the accessibility path). Palette flips never
+ * touch the latch state — the two axes stay independent.
+ */
+export function AppearanceControl({
+  paletteId,
+  setPalette,
+  surface,
+  setReduceTransparency,
 }: {
-  options: Array<{ key: string; label: string; glyph?: ReactNode; active: boolean; onPick: () => void }>;
+  paletteId: PaletteId;
+  setPalette: (id: PaletteId) => void;
+  surface: SurfaceMode;
+  setReduceTransparency: (v: ReduceTransparency) => void;
 }) {
+  const glassOn = surface === 'glass';
   return (
-    <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, background: SUBTLE_BG, flexShrink: 0 }}>
-      {options.map((o) => (
-        <button
-          key={o.key}
-          type="button"
-          aria-pressed={o.active}
-          onClick={o.onPick}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            height: 20,
-            paddingLeft: 7,
-            paddingRight: 8,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: o.active ? SELECTED_BORDER : 'transparent',
-            borderRadius: 6,
-            background: o.active ? SELECTED_BG : 'transparent',
-            boxShadow: o.active ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
-            color: o.active ? TEXT : MUTED,
-            fontFamily: FONT,
-            fontSize: 10.5,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            cursor: 'pointer',
-            transition: 'background 140ms ease, color 140ms ease',
-          }}
-        >
-          {o.glyph}
-          {o.label}
-        </button>
-      ))}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 8, background: SUBTLE_BG, flexShrink: 0 }}>
+      <SegmentButton
+        active={paletteId === 'light'}
+        onPick={() => setPalette('light')}
+        label="Light"
+        glyph={<ThemeGlyphSun />}
+      />
+      <SegmentButton
+        active={paletteId === 'dark'}
+        onPick={() => setPalette('dark')}
+        label="Dark"
+        glyph={<ThemeGlyphMoon />}
+      />
+      <span aria-hidden style={{ width: 1, height: 12, background: 'var(--t-divider-subtle)', marginLeft: 2, marginRight: 2, flexShrink: 0 }} />
+      <button
+        type="button"
+        aria-pressed={glassOn}
+        aria-label={glassOn ? 'Glass surface on' : 'Glass surface off'}
+        title={glassOn ? 'Glass surface — on' : 'Glass surface — off'}
+        onClick={() => setReduceTransparency(glassOn ? 'on' : 'off')}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 20,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: glassOn ? SELECTED_BORDER : 'transparent',
+          borderRadius: 6,
+          background: glassOn ? SELECTED_BG : 'transparent',
+          boxShadow: glassOn ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
+          // Icon-only latch needs MORE ink than the labeled segments — a
+          // muted 13px stroke glyph disappears on paper (hurttlocker lens:
+          // tune for the eye, not the token). Secondary ink + 14px when off.
+          color: glassOn ? TEXT : 'var(--t-text-secondary, #475569)',
+          cursor: 'pointer',
+          transition: 'background 140ms ease, color 140ms ease',
+        }}
+      >
+        <GlassGlyph size={14} />
+      </button>
     </div>
   );
 }
 
-export function ThemeToggle({ paletteId, setPalette }: { paletteId: PaletteId; setPalette: (id: PaletteId) => void }) {
+function SegmentButton({ active, onPick, label, glyph }: { active: boolean; onPick: () => void; label: string; glyph?: ReactNode }) {
   return (
-    <SegmentedPair
-      options={[
-        { key: 'light', label: 'Light', glyph: <ThemeGlyphSun />, active: paletteId === 'light', onPick: () => setPalette('light') },
-        { key: 'dark', label: 'Dark', glyph: <ThemeGlyphMoon />, active: paletteId === 'dark', onPick: () => setPalette('dark') },
-      ]}
-    />
-  );
-}
-
-/**
- * Glass On/Off — flips the surface axis. Glass = reduceTransparency 'off'
- * (vibrancy chrome), Off = 'on' (opaque/solid chrome, the accessibility
- * path). Shows the EFFECTIVE surface, so a 'system' preference still reads
- * correctly; picking either side pins an explicit preference.
- */
-export function SurfaceToggle({
-  surface,
-  setReduceTransparency,
-}: {
-  surface: SurfaceMode;
-  setReduceTransparency: (v: ReduceTransparency) => void;
-}) {
-  return (
-    <SegmentedPair
-      options={[
-        { key: 'glass', label: 'On', active: surface === 'glass', onPick: () => setReduceTransparency('off') },
-        { key: 'solid', label: 'Off', active: surface === 'solid', onPick: () => setReduceTransparency('on') },
-      ]}
-    />
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onPick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        height: 20,
+        paddingLeft: 7,
+        paddingRight: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: active ? SELECTED_BORDER : 'transparent',
+        borderRadius: 6,
+        background: active ? SELECTED_BG : 'transparent',
+        boxShadow: active ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
+        color: active ? TEXT : MUTED,
+        fontFamily: FONT,
+        fontSize: 10.5,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        cursor: 'pointer',
+        transition: 'background 140ms ease, color 140ms ease',
+      }}
+    >
+      {glyph}
+      {label}
+    </button>
   );
 }
