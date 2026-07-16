@@ -23,7 +23,7 @@ const STATUS_STATES: Array<{
   { state: 'review', label: 'Awaiting review', meaning: 'Paused, parked waiting on you. Neutral — the grid holds dim, the lit center blinks off rarely ("your turn"), not the color.', color: '#94a3b8', motion: 'Hold-blink', where: 'needs-review packets' },
   { state: 'rejected', label: 'Review declined', meaning: 'Reviewed and turned down. Gravity in amber — the 8 outer cells fall and fade, then reassemble. Same mark as failed; color is severity.', color: '#F97316', motion: 'Gravity (amber)', where: 'rejected packets' },
   { state: 'merged', label: 'Merged / done', meaning: 'Landed on main. Closed. Cells settle — pop in staggered and hold most of the cycle.', color: 'var(--t-success)', motion: 'Settle', where: 'released packets' },
-  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Gravity in red — same fall-and-reassemble mark as a declined review, color raised to alarm.', color: '#ef4444', motion: 'Gravity (red)', where: 'failed / blocked lanes' },
+  { state: 'failed', label: 'Failed', meaning: 'Crashed or errored out. Gravity in red — same fall-and-reassemble mark as a declined review, color raised to alarm.', color: '#FF3B30', motion: 'Gravity (red)', where: 'failed / blocked lanes' },
 ];
 
 const SAMPLE_ROW_TITLE = 'Ingest spec files to improve retrieval awareness';
