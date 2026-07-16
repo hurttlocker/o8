@@ -225,6 +225,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // run for them — it could adopt an unrelated recently-touched thread in
   // the race window before loadThread lands.
   suppressAutoRestore?: boolean;
+  /** True when the host tab is bound to a persisted thread whose history
+   *  (incl. its backend) hasn't loaded yet. Until the load lands, the
+   *  composer chip shows '…' instead of confidently claiming the DEFAULT
+   *  backend — a wrong label on every tab right after boot/reload was the
+   *  "they all say o8" report (2026-07-16). */
+  expectsThreadLoad?: boolean;
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
@@ -265,6 +271,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onChromeChange,
   onChatSummary,
   suppressAutoRestore = false,
+  expectsThreadLoad = false,
 }, ref) {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
@@ -365,6 +372,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [orchestratorBackend, setOrchestratorBackend] = useState<OrchestratorBackendSetting>(
     () => resolveActiveComposerBackend(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK),
   );
+  // Who chose the composer's backend: 'default' (operator default seeded it),
+  // 'thread' (adopted from a loaded thread's stored backend), 'user' (picked
+  // in the composer this session). Precedence user > thread > default — a
+  // reload must NOT silently re-route an OpenClaw/Codex conversation onto the
+  // operator default ("they all say o8", 2026-07-16): a thread-bound tab
+  // continues on ITS backend; the default is for new sessions.
+  const backendSourceRef = useRef<'default' | 'thread' | 'user'>('default');
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
   );
@@ -493,7 +507,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const defaults = await fetchThoughtsOperatorDefaults(controller.signal);
       if (controller.signal.aborted) return;
       setOperatorDefaults(defaults);
-      setOrchestratorBackend(resolveActiveComposerBackend(defaults));
+      // Late-landing defaults must not clobber a backend the thread (or the
+      // user) already chose — default is the weakest source.
+      if (backendSourceRef.current === 'default') {
+        setOrchestratorBackend(resolveActiveComposerBackend(defaults));
+      }
       if (thinkingPreferenceTouchedRef.current) return;
       const nextThinkingPreferences = resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
       setAdaptiveThinkingEnabled(nextThinkingPreferences.adaptiveThinkingEnabled);
@@ -810,7 +828,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     requestAnimationFrame(() => {
       // Smooth when idle (a fresh user turn jumps into view); instant while
       // streaming so it doesn't fight the per-frame pin below.
-      chatEndRef.current?.scrollIntoView({ behavior: orchStream.status === 'busy' ? 'auto' : 'smooth' });
+      // Container-scoped on purpose (body-scroll trigger hunt, 2026-07-16):
+      // scrollIntoView scrolls EVERY scrollable ancestor up to the document —
+      // on the zoomed root that displaces the whole app shell (the class the
+      // dashboard shell-guard exists to snap back). Scroll only the transcript.
+      const end = chatEndRef.current;
+      const container = end?.closest('.thoughts-scroll') as HTMLElement | null;
+      if (!container) return;
+      container.scrollTo({ top: container.scrollHeight, behavior: orchStream.status === 'busy' ? 'auto' : 'smooth' });
     });
   }, [chatMessages, orchStream.messages, orchStream.status]);
 
@@ -1052,6 +1077,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     responseSeenRef.current = false;
     idlePollsRef.current = 0;
     orchStream.reset();
+    // A fresh conversation drops any thread-adopted backend back to the
+    // operator default (explicit user picks stay).
+    if (backendSourceRef.current === 'thread') {
+      backendSourceRef.current = 'default';
+      setOrchestratorBackend(resolveActiveComposerBackend(operatorDefaults));
+    }
     setActiveThreadBackend(composerBackendTurnOverride(orchestratorBackend) ?? null);
     setActiveThreadAgent(null);
     // #597 minted a fresh threadId AND eagerly persisted an empty placeholder
@@ -1072,7 +1103,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, orchestratorBackend]);
+  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -1327,6 +1358,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setPlanText(data.planText ?? null);
       setActiveThreadBackend(data.backend ?? null);
       setActiveThreadAgent(data.agent ?? null);
+      // Continue the conversation where it lives: adopt the thread's stored
+      // backend for the next turn (chip + send both follow) unless the user
+      // explicitly picked one this session. Not persisted — the operator
+      // default is untouched; new sessions still start on it. `acp` is the
+      // one OrchestratorBackendId with no composer setting — map it to its
+      // hermes surface name.
+      const adoptable: OrchestratorBackendSetting | null = data.backend === 'acp' ? 'hermes' : (data.backend ?? null);
+      if (adoptable && backendSourceRef.current !== 'user') {
+        backendSourceRef.current = 'thread';
+        setOrchestratorBackend(adoptable);
+      }
       threadIdRef.current = tabId;
       setThreadId(tabId);
       setWaitingForReply(false);
@@ -1392,12 +1434,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // review 2026-07-15). The label falls back to the default (OpenClaw → 'main').
     ? orchestratorBackendDisplayLabel({ backend: activeBackendIdentity, agent: null })
     : null;
+  // A thread-bound tab whose history (incl. backend) hasn't loaded yet must
+  // not claim the default backend — "…" is the truthful label until the load
+  // lands (threadId flips non-null). See expectsThreadLoad prop doc.
+  const backendHydrating = isOrchestratorMode && expectsThreadLoad && threadId === null;
   const activeTargetLabel = isChatMode
     ? selectedChatModel.label
     : isSingleMode
       ? orchestratorRuntimeTone(singleRuntime).label
       : isOrchestratorMode
-        ? activeBackendLabel ?? 'Claude Code'
+        ? (backendHydrating ? '…' : activeBackendLabel ?? 'Claude Code')
         : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isSingleMode
     ? orchestratorRuntimeTone(singleRuntime).color
@@ -2148,6 +2194,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, []);
 
   const handleBackendChange = useCallback((next: OrchestratorBackendSetting) => {
+    backendSourceRef.current = 'user';
     setOrchestratorBackend(next);
     setActiveThreadBackend(composerBackendTurnOverride(next) ?? null);
     setActiveThreadAgent(null);

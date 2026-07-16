@@ -148,6 +148,14 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       style={{
       flex: 1,
       overflowY: 'auto',
+      // THE body-scroll trigger (hunted since 0.1.608, closed 2026-07-16 via
+      // frame-by-frame video forensics): without containment, trackpad
+      // momentum at this scroller's boundary CHAINS to the document — and at
+      // non-100% UI zoom the inverse-sized root has real scroll range, so the
+      // whole shell displaces until the dashboard guard snaps it back (the
+      // rubber-band jumping + WKWebView banding in Q's clip). Contain kills
+      // the chain at the source; the shell guard stays as the invariant net.
+      overscrollBehaviorY: 'contain',
       paddingTop: 14,
       paddingRight: 'var(--cortex-chat-gutter)',
       // Breathing room before the composer, sized to CLEAR the 30px bottom-fade
