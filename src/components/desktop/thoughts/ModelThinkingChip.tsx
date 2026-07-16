@@ -80,19 +80,16 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
     ],
   },
-  // OpenClaw pulled from the picker (Q ruling 2026-07-16): not on the
-  // one-click path the official CLIs are — its governed clone needs its own
-  // gateway + credential story that broke three ways in one night (invalid
-  // config key, model allowlist, SQLite auth migration). The backend module
-  // stays registered so existing openclaw threads keep working and it can
-  // return when its setup story is one-click.
-  {
-    key: 'hermes',
-    label: 'Hermes',
-    options: [
-      { value: 'hermes', label: 'Hermes', triggerLabel: 'Hermes', backend: 'hermes' },
-    ],
-  },
+  // OpenClaw + Hermes pulled from the picker (Q ruling 2026-07-16): neither
+  // is on the one-click path the official CLIs are. OpenClaw's governed clone
+  // needs its own gateway + credential story that broke three ways in one
+  // night (invalid config key, model allowlist, SQLite auth migration);
+  // Hermes is a Python-venv install that the 2026-07-07 storage cleanup
+  // deleted outright while its wrapper script kept reporting "installed".
+  // Both backend modules stay registered so existing threads keep working
+  // and either can return when its setup story is one-click. Settings →
+  // Operator Defaults still offers Hermes when a HEALTHY binary is present
+  // (isHermesAvailable now exec-probes instead of existsSync).
   // The free house (operator ruling 2026-07-12): one conversational model that
   // streams with no subscription draw, so the operator can drive the full
   // orchestrator UI without burning Claude/Codex usage. Named only 'o8' — the
