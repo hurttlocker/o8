@@ -37,6 +37,98 @@ interface FeedbackBody {
   image?: unknown;
   images?: unknown;
   includeDiagnostics?: unknown;
+  client?: unknown;
+}
+
+/** Client-collected state snapshot — validated + clamped from body.client. */
+interface ClientDiagnostics {
+  ui: {
+    innerW: number;
+    innerH: number;
+    dpr: number;
+    uiZoom: string;
+    bodyScrollTop: number;
+    docScrollTop: number;
+    dashboardTop: number | null;
+    palette: string;
+    surface: string;
+  } | null;
+  consoleErrors: Array<{ message: string; source: string; lineno: number; timestamp: number }>;
+  platform: string;
+}
+
+const MAX_CLIENT_CONSOLE_ERRORS = 20;
+
+function clampNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+function clampString(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+/** Never throws; unusable input degrades to nulls/empties, never a 400 — the
+ *  operator's report text always outranks its diagnostics. */
+function parseClientDiagnostics(raw: unknown): ClientDiagnostics | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const source = raw as { ui?: unknown; consoleErrors?: unknown; platform?: unknown };
+  const ui = source.ui && typeof source.ui === 'object'
+    ? (() => {
+        const u = source.ui as Record<string, unknown>;
+        return {
+          innerW: clampNumber(u.innerW),
+          innerH: clampNumber(u.innerH),
+          dpr: Number(u.dpr) || 1,
+          uiZoom: clampString(u.uiZoom, 8) || '1',
+          bodyScrollTop: clampNumber(u.bodyScrollTop),
+          docScrollTop: clampNumber(u.docScrollTop),
+          dashboardTop: u.dashboardTop == null ? null : clampNumber(u.dashboardTop),
+          palette: clampString(u.palette, 16),
+          surface: clampString(u.surface, 16),
+        };
+      })()
+    : null;
+  const consoleErrors = Array.isArray(source.consoleErrors)
+    ? source.consoleErrors.slice(-MAX_CLIENT_CONSOLE_ERRORS).map((entry) => {
+        const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+        return {
+          message: clampString(e.message, 600),
+          source: clampString(e.source, 200),
+          lineno: clampNumber(e.lineno),
+          timestamp: clampNumber(e.timestamp),
+        };
+      })
+    : [];
+  return { ui, consoleErrors, platform: clampString(source.platform, 64) || 'unknown' };
+}
+
+/** One embed line: geometry + drift + error count. The dashboardTop/bodyScroll
+ *  numbers are exactly the forensics that cracked the 0.1.605 "half window"
+ *  class — a healthy shell reads `dashTop 0 · bodyScroll 0`. */
+function clientStateSummary(client: ClientDiagnostics): string {
+  const parts: string[] = [];
+  if (client.ui) {
+    const u = client.ui;
+    parts.push(`${u.innerW}×${u.innerH} @${u.dpr}x`, `zoom ${u.uiZoom}`);
+    parts.push(`bodyScroll ${u.bodyScrollTop}`, `dashTop ${u.dashboardTop ?? '—'}`);
+    if (u.palette || u.surface) parts.push(`${u.palette}/${u.surface}`);
+  }
+  parts.push(`${client.consoleErrors.length} console error${client.consoleErrors.length === 1 ? '' : 's'} buffered`);
+  parts.push(client.platform);
+  return parts.join(' · ');
+}
+
+function renderClientDiagnostics(client: ClientDiagnostics): string {
+  const lines: string[] = ['── CLIENT STATE ──', clientStateSummary(client), ''];
+  if (client.consoleErrors.length > 0) {
+    lines.push('── CONSOLE ERROR RING BUFFER (newest last) ──');
+    for (const entry of client.consoleErrors) {
+      const when = entry.timestamp ? new Date(entry.timestamp).toISOString() : '(no ts)';
+      lines.push(`${when} ${entry.source}:${entry.lineno}`, entry.message, '');
+    }
+  }
+  return lines.join('\n');
 }
 
 const MAX_IMAGES = 5;
@@ -225,9 +317,13 @@ async function buildDiagnostics(route: string, userAgent: string): Promise<Repor
   const platform = os.platform();
   const release = os.release();
   const arch = os.arch();
+  // x64 node reporting an Apple-branded CPU = running under Rosetta on Apple
+  // Silicon — a distinct bug population (o8 ships x86_64-only), so name it.
+  const cpuModel = os.cpus()[0]?.model ?? '';
+  const rosetta = arch === 'x64' && /^Apple\b/.test(cpuModel) ? ' (Rosetta on Apple Silicon)' : '';
   return {
     version: readServerVersion(),
-    osLabel: `${platform} ${release} ${arch}`,
+    osLabel: `${platform} ${release} ${arch}${rosetta}`,
     nodeVersion: process.version,
     route,
     userAgent,
@@ -249,7 +345,7 @@ function field(name: string, value: string) {
   };
 }
 
-function buildEmbed(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, crashes: CrashDigest, report: Report) {
+function buildEmbed(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, crashes: CrashDigest, client: ClientDiagnostics | null, report: Report) {
   const fields = [
     field('Version', diagnostics.version),
     field('OS', diagnostics.osLabel),
@@ -258,6 +354,12 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
     ...(diagnostics.projectLabel ? [field('Project', diagnostics.projectLabel)] : []),
     field('Reported by', report.reporter ? `@${report.reporter}` : 'anonymous'),
     field('Timestamp', diagnostics.timestamp),
+    // Full-width: geometry + drift + buffered-error count. Triage starts here —
+    // a healthy shell reads `bodyScroll 0 · dashTop 0`; the full ring buffer
+    // rides in diagnostics.txt.
+    ...(client
+      ? [{ name: 'State', value: truncate(clientStateSummary(client), DISCORD_FIELD_VALUE_LIMIT), inline: false }]
+      : []),
     // Full-width: the summary carries a stack-trace head that reads badly in a
     // narrow inline column, and the traces themselves ride as crashes.txt.
     ...(crashes.count > 0
@@ -283,7 +385,7 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
   };
 }
 
-async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, client: ClientDiagnostics | null, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
   const webhookUrl = resolveFeedbackWebhook();
   if (!webhookUrl) {
     // Fail loudly. Silently dropping a report the operator spent a minute writing
@@ -292,7 +394,7 @@ async function postDiscordReport(category: FeedbackCategory, message: string, di
   }
 
   const embed = {
-    ...buildEmbed(category, message, diagnostics, crashes, report),
+    ...buildEmbed(category, message, diagnostics, crashes, client, report),
     // Render the first screenshot inline in the embed; the rest ride along as
     // additional attachments. The attachment:// URL must match a file below.
     ...(images[0] ? { image: { url: `attachment://${images[0].filename}` } } : {}),
@@ -302,14 +404,18 @@ async function postDiscordReport(category: FeedbackCategory, message: string, di
     embeds: [embed],
   };
 
-  // Stack traces blow past Discord's 1024-char field cap, so the traces that
-  // preceded this report ride as a file rather than inline. Image filenames are
-  // caller-supplied, so step around one that already claims our name.
+  // Stack traces + the console ring buffer blow past Discord's 1024-char field
+  // cap, so the full forensics ride as a file rather than inline. Image
+  // filenames are caller-supplied, so step around one that claims our name.
+  const diagnosticsText = [
+    client ? renderClientDiagnostics(client) : '',
+    crashes.text ? `── CRASHES (24h window) ──\n${crashes.text}` : '',
+  ].filter(Boolean).join('\n');
   const taken = new Set(images.map((img) => img.filename));
-  let crashName = 'crashes.txt';
-  for (let i = 1; taken.has(crashName); i += 1) crashName = `crashes-${i}.txt`;
-  const crashFile = crashes.text
-    ? { bytes: Buffer.from(crashes.text, 'utf8'), mime: 'text/plain', filename: crashName }
+  let crashName = 'diagnostics.txt';
+  for (let i = 1; taken.has(crashName); i += 1) crashName = `diagnostics-${i}.txt`;
+  const crashFile = diagnosticsText
+    ? { bytes: Buffer.from(diagnosticsText, 'utf8'), mime: 'text/plain', filename: crashName }
     : null;
 
   try {
@@ -361,15 +467,17 @@ export async function POST(request: NextRequest) {
 
   try {
     const diagnostics = await buildDiagnostics(validated.route, validated.userAgent);
-    // Local crash history is a separate disclosure from the text/screenshot the
-    // operator chose to submit. Attach it only after an affirmative per-report
-    // choice; old clients omit the field and therefore send no crash records.
+    // Diagnostics (crash digest + client snapshot) attach when the client sent
+    // them — the shared submitReport client includes them by DEFAULT with an
+    // opt-out (Q ruling 2026-07-15: a report should carry its own forensics;
+    // the intake is private). Old clients omit both fields → nothing attaches.
     const crashes: CrashDigest = body.includeDiagnostics === true
       ? collectCrashDigest()
       : { count: 0, records: [], summary: '', text: '' };
+    const client = body.includeDiagnostics === true ? parseClientDiagnostics(body.client) : null;
     const report: Report = { id: newReportId(), reporter: await resolveReporter(request) };
 
-    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, report);
+    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, client, report);
     if (!posted.ok) return jsonError(posted.error, 502);
 
     // Only ledger a report that actually reached Discord — an id we hand back for

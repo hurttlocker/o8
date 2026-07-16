@@ -113,7 +113,7 @@ describe('POST /api/feedback/report', () => {
     expect(form, 'crashes must force the multipart path even with no screenshot').not.toBeNull();
 
     const file = form!.get('files[0]') as File;
-    expect(file.name).toBe('crashes.txt');
+    expect(file.name).toBe('diagnostics.txt');
     const text = await file.text();
     expect(text).toContain('TypeError: diff is undefined');
     expect(text).toContain('at DiffPanel (DiffPanel.tsx:42)');
@@ -149,7 +149,7 @@ describe('POST /api/feedback/report', () => {
     expect(captured.form).toBeNull();
   });
 
-  it('does not let a screenshot named crashes.txt shadow the crash file', async () => {
+  it('does not let a screenshot named diagnostics.txt shadow the diagnostics file', async () => {
     crashRecords.current = [crash()];
 
     await postReport({
@@ -157,13 +157,61 @@ describe('POST /api/feedback/report', () => {
       message: 'collision',
       route: '/dashboard',
       includeDiagnostics: true,
-      images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', name: 'crashes.txt' }],
+      images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', name: 'diagnostics.txt' }],
     });
 
     const form = captured.form!;
     const names = form.getAll('files[0]').concat(form.getAll('files[1]')).map((f) => (f as File).name);
-    expect(names).toContain('crashes.txt');
-    expect(names).toContain('crashes-1.txt');
+    expect(names).toContain('diagnostics.txt');
+    expect(names).toContain('diagnostics-1.txt');
+  });
+
+  it('renders the client state snapshot into the State field and the diagnostics file', async () => {
+    const res = await postReport({
+      category: 'bug',
+      message: 'half the window is wallpaper',
+      route: '/dashboard',
+      includeDiagnostics: true,
+      client: {
+        ui: {
+          innerW: 2048, innerH: 1128, dpr: 2, uiZoom: '1',
+          bodyScrollTop: 491, docScrollTop: 0, dashboardTop: -491,
+          palette: 'dark', surface: 'glass',
+        },
+        consoleErrors: [
+          { message: '[workspace-spawn] orchestrator spawn failed: boom', source: 'app', lineno: 12, timestamp: 1784168000000 },
+        ],
+        platform: 'MacIntel',
+      },
+    });
+    expect(res.status).toBe(200);
+
+    const form = captured.form;
+    expect(form, 'client diagnostics must force the multipart path').not.toBeNull();
+    const embed = await embedOf(form!);
+    const state = embed.fields.find((f) => f.name === 'State');
+    expect(state?.value).toContain('bodyScroll 491');
+    expect(state?.value).toContain('dashTop -491');
+    expect(state?.inline).toBe(false);
+
+    const file = form!.get('files[0]') as File;
+    expect(file.name).toBe('diagnostics.txt');
+    const text = await file.text();
+    expect(text).toContain('CONSOLE ERROR RING BUFFER');
+    expect(text).toContain('[workspace-spawn] orchestrator spawn failed: boom');
+  });
+
+  it('drops client diagnostics when includeDiagnostics is absent', async () => {
+    const res = await postReport({
+      category: 'bug',
+      message: 'no consent, no forensics',
+      route: '/dashboard',
+      client: { ui: null, consoleErrors: [], platform: 'MacIntel' },
+    });
+    expect(res.status).toBe(200);
+    expect(captured.form).toBeNull();
+    const payload = captured.json as { embeds: { fields: DiscordEmbedField[] }[] };
+    expect(payload.embeds[0].fields.some((f) => f.name === 'State')).toBe(false);
   });
 
   it('still rejects an invalid report before touching the crash log', async () => {

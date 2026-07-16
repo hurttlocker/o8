@@ -9,6 +9,7 @@ import {
   SettingsSegmented,
 } from './shared';
 import { SettingsGroup } from './grouped';
+import { collectClientDiagnostics } from '@/lib/feedback/report-client';
 
 type ReportCategory = 'bug' | 'request';
 type ReportState = 'idle' | 'sending' | 'sent' | 'error';
@@ -117,6 +118,10 @@ export function ReportIssueSection() {
       : 'unknown';
 
     try {
+      // Diagnostics ride along by default (Q ruling 2026-07-15) — geometry,
+      // zoom, the console-error ring buffer, plus the server-side crash
+      // digest. Best-effort: a diagnostics failure never blocks the report.
+      const client = await collectClientDiagnostics().catch(() => null);
       const response = await fetch('/api/feedback/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -126,6 +131,8 @@ export function ReportIssueSection() {
           route,
           userAgent,
           image: image ? { dataUrl: image.dataUrl, name: image.name } : undefined,
+          includeDiagnostics: true,
+          client: client ?? undefined,
         }),
       });
       const body = await response.json().catch(() => null) as ReportResponse | null;
