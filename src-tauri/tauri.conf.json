@@ -24,6 +24,10 @@
         "hiddenTitle": true,
         "trafficLightPosition": {
           "x": 14,
+          "y": 25
+        },
+        "trafficLightPosition": {
+          "x": 14,
           "y": 15
         },
         "decorations": true,
