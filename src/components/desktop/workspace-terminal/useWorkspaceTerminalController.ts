@@ -782,6 +782,11 @@ export function useWorkspaceTerminalController(
       // assignment so the user's click stays sticky. Phase 4 friction #4.
       const capturedNavVersion = userNavVersionRef.current;
       void (async () => {
+        // Re-check at fire time (same pattern as the 2s fallback below): this
+        // effect scheduled against an EMPTY tab set, but a user spawn can land
+        // inside the timer + async-load window (GQXEZD) — if tabs exist now,
+        // wholesale-writing defaults or a restore over them is a clobber.
+        if (tabsRef.current.length > 0) return;
         if (stableRepoScope && preferredRepo?.localPath) {
           const saved = await loadTabState(stableRepoScope, preferredRepo.localPath);
           if (saved && saved.tabs.length > 0) {
@@ -789,6 +794,9 @@ export function useWorkspaceTerminalController(
             if (restored) return;
           }
         }
+        // Same re-check after the async load — a spawn during the await must
+        // not be overwritten by the default-tab injection below.
+        if (tabsRef.current.length > 0) return;
         if (!autoCreateDefaultTab) {
           tabsRef.current = [];
           setTabs([]);
