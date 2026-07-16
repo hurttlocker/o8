@@ -2,7 +2,12 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { SmoothCorners } from '@lisse/react';
 import { CollapsedRailIcon, ChevronsRightIcon } from './branch-rail-collapse';
+import {
+  COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
+  WORKSPACE_RAIL_CORNER_SMOOTHING,
+} from './branch-rail-geometry';
 import type { PrDetail } from './pr-panel/types';
 
 const ROW_HEIGHT = 28;
@@ -118,7 +123,16 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
   const maxHeight = Math.max(160, viewportHeight - top - OVERLAY_MARGIN);
 
   return createPortal(
-    <div
+    // Lisse squircle, same smoothing as the workspace card corner it floats
+    // over — radius 18 nests concentrically inside the workspace's 26-radius
+    // corner at the overlay's ~8px inset, so the two edges read as one system
+    // in glass mode (Q, 0.1.604: the plain 14px CSS corner clashed against
+    // the Lisse corner behind it). box-shadow strategy: native CSS shadow on
+    // a sibling — immune to WebKit's SVG-filter rasterisation bug.
+    <SmoothCorners
+      corners={{ radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
+      innerBorder={{ width: 1, color: 'var(--t-border-subtle, var(--t-border))', opacity: 1 }}
+      shadowStrategy="box-shadow"
       className="hide-scrollbar"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
@@ -138,10 +152,6 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         paddingLeft: 10,
         overflowY: 'auto',
         scrollbarWidth: 'none',
-        borderRadius: 14,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border-subtle, var(--t-border))',
         // Opaque paper surface so the chat never bleeds through (--t-chat-surface-bg
         // is pinned solid in every palette × surface). The card reads as an
         // elevated panel over the chat, not a translucent scrim.
@@ -270,7 +280,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
       </Card>
 
       <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabelText} />
-    </div>,
+    </SmoothCorners>,
     document.body,
   );
 }
