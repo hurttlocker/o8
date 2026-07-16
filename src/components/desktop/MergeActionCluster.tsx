@@ -36,6 +36,17 @@ interface MergeActionClusterProps {
   /** GitHub remote URL for the active repo. Used to resolve the slug for
    *  /api/panel/prs and /api/panel/prs/[number] calls. */
   repoRemoteUrl: string | null;
+  /**
+   * The repo's default branch. Sitting on it is the resting state, not news —
+   * the cluster renders nothing there and lets the terminal control take the
+   * centre. It reappears the moment the branch is somewhere worth naming: a PR
+   * branch, or an agent's worktree branch (Q 2026-07-16).
+   *
+   * Passed in rather than assumed to be "main": repos whose default is `master`
+   * or `develop` would otherwise show a branch chip permanently, which is the
+   * exact noise this removes.
+   */
+  defaultBranch?: string | null;
 }
 
 interface PrSummary {
@@ -105,6 +116,24 @@ interface Derived {
   disabled: boolean;
 }
 
+/**
+ * True when the cluster has nothing worth saying: the branch IS the repo's
+ * default and no PR is open against it.
+ *
+ * Exported for tests — the whole point is that it stays quiet on `main` and
+ * speaks up everywhere else, and both halves are easy to get wrong.
+ */
+export function isRestingOnDefaultBranch(
+  branch: string | null,
+  defaultBranch: string | null | undefined,
+  derived: Pick<Derived, 'variant' | 'pr'>,
+): boolean {
+  if (!branch || !defaultBranch) return false;
+  if (branch !== defaultBranch) return false;
+  // An open PR against the default branch is real news — keep the chrome.
+  return derived.variant === 'idle' && !derived.pr;
+}
+
 function derive(
   branch: string | null,
   pr: PrSummary | null,
@@ -150,7 +179,7 @@ function derive(
   return { variant: 'idle', statusText: null, statusTone: 'muted', pr: null, primaryLabel: '', primaryIcon: 'branch', disabled: true };
 }
 
-function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact = false }: MergeActionClusterProps) {
+function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact = false, defaultBranch = null }: MergeActionClusterProps) {
   const repoSlug = compact ? null : repoSlugFromRemote(repoRemoteUrl);
   const [pr, setPr] = useState<PrSummary | null>(null);
   const [merging, setMerging] = useState(false);
@@ -257,6 +286,12 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
 
   const displayBranch = branchName ? formatBranchDisplayName(branchName) : null;
   if (!displayBranch) return null;
+  // On the default branch with nothing open against it, there's nothing to say
+  // — "main" is where you always are. Anything else (a PR branch, an agent's
+  // worktree) is worth naming, and an open PR keeps its merge chrome even if
+  // the branch somehow matches. (Q 2026-07-16 — same spirit as the 2026-07-11
+  // ruling below: no state is the state.)
+  if (isRestingOnDefaultBranch(branchName, defaultBranch, derived)) return null;
 
   const tone = TONE[derived.statusTone];
   const successTone = TONE.success;

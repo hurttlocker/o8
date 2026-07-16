@@ -5539,6 +5539,12 @@ function DashboardInner() {
         })()}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
+        // Only the registry entry knows the repo's default branch (readiness
+        // carries onDefaultBranch, but that describes the REPO's checkout — not
+        // whichever branch this cluster is showing, which may be an agent's
+        // worktree). Null when unknown, and the cluster then shows the chip
+        // rather than guessing it away.
+        defaultBranch={globalRepoEntry?.defaultBranch ?? null}
         compact={compactShell}
         glassSurface={effectiveGlassSurface}
         parkedLanes={parkedLanes}
