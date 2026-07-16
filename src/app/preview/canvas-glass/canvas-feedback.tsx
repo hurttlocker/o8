@@ -25,6 +25,8 @@ import {
   type ReportCategory,
   type ReportImage,
 } from '@/lib/feedback/report-client';
+import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
+import { useReportDataSharing } from '@/lib/feedback/report-data-sharing-client';
 import { FONT, glass } from './ui';
 
 type SendState = 'idle' | 'sending' | 'sent' | 'error';
@@ -38,6 +40,15 @@ export function CanvasFeedbackButton() {
   const [image, setImage] = useState<ReportImage | null>(null);
   const [state, setState] = useState<SendState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const {
+    status: dataSharingStatus,
+    error: dataSharingError,
+    enabling: dataSharingEnabling,
+    enabled: dataSharingEnabled,
+    check: checkDataSharing,
+    enable: enableDataSharing,
+    markDisabled: markDataSharingDisabled,
+  } = useReportDataSharing();
 
   const reset = useCallback(() => {
     setMessage('');
@@ -50,12 +61,24 @@ export function CanvasFeedbackButton() {
   // so the shot is the app state, not this popover), then open with it attached.
   // Falls back to opening empty if capture is unavailable (web) or denied.
   const openWithCapture = useCallback(async () => {
-    const shot = await captureAppWindow();
     setState('idle');
     setError(null);
+    const enabled = await checkDataSharing();
+    if (!enabled) {
+      setImage(null);
+      setOpen(true);
+      return;
+    }
+    const shot = await captureAppWindow();
     if (shot) setImage(shot);
     setOpen(true);
-  }, []);
+  }, [checkDataSharing]);
+
+  const openWithoutCapture = useCallback(async () => {
+    setImage(null);
+    setOpen(true);
+    await checkDataSharing();
+  }, [checkDataSharing]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -99,6 +122,7 @@ export function CanvasFeedbackButton() {
   const send = useCallback(async () => {
     const trimmed = message.trim();
     if (!trimmed) { setState('error'); setError('Add a short note first.'); return; }
+    if (!await checkDataSharing(false)) return;
     setState('sending');
     setError(null);
     const result = await submitReport({ category, message: trimmed, route: 'canvas', image });
@@ -107,12 +131,13 @@ export function CanvasFeedbackButton() {
       setMessage('');
       setImage(null);
     } else {
+      if (result.code === REPORT_DATA_SHARING_OFF_ERROR) markDataSharingDisabled();
       setState('error');
       setError(result.error);
     }
-  }, [category, message, image]);
+  }, [category, checkDataSharing, image, markDataSharingDisabled, message]);
 
-  const canSend = message.trim().length > 0 && state !== 'sending';
+  const canSend = dataSharingEnabled && message.trim().length > 0 && state !== 'sending';
 
   return (
     <>
@@ -121,7 +146,10 @@ export function CanvasFeedbackButton() {
         type="button"
         aria-label="Send feedback"
         title="Send feedback"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (open) setOpen(false);
+          else void openWithoutCapture();
+        }}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -171,6 +199,45 @@ export function CanvasFeedbackButton() {
               <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>beta · one-way</span>
             </div>
 
+            {dataSharingStatus === 'checking' ? (
+              <div style={{ paddingTop: 14, paddingBottom: 14, color: 'var(--cnv-ink-muted)', fontSize: 11.5, fontWeight: 300, lineHeight: 1.5 }}>
+                Checking data-sharing settings…
+              </div>
+            ) : !dataSharingEnabled ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8, paddingBottom: 4 }}>
+                <div style={{ color: 'var(--cnv-ink)', fontSize: 11.5, fontWeight: 300, lineHeight: 1.55 }}>
+                  {REPORT_DATA_SHARING_OFF_MESSAGE}
+                </div>
+                {dataSharingError ? (
+                  <div style={{ color: '#ef4444', fontSize: 10.5, fontWeight: 300, lineHeight: 1.45 }}>
+                    {dataSharingError}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => { void enableDataSharing(); }}
+                  disabled={dataSharingEnabling}
+                  style={{
+                    alignSelf: 'flex-start',
+                    minHeight: 30,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    borderRadius: 8,
+                    borderWidth: 0,
+                    background: ACCENT,
+                    color: '#1a1206',
+                    opacity: dataSharingEnabling ? 0.6 : 1,
+                    cursor: dataSharingEnabling ? 'default' : 'pointer',
+                    fontFamily: FONT,
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                  }}
+                >
+                  {dataSharingEnabling ? 'Enabling…' : 'Enable sharing'}
+                </button>
+              </div>
+            ) : (
+              <>
             {/* bug / request */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, padding: 3, borderRadius: 9, background: 'var(--cnv-tint)' }}>
               {(['bug', 'request'] as const).map((c) => (
@@ -247,7 +314,7 @@ export function CanvasFeedbackButton() {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <span style={{ fontSize: 11, fontWeight: 300, color: state === 'error' ? '#ef4444' : state === 'sent' ? ACCENT : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {state === 'sent' ? 'Sent — thanks ✊🏽' : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_REPORT_MESSAGE}`}
+                {state === 'sent' ? 'Sent — thanks' : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_REPORT_MESSAGE}`}
               </span>
               <button
                 type="button"
@@ -282,6 +349,8 @@ export function CanvasFeedbackButton() {
                 Send another
               </button>
             ) : null}
+              </>
+            )}
           </div>
         </>
       ), document.body) : null}

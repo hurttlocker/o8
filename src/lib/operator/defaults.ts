@@ -1238,7 +1238,7 @@ export function resolveTelemetryIngestUrlSync(): string {
   return getOperatorDefaultsSync().values.telemetryIngestUrl;
 }
 
-/** Sentry "Crash & error reports" toggle (default ON; dormant without a DSN). */
+/** Crash/error data-sharing toggle (default off; also gates user bug reports). */
 export function resolveCrashReportsEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.crashReportsEnabled;
 }
