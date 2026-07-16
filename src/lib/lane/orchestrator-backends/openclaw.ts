@@ -48,6 +48,9 @@ interface OpenclawOrchestratorSession {
   status: 'ready' | 'busy' | 'dead';
   proc: ChildProcess | null;
   createdAt: number;
+  /** True once the o8 orchestrator framing has been seeded into this
+   *  session's first message (replaces the removed systemPromptOverride). */
+  promptSeeded?: boolean;
 }
 
 /**
@@ -214,13 +217,17 @@ function governOpenclawAgent(agent: Record<string, unknown>): Record<string, unk
     tools.alsoAllow = (tools.alsoAllow as unknown[]).filter((t) => t !== 'sessions_spawn');
   }
 
-  const priorPrompt =
-    typeof agent.systemPromptOverride === 'string' ? agent.systemPromptOverride.trim() : '';
-  const systemPromptOverride = priorPrompt
-    ? `${OPENCLAW_ORCHESTRATOR_PROMPT}\n\n---\n\n${priorPrompt}`
-    : OPENCLAW_ORCHESTRATOR_PROMPT;
-
-  return { ...agent, tools, systemPromptOverride };
+  // OpenClaw 2026.7.1 removed `agents.list[].systemPromptOverride` ("OpenClaw
+  // owns the generated system prompt") — writing it makes the WHOLE profile
+  // config invalid and the gateway dies before becoming ready (live-hit
+  // 2026-07-16, Q's runtime sweep). Strip it from the governed copy (the
+  // operator's source agent may still carry the legacy key) and deliver the
+  // o8 orchestrator framing per-session instead: sendOpenclawTurn seeds
+  // OPENCLAW_ORCHESTRATOR_PROMPT into the session's FIRST message.
+  const { systemPromptOverride: _legacy, ...rest } = agent as Record<string, unknown> & {
+    systemPromptOverride?: unknown;
+  };
+  return { ...rest, tools };
 }
 
 /** The operator's openclaw agents — `{ id, name }` per entry in `agents.list`. */
@@ -678,7 +685,12 @@ async function sendToOpenclawOrchestrator(
   }
 
   const openclawBin = process.env.O8_OPENCLAW_BIN?.trim() || 'openclaw';
-  const fullMessage = buildRepoContextPreamble(session.repoPath) + message;
+  // First turn of a session carries the orchestrator framing that used to
+  // live in the (now-removed) systemPromptOverride config key — the session
+  // retains it as conversation context for every later turn.
+  const framing = session.promptSeeded ? '' : `${OPENCLAW_ORCHESTRATOR_PROMPT}\n\n---\n\n`;
+  session.promptSeeded = true;
+  const fullMessage = framing + buildRepoContextPreamble(session.repoPath) + message;
 
   const args = [
     '--profile', OPENCLAW_PROFILE,
