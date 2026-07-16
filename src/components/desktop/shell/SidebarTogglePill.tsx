@@ -21,13 +21,16 @@ interface SidebarTogglePillProps {
   onClick?: () => void;
   /**
    * Per-context vertical nudge (px). LOCKED at 100% UI zoom against the
-   * native traffic lights (Q ruling 2026-07-16: icon center rides the
-   * lights' center — conf trafficLightPosition y=25 puts that at ~19.75px
-   * window-y; the pill was sitting ~3px high after titlebar churn).
-   * Default +1 fits the LeftHeaderStrip (sidebar open);
-   * WorkspaceHeaderStrip passes 0 so the pill lands at the SAME window-y
-   * when the sidebar collapses and the toggle migrates over there.
-   * Re-verify against a bitmap crop after ANY titlebar geometry change.
+   * native traffic lights (Q ruling 2026-07-16): pill center = 22.64px
+   * window-y, calibrated against the lights' EMPIRICAL center (~22.4px,
+   * measured from a retina crop — the conf-derived 19.75 was wrong).
+   * TRAP: the header strip vertically centers its items, so a marginTop
+   * nudge moves the pill HALF its value — 3.3 margin = +1.65 actual.
+   * Default +3.3 fits the LeftHeaderStrip (sidebar open);
+   * WorkspaceHeaderStrip passes +2.3 so the pill lands at the SAME
+   * window-y when the sidebar collapses and the toggle migrates there.
+   * Re-verify (DOM: pill gBCR center-y ≈ 22.6 at --ui-zoom 1) after ANY
+   * titlebar geometry change.
    */
   yNudge?: number;
   /**
@@ -40,7 +43,7 @@ interface SidebarTogglePillProps {
   onHoverLeave?: () => void;
 }
 
-export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = 1, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
+export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = 3.3, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
   const active = sidebarVisible;
   return (
     <motion.button
