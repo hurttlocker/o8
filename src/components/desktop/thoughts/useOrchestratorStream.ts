@@ -1099,6 +1099,12 @@ export function useOrchestratorStream(
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
         clientMessageId,
         message: outboundMessage,
+        // What the TRANSCRIPT stores/shows — the user's own words, never the
+        // solo/swarm hints or resume prelude baked into `message` for the
+        // model. Without this, ws-server persisted the scaffolded wire text
+        // and reloads showed "[Solo mode active] …" as if the user typed it
+        // (Chris's screenshot, 2026-07-16).
+        displayMessage,
         permissionMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
