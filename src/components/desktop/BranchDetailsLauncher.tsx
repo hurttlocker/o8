@@ -149,6 +149,34 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
     };
   }, [measure]);
 
+  // Panel-divider drags move the capsule WITHOUT firing window scroll/resize —
+  // the drag writes widths straight onto the column DOM styles — so the card
+  // floated at a stale anchor the instant the right panel moved (Q report
+  // 0.1.604). No layout event covers that (the capsule's own wrapper is fixed
+  // width), so while the card is OPEN, re-glue on a rAF loop (floating-ui
+  // autoUpdate pattern) — state only updates when the rect actually moved, so
+  // idle frames are a string compare. Closed card costs nothing.
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    measure();
+    let raf = 0;
+    let lastKey = '';
+    const glue = () => {
+      const el = capsuleRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const key = `${rect.top}|${rect.right}`;
+        if (key !== lastKey) {
+          lastKey = key;
+          setAnchorRect(rect);
+        }
+      }
+      raf = window.requestAnimationFrame(glue);
+    };
+    raf = window.requestAnimationFrame(glue);
+    return () => window.cancelAnimationFrame(raf);
+  }, [isOpen, measure]);
+
   const activePacket = useMemo(
     () => pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath),
     [data?.missionState?.packets, data?.selectedPacketId, repoPath],
