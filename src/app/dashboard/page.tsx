@@ -1027,6 +1027,28 @@ function DashboardInner() {
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
+
+  // ── Body-scroll guard ──
+  // The dashboard is a fixed-viewport shell — the BODY must never scroll. But
+  // globals.css only hides overflow-X, and during boot the launch clamps
+  // resize the window mid-hydration, so a transcript scrollIntoView can scroll
+  // the momentarily-overflowing BODY instead of the chat container. That
+  // offset then STICKS: the whole app sat 491px above the window top with the
+  // wallpaper showing through the transparent bottom half (live-hit on the
+  // 0.1.605 + 0.1.607 update relaunches, 2026-07-15 — looked like the webview
+  // under-filling the window). Capture-phase listener: scroll events don't
+  // bubble, so document-level capture is the only single hook that sees the
+  // body's own scrolls. Reset is two property reads unless drift happened.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const resetBodyScroll = () => {
+      if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
+      if (document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0;
+    };
+    resetBodyScroll();
+    document.addEventListener('scroll', resetBodyScroll, true);
+    return () => document.removeEventListener('scroll', resetBodyScroll, true);
+  }, []);
   const compactShell = viewportBands?.compact ?? false;
   const getResponsiveViewportWidth = useCallback(() => (
     viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
