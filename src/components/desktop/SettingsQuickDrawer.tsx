@@ -371,7 +371,11 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
   const displayName = user?.name || user?.email || 'Signed in';
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 7px 1px', minWidth: 0 }}>
+      {/* The identity header IS the manage-account affordance (Q ruling
+          2026-07-16): a separate "Manage account" row doubled the same verb
+          and made the drawer taller. Clicking your own name/avatar opens
+          account management — one row shorter. */}
+      <RowButton onClick={auth.openManageAccount}>
         {user?.avatarUrl ? (
           <div
             aria-hidden="true"
@@ -389,7 +393,7 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
         ) : (
           <IconFrame><CircleUser size={15} /></IconFrame>
         )}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, paddingTop: 2, paddingBottom: 1 }}>
           <div style={{ color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {displayName}
           </div>
@@ -399,14 +403,9 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
             </div>
           ) : null}
         </div>
-      </div>
+      </RowButton>
 
       <div style={separatorStyle()} />
-
-      <RowButton onClick={auth.openManageAccount}>
-        <IconFrame><CircleUser size={13} /></IconFrame>
-        <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Manage account</span>
-      </RowButton>
 
       <RowButton onClick={() => { void auth.signOut(); }}>
         <IconFrame><LogOut size={13} /></IconFrame>
