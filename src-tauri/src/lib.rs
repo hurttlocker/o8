@@ -4440,6 +4440,34 @@ fn round_window_corners(win: &tauri::WebviewWindow, radius: f64) {
     }
 }
 
+/// Hide the native macOS traffic lights (close / miniaturize / zoom) on a
+/// window. The webview renders its own DOM traffic lights instead (Q ruling
+/// 2026-07-16): native buttons are drawn by the OS at a fixed PHYSICAL size
+/// and position, so they can never track the app's CSS `zoom` — every
+/// alignment between them and the scaled chrome was a per-zoom calibration
+/// (the 64px × --zoom-inverse spacer, the empirical 22.4px yNudge saga).
+/// DOM lights live in the same flex row as the sidebar toggle and scale with
+/// everything else. macOS re-shows standard buttons after some style-mask /
+/// fullscreen transitions, so this is also re-asserted from the main window's
+/// event handler (Focused + Resized), not just at setup.
+#[cfg(target_os = "macos")]
+fn hide_native_traffic_lights(win: &tauri::WebviewWindow) {
+    use objc2::{msg_send, runtime::AnyObject};
+    let ptr = match win.ns_window() {
+        Ok(p) if !p.is_null() => p as *mut AnyObject,
+        _ => return,
+    };
+    unsafe {
+        // NSWindowButton: 0 = close, 1 = miniaturize, 2 = zoom
+        for kind in 0usize..3 {
+            let btn: *mut AnyObject = msg_send![ptr, standardWindowButton: kind];
+            if !btn.is_null() {
+                let _: () = msg_send![btn, setHidden: true];
+            }
+        }
+    }
+}
+
 /// Make the native Zoom (maximize / restore-down) instant instead of animated.
 ///
 /// WKWebView cannot repaint during an animated NSWindow frame change — the web
@@ -6051,8 +6079,14 @@ pub fn run() {
             // event loop starts, rather than after the whole bootstrap has run.
             if app.get_webview_window("main").is_none() {
                 if let Some(config) = main_window_config.as_ref() {
+                    // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
+                    // hides the native traffic lights, so it must render the
+                    // DOM ones (TrafficLights.tsx). Old shells lack the flag →
+                    // the strips keep the native-lights spacer fallback, which
+                    // keeps dev-bridge (new frontend on the old installed
+                    // binary) rendering correctly.
                     let init_script = format!(
-                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {};",
+                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = true;",
                         api_port,
                         serde_json::to_string(&boot_identity.boot_id)
                             .unwrap_or_else(|_| "\"\"".into())
@@ -6144,6 +6178,14 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 make_window_zoom_instant(&window);
 
+                // Native traffic lights OFF — the webview draws its own so the
+                // whole titlebar cluster scales with the app's CSS zoom
+                // (Q ruling 2026-07-16). Re-asserted below on Focused/Resized
+                // because macOS un-hides standard buttons across fullscreen
+                // and style-mask transitions.
+                #[cfg(target_os = "macos")]
+                hide_native_traffic_lights(&window);
+
                 #[cfg(target_os = "windows")]
                 if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
                     log::warn!("Failed to apply Windows blur: {}", err);
@@ -6200,6 +6242,20 @@ pub fn run() {
                         | tauri::WindowEvent::Moved(_)
                         | tauri::WindowEvent::ScaleFactorChanged { .. } => {
                             window_restore::schedule_event_clamp(&app_handle);
+                            // Re-hide the native traffic lights — macOS
+                            // re-shows standard buttons across fullscreen
+                            // enter/exit and style-mask changes, and both
+                            // paths land here as a Resized event.
+                            #[cfg(target_os = "macos")]
+                            if let Some(w) = app_handle.get_webview_window("main") {
+                                hide_native_traffic_lights(&w);
+                            }
+                        }
+                        #[cfg(target_os = "macos")]
+                        tauri::WindowEvent::Focused(_) => {
+                            if let Some(w) = app_handle.get_webview_window("main") {
+                                hide_native_traffic_lights(&w);
+                            }
                         }
                         _ => {}
                     }

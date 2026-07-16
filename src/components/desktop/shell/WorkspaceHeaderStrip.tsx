@@ -14,6 +14,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
+import { TrafficLightsOrSpacer } from './TrafficLights';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
@@ -129,23 +130,25 @@ export function WorkspaceHeaderStrip({
       drag
       left={
         <>
-          {/* When this strip is leftmost (sidebar collapsed), pad past the
-              macOS traffic lights — they're drawn at fixed window coords by
-              the OS. 64px clears the green light (~x=62) plus the standard
-              ~10px breathing room before the toggle pill. Screen pixels
-              (× --zoom-inverse), since the lights ignore CSS zoom. */}
-          {leadingInset ? <div style={{ width: 'calc(64px * var(--zoom-inverse, 1))', flexShrink: 0 }} /> : null}
+          {/* When this strip is leftmost (sidebar collapsed) it carries the
+              traffic lights: DOM-rendered on shells that hide the native ones
+              (they scale with CSS zoom — Q ruling 2026-07-16), legacy
+              screen-pixel spacer on older shells. Same yNudge as the toggle
+              pill below so their centers ride one line. */}
+          {leadingInset ? <TrafficLightsOrSpacer yNudge={1.3} leadInPx={2} /> : null}
           {onToggleSidebar ? (
             <SidebarTogglePill
               sidebarVisible={sidebarVisible}
               onClick={onToggleSidebar}
               onHoverEnter={onSidebarHoverEnter}
               onHoverLeave={onSidebarHoverLeave}
-              // Workspace strip is 36 tall starting at y=4; the left card's
-              // strip is 32 starting at y=5. +1 offset (vs the left default)
-              // keeps the pill at the same window-y across the sidebar
-              // toggle — without this it shifts 1px on collapse.
-              yNudge={2.3}
+              // Calibrated LIVE against the left strip (2026-07-16): with the
+              // left card's pill at yNudge 3.3 → center-y 22.39, this strip's
+              // geometry needs 1.3 to land the SAME 22.39 (2.3 measured 0.5px
+              // low at 22.89). Keeps the whole cluster from jumping when the
+              // sidebar collapses. Re-verify with gBCR center-y in both
+              // states after ANY titlebar geometry change.
+              yNudge={1.3}
             />
           ) : null}
         </>
@@ -177,7 +180,7 @@ export function WorkspaceHeaderStrip({
                 icon={<IconTerminal />}
                 label="Toggle terminal"
                 onClick={onToggleBottomPanel}
-                yNudge={2.3}
+                yNudge={1.3}
               />
             ) : null}
             {onSplitWorkspacePanel ? (
@@ -185,7 +188,7 @@ export function WorkspaceHeaderStrip({
                 icon={<IconColumns />}
                 label="Split workspace"
                 onClick={onSplitWorkspacePanel}
-                yNudge={2.3}
+                yNudge={1.3}
               />
             ) : null}
             {/* Sits immediately before the panel toggle — the header's
@@ -276,7 +279,7 @@ function SplitHeaderPillStrips({
                   label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
                   title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
                   onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
-                  yNudge={2.3}
+                  yNudge={1.3}
                 />
               ) : null}
               <HeaderPlayButton
