@@ -1,72 +1,140 @@
-# Repository Guidelines
+# o8 Repository Guide
 
-## Project Structure & Module Organization
-`src/app` contains the Next.js App Router pages and API routes. `src/components` holds UI surfaces, with major splits for `desktop`, `mobile`, and `landing`. Shared logic lives in `src/lib` by domain (`runtime`, `worktree`, `openclaw`, `cortex`, `review`, etc.). `src/ws-server.ts` runs the standalone WebSocket bridge used by the mobile shell. Native desktop packaging lives in `src-tauri`. Product notes, specs, and architecture docs live in `docs`; static assets are in `public` and `assets`.
+This is the Codex-facing execution guide for the o8 repository. [`CLAUDE.md`](./CLAUDE.md) carries broader product and architecture context, but volatile inventories in documentation can drift; for ports, scripts, runtime registrations, route policy, and test behavior, the implementation and tests are authoritative.
 
-## Brand Direction
-Read [`BRAND.md`](./BRAND.md) before making desktop or mobile visual changes. It defines the current product theme, spacing, color, motion, and component language.
+## What o8 Is
 
-## Build, Test, and Development Commands
-Use `npm install` to sync dependencies.
+o8 is a Next.js 16 + React 19 application packaged in a Tauri v2 desktop shell. It is the governance and operator-control layer for autonomous engineering: missions, isolated packet worktrees, review and approval gates, audit history, organizational memory, a mobile remote-control surface, and Symon voice control.
 
-- `npm run dev`: starts Next.js on `http://localhost:3001`
-- `npm run dev:ws`: starts the WebSocket server on port `3002`
-- `npm run desktop:dev`: runs the web app and WS server together for normal UI work
-- `npm run build`: creates the production Next.js build
-- `npm run start`: serves the production build on port `3001`
-- `npm run lint`: runs ESLint across the repo
-- `npm run typecheck`: runs strict TypeScript checks with `tsc --noEmit`
-- `npm run tauri:dev` / `npm run tauri:build`: run or package the native Tauri shell
+The root route redirects to `/dashboard`. Desktop UI lives primarily in `src/app/dashboard` and `src/components/desktop`; mobile is intentionally separate under `src/app/mobile` and `src/components/mobile`. `src/ws-server.ts` is the standalone realtime bridge. Native packaging and Symon live in `src-tauri`.
 
-## Coding Style & Naming Conventions
-This repo uses TypeScript in `strict` mode and the Next.js ESLint flat config in [`eslint.config.mjs`](./eslint.config.mjs). Match the existing style: 2-space indentation, single quotes, semicolons, and concise comments only where the flow is not obvious. Use `PascalCase` for React components (`DesktopChat.tsx`), `camelCase` for functions and utilities, and keep domain files grouped under `src/lib/<domain>`. Prefer the `@/` path alias over long relative imports.
+Keep two extension systems distinct:
 
-## Testing Guidelines
-No automated test runner is configured yet. For every change, run `npx tsc --noEmit` — that is the one **must-pass** gate. For lint, run it **scoped to the files you touched** (`npx eslint <your changed files>`), **never the repo-wide `npm run lint`** — that walks the whole codebase and can take 10+ minutes even for a one-file change, and o8 already runs the authoritative typecheck + change-scoped rule-check at the merge gate. **Lint is advisory: finalize as soon as typecheck passes and your changed-file checks are clean — do NOT keep the lane running while you wait on a slow or repo-wide check.** Smoke-test the affected routes (`/`, `/dashboard`, `/landing`, `/mobile`) only when UI behavior changes. Validate API and WS changes with the local bridge running via `npm run desktop:dev` or `npm run dev:ws`.
+- **Orchestrator backends** live in `src/lib/lane/orchestrator-backends/`. They decide which system drives an orchestration turn.
+- **Worker/runtime adapters** live in `src/lib/runtimes/`. The UI and API use the runtime registry and capability contract rather than talking directly to Codex, Claude Code, Gemini, OpenCode, Cursor, Grok, Pi, or cloud workers.
 
-## Commit & Pull Request Guidelines
-Recent history follows Conventional Commit prefixes such as `feat:` and `fix:`. Keep commits focused and imperative, for example `fix: prevent stale mobile transcript replay`. PRs should include a short problem/solution summary, linked issue or design doc when relevant, and manual verification steps. Include screenshots or recordings for desktop/mobile UI changes and note any required env vars in `.env.local` such as `WS_TOKEN`, `GEMINI_API_KEY`, or `VERCEL_TOKEN`.
+Do not assume that the active orchestrator backend and a dispatched worker runtime are the same. The `auto` backend currently resolves through `active-backend.ts`; inspect that resolver and the registries before changing routing behavior.
 
-## o8 CLI (available inside packet worktrees)
+## Repository Map
 
-When you're an agent dispatched into an o8 packet worktree, the `o8` CLI is on `$PATH` (symlinked to `/usr/local/bin/o8` once o8.app has run at least once; if exit 127 the symlink is missing — re-launch o8.app once to restore it). Use it instead of curling the local HTTP API — it knows your packet context and resolves cwd automatically.
+- `src/app`: Next.js App Router pages and API routes.
+- `src/components`: desktop, mobile, and shared UI surfaces.
+- `src/lib`: domain logic; the largest active areas are lane/orchestration, runtimes, Cortex/Brain, MCP, mobile, auth, worktrees, DB, browser, and operator settings.
+- `src/ws-server.ts` and `src/lib/ws-server`: WebSocket transport and extracted server domains.
+- `src-tauri`: Rust shell, native commands, packaging, updater, and Symon.
+- `cli`: source for the `o8` CLI. Treat `cli/src/index.ts` and command implementations as the command-surface truth.
+- `tests` plus colocated `src/**/*.test.ts`: Vitest coverage, including route/auth/reachability tests.
+- `scripts`: build, release, smoke, benchmark, and rule-check tooling.
+- `docs`: architecture, product, security, performance, and handoff material.
+
+Local state is SQLite/file-backed under `~/.o8` by default. Use `CORTEX_IDE_DATA_DIR` for isolated tests or alternate state; do not write tools that assume one developer's home path.
+
+## Design Sources
+
+For desktop or mobile visual work, read these in order:
+
+1. [`Hurttlocker.md`](./Hurttlocker.md) for operator-locked typography, icon, row, and layout geometry.
+2. [`DESIGN.md`](./DESIGN.md) for the desktop visual language, palette, surfaces, and accessibility model.
+3. [`STYLEGUIDE.md`](./STYLEGUIDE.md) for interaction review gates: feedback timing, sibling cohesion, and button hierarchy.
+4. `src/lib/theme/` for the actual light/dark × glass/solid token implementation.
+
+`BRAND.md` is historical Cortex-era direction and is not the current implementation authority.
+
+## Setup and Commands
+
+Use Node 22 (`package.json` pins `>=22 <23`) and `npm install` to sync dependencies.
+
+- `npm run dev`: starts the coordinated Next + WebSocket development stack and cleans its registered stale processes first. The current defaults are API `47120` and WS `47125`, overridable through `PORT`/`O8_API_PORT` and `WS_PORT`/`O8_WS_PORT`.
+- `npm run dev:next`: starts only Next.js.
+- `npm run dev:ws`: starts only the WebSocket server.
+- `npm run desktop:dev`: alias for the coordinated `npm run dev` stack.
+- `npm run desktop:dev:side`: side-by-side dev stack on `3010`/`3011` for installed-app bridge work.
+- `npm run build`: production Next.js build using webpack.
+- `npm run start`: serves a production Next build, honoring `PORT`.
+- `npm run tauri:dev` / `npm run tauri:build`: run or package the native shell.
+- `npm run tauri:build:signed`: signed updater-capable build with the MCP feature enabled.
+
+Never copy these fallback ports into application code. The packaged shell chooses ports dynamically and writes `~/.o8/api-port` and `~/.o8/ws-port`; server code should use `getApiBase()` / `resolvePortInfo()`, and standalone CLI/MCP code should use its existing resolver.
+
+## Verification
+
+`npx tsc --noEmit` is the mandatory local completion gate for every code change. `npm run typecheck` is the fuller variant: it clears generated Next types, runs `next typegen`, then runs TypeScript.
+
+Vitest is configured in `vitest.config.ts` with isolated data directories and no global test APIs. Run the smallest relevant test set during iteration (`npx vitest run <paths>`), then `npm test` when the change crosses domains, changes a shared contract, or needs the full suite. For Rust changes, run the relevant Cargo test from `src-tauri`, normally `cargo test --lib`.
+
+Run `npm run rule-check -- --base=<ref>` for changed TypeScript/TSX. It enforces the changed-line UI/port/path invariants and the file ceiling. Run ESLint only on touched files (`npx eslint <changed files>`); repo-wide `npm run lint` carries known baseline debt and is not a normal packet completion gate.
+
+New cross-process seams, prompt-taught tool arguments, persistence paths, and principal/authorization changes require a test through the real entry point and persisted state. A helper-only unit test does not prove that production callers can reach the behavior. Use `tests/route-coverage.test.ts`, `tests/principal-authz.test.ts`, and `tests/real-path-seams.test.ts` as patterns.
+
+CI currently runs on pull requests and manual dispatch. PRs run typecheck, unit tests, and the governance smoke; full lint and build are manual-dispatch jobs. Do not describe CI from memory—read `.github/workflows/ci.yml` when changing the gate.
+
+## Load-Bearing Code Rules
+
+- Preserve existing worktree changes. Never overwrite unrelated edits, and inspect `git status` before changing files.
+- TypeScript is strict. Match the existing two-space, single-quote, semicolon style; use `PascalCase` for components, `camelCase` for functions, and the `@/` alias for `src` imports.
+- The default file ceiling is 800 lines. Current mechanical waivers are `src/app/dashboard/page.tsx`, `src/ws-server.ts`, `src/lib/worktree/manager.ts`, and `src/lib/lane/commands.ts`. New waivers require an explicit user decision.
+- Do not introduce `className` or new CSS classes in TSX. Use inline style objects. Existing legacy classes do not make new ones acceptable.
+- Use longhand spacing properties when multiple values are needed (`paddingTop`, `paddingRight`, etc.); React 19 warns when shorthand and longhand are mixed.
+- Use theme variables for themeable surfaces. Do not add hardcoded rgba-white surface colors.
+- Do not add emoji UI. Desktop icons must use the established raw-SVG/shim pattern; do not introduce `lucide-react` or React Phosphor component imports into desktop code.
+- Keep React hooks unconditional and in stable order; do not put an early `return null` before hooks.
+- API middleware is default-deny for `/api/*`. Public routes must be added deliberately to the narrow read/any-method allowlists, and externally reachable self-authenticating routes must verify their own credentials. There is no `GATED_PREFIXES` list.
+- API routes should return structured error responses rather than throwing to the framework.
+- Do not hardcode `3001`/`3002` or `/Users/marquisehurtt/...` in implementation code. Use the port resolver, `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit env variable.
+- Ad-hoc LLM calls go through the existing proxy/routing layer. The sanctioned AI SDK import boundary is `src/lib/chat/gateway-client.ts`; do not spread `ai`/`@ai-sdk/*` imports elsewhere without an explicit architecture change.
+- For MCP tools consumed by OpenAI strict mode, keep the top-level input schema a plain object with `properties` and `required`; validate unions or conditional relationships in the handler.
+
+## Commits and Coordination
+
+Use focused, imperative Conventional Commit subjects such as `fix: prevent stale transcript replay`. In packet worktrees, use `o8 packet commit -m "..."` so staging respects packet scope. Outside a packet, do not commit, push, version-bump, ship, or open a PR unless the user requested that action.
+
+When multiple agents are active in the same repository, use `o8 team who`, `o8 team status`, `o8 team tell`, and named leases to coordinate shared operations. Use `o8 lane touches --path <file>` before editing a file another packet may own. Do not install coordination hooks with `o8 team init` unless the operator explicitly asks for them.
+
+## o8 CLI
+
+The `o8` CLI is symlinked onto `$PATH` after o8.app runs once. Inside packet worktrees it resolves packet and lane context from the current directory; operators can use the same control-plane verbs from the repository root. Use it instead of curling the local HTTP API.
 
 ```
-o8 status                              # global fleet snapshot (running packets, lanes, merges, approvals)
-o8 version                             # CLI + connected server version
-o8 doctor [--reap]                     # verify port/token resolution + ping; --reap clears zombie lanes
+o8 status                                  # fleet snapshot: packets, lanes, merges, approvals
+o8 version                                 # CLI + connected server version
+o8 doctor [--reap] [--repair]              # diagnose server/config; reap zombies; repair CLI symlink
+o8 app restart [--if-update-pending]        # request a running-app restart
+o8 mcp install --claude-code|--cursor|--print
 
 # Run a long process the operator can WATCH LIVE (servers, backtests, scripts)
-o8 run <cmd...>                        # run inside an o8-owned terminal; streams output to you AND lets the operator attach a live view
-o8 run --detach <cmd...>               # fire-and-register (servers): returns immediately, leaves it running
-o8 run --list                          # list managed runs (running + recent, with exit codes)
-o8 run -- <cmd...>                     # put -- before the command when it has its own flags (e.g. o8 run -- pytest -q)
+o8 run <cmd...>                            # stream in an o8-owned terminal visible to the operator
+o8 run --detach <cmd...>                   # register a server/daemon and return immediately
+o8 run --list                              # managed runs with recent exit codes
+o8 run stop <run-id>                       # stop a managed run
+o8 run -- <cmd...>                         # use -- when the wrapped command has flags
 
 # Packet (your dispatched work) — most auto-resolve the lane from cwd
-o8 packet info                         # current packet metadata (id, branch, base, runtime, recent events)
-o8 packet scope [packet-id]            # one-call worker context: file ceiling, allowed/blocked paths, directives, related-packet overlap (auto-resolves from cwd)
-o8 packet diff [id]                    # this packet's code diff vs base (committed + uncommitted), byte-bounded
-o8 packet commit -m "<message>"        # stage + commit the worktree with an explicit pathspec (use instead of raw git add/commit)
-o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
+o8 packet info                             # packet metadata: id, branch, base, runtime, events
+o8 packet scope [packet-id]                # scope, directives, file ceiling, overlaps
+o8 packet diff [packet-id]                 # committed + uncommitted diff vs base
+o8 packet commit -m "<message>"            # scoped stage + commit; prefer over raw git add/commit
+o8 packet heartbeat [--lane <lane-id>]     # lifecycle ping; exits 4 outside a packet without --lane
 o8 packet report --event progress [--reason "..." --message "..."]   # surface a structured progress/blocker event
 o8 packet capture --url <url> --before|--after [--clip <sel>] [--full-page] [--wait-for <sel>] [--hover <sel>] [--click <sel>] [--settle <ms>] [--label "..."]   # screenshot the running app as VISUAL PROOF of a bug/fix
 o8 packet mirror-proof --pr <n> [--repo owner/repo] [--packet <id>]  # mirror the packet's before/after proof onto a GitHub PR (release-asset hosted, zero git bloat)
-o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
-o8 packet runtime-drift                # detect + warn when the lane's bound runtime drifted (exit 5 on drift)
-o8 packet review --approve [--commit-message "..."]                  # approve + merge a reviewed packet
-o8 packet reset [--packet <id>] [--reason "..."]        # wipe a stuck packet's worktree + lane, then `o8 mission dispatch` to relaunch
-o8 packet retry [--packet <id>] [--reason "..."]        # like reset but KEEP the worktree (resume the work in place)
-o8 packet rerun --feedback "..." [--packet <id>]        # fresh worker with feedback (relaunches immediately)
-o8 packet steer --message "..." [--packet <id>]         # nudge a packet's warm session (layer-3 escalation, cheaper than rerun)
-o8 packet merge-preview [--packet <id>]                 # dry-run the 5-layer merge gate (wouldMerge + blockers), no mutation
-o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # FROM A WORKER this does NOT merge — it raises an operator approval card and returns status "pending_operator_approval". You cannot merge your own work to main; that is the operator's call. Track the card with `o8 inbox list`.
+o8 packet log [id] [--follow] [--since <cursor>]         # read or tail lane events
+o8 packet runtime-drift                    # exit 5 when the bound runtime drifted
+o8 packet stop|cancel [packet-id]           # interrupt and hold; resume with reset/rerun
+o8 packet reset [--packet <id>] [--reason "..."]         # wipe worktree + lane, then redispatch
+o8 packet retry [--packet <id>] [--reason "..."]         # reset while keeping the worktree
+o8 packet rerun --feedback "..." [--packet <id>]         # fresh worker, immediate relaunch
+o8 packet steer --message "..." [--packet <id>]          # nudge the warm session
+o8 packet merge-preview [--packet <id>]                  # read-only five-layer merge preview
+o8 packet review --approve [--expected-sha <sha>] [--commit-message "..."]   # records review, then uses the gated merge path
+o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # worker context raises an operator card; it does not self-merge
 
 # Mission orchestration — fan out sub-work to fellow agents and track it without leaving the CLI.
 o8 mission create --title "..." [--body "..."] [--repo <path>] [--compare m1,m2] [--runtime r]   # create a mission from an inline task (--compare seeds a best-of-N)
-o8 mission dispatch [--mission <id>] [--wait]   # dispatch a created mission's packets (returns once launch is initiated; --wait blocks for the full launch + count)
-o8 mission status   [--mission <id>] [--cost]                          # mission + packet state
-o8 mission wait     [--mission <id>] [--packet <id>] [--timeout <ms>]  # block until a packet hits a review/terminal state (wakeReason in the payload)
-o8 mission tail     [--mission <id>] [--timeout <ms>]                  # stream packet status transitions until terminal
+o8 mission dispatch [--mission <id>] [--wait] [--watch] [--timeout 2h] [--poll <ms>]   # launch; optionally notify on review/terminal
+o8 mission status [--mission <id>] [--cost]             # mission + packet state
+o8 mission stop --mission <id>                           # interrupt and hold every packet
+o8 mission wait [--mission <id>] [--packet <id>] [--timeout 30m] [--poll <ms>]
+o8 mission tail [--mission <id>] [--timeout 30m] [--poll <ms>]
 
 # Governance inbox — the operator approval queue; worker approve-merge cards land here.
 o8 inbox list [--all]                  # pending approvals (--all includes resolved)
@@ -84,11 +152,20 @@ o8 task report <id> --event "..."      # append a task progress event
 o8 task archive <id>                   # prune/archive a stale task row
 o8 task prune <id>                     # permanently remove a done/archived task row
 
+# Same-repo coordination (git-native; no server required)
+o8 team who
+o8 team status "<one-line status>"
+o8 team tell @<handle> "<message>"
+o8 team inbox [--all]
+o8 team lease list
+o8 team lease acquire <name> [--note "..."] [--ttl <minutes>]
+o8 team lease release <name>
+
 o8 lane touches --path <file>          # other lanes touching the same file (or --packet <id>)
 
 # Engineering Brain — ASK it instead of grepping for conventions, history, or ownership.
 # Returns an answer + titled citations in seconds; auto-scopes to your packet's repo from cwd.
-o8 ask "<question>" [--repo <path>]    # e.g. o8 ask "What is the theming rule for surface colors?"
+o8 ask "<question>" [--repo <path>] [--terse]   # e.g. o8 ask "What is the theming rule for surface colors?"
 
 # Brain feedback — workers contribute observations the orchestrator promotes to directives.
 # See "Contributing to the brain" below; this is the only way a worker writes to memory.
@@ -100,10 +177,11 @@ o8 cortex observe --kind <regression|pattern|gotcha|preference> --text "..." [--
 # live-viewed in the canvas as an "Agent Chrome" tab), and later verbs stick with the
 # engine while its page is open (--surface canvas|panel|engine overrides). Every call
 # from a packet worktree lands in the lane audit trail as `browser_acted`.
-o8 browser open [url]                  # reveal the browser at a URL (localhost → embedded, external → engine)
-o8 browser read [--max-chars <n>]      # page text + interactive elements with stable CSS selectors
+o8 browser open [url]
+o8 browser read [--selector <css>] [--max-chars <n>] [--surface ...]
 o8 browser click "<selector>"          # click an element (selector from `read`)
 o8 browser type "<selector>" <text…> [--submit]   # type into an input; --submit presses Enter
+o8 browser grab "<selector>"           # rich style/accessibility payload for one element
 o8 browser wait "<selector>" [--text <s>] [--timeout <ms>]   # poll until the selector (and text) resolves
 o8 browser close                       # end this scope's engine (headless Chrome) session
 
@@ -112,15 +190,15 @@ o8 spec read     [--repo <path>]       # raw o8.md content
 o8 spec index    [--repo <path>]       # structured review threads + summary
 o8 spec pending  [--repo <path>]       # only the UNRESOLVED threads (what to address)
 o8 spec check    [--repo <path>]       # validate the review markup
-o8 spec comment  --repo <path> --body "<thought>" [--anchor "<snippet>"]   # leave a new pointer (author defaults to AI)
-o8 spec reply    --repo <path> --to <id> --body "<msg>"                    # reply to a thread
-o8 spec resolve  --repo <path> --id <id> [--summary "<note>"]              # mark a thread resolved
-o8 spec suggest  --repo <path> --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]  # propose a non-destructive edit
+o8 spec comment  [--repo <path>] --body "<thought>" [--anchor "<snippet>"] [--by AI]
+o8 spec reply    [--repo <path>] --to <id> --body "<msg>" [--by AI]
+o8 spec resolve  [--repo <path>] --id <id> [--summary "<note>"]
+o8 spec suggest  [--repo <path>] --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]
 ```
 
-Output is JSON by default (pass `--human` for pretty ANSI). Errors come back as JSON with a stable schema + an exit code (1 invalid args, 2 connection refused, 3 unauthorized, 4 not found, 5 conflict). Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
+Output is JSON by default (pass `--human` for pretty ANSI). Errors use stable schemas and exit codes: 1 invalid arguments, 2 connection refused, 3 unauthorized, 4 not found, and 5 conflict. The CLI resolves the active port and bearer token from dispatch env, `~/.o8`, or the legacy fallback; do not replace it with handwritten HTTP calls.
 
-If a command exits 127 (`command not found`), o8.app probably hasn't run yet on this machine, or the symlink was removed; fall back to typecheck + commit and the heal-bot will pick up signals from there.
+If a command exits 127 (`command not found`), launch o8.app once and run `o8 doctor --repair` after the binary is reachable. If the local control plane is unavailable, continue only with work that does not depend on packet mutation, and report the missing verification boundary.
 
 ## Running things the operator can see (`o8 run`)
 
