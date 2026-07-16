@@ -340,6 +340,13 @@ export interface MobileTranscriptEntry {
   /** Structured orchestrator status event (mission complete / merge / heal) — rendered as OrchestratorStatusCard. */
   statusEvent?: import('@/lib/orchestrator/status-events').OrchestratorStatusEventData;
   /**
+   * Marks a system entry as an in-chat error notice (delivery failure, stream
+   * error) so it renders with the warning tint instead of the neutral system
+   * card. Entries persisted before this flag existed fall back to text
+   * detection — see `isErrorNoticeText` in `@/lib/transcripts/error-notice`.
+   */
+  isError?: boolean;
+  /**
    * Collide (MoA) pre-roll — the faint, collapsible "two proposals collided"
    * card that precedes the synthesized answer. Present only on Collide turns;
    * rendered as CollideProposalCard instead of the default message body.

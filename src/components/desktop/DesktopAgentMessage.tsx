@@ -13,6 +13,7 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
+import { resolveIsErrorNotice } from '@/lib/transcripts/error-notice';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
@@ -190,6 +191,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // Sanitize regex chain runs on every render unless memoized — heavy on
   // long transcripts where entry text is stable but parent re-renders fire.
   const displayText = useMemo(() => sanitizeTranscriptText(entry.text), [entry.text]);
+  // Error notices are system entries that reported a broken turn — tinted so
+  // they don't read as ordinary system news. Everything else stays neutral.
+  const isErrorNotice = entry.role === 'system' && resolveIsErrorNotice(entry);
   // Smooth (typewriter) reveal for the in-flight assistant reply — paces out
   // bursty deltas so words flow in. No-op (returns full text) for user/history.
   const revealedText = useSmoothText(displayText, entry.role === 'assistant' && isStreaming);
@@ -421,7 +425,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             paddingBottom: 10,
             paddingLeft: 14,
             borderRadius: 10,
-            background: 'var(--t-input-bg)',
+            background: 'var(--t-chat-user-bg)',
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-divider)',
@@ -512,9 +516,15 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           paddingLeft: entry.role === 'system' ? 12 : 0,
           paddingRight: entry.role === 'system' ? 12 : 0,
           borderRadius: entry.role === 'system' ? 12 : 0,
-          background: entry.role === 'system' ? 'var(--t-bg-card, rgba(148, 163, 184, 0.06))' : 'transparent',
-          border: entry.role === 'system' ? '1px solid var(--t-divider)' : 'none',
-          boxShadow: entry.role === 'system' ? 'var(--t-panel-shadow)' : 'none',
+          background: isErrorNotice
+            ? 'var(--t-chat-error-bg)'
+            : entry.role === 'system' ? 'var(--t-bg-card, rgba(148, 163, 184, 0.06))' : 'transparent',
+          border: isErrorNotice
+            ? '1px solid var(--t-chat-error-border)'
+            : entry.role === 'system' ? '1px solid var(--t-divider)' : 'none',
+          // Flat: the panel shadow read as a stuck hover state against the
+          // transcript's flat agent text.
+          boxShadow: 'none',
         }}>
           {showMarkdown
             ? renderedMarkdown
