@@ -20,13 +20,14 @@ interface SidebarTogglePillProps {
   sidebarVisible?: boolean;
   onClick?: () => void;
   /**
-   * Per-context vertical nudge (px). Default -2 fits the LeftHeaderStrip
-   * baseline (32px strip, paddingTop=5 card — the original /preview/shell
-   * lab geometry). WorkspaceHeaderStrip passes -3 so the pill lands at the
-   * SAME window-y when the sidebar collapses and the toggle migrates over
-   * there. The production dashboard now passes -6 from LeftHeaderStrip
-   * because the AgentPanel card's paddingTop bumped from 5 → 9 for outer
-   * breathing room (2026-05-27).
+   * Per-context vertical nudge (px). LOCKED at 100% UI zoom against the
+   * native traffic lights (Q ruling 2026-07-16: icon center rides the
+   * lights' center — conf trafficLightPosition y=25 puts that at ~19.75px
+   * window-y; the pill was sitting ~3px high after titlebar churn).
+   * Default +1 fits the LeftHeaderStrip (sidebar open);
+   * WorkspaceHeaderStrip passes 0 so the pill lands at the SAME window-y
+   * when the sidebar collapses and the toggle migrates over there.
+   * Re-verify against a bitmap crop after ANY titlebar geometry change.
    */
   yNudge?: number;
   /**
@@ -39,7 +40,7 @@ interface SidebarTogglePillProps {
   onHoverLeave?: () => void;
 }
 
-export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = -2, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
+export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = 1, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
   const active = sidebarVisible;
   return (
     <motion.button
@@ -81,10 +82,8 @@ export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = -2,
         borderRadius: 7,
         cursor: 'pointer',
         flexShrink: 0,
-        // Localized upward nudge so the pill sits higher inside whichever
-        // strip places it. Default -4 fits the LeftHeaderStrip card placement;
-        // WorkspaceHeaderStrip overrides with -5 to keep window-y identical
-        // across the sidebar-open ↔ sidebar-closed toggle.
+        // Locked vertical nudge — see the yNudge prop doc: centers the pill
+        // on the native traffic lights at 100% zoom (Q ruling 2026-07-16).
         marginTop: yNudge,
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',

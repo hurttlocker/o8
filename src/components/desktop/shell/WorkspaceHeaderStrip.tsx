@@ -144,7 +144,7 @@ export function WorkspaceHeaderStrip({
               // strip is 32 starting at y=5. +1 offset (vs the left default)
               // keeps the pill at the same window-y across the sidebar
               // toggle — without this it shifts 1px on collapse.
-              yNudge={-3}
+              yNudge={0}
             />
           ) : null}
         </>
@@ -177,7 +177,7 @@ export function WorkspaceHeaderStrip({
                 icon={<IconTerminal />}
                 label="Toggle terminal"
                 onClick={onToggleBottomPanel}
-                yNudge={-3}
+                yNudge={0}
               />
             ) : null}
             {onSplitWorkspacePanel ? (
@@ -185,7 +185,7 @@ export function WorkspaceHeaderStrip({
                 icon={<IconColumns />}
                 label="Split workspace"
                 onClick={onSplitWorkspacePanel}
-                yNudge={-3}
+                yNudge={0}
               />
             ) : null}
             {showRightPanelFallbackToggle ? (
@@ -272,7 +272,7 @@ function SplitHeaderPillStrips({
                   label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
                   title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
                   onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
-                  yNudge={-3}
+                  yNudge={0}
                 />
               ) : null}
               <HeaderPlayButton
