@@ -99,7 +99,7 @@ export function AppearanceControl({
         label="Dark"
         glyph={<ThemeGlyphMoon />}
       />
-      <span aria-hidden style={{ width: 1, height: 12, background: 'var(--t-divider-subtle)', marginLeft: 1, marginRight: 1, flexShrink: 0 }} />
+      <span aria-hidden style={{ width: 1, height: 10, background: 'var(--t-divider-subtle)', marginLeft: 1, marginRight: 1, flexShrink: 0 }} />
       <button
         type="button"
         aria-pressed={glassOn}
@@ -110,8 +110,8 @@ export function AppearanceControl({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 22,
-          height: 20,
+          width: 21,
+          height: 18,
           borderWidth: 1,
           borderStyle: 'solid',
           // Off state keeps a faint FRAME (not transparent like inactive
@@ -130,7 +130,7 @@ export function AppearanceControl({
           transition: 'background 140ms ease, color 140ms ease',
         }}
       >
-        <GlassGlyph size={14} />
+        <GlassGlyph size={13} />
       </button>
     </div>
   );
@@ -150,7 +150,7 @@ function SegmentButton({ active, onPick, label, glyph }: { active: boolean; onPi
         // track grows and every row overflows the panel (live-hit
         // 2026-07-16 — trailing values ended 1px from the edge).
         gap: 3,
-        height: 20,
+        height: 18,
         paddingLeft: 5,
         paddingRight: 5,
         borderWidth: 1,
@@ -161,7 +161,7 @@ function SegmentButton({ active, onPick, label, glyph }: { active: boolean; onPi
         boxShadow: active ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
         color: active ? TEXT : MUTED,
         fontFamily: FONT,
-        fontSize: 10.5,
+        fontSize: 10,
         fontWeight: 300,
         letterSpacing: '-0.1px',
         cursor: 'pointer',

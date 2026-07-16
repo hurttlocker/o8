@@ -46,6 +46,13 @@ interface ThemeContextValue {
   reduceTransparency: ReduceTransparency;
   setReduceTransparency: (v: ReduceTransparency) => void;
   systemReduceTransparency: boolean;
+  /** All Glass (experimental, Q 2026-07-16): the WORKSPACE CENTER goes
+   *  translucent too, so the whole window bleeds the vibrancy — the one
+   *  exception to the "center is always solid" doctrine. Forces
+   *  dark-palette ink + glass surface while on (the mode has no
+   *  light/dark axis); drawers and popovers keep their normal palette. */
+  workspaceGlass: boolean;
+  setWorkspaceGlass: (on: boolean) => void;
   // Legacy API (kept for existing call sites)
   themeId: string;
   setTheme: (id: string) => void;
@@ -60,6 +67,8 @@ const ThemeContext = createContext<ThemeContextValue>({
   reduceTransparency: 'on',
   setReduceTransparency: () => {},
   systemReduceTransparency: false,
+  workspaceGlass: false,
+  setWorkspaceGlass: () => {},
   themeId: 'light-solid',
   setTheme: () => {},
   themes: [],
@@ -71,7 +80,31 @@ export function useTheme() {
 
 const PALETTE_STORAGE_KEY = 'cortex-theme-palette';
 const TRANSPARENCY_STORAGE_KEY = 'cortex-reduce-transparency';
+const WORKSPACE_GLASS_STORAGE_KEY = 'cortex-workspace-glass';
 const LEGACY_THEME_KEY = 'cortex-theme';
+
+/**
+ * All Glass center overrides — applied ON TOP of the dark-glass theme when
+ * the mode is on. These three tokens are the "center is always solid"
+ * doctrine; All Glass is the sanctioned exception. FIRST-PASS values
+ * borrowed from the chrome's dark-glass tints (Q 2026-07-16: "you have all
+ * the glass values") — the operator tunes them with the development sliders
+ * next; don't hand-polish here.
+ */
+const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
+  '--t-chat-surface-bg': 'rgba(28, 30, 34, 0.52)',
+  '--t-terminal-bg': 'rgba(22, 24, 28, 0.55)',
+  '--t-canvas-bg': 'rgba(32, 32, 32, 0.44)',
+};
+
+function readWorkspaceGlass(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(WORKSPACE_GLASS_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 const FRESH_INSTALL_PALETTE: PaletteId = 'light';
 const FRESH_INSTALL_REDUCE_TRANSPARENCY: ReduceTransparency = 'on';
 
@@ -340,20 +373,41 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // an effect subscribing to system setting changes.
   const [systemReduceTransparency] = useState(false);
 
+  const [workspaceGlass, setWorkspaceGlassState] = useState<boolean>(() => readWorkspaceGlass());
+
   const surface = useMemo(
     () => resolveSurface(reduceTransparency, systemReduceTransparency),
     [reduceTransparency, systemReduceTransparency],
   );
 
-  const palette = useMemo(() => getPalette(paletteId), [paletteId]);
-  const resolved = useMemo(() => resolveTheme(palette, surface), [palette, surface]);
+  // All Glass has no light/dark axis (Q 2026-07-16) — while on, the resolved
+  // theme is pinned to dark ink over glass regardless of the stored picks
+  // (the user's palette/surface preferences survive untouched for when the
+  // mode turns off).
+  const effectiveSurface = workspaceGlass ? 'glass' : surface;
+  const palette = useMemo(
+    () => getPalette(workspaceGlass ? 'dark' : paletteId),
+    [paletteId, workspaceGlass],
+  );
+  const resolved = useMemo(() => resolveTheme(palette, effectiveSurface), [palette, effectiveSurface]);
 
   // Mount once without animation, then animate on every subsequent change.
   const mountedRef = useRef(false);
   useEffect(() => {
     applyThemeVars(resolved, mountedRef.current);
+    const root = document.documentElement;
+    if (workspaceGlass) {
+      for (const [key, value] of Object.entries(WORKSPACE_GLASS_OVERRIDES)) {
+        root.style.setProperty(key, value);
+      }
+      root.dataset.workspaceGlass = 'true';
+    } else {
+      // applyThemeVars just rewrote the tokens from the palette, so only the
+      // marker attribute needs clearing.
+      delete root.dataset.workspaceGlass;
+    }
     mountedRef.current = true;
-  }, [resolved]);
+  }, [resolved, workspaceGlass]);
 
   const setPalette = useCallback((id: PaletteId) => {
     setPaletteId(id);
@@ -370,6 +424,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setReduceTransparencyState(v);
     try {
       localStorage.setItem(TRANSPARENCY_STORAGE_KEY, v);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const setWorkspaceGlass = useCallback((on: boolean) => {
+    setWorkspaceGlassState(on);
+    try {
+      localStorage.setItem(WORKSPACE_GLASS_STORAGE_KEY, on ? 'true' : 'false');
     } catch {
       /* noop */
     }
@@ -409,6 +472,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       reduceTransparency,
       setReduceTransparency,
       systemReduceTransparency,
+      workspaceGlass,
+      setWorkspaceGlass,
       // Legacy: themeId returns the palette id only (e.g. 'light' / 'dark')
       // so existing call sites doing `themeId === 'light'` keep working.
       // Use `surface` and `reduceTransparency` for the new axis.
@@ -423,6 +488,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       reduceTransparency,
       setReduceTransparency,
       systemReduceTransparency,
+      workspaceGlass,
+      setWorkspaceGlass,
       resolved.paletteId,
       setTheme,
       themes,
