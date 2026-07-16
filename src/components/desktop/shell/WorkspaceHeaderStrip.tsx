@@ -145,6 +145,10 @@ export function WorkspaceHeaderStrip({
   return (
     <ColumnHeaderStrip
       drag
+      // No hairline under the CENTER strip (Q 2026-07-16): the three
+      // columns' hairlines lined up into one faint line across the whole
+      // app. The side strips keep theirs.
+      bottomHairline={false}
       left={
         <>
           {/* When this strip is leftmost (sidebar collapsed) it carries the
