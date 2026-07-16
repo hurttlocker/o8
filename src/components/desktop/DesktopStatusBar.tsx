@@ -22,6 +22,9 @@ interface DesktopStatusBarProps {
   branchName: string | null;
   repoName: string | null;
   repoRemoteUrl?: string | null;
+  /** The active repo's default branch — the branch cluster hides while sitting
+   *  on it (Q 2026-07-16). */
+  defaultBranch?: string | null;
   /** Width of the left AgentPanel column, in CSS px. The bottom bar uses
    *  this to align its left chrome with the column above so the centered
    *  merge cluster lands directly under the workspace surface. */
@@ -51,6 +54,7 @@ function DesktopStatusBarBase({
   branchName,
   repoName,
   repoRemoteUrl = null,
+  defaultBranch = null,
   bottomPanelVisible = false,
   onToggleBottomPanel,
   onOpenBottomPanelSurface,
@@ -186,6 +190,7 @@ function DesktopStatusBarBase({
             branchName={branchName}
             repoName={repoName}
             repoRemoteUrl={repoRemoteUrl}
+            defaultBranch={defaultBranch}
             compact={compact}
           />
           {!compact && onToggleBottomPanel ? (
