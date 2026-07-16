@@ -106,6 +106,15 @@ pub async fn speak(text: &str, config: &TtsConfig) -> Result<Vec<u8>, String> {
             // reached Steffan — now EdgeFree is primary, so the common path has
             // no failing cloud round-trip.
             if matches!(config.provider, TtsProvider::EdgeFree) {
+                // Ring-buffer breadcrumb: this fall to the `say` floor is the
+                // "wrong voice" class (report S9KT8H heard Fred with zero
+                // forensics — the TTS ladder only logged to the sidecar).
+                // record_console_error puts WHY in the next bug report.
+                crate::record_console_error(
+                    format!("[tts] Steffan (edge) failed, falling to macOS say: {primary_err}"),
+                    "rust-tts".to_string(),
+                    0,
+                );
                 return Err(primary_err);
             }
             match edge_local::synthesize(text).await {
