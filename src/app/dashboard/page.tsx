@@ -196,9 +196,21 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const DEFAULT_LEFT_PANEL_WIDTH = 300;
-const SIDEBAR_PREVIEW_TOP = 35;
-const SIDEBAR_PREVIEW_BOTTOM_INSET = 5;
-const STATUS_BAR_FALLBACK_HEIGHT = 36;
+// 40 = the workspace card's measured top (36px header strip + 4px inset), so
+// the hover preview's top edge rides the SAME line as the workspace card
+// beside it (Q 2026-07-16: "they aren't parallel to the workspace"). Was 35
+// (pill bottom 33 + 2px) — the 7px pill→overlay gap is still inside the
+// hover-close grace timer, unlike the old 11px dead zone at 44 (2026-05-28).
+// Uniform breathing on every open side (Q 2026-07-16 "however much it is
+// from the left side, do that to the top and bottom"): the 8px left gap is
+// the reference — top gap = 8 below the 36px header strip, bottom gap = 8
+// above the WINDOW bottom (the overlay stands in for the full-height sidebar
+// dock; the status bar only spans center+right now). Known trade-off: the
+// pill→overlay hover gap grows to ~11px again — the hover-close grace timer
+// covers crossing it; if the 2026-05-28 click-dead-zone complaint returns,
+// bridge it with an invisible hover extension, don't shrink the frame.
+const SIDEBAR_PREVIEW_INSET = 8;
+const SIDEBAR_PREVIEW_TOP = 36 + SIDEBAR_PREVIEW_INSET;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
 const MIN_RIGHT_PANEL_WIDTH = 240;
@@ -3627,15 +3639,19 @@ function DashboardInner() {
     const uiZoom = Number.isFinite(parsedZoom) && parsedZoom > 0 ? parsedZoom : 1;
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     const layoutViewportHeight = viewportHeight / uiZoom;
+    // Bottom boundary is the STATUS-BAR line, not the window bottom — a
+    // window-bottom overlay read as over-extended next to the workspace card
+    // (Q 2026-07-16 round 2: "top looks good, bottom over-extended"). Same
+    // SIDEBAR_PREVIEW_INSET gap above the bar as on the left and top.
     const statusBarTop = document
       .querySelector<HTMLElement>('[data-mcp-scope="desktop-status-bar"]')
       ?.getBoundingClientRect().top;
     const bottomBoundary = typeof statusBarTop === 'number' && statusBarTop > 0
       ? statusBarTop
-      : layoutViewportHeight - STATUS_BAR_FALLBACK_HEIGHT;
+      : layoutViewportHeight - 36;
     const nextHeight = Math.max(
       0,
-      bottomBoundary - SIDEBAR_PREVIEW_TOP - SIDEBAR_PREVIEW_BOTTOM_INSET,
+      bottomBoundary - SIDEBAR_PREVIEW_TOP - SIDEBAR_PREVIEW_INSET,
     );
     setSidebarPreviewMaxHeight((current) => current === nextHeight ? current : nextHeight);
   }, []);
@@ -5445,7 +5461,7 @@ function DashboardInner() {
                   // had to double-click to pin (2026-05-28). Traffic
                   // lights end around y=30 — y=35 still clears them.
                   top: SIDEBAR_PREVIEW_TOP,
-                  left: 8,
+                  left: SIDEBAR_PREVIEW_INSET,
                   // Match the actual AgentPanel column width so the
                   // overlay is a 1:1 stand-in for the real panel — no
                   // condensed copy. Default 300px (DEFAULT_LEFT_PANEL_WIDTH).
@@ -5460,10 +5476,12 @@ function DashboardInner() {
                   minHeight: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  borderTopLeftRadius: 14,
-                  borderTopRightRadius: 14,
-                  borderBottomLeftRadius: 14,
-                  borderBottomRightRadius: 14,
+                  // Tracks the inner squircle's curve — see the SmoothCorners
+                  // below (26/0.6, matching the workspace card).
+                  borderTopLeftRadius: WORKSPACE_RAIL_CORNER_RADIUS,
+                  borderTopRightRadius: WORKSPACE_RAIL_CORNER_RADIUS,
+                  borderBottomLeftRadius: WORKSPACE_RAIL_CORNER_RADIUS,
+                  borderBottomRightRadius: WORKSPACE_RAIL_CORNER_RADIUS,
                   // Shadow + border live on this outer rounded rect, not the
                   // squircle: clip-path clips box-shadows, and Lisse's traced
                   // shadow (autoEffects) inserts an unconstrained wrapper div
@@ -5500,7 +5518,11 @@ function DashboardInner() {
                     list scrolls internally when the window is short.
                     backdrop-filter is clipped to the squircle. */}
                 <SmoothCorners
-                  corners={{ radius: 14, smoothing: 0.6 }}
+                  // Same curve as the workspace card (Q 2026-07-16: "the
+                  // edges don't match the workspace edges") — radius 14 read
+                  // as a different, tighter corner family next to the
+                  // center's 26/0.6 Lisse squircle.
+                  corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
                   autoEffects={false}
                   style={{
                     flex: 1,
