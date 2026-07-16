@@ -156,10 +156,18 @@ function RowButton({
       aria-expanded={ariaExpanded}
       style={{
         width: '100%',
+        // border-box, or width:100% + the horizontal padding OVERFLOWS the
+        // drawer body by 14px and every trailing value (⌘, / version /
+        // chevrons) ends ~1px from the panel edge (operator live-hit
+        // 2026-07-16: "numbers are too close to the edge").
+        boxSizing: 'border-box',
         minHeight: 30,
         border: 0,
         borderRadius: 9,
-        padding: '0 7px',
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 7,
+        paddingRight: 7,
         background: 'transparent',
         color: 'inherit',
         cursor: 'pointer',

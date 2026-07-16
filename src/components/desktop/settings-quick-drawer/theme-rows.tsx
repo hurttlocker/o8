@@ -47,12 +47,19 @@ export function ThemeContrastGlyph() {
   );
 }
 
-/** Two offset panes, the front one translucent — reads as "glass layers". */
+/** Two offset panes, the front one translucent — reads as "glass layers".
+ *  Heavier than the default icon weight ON PURPOSE (hurttlocker lens,
+ *  operator live-hit 2026-07-16): at 13-15px, 2px strokes render ~1.2px and
+ *  a 0.22 fill vanishes on both palettes — the latch read as empty space. */
 export function GlassGlyph({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
+    // Width/height as INLINE STYLE, not just attributes: a drawer-scoped
+    // stylesheet rule computed this svg to width:0 inside the latch's flex
+    // button (live-hit 2026-07-16 — the glyph vanished while its ink was
+    // fine). Inline sizing wins over any sheet.
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinejoin="round" aria-hidden="true" style={{ width: size, height: size, flexShrink: 0, display: 'block' }}>
       <rect x="3" y="3" width="13" height="13" rx="2.5" />
-      <rect x="8" y="8" width="13" height="13" rx="2.5" fill="currentColor" fillOpacity={0.22} />
+      <rect x="8" y="8" width="13" height="13" rx="2.5" fill="currentColor" fillOpacity={0.5} />
     </svg>
   );
 }
@@ -92,7 +99,7 @@ export function AppearanceControl({
         label="Dark"
         glyph={<ThemeGlyphMoon />}
       />
-      <span aria-hidden style={{ width: 1, height: 12, background: 'var(--t-divider-subtle)', marginLeft: 2, marginRight: 2, flexShrink: 0 }} />
+      <span aria-hidden style={{ width: 1, height: 12, background: 'var(--t-divider-subtle)', marginLeft: 1, marginRight: 1, flexShrink: 0 }} />
       <button
         type="button"
         aria-pressed={glassOn}
@@ -103,11 +110,15 @@ export function AppearanceControl({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 24,
+          width: 22,
           height: 20,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: glassOn ? SELECTED_BORDER : 'transparent',
+          // Off state keeps a faint FRAME (not transparent like inactive
+          // segments): an icon-only control with no label and no resting
+          // treatment reads as empty pill space — the operator couldn't
+          // find it (live-hit 2026-07-16).
+          borderColor: glassOn ? SELECTED_BORDER : 'var(--t-divider, rgba(127,127,127,0.25))',
           borderRadius: 6,
           background: glassOn ? SELECTED_BG : 'transparent',
           boxShadow: glassOn ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
@@ -134,10 +145,14 @@ function SegmentButton({ active, onPick, label, glyph }: { active: boolean; onPi
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 4,
+        // Tighter than the drawer's other pills ON PURPOSE: this row's
+        // min-content must stay under the drawer body's ~264px or the grid
+        // track grows and every row overflows the panel (live-hit
+        // 2026-07-16 — trailing values ended 1px from the edge).
+        gap: 3,
         height: 20,
-        paddingLeft: 7,
-        paddingRight: 8,
+        paddingLeft: 5,
+        paddingRight: 5,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: active ? SELECTED_BORDER : 'transparent',
