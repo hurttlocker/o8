@@ -35,7 +35,7 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
 import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
-import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
+import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
 import {
   buildChatSessionSnapshots,
   buildCommitCanvasTab,
@@ -636,6 +636,10 @@ export function useWorkspaceTerminalController(
     // clicks a different tab while computeRestoredTabs is awaiting, the
     // captured version goes stale and we drop the activeTabId update.
     const capturedNavVersion = userNavVersionRef.current;
+    // Capture the pre-restore tab ids too: any tab the user spawns while the
+    // compute awaits (GQXEZD — "New session" during a slow Rosetta restore)
+    // must survive the landing. Replace-not-merge silently ate it.
+    const preRestoreTabIds = new Set(tabsRef.current.map((tab) => tab.id));
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
@@ -643,8 +647,11 @@ export function useWorkspaceTerminalController(
     }, cancelled);
     if (!result) return false;
 
-    tabsRef.current = result.tabs;
-    setTabs(result.tabs);
+    const mergedTabs = mergeUserSpawnedTabs(result.tabs, tabsRef.current, preRestoreTabIds);
+    tabsRef.current = mergedTabs;
+    setTabs(mergedTabs);
+    // Self-guarding: a user spawn during restore bumped the nav version, so
+    // the restored active id is dropped and the user's tab keeps focus.
     setActiveTabIdFromRestore(result.activeTabId, capturedNavVersion);
     if (cancelled?.()) return false;
 

@@ -490,6 +490,30 @@ export interface LoadInitialTabStateOptions {
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
+/*  mergeUserSpawnedTabs                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A restore landing must never eat tabs the user created while it was in
+ * flight (GQXEZD, 2026-07-16: "New session" clicked during a slow Rosetta
+ * re-restore — applyPersistedState's wholesale setTabs(result.tabs) replaced
+ * the array and silently dropped the just-spawned tab; no error anywhere).
+ *
+ * `preRestoreTabIds` is the id set captured BEFORE the async compute began;
+ * anything in `currentTabs` that wasn't there at capture time and isn't in
+ * the restored set is a user action that outranks the restore.
+ */
+export function mergeUserSpawnedTabs(
+  restoredTabs: TerminalTab[],
+  currentTabs: TerminalTab[],
+  preRestoreTabIds: ReadonlySet<string>,
+): TerminalTab[] {
+  const restoredIds = new Set(restoredTabs.map((tab) => tab.id));
+  const userAdded = currentTabs.filter((tab) => !preRestoreTabIds.has(tab.id) && !restoredIds.has(tab.id));
+  return userAdded.length > 0 ? [...restoredTabs, ...userAdded] : restoredTabs;
+}
+
+/* ------------------------------------------------------------------ */
 /*  resetControllerRefs                                                */
 /* ------------------------------------------------------------------ */
 
@@ -557,6 +581,20 @@ export function canPreserveScopedTabs(
   // the empty picker.
   const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat');
   if (hasChatSessionTabs) return true;
+  // Same doctrine for the operator's OWN conversations (GQXEZD, 2026-07-16):
+  // an orchestrator tab bound to a thread — or one the user JUST spawned
+  // (freshSpawn) — must never be wiped by a repo-scope flip. On slow
+  // (Rosetta) boots the repo registry hydrates AFTER the no-repo restore
+  // landed; the key flip found an orchestrator-only tab set with no repo
+  // stamped, failed every condition below, and setTabs([]) emptied the
+  // workspace ("Start a new session" CTA) — then the async re-restore
+  // clobbered anything spawned into the gap. A blank BOOT-default
+  // orchestrator (no thread, not user-spawned) stays expendable so a real
+  // repo switch can still load that repo's saved tabs.
+  const hasLiveOrchestratorTabs = currentTabs.some((tab) => (
+    tab.kind === 'orchestrator' && (Boolean(tab.orchestratorThreadId) || tab.freshSpawn === true)
+  ));
+  if (hasLiveOrchestratorTabs) return true;
   if (!nextPreferredRepoPath) return false;
   return (
     currentTabs.some((tab) => tab.repo?.localPath === nextPreferredRepoPath)
