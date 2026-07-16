@@ -3481,6 +3481,14 @@ async function handleOrchestratorSendMsgOnce(
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
+  // The transcript persists the operator's OWN words. `message` may carry
+  // model-facing scaffolding the client prepends (solo/swarm hints, compaction
+  // resume prelude) — persisting it verbatim rendered "[Solo mode active] …"
+  // as a user bubble after reload (Chris's screenshot, 2026-07-16). Older
+  // clients omit the field and fall back to the wire message, same as before.
+  const transcriptMessage = typeof msg.displayMessage === 'string' && msg.displayMessage.trim()
+    ? msg.displayMessage
+    : message;
 
   // Permission mode travels with the user message. Defaults to 'full' to
   // match legacy behavior for clients that haven't been updated yet.
@@ -3592,7 +3600,7 @@ async function handleOrchestratorSendMsgOnce(
     const updatedThread = appendMobileOrchestratorUserMessage({
       tabId: threadId,
       repoPath,
-      message,
+      message: transcriptMessage,
       backend: activeBackend.id,
       agent: activeAgentTag,
       timestampMs: turnStartedAtMs,
