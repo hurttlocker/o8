@@ -37,6 +37,7 @@ import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
 import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
@@ -2473,6 +2474,18 @@ function DashboardInner() {
     window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
   }, []);
 
+  // Failed spawns must be VISIBLE, not ring-buffer-only — a swallowed failure
+  // IS "the New session button does nothing" (report D3YPBP rounds 1-3, still
+  // undiagnosable on the reporter's machine because the error text never left
+  // console.error). The toast carries the real message so a screenshot is a
+  // diagnosis.
+  const [spawnErrorMessage, setSpawnErrorMessage] = useState<string | null>(null);
+  const reportSpawnFailure = useCallback((kind: string, error: unknown) => {
+    console.error(`[workspace-spawn] ${kind} spawn failed:`, error);
+    const detail = error instanceof Error ? error.message : String(error);
+    setSpawnErrorMessage(`New ${kind} session failed: ${detail}`);
+  }, []);
+
   const handleCreateWorkspaceOrchestrator = useCallback((repo?: { name: string; localPath: string; remoteUrl?: string; branch?: string | null } | null) => {
     void (async () => {
       try {
@@ -2483,13 +2496,10 @@ function DashboardInner() {
         setActiveTileId(target.tileId);
         flashWorkspaceTab(target.handle.openOrchestratorTab(repo ?? undefined));
       } catch (error) {
-        // Workspace may still be mounting; the click is best-effort — but a
-        // swallowed failure here IS "the New session button does nothing"
-        // (report D3YPBP), so leave forensics in the error ring buffer.
-        console.error('[workspace-spawn] orchestrator spawn failed:', error);
+        reportSpawnFailure('orchestrator', error);
       }
     })();
-  }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget]);
+  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget]);
 
   const handleCreateWorkspaceChat = useCallback(() => {
     void (async () => {
@@ -2506,11 +2516,10 @@ function DashboardInner() {
           createNew: true,
         }));
       } catch (error) {
-        // Best-effort, but never silent — see the orchestrator catch above.
-        console.error('[workspace-spawn] chat spawn failed:', error);
+        reportSpawnFailure('chat', error);
       }
     })();
-  }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
+  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
 
   const handleCreateWorkspaceTerminal = useCallback(() => {
     void (async () => {
@@ -2523,11 +2532,10 @@ function DashboardInner() {
         setActiveTileId(target.tileId);
         flashWorkspaceTab(target.handle.openTerminalTab(workspaceTerminalPreferredRepo ?? undefined));
       } catch (error) {
-        // Best-effort, but never silent — see the orchestrator catch above.
-        console.error('[workspace-spawn] terminal spawn failed:', error);
+        reportSpawnFailure('terminal', error);
       }
     })();
-  }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
+  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
@@ -5534,6 +5542,9 @@ function DashboardInner() {
           holds a claim, so the phases never flash the greeting/blank between
           handoffs (Q video, 0.1.604). See workspace-boot-loader-claim.tsx. */}
       <WorkspaceBootLoaderHost />
+
+      {/* Failed New-session spawns surface here — never silent (D3YPBP). */}
+      <SpawnErrorToast message={spawnErrorMessage} onDismiss={() => setSpawnErrorMessage(null)} />
 
     </div>
     </DictationHost>
