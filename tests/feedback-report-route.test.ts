@@ -13,6 +13,7 @@ const crashRecords = vi.hoisted(() => ({ current: [] as CrashRecord[] }));
 const ledger = vi.hoisted(() => ({ written: [] as unknown[] }));
 const auth = vi.hoisted(() => ({ ghUser: null as string | null }));
 const webhook = vi.hoisted(() => ({ url: 'https://discord.test/webhook' as string | null }));
+const dataSharing = vi.hoisted(() => ({ enabled: true }));
 
 vi.mock('@/lib/telemetry/crash-store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/telemetry/crash-store')>()),
@@ -39,14 +40,17 @@ vi.mock('@/lib/repos/projects', () => ({
 vi.mock('@/lib/runtime/ide-surface-state', () => ({
   readIdeSurfaceState: () => null,
 }));
+vi.mock('@/lib/operator/defaults', () => ({
+  resolveCrashReportsEnabledSync: () => dataSharing.enabled,
+}));
 
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/feedback/report/route';
 
 interface DiscordEmbedField { name: string; value: string; inline?: boolean }
-interface CapturedPost { form: FormData | null; json: unknown }
+interface CapturedPost { form: FormData | null; json: unknown; calls: number }
 
-const captured: CapturedPost = { form: null, json: null };
+const captured: CapturedPost = { form: null, json: null, calls: 0 };
 
 /**
  * A real NextRequest — not a bare Request. `request.cookies` is a NextRequest
@@ -76,9 +80,12 @@ beforeEach(() => {
   ledger.written = [];
   auth.ghUser = null;
   webhook.url = 'https://discord.test/webhook';
+  dataSharing.enabled = true;
   captured.form = null;
   captured.json = null;
+  captured.calls = 0;
   vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    captured.calls += 1;
     if (init.body instanceof FormData) captured.form = init.body;
     else captured.json = JSON.parse(String(init.body));
     return new Response(null, { status: 204 });
@@ -98,6 +105,35 @@ function crash(overrides: Partial<CrashRecord> = {}): CrashRecord {
 }
 
 describe('POST /api/feedback/report', () => {
+  it('returns a structured 403 without posting when data sharing is off', async () => {
+    dataSharing.enabled = false;
+
+    const res = await postReport({
+      category: 'bug',
+      message: 'screenshot report must stay local',
+      route: '/dashboard',
+      image: { dataUrl: 'data:image/png;base64,iVBORw0KGgo=', name: 'screen.png' },
+      includeDiagnostics: true,
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: false,
+      error: 'data_sharing_off',
+    });
+    expect(captured.calls).toBe(0);
+    expect(ledger.written).toHaveLength(0);
+  });
+
+  it('keeps the webhook path unchanged when data sharing is on', async () => {
+    const res = await postReport({ category: 'bug', message: 'sharing is enabled', route: '/dashboard' });
+
+    expect(res.status).toBe(200);
+    expect(captured.calls).toBe(1);
+    expect(captured.json).not.toBeNull();
+    expect(ledger.written).toHaveLength(1);
+  });
+
   it('attaches recent crashes as a file and a Crashes field', async () => {
     crashRecords.current = [crash()];
 

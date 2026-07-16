@@ -10,6 +10,8 @@
  */
 
 import { isTauri } from '@/lib/tauri/bridge';
+import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
+import { readReportDataSharingEnabled } from '@/lib/feedback/report-data-sharing-client';
 
 export const MAX_REPORT_MESSAGE = 4000;
 export const MAX_REPORT_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -159,8 +161,17 @@ export async function submitReport(input: {
   route: string;
   image?: ReportImage | null;
   includeDiagnostics?: boolean;
-}): Promise<{ ok: true; reportId: string | null } | { ok: false; error: string }> {
+}): Promise<{ ok: true; reportId: string | null } | { ok: false; error: string; code?: string }> {
   try {
+    const dataSharingEnabled = await readReportDataSharingEnabled().catch(() => false);
+    if (!dataSharingEnabled) {
+      return {
+        ok: false,
+        error: REPORT_DATA_SHARING_OFF_MESSAGE,
+        code: REPORT_DATA_SHARING_OFF_ERROR,
+      };
+    }
+
     const includeDiagnostics = input.includeDiagnostics !== false;
     const client = includeDiagnostics ? await collectClientDiagnostics() : null;
     const response = await fetch('/api/feedback/report', {
@@ -176,9 +187,13 @@ export async function submitReport(input: {
         client: client ?? undefined,
       }),
     });
-    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; reportId?: string } | null;
+    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string; reportId?: string } | null;
     if (!response.ok || !body?.ok) {
-      return { ok: false, error: body?.error || `Report failed (HTTP ${response.status}).` };
+      return {
+        ok: false,
+        error: body?.message || body?.error || `Report failed (HTTP ${response.status}).`,
+        code: body?.error,
+      };
     }
     return { ok: true, reportId: typeof body.reportId === 'string' ? body.reportId : null };
   } catch (error) {

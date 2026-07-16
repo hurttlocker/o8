@@ -10,6 +10,8 @@ import {
 } from './shared';
 import { SettingsGroup } from './grouped';
 import { collectClientDiagnostics } from '@/lib/feedback/report-client';
+import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
+import { useReportDataSharing } from '@/lib/feedback/report-data-sharing-client';
 
 type ReportCategory = 'bug' | 'request';
 type ReportState = 'idle' | 'sending' | 'sent' | 'error';
@@ -17,6 +19,7 @@ type ReportState = 'idle' | 'sending' | 'sent' | 'error';
 interface ReportResponse {
   ok?: boolean;
   error?: string;
+  message?: string;
   /** Short id the fix reaches back through — a commit trailer publishes it to #fixed. */
   reportId?: string;
 }
@@ -38,9 +41,18 @@ export function ReportIssueSection() {
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
+    status: dataSharingStatus,
+    error: dataSharingError,
+    enabling: dataSharingEnabling,
+    enabled: dataSharingEnabled,
+    check: checkDataSharing,
+    enable: enableDataSharing,
+    markDisabled: markDataSharingDisabled,
+  } = useReportDataSharing();
 
   const trimmedMessage = message.trim();
-  const canSend = trimmedMessage.length > 0 && state !== 'sending';
+  const canSend = dataSharingEnabled && trimmedMessage.length > 0 && state !== 'sending';
   const countLabel = useMemo(() => `${message.length}/${MAX_MESSAGE_LENGTH}`, [message.length]);
 
   const attachImage = useCallback((file: File | null | undefined) => {
@@ -106,6 +118,7 @@ export function ReportIssueSection() {
       setError('Add a short report before sending.');
       return;
     }
+    if (!await checkDataSharing(false)) return;
 
     setState('sending');
     setError(null);
@@ -137,8 +150,9 @@ export function ReportIssueSection() {
       });
       const body = await response.json().catch(() => null) as ReportResponse | null;
       if (!response.ok || !body?.ok) {
+        if (body?.error === REPORT_DATA_SHARING_OFF_ERROR) markDataSharingDisabled();
         setState('error');
-        setError(body?.error || `Report failed with HTTP ${response.status}.`);
+        setError(body?.message || body?.error || `Report failed with HTTP ${response.status}.`);
         return;
       }
       setState('sent');
@@ -149,7 +163,7 @@ export function ReportIssueSection() {
       setState('error');
       setError(sendError instanceof Error ? sendError.message : 'Report failed.');
     }
-  }, [category, trimmedMessage, image]);
+  }, [category, checkDataSharing, image, markDataSharingDisabled, trimmedMessage]);
 
   return (
     <section style={{ marginTop: 28, marginBottom: 4 }}>
@@ -167,6 +181,27 @@ export function ReportIssueSection() {
           paddingLeft: 14,
           paddingRight: 14,
         }}>
+          {dataSharingStatus === 'checking' ? (
+            <div style={{ color: RAMS_INK_QUIET, fontFamily: APP_FONT_STACK, fontSize: 13, fontWeight: 300, lineHeight: 1.55 }}>
+              Checking data-sharing settings…
+            </div>
+          ) : !dataSharingEnabled ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{ color: 'var(--t-text)', fontFamily: APP_FONT_STACK, fontSize: 13, fontWeight: 300, lineHeight: 1.55 }}>
+                {REPORT_DATA_SHARING_OFF_MESSAGE}
+              </div>
+              {dataSharingError ? <StatusLine tone="error">{dataSharingError}</StatusLine> : null}
+              <RamsButton
+                type="button"
+                onClick={() => { void enableDataSharing(); }}
+                disabled={dataSharingEnabling}
+                busy={dataSharingEnabling}
+              >
+                {dataSharingEnabling ? 'Enabling' : 'Enable sharing'}
+              </RamsButton>
+            </div>
+          ) : (
+            <>
           <SettingsSegmented
             value={category}
             onChange={(v) => {
@@ -385,6 +420,8 @@ export function ReportIssueSection() {
               </RamsButton>
             </div>
           ) : null}
+            </>
+          )}
         </div>
       </SettingsGroup>
     </section>
