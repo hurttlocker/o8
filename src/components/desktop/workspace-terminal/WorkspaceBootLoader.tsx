@@ -179,11 +179,15 @@ function WorkspaceBootLoaderBase() {
         position: 'fixed',
         inset: 0,
         zIndex: 180,
-        // Glass surface: the boot splash's translucent tint, so the vibrancy
-        // reads through and boot → workspace is one continuous glass. Solid
-        // keeps the opaque paper.
+        // OPAQUE in both surfaces (Q ruling 2026-07-16): the old glass tint
+        // (alpha ~0.6, borrowed from the bundled splash) let the mounted
+        // chrome + the solid center tile read THROUGH the loader — the
+        // "half-and-half" boot (sidebar and status bar up, bright grey slab
+        // over the workspace). The splash's translucency only worked because
+        // nothing but vibrancy sat behind it. Same tones, alpha 1: one cover,
+        // one reveal when the workspace is actually ready.
         background: document.documentElement.dataset.surface === 'glass'
-          ? 'linear-gradient(180deg, rgba(32, 36, 42, 0.62) 0%, rgba(18, 20, 24, 0.58) 100%)'
+          ? 'linear-gradient(180deg, rgb(32, 36, 42) 0%, rgb(18, 20, 24) 100%)'
           : 'var(--t-chat-surface-bg)',
         animation: 'o8BootBackdropIn 200ms ease-out both',
       }}
