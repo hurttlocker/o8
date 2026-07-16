@@ -27,9 +27,11 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
     <ColumnHeaderStrip
       drag
       // Strip height 32 — the toggle pill centers at ~y=20. The traffic
-      // lights center on the same line (trafficLightPosition y=15 → 12px
-      // buttons centered at 21; was y=22/center 28, which sat 7px below the
-      // toggle — the 2026-07-15 stoplight alignment pass).
+      // lights are positioned onto that SAME centerline at runtime by
+      // traffic_lights.rs, driven from ui-zoom.ts with centerline × zoom
+      // (CHROME_STOPLIGHT_CENTER_CSS = 20) — the static conf inset could
+      // only be right at one zoom level and was ~5pt high at 100%
+      // (2026-07-15 stoplight alignment, round 2).
       height={32}
       left={
         <>
