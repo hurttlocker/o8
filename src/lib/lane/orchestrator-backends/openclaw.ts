@@ -230,6 +230,28 @@ function governOpenclawAgent(agent: Record<string, unknown>): Record<string, unk
   return { ...rest, tools };
 }
 
+/**
+ * Model ids the governed agent accepts as a `--model` override — the keys of
+ * its `agents.list[].models` map (OpenClaw 2026.7.1 treats that map as the
+ * per-agent allowlist; an id outside it hard-errors the turn:
+ * `Model override "X" is not allowed for agent "Y"`, live-hit 2026-07-16 when
+ * a thread's Codex model chip leaked across a backend switch). Empty set on
+ * any read failure — callers then skip the override and the agent uses its
+ * configured primary.
+ */
+export function openclawAgentAllowedModels(agentId: string): Set<string> {
+  try {
+    const source = JSON.parse(readFileSync(OPENCLAW_O8_CONFIG, 'utf8')) as {
+      agents?: { list?: Array<{ id?: unknown; models?: Record<string, unknown> }> };
+    };
+    const agent = (source.agents?.list ?? []).find((a) => a.id === agentId);
+    if (!agent?.models || typeof agent.models !== 'object') return new Set();
+    return new Set(Object.keys(agent.models));
+  } catch {
+    return new Set();
+  }
+}
+
 /** The operator's openclaw agents — `{ id, name }` per entry in `agents.list`. */
 export function listOpenclawAgents(): Array<{ id: string; name: string }> {
   try {
@@ -702,7 +724,19 @@ async function sendToOpenclawOrchestrator(
   ];
   const thinking = thinkingFlag(options.thinkingEffort);
   if (thinking) args.push('--thinking', thinking);
-  if (options.model?.trim()) args.push('--model', options.model.trim());
+  const requestedModel = options.model?.trim();
+  if (requestedModel) {
+    const allowed = openclawAgentAllowedModels(session.agentId);
+    if (allowed.has(requestedModel)) {
+      args.push('--model', requestedModel);
+    } else {
+      // A model chip from another backend (e.g. a Codex id after a backend
+      // switch) hard-errors the whole turn in OpenClaw 2026.7.1. Use the
+      // agent's configured primary instead and say so, rather than dying.
+      console.log(`[openclaw-orchestrator] model override ${requestedModel} not in agent ${session.agentId} allowlist (${[...allowed].join(', ') || 'none readable'}); using the agent's default model`);
+      emitEvent({ type: 'thinking', text: `Model ${requestedModel} isn't configured for the OpenClaw agent "${session.agentId}" — using its default model instead.` });
+    }
+  }
   console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
 
   return new Promise<void>((promiseResolve, promiseReject) => {
