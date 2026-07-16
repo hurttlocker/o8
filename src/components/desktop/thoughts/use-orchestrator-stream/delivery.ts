@@ -53,6 +53,7 @@ export function createOrchestratorDeliveryFailureEntry(options?: {
     text: hasOriginalText
       ? `Message may not have been delivered — the bridge was still starting. Tap to retry.\n\n${options.originalText}`
       : 'Couldn\'t reach the orchestrator — please re-send.',
+    isError: true,
     timestamp,
     timestampLabel: formatTimestampLabel(timestamp),
   };
