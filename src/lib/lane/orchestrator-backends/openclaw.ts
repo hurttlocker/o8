@@ -857,9 +857,18 @@ async function sendToOpenclawOrchestrator(
       }
 
       if (code !== 0) {
+        const rawError = stderr.trim().slice(0, 500) || `openclaw exited with code ${code}`;
+        // Stale-credential class (the governed profile's OAuth token expired
+        // or its refresh token was consumed — single-use). The raw gateway
+        // error is undiagnosable from the chat surface; say exactly what to
+        // run instead (2026-07-16 saga: the o8 profile carried a token that
+        // expired six weeks earlier and every turn died cryptically).
+        const isStaleAuth = /refresh token has already been used|token refresh failed|please try signing in again/i.test(rawError);
         emitEvent({
           type: 'error',
-          error: stderr.trim().slice(0, 500) || `openclaw exited with code ${code}`,
+          error: isStaleAuth
+            ? `OpenClaw's o8 profile login has expired (its copy of your credentials went stale). One-time fix — run this in a terminal, then retry:\n\nopenclaw --profile o8 models auth --agent ${session.agentId} setup-token --provider openai --yes\n\n(${rawError.slice(0, 200)})`
+            : rawError,
         });
       }
 
