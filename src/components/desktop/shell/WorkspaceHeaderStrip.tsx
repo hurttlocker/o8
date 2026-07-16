@@ -21,6 +21,7 @@ import { HeaderPlayButton } from './HeaderPlayButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
+import { CanvasModeButton } from '../title-bar/CanvasModeButton';
 
 interface WorkspaceHeaderStripProps {
   /** Render the 78px macOS traffic-light spacer — set when this strip is leftmost. */
@@ -144,7 +145,7 @@ export function WorkspaceHeaderStrip({
               // strip is 32 starting at y=5. +1 offset (vs the left default)
               // keeps the pill at the same window-y across the sidebar
               // toggle — without this it shifts 1px on collapse.
-              yNudge={0}
+              yNudge={2.3}
             />
           ) : null}
         </>
@@ -167,8 +168,7 @@ export function WorkspaceHeaderStrip({
         </div>
       ) : null}
       right={
-        showApprovalBadge || showProjectContextToggle || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
-          <>
+        <>
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
@@ -177,7 +177,7 @@ export function WorkspaceHeaderStrip({
                 icon={<IconTerminal />}
                 label="Toggle terminal"
                 onClick={onToggleBottomPanel}
-                yNudge={0}
+                yNudge={2.3}
               />
             ) : null}
             {onSplitWorkspacePanel ? (
@@ -185,9 +185,14 @@ export function WorkspaceHeaderStrip({
                 icon={<IconColumns />}
                 label="Split workspace"
                 onClick={onSplitWorkspacePanel}
-                yNudge={0}
+                yNudge={2.3}
               />
             ) : null}
+            {/* Sits immediately before the panel toggle — the header's
+                "leaves this view" slot (Q 2026-07-16, mirroring Cursor's
+                `IDE ↗`). Moved off the bottom-left status bar: these little
+                buttons carry weight and belong where they're reached for. */}
+            <CanvasModeButton onClick={() => { window.location.assign('/preview/canvas-glass'); }} />
             {showRightPanelFallbackToggle ? (
               <RightPanelMorphButton
                 workspacePanelVisible={false}
@@ -196,7 +201,6 @@ export function WorkspaceHeaderStrip({
               />
             ) : null}
           </>
-        ) : null
       }
     />
   );
@@ -272,7 +276,7 @@ function SplitHeaderPillStrips({
                   label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
                   title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
                   onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
-                  yNudge={0}
+                  yNudge={2.3}
                 />
               ) : null}
               <HeaderPlayButton
