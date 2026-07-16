@@ -18,6 +18,7 @@
  * tools, so Hermes runs against a profile that denies native spawn.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 import { AcpClient, mapStopReason, type AcpMcpServer } from '@/lib/acp/client';
@@ -260,5 +261,22 @@ export const acpBackend: OrchestratorBackend = makeAcpBackend({
 
 /** Whether the Hermes ACP agent is available (binary present). */
 export function isHermesAvailable(): boolean {
-  return resolveHermesBinary() !== null;
+  const bin = resolveHermesBinary();
+  if (!bin) return false;
+  // Presence isn't health: ~/.local/bin/hermes is a wrapper script that execs
+  // a Python venv — the 2026-07-07 storage cleanup deleted ~/.hermes and the
+  // wrapper survived, so existsSync said "available" on a machine where every
+  // Hermes turn could only fail (live-hit 2026-07-16, runtime sweep). Verify
+  // the binary actually EXECUTES (cached — this gates a settings picker, not
+  // a hot path).
+  if (hermesHealthCache !== null) return hermesHealthCache;
+  try {
+    const probe = spawnSync(bin, ['--version'], { timeout: 5_000, stdio: 'ignore' });
+    hermesHealthCache = probe.status === 0;
+  } catch {
+    hermesHealthCache = false;
+  }
+  return hermesHealthCache;
 }
+
+let hermesHealthCache: boolean | null = null;
