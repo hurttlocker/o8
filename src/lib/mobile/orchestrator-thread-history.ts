@@ -290,11 +290,18 @@ function projectThread(
   const fallbackTitle = stableOrchestratorThreadTitleForId(tabId, record.savedAt || modifiedAt);
   const repoPath = typeof record.repoPath === 'string' ? record.repoPath : null;
   const githubIdentity = resolveRepoGithubIdentity(repoPath, record.remoteUrl);
+  // "Last spoke", not "last touched" (Q ruling 2026-07-16): savedAt restamps
+  // on every persist — merely OPENING a thread re-persisted it and bumped it
+  // to the top of every recency-ordered rail. The newest message timestamp is
+  // the truthful recency; savedAt/mtime only for empty or pre-timestamp files.
+  const lastSpokeMs = messages.reduce((max, m) => (
+    Number.isFinite(m?.timestamp) && (m.timestamp as number) > max ? (m.timestamp as number) : max
+  ), 0);
 
   return {
     id: tabId,
     title: trimTitle(record.title, fallbackTitle),
-    lastMessageAt: record.savedAt || modifiedAt,
+    lastMessageAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : (record.savedAt || modifiedAt),
     runtime: inferRuntime(effectiveModel(tabId, record)),
     status: record.orchestratorTerminalStatus === 'failed'
       ? 'failed'
