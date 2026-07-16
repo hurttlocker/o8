@@ -57,9 +57,16 @@ interface ClientDiagnostics {
   } | null;
   consoleErrors: Array<{ message: string; source: string; lineno: number; timestamp: number }>;
   platform: string;
+  /** Workspace tile/tab snapshot (GQXEZD forensics) — free-shape JSON from the
+   *  client's introspection contributors, clamped to a size cap. */
+  workspace: string | null;
+  /** Session-spawn breadcrumbs — "orchestrator:requested / :done tile=… tab=…". */
+  spawnJournal: Array<{ ts: number; event: string }>;
 }
 
 const MAX_CLIENT_CONSOLE_ERRORS = 20;
+const MAX_SPAWN_JOURNAL = 20;
+const MAX_WORKSPACE_JSON = 6000;
 
 function clampNumber(value: unknown): number {
   const n = Number(value);
@@ -74,7 +81,7 @@ function clampString(value: unknown, max: number): string {
  *  operator's report text always outranks its diagnostics. */
 function parseClientDiagnostics(raw: unknown): ClientDiagnostics | null {
   if (!raw || typeof raw !== 'object') return null;
-  const source = raw as { ui?: unknown; consoleErrors?: unknown; platform?: unknown };
+  const source = raw as { ui?: unknown; consoleErrors?: unknown; platform?: unknown; workspace?: unknown; spawnJournal?: unknown };
   const ui = source.ui && typeof source.ui === 'object'
     ? (() => {
         const u = source.ui as Record<string, unknown>;
@@ -102,7 +109,21 @@ function parseClientDiagnostics(raw: unknown): ClientDiagnostics | null {
         };
       })
     : [];
-  return { ui, consoleErrors, platform: clampString(source.platform, 64) || 'unknown' };
+  let workspace: string | null = null;
+  if (source.workspace && typeof source.workspace === 'object') {
+    try {
+      workspace = JSON.stringify(source.workspace, null, 1).slice(0, MAX_WORKSPACE_JSON);
+    } catch {
+      workspace = null;
+    }
+  }
+  const spawnJournal = Array.isArray(source.spawnJournal)
+    ? source.spawnJournal.slice(-MAX_SPAWN_JOURNAL).map((entry) => {
+        const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+        return { ts: clampNumber(e.ts), event: clampString(e.event, 300) };
+      })
+    : [];
+  return { ui, consoleErrors, platform: clampString(source.platform, 64) || 'unknown', workspace, spawnJournal };
 }
 
 /** One embed line: geometry + drift + error count. The dashboardTop/bodyScroll
@@ -123,6 +144,17 @@ function clientStateSummary(client: ClientDiagnostics): string {
 
 function renderClientDiagnostics(client: ClientDiagnostics): string {
   const lines: string[] = ['── CLIENT STATE ──', clientStateSummary(client), ''];
+  if (client.spawnJournal.length > 0) {
+    lines.push('── SPAWN JOURNAL (newest last) ──');
+    for (const entry of client.spawnJournal) {
+      const when = entry.ts ? new Date(entry.ts).toISOString() : '(no ts)';
+      lines.push(`${when} ${entry.event}`);
+    }
+    lines.push('');
+  }
+  if (client.workspace) {
+    lines.push('── WORKSPACE SNAPSHOT (tiles · handles · tabs) ──', client.workspace, '');
+  }
   if (client.consoleErrors.length > 0) {
     lines.push('── CONSOLE ERROR RING BUFFER (newest last) ──');
     for (const entry of client.consoleErrors) {

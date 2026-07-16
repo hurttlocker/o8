@@ -32,7 +32,9 @@ import type {
   WorkspaceLaneState,
 } from '@/lib/orchestrator/types';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
+import { registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 import {
+  collectLeafNodes,
   findLeafByContentKind,
   findTile,
   getFirstLeaf,
@@ -230,6 +232,27 @@ export function useWorkspaceTerminal({
     workspaceTerminalHandlesRef.current.delete(tileId);
     pendingWorkspaceTerminalResolversRef.current.delete(tileId);
   }, []);
+
+  // Report-time forensics (GQXEZD): the silent "New session does nothing"
+  // class needs the tile/handle truth at the moment a report is filed —
+  // which leaves exist, which have live handles, where the active tile
+  // points. Registered as an introspection contributor; read via
+  // collectClientDiagnostics and window.__o8Introspect().
+  const introspectionStateRef = useRef({ tileLayout, activeTileId });
+  introspectionStateRef.current = { tileLayout, activeTileId };
+  useEffect(() => registerIntrospectionContributor('layout', () => {
+    const { tileLayout: layout, activeTileId: active } = introspectionStateRef.current;
+    return {
+      activeTileId: active,
+      leaves: collectLeafNodes(layout.root).map((leaf) => ({
+        id: leaf.id,
+        kind: leaf.content.kind,
+        repoPath: leaf.content.kind === 'terminal' ? (leaf.content.repoPath ?? null) : undefined,
+      })),
+      handleTileIds: [...workspaceTerminalHandlesRef.current.keys()],
+      pendingResolverTileIds: [...pendingWorkspaceTerminalResolversRef.current.keys()],
+    };
+  }), []);
 
   const setTerminalTileRepoScope = useCallback((tileId: string, repoPath: string | null) => {
     setTileLayout((current) => {
