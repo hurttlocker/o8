@@ -20,7 +20,13 @@ fn preferred_male_voice() -> Option<&'static str> {
     static VOICE: OnceLock<Option<&'static str>> = OnceLock::new();
     *VOICE.get_or_init(|| {
         // en-US male first (matches Steffan's accent), then en-GB male.
-        const CANDIDATES: &[&str] = &["Alex", "Aaron", "Fred", "Tom", "Daniel", "Arthur", "Oliver"];
+        // NEVER Fred: it's the ancient robotic voice ("Stephen Hawking",
+        // report S9KT8H) yet it's pre-installed on every Mac while the good
+        // voices are downloads — with Fred in this list, a fresh laptop
+        // always landed on it. No candidate installed → return None and the
+        // caller omits -v entirely, so `say` uses the SYSTEM default voice
+        // (the user's own setting — natural, never the robot).
+        const CANDIDATES: &[&str] = &["Alex", "Aaron", "Tom", "Daniel", "Arthur", "Oliver", "Evan", "Nathan"];
         let listing = std::process::Command::new("say")
             .args(["-v", "?"])
             .output()
