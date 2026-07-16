@@ -21,6 +21,11 @@ interface ColumnHeaderStripProps {
   height?: number;
   /** When true the strip acts as a Tauri window-drag region. */
   drag?: boolean;
+  /** The 0.5px hairline under the strip. The CENTER workspace strip turns
+   *  it off (Q 2026-07-16: the three strips' hairlines lined up into one
+   *  faint line across the whole app — the sides keep theirs, the middle
+   *  doesn't need it). */
+  bottomHairline?: boolean;
   style?: CSSProperties;
 }
 
@@ -30,6 +35,7 @@ export function ColumnHeaderStrip({
   right,
   height = 36,
   drag = false,
+  bottomHairline = true,
   style,
 }: ColumnHeaderStripProps) {
   // Window drag — Tauri v2 startDragging. Skip when the click lands on an
@@ -67,7 +73,7 @@ export function ColumnHeaderStrip({
         paddingLeft: 8,
         paddingRight: 8,
         background: 'var(--t-chrome, transparent)',
-        borderBottom: '0.5px solid var(--t-divider-subtle)',
+        borderBottom: bottomHairline ? '0.5px solid var(--t-divider-subtle)' : 'none',
         color: 'var(--t-text)',
         position: 'relative',
         boxSizing: 'border-box',

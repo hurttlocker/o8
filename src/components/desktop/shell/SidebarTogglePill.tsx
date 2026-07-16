@@ -66,7 +66,13 @@ export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = 3.3
           color: 'var(--t-text-secondary)',
         },
         hover: {
-          background: 'var(--t-hover)',
+          // Chrome-button hover, NOT --t-hover (Q 2026-07-16, all-glass
+          // live-hit): this pill sits on PURE vibrancy, where the 5%-white
+          // --t-hover haze takes the wallpaper's hue (blue sky → blue
+          // hover) and stops matching the app's other hovers. The
+          // chrome-btn tokens are the vocabulary designed for controls on
+          // vibrancy — same treatment as the right-rail buttons.
+          background: 'var(--t-chrome-btn-hover-bg, var(--t-hover))',
           color: 'var(--t-text)',
         },
       }}
