@@ -39,6 +39,7 @@ import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
 import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
+import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
 import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
@@ -2520,18 +2521,22 @@ function DashboardInner() {
     // Field telemetry for the silent-failure class (D3YPBP): the toast tells
     // the operator, this tells US how often it happens across installs.
     captureAnomaly('workspace-spawn failed', { kind, detail });
+    recordSpawnEvent(`${kind}:error ${detail}`);
     setSpawnErrorMessage(`New ${kind} session failed: ${detail}`);
   }, []);
 
   const handleCreateWorkspaceOrchestrator = useCallback((repo?: { name: string; localPath: string; remoteUrl?: string; branch?: string | null } | null) => {
     void (async () => {
+      recordSpawnEvent(`orchestrator:requested activeTile=${activeTileId ?? 'none'}`);
       try {
         const target = await waitForWorkspaceTerminalTarget({
           preferredTileId: activeTileId,
           fallbackToAnyExisting: true,
         });
         setActiveTileId(target.tileId);
-        flashWorkspaceTab(target.handle.openOrchestratorTab(repo ?? undefined));
+        const tabId = target.handle.openOrchestratorTab(repo ?? undefined);
+        recordSpawnEvent(`orchestrator:done tile=${target.tileId} tab=${tabId}`);
+        flashWorkspaceTab(tabId);
       } catch (error) {
         reportSpawnFailure('orchestrator', error);
       }
@@ -2540,6 +2545,7 @@ function DashboardInner() {
 
   const handleCreateWorkspaceChat = useCallback(() => {
     void (async () => {
+      recordSpawnEvent(`chat:requested activeTile=${activeTileId ?? 'none'}`);
       try {
         const target = await waitForWorkspaceTerminalTarget({
           repoPath: workspaceTerminalPreferredRepo?.localPath ?? null,
@@ -2547,11 +2553,13 @@ function DashboardInner() {
           fallbackToAnyExisting: true,
         });
         setActiveTileId(target.tileId);
-        flashWorkspaceTab(target.handle.openLlmChatSession({
+        const tabId = target.handle.openLlmChatSession({
           repo: workspaceTerminalPreferredRepo ?? undefined,
           label: 'Chat',
           createNew: true,
-        }));
+        });
+        recordSpawnEvent(`chat:done tile=${target.tileId} tab=${tabId}`);
+        flashWorkspaceTab(tabId);
       } catch (error) {
         reportSpawnFailure('chat', error);
       }
@@ -2560,6 +2568,7 @@ function DashboardInner() {
 
   const handleCreateWorkspaceTerminal = useCallback(() => {
     void (async () => {
+      recordSpawnEvent(`terminal:requested activeTile=${activeTileId ?? 'none'}`);
       try {
         const target = await waitForWorkspaceTerminalTarget({
           repoPath: workspaceTerminalPreferredRepo?.localPath ?? null,
@@ -2567,7 +2576,9 @@ function DashboardInner() {
           fallbackToAnyExisting: true,
         });
         setActiveTileId(target.tileId);
-        flashWorkspaceTab(target.handle.openTerminalTab(workspaceTerminalPreferredRepo ?? undefined));
+        const tabId = target.handle.openTerminalTab(workspaceTerminalPreferredRepo ?? undefined);
+        recordSpawnEvent(`terminal:done tile=${target.tileId} tab=${tabId}`);
+        flashWorkspaceTab(tabId);
       } catch (error) {
         reportSpawnFailure('terminal', error);
       }
