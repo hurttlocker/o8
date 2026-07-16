@@ -27,9 +27,13 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
     <ColumnHeaderStrip
       drag
       // Strip height 32 — the toggle pill centers at ~y=20. The traffic
-      // lights center on the same line (trafficLightPosition y=15 → 12px
-      // buttons centered at 21; was y=22/center 28, which sat 7px below the
-      // toggle — the 2026-07-15 stoplight alignment pass).
+      // lights center on the same line: tao's inset semantics are
+      // center = (buttonHeight + y) / 2 (bitmap-verified 2026-07-15: y=15
+      // measured center 14.75, NOT y+6 — the y=15 attempt overshot UP by
+      // ~5pt), so conf y=25 puts the ~14.5pt buttons at center ~19.75.
+      // Calibrated at 100% zoom; zoom-tracking via runtime repositioning
+      // was tried (0.1.605) and REVERTED — resizing the titlebar container
+      // outside tao's draw_rect left the webview under-filling the window.
       height={32}
       left={
         <>
