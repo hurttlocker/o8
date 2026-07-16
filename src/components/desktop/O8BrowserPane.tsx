@@ -59,7 +59,7 @@ function liveSrc(url: string): string {
 
 // ── Types ──
 
-interface BrowserTab {
+export interface BrowserTab {
   id: string;
   url: string;
   title: string;
@@ -156,6 +156,7 @@ function TabFavicon({ url }: { url: string }) {
 
 const DEFAULT_STATE_SCOPE_KEY = 'right-panel';
 const browserPaneStateStore = new Map<string, BrowserPaneStateSnapshot>();
+const browserPaneListeners = new Set<() => void>();
 
 function normalizeStateScopeKey(key?: string): string {
   const trimmed = key?.trim();
@@ -188,6 +189,29 @@ function writeBrowserPaneState(scopeKey: string, tabs: BrowserTab[], activeTabId
     activeTabId: activeTab?.id ?? null,
     activeUrl: activeTab?.url ?? null,
   });
+  for (const listener of browserPaneListeners) listener();
+}
+
+/** Stable empty reference — `useSyncExternalStore` re-renders forever if the
+ *  no-tabs snapshot is a fresh array each read. */
+const NO_BROWSER_TABS: readonly BrowserTab[] = Object.freeze([]);
+
+/** Subscribe to o8's browser-tab state. Fires on any pane write. */
+export function subscribeBrowserPaneTabs(listener: () => void): () => void {
+  browserPaneListeners.add(listener);
+  return () => {
+    browserPaneListeners.delete(listener);
+  };
+}
+
+/**
+ * The tabs o8 currently owns in a given pane scope. The returned array is the
+ * stored reference — it only changes identity when the pane writes, which is
+ * what makes it safe as a `useSyncExternalStore` snapshot.
+ */
+export function getBrowserPaneTabs(scopeKey?: string): readonly BrowserTab[] {
+  const stored = browserPaneStateStore.get(normalizeStateScopeKey(scopeKey));
+  return stored?.tabs ?? NO_BROWSER_TABS;
 }
 
 function activeUrlFromSnapshot(snapshot: BrowserPaneStateSnapshot | null): string {

@@ -4306,6 +4306,12 @@ function DashboardInner() {
           event.preventDefault();
           handleToggleO8Panel();
         }
+        // ⌘⌥C — Canvas mode. Same destination as the header button. `event.code`
+        // for the same reason as ⌘⌥B above: Option remaps event.key (⌥C → 'ç').
+        if (event.code === 'KeyC' && !event.shiftKey) {
+          event.preventDefault();
+          window.location.assign('/preview/canvas-glass');
+        }
         return;
       }
       if (event.shiftKey) return;
@@ -4561,6 +4567,7 @@ function DashboardInner() {
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
       onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
       onOpenSettings={toggleSettingsOverlay}
+      onOpenMobilePairing={openMobilePairing}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
       onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
       onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
@@ -4937,11 +4944,15 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-style floating card with a 5px buffer on every edge.
+            // Claude-style floating card with a 5px buffer on top/left/right.
+            // Bottom is FLUSH (Q ruling 2026-07-16): the status bar no longer
+            // runs under this column, so the panel stretches to the window
+            // bottom — square bottom corners, the window's own corner mask
+            // shapes the bottom-left.
             paddingTop: 5,
             paddingLeft: 5,
             paddingRight: 5,
-            paddingBottom: 5,
+            paddingBottom: 0,
           }}
         >
           {effectiveGlassSurface ? (
@@ -5029,6 +5040,15 @@ function DashboardInner() {
           transform: `translateX(${workspaceInset / 2}px)`,
         }} />
       </div>}
+
+      {/* ── Center + right region ──
+          Wrapped in its own column so the DesktopStatusBar renders at ITS
+          bottom instead of spanning the full window (Q ruling 2026-07-16):
+          the sidebar column now runs full-height to the window bottom — the
+          status bar's old left band was an empty anchor after its utilities
+          moved out. */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
       {/* ── Center: Workspace Surface ── */}
       <div data-mcp-scope="workspace" style={{
@@ -5492,10 +5512,12 @@ function DashboardInner() {
           </AnimatePresence>
         </>
       )}
-      </div>{/* end main layout */}
+      </div>{/* end center+right row */}
 
       {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ──
-          The pill defaults to the project's HEAD branch. When the active
+          Lives INSIDE the center+right column (not page-wide) so the sidebar
+          column beside it runs full-height (Q ruling 2026-07-16). The pill
+          defaults to the project's HEAD branch. When the active
           orchestrator tab has a worktree pick that targets the same repo,
           the pill mirrors that branch so MergeActionCluster's PR + lane
           state (ready / push / merge) tracks the operator's pick. */}
@@ -5528,14 +5550,9 @@ function DashboardInner() {
         onOpenShortcuts={() => setShortcutsOpen(true)}
         leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
-        onOpenMobilePairing={openMobilePairing}
-        onPortPreview={(_port, url) => {
-          setO8BrowserUrl(url);
-          setO8ActiveTab('browser');
-          setRightPanelKind('o8');
-          openRightPanelFromUser();
-        }}
       />
+      </div>{/* end center+right column */}
+      </div>{/* end main layout */}
 
       <GuidedDiscoveryCoachmark
         visible={showMobileFtux}

@@ -214,6 +214,8 @@ export interface AgentPanelProps {
   onOpenCommandPalette?: () => void;
   onOpenProjectManagement?: () => void;
   onOpenSettings?: () => void;
+  /** Pair-mobile, rendered on the account row beside the gear (Q 2026-07-16). */
+  onOpenMobilePairing?: () => void;
   selectedRepoReadiness?: RepoReadiness | null;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;

@@ -5,12 +5,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { ChromeButton } from '../chrome/ChromeButton';
-import { GearSixIcon } from '../desktop-status-bar/status-bar-icons';
+import { DeviceMobileIcon, GearSixIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { WhatsNewCard } from './WhatsNewCard';
 
 interface AccountBlockProps {
   onOpenSettings?: () => void;
+  /** Pair-mobile lives on this row, in line with the gear, rather than in the
+   *  status bar below it (Q 2026-07-16). Omit and the button doesn't render. */
+  onOpenMobilePairing?: () => void;
 }
 
 type AccountPopover = 'menu' | 'whats-new' | null;
@@ -19,6 +22,7 @@ const NOOP = () => {};
 
 export function AccountBlock({
   onOpenSettings,
+  onOpenMobilePairing,
 }: AccountBlockProps) {
   const { isLoaded, signedIn, user } = useO8Auth();
   const { plan, founder, actualPlan, actualFounder } = useEntitlement();
@@ -201,6 +205,15 @@ export function AccountBlock({
                 </span>
               </span>
             </button>
+            {onOpenMobilePairing ? (
+              <ChromeButton
+                icon={<DeviceMobileIcon size={14} color="var(--t-text-muted)" />}
+                label="Pair mobile device"
+                onClick={onOpenMobilePairing}
+                size={22}
+                radius={6}
+              />
+            ) : null}
             <ChromeButton
               icon={<GearSixIcon size={14} color="var(--t-text-muted)" />}
               label="Account settings"

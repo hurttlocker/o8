@@ -89,6 +89,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onOpenCommandPalette,
     onOpenProjectManagement,
     onOpenSettings,
+    onOpenMobilePairing,
     leftPanelFocus: liftedLeftPanelFocus,
   } = props;
 
@@ -288,7 +289,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         <ConnectionPill />
         <FixedReportCard />
         <UpdateCard />
-        <AccountBlock onOpenSettings={onOpenSettings} />
+        <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} />
         {addRepoDialog}
       </div>
     );
@@ -488,7 +489,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       <ConnectionPill />
       <FixedReportCard />
       <UpdateCard />
-      <AccountBlock onOpenSettings={onOpenSettings} />
+      <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} />
       {addRepoDialog}
     </div>
   );
