@@ -38,6 +38,7 @@ import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
+import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
@@ -1039,9 +1040,20 @@ function DashboardInner() {
   // under-filling the window). Capture-phase listener: scroll events don't
   // bubble, so document-level capture is the only single hook that sees the
   // body's own scrolls. Reset is two property reads unless drift happened.
+  const bodyScrollAnomalyReportedRef = useRef(false);
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const resetBodyScroll = () => {
+      const drift = Math.max(document.body.scrollTop, document.documentElement.scrollTop);
+      if (drift === 0) return;
+      // The guard curing it silently would hide how often this fires in the
+      // field — phone home ONCE per session (Sentry anomaly + ring buffer, so
+      // it also rides any later bug report from this machine).
+      if (!bodyScrollAnomalyReportedRef.current) {
+        bodyScrollAnomalyReportedRef.current = true;
+        console.error(`[shell-guard] body scroll corrected: ${drift}px (the app shell must never body-scroll)`);
+        captureAnomaly('shell-guard: body scroll corrected', { driftPx: drift });
+      }
       if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
       if (document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0;
     };
@@ -2505,6 +2517,9 @@ function DashboardInner() {
   const reportSpawnFailure = useCallback((kind: string, error: unknown) => {
     console.error(`[workspace-spawn] ${kind} spawn failed:`, error);
     const detail = error instanceof Error ? error.message : String(error);
+    // Field telemetry for the silent-failure class (D3YPBP): the toast tells
+    // the operator, this tells US how often it happens across installs.
+    captureAnomaly('workspace-spawn failed', { kind, detail });
     setSpawnErrorMessage(`New ${kind} session failed: ${detail}`);
   }, []);
 

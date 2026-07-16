@@ -28,7 +28,27 @@ interface TelemetryConfig {
 
 let started = false;
 let enabled = true;
+let sentry: typeof import('@sentry/browser') | null = null;
 const POLL_MS = 30_000;
+
+/**
+ * Report a NON-CRASH anomaly to Sentry — a state that's wrong but throws
+ * nothing (body scroll drift, a silently failed spawn). Crash-only telemetry
+ * is structurally blind to this class (2026-07-15: the "half window" bug shipped
+ * twice with zero Sentry events because nothing ever threw), so the known
+ * guards/fallbacks phone home when they fire. Same dormancy + kill-switch as
+ * crashes: no DSN or toggle OFF → silent no-op. Pair every call site with a
+ * `console.error` so the event ALSO lands in the ring buffer that rides
+ * bug reports.
+ */
+export function captureAnomaly(message: string, extra?: Record<string, unknown>): void {
+  try {
+    if (!sentry || !enabled) return;
+    sentry.captureMessage(message, { level: 'warning', extra });
+  } catch {
+    /* telemetry must never disturb the app */
+  }
+}
 
 async function fetchConfig(): Promise<TelemetryConfig | null> {
   try {
@@ -58,6 +78,7 @@ export async function initSentryBrowser(): Promise<void> {
     enabled = cfg.enabled;
 
     const Sentry = await import('@sentry/browser');
+    sentry = Sentry;
     Sentry.init({
       dsn: cfg.dsn,
       release: cfg.release,
