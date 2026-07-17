@@ -660,60 +660,9 @@ export function ModelThinkingChip({
             <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
           ) : null}
 
-          {/* Mode — Solo vs Collide. Swarm/Ultracode moved to the effort
-              slider's top notch (Q ruling 2026-07-11), so it's no longer a
-              row here. */}
-          {onSetCollide && !isO8Backend ? (
-            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ paddingLeft: 7, paddingRight: 7, paddingBottom: 2 }}>
-                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Mode</div>
-              </div>
-              {[
-                { key: 'solo', active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator driving the fleet', hint: 'One orchestrator plans, dispatches, and reviews the whole worker fleet. Still many agents working — one brain directing them.' },
-                { key: 'collide', active: collideActive, label: 'Mixture of Agents', detail: `Claude + Codex propose · ${decideLabel}`, hint: `Mixture of Agents (Collide): Claude and Codex propose independently, then your chosen model (${shortModelLabel}) synthesizes and does the work — a built-in second opinion for hard problems.` },
-              ].map((mode) => (
-                <button
-                  key={mode.key}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={mode.active}
-                  title={mode.hint}
-                  onClick={() => {
-                    onSetSwarm?.(false);
-                    onSetCollide?.(mode.key === 'collide' ? !collideActive : false);
-                    setOpen(false);
-                  }}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-                    alignItems: 'center',
-                    gap: 8,
-                    minHeight: 30,
-                    paddingTop: 4,
-                    paddingRight: 6,
-                    paddingBottom: 4,
-                    paddingLeft: 7,
-                    borderWidth: 0,
-                    borderRadius: 8,
-                    background: mode.active ? `color-mix(in srgb, ${SWARM_ACCENT} 10%, transparent)` : 'transparent',
-                    color: 'var(--t-text)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: 'var(--font-sans-system)',
-                  }}
-                  onMouseEnter={(event) => { if (!mode.active) event.currentTarget.style.background = 'var(--t-hover)'; }}
-                  onMouseLeave={(event) => { if (!mode.active) event.currentTarget.style.background = 'transparent'; }}
-                >
-                  <SwarmGlyph size={13} color={mode.active ? SWARM_ACCENT : 'var(--t-text-muted)'} />
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: mode.active ? SWARM_ACCENT : 'var(--t-text)' }}>{mode.label}</span>
-                    <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.3, color: 'var(--t-text-faint)' }}>{mode.detail}</span>
-                  </span>
-                  <span style={{ width: 6, height: 6, borderRadius: 999, background: mode.active ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
-                </button>
-              ))}
-            </div>
-          ) : null}
+          {/* Mode section removed (Q 2026-07-17): Solo / Multitask /
+              Mixture of Agents live in the composer's "+" switcher now —
+              this picker is models + thinking only. */}
         </div>
       </ComposerPopover>
     </>
