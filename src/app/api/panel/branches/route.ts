@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execFileSync } from 'node:child_process';
 import { isSafeGitRef } from '@/lib/git/refs';
+import { getBranchSnapshot, getCachedBranchSnapshot, refreshBranchSnapshot } from '@/lib/panel/branch-snapshot';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,6 +79,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const cachedSnapshot = getCachedBranchSnapshot(repoPath);
+    if (cachedSnapshot) {
+      void refreshBranchSnapshot(repoPath);
+      return NextResponse.json({ branches: cachedSnapshot, repoPath });
+    }
+
+    const snapshot = await getBranchSnapshot(repoPath);
+    if (snapshot) {
+      return NextResponse.json({ branches: snapshot, repoPath });
+    }
+
     if (!isGitRepo(repoPath)) {
       return NextResponse.json({ branches: [], repoPath, isGitRepo: false });
     }
