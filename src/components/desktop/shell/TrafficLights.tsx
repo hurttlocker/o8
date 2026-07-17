@@ -149,8 +149,12 @@ export function TrafficLights({ yNudge = 0, leadInPx = 1 }: { yNudge?: number; l
     try {
       const win = await importWindow();
       await fn(win);
-    } catch {
-      // Not in Tauri — no-op.
+    } catch (err) {
+      // Loud, never silent (2026-07-17 live-hit): minimize + fullscreen were
+      // permission-DENIED (capabilities/default.json lacked allow-minimize /
+      // allow-set-fullscreen) and this catch ate the rejection — the buttons
+      // read as dead with zero trace. Browser mode still lands here benignly.
+      console.warn('[traffic-lights] window verb failed:', err);
     }
   };
 
