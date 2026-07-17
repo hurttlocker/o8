@@ -213,7 +213,8 @@ export function canvasFreeLook(look: CanvasFreeLookId): CanvasGlassSettings {
     return { ...CANVAS_GLASS_PRESETS.find((p) => p.id === 'glass')!.values };
   }
   const paper = CANVAS_GLASS_PRESETS.find((p) => p.id === 'paper')!.values;
-  if (look === 'light') return { ...paper };
+  // veil 1 = fully opaque washes, the exact IDE surface colors.
+  if (look === 'light') return { ...paper, veil: 1 };
   // Free Dark matches the IDE's dark-solid graphite (Q 2026-07-17: the three
   // shipping looks mean the SAME thing on both surfaces) — near-opaque dark
   // wash, not the old translucent 0.3 veil that read as a second glass mode.
@@ -221,7 +222,7 @@ export function canvasFreeLook(look: CanvasFreeLookId): CanvasGlassSettings {
     ...paper,
     tone: 'dark',
     textShade: defaultTextShadeForTone('dark'),
-    veil: 0.95,
+    veil: 1,
     tint: 0.5,
     chatTint: 0.55,
     dockTint: 0.95,
@@ -453,7 +454,10 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   // dot grid flips so it reads on either. THIS is what makes Light a true
   // white canvas, not just light panes floating over a dark desktop.
   const bgLight = value.tone === 'light';
-  root.style.setProperty('--cnv-bg-veil', `rgba(${bgLight ? '244, 246, 249' : '7, 9, 13'}, ${value.veil.toFixed(2)})`);
+  // Standard surface colors match the IDE side exactly (Q 2026-07-17):
+  // light wash = the cream paper #F4F2ED, dark wash = the graphite #1c1c1c.
+  // Every look rides the same pair, so the two surfaces read as one family.
+  root.style.setProperty('--cnv-bg-veil', `rgba(${bgLight ? '244, 242, 237' : '28, 28, 28'}, ${value.veil.toFixed(2)})`);
   root.style.setProperty('--cnv-bg-dot', bgLight ? 'rgba(12, 15, 22, 0.05)' : 'rgba(255, 255, 255, 0.055)');
   // Chat cards: their own frost + tint amounts, optionally their own pane
   // tone — but the TEXT is the universal shade, same as everything else.
