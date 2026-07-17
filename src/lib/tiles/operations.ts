@@ -492,6 +492,13 @@ function migrateNode(node: any): any {
       thoughts: 'terminal',
       'mission-control': 'terminal',
       'orchestrator-history': 'terminal',
+      // Legacy dispatch auto-split leaf (split-zombie root fix 2026-07-16):
+      // layouts minted by the April-2026 auto-open-second-workspace behavior
+      // persisted a 'workspace' kind that the terminal↔terminal collapse
+      // below could never see — so the phantom second pane RESURRECTED on
+      // every boot and each dispatch re-lit it. Mapping it to terminal lets
+      // the collapse finally heal those layouts for good.
+      workspace: 'terminal',
     };
     if (KIND_MAP[node.content.kind]) {
       node.content.kind = KIND_MAP[node.content.kind];
