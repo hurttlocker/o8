@@ -24,11 +24,27 @@ import { WorkspaceBootLoader } from './WorkspaceBootLoader';
 let claimCount = 0;
 const listeners = new Set<() => void>();
 
+// One-way boot latch (Q video 2026-07-17: "flash and flash and flash" — the
+// full UI rendered, then a LATE claim re-summoned the full-screen splash over
+// it seconds later). The full-screen loader belongs to BOOT only: once every
+// claim has released and stayed released through the settle window, the boot
+// is done and later claims become no-ops — late restores paint their own
+// in-place shimmers instead of blanking a working UI. The settle window keeps
+// the designed rapid claim handoffs between boot phases working.
+const BOOT_SETTLE_MS = 1500;
+let bootCompleted = false;
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
 function notify() {
   for (const listener of listeners) listener();
 }
 
 export function claimBootLoader(): () => void {
+  if (bootCompleted) return () => {};
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
   claimCount += 1;
   notify();
   let released = false;
@@ -36,6 +52,12 @@ export function claimBootLoader(): () => void {
     if (released) return;
     released = true;
     claimCount -= 1;
+    if (claimCount === 0 && !settleTimer) {
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        bootCompleted = true;
+      }, BOOT_SETTLE_MS);
+    }
     notify();
   };
 }
