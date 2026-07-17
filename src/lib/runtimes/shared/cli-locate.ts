@@ -152,3 +152,29 @@ export function scanAndLink(binaryName: string, home: string = os.homedir()): st
   ensureCliSymlink(binaryName, found, home);
   return found;
 }
+
+/**
+ * Spawn-time resolver for the `claude` binary — env override, then a cached
+ * scan hit that is RE-VALIDATED on every call.
+ *
+ * The validation is the point (F6JHXW, Sydney 2026-07-16): Claude Code's
+ * native auto-updater repoints ~/.local/bin/claude at
+ * ~/.local/share/claude/versions/<new> BEFORE the new binary finishes
+ * downloading, so for a multi-minute window the whole symlink chain is dead
+ * and every spawn ENOENTs. A forever-cache (the old _claudeBinCache in
+ * orchestrator-session) stayed stuck on the dead chain even when a healthy
+ * sibling install (nvm/brew) was one re-scan away. existsSync follows the
+ * FULL symlink chain, so a mid-update break fails the check and the very
+ * next call re-scans — one stat per spawn when healthy.
+ */
+let cachedClaudeBin: string | null = null;
+export function resolveClaudeBinary(home: string = os.homedir()): string {
+  const envOverride = process.env.O8_CLAUDE_CODE_BIN || process.env.CLAUDE_BIN;
+  if (envOverride) return envOverride;
+  if (cachedClaudeBin && existsSync(cachedClaudeBin)) return cachedClaudeBin;
+  cachedClaudeBin = scanForBinary('claude', home);
+  if (!cachedClaudeBin) {
+    console.warn('[cli-locate] claude not found in any well-known dir — falling back to ~/.local/bin/claude (likely ENOENT; is Claude Code installed?)');
+  }
+  return cachedClaudeBin ?? path.join(home, '.local', 'bin', 'claude');
+}
