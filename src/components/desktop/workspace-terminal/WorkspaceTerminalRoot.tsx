@@ -330,13 +330,10 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           effectiveActiveTabId={controller.effectiveActiveTabId}
           termWsConnected={controller.termWsConnected}
           panelRefs={controller.panelRefs}
-          onLaunchWorkspace={() => controller.setLaunchRequestKey((value) => value + 1)}
           onCloseTab={controller.handleCloseTab}
           onRunInTerminal={controller.handleRunCommandInTerminal}
-          onOpenHistoryChat={controller.handleOpenHistoryChat}
           onOpenWorkspaceCommitTab={controller.handleOpenWorkspaceCommitTab}
           onUpdateLlmSummary={controller.handleUpdateLlmSummary}
-          onConsumeLlmDraftInjection={controller.handleConsumeLlmDraftInjection}
           onUpdateLinkedIssue={controller.handleUpdateLinkedIssue}
           onUpdateChatMessages={controller.handleUpdateChatMessages}
           onUpdateChatSessionKey={controller.handleUpdateChatSessionKey}
