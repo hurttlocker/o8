@@ -26,6 +26,7 @@ import {
   TabHeading,
 } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
+import { fetchOperatorDefaults } from './operator-defaults-client';
 import { GitHubConnectionSections, type GitHubConnectionProps } from './GitHubTab';
 import {
   ENV_LOCKED_REASON,
@@ -136,7 +137,7 @@ export function GitPrsTab(github: GitHubConnectionProps) {
 
   const loadDefaults = useCallback(async () => {
     try {
-      const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const response = await fetchOperatorDefaults();
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load Git & PR settings.');
@@ -159,7 +160,7 @@ export function GitPrsTab(github: GitHubConnectionProps) {
       setBusyField(field);
       setNotice(null);
       try {
-        const response = await fetch('/api/panel/operator-defaults', {
+        const response = await fetchOperatorDefaults({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ [field]: value }),

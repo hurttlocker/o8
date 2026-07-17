@@ -51,7 +51,7 @@ function WorkspaceBootLoaderBase() {
     let cssH = 0;
     let cols = 0;
     let rows = 0;
-    let lum = new Float32Array(0);
+    let activeCells: Array<{ i: number; j: number; base: number }> = [];
     let cx = -1;
     let cy = -1;
     const off = document.createElement('canvas');
@@ -69,7 +69,6 @@ function WorkspaceBootLoaderBase() {
       canvas!.height = Math.floor(cssH * dpr);
       cols = Math.max(8, Math.floor(cssW / CELL));
       rows = Math.max(8, Math.floor(cssH / CELL));
-      lum = new Float32Array(cols * rows);
 
       off.width = cols;
       off.height = rows;
@@ -91,10 +90,13 @@ function WorkspaceBootLoaderBase() {
       o.font = font(size);
       o.fillText(TEXT, cols / 2, rows / 2);
       const d = o.getImageData(0, 0, cols, rows).data;
+      const nextCells: Array<{ i: number; j: number; base: number }> = [];
       for (let k = 0; k < cols * rows; k++) {
         const a = d[4 * k + 3] / 255;
-        lum[k] = ((0.299 * d[4 * k] + 0.587 * d[4 * k + 1] + 0.114 * d[4 * k + 2]) / 255) * a;
+        const base = ((0.299 * d[4 * k] + 0.587 * d[4 * k + 1] + 0.114 * d[4 * k + 2]) / 255) * a;
+        if (base > 0.015) nextCells.push({ i: k % cols, j: Math.floor(k / cols), base });
       }
+      activeCells = nextCells;
     }
 
     build();
@@ -104,9 +106,13 @@ function WorkspaceBootLoaderBase() {
     const last = RAMP.length - 1;
     let raf = 0;
     let start = 0;
+    let lastFrame = 0;
     const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
     function frame(ts: number) {
+      raf = requestAnimationFrame(frame);
+      if (ts - lastFrame < 1000 / 30) return;
+      lastFrame = ts;
       if (!start) start = ts;
       const t = (ts - start) / 1000;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -132,33 +138,26 @@ function WorkspaceBootLoaderBase() {
       const rad2 = 2 * rad * rad;
       const inside = cx >= 0;
 
-      for (let j = 0; j < rows; j++) {
-        const y = j * CELL;
-        const rowOff = j * cols;
-        for (let i = 0; i < cols; i++) {
-          const base = lum[rowOff + i];
-          if (base <= 0.015) continue;
-          const dist = i + j * 0.4 - edge;
-          const crest = Math.exp(-(dist * dist) / bw2);
-          let val = base * (0.5 + crest * 0.85);
-          if (inside) {
-            const dx = i - cx;
-            const dy = j - cy;
-            const d2 = dx * dx + dy * dy;
-            if (d2 < rad2 * 3) {
-              val += base * (33 / 50) * Math.exp(-d2 / rad2) * Math.sin(Math.sqrt(d2) * 0.7 - t * 7);
-            }
+      for (const cell of activeCells) {
+        const dist = cell.i + cell.j * 0.4 - edge;
+        const crest = Math.exp(-(dist * dist) / bw2);
+        let val = cell.base * (0.5 + crest * 0.85);
+        if (inside) {
+          const dx = cell.i - cx;
+          const dy = cell.j - cy;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < rad2 * 3) {
+            val += cell.base * (33 / 50) * Math.exp(-d2 / rad2) * Math.sin(Math.sqrt(d2) * 0.7 - t * 7);
           }
-          if (val <= 0.02) continue;
-          if (val > 1) val = 1;
-          const idx = Math.round(Math.pow(val, 1.2) * last);
-          if (idx <= 0) continue;
-          const ch = RAMP[idx];
-          if (ch === ' ') continue;
-          ctx!.fillText(ch, i * CELL, y);
         }
+        if (val <= 0.02) continue;
+        if (val > 1) val = 1;
+        const idx = Math.round(Math.pow(val, 1.2) * last);
+        if (idx <= 0) continue;
+        const ch = RAMP[idx];
+        if (ch === ' ') continue;
+        ctx!.fillText(ch, cell.i * CELL, cell.j * CELL);
       }
-      raf = requestAnimationFrame(frame);
     }
     raf = requestAnimationFrame(frame);
     start = now();

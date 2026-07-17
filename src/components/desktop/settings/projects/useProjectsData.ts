@@ -71,6 +71,10 @@ export function useProjectsData(): ProjectsDataState {
 
   const refresh = useCallback(async () => {
     try {
+      const secondaryRequests = Promise.allSettled([
+        fetch('/api/projects/context', { cache: 'no-store' }),
+        fetch('/api/projects/locks', { cache: 'no-store' }),
+      ]);
       const [projRes, repoRes, dismissedRes] = await Promise.all([
         fetch('/api/projects', { cache: 'no-store' }),
         fetch('/api/panel/repos', { cache: 'no-store' }),
@@ -84,10 +88,7 @@ export function useProjectsData(): ProjectsDataState {
       setProjects(projData.projects ?? []);
       setRepos(repoData.repos ?? []);
       setDismissedFingerprints(new Set(dismissedData.fingerprints ?? []));
-      const [contextResult, locksResult] = await Promise.allSettled([
-        fetch('/api/projects/context', { cache: 'no-store' }),
-        fetch('/api/projects/locks', { cache: 'no-store' }),
-      ]);
+      const [contextResult, locksResult] = await secondaryRequests;
       if (contextResult.status === 'fulfilled') {
         const contextData = (await contextResult.value.json().catch(() => ({}))) as ProjectContextApiResponse;
         setRuntimeContext(contextResult.value.ok ? contextData.context ?? null : null);

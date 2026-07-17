@@ -70,6 +70,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const revealCancelRef = useRef<((resetTerm: boolean) => void) | null>(null);
   /** While true, incoming PTY chunks queue instead of painting (min-play). */
   const revealHoldRef = useRef(false);
@@ -242,7 +244,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         });
 
         observerRef.current = new ResizeObserver(() => {
-          if (disposed || !fitAddonRef.current) return;
+          if (disposed || !visibleRef.current || !fitAddonRef.current) return;
           try {
             fitAddonRef.current.fit();
             sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);

@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { APP_FONT_STACK, MONO_FONT_STACK, RAMS_CONTROL_BG, RAMS_CONTROL_BORDER, SETTINGS_CONTENT_MAX_WIDTH, TabHeading } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { fetchOperatorDefaults } from './operator-defaults-client';
 
 const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it to manage from Settings.';
 
@@ -153,7 +154,7 @@ export function WorktreeRetentionSection() {
 
   const loadDefaults = useCallback(async () => {
     try {
-      const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const response = await fetchOperatorDefaults();
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load worktree settings.');
@@ -187,7 +188,7 @@ export function WorktreeRetentionSection() {
       setBusyField(field);
       setNotice(null);
       try {
-        const response = await fetch('/api/panel/operator-defaults', {
+        const response = await fetchOperatorDefaults({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ [field]: value }),

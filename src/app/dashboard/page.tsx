@@ -5319,7 +5319,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
                       <OrchestratorDataProvider
                         agents={parsedAgents}
                         missionState={thoughtsMissionState}
@@ -5378,7 +5378,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
                       <OrchestratorDataProvider
                         agents={parsedAgents}
                         missionState={thoughtsMissionState}

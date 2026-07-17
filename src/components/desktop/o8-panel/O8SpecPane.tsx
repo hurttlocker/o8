@@ -107,6 +107,7 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O
   // orchestrator's annotations without a manual reload — and never clobber the
   // operator's unsaved edits (we only swap when local === last-saved).
   const serverContentRef = useRef('');
+  const prewarmedReposRef = useRef(new Set<string>());
 
   // Sparkle → headless one-shot review. An LLM turn server-side annotates o8.md
   // and writes the markers; it never touches the orchestrator session, so
@@ -146,11 +147,12 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O
   // is instant, not a cold spawn. Fire-and-forget, once per repo; the pool reaps
   // the idle proc if it's never used (issue #1332 follow-up). (2026-07-02)
   useEffect(() => {
-    if (!repoPath) return;
+    if (!active || !repoPath || prewarmedReposRef.current.has(repoPath)) return;
+    prewarmedReposRef.current.add(repoPath);
     void fetch(`/api/repo-spec?action=prewarm-review&repoPath=${encodeURIComponent(repoPath)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     }).catch(() => {});
-  }, [repoPath]);
+  }, [active, repoPath]);
 
   useEffect(() => {
     // Only tick the relative-time labels while the pane is actually on screen.

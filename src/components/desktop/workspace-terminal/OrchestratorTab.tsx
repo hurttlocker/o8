@@ -341,8 +341,8 @@ function OrchestratorTabInner({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
-  // Render-independent mirror of chatChromeState.threadId — the restore retry
-  // loops below poll it from timeouts to confirm a loadThread actually landed.
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const loadedThreadIdRef = useRef<string | null>(null);
   const handleChromeChange = useCallback((state: ThoughtsChatPanelChromeState) => {
     loadedThreadIdRef.current = state.threadId;
@@ -436,7 +436,7 @@ function OrchestratorTabInner({
           // Persist the title alongside the threadId so the next reload
           // can pre-set tab.label at tab-creation time (no "Orchestrator"
           // flash before the chat-history fetch completes).
-          if (active && persistLastThread) writeLastOrchestratorThread(repoPath ?? null, threadId, title);
+          if (activeRef.current && persistLastThread) writeLastOrchestratorThread(repoPath ?? null, threadId, title);
           window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
             detail: { tabId, threadId, title },
           }));
@@ -468,7 +468,7 @@ function OrchestratorTabInner({
       cancelled = true;
       window.removeEventListener('o8:thread-title-maybe-updated', onMaybeUpdated as EventListener);
     };
-  }, [active, persistLastThread, tabId, chatChromeState.threadId, lockedMode, repoPath]);
+  }, [persistLastThread, tabId, chatChromeState.threadId, lockedMode, repoPath]);
 
   // Persist the last-active orchestrator thread id globally so dev
   // reloads drop the operator back into their last conversation. Only
