@@ -50,7 +50,7 @@ import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-pr
 import { fingerprintMcpConfig, firstMcpConfigDivergence } from '@/lib/lane/orchestrator-mcp-fingerprint';
 import { buildOrchestratorArgs } from '@/lib/lane/orchestrator-spawn-args';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
-import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
+import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 import {
   consumeResetSignal,
   ensureRegisteredSession,
@@ -100,24 +100,15 @@ export interface OrchestratorSession {
 // ── Constants ──
 
 /**
- * Resolve the claude binary at SPAWN time, not import time. The old constant
- * hardcoded ~/.local/bin/claude (the native-installer location on exactly one
- * machine) — every npm/brew/nvm install got `spawn … ENOENT` and a dead
- * orchestrator (#1551 walkdown, live-hit 2026-07-12). Order: explicit env →
- * the shared well-known-dirs scan (same list onboarding detect uses, so the
- * two can never disagree) → the legacy default as a last resort. Cached after
- * the first hit; scanForBinary is a handful of existsSync probes.
+ * Resolve the claude binary at SPAWN time, not import time (#1551), through
+ * the SHARED validated resolver (F6JHXW): the old local forever-cache stayed
+ * stuck on a dead symlink chain while Claude's native auto-updater was
+ * mid-swap — resolveClaudeBinary re-validates the cached path on every call
+ * and re-scans the moment it dies, so a turn during the update window lands
+ * on any healthy sibling install instead of `spawn … ENOENT`.
  */
-let _claudeBinCache: string | null = null;
 function resolveClaudeBin(): string {
-  if (process.env.CLAUDE_BIN) return process.env.CLAUDE_BIN;
-  if (_claudeBinCache) return _claudeBinCache;
-  const scanned = scanForBinary('claude');
-  _claudeBinCache = scanned ?? join(homedir(), '.local', 'bin', 'claude');
-  if (!scanned) {
-    console.warn('[orchestrator] claude binary not found in any well-known dir — falling back to ~/.local/bin/claude (likely ENOENT)');
-  }
-  return _claudeBinCache;
+  return resolveClaudeBinary();
 }
 const ORCHESTRATOR_STATE_DIR = orchestratorDataDir('orchestrator');
 

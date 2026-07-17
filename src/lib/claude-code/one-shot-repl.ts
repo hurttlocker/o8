@@ -25,6 +25,7 @@
  */
 
 import 'server-only';
+import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -173,7 +174,6 @@ export async function askClaudeOneShot(
  * `askClaudeOneShot`; this is just the fallback default.
  */
 export function defaultClaudeBin(): string {
-  return process.env.O8_CLAUDE_CODE_BIN
-    || process.env.CLAUDE_BIN
-    || join(homedir(), '.local', 'bin', 'claude');
+  // Shared validated resolver (F6JHXW) — see cli-locate.resolveClaudeBinary.
+  return resolveClaudeBinary();
 }
