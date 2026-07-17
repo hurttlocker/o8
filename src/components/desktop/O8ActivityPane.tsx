@@ -145,8 +145,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     }
   }, []);
   useEffect(() => {
+    if (!active) return;
     void refreshDispatchHaltState();
-  }, [refreshDispatchHaltState]);
+  }, [active, refreshDispatchHaltState]);
   const handleDispatchHaltToggle = useCallback(async () => {
     setHaltBusy(true);
     try {
@@ -323,9 +324,12 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
   // Fetch activity data
   useEffect(() => {
-    if (!active && !activityHydratedRef.current) return;
+    if (!active) return;
+    const showInitialSpinner = !activityHydratedRef.current;
     activityHydratedRef.current = true;
     let cancelled = false;
+    let inFlight: Promise<void> | null = null;
+    let trailingRefresh = false;
 
     async function load(showSpinner: boolean) {
       if (showSpinner) setLoading(true);
@@ -357,13 +361,27 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       }
     }
 
+    function scheduleLoad(showSpinner = false) {
+      if (inFlight) {
+        trailingRefresh = true;
+        return;
+      }
+      inFlight = load(showSpinner).finally(() => {
+        inFlight = null;
+        if (trailingRefresh && !cancelled) {
+          trailingRefresh = false;
+          scheduleLoad();
+        }
+      });
+    }
+
     // Initial load / scope change shows the skeleton; background refreshes
     // below update the feed in place so the pane doesn't flash to the
     // "Loading activity…" skeleton on every realtime tick (#1150).
-    void load(active);
+    scheduleLoad(showInitialSpinner);
 
     // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
-    const handler = () => { void load(false); };
+    const handler = () => { scheduleLoad(); };
     window.addEventListener('o8:realtime', handler);
     window.addEventListener('o8:agent-lifecycle', handler);
     window.addEventListener('o8:lane-lifecycle', handler);

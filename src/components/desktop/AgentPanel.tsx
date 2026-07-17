@@ -210,21 +210,21 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   // keep navigating; close it manually. Opening the control room is a separate
   // action on the row's chevron (handleMiniOpenControlRoom).
   const handleMiniProjectSelect = useCallback((project: ProjectRecord) => {
-    void projects.switchActive(project.id);
-  }, [projects]);
+    if (activeProjectId !== project.id) void projects.switchActive(project.id);
+  }, [activeProjectId, projects]);
   // Clicking a repo selects that specific repo so the right side shows it — no
   // auto control room, and the drawer stays open for repo-to-repo navigation.
   const handleMiniRepoSelect = useCallback((project: ProjectRecord, repoPath: string) => {
     const repo = registeredRepoByPath.get(repoPath);
-    void projects.switchActive(project.id);
+    if (activeProjectId !== project.id) void projects.switchActive(project.id);
     onSelectRepo?.(repo?.id ?? repoPath);
-  }, [onSelectRepo, projects, registeredRepoByPath]);
+  }, [activeProjectId, onSelectRepo, projects, registeredRepoByPath]);
   // The chevron explicitly opens the control room (project focus drawer).
   const handleMiniOpenControlRoom = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
-    void projects.switchActive(project.id);
+    if (activeProjectId !== project.id) void projects.switchActive(project.id);
     leftPanelFocus.focusByProjectId(project.id);
-  }, [leftPanelFocus, projects]);
+  }, [activeProjectId, leftPanelFocus, projects]);
 
   useEffect(() => {
     const nonce = addRepoIntent?.nonce ?? null;

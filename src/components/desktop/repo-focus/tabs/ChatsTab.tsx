@@ -166,19 +166,14 @@ export function ChatsTab({
   const fetchHistory = useCallback(async (cancelled?: () => boolean) => {
     setLoading(true);
     try {
-      const [activeResponse, archivedResponse] = await Promise.all([
-        fetch('/api/v2/chat-history/list?include=orchestrator', { cache: 'no-store' }),
-        fetch('/api/v2/chat-history/list?include=orchestrator&archived=only', { cache: 'no-store' }),
-      ]);
-      const activePayload = activeResponse.ok
-        ? await activeResponse.json() as { conversations?: ChatHistoryItem[] }
-        : { conversations: [] };
-      const archivedPayload = archivedResponse.ok
-        ? await archivedResponse.json() as { conversations?: ChatHistoryItem[] }
+      const response = await fetch('/api/v2/chat-history/list?include=orchestrator&archived=include', { cache: 'no-store' });
+      const payload = response.ok
+        ? await response.json() as { conversations?: ChatHistoryItem[] }
         : { conversations: [] };
       if (cancelled?.()) return;
-      setHistoryItems(activePayload.conversations ?? []);
-      setArchivedHistoryItems(archivedPayload.conversations ?? []);
+      const conversations = payload.conversations ?? [];
+      setHistoryItems(conversations.filter((item) => !item.archivedAt));
+      setArchivedHistoryItems(conversations.filter((item) => Boolean(item.archivedAt)));
     } catch {
       if (cancelled?.()) return;
       setHistoryItems([]);
@@ -320,6 +315,9 @@ export function ChatsTab({
   const visibleHistory = useMemo(() => (
     historyItems.filter((item) => targetRepos.some((repo) => historyBelongsToRepo(item, repo)))
   ), [historyItems, targetRepos]);
+  const historyPacketsByTabId = useMemo(() => new Map(
+    visibleHistory.map((item) => [item.tabId, pickHistoryPacket(item, visiblePackets)]),
+  ), [visibleHistory, visiblePackets]);
   const visibleArchivedHistory = useMemo(() => (
     archivedHistoryItems.filter((item) => targetRepos.some((repo) => historyBelongsToRepo(item, repo)))
   ), [archivedHistoryItems, targetRepos]);
@@ -631,7 +629,7 @@ export function ChatsTab({
                       compact={compact}
                       disabled={!onOpenHistoryChat}
                       active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                      tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                      tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
                       onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                       onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                     />
@@ -651,7 +649,7 @@ export function ChatsTab({
                         compact={compact}
                         disabled={!onOpenHistoryChat}
                         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                        tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                        tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
                         onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                         onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                       />
@@ -691,7 +689,7 @@ export function ChatsTab({
                                   compact={compact}
                                   disabled={!onOpenHistoryChat}
                                   active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                                  tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                                  tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
                                   onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                                   onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                                   ownedCount={ownedPackets.length}
@@ -797,7 +795,7 @@ export function ChatsTab({
                   compact={compact}
                   disabled={!onOpenHistoryChat}
                   active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                  tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                  tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
                   onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                   onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                 />
@@ -841,7 +839,7 @@ export function ChatsTab({
                 compact={compact}
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
                 onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                 onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
               />

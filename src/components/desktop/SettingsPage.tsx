@@ -8,7 +8,7 @@
  * and passed as props to GitHubTab because it requires cross-tab persistence.
  */
 
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import type {
   SettingsTab,
   GitHubAccount,
@@ -115,12 +115,13 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const [deviceFlow, setDeviceFlow] = useState<GitHubDeviceFlowState | null>(null);
   const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const githubStatusLoadedRef = useRef(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  // Fetch GitHub status on mount
+  // Fetch GitHub status when its owning tab is first shown.
   const loadGitHubStatus = useCallback(async (showRefreshState = false) => {
     try {
       if (showRefreshState) {
@@ -159,8 +160,10 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   }, []);
 
   useEffect(() => {
+    if (activeTab !== 'git-prs' || githubStatusLoadedRef.current) return;
+    githubStatusLoadedRef.current = true;
     void loadGitHubStatus();
-  }, [loadGitHubStatus]);
+  }, [activeTab, loadGitHubStatus]);
 
   const runGitHubAction = useCallback(async (
     action: Extract<GitHubActionKind, 'switch' | 'logout' | 'login_token'>,

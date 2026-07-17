@@ -24,6 +24,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
+import { fetchOperatorDefaults } from './operator-defaults-client';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { resolveEffectiveDefaultOrchestratorBackend } from '@/lib/operator/dispatch-runtime-default';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
@@ -168,7 +169,7 @@ export function OperatorDefaultsTab() {
 
   const loadDefaults = useCallback(async () => {
     try {
-      const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const response = await fetchOperatorDefaults();
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load operator defaults.');
@@ -190,7 +191,7 @@ export function OperatorDefaultsTab() {
     setBusyField(field);
     setNotice(null);
     try {
-      const response = await fetch('/api/panel/operator-defaults', {
+      const response = await fetchOperatorDefaults({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: value }),
