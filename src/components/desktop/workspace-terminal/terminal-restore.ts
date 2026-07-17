@@ -32,6 +32,8 @@ export interface ApplyPersistedStateResult {
   restoredAny: boolean;
 }
 
+export type RestoreValidationMode = 'optimistic' | 'validated';
+
 /**
  * The `thoughts-*` ids the operator has archived. Bounded + fail-open: a slow
  * or failed fetch returns `null`, which disables the archived-tab filter so we
@@ -88,6 +90,7 @@ export async function computeRestoredTabs(
   rawSaved: PersistedTabState,
   options: ApplyPersistedStateOptions,
   cancelled?: () => boolean,
+  validationMode: RestoreValidationMode = 'validated',
 ): Promise<ApplyPersistedStateResult | null> {
   // #717 — third defensive strip on the in-memory boundary between API/cache
   // and the restore pipeline. `loadTabState` already runs the strip, but a
@@ -110,7 +113,7 @@ export async function computeRestoredTabs(
     const id = tab.id ?? '';
     return kind === 'orchestrator' || id.startsWith('orchestrator-') || id.startsWith('thoughts-');
   });
-  const archivedThreadIdsPromise = needsArchivedCheck
+  const archivedThreadIdsPromise = validationMode === 'validated' && needsArchivedCheck
     ? fetchArchivedOrchestratorThreadIds()
     : Promise.resolve<Set<string> | null>(null);
 
@@ -121,14 +124,14 @@ export async function computeRestoredTabs(
   const needsLaneCheck = saved.tabs.some((tab) => (
     (tab.kind ?? 'terminal') === 'chat' && Boolean(tab.orchestrationPacket?.packetId)
   ));
-  const activeLanePacketIdsPromise = needsLaneCheck
+  const activeLanePacketIdsPromise = validationMode === 'validated' && needsLaneCheck
     ? fetchActiveLanePacketIds()
     : Promise.resolve<Set<string> | null>(null);
 
   let alive: Set<string>;
   let liveRuntimeSessionKeys: Set<PersistedRuntimeSessionKey>;
 
-  if (needsLivenessCheck) {
+  if (validationMode === 'validated' && needsLivenessCheck) {
     try {
       const result = await Promise.race([
         Promise.all([checkAliveSessions(tmuxNames), loadLiveRuntimeSessionKeys()]),
