@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { canPreserveScopedTabs, mergeUserSpawnedTabs } from './terminal-restore';
+import { canPreserveScopedTabs, computeRestoredTabs, mergeUserSpawnedTabs } from './terminal-restore';
 import type { TerminalTab } from './types';
 
 function tab(overrides: Partial<TerminalTab>): TerminalTab {
@@ -67,5 +67,23 @@ describe('mergeUserSpawnedTabs — restore landing never eats an in-flight user 
     const restored = [tab({ id: 'a' })];
     const merged = mergeUserSpawnedTabs(restored, [tab({ id: 'a' })], new Set<string>());
     expect(merged.map((t) => t.id)).toEqual(['a']);
+  });
+});
+
+describe('computeRestoredTabs — optimistic crash recovery', () => {
+  it('returns saved tabs for immediate paint before background validation', async () => {
+    const result = await computeRestoredTabs({
+      version: 1,
+      activeTabId: 'thoughts-saved',
+      savedAt: new Date().toISOString(),
+      tabs: [{ id: 'thoughts-saved', label: 'Saved thread', kind: 'orchestrator' }],
+    }, {
+      preferredRepo: null,
+      defaultTab: 'terminal',
+      createDefaultChatTab: () => tab({ kind: 'llm-chat' }),
+    }, undefined, 'optimistic');
+
+    expect(result?.tabs).toMatchObject([{ id: 'thoughts-saved', kind: 'orchestrator', orchestratorThreadId: 'thoughts-saved' }]);
+    expect(result?.activeTabId).toBe('thoughts-saved');
   });
 });
