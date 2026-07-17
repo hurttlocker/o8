@@ -30,20 +30,26 @@ interface MissionTracker {
   missionId: string;
   summary: string;
   repoPath: string | null;
+  threadId: string | null;
   completedAt: number | null;
   packetIds: Set<string>;
   done: Set<string>;
   meta: Map<string, TrackedPacketMeta>;
 }
 
+interface PendingMissionCard {
+  entry: MobileTranscriptEntry;
+  threadId: string | null;
+}
+
 // Module-level so the detector accumulates across the orchestrator tab's
 // mode/active flapping AND the server clearing the current-mission pointer
 // after archival. Pending cards wait here until a live transcript drains them.
 const trackers = new Map<string, MissionTracker>();
-// Recorded Mission-complete cards. NOT consumed on read — kept here so the feed
-// can RE-ASSERT them (idempotent append-by-id) after a thread reload clobbers
-// the live transcript. Capped; superseded per repo by newer missions.
-const pendingCards: MobileTranscriptEntry[] = [];
+// Recorded Mission-complete cards wait for the exact originating transcript.
+// They are consumed on delivery and capped so unowned legacy missions cannot
+// grow this fallback queue without bound.
+const pendingCards: PendingMissionCard[] = [];
 const MAX_PENDING_CARDS = 12;
 const STALE_TERMINAL_SNAPSHOT_MS = 5 * 60 * 1000;
 // Skip redundant capture work when the mission snapshot is unchanged (the
@@ -65,6 +71,26 @@ function packetTerminalTime(packet: OrchestratorPacket): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+export function resolveMissionThreadId(
+  packets: ReadonlyArray<Pick<OrchestratorPacket, 'orchestratorThreadId'>>,
+): string | null {
+  const threadIds = new Set(
+    packets
+      .map((packet) => packet.orchestratorThreadId?.trim())
+      .filter((threadId): threadId is string => Boolean(threadId)),
+  );
+  return threadIds.size === 1 ? [...threadIds][0] : null;
+}
+
+export function missionCardBelongsToThread(
+  originatingThreadId: string | null | undefined,
+  currentThreadId: string | null | undefined,
+): boolean {
+  const origin = originatingThreadId?.trim() ?? '';
+  const current = currentThreadId?.trim() ?? '';
+  return Boolean(origin && current && origin === current);
+}
+
 function recordPendingMissionCard(tracker: MissionTracker) {
   if (hasMissionBeenCarded(tracker.missionId)) {
     trackers.delete(tracker.missionId);
@@ -84,15 +110,18 @@ function recordPendingMissionCard(tracker: MissionTracker) {
     packets,
   };
   const cardId = `orch-mission-complete-${tracker.missionId}`;
-  if (!pendingCards.some((card) => card.id === cardId)) {
+  if (!pendingCards.some((card) => card.entry.id === cardId)) {
     const timestamp = tracker.completedAt ?? Date.now();
     pendingCards.push({
-      id: cardId,
-      role: 'system',
-      text: statusEventToText(statusEvent),
-      timestamp,
-      timestampLabel: new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      statusEvent,
+      threadId: tracker.threadId,
+      entry: {
+        id: cardId,
+        role: 'system',
+        text: statusEventToText(statusEvent),
+        timestamp,
+        timestampLabel: new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        statusEvent,
+      },
     });
     while (pendingCards.length > MAX_PENDING_CARDS) pendingCards.shift();
   }
@@ -110,33 +139,32 @@ function checkTrackerComplete(missionId: string) {
 }
 
 /**
- * Drain (and CONSUME) the Mission-complete cards recorded for `repoPath`. The
- * card goes to the FIRST transcript that drains it — the mission's owning thread,
- * active at record time — and is then removed, so it can never re-assert into a
- * new/empty thread of the same repo. That same-repo re-assert was what left a
- * stale packet sitting atop every fresh orchestrator, blocking a clean new chat.
+ * Drain (and CONSUME) the Mission-complete cards recorded for `repoPath` and
+ * `threadId`. An exact originating-thread match is required, so a new/empty
+ * thread of the same repo cannot claim a previous thread's completion card.
  *
  * Reload survival is now the persisted transcript's job: once a card is appended
  * it auto-saves, so a reload restores it from history. The only gap is a reload
  * inside the sub-second window before that save lands — a rare, cosmetic miss.
  *
- * STRICT repo scoping: a card only drains when BOTH the thread's repo and the
- * card's repo are known AND equal — the old permissive match (surface whenever
- * *either* side was unknown) bled stale cards into new threads across every
- * project, and null repos showed everywhere. (2026-07-02)
+ * Repo and thread ownership must both be known and equal. Unknown ownership is
+ * safer to leave undelivered than to attach permanently to an unrelated chat.
  */
-export function getPendingMissionCards(repoPath: string | null): MobileTranscriptEntry[] {
+export function getPendingMissionCards(
+  repoPath: string | null,
+  threadId: string | null,
+): MobileTranscriptEntry[] {
   if (pendingCards.length === 0) return [];
   const target = normalizeRepoPath(repoPath);
-  if (!target) return [];
+  if (!target || !threadId?.trim()) return [];
   const matched: MobileTranscriptEntry[] = [];
   // Iterate back-to-front so splicing is index-safe; unshift restores order.
   for (let i = pendingCards.length - 1; i >= 0; i -= 1) {
     const card = pendingCards[i];
-    const event = card.statusEvent;
+    const event = card.entry.statusEvent;
     const cardRepo = normalizeRepoPath(event && event.kind === 'mission-complete' ? event.repoPath ?? null : null);
-    if (cardRepo && cardRepo === target) {
-      matched.unshift(card);
+    if (cardRepo && cardRepo === target && missionCardBelongsToThread(card.threadId, threadId)) {
+      matched.unshift(card.entry);
       pendingCards.splice(i, 1); // consume — delivered to this thread, done
     }
   }
@@ -178,6 +206,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
       missionId: id,
       summary: missionState.summary,
       repoPath: missionState.repoPath ?? null,
+      threadId: resolveMissionThreadId(missionState.packets),
       completedAt: null,
       packetIds: new Set<string>(),
       done: new Set<string>(),
@@ -185,6 +214,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
     };
     tracker.summary = missionState.summary || tracker.summary;
     tracker.repoPath = missionState.repoPath ?? tracker.repoPath;
+    tracker.threadId = resolveMissionThreadId(missionState.packets);
     if (terminalTimes.length > 0) {
       tracker.completedAt = Math.max(tracker.completedAt ?? 0, ...terminalTimes);
     }

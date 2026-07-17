@@ -498,6 +498,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useOrchestratorStatusFeed({
     active: isOrchestratorMode && !isChatMode,
     repoPath: resolvedRepoPath,
+    threadId,
     missionPackets: missionState?.packets ?? [],
     appendLocalEntries: orchStream.appendLocalEntries,
   });
@@ -1420,11 +1421,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         orchStream.reset();
       }
       orchStream.replaceTranscript(loadPlan.entries);
-      // A thread reload replaces the transcript wholesale, which would drop a
-      // live-appended Mission-complete card. Re-assert any recorded card for
-      // this repo so the reload can't clobber it (idempotent by id).
+      // A thread reload replaces the transcript wholesale, so deliver any
+      // pending Mission-complete card owned by this exact loaded thread.
       if (isOrchestratorMode) {
-        const missionCards = getPendingMissionCards(resolvedRepoPath);
+        const missionCards = getPendingMissionCards(resolvedRepoPath, tabId);
         if (missionCards.length > 0) orchStream.appendLocalEntries(missionCards);
       }
       seenServerEntriesRef.current.clear();
