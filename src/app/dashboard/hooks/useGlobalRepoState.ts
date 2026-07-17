@@ -3,7 +3,7 @@ import { requestConfirm, requestPrompt, toast } from '@/components/shared/Confir
 import type { NavSection } from '@/app/dashboard/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
-import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { fetchSWRJson, getSWR } from '@/lib/panel/fetch-cache';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -128,8 +128,10 @@ export function useGlobalRepoState({
   }, [globalRepoEntry?.localPath]);
 
   const loadRegisteredRepos = useCallback(async () => {
-    const response = await fetchOnce('/api/panel/repos');
-    const data = await response.json() as { repos?: RepoRegistryEntry[] };
+    const cacheKey = 'panel:repos';
+    const cached = getSWR<{ repos?: RepoRegistryEntry[] }>(cacheKey);
+    if (cached.data) setGlobalRepoEntries(cached.data.repos ?? []);
+    const data = await fetchSWRJson<{ repos?: RepoRegistryEntry[] }>(cacheKey, '/api/panel/repos');
     const repos = data.repos ?? [];
     setGlobalRepoEntries(repos);
     return repos;
