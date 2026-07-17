@@ -9,25 +9,20 @@
  * It paints the SAME ASCII "o8" wave as the app's boot splash
  * (scripts/tauri-export.mjs) so boot → workspace reads as one continuous
  * identity. Unlike the bundled boot splash (which can't see the app theme and is
- * hardcoded), this one runs inside the app, so it reads the live theme tokens
- * (--t-chat-surface-bg / --t-text) off :root — light glyphs on dark, dark glyphs
+ * hardcoded), this one runs inside the app and follows the theme via the
+ * data-palette/data-surface attrs (stamped pre-paint by the layout script) and
+ * the --o8-boot-cover-* vars in globals.css — light glyphs on dark, dark glyphs
  * on light. A wordmark is rasterized to the grid, sampled to a density ramp, and
- * a diagonal crest washes across it.
+ * a diagonal crest washes across it. It renders IN PLACE (no portal) so it
+ * server-renders into the dashboard HTML and owns the first paint.
  */
 
 import { memo, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 
 const RAMP = ' .:-=+*#%@';
 const CELL = 6;
 const SCALE = 0.4;
 const TEXT = 'o8';
-
-function readVar(name: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback;
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
-}
 
 function WorkspaceBootLoaderBase() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -38,13 +33,15 @@ function WorkspaceBootLoaderBase() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Theme-aware: read the resolved surface + ink tokens once on mount. In
-    // glass surface the overlay carries the boot splash's translucent tint
-    // (set on the wrapper below), so the canvas CLEARS instead of painting an
-    // opaque slab and the ink goes white — identical to the bundled splash.
+    // Theme-aware WITHOUT reading --t-* vars: this effect can run BEFORE the
+    // ThemeProvider effect applies tokens (child effects fire first), so var
+    // reads here race hydration. The data-surface/data-palette attrs are
+    // stamped pre-paint by the layout's inline script, so they're always
+    // truthful by now. The wrapper div owns the background (cover var); the
+    // canvas only ever CLEARS and draws glyphs.
     const glass = document.documentElement.dataset.surface === 'glass';
-    const bg = readVar('--t-chat-surface-bg', '#0a0a0a');
-    const ink = glass ? '#ffffff' : readVar('--t-text', '#f4f4f5');
+    const darkPalette = document.documentElement.dataset.palette === 'dark';
+    const ink = glass ? '#ffffff' : darkPalette ? '#e8ecf2' : '#0f172a';
 
     let dpr = 1;
     let cssW = 0;
@@ -116,14 +113,9 @@ function WorkspaceBootLoaderBase() {
       if (!start) start = ts;
       const t = (ts - start) / 1000;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
-      if (glass) {
-        // Transparent canvas — the wrapper's glass tint (and the vibrancy
-        // beneath the transparent chrome) reads through between glyphs.
-        ctx!.clearRect(0, 0, cssW, cssH);
-      } else {
-        ctx!.fillStyle = bg;
-        ctx!.fillRect(0, 0, cssW, cssH);
-      }
+      // Always transparent — the wrapper div's cover background is the ONE
+      // paint (solid token or glass tint); the canvas only draws glyphs.
+      ctx!.clearRect(0, 0, cssW, cssH);
       ctx!.fillStyle = ink;
       ctx!.font = `${CELL}px ui-monospace, Menlo, monospace`;
       ctx!.textBaseline = 'top';
@@ -170,9 +162,16 @@ function WorkspaceBootLoaderBase() {
     };
   }, []);
 
-  if (typeof document === 'undefined') return null;
-
-  return createPortal(
+  // Rendered IN PLACE (no portal) so the loader server-renders into the
+  // dashboard HTML — the splash owns the window from the very first paint
+  // instead of letting ~1.2s of naked pre-hydration chrome through (prod boot
+  // recording 2026-07-17). The Host mounts at the dashboard root, so
+  // position:fixed escapes nothing it needs (same level as the drag-capture
+  // layer). Background/ink come from --o8-boot-cover-* — defined in
+  // globals.css keyed on the data-palette/data-surface attrs the pre-paint
+  // stamp script sets, so the cover paints the RIGHT theme before any
+  // ThemeProvider JS runs.
+  return (
     <div
       style={{
         position: 'fixed',
@@ -185,9 +184,7 @@ function WorkspaceBootLoaderBase() {
         // over the workspace). The splash's translucency only worked because
         // nothing but vibrancy sat behind it. Same tones, alpha 1: one cover,
         // one reveal when the workspace is actually ready.
-        background: document.documentElement.dataset.surface === 'glass'
-          ? 'linear-gradient(180deg, rgb(32, 36, 42) 0%, rgb(18, 20, 24) 100%)'
-          : 'var(--t-chat-surface-bg)',
+        background: 'var(--o8-boot-cover-bg, #F4F2ED)',
         animation: 'o8BootBackdropIn 200ms ease-out both',
       }}
       aria-label="Loading workspace"
@@ -208,15 +205,14 @@ function WorkspaceBootLoaderBase() {
           fontSize: 11.5,
           fontWeight: 320,
           letterSpacing: '0.04em',
-          color: 'var(--t-text-faint)',
+          color: 'var(--o8-boot-cover-ink, var(--t-text-faint))',
           fontFamily: 'var(--font-sans-system)',
           animation: 'o8BootCaptionIn 600ms ease-out both',
         }}
       >
         Loading workspace…
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 

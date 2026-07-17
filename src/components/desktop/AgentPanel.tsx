@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
+import { WorkspaceBootLoaderClaim } from './workspace-terminal/workspace-boot-loader-claim';
 import { ConnectionPill } from './ConnectionPill';
 import { UpdateCard } from './UpdateCard';
 import { AccountBlock } from './account-block/AccountBlock';
@@ -122,6 +123,19 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   // The old footer dot switcher is retired so project navigation lives in
   // one place instead of competing with the bottom utility buttons.
   const projects = useProjects();
+
+  // Boot claim — the left rail's first data (projects ledger + agent
+  // inventory) landed ~3s AFTER the boot loader revealed the UI, so the
+  // sidebar popped in with a layout shift (prod boot recording 2026-07-17).
+  // Hold the shared boot loader until both first loads resolve, with a
+  // fail-open cap so a dead API can't hold boot hostage. claimBootLoader is a
+  // no-op after the boot latch, so later refetches never re-summon the splash.
+  const [sidebarBootHoldExpired, setSidebarBootHoldExpired] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSidebarBootHoldExpired(true), 12000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const sidebarBootHold = !sidebarBootHoldExpired && (projects.loading || inventoryLoading);
 
   // Prefer the lifted focus state when the dashboard supplies it, so column
   // width and panel content share a single source of truth. Falls back to a
@@ -326,6 +340,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         background: 'transparent',
       } as CSSProperties}
     >
+      {sidebarBootHold ? <WorkspaceBootLoaderClaim /> : null}
       <div
         suppressHydrationWarning
         style={{

@@ -175,6 +175,25 @@ html[data-palette='dark'][data-surface='solid'] {
   --neo-hover-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
+/* Boot cover (WorkspaceBootLoader) — must paint the right theme BEFORE any
+ * ThemeProvider JS runs, so the values are hardcoded here keyed on the
+ * data-palette/data-surface attrs the layout's pre-paint script stamps.
+ * Solid values mirror the registry's --t-chat-surface-bg per palette; the
+ * glass gradient matches the bundled boot splash (scripts/tauri-export.mjs)
+ * so native splash → in-app loader reads as ONE continuous surface. */
+:root {
+  --o8-boot-cover-bg: #F4F2ED;
+  --o8-boot-cover-ink: rgba(15, 23, 42, 0.45);
+}
+html[data-palette='dark'] {
+  --o8-boot-cover-bg: #242424;
+  --o8-boot-cover-ink: rgba(232, 236, 242, 0.45);
+}
+html[data-surface='glass'] {
+  --o8-boot-cover-bg: linear-gradient(180deg, rgb(32, 36, 42) 0%, rgb(18, 20, 24) 100%);
+  --o8-boot-cover-ink: rgba(244, 244, 245, 0.5);
+}
+
 a {
   color: inherit;
   text-decoration: none;

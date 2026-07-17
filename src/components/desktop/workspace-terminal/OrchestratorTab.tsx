@@ -505,6 +505,12 @@ function OrchestratorTabInner({
   // chat panel has actually loaded the messages (hasMessages flips).
   const restoredThreadRef = useRef<string | null>(null);
   const [showRestoreLoader, setShowRestoreLoader] = useState(false);
+  // True while a loadThread retry loop below is actively nudging the history
+  // fetch. The restore hold reads this: while a loop is working, the 3s
+  // empty-bail is wrong — it dropped the tab onto the "What should we build"
+  // hero for ~12s while the loop kept retrying against a booting server
+  // (prod boot recording 2026-07-17), then the transcript popped in over it.
+  const [threadLoadPending, setThreadLoadPending] = useState(false);
   const [isRestoringThread, setIsRestoringThread] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     // A persisted thread binding reloading across an app restart is ALSO a
@@ -547,13 +553,20 @@ function OrchestratorTabInner({
     let timer: number | null = null;
     const tryLoad = () => {
       if (cancelled) return;
-      if (restoredThreadRef.current !== restored && globalLastThreadRestoreClaimed) return; // claimed by another tab mid-wait
+      if (restoredThreadRef.current !== restored && globalLastThreadRestoreClaimed) {
+        setThreadLoadPending(false); // claimed by another tab mid-wait
+        return;
+      }
       // Confirmed landed — the panel's chrome reports the restored thread.
-      if (loadedThreadIdRef.current === restored) return;
+      if (loadedThreadIdRef.current === restored) {
+        setThreadLoadPending(false);
+        return;
+      }
       const handle = chatPanelRef.current;
       if (!handle) {
         mountPolls += 1;
         if (mountPolls < 50) timer = window.setTimeout(tryLoad, 100);
+        else setThreadLoadPending(false);
         return;
       }
       // Claim on FIRST call (one tab adopts the global last-thread), then keep
@@ -579,10 +592,13 @@ function OrchestratorTabInner({
       handle.loadThread(restored);
       loadRetries += 1;
       if (loadRetries < 20) timer = window.setTimeout(tryLoad, 1000);
+      else setThreadLoadPending(false); // exhausted — fail open to the hero
     };
+    setThreadLoadPending(true);
     timer = window.setTimeout(tryLoad, 0);
     return () => {
       cancelled = true;
+      setThreadLoadPending(false);
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [active, initialThreadId, restoreLastThread, repoPath, publishWorkspaceThread, tabId]);
@@ -598,15 +614,22 @@ function OrchestratorTabInner({
       return;
     }
     const appearTimer = window.setTimeout(() => setShowRestoreLoader(true), 200);
+    // While a loadThread retry loop is actively working, the short empty-bail
+    // is wrong — it revealed the "What should we build" hero over a transcript
+    // that was still fetching against a booting server, then the conversation
+    // popped in over it ~12s later (prod boot recording 2026-07-17). Hold with
+    // a long fail-open while the loop works; the loop clearing
+    // threadLoadPending (landed, exhausted, or superseded) re-runs this effect
+    // and arms the short bail for the genuinely-empty-thread case.
     const emptyTimer = window.setTimeout(() => {
       setShowRestoreLoader(false);
       setIsRestoringThread(false);
-    }, 3000);
+    }, threadLoadPending ? 30000 : 3000);
     return () => {
       window.clearTimeout(appearTimer);
       window.clearTimeout(emptyTimer);
     };
-  }, [isRestoringThread, chatChromeState.hasMessages]);
+  }, [isRestoringThread, chatChromeState.hasMessages, threadLoadPending]);
 
   useEffect(() => {
     if (!active) return;
@@ -754,22 +777,27 @@ function OrchestratorTabInner({
       if (cancelled) return;
       if (loadedThreadIdRef.current === initialThreadId) {
         loadedInitialThreadRef.current = initialThreadId;
+        setThreadLoadPending(false);
         return;
       }
       const handle = chatPanelRef.current;
       if (!handle) {
         mountPolls += 1;
         if (mountPolls < 50) timer = window.setTimeout(tryLoad, 100);
+        else setThreadLoadPending(false);
         return;
       }
       console.log(`[orchestrator] loading tab-bound thread ${initialThreadId} (retry ${loadRetries})`);
       handle.loadThread(initialThreadId);
       loadRetries += 1;
       if (loadRetries < 20) timer = window.setTimeout(tryLoad, 1000);
+      else setThreadLoadPending(false); // exhausted — fail open to the hero
     };
+    setThreadLoadPending(true);
     timer = window.setTimeout(tryLoad, 0);
     return () => {
       cancelled = true;
+      setThreadLoadPending(false);
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [active, initialThreadId]);

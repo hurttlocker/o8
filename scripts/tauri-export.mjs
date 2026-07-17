@@ -20,6 +20,14 @@ const pub = join(root, 'public');
 const loaderVerifyPath = join(root, 'scripts', 'loader-verify.mjs');
 const nativeAddonRuntimePath = join(root, 'scripts', 'native-addon-runtime.cjs');
 
+// Real version for the loader's corner stamp — the template used to carry a
+// stale hardcoded fallback (v0.1.16 forever) because __O8_VERSION__ is not
+// injected at loader time.
+let loaderAppVersion = 'dev';
+try {
+  loaderAppVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version || 'dev';
+} catch { /* keep 'dev' */ }
+
 // Clean previous build
 if (existsSync(out)) rmSync(out, { recursive: true });
 mkdirSync(frontend, { recursive: true });
@@ -99,7 +107,8 @@ const loaderHtml = `<!DOCTYPE html>
     // the failure message in tick()'s deadline branch.
     (function stampOnce() {
       const el = document.getElementById('stamp');
-      if (el) el.textContent = 'v' + (window.__O8_VERSION__ || 'dev');
+      // Baked at export time; only override if the runtime injected a version.
+      if (el && window.__O8_VERSION__) el.textContent = 'v' + window.__O8_VERSION__;
     })();
 
     async function probe(port) {
@@ -152,7 +161,7 @@ const loaderHtml = `<!DOCTYPE html>
       <span id="stage">starting</span>
       <span class="dot-row"><span></span><span></span><span></span></span>
     </span>
-    <span id="stamp">v0.1.16</span>
+    <span id="stamp">v${loaderAppVersion}</span>
   </div>
   <script>
     (function () {
