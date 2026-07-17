@@ -240,14 +240,16 @@ export function useGlobalRepoState({
   // Fetch branch when selected repo changes
   useEffect(() => {
     if (!globalRepoEntry?.localPath) return;
-    fetch(`/api/panel/branches?path=${encodeURIComponent(globalRepoEntry.localPath)}`)
+    const controller = new AbortController();
+    fetch(`/api/panel/branches?path=${encodeURIComponent(globalRepoEntry.localPath)}`, { signal: controller.signal })
       .then(r => r.json())
       .then(bData => {
         const current = (bData.branches ?? []).find((b: { current: boolean; name: string }) => b.current);
         if (current?.name) setGlobalRepoBranch(current.name);
       })
       .catch(() => {});
-  }, [globalRepoEntry]);
+    return () => controller.abort();
+  }, [globalRepoEntry?.localPath]);
 
   useEffect(() => {
     // Defer worktree refresh — not needed for initial shell paint

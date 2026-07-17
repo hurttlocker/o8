@@ -24,6 +24,7 @@ import {
   type SettingsTab,
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { fetchOperatorDefaults } from './operator-defaults-client';
 import { autostartIsEnabled, autostartSet, isTauri } from '@/lib/tauri/bridge';
 import { isTelemetryOptedOut, setTelemetryOptOut } from '@/lib/analytics/track';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
@@ -139,7 +140,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
 
   const loadDefaults = useCallback(async () => {
     try {
-      const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const response = await fetchOperatorDefaults();
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load settings.');
@@ -157,7 +158,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
     setBusyField(field);
     setNotice(null);
     try {
-      const response = await fetch('/api/panel/operator-defaults', {
+      const response = await fetchOperatorDefaults({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: value }),

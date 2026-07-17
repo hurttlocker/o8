@@ -23,6 +23,7 @@ import {
   type SettingsTab,
 } from './shared';
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { fetchOperatorDefaults } from './operator-defaults-client';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { ApiKeysProviderList } from './APIKeysTab';
@@ -135,7 +136,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
 
   const loadDefaults = useCallback(async () => {
     try {
-      const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const response = await fetchOperatorDefaults();
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load model settings.');
@@ -156,7 +157,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       setBusyField(field);
       setNotice(null);
       try {
-        const response = await fetch('/api/panel/operator-defaults', {
+        const response = await fetchOperatorDefaults({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ [field]: value }),

@@ -1229,9 +1229,9 @@ export function useWorkspaceTerminalController(
 
   const handleSelectTab = useCallback((id: string) => {
     setActiveTabIdFromUser(id);
-    setTabs((previous) => previous.map((tab) => (
-      tab.id === id && tab.unseen ? { ...tab, unseen: false } : tab
-    )));
+    setTabs((previous) => previous.find((tab) => tab.id === id)?.unseen
+      ? previous.map((tab) => (tab.id === id ? { ...tab, unseen: false } : tab))
+      : previous);
   }, [setActiveTabIdFromUser]);
 
   const handleClosePreview = useCallback((id: string) => {

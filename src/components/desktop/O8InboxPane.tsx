@@ -109,37 +109,48 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   const [actionNoteById, setActionNoteById] = useState<Record<string, string>>({});
   const [approvalNoteById, setApprovalNoteById] = useState<Record<string, string>>({});
   const [busyApproval, setBusyApproval] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
-  const inboxHydratedRef = useRef(false);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const refreshTrailingRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    const [inboxResult, approvalsResult] = await Promise.allSettled([
-      fetch('/api/panel/supervisor-inbox?includeDismissed=1&scope=all', { cache: 'no-store' })
-        .then(async (response) => {
-          if (!response.ok) return null;
-          const body = await response.json();
-          return Array.isArray(body?.items) ? body.items as SupervisorInboxItem[] : null;
-        }),
-      fetch('/api/panel/approvals?status=pending', { cache: 'no-store' })
-        .then(async (response) => {
-          if (!response.ok) return null;
-          const body = await response.json();
-          return Array.isArray(body?.approvals) ? body.approvals as ApprovalRecord[] : null;
-        }),
-    ]);
+    if (refreshInFlightRef.current) {
+      refreshTrailingRef.current = true;
+      return refreshInFlightRef.current;
+    }
+    const request = (async () => {
+      do {
+        refreshTrailingRef.current = false;
+        const [inboxResult, approvalsResult] = await Promise.allSettled([
+          fetch('/api/panel/supervisor-inbox?includeDismissed=1&scope=all', { cache: 'no-store' })
+            .then(async (response) => {
+              if (!response.ok) return null;
+              const body = await response.json();
+              return Array.isArray(body?.items) ? body.items as SupervisorInboxItem[] : null;
+            }),
+          fetch('/api/panel/approvals?status=pending', { cache: 'no-store' })
+            .then(async (response) => {
+              if (!response.ok) return null;
+              const body = await response.json();
+              return Array.isArray(body?.approvals) ? body.approvals as ApprovalRecord[] : null;
+            }),
+        ]);
 
-    if (inboxResult.status === 'fulfilled' && inboxResult.value) {
-      setItems(inboxResult.value);
+        if (inboxResult.status === 'fulfilled' && inboxResult.value) setItems(inboxResult.value);
+        if (approvalsResult.status === 'fulfilled' && approvalsResult.value) setApprovals(approvalsResult.value);
+        setLoading(false);
+        setApprovalLoading(false);
+      } while (refreshTrailingRef.current);
+    })();
+    refreshInFlightRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (refreshInFlightRef.current === request) refreshInFlightRef.current = null;
     }
-    if (approvalsResult.status === 'fulfilled' && approvalsResult.value) {
-      setApprovals(approvalsResult.value);
-    }
-    setLoading(false);
-    setApprovalLoading(false);
   }, []);
 
   useEffect(() => {
-    if (!active && !inboxHydratedRef.current) return;
-    inboxHydratedRef.current = true;
+    if (!active) return;
     void refresh();
     const handleEvent = (event: Event) => {
       const queryKey = (event as CustomEvent<{ queryKey?: string[] }>).detail?.queryKey;

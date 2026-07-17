@@ -184,15 +184,15 @@ export function useWorkspaceChatPane({
   useEffect(() => {
     if (!normalizedSessionKey) return undefined;
     const controller = new AbortController();
-    const run = () => bootstrapTranscripts([normalizedSessionKey], {
+    const run = (refetchFresh = false) => bootstrapTranscripts([normalizedSessionKey], {
       merge: mergeTranscriptEntries,
       signal: controller.signal,
-      refetchFresh: true,
+      refetchFresh,
     });
     void run();
     let interval: number | undefined;
     if (active && supervisorActive) {
-      interval = window.setInterval(() => { void run(); }, 3000);
+      interval = window.setInterval(() => { void run(true); }, 3000);
     }
     return () => {
       controller.abort();
