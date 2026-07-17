@@ -89,6 +89,23 @@ function ChatGlyph() {
   );
 }
 
+function RetryGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  );
+}
+
+function StopGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="7" y="7" width="10" height="10" rx="1.5" />
+    </svg>
+  );
+}
+
 function ArchiveGlyph() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
@@ -109,6 +126,9 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   const [actionNoteById, setActionNoteById] = useState<Record<string, string>>({});
   const [approvalNoteById, setApprovalNoteById] = useState<Record<string, string>>({});
   const [busyApproval, setBusyApproval] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
+  // #1569: latch while a retry/stop verb runs — a double-click on Retry would
+  // otherwise relaunch two fresh workers.
+  const [busyIncidentId, setBusyIncidentId] = useState<string | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshTrailingRef = useRef(false);
 
@@ -310,6 +330,69 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
     }).catch(() => {});
     setActionNote(item.id, 'Escalated to orchestrator.');
   }, [setActionNote, refresh]);
+
+  // #1569: the retry-exhausted copy tells the operator to "retry manually or
+  // stop the packet" — these are those verbs. Retry = layer-4 fresh redispatch
+  // carrying the incident's error as feedback (the warm session is dead by the
+  // time bounded retries exhaust, so steer isn't an option); the incident flips
+  // to escalated so it reads "in flight" and heal-bot auto-resolves it on merge.
+  // Stop = interrupt + hold, then the incident is dismissed as operator-decided.
+  const retryPacket = useCallback(async (item: SupervisorInboxItem) => {
+    if (!item.packetId || busyIncidentId) return;
+    setBusyIncidentId(item.id);
+    setActionNote(item.id, 'Relaunching a fresh worker...');
+    try {
+      const response = await fetch('/api/orchestrator/rerun-with-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packetId: item.packetId,
+          feedback: `Operator retried manually from the Incident Queue after bounded retries were exhausted. Original failure: ${item.errorExcerpt || 'see lane events.'}`,
+        }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error ?? 'Retry was rejected.');
+      await fetch('/api/panel/supervisor-inbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'escalate', id: item.id }),
+      }).catch(() => {});
+      setActionNote(item.id, 'Fresh worker relaunched.');
+      window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
+      await refresh();
+    } catch (error) {
+      setActionNote(item.id, error instanceof Error ? error.message : 'Retry failed.');
+    } finally {
+      setBusyIncidentId(null);
+    }
+  }, [busyIncidentId, refresh, setActionNote]);
+
+  const stopPacket = useCallback(async (item: SupervisorInboxItem) => {
+    if (!item.packetId || busyIncidentId) return;
+    setBusyIncidentId(item.id);
+    setActionNote(item.id, 'Stopping the packet...');
+    try {
+      const response = await fetch('/api/orchestrator/stop-packet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId: item.packetId }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error ?? 'Stop was rejected.');
+      await fetch('/api/panel/supervisor-inbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'dismiss', id: item.id }),
+      }).catch(() => {});
+      setActionNote(item.id, 'Packet stopped and held.');
+      window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
+      await refresh();
+    } catch (error) {
+      setActionNote(item.id, error instanceof Error ? error.message : 'Stop failed.');
+    } finally {
+      setBusyIncidentId(null);
+    }
+  }, [busyIncidentId, refresh, setActionNote]);
 
   const humanRequired = items.filter((item) => item.status === 'human_required');
   const escalated = items.filter((item) => item.status === 'escalated');
@@ -524,6 +607,24 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                   <div style={{ minWidth: 0, flex: 1, fontSize: 10, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {actionNote}
                   </div>
+                  {isHumanRequired && item.packetId ? (
+                    <>
+                      <InboxActionButton
+                        title="Retry packet (fresh worker)"
+                        onClick={() => { void retryPacket(item); }}
+                        disabled={busyIncidentId !== null}
+                      >
+                        <RetryGlyph />
+                      </InboxActionButton>
+                      <InboxActionButton
+                        title="Stop packet"
+                        onClick={() => { void stopPacket(item); }}
+                        disabled={busyIncidentId !== null}
+                      >
+                        <StopGlyph />
+                      </InboxActionButton>
+                    </>
+                  ) : null}
                   <InboxActionButton
                     title={transcriptPreview ? 'Hide transcript' : 'Preview transcript'}
                     onClick={() => { void openTranscript(item); }}
