@@ -974,6 +974,8 @@ function DashboardInner() {
 
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const settingsPanelRef = useRef<HTMLDivElement>(null);
+  const workspaceSurfaceRef = useRef<HTMLDivElement>(null);
+  const settingsWasOpenRef = useRef(false);
   const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
   const [workspaceLifecycleSummary, setWorkspaceLifecycleSummary] = useState<WorkspaceLifecycleSummaryView>({
     unreadCount: 0,
@@ -997,6 +999,16 @@ function DashboardInner() {
   // match (no hydration mismatch).
   const [chatVisible, setChatVisible] = useState(false);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
+  // Keep each expensive panel instance alive after its first visit. Presentation
+  // can collapse or crossfade, but reopening must not repay its chunk, queries,
+  // observers, or local tab state.
+  const [mountedRightPanels, setMountedRightPanels] = useState({ o8: false, review: false });
+  useEffect(() => {
+    if (!chatVisible) return;
+    setMountedRightPanels((current) => current[rightPanelKind]
+      ? current
+      : { ...current, [rightPanelKind]: true });
+  }, [chatVisible, rightPanelKind]);
   // Resize perf: never store the raw window width in state — a live drag-resize
   // fires per-frame and a changing number re-renders this entire page tree every
   // frame (the top-chrome "lags then snaps" jank, 2026-07-15). Only the derived
@@ -4287,6 +4299,50 @@ function DashboardInner() {
     setActiveNavSection,
   });
 
+  const settingsTakeoverActive = activeNavSection === 'settings';
+  useEffect(() => {
+    if (!settingsTakeoverActive) {
+      if (settingsWasOpenRef.current) {
+        requestAnimationFrame(() => {
+          workspaceSurfaceRef.current?.querySelector<HTMLTextAreaElement>('textarea:not([disabled])')?.focus();
+        });
+      }
+      settingsWasOpenRef.current = false;
+      return;
+    }
+
+    settingsWasOpenRef.current = true;
+    const panel = settingsPanelRef.current;
+    if (!panel) return;
+    const selector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusFirst = () => {
+      if (!panel.contains(document.activeElement)) panel.querySelector<HTMLElement>(selector)?.focus();
+    };
+    const frame = requestAnimationFrame(focusFirst);
+    const observer = new MutationObserver(focusFirst);
+    observer.observe(panel, { childList: true, subtree: true });
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(selector));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    panel.addEventListener('keydown', trapFocus);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      panel.removeEventListener('keydown', trapFocus);
+    };
+  }, [settingsTakeoverActive]);
+
   // ── Mobile pairing — open the full-screen QR view as a canvas tab ──
   // Always closes the settings overlay first so the tab is visible when this
   // is triggered from the Connections settings tab (overlay covers the
@@ -5190,7 +5246,18 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection !== 'automations' && activeNavSection !== 'customize' && activeNavSection !== 'settings' && (
+        {activeNavSection !== 'automations' && activeNavSection !== 'customize' && (
+          <div
+            ref={workspaceSurfaceRef}
+            aria-hidden={settingsTakeoverActive}
+            inert={settingsTakeoverActive}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: settingsTakeoverActive ? 'none' : 'flex',
+              flexDirection: 'column',
+            }}
+          >
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}
@@ -5218,15 +5285,15 @@ function DashboardInner() {
             />
             <DashboardHydrationMarker />
           </OrchestratorDataProvider>
+          </div>
         )}
 
         </SmoothCorners>
       </div>
 
-      <AnimatePresence initial={false}>
-        {showRightPanelColumn ? (
-          <motion.div
-            key="right-panel-shell"
+      <motion.div
+            aria-hidden={!showRightPanelColumn}
+            inert={!showRightPanelColumn}
             // Animate the LAYOUT WIDTH (not just opacity/x) so the center
             // column reflows smoothly as the panel collapses — instead of
             // the panel holding its full footprint through a cosmetic
@@ -5235,9 +5302,8 @@ function DashboardInner() {
             // collapse; the inner keeps its own drag-resize width animation.
             // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
             // + the inner's 4px right margin so nothing clips when open.
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth), opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
+            initial={false}
+            animate={{ width: showRightPanelColumn ? 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
             // per-mousemove target makes the panel rubber-band behind the
             // cursor. The 260ms ease stays for open/close mount/unmount.
@@ -5317,18 +5383,17 @@ function DashboardInner() {
                 browserTabsSlotRef={setBrowserHeaderTabSlot}
                 showBrowserTabs={rightPanelKind === 'o8' && (o8ActiveTab === 'browser' || Boolean(o8BrowserHoverUrl))}
               />
-              <AnimatePresence initial={false} mode="wait">
-                {rightPanelKind === 'o8' ? (
+                {mountedRightPanels.o8 && (
                   <motion.div
-                    key="o8-panel"
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 12 }}
+                    aria-hidden={rightPanelKind !== 'o8'}
+                    inert={rightPanelKind !== 'o8'}
+                    initial={false}
+                    animate={{ opacity: rightPanelKind === 'o8' ? 1 : 0, x: rightPanelKind === 'o8' ? 0 : 12 }}
                     transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
                     style={{
                       flex: 1,
                       minHeight: 0,
-                      display: 'flex',
+                      display: rightPanelKind === 'o8' ? 'flex' : 'none',
                       flexDirection: 'column',
                     }}
                   >
@@ -5377,17 +5442,18 @@ function DashboardInner() {
                       </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>
-                ) : (
+                )}
+                {mountedRightPanels.review && (
                   <motion.div
-                    key="ambient-right-panel"
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 12 }}
+                    aria-hidden={rightPanelKind !== 'review'}
+                    inert={rightPanelKind !== 'review'}
+                    initial={false}
+                    animate={{ opacity: rightPanelKind === 'review' ? 1 : 0, x: rightPanelKind === 'review' ? 0 : 12 }}
                     transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
                     style={{
                       flex: 1,
                       minHeight: 0,
-                      display: 'flex',
+                      display: rightPanelKind === 'review' ? 'flex' : 'none',
                       flexDirection: 'column',
                     }}
                   >
@@ -5412,12 +5478,9 @@ function DashboardInner() {
                     </Suspense>
                   </motion.div>
                 )}
-              </AnimatePresence>
               </SmoothCorners>
             </motion.div>
           </motion.div>
-        ) : null}
-      </AnimatePresence>
 
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
