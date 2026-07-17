@@ -201,6 +201,10 @@ function resolveSurface(
   pref: ReduceTransparency,
   systemReduceTransparency: boolean,
 ): SurfaceMode {
+  // WARNING: mirrored by the pre-paint stamp script in src/app/layout.tsx (which
+  // assumes systemReduceTransparency=false because the Tauri IPC wiring for
+  // the OS setting doesn't exist yet). If you wire the real OS value here,
+  // update the layout script too or 'system' users flash the wrong surface.
   if (pref === 'on') return 'solid';
   if (pref === 'off') return 'glass';
   return systemReduceTransparency ? 'solid' : 'glass';
