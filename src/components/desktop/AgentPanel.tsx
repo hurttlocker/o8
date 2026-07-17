@@ -841,6 +841,12 @@ function MiniAgentPanelAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      // Menu-disclosure rows are real menu triggers (New session → inline
+      // Orchestrator/Terminal menu). Say so: agents and screen readers find
+      // triggers by aria-haspopup/aria-expanded — the o8_view_* menu tools
+      // ignore unlabeled buttons entirely (#1571).
+      aria-haspopup={disclosure === 'menu' ? 'menu' : undefined}
+      aria-expanded={disclosure === 'menu' ? active : undefined}
       style={{
         width: 'calc(100% - 16px)',
         marginLeft: 8,
