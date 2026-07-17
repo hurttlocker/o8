@@ -80,6 +80,7 @@ interface ChatMessageListProps {
   // ran tools, the parent passes a TurnSummary anchored to the closing
   // assistant message. The card renders inline directly after that message.
   turnSummary?: TurnSummary | null;
+  onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -104,6 +105,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   onRestoreSuggestions,
   suggestedRepliesPending = false,
   turnSummary = null,
+  onScroll,
 }, chatEndRef) {
   // Parallel tool work emitted as separate tool-only assistant messages
   // renders as ONE merged cluster (a single counted "Running N commands"
@@ -145,6 +147,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       // Voice-playback scroll-follow yields to a manual scroll gesture here.
       onWheel={noteUserScroll}
       onTouchMove={noteUserScroll}
+      onScroll={onScroll}
       style={{
       flex: 1,
       overflowY: 'auto',

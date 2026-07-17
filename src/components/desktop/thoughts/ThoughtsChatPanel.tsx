@@ -81,6 +81,7 @@ import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { isFileEditCall } from './chat-panel/file-edits';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
+import { useThreadHistoryBackfill, type ThreadHistoryPage } from './chat-panel/useThreadHistoryBackfill';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { interruptRuntimeSurface } from './chat-panel/runtimeInterrupt';
 import { useSteerAutoFire } from './chat-panel/useSteerAutoFire';
@@ -408,6 +409,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const openRef = useRef(open);
   const chatStreamRequest = useActiveLongLivedRequest(open);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const suppressNextTranscriptAutoScrollRef = useRef(false);
   const seenServerEntriesRef = useRef<Map<string, string>>(new Map());
   const responseSeenRef = useRef(false);
   const idlePollsRef = useRef(0);
@@ -825,6 +827,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [open, input, draftInjection?.id]);
 
   useEffect(() => {
+    if (suppressNextTranscriptAutoScrollRef.current) {
+      suppressNextTranscriptAutoScrollRef.current = false;
+      return;
+    }
     requestAnimationFrame(() => {
       // Smooth when idle (a fresh user turn jumps into view); instant while
       // streaming so it doesn't fight the per-frame pin below.
@@ -1292,6 +1298,40 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     isOrchestratorMode ? resolvedRepoPath : null,
   );
 
+  const fetchOlderThreadPage = useCallback(async (
+    tabId: string,
+    before: string,
+  ): Promise<ThreadHistoryPage<ThoughtsHistoryMessage> | null> => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 6000);
+    try {
+      const params = new URLSearchParams({ tabId, limit: '60', before });
+      const res = await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
+      if (!res.ok) return null;
+      return await res.json() as ThreadHistoryPage<ThoughtsHistoryMessage>;
+    } catch {
+      return null;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }, []);
+
+  const prependThreadHistoryPage = useCallback((historyMessages: ThoughtsHistoryMessage[]) => {
+    const olderEntries = mapHistoryMessagesToTranscript(historyMessages);
+    if (olderEntries.length === 0) return;
+    suppressNextTranscriptAutoScrollRef.current = true;
+    const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+    const entries = mergeTranscriptEntries(olderEntries, liveTranscript);
+    setChatMessages(entries);
+    orchStream.replaceTranscript(entries);
+  }, [chatMessages, orchStream]);
+
+  const { startBackfill, cancelBackfill, onScroll: loadOlderHistoryOnScroll } = useThreadHistoryBackfill({
+    fetchPage: fetchOlderThreadPage,
+    getScrollContainer: () => chatEndRef.current?.closest('.thoughts-scroll') as HTMLElement | null,
+    onPrepend: prependThreadHistoryPage,
+  });
+
   const handleLoadThread = useCallback(async (tabId: string) => {
     // Drop duplicate history loads for this tab while one is in flight or just
     // settled, then claim both refs for the duration.
@@ -1304,6 +1344,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     lastLoadKeyRef.current = tabId;
     lastLoadAtRef.current = now;
     const myGeneration = ++loadGenerationRef.current;
+    cancelBackfill();
     try {
       // Bound history load with a timeout + one retry so socket starvation
       // cannot permanently wedge the thread on an empty state.
@@ -1311,7 +1352,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 6000);
         try {
-          return await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`, { signal: controller.signal });
+          const params = new URLSearchParams({ tabId, limit: '60' });
+          return await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
         } catch {
           return null;
         } finally {
@@ -1331,6 +1373,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         planText?: string | null;
         backend?: OrchestratorBackendId | null;
         agent?: string | null;
+        page?: ThreadHistoryPage<ThoughtsHistoryMessage>['page'];
       };
       // A newer loadThread started while this one was awaiting the network — its
       // results are stale and must NOT overwrite the newer thread's state.
@@ -1388,6 +1431,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       orchestratorSessionRef.current = null;
       singleRuntimeSessionRef.current = null;
       singleRuntimeLaunchPromiseRef.current = null;
+      startBackfill(tabId, data.page);
       setTimeout(() => inputRef.current?.focus(), 50);
     } catch {
       // silent
@@ -1399,7 +1443,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath]);
+  }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, startBackfill]);
 
   const suggestions = useMemo(
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),
@@ -2353,6 +2397,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             onDismissSuggestions={dismissSuggestedReplies}
             onRestoreSuggestions={restoreSuggestedReplies}
             turnSummary={turnSummary}
+            onScroll={loadOlderHistoryOnScroll}
           />
         </div>
         {transcriptSideRail ?? null}
