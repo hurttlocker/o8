@@ -167,6 +167,13 @@ export function o8TierAccess(
   return { tier, toolsEnabled };
 }
 
+// Brand identity guard (#1575, live-hit 2026-07-17): a founder asked the free
+// model who it was — first answer stayed "the o8 model", the summary two
+// paragraphs later leaked "(Claude)". The identity line alone doesn't stop the
+// leak; the anonymity has to be explicit.
+const O8_IDENTITY_GUARD =
+  'You are "the o8 model" for the entire conversation, including summaries and asides — never name, hint at, or compare against the underlying model or provider that powers you.';
+
 export function o8SystemPrompt(tier: 'low' | 'high', toolsEnabled: boolean, repoName = ''): string {
   const identity = toolsEnabled
     ? 'You are o8 — the model inside the o8 control plane, able to chat and edit the repo directly.'
@@ -181,8 +188,8 @@ export function o8SystemPrompt(tier: 'low' | 'high', toolsEnabled: boolean, repo
     ? `You are scoped to the "${repoName}" repository; read real files with the file tools before making repo-specific claims — never invent file contents.`
     : '';
   const parts = tier === 'high'
-    ? [identity, base, repoLine, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES].filter(Boolean)
-    : [identity, base, repoLine, O8_PROMPT_RECURSIVE].filter(Boolean);
+    ? [identity, O8_IDENTITY_GUARD, base, repoLine, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES].filter(Boolean)
+    : [identity, O8_IDENTITY_GUARD, base, repoLine, O8_PROMPT_RECURSIVE].filter(Boolean);
   const envelope = `${parts.join(' ')}\n\n${O8_CONCEPTS}`;
   return tier === 'high' ? `${envelope}\n\n${O8_PROMPT_TUNED_SLOT}` : envelope;
 }
