@@ -8,6 +8,7 @@ import {
   createClaudeCodeStreamJsonParser,
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
+import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   ClaudeCodeStreamJsonParser,
@@ -59,10 +60,11 @@ const IDLE_TIMEOUT_MS = 30 * 60_000;
 const sessions = new Map<string, InternalClaudeCodeInteractiveSession>();
 type PermissionRequestEvent = Extract<ClaudeCodeStreamJsonParserEvent, { type: 'permission_request' }>;
 
+// Shared validated resolver (F6JHXW): env override, then a per-call
+// re-validated scan — rides through Claude's non-atomic self-updates and
+// finds npm/brew/nvm installs the old hardcoded default never could.
 function claudeCodeBin(): string {
-  return process.env.O8_CLAUDE_CODE_BIN
-    || process.env.CLAUDE_BIN
-    || join(homedir(), '.local', 'bin', 'claude');
+  return resolveClaudeBinary();
 }
 
 function normalizeCwd(cwd: string): string {
