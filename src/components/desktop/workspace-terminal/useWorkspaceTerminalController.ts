@@ -110,6 +110,7 @@ export function useWorkspaceTerminalController(
   const restoredRef = useRef(false);
   const restoreSettledRef = useRef(false);
   const restoreInFlightRef = useRef(false);
+  const restoreGenerationRef = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detectedPortsRef = useRef<Set<number>>(new Set());
   const urlDetectionEnabledRef = useRef(false);
@@ -639,11 +640,12 @@ export function useWorkspaceTerminalController(
     // compute awaits (GQXEZD — "New session" during a slow Rosetta restore)
     // must survive the landing. Replace-not-merge silently ate it.
     const preRestoreTabIds = new Set(tabsRef.current.map((tab) => tab.id));
+    const restoreGeneration = ++restoreGenerationRef.current;
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
       createDefaultChatTab,
-    }, cancelled);
+    }, cancelled, 'optimistic');
     if (!result) return false;
 
     const mergedTabs = mergeUserSpawnedTabs(result.tabs, tabsRef.current, preRestoreTabIds);
@@ -667,6 +669,28 @@ export function useWorkspaceTerminalController(
     } else {
       initialTerminalBootstrapRef.current = false;
     }
+
+    // Paint the sanitized saved workspace first. The existing liveness,
+    // archived-thread, and lane checks still decide the final state, but they
+    // now reconcile in the background instead of holding crash recovery blank.
+    void computeRestoredTabs(saved, {
+      preferredRepo: preferredRepoRef.current,
+      defaultTab,
+      createDefaultChatTab,
+    }, () => cancelled?.() || restoreGeneration !== restoreGenerationRef.current, 'validated').then((validated) => {
+      if (!validated || cancelled?.() || restoreGeneration !== restoreGenerationRef.current) return;
+      const currentById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
+      const reconciledTabs = mergeUserSpawnedTabs(validated.tabs, tabsRef.current, new Set(result.tabs.map((tab) => tab.id)));
+      tabsRef.current = reconciledTabs;
+      setTabs(reconciledTabs);
+      setActiveTabIdFromRestore(validated.activeTabId, capturedNavVersion);
+      if (!termWsConnectedRef.current) return;
+      for (const deadTab of validated.deadTerminalTabs) {
+        if (currentById.get(deadTab.id)?.tmuxSession === null) continue;
+        const restoreCommand = deadTab.repo?.localPath ? `cd ${shellQuote(deadTab.repo.localPath)}` : undefined;
+        requestTerminalForTab(deadTab.id, restoreCommand);
+      }
+    });
     return result.restoredAny;
   }, [createDefaultChatTab, defaultTab, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
 

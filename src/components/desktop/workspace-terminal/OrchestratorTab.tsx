@@ -504,9 +504,7 @@ function OrchestratorTabInner({
   // true from the moment we know we're going to restore until the
   // chat panel has actually loaded the messages (hasMessages flips).
   const restoredThreadRef = useRef<string | null>(null);
-  // Timestamp the boot loader first showed — drives its minimum on-screen window
-  // so a fast restore resolves as one smooth beat instead of a sub-100ms flicker.
-  const restoreShownAtRef = useRef<number | null>(null);
+  const [showRestoreLoader, setShowRestoreLoader] = useState(false);
   const [isRestoringThread, setIsRestoringThread] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     // A persisted thread binding reloading across an app restart is ALSO a
@@ -589,26 +587,25 @@ function OrchestratorTabInner({
     };
   }, [active, initialThreadId, restoreLastThread, repoPath, publishWorkspaceThread, tabId]);
 
-  // Drop the restoring flag once messages arrive (hasMessages flips
-  // true). Also bail out if the restore has been running for ~3s —
-  // covers the edge case where chat-history has no messages (empty
-  // restore target) so hasMessages would never flip and the shimmer
-  // would sit forever.
+  // The restored tab itself paints immediately. Only show a loader if its
+  // transcript remains absent long enough to be perceptible, then remove it
+  // as soon as history lands (or after the empty-history bail-out).
   useEffect(() => {
     if (!isRestoringThread) return;
-    if (restoreShownAtRef.current == null) restoreShownAtRef.current = Date.now();
-    let timer: number | undefined;
-    const scheduleFinish = (extraDelay: number) => {
-      const shownAt = restoreShownAtRef.current ?? Date.now();
-      // Keep the loader on screen >=480ms total so a fast restore reads as one
-      // smooth beat, never a flash you can't catch.
-      const minRemaining = Math.max(0, 480 - (Date.now() - shownAt));
-      timer = window.setTimeout(() => setIsRestoringThread(false), Math.max(extraDelay, minRemaining));
+    if (chatChromeState.hasMessages) {
+      setShowRestoreLoader(false);
+      setIsRestoringThread(false);
+      return;
+    }
+    const appearTimer = window.setTimeout(() => setShowRestoreLoader(true), 200);
+    const emptyTimer = window.setTimeout(() => {
+      setShowRestoreLoader(false);
+      setIsRestoringThread(false);
+    }, 3000);
+    return () => {
+      window.clearTimeout(appearTimer);
+      window.clearTimeout(emptyTimer);
     };
-    // Messages arrived -> resolve to the conversation (after the minimum window).
-    // Empty restore target (no messages will ever arrive) -> bail after ~3s.
-    scheduleFinish(chatChromeState.hasMessages ? 0 : 3000);
-    return () => { if (timer != null) window.clearTimeout(timer); };
   }, [isRestoringThread, chatChromeState.hasMessages]);
 
   useEffect(() => {
@@ -1092,7 +1089,7 @@ function OrchestratorTabInner({
     [],
   );
 
-  const emptyOrShimmerNode = isRestoringThread ? restoringShimmerNode : emptyStateNode;
+  const emptyOrShimmerNode = showRestoreLoader ? restoringShimmerNode : emptyStateNode;
 
   const hasMessages = chatChromeState.hasMessages;
 
