@@ -185,13 +185,25 @@ exit codes:
   3 unauthorized   4 not found   5 conflict
 `;
 
+/**
+ * Group-scoped help (#1576): `o8 packet --help` used to print the GLOBAL usage
+ * while unknownSubcommandError's hint pointed right back at it — a circle.
+ * Extract the group's own lines from USAGE; null when the group has none
+ * (caller falls back to the full USAGE).
+ */
+function groupUsage(group: string): string | null {
+  const lines = USAGE.split('\n').filter((line) => new RegExp(`^  ${group}( |$)`).test(line));
+  if (lines.length === 0) return null;
+  return `usage: o8 ${group} <subcommand> [flags]\n\n${lines.join('\n')}\n\nRun \`o8 --help\` for the full command surface.\n`;
+}
+
 async function dispatch(args: ParsedArgs): Promise<number> {
   const [primary, secondary] = args.command;
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
   if (args.help && primary !== 'run') {
-    process.stdout.write(USAGE);
+    process.stdout.write((primary && groupUsage(primary)) || USAGE);
     return 0;
   }
   if (!primary) {
