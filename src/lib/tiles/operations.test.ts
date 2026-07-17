@@ -34,6 +34,16 @@ describe('deserializeTileLayout — stale split collapse', () => {
     expect(layout?.root.type).toBe('leaf');
   });
 
+  it('heals the April-2026 dispatch auto-split: a legacy workspace-kind leaf collapses instead of resurrecting a second pane', () => {
+    // Split-zombie root fix (2026-07-16): layouts minted by the old
+    // auto-open-second-workspace-on-dispatch behavior persisted a
+    // 'workspace' leaf the terminal↔terminal collapse never matched, so the
+    // phantom pane came back on every boot.
+    const layout = deserializeTileLayout(serialize(split('s1', [leaf('a', 'terminal'), leaf('b', 'workspace')])));
+    expect(layout?.root.type).toBe('leaf');
+    expect(layout?.root.type === 'leaf' && layout.root.content.kind).toBe('terminal');
+  });
+
   it('preserves a terminal↔canvas split (live intentional layout)', () => {
     const layout = deserializeTileLayout(serialize(split('s1', [leaf('a', 'terminal'), leaf('b', 'canvas')])));
     expect(layout?.root.type).toBe('split');

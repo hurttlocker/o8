@@ -165,6 +165,11 @@ export function useWorkspaceTerminal({
   workspaceTerminalPreferredRepo,
 }: UseWorkspaceTerminalArgs) {
   const [dashTermSession, setDashTermSession] = useState<string | null>(null);
+  // Fresh active-tile identity for stable callbacks (openWorkspaceTabForLane
+  // routes dispatched packet tabs to the ACTIVE workspace without taking
+  // activeTileId as a dep and re-creating the callback per tab switch).
+  const activeTileIdRef = useRef(activeTileId);
+  activeTileIdRef.current = activeTileId;
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
@@ -697,9 +702,21 @@ export function useWorkspaceTerminal({
       const targetScope = workspaceScopeEntries.find((entry) => entry.localPath === lane.repoPath)
         ?? workspaceScopeEntries.find((entry) => pathBelongsToRepoScope(lane.repoPath, entry.localPath))
         ?? null;
+      // Dispatched packet MONITORING tabs attach to the operator's active
+      // workspace — they must never mint a second WorkspaceTerminal leaf.
+      // `fallbackToAnyExisting: false` was the April-2026 auto-split zombie
+      // (Q live-hit 2026-07-16): with the orchestrator's host tile at
+      // repoPath:null, the repo-scoped lookup missed, the reuse branch was
+      // opted out, and ensureWorkspaceTerminalTile split a whole second pane
+      // — which every later same-repo dispatch then deterministically
+      // reused. The tab carries its own repo/worktree context
+      // (targetScope + orchestrationPacket), so the host tile's scope is
+      // irrelevant; preferredTileId makes the ACTIVE workspace win before
+      // any stale repo-scoped leaf. NOT the session-tiles drag-to-split —
+      // that system is separate and untouched.
       const target = await waitForWorkspaceTerminalTarget({
         repoPath: lane.repoPath,
-        fallbackToAnyExisting: false,
+        preferredTileId: activeTileIdRef.current,
       });
       const rawPacketTitle = packet?.title ?? lane.packetTitle ?? targetScope?.name ?? 'Dispatched Agent';
       const packetTitle = rawPacketTitle.trim().toLowerCase().startsWith('[automation]')
