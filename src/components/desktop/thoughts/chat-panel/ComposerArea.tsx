@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
@@ -11,6 +11,7 @@ import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
 import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
+import { registerComposerCenter } from '../../composer-center-registry';
 
 interface ComposerAreaProps {
   input: string;
@@ -134,6 +135,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onEditSteer,
   onEditingSteerChange,
 }, inputRef) {
+  const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
   // Conductor-style keyboard queue (borrow: @mattyp tweet). queueNavIndex !== null
@@ -203,6 +205,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     if (!node) return;
     node.style.height = 'auto';
   }, [input, inputRef]);
+
+  useEffect(() => {
+    const composerCenter = composerCenterRef.current;
+    if (!composerCenter) return;
+    return registerComposerCenter(composerCenter);
+  }, []);
 
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Textarea stays typeable while the agent is busy so the user can compose a
@@ -330,6 +338,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           // cluster directly under the composer — the column-width props it used
           // before ignored insets/gaps + a hidden right region and drifted ~125px.
           data-composer-center=""
+          ref={composerCenterRef}
           onDragOver={dragHandlers?.onDragOver}
           onDragLeave={dragHandlers?.onDragLeave}
           onDrop={dragHandlers?.onDrop}
