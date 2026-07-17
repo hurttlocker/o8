@@ -33,7 +33,7 @@ const refreshes = new Map<string, Promise<void>>();
 
 async function git(repoPath: string, args: string[], timeout = 5000): Promise<string> {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-    encoding: 'utf-8', timeout, stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf-8', timeout,
   });
   return stdout.trim();
 }
@@ -72,7 +72,7 @@ async function runJobs<T>(jobs: Array<() => Promise<T>>): Promise<T[]> {
 async function diskSize(targetPath: string): Promise<string | undefined> {
   try {
     const { stdout } = await execFileAsync('du', ['-sh', targetPath], {
-      encoding: 'utf-8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8', timeout: 3000,
     });
     return stdout.trim().split('\t')[0] || undefined;
   } catch { return undefined; }
