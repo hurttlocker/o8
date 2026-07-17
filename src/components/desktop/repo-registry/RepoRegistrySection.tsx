@@ -297,7 +297,7 @@ function RepoRegistrySectionBase({
     fetchAgentBranches();
     // WS-driven: instant refresh on agent events instead of 30s polling
     const handler = () => { fetchAgentBranches(); };
-    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchAgentBranches, 300_000);
     return () => {
@@ -325,7 +325,7 @@ function RepoRegistrySectionBase({
     fetchPorts();
     // WS-driven: refresh on agent events instead of 10s polling
     const handler = () => { fetchPorts(); };
-    const wsEvents = ['o8:agent-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchPorts, 120_000); // 2min fallback
     return () => {

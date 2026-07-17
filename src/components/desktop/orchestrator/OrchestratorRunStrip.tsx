@@ -43,7 +43,7 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
     };
     fetchRuns();
     const handler = () => fetchRuns();
-    window.addEventListener('o8:agent-lifecycle', handler);
+    window.addEventListener('o8:lifecycle-reconcile', handler);
 
     // PERF: this strip renders NOTHING when no run is active, yet it polled every
     // 8s to find out whether one had started — the busiest idle endpoint after
@@ -63,7 +63,7 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
     return () => {
       cancelled = true;
       clearInterval(timer);
-      window.removeEventListener('o8:agent-lifecycle', handler);
+      window.removeEventListener('o8:lifecycle-reconcile', handler);
     };
     // wsConnected in deps: reconnecting re-establishes the slow cadence AND
     // refetches immediately, resyncing anything missed while the socket was down.

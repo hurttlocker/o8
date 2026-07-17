@@ -60,12 +60,10 @@ export function useLaneReviewChanges(laneId?: string | null): WorkspaceChangesSt
     if (!laneId) return undefined;
 
     const handler = () => { void refresh(); };
-    window.addEventListener('o8:agent-lifecycle', handler);
-    window.addEventListener('o8:lane-lifecycle', handler);
+    window.addEventListener('o8:lifecycle-reconcile', handler);
     const fallbackId = window.setInterval(() => { void refresh(); }, 300_000);
     return () => {
-      window.removeEventListener('o8:agent-lifecycle', handler);
-      window.removeEventListener('o8:lane-lifecycle', handler);
+      window.removeEventListener('o8:lifecycle-reconcile', handler);
       window.clearInterval(fallbackId);
     };
   }, [laneId, refresh]);

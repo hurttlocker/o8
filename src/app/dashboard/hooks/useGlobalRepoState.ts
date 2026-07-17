@@ -259,7 +259,7 @@ export function useGlobalRepoState({
     }
     // WS-driven: instant refresh on lifecycle events instead of 30s polling
     const handler = () => { void refreshSelectedRepoWorktrees(); };
-    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = window.setInterval(handler, 300_000);
     return () => {
@@ -292,7 +292,7 @@ export function useGlobalRepoState({
     const initTimer = setTimeout(() => { void fetchAllRepoWorktrees(); }, 4_000);
     // WS-driven: instant refresh on lifecycle events instead of 60s polling
     const handler = () => { void fetchAllRepoWorktrees(); };
-    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = window.setInterval(handler, 300_000);
     return () => {

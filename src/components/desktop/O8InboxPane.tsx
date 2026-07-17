@@ -161,7 +161,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
     window.addEventListener('o8:supervisor-inbox', handleEvent);
     window.addEventListener('o8:inbox', handleEvent);
     window.addEventListener('o8:realtime', handleEvent);
-    window.addEventListener('o8:lane-lifecycle', handleEvent);
+    window.addEventListener('o8:lifecycle-reconcile', handleEvent);
     window.addEventListener('o8:invalidate', handleEvent);
     // Push-not-poll: supervisor + approval WS events (and REFRESH_EVENT) drive
     // live updates, so this timer is only a safety net for a dropped event.
@@ -171,7 +171,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
       window.removeEventListener('o8:supervisor-inbox', handleEvent);
       window.removeEventListener('o8:inbox', handleEvent);
       window.removeEventListener('o8:realtime', handleEvent);
-      window.removeEventListener('o8:lane-lifecycle', handleEvent);
+      window.removeEventListener('o8:lifecycle-reconcile', handleEvent);
       window.removeEventListener('o8:invalidate', handleEvent);
       window.clearInterval(interval);
     };

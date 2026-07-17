@@ -2175,7 +2175,7 @@ function DashboardInner() {
     const initTimer = setTimeout(() => { void refreshWorkspaceLifecycle(); }, 2_500);
     // WS-driven: instant refresh on lifecycle events instead of 30s polling
     const handler = () => { void refreshWorkspaceLifecycle(); };
-    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = window.setInterval(handler, 300_000); // 5min resilience fallback
     return () => {
