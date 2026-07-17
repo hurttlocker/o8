@@ -34,3 +34,5 @@
 - Mobile lane: handle `symon-task-complete` exactly as documented in `docs/symon-agent-mode.md` by forwarding it to the live WebRTC conversation as an assistant-visible item.
 - Thread-restore pagination: used a short timeout chain for idle backfill because it is reliable in the Tauri webview where `requestIdleCallback` is not guaranteed.
 
+- Lifecycle reconcile split: payload-reading consumers stay on the per-event channels (now carrying detail); only payload-blind bulk refetchers moved to the coalesced o8:lifecycle-reconcile signal.
+
