@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ComposerChipCompactContext } from './composer-compact-context';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { AttachFilesButton } from './AttachFilesButton';
+import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
 import { SessionRulesChip } from './SessionRulesChip';
 import { ModelThinkingChip } from './ModelThinkingChip';
@@ -424,6 +425,8 @@ export function InputButtons({
   onStop,
   onUploadDiskFiles,
   onFileReferenceSelect,
+  composerMode,
+  onComposerModeChange,
   repoPath,
   workspaceTargets,
   selectedRepoPath,
@@ -472,6 +475,8 @@ export function InputButtons({
   onStop?: () => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   onFileReferenceSelect?: (path: string) => void;
+  composerMode?: ComposerMode;
+  onComposerModeChange?: (mode: ComposerMode) => void;
   repoPath?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
@@ -555,24 +560,28 @@ export function InputButtons({
         <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
       ) : null}
 
-      {/* Attach + context meter live LEFT near the file input (Q ruling
-          2026-07-11). Mic moved RIGHT next to Send — see the right cluster. */}
+      {/* Left cluster = intent: attach/+, mode chip, mic (Q ruling 2026-07-17
+          — supersedes 07-11's mic-next-to-Send). Context meter moved RIGHT
+          beside the model selector. */}
       <AttachFilesButton
         onUploadDiskFiles={onUploadDiskFiles}
         onFileReferenceSelect={onFileReferenceSelect}
+        mode={composerMode}
+        onModeChange={onComposerModeChange}
         repoPath={repoPath}
       />
+      <MicButton />
+
+      </div>
+
+      {/* Right cluster — runtime: context meter · model · thinking · send
+          (Q ruling 2026-07-17). Pinned, never shrinks or clips. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {inlineMeterSlot ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {inlineMeterSlot}
         </span>
       ) : null}
-
-      </div>
-
-      {/* Right cluster — Claude Code style: model · thinking level · context
-          meter as quiet text, then send/stop. Pinned, never shrinks or clips. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {modelLabel ? (
         <ModelThinkingChip
           split
@@ -591,10 +600,6 @@ export function InputButtons({
           onSetCollide={onSetCollide}
         />
       ) : null}
-
-      {/* Mic sits next to Send — mic-then-send is the natural flow (Q ruling
-          2026-07-11, swapped from the left cluster). */}
-      <MicButton />
 
       {/* Send — ↵ enter key when idle, square stop while working
           (Claude Code reference, Q ruling 2026-07-11). */}

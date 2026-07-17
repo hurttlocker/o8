@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
+import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
@@ -62,6 +63,8 @@ interface ComposerAreaProps {
   onAttachedImageAnnotate?: (index: number) => void;
   onAttachedFileRemove?: (fileName: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
+  composerMode?: ComposerMode;
+  onComposerModeChange?: (mode: ComposerMode) => void;
   repoPath?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
@@ -123,6 +126,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onAttachedImageAnnotate,
   onAttachedFileRemove,
   onUploadDiskFiles,
+  composerMode,
+  onComposerModeChange,
   repoPath,
   workspaceTargets,
   selectedRepoPath,
@@ -224,7 +229,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   if (isWorkingLocked) {
     composerPlaceholder = 'Queue for next turn';
   } else if (isOrchestratorMode) {
-    composerPlaceholder = 'Plan, build, ask · / for commands';
+    // Cursor-parity (Q 2026-07-17): the placeholder teaches the active mode;
+    // the chip beside "+" is the persistent indicator.
+    composerPlaceholder = composerModeSpec(composerMode ?? 'solo').placeholder;
   } else if (displayWaiting) {
     composerPlaceholder = `${activeTargetLabel} is thinking...`;
   }
@@ -706,6 +713,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             working={isOrchestratorMode && displayWaiting}
             onStop={isOrchestratorMode ? onStop : undefined}
             onUploadDiskFiles={onUploadDiskFiles}
+            composerMode={composerMode}
+            onComposerModeChange={onComposerModeChange}
             onFileReferenceSelect={handleFileReferenceSelect}
             repoPath={repoPath}
             workspaceTargets={workspaceTargets}
