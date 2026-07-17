@@ -1089,7 +1089,15 @@ function OrchestratorTabInner({
     [],
   );
 
-  const emptyOrShimmerNode = showRestoreLoader ? restoringShimmerNode : emptyStateNode;
+  // While a restore is in flight but the loader hasn't earned its 200ms
+  // appearance yet, render BLANK — falling through to the empty-state hero
+  // flashes the premature "Start a new session" CTA the old 480ms hold
+  // existed to prevent (reviewer correction, 2026-07-16). The fragment is
+  // deliberate: a null override would fall back to the panel's own default
+  // empty state.
+  const emptyOrShimmerNode = isRestoringThread
+    ? (showRestoreLoader ? restoringShimmerNode : <></>)
+    : emptyStateNode;
 
   const hasMessages = chatChromeState.hasMessages;
 
