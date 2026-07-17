@@ -2,6 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
+import { applyComposerModeDirective, type ComposerMode } from './composer-mode';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
@@ -275,6 +276,23 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   expectsThreadLoad = false,
 }, ref) {
   const [input, setInput] = useState('');
+  // Composer mode (Cursor-parity, Q 2026-07-17) — persists across sends until
+  // switched, Cursor behavior. Ref mirrors state so handleTaskSend reads the
+  // live value without growing its dependency list.
+  const [composerMode, setComposerMode] = useState<ComposerMode>('solo');
+  const composerModeRef = useRef<ComposerMode>('solo');
+  composerModeRef.current = composerMode;
+  // MoA IS the Collide backend — keep the chip and the model-picker's Mode
+  // section telling the same truth in both directions.
+  const handleComposerModeChange = useCallback((next: ComposerMode) => {
+    setComposerMode(next);
+    if (next === 'moa') onSetCollide?.(true);
+    else if (collideEnabled) onSetCollide?.(false);
+  }, [onSetCollide, collideEnabled]);
+  useEffect(() => {
+    if (collideEnabled && composerMode !== 'moa') setComposerMode('moa');
+    else if (!collideEnabled && composerMode === 'moa') setComposerMode('solo');
+  }, [collideEnabled, composerMode]);
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
   // Orchestration mode + runtime + chat-model selection. Per-tab when
@@ -1789,8 +1807,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   ]);
 
   const handleTaskSend = useCallback(async (explicitText?: string) => {
-    const msg = (explicitText ?? input).trim();
-    if (!msg) return;
+    const rawMsg = (explicitText ?? input).trim();
+    if (!rawMsg) return;
+    // Composer mode (Cursor-parity, Q 2026-07-17): prepend the active mode's
+    // directive — visible, honest prompt-shaping that works on every backend.
+    // Build adds nothing; slash commands pass through untouched.
+    const msg = applyComposerModeDirective(rawMsg, composerModeRef.current);
 
     track('orchestrator.message'); // coarse usage signal (analytics epic #1249) — no content
 
@@ -2505,6 +2527,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onAttachedImageAnnotate={setAnnotatingIndex}
         onAttachedFileRemove={removeAttachedFile}
         onUploadDiskFiles={processAttachmentFiles}
+        composerMode={isOrchestratorMode && !isChatMode ? composerMode : undefined}
+        onComposerModeChange={isOrchestratorMode && !isChatMode ? handleComposerModeChange : undefined}
         repoPath={resolvedRepoPath}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={resolvedRepoPath}

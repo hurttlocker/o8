@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
+import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
 
 interface FileSuggestion {
   path: string;
@@ -37,6 +38,19 @@ interface AttachFilesButtonProps {
   onFileReferenceSelect?: (path: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   repoPath?: string | null;
+  /** Composer mode section (Cursor-parity, Q 2026-07-17) — the "+" switcher
+   *  carries agent intent so the model picker stays models-only. Section
+   *  renders only when both are provided (orchestrator composer). */
+  mode?: ComposerMode;
+  onModeChange?: (mode: ComposerMode) => void;
+}
+
+function CheckGlyph() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="m5 13 4 4L19 7" />
+    </svg>
+  );
 }
 
 function PlusGlyph() {
@@ -71,8 +85,11 @@ export function AttachFilesButton({
   onFileReferenceSelect,
   onUploadDiskFiles,
   repoPath,
+  mode,
+  onModeChange,
 }: AttachFilesButtonProps) {
   const [open, setOpen] = useState(false);
+  const [hoveredMode, setHoveredMode] = useState<ComposerMode | null>(null);
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<FileSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -124,8 +141,10 @@ export function AttachFilesButton({
     setOpen(false);
   };
 
+  const activeSpec = mode ? COMPOSER_MODES.find((m) => m.id === mode) : undefined;
+
   return (
-    <div style={{ display: 'inline-flex' }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
       <button
         ref={triggerRef}
         type="button"
@@ -158,6 +177,39 @@ export function AttachFilesButton({
         <PlusGlyph />
       </button>
 
+      {/* Mode chip (Q 2026-07-17): the active operating mode, always visible
+          beside the trigger — the placeholder disappears once you type, the
+          chip is the persistent truth. Click re-opens the switcher. */}
+      {activeSpec && onModeChange ? (
+        <button
+          type="button"
+          title={activeSpec.sublabel}
+          aria-label={`Mode: ${activeSpec.label}`}
+          onClick={() => setOpen((current) => !current)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            height: 20,
+            paddingLeft: 7,
+            paddingRight: 7,
+            borderRadius: 6,
+            borderWidth: 0,
+            background: mode === 'solo' ? 'transparent' : 'var(--t-accent-soft)',
+            color: mode === 'solo' ? 'var(--t-text-faint)' : 'var(--t-accent)',
+            cursor: 'pointer',
+            fontSize: 10.5,
+            fontWeight: 500,
+            letterSpacing: '-0.05px',
+            fontFamily: 'var(--font-sans-system)',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={(event) => { if (mode === 'solo') event.currentTarget.style.color = 'var(--t-text)'; }}
+          onMouseLeave={(event) => { if (mode === 'solo') event.currentTarget.style.color = 'var(--t-text-faint)'; }}
+        >
+          {activeSpec.chip}
+        </button>
+      ) : null}
+
       <input
         ref={fileInputRef}
         aria-label="Upload attachments from disk"
@@ -176,8 +228,8 @@ export function AttachFilesButton({
       <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} align="end">
         <div
           style={{
-            width: 288,
-            maxWidth: 'min(288px, calc(100vw - 32px))',
+            width: 240,
+            maxWidth: 'min(240px, calc(100vw - 32px))',
             borderRadius: 14,
             border: '1px solid var(--t-panel-border)',
             background: 'var(--t-panel-solid, var(--t-panel))',
@@ -185,13 +237,81 @@ export function AttachFilesButton({
             overflow: 'hidden',
           }}
         >
+          {mode && onModeChange ? (
+            <div style={{
+              paddingTop: 6,
+              paddingRight: 5,
+              paddingBottom: 5,
+              paddingLeft: 5,
+              borderBottom: '1px solid var(--t-divider-subtle)',
+            }}>
+              {COMPOSER_MODES.map((spec) => {
+                const active = spec.id === mode;
+                return (
+                  <button
+                    key={spec.id}
+                    type="button"
+                    onClick={() => { onModeChange(spec.id); setOpen(false); }}
+                    onMouseEnter={(event) => { setHoveredMode(spec.id); event.currentTarget.style.background = 'var(--t-hover)'; }}
+                    onMouseLeave={(event) => { setHoveredMode(null); event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      minHeight: 26,
+                      paddingTop: 0,
+                      paddingRight: 8,
+                      paddingBottom: 0,
+                      paddingLeft: 8,
+                      borderRadius: 7,
+                      borderWidth: 0,
+                      background: active ? 'var(--t-hover)' : 'transparent',
+                      color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontFamily: 'var(--font-sans-system)',
+                      fontSize: 12.5,
+                      fontWeight: active ? 500 : 400,
+                      letterSpacing: '-0.1px',
+                    }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>{spec.label}</span>
+                    <span style={{ width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: active ? 'visible' : 'hidden' }}>
+                      <CheckGlyph />
+                    </span>
+                  </button>
+                );
+              })}
+              {/* One caption line, fixed height so hover never resizes the
+                  menu — describes the hovered mode, falls back to the active
+                  one. Row sublabels were a wall (Q 2026-07-17). */}
+              <div style={{
+                minHeight: 15,
+                paddingTop: 3,
+                paddingLeft: 8,
+                paddingRight: 8,
+                fontSize: 10,
+                lineHeight: 1.25,
+                color: 'var(--t-text-faint)',
+                fontFamily: 'var(--font-sans-system)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {(COMPOSER_MODES.find((m) => m.id === (hoveredMode ?? mode)) ?? COMPOSER_MODES[0]).sublabel}
+              </div>
+            </div>
+          ) : null}
+
           <div style={{
-            paddingTop: 10,
-            paddingRight: 10,
-            paddingBottom: 10,
-            paddingLeft: 10,
-            borderBottom: '1px solid var(--t-divider-subtle)',
+            paddingTop: 5,
+            paddingRight: 5,
+            paddingBottom: 5,
+            paddingLeft: 5,
           }}>
+            {/* Flat rows, same vocabulary as the mode rows above — the old
+                bordered input-bubbles read as chunky cards (Q 2026-07-17). */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -200,47 +320,39 @@ export function AttachFilesButton({
                 alignItems: 'center',
                 gap: 8,
                 width: '100%',
-                minHeight: 34,
+                minHeight: 26,
                 paddingTop: 0,
-                paddingRight: 10,
+                paddingRight: 8,
                 paddingBottom: 0,
-                paddingLeft: 10,
-                borderRadius: 9,
-                border: '1px solid var(--t-input-border)',
-                background: 'var(--t-input-bg)',
-                color: 'var(--t-text)',
+                paddingLeft: 8,
+                borderRadius: 7,
+                borderWidth: 0,
+                background: 'transparent',
+                color: 'var(--t-text-secondary)',
                 cursor: 'pointer',
+                textAlign: 'left',
                 fontSize: 12.5,
-                fontWeight: 500,
+                fontWeight: 400,
                 letterSpacing: '-0.1px',
                 fontFamily: 'var(--font-sans-system)',
               }}
-              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-card)'; }}
-              onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-input-bg)'; }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}
             >
               <UploadGlyph />
               Upload from disk
             </button>
-          </div>
 
-          <div style={{
-            paddingTop: 10,
-            paddingRight: 10,
-            paddingBottom: 10,
-            paddingLeft: 10,
-          }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 7,
-              minHeight: 32,
+              gap: 8,
+              minHeight: 26,
               paddingTop: 0,
-              paddingRight: 9,
+              paddingRight: 8,
               paddingBottom: 0,
-              paddingLeft: 9,
-              borderRadius: 9,
-              border: '1px solid var(--t-input-border)',
-              background: 'var(--t-input-bg)',
+              paddingLeft: 8,
+              borderRadius: 7,
               color: 'var(--t-text-muted)',
             }}>
               <SearchGlyph />
@@ -263,7 +375,7 @@ export function AttachFilesButton({
               />
             </div>
 
-            <div style={{ marginTop: 8, maxHeight: 180, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--t-text-faint) transparent' } as React.CSSProperties}>
+            <div style={{ maxHeight: 180, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--t-text-faint) transparent' } as React.CSSProperties}>
               {query.trim() && suggestions.length === 0 ? (
                 <div style={{
                   paddingTop: 8,
