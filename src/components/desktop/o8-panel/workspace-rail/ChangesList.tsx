@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   File,
   FileCode,
@@ -76,90 +76,163 @@ function statusGlyph(status: ReviewChangedFile['status']) {
   return '';
 }
 
-export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesState {
-  const [files, setFiles] = useState<ReviewChangedFile[]>([]);
-  const [sourceRepoPath, setSourceRepoPath] = useState<string | null>(null);
-  // Start loading when a repo is present so the first paint is the skeleton,
-  // not a one-frame "Working tree clean" flash before the fetch effect runs (#1340).
-  const [loading, setLoading] = useState<boolean>(() => Boolean(repoPath));
-  const [error, setError] = useState<string | null>(null);
-  const [branch, setBranch] = useState<string | null>(null);
-  const [repoSlug, setRepoSlug] = useState<string | null>(null);
-  const currentRepoPath = repoPath ?? null;
+interface WorkspaceChangesSnapshot {
+  files: ReviewChangedFile[];
+  loading: boolean;
+  error: string | null;
+  branch: string | null;
+  repoSlug: string | null;
+}
 
-  const refresh = useCallback(async () => {
-    if (!repoPath) {
-      setFiles([]);
-      setBranch(null);
-      setRepoSlug(null);
-      setSourceRepoPath(null);
-      setError(null);
-      setLoading(false);
-      return;
-    }
+interface WorkspaceChangesController {
+  repoPath: string;
+  getSnapshot: () => WorkspaceChangesSnapshot;
+  subscribe: (listener: () => void) => () => void;
+  refresh: () => Promise<void>;
+}
 
-    setLoading(true);
-    setError(null);
-    try {
-      // changesOnly=1 keeps this off the slow network `gh` path — the changes
-      // view reads only changedFiles/branch/repoSlug, all local git data (#1340).
-      const workspaceQuery = `?workspace=${encodeURIComponent(repoPath)}&changesOnly=1`;
-      const response = await fetch(`/api/review/workspace${workspaceQuery}`);
-      if (!response.ok) throw new Error('Failed to load workspace changes');
-      const data = await response.json() as WorkspaceReviewResponse;
-      setSourceRepoPath(repoPath);
-      setFiles(Array.isArray(data.changedFiles) ? data.changedFiles : []);
-      setBranch(typeof data.branch === 'string' ? data.branch : null);
-      setRepoSlug(typeof data.repoSlug === 'string' ? data.repoSlug : null);
-    } catch (err) {
-      setSourceRepoPath(repoPath);
-      setFiles([]);
-      setBranch(null);
-      setRepoSlug(null);
-      setError(err instanceof Error ? err.message : 'Unable to load workspace changes');
-    } finally {
-      setLoading(false);
-    }
-  }, [repoPath]);
+const EMPTY_WORKSPACE_CHANGES_SNAPSHOT: WorkspaceChangesSnapshot = {
+  files: [],
+  loading: false,
+  error: null,
+  branch: null,
+  repoSlug: null,
+};
+const workspaceChangesControllers = new Map<string, WorkspaceChangesController>();
+const activeWorkspaceChangesControllers = new Map<WorkspaceChangesController, number>();
+let workspaceChangesFallbackId: number | null = null;
+let workspaceChangesRefreshQueued = false;
+
+function refreshActiveWorkspaceChanges() {
+  return Promise.all([...activeWorkspaceChangesControllers.keys()].map((controller) => controller.refresh()));
+}
+
+function scheduleActiveWorkspaceChangesRefresh() {
+  if (workspaceChangesRefreshQueued) return;
+  workspaceChangesRefreshQueued = true;
+  queueMicrotask(() => {
+    workspaceChangesRefreshQueued = false;
+    void refreshActiveWorkspaceChanges();
+  });
+}
+
+function syncWorkspaceChangesLifecycle() {
+  if (typeof window === 'undefined') return;
+  if (activeWorkspaceChangesControllers.size > 0 && workspaceChangesFallbackId === null) {
+    window.addEventListener('o8:lifecycle-reconcile', scheduleActiveWorkspaceChangesRefresh);
+    workspaceChangesFallbackId = window.setInterval(scheduleActiveWorkspaceChangesRefresh, 300_000);
+    return;
+  }
+  if (activeWorkspaceChangesControllers.size === 0 && workspaceChangesFallbackId !== null) {
+    window.removeEventListener('o8:lifecycle-reconcile', scheduleActiveWorkspaceChangesRefresh);
+    window.clearInterval(workspaceChangesFallbackId);
+    workspaceChangesFallbackId = null;
+  }
+}
+
+function getWorkspaceChangesController(repoPath: string): WorkspaceChangesController {
+  const existing = workspaceChangesControllers.get(repoPath);
+  if (existing) return existing;
+
+  let snapshot: WorkspaceChangesSnapshot = EMPTY_WORKSPACE_CHANGES_SNAPSHOT;
+  let inFlight: Promise<void> | null = null;
+  const listeners = new Set<() => void>();
+  const notify = () => listeners.forEach((listener) => listener());
+  const setSnapshot = (next: WorkspaceChangesSnapshot) => {
+    snapshot = next;
+    notify();
+  };
+  const controller: WorkspaceChangesController = {
+    repoPath,
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    refresh: async () => {
+      if (inFlight) return inFlight;
+      inFlight = (async () => {
+        setSnapshot({ ...snapshot, loading: true, error: null });
+        try {
+          // changesOnly=1 keeps this off the slow network `gh` path — the changes
+          // view reads only changedFiles/branch/repoSlug, all local git data (#1340).
+          const workspaceQuery = `?workspace=${encodeURIComponent(repoPath)}&changesOnly=1`;
+          const response = await fetch(`/api/review/workspace${workspaceQuery}`);
+          if (!response.ok) throw new Error('Failed to load workspace changes');
+          const data = await response.json() as WorkspaceReviewResponse;
+          setSnapshot({
+            files: Array.isArray(data.changedFiles) ? data.changedFiles : [],
+            loading: false,
+            error: null,
+            branch: typeof data.branch === 'string' ? data.branch : null,
+            repoSlug: typeof data.repoSlug === 'string' ? data.repoSlug : null,
+          });
+        } catch (err) {
+          setSnapshot({
+            files: [],
+            loading: false,
+            error: err instanceof Error ? err.message : 'Unable to load workspace changes',
+            branch: null,
+            repoSlug: null,
+          });
+        } finally {
+          inFlight = null;
+        }
+      })();
+      return inFlight;
+    },
+  };
+  workspaceChangesControllers.set(repoPath, controller);
+  return controller;
+}
+
+export function useWorkspaceChanges(repoPath?: string | null, { active = true }: { active?: boolean } = {}): WorkspaceChangesState {
+  const controller = useMemo(() => (repoPath ? getWorkspaceChangesController(repoPath) : null), [repoPath]);
+  const subscribe = useCallback((listener: () => void) => (
+    controller ? controller.subscribe(listener) : () => undefined
+  ), [controller]);
+  const snapshot = useSyncExternalStore(
+    subscribe,
+    () => controller?.getSnapshot() ?? EMPTY_WORKSPACE_CHANGES_SNAPSHOT,
+    () => EMPTY_WORKSPACE_CHANGES_SNAPSHOT,
+  );
 
   useEffect(() => {
-    void refresh();
-    if (!repoPath) return;
-
-    const handler = () => { void refresh(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const eventName of wsEvents) window.addEventListener(eventName, handler);
-    const fallbackId = window.setInterval(() => { void refresh(); }, 300_000);
+    if (!controller || !active) return;
+    activeWorkspaceChangesControllers.set(controller, (activeWorkspaceChangesControllers.get(controller) ?? 0) + 1);
+    syncWorkspaceChangesLifecycle();
+    scheduleActiveWorkspaceChangesRefresh();
     return () => {
-      for (const eventName of wsEvents) window.removeEventListener(eventName, handler);
-      window.clearInterval(fallbackId);
+      const remaining = (activeWorkspaceChangesControllers.get(controller) ?? 1) - 1;
+      if (remaining > 0) activeWorkspaceChangesControllers.set(controller, remaining);
+      else activeWorkspaceChangesControllers.delete(controller);
+      syncWorkspaceChangesLifecycle();
     };
-  }, [refresh, repoPath]);
+  }, [active, controller]);
 
-  const scopedFiles = useMemo(
-    () => (sourceRepoPath === currentRepoPath ? files : []),
-    [currentRepoPath, files, sourceRepoPath],
-  );
+  const refresh = useCallback(async () => {
+    await controller?.refresh();
+  }, [controller]);
   const totalAdditions = useMemo(
-    () => scopedFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0),
-    [scopedFiles],
+    () => snapshot.files.reduce((sum, file) => sum + (file.additions ?? 0), 0),
+    [snapshot.files],
   );
   const totalDeletions = useMemo(
-    () => scopedFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0),
-    [scopedFiles],
+    () => snapshot.files.reduce((sum, file) => sum + (file.deletions ?? 0), 0),
+    [snapshot.files],
   );
-  const dirtyFileSet = useMemo(() => new Set(scopedFiles.map((file) => file.path)), [scopedFiles]);
+  const dirtyFileSet = useMemo(() => new Set(snapshot.files.map((file) => file.path)), [snapshot.files]);
 
   return {
-    files: scopedFiles,
-    loading,
-    error,
+    files: snapshot.files,
+    loading: snapshot.loading,
+    error: snapshot.error,
     totalAdditions,
     totalDeletions,
     dirtyFileSet,
-    branch: sourceRepoPath === currentRepoPath ? branch : null,
-    repoSlug: sourceRepoPath === currentRepoPath ? repoSlug : null,
-    repoPath: sourceRepoPath === currentRepoPath ? currentRepoPath : null,
+    branch: snapshot.branch,
+    repoSlug: snapshot.repoSlug,
+    repoPath: controller ? repoPath : null,
     source: 'local',
     sourceLabel: 'Local changes',
     patchByPath: new Map(),
