@@ -449,11 +449,16 @@ impl LiveRecognizer {
                                 // only the high-frequency session chatter
                                 // (listening/locale/on_device/input_device)
                                 // stays UI-only.
-                                const LOGGED_PREFIXES: [&str; 4] = [
+                                const LOGGED_PREFIXES: [&str; 5] = [
                                     "audio_engine",
                                     "microphone:",
                                     "speech_recognition:",
                                     "recognizer",
+                                    // The macOS 26 SpeechAnalyzer ladder was
+                                    // INVISIBLE in field logs without this —
+                                    // J5PHEN forensics greps came back empty
+                                    // no matter which rung fired (2026-07-16).
+                                    "analyzer",
                                 ];
                                 if LOGGED_PREFIXES.iter().any(|p| evt.text.starts_with(p)) {
                                     log::warn!("[stt] helper health: {}", evt.text);
@@ -648,16 +653,48 @@ impl LiveRecognizer {
             }
         }
 
-        let mut command = Command::new(helper);
+        // Fallback (non-disclaimed) spawn. On Apple Silicon, route through
+        // /usr/bin/arch -arm64 so a Rosetta-translated parent still gets the
+        // helper's NATIVE slice (same reasoning as the setarchpref_np in
+        // spawn_disclaimed — children DO inherit Rosetta translation).
+        #[cfg(target_os = "macos")]
+        let prefer_arm64 = Self::hardware_supports_arm64();
+        #[cfg(not(target_os = "macos"))]
+        let prefer_arm64 = false;
+        let mut command = if prefer_arm64 {
+            log::info!("[stt] fallback spawn via /usr/bin/arch -arm64 (Apple Silicon hardware)");
+            let mut c = Command::new("/usr/bin/arch");
+            c.arg("-arm64").arg(helper);
+            c
+        } else {
+            Command::new(helper)
+        };
         if let Some(fifo) = audio_fifo {
             command.arg("--audio-fifo").arg(fifo);
         }
-        let mut child = command
+        let spawn_result = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn speech_recognizer: {e}"))?;
+            .spawn();
+        // If the arch wrapper itself failed to launch, retry plain — a
+        // Rosetta helper beats a dead one.
+        let mut child = match spawn_result {
+            Ok(c) => c,
+            Err(e) if prefer_arm64 => {
+                log::warn!("[stt] arch-wrapped spawn failed ({e}); retrying direct spawn");
+                let mut c = Command::new(helper);
+                if let Some(fifo) = audio_fifo {
+                    c.arg("--audio-fifo").arg(fifo);
+                }
+                c.stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("Failed to spawn speech_recognizer: {e}"))?
+            }
+            Err(e) => return Err(format!("Failed to spawn speech_recognizer: {e}")),
+        };
 
         let stdin = child
             .stdin
@@ -683,6 +720,29 @@ impl LiveRecognizer {
     /// Raw `posix_spawn` of the helper with TCC responsibility disclaimed and
     /// stdio wired to fresh pipes. See `spawn_helper` for the why.
     #[cfg(target_os = "macos")]
+    /// True when the HARDWARE is Apple Silicon — readable even from inside a
+    /// Rosetta-translated x86_64 process (where `cfg!(target_arch)` and
+    /// `uname` both lie and say x86_64). Drives the helper arch preference.
+    #[cfg(target_os = "macos")]
+    fn hardware_supports_arm64() -> bool {
+        let name = match std::ffi::CString::new("hw.optional.arm64") {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        let mut val: libc::c_int = 0;
+        let mut len = std::mem::size_of::<libc::c_int>();
+        let rc = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                &mut val as *mut _ as *mut libc::c_void,
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        rc == 0 && val == 1
+    }
+
     fn spawn_disclaimed(
         helper: &std::path::Path,
         audio_fifo: Option<&std::path::Path>,
@@ -699,7 +759,23 @@ impl LiveRecognizer {
                 disclaim: libc::c_int,
             ) -> libc::c_int;
             fn _NSGetEnviron() -> *mut *mut *mut libc::c_char;
+            // Public since macOS 11 — the ONLY way a process controls which
+            // slice of a fat child runs. The 63c217b7 fat-helper fix rested on
+            // "children don't inherit the parent's Rosetta mode", which is
+            // FALSE (Apple DTS: a translated x86_64 parent execs the x86_64
+            // slice of a universal child unless this attr says otherwise) —
+            // so the arm64 slice we shipped never ran on Apple Silicon and
+            // SpeechTranscriber kept probing 0 locales under Rosetta (J5PHEN).
+            fn posix_spawnattr_setarchpref_np(
+                attr: *mut libc::posix_spawnattr_t,
+                count: libc::size_t,
+                pref: *mut libc::cpu_type_t,
+                subpref: *mut libc::cpu_subtype_t,
+                ocount: *mut libc::size_t,
+            ) -> libc::c_int;
         }
+        const CPU_TYPE_ARM64: libc::cpu_type_t = 0x0100_000C; // CPU_TYPE_ARM | CPU_ARCH_ABI64
+        const CPU_SUBTYPE_ANY: libc::cpu_subtype_t = -1;
 
         let path = std::ffi::CString::new(helper.as_os_str().as_bytes())
             .map_err(|_| "helper path contains NUL".to_string())?;
@@ -734,6 +810,24 @@ impl LiveRecognizer {
                 libc::posix_spawnattr_destroy(&mut attr);
                 close_all(&[fds_in[0], fds_in[1], fds_out[0], fds_out[1], fds_err[0], fds_err[1]]);
                 return Err("responsibility_spawnattrs_setdisclaim failed".to_string());
+            }
+
+            // Prefer the NATIVE arm64 slice of the fat helper on Apple
+            // Silicon, even when this parent runs translated under Rosetta.
+            // Non-fatal on failure — a Rosetta helper still works, just via
+            // the degraded legacy path.
+            if Self::hardware_supports_arm64() {
+                let mut pref: libc::cpu_type_t = CPU_TYPE_ARM64;
+                let mut subpref: libc::cpu_subtype_t = CPU_SUBTYPE_ANY;
+                let mut ocount: libc::size_t = 0;
+                let arch_rc = posix_spawnattr_setarchpref_np(&mut attr, 1, &mut pref, &mut subpref, &mut ocount);
+                if arch_rc == 0 {
+                    log::info!("[stt] helper arch preference: arm64 (Apple Silicon hardware; parent may be Rosetta)");
+                } else {
+                    log::warn!("[stt] posix_spawnattr_setarchpref_np failed (rc={arch_rc}) — helper will inherit the parent's arch");
+                }
+            } else {
+                log::info!("[stt] helper arch preference: none (Intel hardware — x86_64 slice)");
             }
 
             let mut fa: libc::posix_spawn_file_actions_t = std::mem::zeroed();

@@ -102,12 +102,45 @@ export function DictationHost({ children }: DictationHostProps) {
     if (!canUseTauriEvents()) return;
     let disposed = false;
     let unlistenFn: (() => void) | null = null;
+    // Insert into a TEXTAREA/INPUT through the React-aware native setter when
+    // execCommand declines (WebKit returns false on some controlled inputs) —
+    // the same recipe the webview agent uses. Returns whether text landed.
+    const insertIntoField = (el: HTMLElement, text: string): boolean => {
+      const inserted = document.execCommand('insertText', false, text);
+      if (inserted) return true;
+      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        const field = el as HTMLTextAreaElement | HTMLInputElement;
+        const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) {
+          const start = field.selectionStart ?? field.value.length;
+          const end = field.selectionEnd ?? start;
+          setter.call(field, field.value.slice(0, start) + text + field.value.slice(end));
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+          try { field.setSelectionRange(start + text.length, start + text.length); } catch { /* type=email etc. */ }
+          return true;
+        }
+      }
+      return false;
+    };
     import('@tauri-apps/api/event')
       .then(({ listen }) =>
-        listen<{ type?: string; text?: string }>('o8:stt-event', (e) => {
+        listen<{ type?: string; text?: string; nonce?: number }>('o8:stt-event', (e) => {
           if (e.payload?.type !== 'system-fill') return;
           const text = e.payload.text ?? '';
           if (!text) return;
+          // J5PHEN root fix: a nonce-carrying fill gets a delivery RECEIPT —
+          // Rust blocks on o8_stt_fill_ack and only an acked insert counts as
+          // pasted. When we can't place the text we ack delivered:false and
+          // RUST owns the synthetic-paste fallback (single owner — the old
+          // JS-side o8_debug_paste fallback would double-paste against it).
+          const nonce = typeof e.payload.nonce === 'number' ? e.payload.nonce : null;
+          const ack = (delivered: boolean, via: string) => {
+            if (nonce === null) return;
+            import('@tauri-apps/api/core')
+              .then(({ invoke }) => invoke('o8_stt_fill_ack', { nonce, delivered, via }))
+              .catch((err) => console.warn('[dictation] fill ack failed', err));
+          };
           // Deliver to the field the operator is actually in. A DIFFERENT in-app
           // editable (e.g. the error-report dialog, SXHV68) must win over the
           // sticky-registered orchestrator composer — otherwise its text is
@@ -123,19 +156,29 @@ export function DictationHost({ children }: DictationHostProps) {
           const composerNode = anchorRef.current;
           const focusedIsComposer =
             editable && !!composerNode && (composerNode === el || composerNode.contains(el));
-          if (editable && !focusedIsComposer) {
-            document.execCommand('insertText', false, text);
-            return;
+          if (editable && !focusedIsComposer && el) {
+            const ok = insertIntoField(el, text);
+            ack(ok, ok ? 'focused-editable' : 'focused-editable-refused');
+            if (ok || nonce !== null) return;
+            // ok=false on a legacy (nonce-less) fill: fall through the ladder.
           }
           if (fillRef.current) {
             fillRef.current(text);
+            ack(true, 'composer-fill');
             return;
           }
-          if (editable) {
-            document.execCommand('insertText', false, text);
+          if (editable && el) {
+            const ok = insertIntoField(el, text);
+            ack(ok, ok ? 'focused-editable' : 'focused-editable-refused');
+            if (ok || nonce !== null) return;
+          }
+          // Nowhere in-app to put it. Nonce path: decline and let Rust run the
+          // synthetic paste. Legacy path (old shell, no nonce): keep the
+          // JS-side fallback that shells before 0.1.613 rely on.
+          if (nonce !== null) {
+            ack(false, 'no-target');
             return;
           }
-          // Nowhere in-app to put it — fall back to the real synthetic paste.
           import('@tauri-apps/api/core')
             .then(({ invoke }) => invoke('o8_debug_paste', { text }))
             .catch((err) => console.warn('[dictation] system-fill fallback paste failed', err));

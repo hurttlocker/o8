@@ -3103,6 +3103,57 @@ mod stt_engine {
         &ACTIVE
     }
 
+    /// Pending in-app fill acknowledgements (J5PHEN root fix, 2026-07-16).
+    /// `system-fill` used to claim PasteOutcome::Pasted the moment the event
+    /// BROADCAST succeeded — Ok(()) only means the event left Rust, not that
+    /// any JS listener inserted anything, so a dead/unmounted DictationHost
+    /// produced a success chime with zero delivery (Chris, three reports
+    /// across six weeks). Now each fill carries a nonce; DictationHost acks
+    /// through `o8_stt_fill_ack` with whether it actually inserted, and the
+    /// emitter blocks on this channel (bounded wait) before claiming success —
+    /// no ack or a false ack falls back to the real synthetic paste.
+    fn fill_acks() -> &'static Mutex<std::collections::HashMap<u64, std::sync::mpsc::Sender<(bool, String)>>> {
+        static ACKS: OnceLock<Mutex<std::collections::HashMap<u64, std::sync::mpsc::Sender<(bool, String)>>>> =
+            OnceLock::new();
+        ACKS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+    }
+
+    fn next_fill_nonce() -> u64 {
+        static NONCE: AtomicU64 = AtomicU64::new(1);
+        NONCE.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// DictationHost's delivery receipt for a `system-fill` event. `delivered`
+    /// is true only when text ACTUALLY landed in a field (execCommand success,
+    /// native-setter insert, or the composer fill) — never merely "listener
+    /// ran". Unknown nonces are ignored (late ack after the emitter already
+    /// fell back).
+    pub fn ack_fill(nonce: u64, delivered: bool, via: Option<String>) {
+        let tx = fill_acks().lock().ok().and_then(|mut m| m.remove(&nonce));
+        if let Some(tx) = tx {
+            let _ = tx.send((delivered, via.unwrap_or_default()));
+        } else {
+            log::warn!("[paste] fill ack for unknown nonce {nonce} (emitter already fell back)");
+        }
+    }
+
+    /// Register a pending fill and hand back the receiver the emitter blocks
+    /// on. The caller MUST call `clear_fill(nonce)` after resolving (success,
+    /// decline, or timeout) so a never-acked entry can't leak.
+    pub fn register_fill(nonce: u64) -> std::sync::mpsc::Receiver<(bool, String)> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        if let Ok(mut m) = fill_acks().lock() {
+            m.insert(nonce, tx);
+        }
+        rx
+    }
+
+    pub fn clear_fill(nonce: u64) {
+        if let Ok(mut m) = fill_acks().lock() {
+            m.remove(&nonce);
+        }
+    }
+
     /// The currently-active session id (0 = none). Used by the Right-Option Ask
     /// path to force-stop a competing Fn / long-form session before it takes the
     /// mic — the three voice modes share this one recognizer.
@@ -3811,24 +3862,56 @@ mod stt_engine {
                     } else if let crate::live_dictation::FinishOutcome::Conflict(message) = live_outcome {
                         crate::paste::PasteOutcome::Failed(message)
                     } else if crate::paste::frontmost_is_o8() {
+                        // J5PHEN root fix (2026-07-16): a broadcast Ok(()) only
+                        // proves the event LEFT Rust — with a dead or unmounted
+                        // DictationHost the old code chimed success while the
+                        // text went nowhere (Chris, three reports over six
+                        // weeks). The fill now carries a nonce and we block
+                        // (bounded) on the webview's o8_stt_fill_ack receipt:
+                        // only an acked INSERT counts as Pasted; a declined ack
+                        // or timeout falls back to the real synthetic paste,
+                        // whose own honest ladder ends in ClipboardOnly + toast.
+                        let nonce = stt_engine::next_fill_nonce();
+                        let ack_rx = stt_engine::register_fill(nonce);
                         let fill = serde_json::json!({
                             "type": "system-fill",
                             "origin": "system",
                             "text": polished.clone(),
+                            "nonce": nonce,
                         });
-                        match app.emit("o8:stt-event", fill) {
+                        let outcome = match app.emit("o8:stt-event", fill) {
                             Ok(()) => {
-                                log::info!(
-                                    "[paste] outcome=filled-in-app chars={} (o8 frontmost — delivered via composer fill path)",
-                                    polished.len()
-                                );
-                                crate::paste::PasteOutcome::Pasted
+                                match ack_rx.recv_timeout(std::time::Duration::from_millis(1200)) {
+                                    Ok((true, via)) => {
+                                        log::info!(
+                                            "[paste] outcome=filled-in-app chars={} via={} (webview acked the insert)",
+                                            polished.len(),
+                                            if via.is_empty() { "unspecified" } else { &via }
+                                        );
+                                        crate::paste::PasteOutcome::Pasted
+                                    }
+                                    Ok((false, via)) => {
+                                        log::warn!(
+                                            "[paste] in-app fill declined (via={}) — falling back to synthetic paste",
+                                            if via.is_empty() { "no-target" } else { &via }
+                                        );
+                                        crate::paste::paste_text_with_status(&polished)
+                                    }
+                                    Err(_) => {
+                                        log::warn!(
+                                            "[paste] in-app fill UNACKED after 1200ms (listener dead or webview busy) — falling back to synthetic paste"
+                                        );
+                                        crate::paste::paste_text_with_status(&polished)
+                                    }
+                                }
                             }
                             Err(e) => {
                                 log::warn!("[paste] in-app fill emit failed ({e}); falling back to synthetic paste");
                                 crate::paste::paste_text_with_status(&polished)
                             }
-                        }
+                        };
+                        stt_engine::clear_fill(nonce);
+                        outcome
                     } else {
                         crate::paste::paste_text_with_status(&polished)
                     };
@@ -4158,6 +4241,15 @@ fn stt_set_input_device(device_uid: String) -> Result<(), String> {
     } else {
         Some(uid)
     })
+}
+
+/// DictationHost's delivery receipt for a nonce-carrying `system-fill` event
+/// (J5PHEN root fix): the emitter blocks on this ack before claiming the
+/// paste happened. See stt_engine::ack_fill.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_stt_fill_ack(nonce: u64, delivered: bool, via: Option<String>) {
+    stt_engine::ack_fill(nonce, delivered, via);
 }
 
 /// Speak `text` aloud via the native TTS engine (voice P4): ElevenLabs/Google →
@@ -5532,6 +5624,8 @@ pub fn run() {
             o8_system_dictation_finish,
             #[cfg(target_os = "macos")]
             o8_stt_locale,
+            #[cfg(target_os = "macos")]
+            o8_stt_fill_ack,
             #[cfg(target_os = "macos")]
             stt_list_input_devices,
             #[cfg(target_os = "macos")]
