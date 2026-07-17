@@ -76,7 +76,7 @@ describe('computeRestoredTabs — optimistic crash recovery', () => {
       version: 1,
       activeTabId: 'thoughts-saved',
       savedAt: new Date().toISOString(),
-      tabs: [{ id: 'thoughts-saved', label: 'Saved thread', kind: 'orchestrator' }],
+      tabs: [{ id: 'thoughts-saved', label: 'Saved thread', kind: 'orchestrator', cliAgent: 'shell' }],
     }, {
       preferredRepo: null,
       defaultTab: 'terminal',
