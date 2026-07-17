@@ -126,6 +126,16 @@ const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
   // bloom through — the dynamic range is what reads as liquid. Wins over
   // applyThemeVars' Tauri passthrough force (overrides apply after it).
   '--t-bg-gradient': 'linear-gradient(180deg, rgba(10, 12, 18, 0.78) 0%, rgba(10, 12, 18, 0.44) 55%, rgba(10, 12, 18, 0.06) 100%)',
+  // Ink is WHITE on the glass (Q ruling 2026-07-17: "in the all-glass mode
+  // inside of the composer, all of that text needs to be white"). The dark
+  // palette's slate muted/secondary inks (#5f6b7a / #8b95a3) read muddy on
+  // the vibrancy material — composer placeholder, model + thinking chips,
+  // and the running-turn timer all consume these tokens.
+  '--t-chat-surface-text': '#ffffff',
+  '--t-chat-surface-text-secondary': 'rgba(255, 255, 255, 0.78)',
+  '--t-chat-surface-text-muted': 'rgba(255, 255, 255, 0.62)',
+  '--t-text-muted': 'rgba(255, 255, 255, 0.66)',
+  '--t-text-faint': 'rgba(255, 255, 255, 0.5)',
   // Faint white breaths — the only fills that exist on the glass.
   '--t-input-bg': 'rgba(255, 255, 255, 0.06)',
   '--t-search-bg': 'rgba(255, 255, 255, 0.06)',
