@@ -613,12 +613,15 @@ export async function loadInitialTabState(
   options: LoadInitialTabStateOptions,
   cancelled: () => boolean,
 ): Promise<PersistedTabState | null> {
-  let saved = options.splitCreated ? null : await loadTabState(options.stateScope, null);
-  if (cancelled()) return null;
-
   const currentStableRepoScope = !options.splitCreated && options.preferredRepoPath
     ? buildRepoStateScope(options.preferredRepoPath)
     : null;
+  const [rootSaved, repoSaved] = await Promise.all([
+    options.splitCreated ? Promise.resolve(null) : loadTabState(options.stateScope, null),
+    currentStableRepoScope ? loadTabState(currentStableRepoScope, options.preferredRepoPath) : Promise.resolve(null),
+  ]);
+  if (cancelled()) return null;
+  let saved = rootSaved;
   const savedRepoPaths = saved
     ? Array.from(new Set(saved.tabs.map((tab) => tab.repoPath).filter((value): value is string => Boolean(value))))
     : [];
@@ -632,8 +635,7 @@ export async function loadInitialTabState(
     && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
     && currentStableRepoScope
   ) {
-    saved = await loadTabState(currentStableRepoScope, options.preferredRepoPath);
-    if (cancelled()) return null;
+    saved = repoSaved;
   }
 
   return saved && saved.tabs.length > 0 ? saved : null;

@@ -39,3 +39,5 @@
 - DesktopStatusBar composer centering: replaced the body-wide MutationObserver with explicit ComposerArea registration; remounts notify the status bar without transcript-stream layout work.
 
 - Workspace restore reconciliation: persisted tabs now paint optimistically and retain the existing liveness/archive/lane filters as a generation-fenced background reconciliation.
+- Repo-switch performance: AgentPanel now restores per-repo agent snapshots before reconciling; its unrendered commits/issues/PR reads were removed, while mounted activity surfaces retain their own fresh fetches.
+

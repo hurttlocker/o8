@@ -4,30 +4,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
 import { isTauri } from '@/lib/tauri/bridge';
-import { ipcFetch } from '@/lib/tauri/ipc-fetch';
-import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { fetchOnce, getSWR, setSWR } from '@/lib/panel/fetch-cache';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
 import {
   agentFp,
-  agentRepoSlug,
   arraysMatchBy,
   buildWorkspaceGroups,
-  compactActivitySummaryLabel,
-  eventFp,
-  relativeAge,
   repoSlugFromRemoteUrl,
 } from './shared';
 import type {
   AgentDetail,
-  CommitSummary,
-  EventEntry,
-  GHIssue,
-  GHPullRequest,
   RepoTaskLaunchRequest,
 } from './types';
+
+type PanelSnapshot = { agents: AgentDetail[] };
 
 interface UseAgentPanelStateArgs {
   selectedRepo?: string | null;
@@ -55,13 +48,7 @@ export function useAgentPanelState({
   const [gatewayReachable, setGatewayReachable] = useState(false);
   const [gatewayWarming, setGatewayWarming] = useState(false);
   const [fleetMeta, setFleetMeta] = useState<Record<string, unknown> | null>(null);
-  const [events, setEvents] = useState<EventEntry[]>([]);
-  const [commits, setCommits] = useState<CommitSummary[]>([]);
-  const [issues, setIssues] = useState<GHIssue[]>([]);
-  const [prs, setPrs] = useState<GHPullRequest[]>([]);
-  const [activityOpen, setActivityOpen] = useState(false);
   const [reposOpen, setReposOpen] = useState(true);
-  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [addRepoIntentNonce, setAddRepoIntentNonce] = useState(0);
   const [repoRegistryState, setRepoRegistryState] = useState<RepoRegistryState>({
     loading: true,
@@ -69,10 +56,11 @@ export function useAgentPanelState({
     hasError: false,
   });
   const [repoLocalPath, setRepoLocalPath] = useState<string | null>(null);
-  const activityAutoOpenedRef = useRef(false);
   const fetchNowRef = useRef<() => void>(() => {});
   const inventoryLoadedRef = useRef(false);
+  const inventoryGenerationRef = useRef(0);
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
+  const panelSnapshotKey = `panel:agents:${selectedRepoLocalPath ?? selectedRepo ?? 'all'}`;
 
   const refreshNow = useCallback(() => {
     fetchNowRef.current();
@@ -170,13 +158,18 @@ export function useAgentPanelState({
     },
     onReviewUpdate: () => {
       fetchNowRef.current();
-      setActivityRefreshKey((current) => current + 1);
     },
   }), []);
   const { isConnected: wsConnected } = useSharedDesktopWs(undefined, wsCallbacks);
 
   useEffect(() => {
+    const snapshot = getSWR<PanelSnapshot>(panelSnapshotKey).data;
+    if (snapshot) setAgents(snapshot.agents);
+  }, [panelSnapshotKey]);
+
+  useEffect(() => {
     async function fetchAll() {
+      const generation = ++inventoryGenerationRef.current;
       if (!inventoryLoadedRef.current) setInventoryLoading(true);
       try {
         const [inventoryResponse, workspacesResponse, reposResponse] = await Promise.all([
@@ -192,11 +185,11 @@ export function useAgentPanelState({
         if (inventoryResponse?.ok) {
           const data = await inventoryResponse.json();
           nextAgents = data.agents ?? [];
-          const freshEvents: EventEntry[] = data.events ?? [];
-          setEvents((current) => arraysMatchBy(current, freshEvents, eventFp) ? current : freshEvents);
-          setFleetMeta(data.meta ?? null);
-          setGatewayReachable(data.meta?.gatewayReachable ?? false);
-          setGatewayWarming(data.meta?.gatewayFreshness === 'warming');
+          if (generation === inventoryGenerationRef.current) {
+            setFleetMeta(data.meta ?? null);
+            setGatewayReachable(data.meta?.gatewayReachable ?? false);
+            setGatewayWarming(data.meta?.gatewayFreshness === 'warming');
+          }
         }
 
         const workspaceMap = new Map<string, {
@@ -285,12 +278,14 @@ export function useAgentPanelState({
           return false;
         });
 
+        if (generation !== inventoryGenerationRef.current) return;
+        setSWR(panelSnapshotKey, { agents: filteredAgents });
         onAgentsUpdate?.(filteredAgents);
         setAgents((current) => arraysMatchBy(current, filteredAgents, agentFp) ? current : filteredAgents);
       } catch {
         // Ignore background refresh failures.
       } finally {
-        if (!inventoryLoadedRef.current) {
+        if (generation === inventoryGenerationRef.current && !inventoryLoadedRef.current) {
           inventoryLoadedRef.current = true;
           setInventoryLoading(false);
         }
@@ -316,7 +311,7 @@ export function useAgentPanelState({
       for (const e of wsEvents) window.removeEventListener(e, handler);
       if (debounceTimer) clearTimeout(debounceTimer);
     };
-  }, [onAgentsUpdate, wsConnected]);
+  }, [onAgentsUpdate, panelSnapshotKey, wsConnected]);
 
   // Phase 4 friction fix #3: while the inventory snapshot is in stale mode
   // (the "Showing cached session state while the gateway reconnects" banner)
@@ -341,78 +336,6 @@ export function useAgentPanelState({
     return preferredGroup?.repo ?? null;
   }, [workspaceGroups]);
   const effectiveScopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : inferredRepo;
-
-  useEffect(() => {
-    if (!effectiveScopedRepo) {
-      setCommits([]);
-      return;
-    }
-    const scopedRepo = effectiveScopedRepo;
-
-    async function fetchCommits() {
-      try {
-        const response = await ipcFetch(`/api/panel/commits?repo=${encodeURIComponent(scopedRepo)}&limit=10`);
-        if (!response.ok) return;
-        const data = await response.json();
-        const nextCommits = (data.commits ?? []).map((commit: { hash?: string; message?: string; date?: string }) => ({
-          hash: commit.hash ?? '',
-          message: commit.message ?? '',
-          age: commit.date ? relativeAge(commit.date) : '',
-        }));
-        setCommits((current) => arraysMatchBy(current, nextCommits, (commit) => commit.hash) ? current : nextCommits);
-      } catch {
-        // Ignore background refresh failures.
-      }
-    }
-
-    void fetchCommits();
-    // WS-driven: refresh on agent events (agents produce commits)
-    const handler = () => { void fetchCommits(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(fetchCommits, 300_000);
-    return () => {
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
-    };
-  }, [effectiveScopedRepo]);
-
-  useEffect(() => {
-    if (!effectiveScopedRepo) {
-      setIssues([]);
-      setPrs([]);
-      return;
-    }
-
-    const repoParam = `?repo=${encodeURIComponent(effectiveScopedRepo)}`;
-    async function fetchGitHub() {
-      const [issuesResponse, prsResponse] = await Promise.all([
-        fetch(`/api/panel/issues${repoParam}`).catch(() => null),
-        fetch(`/api/panel/prs${repoParam}`).catch(() => null),
-      ]);
-      if (issuesResponse?.ok) {
-        const data = await issuesResponse.json();
-        const nextIssues = data.issues ?? [];
-        setIssues((current) => arraysMatchBy(current, nextIssues, (issue: GHIssue) => `${issue.number}|${issue.state ?? ''}`) ? current : nextIssues);
-      }
-      if (prsResponse?.ok) {
-        const data = await prsResponse.json();
-        const nextPrs = data.prs ?? [];
-        setPrs((current) => arraysMatchBy(current, nextPrs, (pr: GHPullRequest) => `${pr.number}|${pr.state}|${pr.additions}|${pr.deletions}`) ? current : nextPrs);
-      }
-    }
-
-    void fetchGitHub();
-    // WS-driven: refresh on lane events (lanes create PRs/issues)
-    const handler = () => { void fetchGitHub(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(fetchGitHub, 300_000);
-    return () => {
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
-    };
-  }, [effectiveScopedRepo]);
 
   useEffect(() => {
     if (selectedRepoLocalPath) {
@@ -455,32 +378,7 @@ export function useAgentPanelState({
         ? `${trackedWorkspaceCount} live · ${reviewWorkspaceCount} in review`
         : null;
 
-  const activityAgentRepoById = useMemo(
-    () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
-    [agents],
-  );
-  const visibleActivityEvents = useMemo(() => {
-    return events.filter((event) => {
-      const eventRepo = activityAgentRepoById.get(event.agentId) ?? null;
-      if (!eventRepo) return false;
-      if (!effectiveScopedRepo) return true;
-      return eventRepo === effectiveScopedRepo;
-    });
-  }, [activityAgentRepoById, effectiveScopedRepo, events]);
 
-  const hasGitHubScopedSummary = Boolean(effectiveScopedRepo);
-  const activityItemCount = hasGitHubScopedSummary
-    ? visibleActivityEvents.length + commits.length + issues.length + prs.length
-    : null;
-  const activityDockTitle = effectiveScopedRepo ? 'Repo activity' : 'Activity';
-  const latestEventSummary = hasGitHubScopedSummary
-    ? (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
-      ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
-      ?? (commits[0]?.message ?? compactActivitySummaryLabel(visibleActivityEvents[0]?.title))
-    : (hasRegisteredRepos
-      ? 'Commits, PRs, and CI runs stream here once agents are active.'
-      : 'Commits, PRs, and CI runs stream here once a repo is attached.');
-  const activitySummary = compactActivitySummaryLabel(latestEventSummary);
   const [addRepoIntentMode, setAddRepoIntentMode] = useState<'scratch' | 'existing' | null>(null);
   const addRepoIntent = addRepoIntentNonce > 0
     ? { nonce: addRepoIntentNonce, mode: addRepoIntentMode }
@@ -504,35 +402,18 @@ export function useAgentPanelState({
   useEffect(() => { if (isTauri()) setTitlebarSpacerHeight(38); }, []);
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
 
-  useEffect(() => {
-    if (activityAutoOpenedRef.current) return;
-    if (inventoryLoading || repoRegistryState.loading) return;
-    if (agents.length === 0) {
-      setActivityOpen(true);
-      activityAutoOpenedRef.current = true;
-    }
-  }, [agents.length, inventoryLoading, repoRegistryState.loading]);
-
   return {
     agents,
     inventoryLoading,
     gatewayReachable,
     gatewayWarming,
     fleetMeta,
-    commits,
-    activityOpen,
-    setActivityOpen,
     reposOpen,
     setReposOpen,
-    activityRefreshKey,
     repoRegistryState,
     setRepoRegistryState,
     effectiveScopedRepo,
     currentLaunchRepoPath,
-    visibleActivityEvents,
-    activityItemCount,
-    activityDockTitle,
-    activitySummary,
     workspacesSummary,
     addRepoIntent,
     titlebarSpacerHeight,
