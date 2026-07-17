@@ -33,6 +33,7 @@ import {
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
+import { createTerminalActivityTracker } from '@/components/desktop/workspace-terminal/terminal-activity';
 import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
 import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
@@ -123,15 +124,11 @@ export function useWorkspaceTerminalController(
   const activeChatSessionChangeRef = useRef(onActiveChatSessionChange);
   const reportedChatSessionsSignatureRef = useRef('');
   const reportedActiveChatSessionKeyRef = useRef<string | null>(null);
+  const terminalActivity = useMemo(() => createTerminalActivityTracker({ getTabs: () => tabsRef.current, setTabs }), []);
+  useEffect(() => () => terminalActivity.dispose(), [terminalActivity]);
 
-  // Phase 4 friction fix #4: tab-navigation race during HMR.
-  // The restore pipeline (loadInitialTabState → applyPersistedState) is
-  // async. While the await resolves, the user may have clicked a different
-  // tab — the late-landing setActiveTabId from restore would then yank
-  // them back, looking like a phantom navigation. Track a monotonic
-  // counter that bumps on every USER-driven setActiveTabId; restore
-  // captures the value at the start of its async work and bails if a
-  // newer user nav landed in the interim.
+  // A monotonic user-navigation version prevents a late restore from
+  // replacing a newer tab selection.
   const userNavVersionRef = useRef(0);
   const setActiveTabIdFromUser = useCallback((next: string) => {
     userNavVersionRef.current += 1;
@@ -300,6 +297,7 @@ export function useWorkspaceTerminalController(
       });
       return () => window.cancelAnimationFrame(frame);
     }
+    terminalActivity.reset();
     urlDetectionEnabledRef.current = false;
     const frame = window.requestAnimationFrame(() => {
       setPreviews([]);
@@ -308,7 +306,7 @@ export function useWorkspaceTerminalController(
       setActiveTabId('');
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [preferredRepo?.localPath, restoreKey]);
+  }, [preferredRepo?.localPath, restoreKey, terminalActivity]);
 
   useEffect(() => {
     const nextSessions = buildChatSessionSnapshots(
@@ -329,8 +327,9 @@ export function useWorkspaceTerminalController(
   }, [effectiveActiveTabId, preferredRepo?.branch, preferredRepo?.localPath, stableRepoScope, stateScope, visibleTabs]);
 
   const persistTabsNow = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
-    const persisted = buildPersistedState(currentTabs, currentActiveId);
-    const persistenceScope = resolvePersistenceScope(currentTabs);
+    const tabsWithActivity = terminalActivity.merge(currentTabs);
+    const persisted = buildPersistedState(tabsWithActivity, currentActiveId);
+    const persistenceScope = resolvePersistenceScope(tabsWithActivity);
     void saveTabState(persisted, persistenceScope);
     if (persistenceScope !== stateScope) {
       if (stateScope === 'tile-root') {
@@ -339,7 +338,7 @@ export function useWorkspaceTerminalController(
         void saveTabState({ version: 1, activeTabId: '', tabs: [], savedAt: persisted.savedAt }, stateScope);
       }
     }
-  }, [resolvePersistenceScope, stateScope]);
+  }, [resolvePersistenceScope, stateScope, terminalActivity]);
 
   const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -1001,9 +1000,10 @@ export function useWorkspaceTerminalController(
     openWorkspaceTerminalTab,
     openWorkspaceInspectorTab,
     persistTabsNow,
+    recordTerminalActivity: terminalActivity.record,
     sendTerminalDetach,
     closeTabById: (tabId: string) => handleCloseTabRef.current(tabId),
-  }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, openWorkspaceTerminalTab, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, spawnOrchestratorTab, stateScope]);
+  }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, openWorkspaceTerminalTab, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, spawnOrchestratorTab, stateScope, terminalActivity]);
 
   const handleRegisterRepo = useCallback((localPath: string) => {
     fetch('/api/panel/repos', {
@@ -1178,12 +1178,12 @@ export function useWorkspaceTerminalController(
       if (tab.id === effectiveActiveTabId || !isAutoArchiveEligible(tab)) continue;
       const delayMs = Math.max(0, ORCHESTRATED_TAB_AUTO_ARCHIVE_MS - Math.max(0, now - tab.lastActivity));
       timers.set(tab.id, window.setTimeout(() => {
-        archiveWorkspaceTab(tab.id, tab.orchestrationPacket?.packetId ?? null);
+        const latest = terminalActivity.merge(tabsRef.current).find((candidate) => candidate.id === tab.id);
+        if (latest && Date.now() - latest.lastActivity >= ORCHESTRATED_TAB_AUTO_ARCHIVE_MS) archiveWorkspaceTab(tab.id, tab.orchestrationPacket?.packetId ?? null);
       }, delayMs));
     }
     return () => { timers.forEach((id) => window.clearTimeout(id)); };
-  }, [archiveWorkspaceTab, effectiveActiveTabId, tabs]);
-
+  }, [archiveWorkspaceTab, effectiveActiveTabId, tabs, terminalActivity]);
   useEffect(() => {
     flushPendingCliCommands(tabs, pendingCliCommands.current, sendTerminalInput);
   }, [sendTerminalInput, tabs]);

@@ -28,18 +28,10 @@ interface WorkspaceTerminalPanelsProps {
   effectiveActiveTabId: string;
   termWsConnected: boolean;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
-  onLaunchWorkspace: () => void;
   onCloseTab: (tabId: string) => void;
   onRunInTerminal: (command: string) => void;
-  onOpenHistoryChat: (
-    currentTab: TerminalTab,
-    historyTabId: string,
-    title: string,
-    historyRepo?: { name?: string; localPath?: string; branch?: string | null; remoteUrl?: string | null } | null,
-  ) => void;
   onOpenWorkspaceCommitTab: (hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => void;
   onUpdateLlmSummary: (tabId: string, summary: string | null) => void;
-  onConsumeLlmDraftInjection: (tabId: string, injectionId: string) => void;
   onUpdateLinkedIssue: (tabId: string, linkedIssue: import('@/components/desktop/IssueLinkPicker').LinkedIssueRef | null) => void;
   onUpdateChatMessages: (tabId: string, messages: import('@/lib/mobile/types').MobileTranscriptEntry[]) => void;
   onUpdateChatSessionKey: (tabId: string, sessionKey: string) => void;
@@ -62,13 +54,10 @@ function WorkspaceTerminalPanelsBase({
   effectiveActiveTabId,
   termWsConnected,
   panelRefs,
-  onLaunchWorkspace,
   onCloseTab,
   onRunInTerminal,
-  onOpenHistoryChat,
   onOpenWorkspaceCommitTab,
   onUpdateLlmSummary,
-  onConsumeLlmDraftInjection,
   onUpdateLinkedIssue,
   onUpdateChatMessages,
   onUpdateChatSessionKey,
@@ -99,90 +88,37 @@ function WorkspaceTerminalPanelsBase({
     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {visibleTabs.map((tab) => (
         tab.kind === 'orchestrator' ? (
-          // NEVER hard-lock an orchestrator-kind tab (no lockedMode here).
-          // Deriving lockedMode from a persisted mode:'single' made single a
-          // one-way door — the chooser hides and every switch-back path
-          // no-ops, so the tab is stuck as Codex forever (operator hit this
-          // 2026-07-06). Dedicated single-runtime tabs are kind:'chat' below;
-          // an orchestrator tab starts in its persisted mode but stays
-          // switchable.
-          // Suspense fallback for the ACTIVE tab claims the shared boot
-          // loader so the lazy chunk load is covered by the same overlay the
-          // boot path shows — a null fallback here blanked the workspace for
-          // a beat between the panels loader and the tab mounting (Q video,
-          // 0.1.604). Background tabs keep null (nothing to cover).
-          <Suspense key={tab.id} fallback={tab.id === effectiveActiveTabId ? <WorkspaceBootLoaderClaim /> : null}>
-            <LazyOrchestratorTab
-              tabId={tab.id}
-              active={tab.id === effectiveActiveTabId}
-              repoPath={tab.repo?.localPath ?? null}
-              repoLabel={tab.repo?.name ?? null}
-              initialMode={tab.mode}
-              initialSingleRuntime={tab.singleRuntime}
-              initialChatModelId={tab.chatModelId}
-              initialThreadId={tab.orchestratorThreadId ?? (tab.id.startsWith('thoughts-') ? tab.id : undefined)}
-              // A persisted binding rehydrating across a reload is a restore —
-              // the tab holds the boot loader over the history load instead of
-              // flashing the empty greeting first.
-              restoringPersistedThread={Boolean(tab.orchestratorThreadId)}
-              projectContextRailVisible={projectContextRailVisible}
-              onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
-              restoreLastThread={!tab.freshSpawn}
-              turnInjection={tab.orchestratorTurnInjection}
-            />
-          </Suspense>
-        ) : tab.kind === 'llm-chat' ? (
-          <Suspense key={tab.id} fallback={null}>
-            <LazyOrchestratorTab
-              tabId={tab.id}
-              active={tab.id === effectiveActiveTabId}
-              repoPath={tab.repo?.localPath ?? null}
-              repoLabel={tab.repo?.name ?? null}
-              lockedMode="chat"
-              initialMode="chat"
-              initialChatModelId={tab.chatModelId}
-              initialChatOpenrouterModel={tab.chatOpenrouterModel}
-              initialThreadId={tab.id}
-              projectContextRailVisible={projectContextRailVisible}
-              onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
-            />
-          </Suspense>
-        ) : tab.kind === 'chat' ? (
-          <div
+          <OrchestratorResidentPanel
             key={tab.id}
-            aria-hidden={tab.id !== effectiveActiveTabId}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              visibility: tab.id === effectiveActiveTabId ? 'visible' : 'hidden',
-              pointerEvents: tab.id === effectiveActiveTabId ? 'auto' : 'none',
-              position: tab.id === effectiveActiveTabId ? 'relative' : 'absolute',
-              inset: 0,
-              flex: tab.id === effectiveActiveTabId ? 1 : undefined,
-              height: '100%',
-              minHeight: 0,
-            }}
-          >
-            <WorkspaceChatPane
-              tab={tab}
-              active={tab.id === effectiveActiveTabId}
-              onUpdateMessages={onUpdateChatMessages}
-              onUpdateSessionKey={onUpdateChatSessionKey}
-              onRunInTerminal={onRunInTerminal}
-              onSelectModel={onUpdateChatModel}
-              onConsumeDraftInjection={onConsumeChatDraftInjection}
-              onLinkedIssueChange={onUpdateLinkedIssue}
-              onSaveCheckpoint={onSaveCheckpoint}
-              onRestoreLatestCheckpoint={onRestoreLatestCheckpoint}
-            />
-          </div>
+            tab={tab}
+            active={tab.id === effectiveActiveTabId}
+            projectContextRailVisible={projectContextRailVisible}
+            onUpdateLlmSummary={onUpdateLlmSummary}
+          />
+        ) : tab.kind === 'llm-chat' ? (
+          <OrchestratorResidentPanel
+            key={tab.id}
+            tab={tab}
+            active={tab.id === effectiveActiveTabId}
+            projectContextRailVisible={projectContextRailVisible}
+            onUpdateLlmSummary={onUpdateLlmSummary}
+          />
+        ) : tab.kind === 'chat' ? (
+          <ChatResidentPanel
+            key={tab.id}
+            tab={tab}
+            active={tab.id === effectiveActiveTabId}
+            onUpdateMessages={onUpdateChatMessages}
+            onUpdateSessionKey={onUpdateChatSessionKey}
+            onRunInTerminal={onRunInTerminal}
+            onSelectModel={onUpdateChatModel}
+            onConsumeDraftInjection={onConsumeChatDraftInjection}
+            onLinkedIssueChange={onUpdateLinkedIssue}
+            onSaveCheckpoint={onSaveCheckpoint}
+            onRestoreLatestCheckpoint={onRestoreLatestCheckpoint}
+          />
         ) : tab.kind === 'fleet-canvas' ? (
-          <Suspense key={tab.id} fallback={null}>
-            <LazyFleetCanvasTab
-              active={tab.id === effectiveActiveTabId}
-              repoPath={tab.repo?.localPath ?? null}
-            />
-          </Suspense>
+          <FleetCanvasResidentPanel key={tab.id} active={tab.id === effectiveActiveTabId} repoPath={tab.repo?.localPath ?? null} />
         ) : tab.kind === 'canvas' && tab.canvasTab ? (
           <CanvasPanel
             key={tab.id}
@@ -195,18 +131,15 @@ function WorkspaceTerminalPanelsBase({
             onOpenWorkspaceCommitTab={onOpenWorkspaceCommitTab}
           />
         ) : tab.tmuxSession ? (
-          <XtermPanel
+          <TerminalResidentPanel
             key={tab.tmuxSession}
-            ref={(handle) => {
-              if (handle) panelRefs.current.set(tab.tmuxSession!, handle);
-              else panelRefs.current.delete(tab.tmuxSession!);
-            }}
             tmuxSession={tab.tmuxSession}
+            panelRefs={panelRefs}
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
             sendTerminalResize={sendTerminalResize}
             sendTerminalDetach={sendTerminalDetach}
-            visible={tab.id === effectiveActiveTabId}
+            active={tab.id === effectiveActiveTabId}
           />
         ) : (
           <PendingTerminalPanel
@@ -343,7 +276,153 @@ function EmptyWorkspaceCard({
 
 export const WorkspaceTerminalPanels = memo(WorkspaceTerminalPanelsBase);
 
-function CanvasPanel({
+const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
+  tab,
+  active,
+  projectContextRailVisible,
+  onUpdateLlmSummary,
+}: {
+  tab: TerminalTab;
+  active: boolean;
+  projectContextRailVisible: boolean;
+  onUpdateLlmSummary: (tabId: string, summary: string | null) => void;
+}) {
+  if (tab.kind === 'llm-chat') {
+    return (
+      <Suspense fallback={null}>
+        <LazyOrchestratorTab
+          tabId={tab.id}
+          active={active}
+          repoPath={tab.repo?.localPath ?? null}
+          repoLabel={tab.repo?.name ?? null}
+          lockedMode="chat"
+          initialMode="chat"
+          initialChatModelId={tab.chatModelId}
+          initialChatOpenrouterModel={tab.chatOpenrouterModel}
+          initialThreadId={tab.id}
+          projectContextRailVisible={projectContextRailVisible}
+          onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
+        />
+      </Suspense>
+    );
+  }
+  return (
+    <Suspense fallback={active ? <WorkspaceBootLoaderClaim /> : null}>
+      <LazyOrchestratorTab
+        tabId={tab.id}
+        active={active}
+        repoPath={tab.repo?.localPath ?? null}
+        repoLabel={tab.repo?.name ?? null}
+        initialMode={tab.mode}
+        initialSingleRuntime={tab.singleRuntime}
+        initialChatModelId={tab.chatModelId}
+        initialThreadId={tab.orchestratorThreadId ?? (tab.id.startsWith('thoughts-') ? tab.id : undefined)}
+        restoringPersistedThread={Boolean(tab.orchestratorThreadId)}
+        projectContextRailVisible={projectContextRailVisible}
+        onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
+        restoreLastThread={!tab.freshSpawn}
+        turnInjection={tab.orchestratorTurnInjection}
+      />
+    </Suspense>
+  );
+});
+
+const ChatResidentPanel = memo(function ChatResidentPanel({
+  tab,
+  active,
+  onUpdateMessages,
+  onUpdateSessionKey,
+  onRunInTerminal,
+  onSelectModel,
+  onConsumeDraftInjection,
+  onLinkedIssueChange,
+  onSaveCheckpoint,
+  onRestoreLatestCheckpoint,
+}: {
+  tab: TerminalTab;
+  active: boolean;
+  onUpdateMessages: WorkspaceTerminalPanelsProps['onUpdateChatMessages'];
+  onUpdateSessionKey: WorkspaceTerminalPanelsProps['onUpdateChatSessionKey'];
+  onRunInTerminal: WorkspaceTerminalPanelsProps['onRunInTerminal'];
+  onSelectModel: WorkspaceTerminalPanelsProps['onUpdateChatModel'];
+  onConsumeDraftInjection: WorkspaceTerminalPanelsProps['onConsumeChatDraftInjection'];
+  onLinkedIssueChange: WorkspaceTerminalPanelsProps['onUpdateLinkedIssue'];
+  onSaveCheckpoint: WorkspaceTerminalPanelsProps['onSaveCheckpoint'];
+  onRestoreLatestCheckpoint: WorkspaceTerminalPanelsProps['onRestoreLatestCheckpoint'];
+}) {
+  return (
+    <div
+      aria-hidden={!active}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        visibility: active ? 'visible' : 'hidden',
+        pointerEvents: active ? 'auto' : 'none',
+        position: active ? 'relative' : 'absolute',
+        inset: 0,
+        flex: active ? 1 : undefined,
+        height: '100%',
+        minHeight: 0,
+      }}
+    >
+      <WorkspaceChatPane
+        tab={tab}
+        active={active}
+        onUpdateMessages={onUpdateMessages}
+        onUpdateSessionKey={onUpdateSessionKey}
+        onRunInTerminal={onRunInTerminal}
+        onSelectModel={onSelectModel}
+        onConsumeDraftInjection={onConsumeDraftInjection}
+        onLinkedIssueChange={onLinkedIssueChange}
+        onSaveCheckpoint={onSaveCheckpoint}
+        onRestoreLatestCheckpoint={onRestoreLatestCheckpoint}
+      />
+    </div>
+  );
+});
+
+const FleetCanvasResidentPanel = memo(function FleetCanvasResidentPanel({ active, repoPath }: { active: boolean; repoPath: string | null }) {
+  return (
+    <Suspense fallback={null}>
+      <LazyFleetCanvasTab active={active} repoPath={repoPath} />
+    </Suspense>
+  );
+});
+
+const TerminalResidentPanel = memo(function TerminalResidentPanel({
+  tmuxSession,
+  panelRefs,
+  sendTerminalAttach,
+  sendTerminalInput,
+  sendTerminalResize,
+  sendTerminalDetach,
+  active,
+}: {
+  tmuxSession: string;
+  panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
+  sendTerminalAttach: WorkspaceTerminalPanelsProps['sendTerminalAttach'];
+  sendTerminalInput: WorkspaceTerminalPanelsProps['sendTerminalInput'];
+  sendTerminalResize: WorkspaceTerminalPanelsProps['sendTerminalResize'];
+  sendTerminalDetach: WorkspaceTerminalPanelsProps['sendTerminalDetach'];
+  active: boolean;
+}) {
+  return (
+    <XtermPanel
+      ref={(handle) => {
+        if (handle) panelRefs.current.set(tmuxSession, handle);
+        else panelRefs.current.delete(tmuxSession);
+      }}
+      tmuxSession={tmuxSession}
+      sendTerminalAttach={sendTerminalAttach}
+      sendTerminalInput={sendTerminalInput}
+      sendTerminalResize={sendTerminalResize}
+      sendTerminalDetach={sendTerminalDetach}
+      visible={active}
+    />
+  );
+});
+
+const CanvasPanel = memo(function CanvasPanel({
   tab,
   active,
   onCloseTab,
@@ -397,9 +476,9 @@ function CanvasPanel({
       </Suspense>
     </div>
   );
-}
+});
 
-function PendingTerminalPanel({
+const PendingTerminalPanel = memo(function PendingTerminalPanel({
   tab,
   termWsConnected,
   active,
@@ -438,4 +517,4 @@ function PendingTerminalPanel({
       </div>
     </div>
   );
-}
+});

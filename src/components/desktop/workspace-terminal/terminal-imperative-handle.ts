@@ -50,6 +50,7 @@ export interface ImperativeHandleDeps {
   persistTabsNow: (currentTabs: TerminalTab[], currentActiveId: string) => void;
   sendTerminalDetach: (sessionName: string) => void;
   closeTabById: (tabId: string) => void;
+  recordTerminalActivity: (sessionName: string, timestamp?: number) => void;
 }
 
 export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabHandle {
@@ -57,9 +58,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     writeToTerminal: (sessionName, data) => {
       deps.panelRefs.current.get(sessionName)?.writeData(data);
       const now = Date.now();
-      deps.setTabs((previous) => previous.map((tab) => (
-        tab.tmuxSession === sessionName ? { ...tab, lastActivity: now } : tab
-      )));
+      deps.recordTerminalActivity(sessionName, now);
       if (deps.urlDetectionEnabledRef.current) {
         const newPreviews = detectLocalhostPreviews(data, sessionName, deps.tabsRef.current, deps.detectedPortsRef.current);
         for (const preview of newPreviews) {

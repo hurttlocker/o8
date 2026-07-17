@@ -801,6 +801,7 @@ function DashboardInner() {
         label?: string | null;
         tabId?: string | null;
         kind?: string | null;
+        tabs?: WorkspaceTabSummary[];
         finishedTabCount?: number;
         contextRailAvailable?: boolean;
         contextRailVisible?: boolean;
@@ -809,23 +810,36 @@ function DashboardInner() {
       const id = detail?.workspaceId;
       if (!id) return;
       setWorkspaceActiveMap((current) => {
-        const next = new Map(current);
         if (detail?.removed) {
+          if (!current.has(id)) return current;
+          const next = new Map(current);
           next.delete(id);
-        } else {
-          next.set(id, {
-            workspaceId: id,
-            label: detail?.label ?? null,
-            tabId: detail?.tabId ?? null,
-            kind: detail?.kind ?? null,
-            tabs: Array.isArray((detail as { tabs?: WorkspaceTabSummary[] })?.tabs)
-              ? (detail as { tabs?: WorkspaceTabSummary[] }).tabs ?? []
-              : [],
-            finishedTabCount: typeof detail?.finishedTabCount === 'number' ? detail.finishedTabCount : 0,
-            contextRailAvailable: Boolean(detail?.contextRailAvailable),
-            contextRailVisible: detail?.contextRailVisible !== false,
-          });
+          return next;
         }
+        const payload: WorkspaceActivePayload = {
+          workspaceId: id,
+          label: detail?.label ?? null,
+          tabId: detail?.tabId ?? null,
+          kind: detail?.kind ?? null,
+          tabs: Array.isArray(detail?.tabs) ? detail.tabs : [],
+          finishedTabCount: typeof detail?.finishedTabCount === 'number' ? detail.finishedTabCount : 0,
+          contextRailAvailable: Boolean(detail?.contextRailAvailable),
+          contextRailVisible: detail?.contextRailVisible !== false,
+        };
+        const previous = current.get(id);
+        const sameTabs = previous?.tabs.length === payload.tabs.length
+          && previous.tabs.every((tab, index) => {
+            const next = payload.tabs[index];
+            return tab.id === next?.id && tab.label === next.label && tab.kind === next.kind
+              && tab.runtime === next.runtime && tab.packetStatus === next.packetStatus
+              && tab.orchestratorThreadId === next.orchestratorThreadId;
+          });
+        if (previous && previous.label === payload.label && previous.tabId === payload.tabId
+          && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount
+          && previous.contextRailAvailable === payload.contextRailAvailable
+          && previous.contextRailVisible === payload.contextRailVisible && sameTabs) return current;
+        const next = new Map(current);
+        next.set(id, payload);
         return next;
       });
     };
