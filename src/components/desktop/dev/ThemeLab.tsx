@@ -35,6 +35,39 @@ const PRESETS: ReadonlyArray<{ label: string; hex: string }> = [
   { label: 'Warm', hex: '#211f1d' },
 ];
 
+// All-glass mode (Q 2026-07-17 v2: "we don't need tint — darkness and blur,
+// vibrancy"): glass is a MATERIAL, not a color. The real controls are the
+// macOS NSVisualEffectMaterial (each is a fixed blur/frost recipe — material
+// choice IS the blur dial; CSS backdrop-filter is dead in Tauri) and a
+// near-black darkness veil per surface group. Bake winners into
+// WORKSPACE_GLASS_OVERRIDES (theme/context.tsx) + the boot material.
+const GLASS_DARKNESS_GROUPS: ReadonlyArray<{ label: string; ids: string[] }> = [
+  { label: 'Workspace darkness (chat · canvas · terminal)', ids: ['--t-chat-surface-bg', '--t-canvas-bg', '--t-terminal-bg'] },
+  { label: 'Panel darkness', ids: ['--t-panel'] },
+];
+// The veil is always this near-black; only its alpha moves.
+const GLASS_VEIL_RGB = '13, 15, 19';
+// Mirrors set_canvas_material's accepted ids (src-tauri/lib.rs).
+const GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'default', label: 'Chrome' },
+  { id: 'hud', label: 'HUD' },
+  { id: 'under-window', label: 'Under' },
+  { id: 'sidebar', label: 'Sidebar' },
+  { id: 'popover', label: 'Popover' },
+  { id: 'menu', label: 'Menu' },
+  { id: 'sheet', label: 'Sheet' },
+  { id: 'window', label: 'Window' },
+  { id: 'fullscreen', label: 'Full' },
+  { id: 'none', label: 'Clear' },
+];
+
+function readVeilAlpha(token: string): number {
+  if (typeof document === 'undefined') return 35;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  const m = raw.match(/rgba?\([^)]*,\s*([\d.]+)\s*\)$/);
+  return m ? Math.round(Number(m[1]) * 100) : raw && raw !== 'transparent' ? 100 : 0;
+}
+
 type Hsl = { h: number; s: number; l: number };
 
 function hexToHsl(raw: string): Hsl | null {
@@ -73,11 +106,15 @@ function readTokenHsl(token: string): Hsl {
   return hexToHsl(raw) ?? { h: 216, s: 16, l: 12 };
 }
 
+
 export function ThemeLab() {
   const isDev = process.env.NODE_ENV === 'development';
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'solid' | 'glass'>('solid');
   const [tokenId, setTokenId] = useState(TOKENS[0].id);
   const [hsl, setHsl] = useState<Hsl>({ h: 216, s: 16, l: 12 });
+  const [darkness, setDarkness] = useState<number[]>(() => GLASS_DARKNESS_GROUPS.map(() => 35));
+  const [material, setMaterial] = useState('default');
   const [touched, setTouched] = useState<Set<string>>(() => new Set());
   const [copied, setCopied] = useState(false);
 
@@ -98,9 +135,12 @@ export function ThemeLab() {
     // rAF defer — reading computed style + setState synchronously inside the
     // effect trips the cascading-render lint; one frame later is identical
     // for a dev probe.
-    const raf = requestAnimationFrame(() => setHsl(readTokenHsl(tokenId)));
+    const raf = requestAnimationFrame(() => {
+      if (mode === 'glass') setDarkness(GLASS_DARKNESS_GROUPS.map((group) => readVeilAlpha(group.ids[0])));
+      else setHsl(readTokenHsl(tokenId));
+    });
     return () => cancelAnimationFrame(raf);
-  }, [open, tokenId]);
+  }, [open, tokenId, mode]);
 
   const hex = useMemo(() => hslToHex(hsl), [hsl]);
 
@@ -111,6 +151,33 @@ export function ThemeLab() {
     setCopied(false);
   }, [tokenId]);
 
+  const applyDarkness = useCallback((groupIdx: number, alpha: number) => {
+    setDarkness((prev) => prev.map((v, i) => (i === groupIdx ? alpha : v)));
+    const value = `rgba(${GLASS_VEIL_RGB}, ${(alpha / 100).toFixed(2)})`;
+    setTouched((prev) => {
+      const set = new Set(prev);
+      for (const id of GLASS_DARKNESS_GROUPS[groupIdx].ids) {
+        document.documentElement.style.setProperty(id, value);
+        set.add(id);
+      }
+      return set;
+    });
+    setCopied(false);
+  }, []);
+
+  const applyMaterial = useCallback((id: string) => {
+    setMaterial(id);
+    setCopied(false);
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_canvas_material', { material: id });
+      } catch (err) {
+        console.warn('[theme-lab] material swap failed:', err);
+      }
+    })();
+  }, []);
+
   const applyPreset = useCallback((presetHex: string) => {
     const parsed = hexToHsl(presetHex);
     if (parsed) apply(parsed);
@@ -119,13 +186,25 @@ export function ThemeLab() {
   const resetAll = useCallback(() => {
     for (const id of touched) document.documentElement.style.removeProperty(id);
     setTouched(new Set());
-    setHsl(readTokenHsl(tokenId));
+    if (mode === 'glass') {
+      setDarkness(GLASS_DARKNESS_GROUPS.map((group) => readVeilAlpha(group.ids[0])));
+      if (material !== 'default') applyMaterial('default');
+    } else {
+      setHsl(readTokenHsl(tokenId));
+    }
     setCopied(false);
-  }, [tokenId, touched]);
+  }, [tokenId, touched, mode, material, applyMaterial]);
 
   const copyValue = useCallback(() => {
-    void navigator.clipboard.writeText(`'${tokenId}': '${hex}',`).then(() => setCopied(true));
-  }, [hex, tokenId]);
+    const payload = mode === 'glass'
+      ? [
+          `// material: ${material}`,
+          ...GLASS_DARKNESS_GROUPS.flatMap((group, i) =>
+            group.ids.map((id) => `'${id}': 'rgba(${GLASS_VEIL_RGB}, ${(darkness[i] / 100).toFixed(2)})',`)),
+        ].join('\n')
+      : `'${tokenId}': '${hex}',`;
+    void navigator.clipboard.writeText(payload).then(() => setCopied(true));
+  }, [hex, tokenId, mode, material, darkness]);
 
   if (!isDev || !open || typeof document === 'undefined') return null;
 
@@ -166,6 +245,69 @@ export function ThemeLab() {
         <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', fontFamily: MONO }}>dev · ⌘⌃G</span>
       </div>
 
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+        {(['solid', 'glass'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => { setMode(m); setCopied(false); }}
+            style={{
+              flex: 1,
+              minHeight: 24,
+              borderRadius: 8,
+              border: '1px solid var(--t-divider-subtle)',
+              background: mode === m ? 'var(--t-hover)' : 'transparent',
+              color: mode === m ? 'var(--t-text)' : 'var(--t-text-muted)',
+              cursor: 'pointer',
+              fontFamily: FONT,
+              fontSize: 10,
+            }}
+          >
+            {m === 'solid' ? 'Solid tokens' : 'All-glass (rgba)'}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'glass' ? (
+        <>
+          <div style={{ fontSize: 9.5, letterSpacing: '0.05em', color: 'var(--t-text-faint)', marginBottom: 5, fontFamily: FONT }}>
+            BLUR · vibrancy material (fixed macOS recipes)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4, marginBottom: 10 }}>
+            {GLASS_MATERIALS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => applyMaterial(m.id)}
+                style={{
+                  minHeight: 24,
+                  borderRadius: 7,
+                  border: '1px solid var(--t-divider-subtle)',
+                  background: material === m.id ? 'var(--t-hover)' : 'transparent',
+                  color: material === m.id ? 'var(--t-text)' : 'var(--t-text-muted)',
+                  cursor: 'pointer',
+                  fontFamily: FONT,
+                  fontSize: 9,
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 9.5, letterSpacing: '0.05em', color: 'var(--t-text-faint)', marginBottom: 5, fontFamily: FONT }}>
+            DARKNESS · near-black veil alpha
+          </div>
+          <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+            {GLASS_DARKNESS_GROUPS.map((group, idx) => (
+              <div key={group.label} style={{ display: 'grid', gap: 3 }}>
+                <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: FONT }}>{group.label}</span>
+                {slider('D', darkness[idx] ?? 0, 100, (a) => applyDarkness(idx, a))}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+      <>
       <div style={{ display: 'grid', gap: 2, marginBottom: 10 }}>
         {TOKENS.map((token) => {
           const active = token.id === tokenId;
@@ -214,7 +356,10 @@ export function ThemeLab() {
         {slider('S', hsl.s, 100, (s) => apply({ ...hsl, s }))}
         {slider('L', hsl.l, 100, (l) => apply({ ...hsl, l }))}
       </div>
+      </>
+      )}
 
+      {mode === 'solid' ? (
       <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
         {PRESETS.map((preset) => (
           <button
@@ -242,9 +387,10 @@ export function ThemeLab() {
           </button>
         ))}
       </div>
+      ) : null}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <code style={{ flex: 1, fontFamily: MONO, fontSize: 10.5, color: 'var(--t-text)' }}>{hex}</code>
+        <code style={{ flex: 1, fontFamily: MONO, fontSize: 10.5, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mode === 'glass' ? `${material} · ${darkness.map((d) => `${d}%`).join(' / ')}` : hex}</code>
         <button
           type="button"
           onClick={copyValue}

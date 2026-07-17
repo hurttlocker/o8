@@ -95,10 +95,45 @@ const LEGACY_THEME_KEY = 'cortex-theme';
  * transparent = pure vibrancy, and when the operator tunes --t-bg with the
  * development sliders the center follows automatically.
  */
+/**
+ * ALL GLASS — the locked one-material contract (Q ruling 2026-07-17).
+ *
+ * All Glass is a MODE, not a playground: no adjusters, one recipe, permanent
+ * (Apple liquid-glass reference — the Tahoe Siri card). The entire window is
+ * ONE frosted vibrancy surface and text sits directly on the glass:
+ *
+ * - Every IN-FLOW surface paints NOTHING (transparent): workspace, panels,
+ *   chrome, canvas, terminal, timeline. The native material is the background.
+ * - INTERACTIVE affordances are faint white breaths (inputs, buttons, kbd) —
+ *   never grey slabs. Hover/card tokens already comply (0.04–0.05 whites).
+ * - STACKED overlays keep their dark frost (--t-panel-solid untouched):
+ *   popovers/menus/drawers stack over app content, and without CSS backdrop
+ *   blur (dead in Tauri) a transparent overlay would be unreadable.
+ */
 const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
-  '--t-chat-surface-bg': 'var(--t-bg)',
-  '--t-terminal-bg': 'var(--t-bg)',
-  '--t-canvas-bg': 'var(--t-bg)',
+  // One material — in-flow surfaces paint nothing.
+  '--t-chat-surface-bg': 'transparent',
+  '--t-terminal-bg': 'transparent',
+  '--t-canvas-bg': 'transparent',
+  '--t-panel': 'transparent',
+  '--t-panel-translucent': 'transparent',
+  '--t-bg-subtle': 'transparent',
+  '--t-timeline-bar': 'transparent',
+  // THE veil — the one thing all-glass paints window-wide (dashboard root
+  // consumes --t-bg-gradient full-bleed). Apple liquid glass (Siri card
+  // reference, matched by eye 2026-07-17): darkest where the text lives,
+  // then the veil OPENS toward the bottom and lets the blurred desktop
+  // bloom through — the dynamic range is what reads as liquid. Wins over
+  // applyThemeVars' Tauri passthrough force (overrides apply after it).
+  '--t-bg-gradient': 'linear-gradient(180deg, rgba(10, 12, 18, 0.78) 0%, rgba(10, 12, 18, 0.44) 55%, rgba(10, 12, 18, 0.06) 100%)',
+  // Faint white breaths — the only fills that exist on the glass.
+  '--t-input-bg': 'rgba(255, 255, 255, 0.06)',
+  '--t-search-bg': 'rgba(255, 255, 255, 0.06)',
+  '--t-btn-secondary-bg': 'rgba(255, 255, 255, 0.07)',
+  '--t-kbd-bg': 'rgba(255, 255, 255, 0.06)',
+  '--t-glass-elevated': 'rgba(255, 255, 255, 0.05)',
+  '--t-glass-muted': 'rgba(255, 255, 255, 0.04)',
+  '--t-glass-muted-strong': 'rgba(255, 255, 255, 0.06)',
 };
 
 function readWorkspaceGlass(): boolean {
@@ -397,19 +432,55 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Mount once without animation, then animate on every subsequent change.
   const mountedRef = useRef(false);
+  const prevWorkspaceGlassRef = useRef(false);
   useEffect(() => {
-    applyThemeVars(resolved, mountedRef.current);
     const root = document.documentElement;
+    if (!workspaceGlass) {
+      // Exit sweep BEFORE the palette re-applies: the all-glass overrides sit
+      // as inline-!important, and any key the target palette does NOT define
+      // would keep its sticky transparent value forever — the 2026-07-17
+      // "every other mode broke" residue bug. Remove-then-apply is airtight.
+      for (const key of Object.keys(WORKSPACE_GLASS_OVERRIDES)) {
+        root.style.removeProperty(key);
+      }
+      document.body.style.removeProperty('background');
+      delete root.dataset.workspaceGlass;
+      if (prevWorkspaceGlassRef.current) {
+        // One-time material restore when actually LEAVING all-glass — the
+        // FullScreenUI material must not linger under the other modes.
+        (window as unknown as { __TAURI_INTERNALS__?: { invoke?: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } })
+          .__TAURI_INTERNALS__?.invoke?.('set_canvas_material', { material: 'default' })
+          ?.catch(() => {});
+      }
+    }
+    applyThemeVars(resolved, mountedRef.current);
     if (workspaceGlass) {
       for (const [key, value] of Object.entries(WORKSPACE_GLASS_OVERRIDES)) {
-        root.style.setProperty(key, value);
+        // 'important': globals.css kills --t-bg-gradient with a stylesheet
+        // !important on dark+glass (which all-glass forces) — inline-important
+        // outranks it. Leaving the mode is safe: applyThemeVars' plain
+        // setProperty replaces the declaration, priority included.
+        root.style.setProperty(key, value, 'important');
       }
       root.dataset.workspaceGlass = 'true';
-    } else {
-      // applyThemeVars just rewrote the tokens from the palette, so only the
-      // marker attribute needs clearing.
-      delete root.dataset.workspaceGlass;
+      // THE veil paints on BODY (red-flash-proven 2026-07-17): every in-flow
+      // div is vibrancy-passthrough (background force-erased !important), so
+      // the --t-bg-gradient token never reaches pixels — body is the one
+      // surface between the passthrough tree and the native material.
+      document.body.style.setProperty(
+        'background',
+        WORKSPACE_GLASS_OVERRIDES['--t-bg-gradient'],
+        'important',
+      );
+      // All-glass material (bake-off 2026-07-17, display-capture compared):
+      // FullScreenUI melts the desktop into structureless color fields — the
+      // Apple liquid look. The per-OS chrome material stays for regular glass;
+      // applyThemeVars re-asserts it when this mode exits.
+      (window as unknown as { __TAURI_INTERNALS__?: { invoke?: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } })
+        .__TAURI_INTERNALS__?.invoke?.('set_canvas_material', { material: 'fullscreen' })
+        ?.catch(() => {});
     }
+    prevWorkspaceGlassRef.current = workspaceGlass;
     mountedRef.current = true;
   }, [resolved, workspaceGlass]);
 
