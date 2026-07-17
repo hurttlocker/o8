@@ -86,6 +86,10 @@ export function TunerPanel({
   full?: boolean;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Experimental fold (Q 2026-07-17): the default tuner is JUST the standard
+  // trio — everything founder-fancy (Looks, dials, depth, advanced) lives
+  // behind one professional "Experimental" disclosure.
+  const [experimentalOpen, setExperimentalOpen] = useState(false);
 
   return (
     <motion.div
@@ -116,23 +120,14 @@ export function TunerPanel({
       {/* Appearance — the master. One switch flips the whole canvas: the
           background, every pane, the dock, chats, and the modals, plus the
           text seed. Light is a true white canvas, not light panes on dark. */}
+      {/* Appearance = the STANDARD trio for everyone (Q 2026-07-17): Dark
+          lands the opaque graphite matching the IDE's dark-solid, Light lands
+          paper, Glass lands the locked ALL GLASS recipe — applied wholesale.
+          The old founders-only tone flip (veil 0.3) read as a second faded
+          glass after any translucent look. Founders diverge via Looks/dials. */}
       <span style={SECTION_LABEL}>Appearance</span>
       <div style={{ display: 'flex', gap: 5 }}>
-        {full ? CANVAS_GLASS_TONES.map((tone) => (
-          <PresetPill
-            key={tone.id}
-            label={tone.label}
-            grow
-            active={settings.tone === tone.id}
-            onClick={() => onChange({
-              tone: tone.id,
-              textShade: defaultTextShadeForTone(tone.id),
-              veil: tone.id === 'light' ? 1 : 0.3,
-            })}
-          />
-        )) : CANVAS_FREE_LOOKS.map((look) => (
-          // Free tier (Q 2026-07-17): three fixed looks — Dark / Light /
-          // Glass (the locked ALL GLASS recipe) — applied wholesale.
+        {CANVAS_FREE_LOOKS.map((look) => (
           <PresetPill
             key={look.id}
             label={look.label}
@@ -149,7 +144,20 @@ export function TunerPanel({
         </span>
       ) : null}
 
-      {full ? (<>
+      {full ? (
+        <button
+          type="button"
+          onClick={() => setExperimentalOpen((value) => !value)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, borderWidth: 0, background: 'transparent', paddingTop: 2, paddingBottom: 2, paddingLeft: 0, paddingRight: 0, cursor: 'pointer', fontFamily: FONT }}
+        >
+          <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth={3} aria-hidden style={{ transform: experimentalOpen ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}>
+            <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span style={SECTION_LABEL}>Experimental</span>
+        </button>
+      ) : null}
+
+      {full && experimentalOpen ? (<>
       {/* Looks — curated full-combo presets, plus the operator's saved Custom. */}
       <span style={SECTION_LABEL}>Looks</span>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
