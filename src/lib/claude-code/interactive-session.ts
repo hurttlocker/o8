@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -368,6 +369,15 @@ function spawnSession(
   resumeSessionId?: string | null,
 ): InternalClaudeCodeInteractiveSession {
   const normalizedResumeSessionId = normalizeResumeSessionId(resumeSessionId);
+  // Node's spawn reports a missing WORKING DIRECTORY as "spawn <binary>
+  // ENOENT" — preflight the cwd so a moved/deleted repo folder fails with
+  // the truth instead of implicating a healthy claude install (FKAR3B).
+  if (!existsSync(cwd)) {
+    throw new Error(
+      `This chat's repo folder no longer exists at ${cwd} — it may have been moved or deleted. `
+      + 'Re-add the repo or fix its path, then start a new session.',
+    );
+  }
   const proc = spawn(claudeCodeBin(), buildClaudeStreamJsonArgs(model, permissionMode, normalizedResumeSessionId), {
     cwd,
     env: {

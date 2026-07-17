@@ -871,6 +871,17 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     stderrFd = openAppendFile(crashRecord.stderrPath);
   }
 
+  // Preflight the cwd (Sydney, FKAR3B/6JWBVV 2026-07-17): Node's spawn throws
+  // ENOENT when the WORKING DIRECTORY is missing, but its message names the
+  // BINARY — "spawn …/claude ENOENT" — which sent a whole debugging round
+  // chasing a healthy claude install while the real fault was a repo folder
+  // the operator had moved or deleted. Fail with the truth instead.
+  if (session.repoPath && !existsSync(session.repoPath)) {
+    throw new Error(
+      `This chat's repo folder no longer exists at ${session.repoPath} — it may have been moved or deleted. `
+      + 'Re-add the repo (or point its project at the new location in Settings → Projects), then start a new session.',
+    );
+  }
   const proc = spawn(resolveClaudeBin(), args, {
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
