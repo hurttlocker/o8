@@ -20,6 +20,7 @@ interface LaneLifecycleDetailData extends LaneLifecyclePayload {
 interface UseOrchestratorStatusFeedOptions {
   active: boolean;
   repoPath: string | null;
+  threadId: string | null;
   missionPackets: OrchestratorPacket[];
   appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
 }
@@ -40,12 +41,14 @@ interface UseOrchestratorStatusFeedOptions {
 export function useOrchestratorStatusFeed({
   active,
   repoPath,
+  threadId,
   missionPackets,
   appendLocalEntries,
 }: UseOrchestratorStatusFeedOptions) {
   const packetsRef = useRef(missionPackets);
   const appendRef = useRef(appendLocalEntries);
   const repoRef = useRef(repoPath);
+  const threadRef = useRef(threadId);
   const seenRef = useRef<Set<string>>(new Set());
 
   // Keep the latest values in refs (updated in an effect, not during render)
@@ -55,6 +58,7 @@ export function useOrchestratorStatusFeed({
     packetsRef.current = missionPackets;
     appendRef.current = appendLocalEntries;
     repoRef.current = repoPath;
+    threadRef.current = threadId;
   });
 
   // Surface Mission-complete cards recorded by the detector. The detector
@@ -63,13 +67,13 @@ export function useOrchestratorStatusFeed({
   useEffect(() => {
     if (!active) return undefined;
     const assert = () => {
-      const cards = getPendingMissionCards(repoRef.current);
+      const cards = getPendingMissionCards(repoRef.current, threadRef.current);
       if (cards.length > 0) appendRef.current(cards);
     };
     assert();
     window.addEventListener(MISSION_CARD_READY_EVENT, assert);
     return () => window.removeEventListener(MISSION_CARD_READY_EVENT, assert);
-  }, [active]);
+  }, [active, repoPath, threadId]);
 
   // Per-packet merge / self-heal cards.
   useEffect(() => {
