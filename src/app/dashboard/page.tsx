@@ -4988,6 +4988,9 @@ function DashboardInner() {
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
             onToggleSidebar={toggleSidebarFromChrome}
+            // Solid: the strip renders inside the floating card and must be
+            // the same continuous tone (Claude-desktop float, Q 2026-07-17).
+            inCard={!effectiveGlassSurface}
           />
         );
         const leftContent = (
@@ -5029,17 +5032,17 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Left DOCK (Q ruling 2026-07-16): flush to the window's left edge
-            // AND bottom (the status bar no longer runs under this column) —
-            // buffer only on top + right. Left-side + bottom-right corners are
-            // hard; the window's own corner mask shapes the bottom-left, and
-            // only the top-right keeps the card curve. The header strips
-            // compensate the lost 5px lead-in via TrafficLightsOrSpacer
-            // leadInPx so the lights cluster keeps its window-x.
-            paddingTop: 5,
-            paddingLeft: 0,
+            // Claude-desktop float (Q ruling 2026-07-17, supersedes the 07-16
+            // flush dock): in SOLID surfaces the sidebar is a floating inset
+            // card — 4px of window-backdrop air on left, top, AND bottom, all
+            // four corners rounded — lights in its top, account row in its
+            // bottom, so everything right of it reads as the workspace. GLASS
+            // keeps the transparent-chrome treatment (chrome paints nothing;
+            // a floating opaque card would break glass-panel parity).
+            paddingTop: effectiveGlassSurface ? 5 : 4,
+            paddingLeft: effectiveGlassSurface ? 0 : 4,
             paddingRight: 5,
-            paddingBottom: 0,
+            paddingBottom: effectiveGlassSurface ? 0 : 4,
           }}
         >
           {effectiveGlassSurface ? (
@@ -5080,12 +5083,16 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                // Dock corners (Q ruling 2026-07-16): flush left + flush
-                // bottom → hard everywhere except the top-right card curve.
-                borderTopLeftRadius: 0,
+                // Claude-desktop float (Q 2026-07-17): the card never touches
+                // a window edge, so all four corners carry the same curve. The
+                // hairline is load-bearing — card and backdrop are near-equal
+                // tones, so without it the 4px air is invisible and the float
+                // reads flush.
+                borderTopLeftRadius: 14,
                 borderTopRightRadius: 14,
-                borderBottomLeftRadius: 0,
-                borderBottomRightRadius: 0,
+                borderBottomLeftRadius: 14,
+                borderBottomRightRadius: 14,
+                border: '1px solid var(--t-divider-subtle)',
                 background: 'var(--t-panel-solid)',
                 // Flat by operator ruling (2026-07-13) — the in-column rail is
                 // not a floating surface; a drop shadow read as a seam against
