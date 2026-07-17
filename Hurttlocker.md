@@ -315,6 +315,50 @@ This file captures what got *locked*. The roadmap below is what's *open* — the
 
 ---
 
+## Sidebar float — LOCKED 2026-07-17 (Claude-desktop card, solid surfaces)
+
+Q ruling 2026-07-17 (supersedes the 2026-07-16 flush dock). In **solid** surfaces the left sidebar is a floating inset card, Claude-Desktop style. Glass surfaces keep the transparent-chrome treatment (chrome paints nothing) — this section is solid-only.
+
+- **Float air**: 4px window-backdrop gap on **left, top, and bottom**; 5px on the right (workspace side). The card never touches a window edge.
+- **Corners**: 14px radius on **all four** corners.
+- **Hairline**: `1px solid var(--t-divider-subtle)` on the card. Load-bearing — card tone ≈ backdrop tone, so the hairline is what makes the float read. Q ruling: keep the contrast **very faint** — do NOT darken the backdrop or whiten the card to chase Claude's stronger separation.
+- **One continuous tone**: the header strip (traffic lights + toggle) renders INSIDE the card with `background: transparent` and **no bottom hairline** (`LeftHeaderStrip inCard` prop). No chrome band, no seam — the card is one surface from lights to account row.
+- **No drop shadow** (2026-07-13 ruling still applies — elevation on true overlays only).
+- Implementation: `dashboard/page.tsx` sidebar column (conditional padding on `effectiveGlassSurface`), `shell/LeftHeaderStrip.tsx` (`inCard`), `shell/ColumnHeaderStrip.tsx` (style spread wins).
+
+---
+
+## ALL GLASS — LOCKED 2026-07-17 (one-material mode, Q-approved by eye)
+
+All Glass is a MODE, not a playground: one recipe, zero user adjusters, permanent (Apple liquid-glass reference). Implementation: `src/lib/theme/context.tsx` WORKSPACE_GLASS_OVERRIDES + the workspace-glass effect.
+
+- **One material**: every in-flow surface transparent (workspace, panels, chrome, canvas, terminal, timeline). Native vibrancy IS the background; text sits directly on glass.
+- **Material**: `FullScreenUI` (display-capture bake-off winner — melts the desktop into structureless color; Sheet was flat, per-OS chrome material was grey murk). Asserted on mode entry; per-OS chrome material restored on exit.
+- **THE veil** (the one painted thing, window-wide): `linear-gradient(180deg, rgba(10,12,18,0.78) 0%, rgba(10,12,18,0.44) 55%, rgba(10,12,18,0.06) 100%)` — dark where ink lives, opens to bloom at the bottom. **Paints on `body`** — every in-flow div is vibrancy-passthrough (background force-erased `!important`), body is the only surface between the passthrough tree and the material. Red-flash-proven.
+- **Faint white breaths** are the only fills: inputs/search/kbd 6%, secondary buttons 7%, glass-elevated 5%, hover/card stay at their 4–5% palette values.
+- **Stacked overlays keep dark frost** (`--t-panel-solid` untouched): popovers/menus/drawers sit over app content and CSS backdrop-blur is dead in Tauri — transparent overlays would be text-on-text. This is the deliberate divergence from Apple (their overlays are separate OS windows with real blur).
+- **Exit sweep**: overrides apply with inline-`important` (a globals.css `!important` kills the gradient otherwise) and are force-removed BEFORE the target palette repaints on exit — the residue class that broke every other mode on 07-17 must never return.
+- **Dev-loop law**: theme-contract edits need a hard reload (HMR does not re-run the theme effect), and never judge glass through window captures (they kill live backdrop sampling — display captures only).
+
+## Composer clusters + "+" switcher — LOCKED 2026-07-17
+
+- **Left cluster = intent**: `+` (attach & mode switcher) · mode chip · mic. **Right cluster = runtime**: context meter · model · thinking · send. Nothing crosses sides.
+- **Modes** (the + menu's top section): Solo / Multitask / Mixture of Agents — Q's exact semantics: Solo = the orchestrator dispatches NOTHING (works with its own tools); Multitask = dispatches parallel worker packets; MoA = plans with both frontier models (flips the Collide backend, synced both ways with any other MoA control) then dispatches. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
+- **Chip**: always visible beside `+`; Solo renders faint (default stays quiet), active modes render accent; click reopens the switcher; title = mode description.
+- **Placeholder teaches the mode** (Cursor borrow) — rewritten per mode, no extra chrome.
+- **The model picker is models + thinking ONLY** — its Mode section is deleted; never reintroduce intent controls there.
+- **Popover recipe** (the locked composer-menu style): 240px drawer, flat single-line rows 26px (radius 7, 12.5px label, check right), ONE faint caption line (fixed height, hover-follows) instead of per-row sublabels, flat rows for actions — never bordered input-bubbles.
+
+## Free theme trio — LOCKED 2026-07-17 (ships with free/OSS)
+
+Light / Dark / Glass mean the SAME thing on both surfaces (IDE + Canvas). Canvas founders keep the full Looks shelf (o8/Slate/Paper/Clear/Frost/Glass) on top.
+
+- **Light** = cream paper, dark ink (IDE light-solid ↔ canvas Paper-light).
+- **Dark** = opaque graphite (IDE dark-solid ↔ canvas free Dark: veil 0.95 window material — NOT the old translucent 0.3 that read as a second glass).
+- **Glass** = the All Glass recipe (IDE mode ↔ canvas `glass` preset: fullscreen material, veil 0.45 flat-wash translation, tint 0.10). Free Glass has no adjusters — it IS the locked mode. Boot clamp maps stored settings via `canvasFreeLookIdFor` so free Glass survives relaunch.
+
+---
+
 ## Why this file exists
 
 The operator asked for it on 2026-05-25 after dialing in the chat-row typography pass: *"we need to lock this style and font in to a new style sheet we will build from scratch later on … hold valuable information about the next level of theming."*
