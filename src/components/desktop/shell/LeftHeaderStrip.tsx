@@ -21,12 +21,21 @@ interface LeftHeaderStripProps {
    * WorkspaceHeaderStrip pill when the sidebar collapses.
    */
   togglePillYNudge?: number;
+  /**
+   * True when the strip renders INSIDE the solid floating sidebar card
+   * (Claude-desktop float, Q 2026-07-17): the card is one continuous tone
+   * from its very top, so the strip paints transparent with no bottom
+   * hairline instead of the chrome band + seam.
+   */
+  inCard?: boolean;
 }
 
-export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge }: LeftHeaderStripProps) {
+export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge, inCard = false }: LeftHeaderStripProps) {
   return (
     <ColumnHeaderStrip
       drag
+      bottomHairline={!inCard}
+      style={inCard ? { background: 'transparent' } : undefined}
       // Strip height 32 — the toggle pill centers at ~y=20. The traffic
       // lights center on the same line: tao's inset semantics are
       // center = (buttonHeight + y) / 2 (bitmap-verified 2026-07-15: y=15
