@@ -186,22 +186,54 @@ export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; va
   { id: 'paper', label: 'Paper', values: { frost: 22, tint: 0.5, ink: 0.95, vibrance: 1.4, veil: 0.9, material: 'window', backdropFrost: 0, backdrop: 'none', chatFrost: 30, chatTint: 0.62, tone: 'light', chatTone: 'match', dockTone: 'match', dockTint: 0.9, textShade: 0.86 } },
   { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none', chatFrost: 20, chatTint: 0.38, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0, textShade: 0.04 } },
   { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.5, textShade: 0.04 } },
+  // Glass — the locked ALL GLASS recipe from the IDE side (Q 2026-07-17),
+  // translated to canvas vocabulary: FullScreenUI material (the bake-off
+  // winner that melts the desktop into structureless color), a mid veil
+  // standing in for the IDE's 0.78→0.06 gradient, minimal card tint so the
+  // one-material feel carries, near-white ink. Free tier gets this look.
+  { id: 'glass', label: 'Glass', values: { frost: 18, tint: 0.1, ink: 0.96, vibrance: 1.8, veil: 0.45, material: 'fullscreen', backdropFrost: 0, backdrop: 'none', chatFrost: 30, chatTint: 0.5, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.45, textShade: 0.04 } },
 ];
 
 /**
- * The free-tier canvas looks (operator, 2026-07-06): free users get Paper
- * only — it's the look where text reads right — in light or dark. Everything
- * else (other looks, depth, dials, advanced) is founders territory.
+ * The free-tier canvas looks (operator 2026-07-06, extended 2026-07-17):
+ * free users get three fixed looks — Paper in light or dark, plus Glass
+ * (the locked ALL GLASS recipe). Everything else (other looks, depth,
+ * dials, advanced) is founders territory.
  */
-export function canvasFreeLook(tone: CanvasGlassSettings['tone']): CanvasGlassSettings {
+export type CanvasFreeLookId = 'light' | 'dark' | 'glass';
+
+export const CANVAS_FREE_LOOKS: ReadonlyArray<{ id: CanvasFreeLookId; label: string }> = [
+  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Light' },
+  { id: 'glass', label: 'Glass' },
+];
+
+export function canvasFreeLook(look: CanvasFreeLookId): CanvasGlassSettings {
+  if (look === 'glass') {
+    return { ...CANVAS_GLASS_PRESETS.find((p) => p.id === 'glass')!.values };
+  }
   const paper = CANVAS_GLASS_PRESETS.find((p) => p.id === 'paper')!.values;
-  if (tone === 'light') return { ...paper };
+  if (look === 'light') return { ...paper };
+  // Free Dark matches the IDE's dark-solid graphite (Q 2026-07-17: the three
+  // shipping looks mean the SAME thing on both surfaces) — near-opaque dark
+  // wash, not the old translucent 0.3 veil that read as a second glass mode.
   return {
     ...paper,
     tone: 'dark',
     textShade: defaultTextShadeForTone('dark'),
-    veil: 0.3,
+    veil: 0.95,
+    tint: 0.5,
+    chatTint: 0.55,
+    dockTint: 0.95,
   };
+}
+
+/** Which free look a stored settings blob corresponds to — the boot clamp
+ *  uses this so a free user's saved Glass survives a relaunch instead of
+ *  snapping back to Paper. Glass is tone-dark, so material is the marker. */
+export function canvasFreeLookIdFor(settings: Pick<CanvasGlassSettings, 'tone' | 'material'>): CanvasFreeLookId {
+  if (settings.material === 'fullscreen') return 'glass';
+  return settings.tone === 'light' ? 'light' : 'dark';
 }
 
 const STORAGE_KEY = 'o8:canvas-glass';

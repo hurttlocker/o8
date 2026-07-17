@@ -21,6 +21,8 @@ import {
   CANVAS_GLASS_RANGES,
   CANVAS_GLASS_TONES,
   canvasFreeLook,
+  canvasFreeLookIdFor,
+  CANVAS_FREE_LOOKS,
   defaultTextShadeForTone,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
@@ -116,20 +118,27 @@ export function TunerPanel({
           text seed. Light is a true white canvas, not light panes on dark. */}
       <span style={SECTION_LABEL}>Appearance</span>
       <div style={{ display: 'flex', gap: 5 }}>
-        {CANVAS_GLASS_TONES.map((tone) => (
+        {full ? CANVAS_GLASS_TONES.map((tone) => (
           <PresetPill
             key={tone.id}
             label={tone.label}
             grow
             active={settings.tone === tone.id}
-            onClick={() => onChange(full
-              ? {
-                tone: tone.id,
-                textShade: defaultTextShadeForTone(tone.id),
-                veil: tone.id === 'light' ? 1 : 0.3,
-              }
-              // Free tier: tone flips move between the two Paper looks wholesale.
-              : { ...canvasFreeLook(tone.id) })}
+            onClick={() => onChange({
+              tone: tone.id,
+              textShade: defaultTextShadeForTone(tone.id),
+              veil: tone.id === 'light' ? 1 : 0.3,
+            })}
+          />
+        )) : CANVAS_FREE_LOOKS.map((look) => (
+          // Free tier (Q 2026-07-17): three fixed looks — Dark / Light /
+          // Glass (the locked ALL GLASS recipe) — applied wholesale.
+          <PresetPill
+            key={look.id}
+            label={look.label}
+            grow
+            active={canvasFreeLookIdFor(settings) === look.id}
+            onClick={() => onChange({ ...canvasFreeLook(look.id) })}
           />
         ))}
       </div>
