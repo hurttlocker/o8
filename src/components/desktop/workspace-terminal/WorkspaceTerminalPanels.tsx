@@ -84,8 +84,25 @@ function WorkspaceTerminalPanelsBase({
   useEffect(() => {
     if (visibleTabs.length > 0) hasEverHadTabsRef.current = true;
   }, [visibleTabs.length]);
+  // Boot claim while the tab restore is UNSETTLED — even when default tabs
+  // already render. The boot restore re-runs when the repo registry hydrates
+  // late (restoreKey flips 'no-repo' → repo), and without this hold the
+  // splash revealed the default tabs at ~10s and the real restored tabs
+  // popped into the strip ~6s later (prod boot recording 2026-07-17). After
+  // the boot latch a mid-session restoreKey flip claims into a no-op, so
+  // repo switches never re-summon the splash. Fail-open cap mirrors the
+  // EmptyWorkspaceState grace so a restore that never settles can't hold
+  // boot hostage.
+  const [restoreHoldExpired, setRestoreHoldExpired] = useState(false);
+  useEffect(() => {
+    if (restoreSettled) return;
+    setRestoreHoldExpired(false);
+    const timer = window.setTimeout(() => setRestoreHoldExpired(true), 15000);
+    return () => window.clearTimeout(timer);
+  }, [restoreSettled]);
   return (
     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
+      {!restoreSettled && !restoreHoldExpired ? <WorkspaceBootLoaderClaim /> : null}
       {visibleTabs.map((tab) => (
         tab.kind === 'orchestrator' ? (
           <OrchestratorResidentPanel
