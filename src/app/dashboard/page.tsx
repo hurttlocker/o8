@@ -67,7 +67,7 @@ import { startWebVitalsObserver } from '@/lib/perf/web-vitals';
 import {
   subscribeO8PanelFocus,
 } from '@/lib/events/o8-panel-focus';
-import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { fetchOnce, fetchSWRJson } from '@/lib/panel/fetch-cache';
 import { safeCancelIdleCallback, safeRequestIdleCallback } from '@/lib/util/webview-safe';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -3890,9 +3890,8 @@ function DashboardInner() {
   const { data: domainLanesRaw } = useReactiveQuery<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null; branch?: string; repoPath?: string; label?: string }> }>({
     queryKey: ['lanes', 'active'],
     queryFn: async () => {
-      const res = await fetchOnce('/api/lanes?active=true');
-      if (!res.ok) return { lanes: [] };
-      return await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null; branch?: string; repoPath?: string; label?: string }> };
+      return await fetchSWRJson<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null; branch?: string; repoPath?: string; label?: string }> }>('lanes:active', '/api/lanes?active=true')
+        .catch(() => ({ lanes: [] }));
     },
     wsEvents: ['lane-lifecycle', 'agent-lifecycle'],
     staleTime: 10_000,

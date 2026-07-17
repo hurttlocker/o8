@@ -3,6 +3,80 @@ import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 const inflight = new Map<string, { promise: Promise<Response>; timestamp: number }>();
 const DEDUP_WINDOW_MS = 150;
 
+interface SwrEntry<T> {
+  data?: T;
+  promise?: Promise<T>;
+}
+
+const swrEntries = new Map<string, SwrEntry<unknown>>();
+const swrListeners = new Map<string, Set<() => void>>();
+
+function notifySWR(key: string) {
+  swrListeners.get(key)?.forEach((listener) => listener());
+}
+
+/** Returns the last known value synchronously while a single background refresh runs. */
+export function getSWR<T>(key: string): { data?: T; stale: boolean } {
+  const entry = swrEntries.get(key) as SwrEntry<T> | undefined;
+  return { data: entry?.data, stale: Boolean(entry?.promise) || !entry?.data };
+}
+
+export function refreshSWR<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const entry = (swrEntries.get(key) ?? {}) as SwrEntry<T>;
+  if (entry.promise) return entry.promise;
+  entry.promise = fetcher()
+    .then((data) => {
+      entry.data = data;
+      return data;
+    })
+    .finally(() => {
+      entry.promise = undefined;
+      swrEntries.set(key, entry);
+      notifySWR(key);
+    });
+  swrEntries.set(key, entry);
+  return entry.promise;
+}
+
+export function fetchSWRJson<T>(key: string, url: string, init?: RequestInit): Promise<T> {
+  return refreshSWR(key, async () => {
+    const response = await fetchOnce(url, init);
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return response.json() as Promise<T>;
+  });
+}
+
+export function subscribeSWR(key: string, listener: () => void): () => void {
+  const listeners = swrListeners.get(key) ?? new Set<() => void>();
+  listeners.add(listener);
+  swrListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) swrListeners.delete(key);
+  };
+}
+
+/** Remove matching snapshots after mutations or lifecycle reconciliation. */
+export function invalidateSWR(...keys: string[]): void {
+  for (const key of keys) {
+    for (const cachedKey of swrEntries.keys()) {
+      if (cachedKey === key || cachedKey.startsWith(`${key}:`)) {
+        swrEntries.delete(cachedKey);
+        notifySWR(cachedKey);
+      }
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('o8:lifecycle-reconcile', () => invalidateSWR('panel:repos', 'panel:workspaces', 'lanes'));
+  window.addEventListener('o8:repos-changed', () => invalidateSWR('panel:repos'));
+  window.addEventListener('o8:invalidate', (event) => {
+    const queryKey = (event as CustomEvent).detail?.queryKey as string[] | undefined;
+    if (queryKey?.length) invalidateSWR(queryKey.join(':'));
+  });
+}
+
 export async function fetchOnce(url: string, init?: RequestInit): Promise<Response> {
   const method = init?.method || 'GET';
   if (method !== 'GET') return fetch(url, init);

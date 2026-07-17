@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
 import type { PrDetail, PrDetailResponse } from './types';
 
 interface UsePrDetailResult {
@@ -37,25 +38,34 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null): 
     const repoQuery = repoSlug ? `?repo=${encodeURIComponent(repoSlug)}` : '';
     const url = `/api/panel/prs/${prNumber}${repoQuery}`;
 
+    const key = `pr-detail:${repoSlug ?? ''}:${prNumber}`;
+    const fetchDetail = async () => {
+      const res = await fetch(url);
+      const data = await res.json() as PrDetailResponse & { error?: string };
+      if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+      return data.pr;
+    };
+    const applySnapshot = () => {
+      const snapshot = getSWR<PrDetail>(key);
+      if (snapshot.data) setDetail(snapshot.data);
+      setLoading(!snapshot.data && snapshot.stale);
+    };
     async function fetchOnce() {
       try {
-        const res = await fetch(url);
-        const data = await res.json() as PrDetailResponse & { error?: string };
+        await refreshSWR(key, fetchDetail);
         if (!active) return;
-        if (!res.ok) {
-          throw new Error(data.error || `Request failed: ${res.status}`);
-        }
-        setDetail(data.pr);
+        applySnapshot();
         setError(null);
       } catch (err) {
         if (!active) return;
         setError(err instanceof Error ? err.message : 'Failed to load PR');
-      } finally {
-        if (active) setLoading(false);
       }
     }
 
-    setLoading(true);
+    applySnapshot();
+    const unsubscribe = subscribeSWR(key, () => {
+      if (active) applySnapshot();
+    });
     void fetchOnce();
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -73,6 +83,7 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null): 
 
     return () => {
       active = false;
+      unsubscribe();
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [prNumber, repoSlug, reloadNonce]);
