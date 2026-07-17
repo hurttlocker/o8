@@ -173,7 +173,7 @@ export function useAgentPanelState({
       if (!inventoryLoadedRef.current) setInventoryLoading(true);
       try {
         const [inventoryResponse, workspacesResponse, reposResponse] = await Promise.all([
-          fetch('/api/runtime/inventory').catch(() => null),
+          fetchOnce('/api/runtime/inventory').catch(() => null),
           fetchOnce('/api/panel/workspaces').catch(() => null),
           fetchOnce('/api/panel/repos').catch(() => null),
         ]);

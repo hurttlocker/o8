@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 
 /** Window-level broadcast so every useProjects instance refreshes after any
  *  mutation (the palette + the AgentPanel + any future surface). Lets us
@@ -63,7 +64,7 @@ export function useProjects(): UseProjectsResult {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/panel/projects');
+      const res = await fetchOnce('/api/panel/projects');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
       // Don't broadcast on refresh — that would feed back into every other

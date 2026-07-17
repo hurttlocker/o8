@@ -89,8 +89,19 @@ export async function fetchOnce(url: string, init?: RequestInit): Promise<Respon
   const method = init?.method || 'GET';
   if (method !== 'GET') return fetch(url, init);
 
+  // Join an identical GET for its WHOLE in-flight duration, not just a 150ms
+  // start window. During the boot storm the same URL is requested repeatedly
+  // over several seconds (inventory ×4 spread across 2-7s) while the first
+  // request is still on the wire — the old timestamp check let every one of
+  // them open a NEW socket, starving the webview's per-host pool (measured
+  // 8-9.5s pure queue stall on trivial routes, prod boot 2026-07-17). The
+  // settle timeout below still bounds the post-completion dedup tail to
+  // DEDUP_WINDOW_MS, so a deliberate refetch after a mutation stays fresh.
+  // Age cap: a wedged request must not trap every future GET of its URL in a
+  // dead join — after 20s, later callers start a fresh request (which also
+  // replaces the map entry).
   const existing = inflight.get(url);
-  if (existing && Date.now() - existing.timestamp < DEDUP_WINDOW_MS) {
+  if (existing && Date.now() - existing.timestamp < 20000) {
     return existing.promise.then((response) => response.clone());
   }
 
