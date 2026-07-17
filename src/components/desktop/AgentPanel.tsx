@@ -163,8 +163,27 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   }, [activeProjectId, leftPanelFocus, onSelectRepo]);
   const effectiveTitlebarSpacerHeight = Math.min(titlebarSpacerHeight, 10);
   const handleCreateOrchestrator = useCallback(() => {
+    // #1572: the global New session must inherit what the rail is looking at.
+    // Spawning repo-less fell back to the last-used workspace — with another
+    // project selected in the rail, the thread bound to the WRONG repo and a
+    // "build this" turn dispatched a worker into it before the tiny breadcrumb
+    // gave the mismatch away. Prefer the rail's selected repo, then the active
+    // project's first repo; only a truly project-less rail spawns unbound.
+    const selectedRepo = leftPanelFocus.view?.selectedRepo ?? null;
+    const target = (selectedRepo && activeProjectRepoSet?.has(selectedRepo.localPath) ? selectedRepo : null)
+      ?? activeProjectReposForChats[0]
+      ?? null;
+    if (target) {
+      onCreateWorkspaceOrchestrator?.({
+        name: target.name,
+        localPath: target.localPath,
+        remoteUrl: target.remoteUrl ?? undefined,
+        branch: target.defaultBranch ?? null,
+      });
+      return;
+    }
     onCreateWorkspaceOrchestrator?.();
-  }, [onCreateWorkspaceOrchestrator]);
+  }, [onCreateWorkspaceOrchestrator, leftPanelFocus.view, activeProjectRepoSet, activeProjectReposForChats]);
   // Repo-header [+] — spawn a fresh orchestrator bound to that repo
   // (Cursor's contextual New Agent pattern).
   const handleCreateOrchestratorForRepo = useCallback((repo: RepoFocusRepo) => {
