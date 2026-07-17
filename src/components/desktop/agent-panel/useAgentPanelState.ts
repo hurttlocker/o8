@@ -308,7 +308,7 @@ export function useAgentPanelState({
     void fetchAll();
     // WS-driven: instant refresh on agent/lane events instead of 60-120s polling
     const handler = () => { fetchNowRef.current?.(); };
-    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchAll, 300_000); // 5min resilience fallback
     return () => {
@@ -368,7 +368,7 @@ export function useAgentPanelState({
     void fetchCommits();
     // WS-driven: refresh on agent events (agents produce commits)
     const handler = () => { void fetchCommits(); };
-    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchCommits, 300_000);
     return () => {
@@ -405,7 +405,7 @@ export function useAgentPanelState({
     void fetchGitHub();
     // WS-driven: refresh on lane events (lanes create PRs/issues)
     const handler = () => { void fetchGitHub(); };
-    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchGitHub, 300_000);
     return () => {

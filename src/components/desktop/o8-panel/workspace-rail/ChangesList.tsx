@@ -127,7 +127,7 @@ export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesS
     if (!repoPath) return;
 
     const handler = () => { void refresh(); };
-    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const eventName of wsEvents) window.addEventListener(eventName, handler);
     const fallbackId = window.setInterval(() => { void refresh(); }, 300_000);
     return () => {

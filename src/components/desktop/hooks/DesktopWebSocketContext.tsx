@@ -79,35 +79,33 @@ interface SharedWsContextValue extends SharedWsState, SharedWsCommands {
 // did not originate from a click in this window. That missing wire is the reason
 // they poll at all.
 //
-// Coalesced, because a fleet coming up fires a burst of lifecycle messages and
-// each listener refetches on every one — a raw 1:1 bridge would turn "10 agents
-// started" into 10 refetches per surface. Leading edge (so the first change is
-// instant) plus one trailing emit (so the final state is never dropped).
+// Every lifecycle payload stays observable on its original channel. Bulk
+// refetch listeners use the separate signal below, so a fleet burst reconciles
+// once without hiding intermediate terminal or retirement transitions.
 const LIFECYCLE_COALESCE_MS = 250;
-const lifecycleLastEmit = new Map<string, number>();
-const lifecycleTrailing = new Map<string, ReturnType<typeof setTimeout>>();
+let lifecycleLastReconcile = 0;
+let lifecycleTrailing: ReturnType<typeof setTimeout> | null = null;
 
-function emitWindowLifecycle(name: 'o8:agent-lifecycle' | 'o8:lane-lifecycle') {
+function emitWindowLifecycle(
+  name: 'o8:agent-lifecycle' | 'o8:lane-lifecycle',
+  detail: { channel: string; event: string; data: Record<string, unknown> | undefined },
+) {
   if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(name, { detail }));
   const now = Date.now();
-  const sinceLast = now - (lifecycleLastEmit.get(name) ?? 0);
+  const sinceLast = now - lifecycleLastReconcile;
 
   if (sinceLast >= LIFECYCLE_COALESCE_MS) {
-    lifecycleLastEmit.set(name, now);
-    window.dispatchEvent(new Event(name));
+    lifecycleLastReconcile = now;
+    window.dispatchEvent(new Event('o8:lifecycle-reconcile'));
     return;
   }
-  // Inside the coalesce window. Schedule exactly one trailing emit so a burst
-  // still settles on the final state instead of being swallowed.
-  if (lifecycleTrailing.has(name)) return;
-  lifecycleTrailing.set(
-    name,
-    setTimeout(() => {
-      lifecycleTrailing.delete(name);
-      lifecycleLastEmit.set(name, Date.now());
-      window.dispatchEvent(new Event(name));
-    }, LIFECYCLE_COALESCE_MS - sinceLast),
-  );
+  if (lifecycleTrailing) return;
+  lifecycleTrailing = setTimeout(() => {
+    lifecycleTrailing = null;
+    lifecycleLastReconcile = Date.now();
+    window.dispatchEvent(new Event('o8:lifecycle-reconcile'));
+  }, LIFECYCLE_COALESCE_MS - sinceLast);
 }
 
 const SharedWsContext = createContext<SharedWsContextValue | null>(null);
@@ -248,7 +246,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
       // Bridge WS events to window CustomEvents for TanStack Query invalidation.
       // Any useReactiveQuery({ wsEvents: ['lane-lifecycle'] }) will hear this.
-      if (channel && channel !== 'system' && channel !== 'pong') {
+      if (channel && channel !== 'system' && channel !== 'pong' && channel !== 'agent-lifecycle' && channel !== 'lane-lifecycle') {
         window.dispatchEvent(new CustomEvent(`o8:${channel}`, {
           detail: { channel, event: eventType, data },
         }));
@@ -312,11 +310,11 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           // two local kill-buttons. Every one of those surfaces was therefore
           // poll-only for any lifecycle change that did not originate from a
           // click in this window, which is exactly why they poll at all.
-          emitWindowLifecycle('o8:agent-lifecycle');
+          emitWindowLifecycle('o8:agent-lifecycle', { channel, event: eventType, data });
           break;
         case 'lane-lifecycle':
           if (data) dispatch('onLaneLifecycle', data);
-          emitWindowLifecycle('o8:lane-lifecycle');
+          emitWindowLifecycle('o8:lane-lifecycle', { channel, event: eventType, data });
           break;
         case 'pong':
           break;
