@@ -183,7 +183,12 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     // only covers the bottom of the rect, so the sampler would falsely un-hide.
     if (forceOccludeRef.current) { setOccluded(true); return; }
     const r = el.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) return;
+    // A degenerate anchor means a HIDDEN ancestor (Settings takeover's
+    // display:none workspace, the width-0 collapsed right panel) — the native
+    // child window ignores CSS, so treat it as occluded and hide explicitly
+    // instead of keeping the last state (reviewer hardening, 2026-07-16).
+    // Geometry returning >4px un-occludes through the normal probe below.
+    if (r.width < 4 || r.height < 4) { setOccluded(true); return; }
     const paintsVisibly = (hit: Element): boolean => {
       let n: Element | null = hit;
       for (let i = 0; i < 6 && n && n !== document.body; i++) {
