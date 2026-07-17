@@ -35,6 +35,7 @@ import {
   CANVAS_GLASS_DEFAULTS,
   applyCanvasGlassSettings,
   canvasFreeLook,
+  canvasFreeLookIdFor,
   readCanvasGlassSettings,
   readPersonalDefault,
   savePersonalDefault,
@@ -523,9 +524,10 @@ export default function CanvasGlassPreviewPage() {
         const isFounders = Boolean(data?.founder) || plan === 'founder' || plan === 'pro' || plan === 'team';
         setFoundersGlass(isFounders);
         if (!isFounders) {
-          // Clamp whatever was stored to the free Paper look, keeping the tone.
+          // Clamp whatever was stored to the nearest free look — Paper
+          // light/dark or Glass — so a saved Glass survives relaunch.
           const stored = readCanvasGlassSettings();
-          const clamped = canvasFreeLook(stored.tone);
+          const clamped = canvasFreeLook(canvasFreeLookIdFor(stored));
           setSettings(clamped);
           writeCanvasGlassSettings(clamped);
           applyCanvasGlassSettings(clamped);
