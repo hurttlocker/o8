@@ -1,5 +1,7 @@
 ## Deviations
 
+- Branch route cache: added a focused helper module because the route's 74-line addition and 37-line deletion caps cannot accommodate the async, concurrency-capped snapshot implementation without exceeding its preservation budget.
+
 - Symon o8-hosted PTYs: added a separate authenticated WS-bridge endpoint because the existing panel proxy intentionally exposes names only and always appends Enter, which cannot support metadata or raw control sequences.
 
 - Pi permission-gate bridge: reused `src/lib/pi/permission-bridge.ts` from the existing packet commit and rewired `owned.ts` to it so `owned.ts` stays below the 800-line ceiling; no behavior deviation.
