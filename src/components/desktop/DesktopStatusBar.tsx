@@ -15,6 +15,7 @@ import type { ParkedLane } from './merge-beacon/derive';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { ViewAsFreeIndicator } from './ViewAsFreeIndicator';
+import { getRegisteredComposerCenter, subscribeToComposerCenter } from './composer-center-registry';
 import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
 
@@ -72,10 +73,10 @@ function DesktopStatusBarBase({
   // Center the branch cluster on the composer's REAL measured position. The
   // column-width props ignored insets/gaps + a hidden right region and drifted
   // the cluster ~125px off the composer (operator: "not hitting", 2026-06-15).
-  // The composer card carries [data-composer-center]; track it through panel
-  // resizes/animations (ResizeObserver — the card is maxWidth:100% so it
-  // resizes as the column narrows) and remounts/tab-switches (MutationObserver,
-  // rAF-debounced). Null → no composer (e.g. an Automations takeover) → fall
+  // The composer card registers itself; track it through panel resizes/animations
+  // (ResizeObserver — the card is maxWidth:100% so it resizes as the column
+  // narrows) and remounts/tab-switches. Null → no composer (e.g. an
+  // Automations takeover) → fall
   // back to the column-width centering.
   const [composerCenterX, setComposerCenterX] = useState<number | null>(null);
   useEffect(() => {
@@ -84,7 +85,7 @@ function DesktopStatusBarBase({
     let observed: Element | null = null;
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => schedule()) : null;
     const measure = () => {
-      const el = document.querySelector('[data-composer-center]');
+      const el = getRegisteredComposerCenter();
       if (ro && el !== observed) {
         if (observed) ro.unobserve(observed);
         if (el) ro.observe(el);
@@ -98,15 +99,14 @@ function DesktopStatusBarBase({
       window.cancelAnimationFrame(raf);
       raf = window.requestAnimationFrame(measure);
     };
+    const unsubscribe = subscribeToComposerCenter(schedule);
     schedule();
     window.addEventListener('resize', schedule);
-    const mo = new MutationObserver(schedule);
-    mo.observe(document.body, { childList: true, subtree: true });
     return () => {
       window.cancelAnimationFrame(raf);
       window.removeEventListener('resize', schedule);
       ro?.disconnect();
-      mo.disconnect();
+      unsubscribe();
     };
   }, []);
 
