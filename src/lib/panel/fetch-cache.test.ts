@@ -51,6 +51,28 @@ describe('fetchOnce dedup window', () => {
     await expect(second.json()).resolves.toEqual({ ok: 2 });
   });
 
+  it('joins an identical GET for its whole in-flight duration, not just 150ms', async () => {
+    // Boot-storm coalescing (prod boot 2026-07-17): the same URL requested
+    // seconds apart while the first request is still on the wire must JOIN
+    // it — the old start-window check opened a new socket per call and
+    // starved the webview's per-host pool (8-9.5s queue stalls measured).
+    let release: (r: Response) => void = () => {};
+    mockIpcFetch.mockReturnValue(new Promise<Response>((resolve) => { release = resolve; }));
+
+    const url = `/api/runtime/inventory?t=${Math.random()}`;
+    const first = fetchOnce(url);
+    // Simulate a second call arriving well past the old 150ms window while
+    // the first is still unresolved.
+    await new Promise((r) => setTimeout(r, 200));
+    const second = fetchOnce(url);
+
+    release(new Response(JSON.stringify({ ok: 3 }), { headers: { 'Content-Type': 'application/json' } }));
+    const [a, b] = await Promise.all([first, second]);
+    expect(mockIpcFetch).toHaveBeenCalledTimes(1);
+    await expect(a.json()).resolves.toEqual({ ok: 3 });
+    await expect(b.json()).resolves.toEqual({ ok: 3 });
+  });
+
   it('non-GET requests bypass the cache entirely', async () => {
     const realFetch = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', realFetch);

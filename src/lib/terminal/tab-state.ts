@@ -3,6 +3,7 @@
  * Stored per workspace tile under ~/.o8/terminal-states/<scope>.json
  */
 
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestrationMode, OrchestratorRuntime, WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
@@ -342,7 +343,7 @@ export function stripPersistedRuntimeSessionKey(
 
 export async function loadLiveRuntimeSessionKeys(): Promise<Set<PersistedRuntimeSessionKey>> {
   try {
-    const res = await fetch('/api/runtime/inventory?fresh=1', {
+    const res = await fetchOnce('/api/runtime/inventory?fresh=1', {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
     });
@@ -558,7 +559,7 @@ export async function loadTabState(scope = 'tile-root', repoPath?: string | null
 /** Check which tmux sessions from the saved state are still alive */
 export async function checkAliveSessions(sessionNames: string[]): Promise<Set<string>> {
   try {
-    const res = await fetch('/api/panel/terminal-sessions');
+    const res = await fetchOnce('/api/panel/terminal-sessions');
     if (!res.ok) return new Set();
     const data = await res.json();
     const alive = new Set<string>(data.sessions as string[]);
