@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
 import type { ArtifactRef } from './types';
 
 interface UseArtifactsArgs {
@@ -31,12 +32,16 @@ export function useArtifacts({ packetId, prNumber, laneId, pollMs, enabled = tru
     if (packetId) params.set('packetId', packetId);
     if (typeof prNumber === 'number') params.set('prNumber', String(prNumber));
     if (laneId) params.set('laneId', laneId);
+    const cacheKey = `artifacts:${key}`;
     try {
-      setLoading(true);
-      const res = await fetch(`/api/panel/artifacts?${params.toString()}`);
-      if (!res.ok) return;
-      const json = (await res.json()) as { artifacts?: ArtifactRef[] };
-      setArtifacts(Array.isArray(json.artifacts) ? json.artifacts : []);
+      await refreshSWR(cacheKey, async () => {
+        const res = await fetch(`/api/panel/artifacts?${params.toString()}`);
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const json = (await res.json()) as { artifacts?: ArtifactRef[] };
+        return Array.isArray(json.artifacts) ? json.artifacts : [];
+      });
+      const snapshot = getSWR<ArtifactRef[]>(cacheKey);
+      if (snapshot.data) setArtifacts(snapshot.data);
     } catch {
       /* leave prior state */
     } finally {
@@ -49,6 +54,14 @@ export function useArtifacts({ packetId, prNumber, laneId, pollMs, enabled = tru
       setArtifacts([]);
       return;
     }
+    const cacheKey = `artifacts:${key}`;
+    const applySnapshot = () => {
+      const snapshot = getSWR<ArtifactRef[]>(cacheKey);
+      if (snapshot.data) setArtifacts(snapshot.data);
+      setLoading(!snapshot.data && snapshot.stale);
+    };
+    applySnapshot();
+    const unsubscribe = subscribeSWR(cacheKey, applySnapshot);
     void fetchOnce();
 
     // Live update (#1147 Phase 2): the ws-server fans out an `artifacts`
@@ -70,11 +83,15 @@ export function useArtifacts({ packetId, prNumber, laneId, pollMs, enabled = tru
     window.addEventListener('o8:artifacts', onRecorded as EventListener);
 
     if (!pollMs || pollMs <= 0) {
-      return () => window.removeEventListener('o8:artifacts', onRecorded as EventListener);
+      return () => {
+        unsubscribe();
+        window.removeEventListener('o8:artifacts', onRecorded as EventListener);
+      };
     }
     const id = window.setInterval(() => { void fetchOnce(); }, pollMs);
     return () => {
       window.removeEventListener('o8:artifacts', onRecorded as EventListener);
+      unsubscribe();
       window.clearInterval(id);
     };
   }, [key, enabled, hasFilter, pollMs, fetchOnce, packetId, prNumber, laneId]);
