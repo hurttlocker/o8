@@ -556,9 +556,9 @@ export function useRepoCardModel({
         .catch(() => {});
       void refreshWorktreeSummary();
     };
-    window.addEventListener('o8:lane-lifecycle', handleLifecycle);
+    window.addEventListener('o8:lifecycle-reconcile', handleLifecycle);
     return () => {
-      window.removeEventListener('o8:lane-lifecycle', handleLifecycle);
+      window.removeEventListener('o8:lifecycle-reconcile', handleLifecycle);
     };
   }, [expanded, refreshWorktreeSummary, repo.localPath]);
 

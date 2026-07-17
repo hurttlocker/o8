@@ -383,15 +383,13 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
     const handler = () => { scheduleLoad(); };
     window.addEventListener('o8:realtime', handler);
-    window.addEventListener('o8:agent-lifecycle', handler);
-    window.addEventListener('o8:lane-lifecycle', handler);
+    window.addEventListener('o8:lifecycle-reconcile', handler);
     const fallbackId = setInterval(handler, 300_000);
 
     return () => {
       cancelled = true;
       window.removeEventListener('o8:realtime', handler);
-      window.removeEventListener('o8:agent-lifecycle', handler);
-      window.removeEventListener('o8:lane-lifecycle', handler);
+      window.removeEventListener('o8:lifecycle-reconcile', handler);
       clearInterval(fallbackId);
     };
   }, [active, effectiveRepo, isAllRepos, repoOptions, repoPath, pathForSlug]);

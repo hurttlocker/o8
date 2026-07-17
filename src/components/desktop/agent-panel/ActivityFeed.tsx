@@ -334,7 +334,7 @@ export const ActivityFeed = memo(function ActivityFeed({
     void fetchExtras();
     // WS-driven: refresh on agent/lane events instead of 5min-only polling
     const handler = () => { void fetchExtras(); };
-    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchExtras, 300_000);
     return () => {

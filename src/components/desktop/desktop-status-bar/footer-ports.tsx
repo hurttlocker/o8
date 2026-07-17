@@ -160,7 +160,7 @@ export function FooterPorts({
       fetchPorts();
     }, 1500);
     const handler = () => fetchPorts();
-    window.addEventListener('o8:agent-lifecycle', handler);
+    window.addEventListener('o8:lifecycle-reconcile', handler);
     // Socket bridges agent-lifecycle into this window event; the interval is a
     // safety net (slower when the socket is live, faster when it's down so we
     // don't go blind). Reconnecting refetches immediately (wsConnected in deps).
@@ -170,7 +170,7 @@ export function FooterPorts({
       if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       clearInterval(fallback);
-      window.removeEventListener('o8:agent-lifecycle', handler);
+      window.removeEventListener('o8:lifecycle-reconcile', handler);
     };
   }, [wsConnected]);
 

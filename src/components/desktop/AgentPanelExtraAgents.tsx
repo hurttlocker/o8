@@ -547,12 +547,10 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePack
   useEffect(() => {
     void fetchData();
     const onLifecycle = () => { void fetchData(); };
-    window.addEventListener('o8:lane-lifecycle', onLifecycle);
-    window.addEventListener('o8:agent-lifecycle', onLifecycle);
+    window.addEventListener('o8:lifecycle-reconcile', onLifecycle);
     const fallbackId = window.setInterval(fetchData, 300_000);
     return () => {
-      window.removeEventListener('o8:lane-lifecycle', onLifecycle);
-      window.removeEventListener('o8:agent-lifecycle', onLifecycle);
+      window.removeEventListener('o8:lifecycle-reconcile', onLifecycle);
       window.clearInterval(fallbackId);
       abortRef.current?.abort();
       cancelHoverClose();

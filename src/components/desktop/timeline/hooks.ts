@@ -62,7 +62,7 @@ export function useTimelineData() {
   useEffect(() => {
     fetchData();
     const handler = () => { fetchData(); };
-    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchData, 300_000);
     return () => {
@@ -91,7 +91,7 @@ export function useTimelineSessions() {
   useEffect(() => {
     void fetchSessions();
     const handler = () => { void fetchSessions(); };
-    const wsEvents = ['o8:inbox', 'o8:agent-lifecycle'];
+    const wsEvents = ['o8:inbox', 'o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchSessions, 300_000);
     return () => {

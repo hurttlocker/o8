@@ -77,7 +77,9 @@ export function useReactiveQuery<T>(options: ReactiveQueryOptions<T>) {
     };
 
     const eventNames = [
-      ...(wsEventsKey ? wsEventsKey.split('|').map((ch) => `o8:${ch}`) : []),
+      ...(wsEventsKey ? [...new Set(wsEventsKey.split('|').map((ch) => (
+        ch === 'lane-lifecycle' || ch === 'agent-lifecycle' ? 'o8:lifecycle-reconcile' : `o8:${ch}`
+      )))] : []),
       ...(customEventsKey ? customEventsKey.split('|') : []),
       'o8:invalidate', // global invalidation bus
     ];

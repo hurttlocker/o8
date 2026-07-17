@@ -378,15 +378,13 @@ export function useWorkspaceTerminal({
   useEffect(() => {
     const handler = () => { void refreshAutomationLaneSessions(); };
     const initialRefreshId = window.setTimeout(handler, 0);
-    window.addEventListener('o8:lane-lifecycle', handler);
-    window.addEventListener('o8:agent-lifecycle', handler);
+    window.addEventListener('o8:lifecycle-reconcile', handler);
     window.addEventListener('o8:supervisor-inbox', handler);
     const intervalId = window.setInterval(handler, 30_000);
     return () => {
       window.clearTimeout(initialRefreshId);
       window.clearInterval(intervalId);
-      window.removeEventListener('o8:lane-lifecycle', handler);
-      window.removeEventListener('o8:agent-lifecycle', handler);
+      window.removeEventListener('o8:lifecycle-reconcile', handler);
       window.removeEventListener('o8:supervisor-inbox', handler);
     };
   }, [refreshAutomationLaneSessions]);
@@ -827,7 +825,7 @@ export function useWorkspaceTerminal({
     const initTimer = setTimeout(pollLanes, 2_000);
     // WS-driven: instant refresh on lane events instead of 15s polling
     const handler = () => { void pollLanes(); };
-    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(pollLanes, 300_000);
     return () => {
