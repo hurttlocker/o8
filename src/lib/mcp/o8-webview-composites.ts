@@ -435,15 +435,29 @@ export function createO8WebviewCompositeHandlers(getClient: () => O8WebviewClien
         if (isMcpToolResult(selected)) return selected;
       }
 
-      const opened = await evalActionThenWaitFor(
+      // The spawn entry moved from a workspace "New tab" menu to the left
+      // rail's "New session" row (2026-07). Try the current trigger first,
+      // keep "New tab" as a fallback for older shells (#1571).
+      let opened = await evalActionThenWaitFor(
         client,
         'open_new_tab_menu',
         'wait_for_popover',
-        buildPickMenuTriggerScript('New tab'),
+        buildPickMenuTriggerScript('New session'),
         buildMenuOptionVisibleScript('Orchestrator'),
         (value) => value.optionVisible === true,
         5_000,
       );
+      if (isMcpToolResult(opened)) {
+        opened = await evalActionThenWaitFor(
+          client,
+          'open_new_tab_menu',
+          'wait_for_popover',
+          buildPickMenuTriggerScript('New tab'),
+          buildMenuOptionVisibleScript('Orchestrator'),
+          (value) => value.optionVisible === true,
+          5_000,
+        );
+      }
       if (isMcpToolResult(opened)) return opened;
 
       const option = await evalActionThenVerify(
