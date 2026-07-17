@@ -21,6 +21,14 @@ export function getSWR<T>(key: string): { data?: T; stale: boolean } {
   return { data: entry?.data, stale: Boolean(entry?.promise) || !entry?.data };
 }
 
+/** Seeds a synchronous snapshot when a surface already has fresh data in memory. */
+export function setSWR<T>(key: string, data: T): void {
+  const entry = (swrEntries.get(key) ?? {}) as SwrEntry<T>;
+  entry.data = data;
+  swrEntries.set(key, entry);
+  notifySWR(key);
+}
+
 export function refreshSWR<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const entry = (swrEntries.get(key) ?? {}) as SwrEntry<T>;
   if (entry.promise) return entry.promise;

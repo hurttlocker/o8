@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { requestConfirm, requestPrompt, toast } from '@/components/shared/ConfirmToastHost';
 import type { NavSection } from '@/app/dashboard/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
@@ -106,24 +106,31 @@ export function useGlobalRepoState({
   const [selectedRepoWorktrees, setSelectedRepoWorktrees] = useState<RepoWorktreeSummary | null>(null);
   const [selectedRepoWorktreesLoading, setSelectedRepoWorktreesLoading] = useState(false);
   const [selectedRepoWorktreeRefreshNonce, setSelectedRepoWorktreeRefreshNonce] = useState(0);
+  const selectedRepoWorktreeSnapshotsRef = useRef(new Map<string, RepoWorktreeSummary>());
+  const selectedRepoWorktreeGenerationRef = useRef(0);
+  const branchGenerationRef = useRef(0);
 
   const refreshSelectedRepoWorktrees = useCallback(async () => {
     if (!globalRepoEntry?.localPath) {
       setSelectedRepoWorktrees(null);
       return;
     }
+    const repoPath = globalRepoEntry.localPath;
+    const generation = ++selectedRepoWorktreeGenerationRef.current;
     setSelectedRepoWorktreesLoading(true);
     try {
-      const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(globalRepoEntry.localPath)}`);
+      const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repoPath)}`);
       const data = await response.json() as RepoWorktreeSummary & { error?: string };
       if (!response.ok) {
         throw new Error(data.error || 'Unable to load worktree summary.');
       }
+      if (generation !== selectedRepoWorktreeGenerationRef.current) return;
+      selectedRepoWorktreeSnapshotsRef.current.set(repoPath, data);
       setSelectedRepoWorktrees(data);
     } catch {
-      setSelectedRepoWorktrees(null);
+      if (generation === selectedRepoWorktreeGenerationRef.current) setSelectedRepoWorktrees(null);
     } finally {
-      setSelectedRepoWorktreesLoading(false);
+      if (generation === selectedRepoWorktreeGenerationRef.current) setSelectedRepoWorktreesLoading(false);
     }
   }, [globalRepoEntry?.localPath]);
 
@@ -241,22 +248,27 @@ export function useGlobalRepoState({
 
   // Fetch branch when selected repo changes
   useEffect(() => {
+    const generation = ++branchGenerationRef.current;
     if (!globalRepoEntry?.localPath) return;
     const controller = new AbortController();
     fetch(`/api/panel/branches?path=${encodeURIComponent(globalRepoEntry.localPath)}`, { signal: controller.signal })
       .then(r => r.json())
       .then(bData => {
         const current = (bData.branches ?? []).find((b: { current: boolean; name: string }) => b.current);
-        if (current?.name) setGlobalRepoBranch(current.name);
+        if (current?.name && generation === branchGenerationRef.current) setGlobalRepoBranch(current.name);
       })
       .catch(() => {});
     return () => controller.abort();
   }, [globalRepoEntry?.localPath]);
 
   useEffect(() => {
+    const repoPath = globalRepoEntry?.localPath;
+    ++selectedRepoWorktreeGenerationRef.current;
+    setSelectedRepoWorktrees(repoPath ? selectedRepoWorktreeSnapshotsRef.current.get(repoPath) ?? null : null);
+    setSelectedRepoWorktreesLoading(false);
     // Defer worktree refresh — not needed for initial shell paint
     const initTimer = setTimeout(() => { void refreshSelectedRepoWorktrees(); }, 1_500);
-    if (!globalRepoEntry?.localPath) {
+    if (!repoPath) {
       return () => clearTimeout(initTimer);
     }
     // WS-driven: instant refresh on lifecycle events instead of 30s polling
