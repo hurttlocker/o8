@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { checkPruneGate } from './prune-gate';
+import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +32,8 @@ export async function removeCortexWorktreePath(input: {
   operatorForce?: boolean;
   /** Set by callers (e.g. cleanupLaneWorktree) that already ran the prune gate. */
   skipPruneGate?: boolean;
+  /** Caller already confirmed the bound session process exited. */
+  overrideLiveGuard?: true;
 }): Promise<boolean> {
   const logPrefix = input.logPrefix ?? 'lane-worktree';
   const label = input.laneId ? ` for lane ${input.laneId}` : '';
@@ -68,6 +71,11 @@ export async function removeCortexWorktreePath(input: {
     return true;
   }
 
+  if (!(await allowWorktreeRemoval(input.worktreePath, {
+    logPrefix,
+    overrideLiveGuard: input.overrideLiveGuard,
+  }))) return false;
+
   try {
     await execFileAsync('git', ['worktree', 'remove', '--force', input.worktreePath], {
       cwd: input.repoRoot,
@@ -80,6 +88,10 @@ export async function removeCortexWorktreePath(input: {
   }
 
   try {
+    if (!(await allowWorktreeRemoval(input.worktreePath, {
+      logPrefix: `${logPrefix}-fallback`,
+      overrideLiveGuard: input.overrideLiveGuard,
+    }))) return false;
     rmSync(input.worktreePath, { recursive: true, force: true });
     await pruneWorktrees(input.repoRoot, logPrefix);
     return !existsSync(input.worktreePath);

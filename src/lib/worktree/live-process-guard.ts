@@ -27,6 +27,35 @@ const execFileAsync = promisify(execFile);
 /** Probe budget. Past this we fail closed (treat the tree as live → keep). */
 const PROBE_TIMEOUT_MS = 2_000;
 
+export type LiveProcessProbeResult =
+  | { status: 'clear' }
+  | { status: 'live'; pids: string[] }
+  | { status: 'inconclusive'; reason: string };
+
+interface LiveProcessCommandResult {
+  stdout: string | Buffer;
+  stderr?: string | Buffer;
+}
+
+export interface LiveProcessProbeOptions {
+  /** Test seam for deterministic lsof exit/error shapes. */
+  runLsof?: (target: string) => Promise<LiveProcessCommandResult>;
+}
+
+function outputText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  return Buffer.isBuffer(value) ? value.toString('utf8') : '';
+}
+
+function compactDetail(value: unknown): string {
+  return outputText(value).trim().replace(/\s+/g, ' ').slice(0, 500);
+}
+
+function liveResult(stdout: unknown): LiveProcessProbeResult | null {
+  const pids = outputText(stdout).split(/\s+/).map((pid) => pid.trim()).filter(Boolean);
+  return pids.length > 0 ? { status: 'live', pids } : null;
+}
+
 /**
  * True when any live process has an open file (or cwd) inside `dirPath`.
  *
@@ -34,46 +63,86 @@ const PROBE_TIMEOUT_MS = 2_000;
  * timeout, missing binary, nonsense path) so the worktree is preserved.
  * Returns `false` only when `lsof` cleanly reports nothing open under the tree.
  */
-export async function hasLiveProcessInside(dirPath: string): Promise<boolean> {
+export async function probeLiveProcessInside(
+  dirPath: string,
+  options: LiveProcessProbeOptions = {},
+): Promise<LiveProcessProbeResult> {
   const target = path.resolve(dirPath);
   // A blank or root path would make `lsof +D` scan the whole filesystem —
   // refuse and fail closed.
   if (!target || target === '/' || target === path.parse(target).root) {
-    return true;
+    return { status: 'inconclusive', reason: `unsafe probe target ${JSON.stringify(target)}` };
   }
 
   try {
     // `lsof +D <dir> -t` lists PIDs of processes with any open file (incl. cwd)
     // under <dir>. Exit 0 + PIDs → live. When nothing is open lsof exits 1 with
     // empty output (that is the ONLY "not live" signal we trust).
-    const { stdout } = await execFileAsync('lsof', ['+D', target, '-t'], {
-      timeout: PROBE_TIMEOUT_MS,
-    });
-    return stdout.trim().length > 0;
+    const { stdout } = options.runLsof
+      ? await options.runLsof(target)
+      : await execFileAsync('lsof', ['+D', target, '-t'], { timeout: PROBE_TIMEOUT_MS });
+    return liveResult(stdout)
+      ?? { status: 'inconclusive', reason: 'lsof exited 0 without reporting a PID' };
   } catch (err) {
     const e = err as {
       code?: number | string;
       killed?: boolean;
       signal?: string;
       stdout?: string | Buffer;
+      stderr?: string | Buffer;
+      message?: string;
     };
     // Timeout (killed by signal) → we could not finish the probe → fail closed.
-    if (e?.killed === true || e?.signal) return true;
+    if (e?.killed === true || e?.signal) {
+      return { status: 'inconclusive', reason: `lsof timed out after ${PROBE_TIMEOUT_MS / 1000}s` };
+    }
 
     // lsof exit 1 == "nothing found under the dir" (the clean not-live path).
     // But lsof also exits 1 in some partial-scan cases while still having
     // printed live PIDs — if stdout carried any PID, treat as live.
     if (e?.code === 1 || e?.code === '1') {
-      const out = typeof e.stdout === 'string'
-        ? e.stdout
-        : Buffer.isBuffer(e.stdout)
-          ? e.stdout.toString('utf8')
-          : '';
-      return out.trim().length > 0;
+      const live = liveResult(e.stdout);
+      if (live) return live;
+      const stderr = compactDetail(e.stderr);
+      return stderr
+        ? { status: 'inconclusive', reason: `lsof partial/failed scan: ${stderr}` }
+        : { status: 'clear' };
     }
 
     // Any other failure — lsof missing (ENOENT), permission, exit 2+ — is
     // genuine uncertainty. Fail closed.
+    const detail = compactDetail(e?.stderr) || compactDetail(e?.message) || 'unknown error';
+    return { status: 'inconclusive', reason: `lsof failed${e?.code ? ` (${String(e.code)})` : ''}: ${detail}` };
+  }
+}
+
+export async function hasLiveProcessInside(
+  dirPath: string,
+  options: LiveProcessProbeOptions = {},
+): Promise<boolean> {
+  return (await probeLiveProcessInside(dirPath, options)).status !== 'clear';
+}
+
+/**
+ * Final deletion-seam guard. Returns true only after a clean lsof result, or
+ * when a caller explicitly certifies that it already confirmed the session's
+ * process exited. Live and inconclusive probes are both refused loudly.
+ */
+export async function allowWorktreeRemoval(
+  dirPath: string,
+  options: { logPrefix: string; overrideLiveGuard?: true },
+): Promise<boolean> {
+  if (options.overrideLiveGuard === true) {
+    console.warn(`[${options.logPrefix}] LIVE-PROCESS GUARD OVERRIDDEN for ${dirPath} — caller confirmed the session process exited`);
     return true;
   }
+
+  const probe = await probeLiveProcessInside(dirPath);
+  if (probe.status === 'clear') return true;
+  if (probe.status === 'live') {
+    console.error(`[${options.logPrefix}] REFUSED worktree removal for ${dirPath} — live process found (pid ${probe.pids.join(', ')})`);
+  } else {
+    console.error(`[${options.logPrefix}] REFUSED worktree removal for ${dirPath} — live-process probe inconclusive: ${probe.reason}`);
+  }
+  return false;
 }

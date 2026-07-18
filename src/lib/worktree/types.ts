@@ -107,6 +107,8 @@ export interface CleanupOptions {
   force?: boolean;
   /** Also delete the branch */
   deleteBranch?: boolean;
+  /** Caller already confirmed the bound session process exited. */
+  overrideLiveGuard?: true;
 }
 
 /**

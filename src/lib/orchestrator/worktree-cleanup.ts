@@ -28,6 +28,7 @@ import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -138,6 +139,9 @@ export async function removeMergedWorktree(
 
   // Force-remove the worktree. Branch may already be deleted by the merge
   // path — `git worktree remove --force` tolerates a missing branch.
+  if (!(await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cleanup' }))) {
+    return { removed: false, reason: 'remove-failed' };
+  }
   try {
     await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
       cwd: lane.repoPath,

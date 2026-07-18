@@ -36,7 +36,7 @@ import type {
 } from './types';
 import { getApfsCowCapability } from './apfs';
 import { resetTrackedWorkspaceChanges } from './clean';
-import { hasLiveProcessInside } from './live-process-guard';
+import { allowWorktreeRemoval } from './live-process-guard';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
@@ -397,10 +397,12 @@ export class WorktreeManager {
       // tree on disk. Failures here are swallowed — the caller still sees the
       // original rebase error.
       try {
-        await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
-          cwd: this.repoRoot,
-          timeout: 15_000,
-        });
+        if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-create-rollback' })) {
+          await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
+            cwd: this.repoRoot,
+            timeout: 15_000,
+          });
+        }
       } catch { /* tree may already be gone */ }
       try {
         await execFileAsync('git', ['branch', '-D', branchName], {
@@ -465,10 +467,12 @@ export class WorktreeManager {
         // Mirror the rebase-conflict cleanup path — tear down the bad tree so
         // we don't leak it on disk; remove the meta so the caller can retry.
         try {
-          await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
-            cwd: this.repoRoot,
-            timeout: 15_000,
-          });
+          if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-typecheck-rollback' })) {
+            await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
+              cwd: this.repoRoot,
+              timeout: 15_000,
+            });
+          }
         } catch { /* tree may already be gone */ }
         try {
           await execFileAsync('git', ['branch', '-D', branchName], {
@@ -555,7 +559,9 @@ export class WorktreeManager {
         await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
       } catch (err) {
         await this.removeMeta(taskId);
-        await rm(worktreePath, { recursive: true, force: true });
+        if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cow-rebase-rollback' })) {
+          await rm(worktreePath, { recursive: true, force: true });
+        }
         throw err;
       }
 
@@ -614,7 +620,9 @@ export class WorktreeManager {
       await this.updateMetaStatus(taskId, 'ready');
       return info;
     } catch (err) {
-      await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+      if (await this.pathExists(worktreePath) && await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cow-create-rollback' })) {
+        await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+      }
       await this.removeMeta(taskId).catch(() => {});
       throw err;
     }
@@ -1246,14 +1254,14 @@ export class WorktreeManager {
    * Remove a worktree and optionally its branch.
    * Checks for uncommitted changes first and auto-commits to preserve agent work.
    */
-  async cleanup(worktreeId: string, opts?: CleanupOptions): Promise<void> {
+  async cleanup(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
     const meta = await this.loadAllMeta();
     const entry = meta[worktreeId];
 
     if (entry?.claudeManaged) {
       // Claude-managed: just remove our metadata; Claude handles its own cleanup
       await this.removeMeta(worktreeId);
-      return;
+      return true;
     }
 
     // #1404 — a blank/dot/traversal worktreeId resolves to the container dir
@@ -1271,13 +1279,13 @@ export class WorktreeManager {
       || !resolvedTarget.startsWith(`${resolvedBase}${path.sep}`)
     ) {
       console.error(`[worktree-prune] REFUSED cleanup for unsafe worktreeId ${JSON.stringify(worktreeId)} → ${resolvedTarget} (repo-root write guard, #1404)`);
-      return;
+      return false;
     }
 
     // Safety: preserve uncommitted agent work before removing
     if (await this.pathExists(worktreePath)) {
       const preserved = await this.preserveUncommittedWork(worktreePath, worktreeId);
-      if (preserved === 'skip') return; // Could not save work — abort prune
+      if (preserved === 'skip') return false; // Could not save work — abort prune
 
       // #1103 — a *clean* worktree can still hold committed-but-unmerged work
       // (an agent committed, but the lane was marked no_changes_produced before
@@ -1291,15 +1299,26 @@ export class WorktreeManager {
         entry?.baseBranch ?? 'main',
         entry?.isolationKind ?? 'git-worktree',
       );
-      if (committed === 'skip') return; // Could not preserve commits — abort to avoid loss
+      if (committed === 'skip') return false; // Could not preserve commits — abort to avoid loss
     }
 
     if ((entry?.isolationKind ?? 'git-worktree') === 'apfs-cow-clone') {
-      await rm(worktreePath, { recursive: true, force: true });
+      if (await this.pathExists(worktreePath)) {
+        if (!(await allowWorktreeRemoval(worktreePath, {
+          logPrefix: 'worktree-cleanup',
+          overrideLiveGuard: opts?.overrideLiveGuard,
+        }))) return false;
+        await rm(worktreePath, { recursive: true, force: true });
+      }
     } else {
       // Remove the git worktree
       const args = ['worktree', 'remove', worktreePath];
       if (opts?.force) args.push('--force');
+
+      if (await this.pathExists(worktreePath) && !(await allowWorktreeRemoval(worktreePath, {
+        logPrefix: 'worktree-cleanup',
+        overrideLiveGuard: opts?.overrideLiveGuard,
+      }))) return false;
 
       try {
         await execFileAsync('git', args, { cwd: this.repoRoot, timeout: 15_000 });
@@ -1315,6 +1334,10 @@ export class WorktreeManager {
       // on disk. Without this rm, every merge under those conditions leaks the
       // whole packet worktree (~1-3 GB) and disk fills within days.
       if (await this.pathExists(worktreePath)) {
+        if (!(await allowWorktreeRemoval(worktreePath, {
+          logPrefix: 'worktree-cleanup-fallback',
+          overrideLiveGuard: opts?.overrideLiveGuard,
+        }))) return false;
         await rm(worktreePath, { recursive: true, force: true });
       }
     }
@@ -1330,6 +1353,7 @@ export class WorktreeManager {
 
     // Remove our metadata
     await this.removeMeta(worktreeId);
+    return true;
   }
 
   /**
@@ -1354,15 +1378,16 @@ export class WorktreeManager {
     try {
       const { listLanes } = await import('@/lib/lane/registry');
       const { isLaneTerminal } = await import('@/lib/lane/terminal-states');
+      const lanePaths = listLanes()
+        .filter((l) => !isLaneTerminal(l.status))
+        .map((l) => l.worktreePath)
+        .filter((p): p is string => Boolean(p));
       activeLanePaths = new Set(
-        listLanes()
-          .filter((l) => !isLaneTerminal(l.status))
-          .map((l) => l.worktreePath)
-          .filter((p): p is string => Boolean(p)),
+        await Promise.all(lanePaths.map((lanePath) => this.canonicalPath(lanePath))),
       );
     } catch (err) {
-      console.warn(
-        `[worktree-prune] lane registry unavailable — aborting prune pass (fail closed): ${err instanceof Error ? err.message : String(err)}`,
+      console.error(
+        `[worktree-prune] PRUNE ABORTED — lane registry unavailable (fail closed): ${err instanceof Error ? err.message : String(err)}`,
       );
       return [];
     }
@@ -1373,17 +1398,18 @@ export class WorktreeManager {
       if (now - wt.lastActivityAt > maxAgeMs && wt.status !== 'active') {
         // Check if this worktree backs an active lane
         const wtPath = path.join(this.worktreeBase, wt.id);
-        if (activeLanePaths.has(wtPath) || activeLanePaths.has(wt.path)) {
+        const [canonicalWtPath, canonicalListedPath] = await Promise.all([
+          this.canonicalPath(wtPath),
+          this.canonicalPath(wt.path),
+        ]);
+        if (activeLanePaths.has(canonicalWtPath) || activeLanePaths.has(canonicalListedPath)) {
           console.log(`[worktree-prune] Skipping ${wt.id} — active lane bound to this worktree`);
           continue;
         }
-        // Never delete a worktree that a live process is still cwd'd inside.
-        if (await hasLiveProcessInside(wt.path)) {
-          console.log(`[worktree-prune] SKIPPED ${wt.id} — live process(es) inside`);
-          continue;
+        const removed = await this.cleanup(wt.id, { force: true, deleteBranch: true });
+        if (removed) {
+          pruned.push(wt.id);
         }
-        await this.cleanup(wt.id, { force: true, deleteBranch: true });
-        pruned.push(wt.id);
       }
     }
 
@@ -1400,7 +1426,7 @@ export class WorktreeManager {
         if (handledIds.has(entry.name)) continue;
         if (!entry.name.startsWith('packet-')) continue;
         const orphanPath = path.join(this.worktreeBase, entry.name);
-        if (activeLanePaths.has(orphanPath)) continue;
+        if (activeLanePaths.has(await this.canonicalPath(orphanPath))) continue;
         // #1585: an UNKNOWN mtime must mean KEEP, never delete. The old code
         // (`.catch(() => 0)`) turned a failed probe into epoch 0 and fell
         // through to `rm -rf` — a fresh worktree whose stat momentarily failed
@@ -1411,11 +1437,7 @@ export class WorktreeManager {
           continue;
         }
         if (now - mtime <= maxAgeMs) continue;
-        // Never delete a worktree that a live process is still cwd'd inside.
-        if (await hasLiveProcessInside(orphanPath)) {
-          console.log(`[worktree-prune] SKIPPED ${entry.name} — live process(es) inside`);
-          continue;
-        }
+        if (!(await allowWorktreeRemoval(orphanPath, { logPrefix: 'worktree-prune-orphan' }))) continue;
         await rm(orphanPath, { recursive: true, force: true });
         console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h)`);
         pruned.push(entry.name);
@@ -1489,7 +1511,10 @@ export class WorktreeManager {
     // (macOS /var → /private/var would defeat a plain string prefix match).
     const all = await this.list({ withDiskUsage: maxTotalGb > 0 });
     const inScope = await Promise.all(
-      all.map(async (wt) => (await this.samePath(path.dirname(wt.path), this.worktreeBase)) && !activeLanePaths?.has(wt.path)),
+      all.map(async (wt) => (
+        (await this.samePath(path.dirname(wt.path), this.worktreeBase))
+        && !activeLanePaths?.has(await this.canonicalPath(wt.path))
+      )),
     );
     const candidates = all
       .filter((_, i) => inScope[i])
@@ -1518,14 +1543,8 @@ export class WorktreeManager {
         continue;
       }
 
-      // Guard 4 (#1585): never delete a worktree that a live process is cwd'd
-      // inside, no matter how old — deleting a live worker's cwd aborts its turn.
-      if (await hasLiveProcessInside(wt.path)) {
-        console.log(`[worktree-prune] SKIPPED ${wt.id} — live process(es) inside`);
-        continue;
-      }
-
-      await this.cleanup(wt.id, { force: true, deleteBranch: true });
+      const didRemove = await this.cleanup(wt.id, { force: true, deleteBranch: true });
+      if (!didRemove) continue;
       liveCount -= 1;
       liveBytes -= wt.diskUsageBytes ?? 0;
       removed.push(wt.id);
@@ -1856,11 +1875,18 @@ export class WorktreeManager {
 
   private async samePath(a: string, b: string): Promise<boolean> {
     if (a === b) return true;
+    const [canonicalA, canonicalB] = await Promise.all([
+      this.canonicalPath(a),
+      this.canonicalPath(b),
+    ]);
+    return canonicalA === canonicalB;
+  }
+
+  private async canonicalPath(candidatePath: string): Promise<string> {
     try {
-      const [realA, realB] = await Promise.all([realpath(a), realpath(b)]);
-      return realA === realB;
+      return await realpath(candidatePath);
     } catch {
-      return path.resolve(a) === path.resolve(b);
+      return path.resolve(candidatePath);
     }
   }
 
