@@ -180,38 +180,49 @@ pub(crate) fn request_mic_access_once() {
         if mic_permission_granted().is_some() {
             return;
         }
-        use block2::RcBlock;
-        use objc2::msg_send;
-        use objc2::runtime::{AnyClass, Bool};
-        use objc2_foundation::NSString;
-
-        // Force-link AVFoundation so AVCaptureDevice exists in the runtime.
-        #[link(name = "AVFoundation", kind = "framework")]
-        extern "C" {}
-
-        let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
-            return;
-        };
-        // AVMediaTypeAudio == "soun".
-        let media = NSString::from_str("soun");
-        // The completion handler fires on an arbitrary queue after the user
-        // answers. RcBlock is retained by AVFoundation for the call, so it
-        // outlives this function; our reference drops here harmlessly.
-        let handler = RcBlock::new(|granted: Bool| {
-            log::info!(
-                "[voice] microphone access request resolved: granted={}",
-                granted.as_bool()
-            );
-        });
-        let _: () = unsafe {
-            msg_send![cls, requestAccessForMediaType: &*media, completionHandler: &*handler]
-        };
-        log::info!("[voice] requested microphone access (status was notDetermined)");
+        fire_mic_prompt();
+        log::info!("[voice] requested microphone access at boot (status was notDetermined)");
     });
 }
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn request_mic_access_once() {}
+
+/// Fire the macOS Microphone TCC prompt via
+/// `AVCaptureDevice requestAccessForMediaType:completionHandler:`. The
+/// completion handler fires on an arbitrary queue after the user answers; the
+/// caller should re-check status (or poll) rather than await this. Shared by the
+/// boot path (`request_mic_access_once`) and the on-demand fix flow
+/// (`request_mic_access_cmd`). Only meaningful when status is notDetermined —
+/// macOS silently no-ops a re-request against an existing decision.
+#[cfg(target_os = "macos")]
+fn fire_mic_prompt() {
+    use block2::RcBlock;
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, Bool};
+    use objc2_foundation::NSString;
+
+    // Force-link AVFoundation so AVCaptureDevice exists in the runtime.
+    #[link(name = "AVFoundation", kind = "framework")]
+    extern "C" {}
+
+    let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+        return;
+    };
+    // AVMediaTypeAudio == "soun".
+    let media = NSString::from_str("soun");
+    // RcBlock is retained by AVFoundation for the call, so it outlives this
+    // function; our reference drops here harmlessly.
+    let handler = RcBlock::new(|granted: Bool| {
+        log::info!(
+            "[voice] microphone access request resolved: granted={}",
+            granted.as_bool()
+        );
+    });
+    let _: () = unsafe {
+        msg_send![cls, requestAccessForMediaType: &*media, completionHandler: &*handler]
+    };
+}
 
 // ── Tauri commands (frontend onboarding / permission-recovery surface) ──
 
@@ -256,4 +267,25 @@ pub fn screen_capture_granted_cmd() -> bool {
 #[tauri::command]
 pub fn mic_permission_granted_cmd() -> Option<bool> {
     mic_permission_granted()
+}
+
+/// On-demand Microphone permission request for the Permissions concierge fix
+/// flow (#1342). Fires the real AVFoundation prompt when the status is
+/// notDetermined; an already-authorized or already-denied grant is left
+/// untouched (macOS will not re-prompt a denial — the UI deep-links System
+/// Settings in that case). Returns the CURRENT status (true authorized / false
+/// denied / null never-asked) so the caller can branch. Unlike
+/// `request_mic_access_once` this has no `Once` guard — the fix button is a
+/// deliberate user action.
+#[tauri::command]
+pub fn request_mic_access_cmd() -> Option<bool> {
+    let status = mic_permission_granted();
+    #[cfg(target_os = "macos")]
+    {
+        if status.is_none() {
+            fire_mic_prompt();
+            log::info!("[voice] requested microphone access on demand (permissions fix flow)");
+        }
+    }
+    status
 }

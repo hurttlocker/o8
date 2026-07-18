@@ -53,6 +53,7 @@ import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
 import { ProjectsPanel } from './settings/ProjectsPanel';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { VoiceTab } from './settings/VoiceTab';
+import { PermissionsTab } from './settings/PermissionsTab';
 import { BillingTab } from './settings/BillingTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
@@ -83,6 +84,15 @@ function CpuNavIcon({ size = 16 }: { size?: number }) {
       <rect x="4" y="4" width="16" height="16" rx="2" />
       <rect x="9" y="9" width="6" height="6" />
       <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+    </svg>
+  );
+}
+
+function ShieldNavIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="M9 12l2 2 4-4" />
     </svg>
   );
 }
@@ -524,6 +534,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
         <TabButton label="General" icon={<GearNavIcon />} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} onClick={() => setActiveTab('voice')} />
+        <TabButton label="Permissions" icon={<ShieldNavIcon />} active={activeTab === 'permissions'} onClick={() => setActiveTab('permissions')} />
 
         <SectionHeader>Agents</SectionHeader>
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
@@ -601,6 +612,9 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
         )}
         {activeTab === 'voice' && (
           <VoiceTab />
+        )}
+        {activeTab === 'permissions' && (
+          <PermissionsTab />
         )}
         {activeTab === 'billing' && (
           <BillingTab />
