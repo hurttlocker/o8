@@ -110,6 +110,20 @@ export interface ResetPacketInput {
   packetId: string;
   reason?: string;
   clearWorktree?: boolean;
+  /**
+   * Generation scope for BACKGROUNDED cleanup (#1528 stop path). When set,
+   * the reset only touches the lanes captured when the stop was issued —
+   * never lanes bound afterwards — skips the prefix-glob orphan worktree
+   * sweep (which would rm -rf a re-dispatched packet's LIVE worktree), and
+   * only applies the mission-state hold if the packet is still in the
+   * operator-stopped state this cleanup belongs to. Without it a stop's
+   * background reset could silently revert and destroy a legitimate
+   * re-dispatch that happened during the cleanup window.
+   */
+  scope?: {
+    laneIds: string[];
+    skipHoldIfStateMoved?: boolean;
+  };
 }
 
 export interface MergePacketResult {
