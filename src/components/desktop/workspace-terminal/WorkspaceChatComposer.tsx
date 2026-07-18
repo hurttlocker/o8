@@ -15,6 +15,7 @@ import {
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { useThoughtsComposerAttachments } from '@/components/desktop/thoughts/chat-panel/useThoughtsComposerAttachments';
+import { PendingSteerCard } from '@/components/desktop/thoughts/chat-panel/PendingSteerCard';
 import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
@@ -157,6 +158,16 @@ function WorkspaceChatComposerBase({
           outlineOffset: -2,
         }}
       >
+        {chat.pendingSteers.length > 0 ? (
+          <PendingSteerCard
+            steers={chat.pendingSteers}
+            onSteerNow={chat.handleSteerNow}
+            onDelete={chat.handleDeleteSteer}
+            onEdit={chat.handleEditSteer}
+            onEditingChange={chat.onEditingSteerChange}
+          />
+        ) : null}
+
         {chat.queuedContextCards.length > 0 ? (
           <div
             style={{
