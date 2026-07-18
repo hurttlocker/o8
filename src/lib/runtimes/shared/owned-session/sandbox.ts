@@ -123,8 +123,11 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   ].map((d) => path.join(home, d)));
 
   // Individual dotfiles the CLIs read (git identity, npm registry, etc.).
+  // `.zshenv` is deliberately ABSENT: it commonly exports the operator's API
+  // keys, and workers inherit their env from the trusted parent — a shell that
+  // can't read it just skips it.
   const homeToolchainFiles = uniq([
-    '.gitconfig', '.gitignore', '.npmrc', '.yarnrc', '.zshenv',
+    '.gitconfig', '.gitignore', '.npmrc', '.yarnrc',
   ].map((f) => path.join(home, f)));
 
   const readRoots = uniq([
@@ -144,6 +147,10 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   const secretRoots = uniq([
     path.join(home, '.o8'),
     path.join(home, '.tauri'),
+    // gh CLI credential store (~/.config/gh/hosts.yml holds the operator's
+    // GitHub OAuth token). `.config` is read-allowed above for git's sake;
+    // workers report through the `o8` CLI and never need gh, so cut this off.
+    path.join(home, '.config', 'gh'),
   ]);
 
   const lines: string[] = [
