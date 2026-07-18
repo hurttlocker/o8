@@ -1395,14 +1395,13 @@ fn spawn_bundled_ws_server(
 // would see. If nothing works, returns None and the caller shows a dialog.
 
 const MIN_NODE_MAJOR: u32 = 22;
-// F40 (#1032): better-sqlite3 native binding is compiled against Node 22's
-// ABI (NODE_MODULE_VERSION 127). Newer Node majors load the binding and
-// throw NODE_MODULE_VERSION mismatch — next-server dies on first DB import,
-// the HTTP listener never binds, the user sees "app up but not working."
-// We prefer Node 22.x specifically when available, even if the user's
-// login-shell default is a newer Node.
+// F40 (#1032), #1456: the bundle ships better-sqlite3 and node-pty prebuilds
+// for both Node 22 and Node 24. Prefer the user's login-shell default when it
+// is either first-class runtime; Node 22 discovery remains a fallback when the
+// default is missing or has an unsupported native module ABI.
 const PREFERRED_NODE_MAJOR: u32 = 22;
-const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR];
+const LATEST_SUPPORTED_NODE_MAJOR: u32 = 24;
+const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR, LATEST_SUPPORTED_NODE_MAJOR];
 
 /// Look in well-known places for a Node 22.x install regardless of the user's
 /// nvm/fnm/volta default. Order matches the rough population of users on each.
@@ -1542,8 +1541,9 @@ fn well_known_cli_bin_dirs() -> Vec<String> {
 /// itself misses (~/.zshrc-managed entries; see well_known_cli_bin_dirs). Runs
 /// even when the login-shell probe fails: the well-known dirs alone rescue CLI
 /// detection on machines where no shell probe works. The sidecar still launches
-/// on the explicit Node 22 binary (`O8_NODE_BIN`), so this never disturbs the
-/// better-sqlite3 ABI pin — it only widens what children can find. Dedup'd;
+/// on the explicit preflight-approved Node binary (`O8_NODE_BIN`), so this
+/// never changes the selected native addon ABI — it only widens what children
+/// can find. Dedup'd;
 /// minimal PATH kept as fallback.
 ///
 /// `login_path` comes from the single `shell_env::probe_login_shell()` call the
@@ -1696,9 +1696,11 @@ mod node_preflight_tests {
     }
 
     #[test]
-    fn native_abi_support_is_limited_to_shipped_node_major() {
+    fn native_abi_support_matches_shipped_node_majors() {
         assert!(supports_native_node_major(PREFERRED_NODE_MAJOR));
-        assert!(!supports_native_node_major(24));
+        assert!(supports_native_node_major(24));
+        assert!(!supports_native_node_major(23));
+        assert!(!supports_native_node_major(25));
     }
 }
 
@@ -1718,34 +1720,39 @@ enum NodePreflightError {
 /// came back empty (no shell answered at all) do we fall back to asking
 /// directly.
 fn run_node_preflight(shell_node: Option<&str>) -> Result<String, NodePreflightError> {
-    // F40 (#1032): prefer Node 22.x specifically when available. Avoids
-    // silent better-sqlite3 ABI failures when the user's login-shell default
-    // is Node 23+. Sydney's MacBook hit this with nvm default = 25.
-    if let Some(node22) = find_preferred_node_22() {
-        if let Some((22, raw)) = check_node_version(&node22) {
-            log::info!(
-                "Node.js pre-flight OK: {} ({}) — preferred {} for native module ABI",
-                raw,
-                node22,
-                PREFERRED_NODE_MAJOR
-            );
-            return Ok(node22);
-        }
-    }
-
     let node_bin = shell_node
         .map(str::to_string)
         .or_else(resolve_node_via_login_shell)
+        .or_else(find_preferred_node_22)
         .ok_or(NodePreflightError::Missing)?;
     let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
+    if major >= MIN_NODE_MAJOR && supports_native_node_major(major) {
+        log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
+        return Ok(node_bin);
+    }
+
+    // Preserve #1032's rescue path when the user's default is too old or newer
+    // than the ABIs bundled by this release, but do not override a valid 22/24
+    // default merely because another Node 22 installation exists.
+    if let Some(node22) = find_preferred_node_22() {
+        if node22 != node_bin {
+            if let Some((22, fallback_raw)) = check_node_version(&node22) {
+                log::info!(
+                    "Node.js pre-flight OK: {} ({}) — default {} is unsupported",
+                    fallback_raw,
+                    node22,
+                    raw
+                );
+                return Ok(node22);
+            }
+        }
+    }
+
     if major < MIN_NODE_MAJOR {
-        return Err(NodePreflightError::TooOld { raw });
+        Err(NodePreflightError::TooOld { raw })
+    } else {
+        Err(NodePreflightError::UnsupportedNativeAbi { raw, major })
     }
-    if !supports_native_node_major(major) {
-        return Err(NodePreflightError::UnsupportedNativeAbi { raw, major });
-    }
-    log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
-    Ok(node_bin)
 }
 
 /// Show a native error dialog and exit. Uses platform-native tools so we
@@ -1755,33 +1762,35 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
         NodePreflightError::Missing => (
             "Node.js not found",
             format!(
-                "o8 needs Node.js v{major}.x to run its backend.\n\n\
-                 Install it with `brew install node@{major}` or `nvm install {major}`,\n\
-                 then launch o8 again. (Node {major} specifically — o8's native modules\n\
-                 are built against the Node {major} ABI; newer majors aren't supported yet.)\n\n\
+                "o8 needs Node.js {major}.x or {latest}.x to run its backend.\n\n\
+                 Install one with `brew install node@{major}` / `nvm install {major}`\n\
+                 or `brew install node@{latest}` / `nvm install {latest}`, then launch o8 again.\n\n\
                  If Node.js is already installed via nvm, fnm, or Volta, make sure it is\n\
                  available to a login shell (zsh/bash with -l flag).",
-                major = PREFERRED_NODE_MAJOR
+                major = PREFERRED_NODE_MAJOR,
+                latest = LATEST_SUPPORTED_NODE_MAJOR
             ),
         ),
         NodePreflightError::TooOld { raw } => (
             "Node.js is too old",
             format!(
-                "o8 needs Node.js v{major}.x but found {raw}.\n\n\
-                 Install it with `brew install node@{major}` or `nvm install {major}`,\n\
+                "o8 needs Node.js {major}.x or {latest}.x but found {raw}.\n\n\
+                 Install a supported version with `brew install node@{major}` or `nvm install {major}`,\n\
                  then launch o8 again.",
                 major = PREFERRED_NODE_MAJOR,
+                latest = LATEST_SUPPORTED_NODE_MAJOR,
                 raw = raw
             ),
         ),
         NodePreflightError::UnsupportedNativeAbi { raw, major: found_major } => (
             "Node.js version is not supported by o8 yet",
             format!(
-                "o8 found {raw}, but this build ships native SQLite modules for Node {major}.x only.\n\n\
+                "o8 found {raw}, but this build ships native addons for Node {major}.x and {latest}.x.\n\n\
                  Install Node {major} with `brew install node@{major}` or `nvm install {major}`,\n\
                  then launch o8 again. If you use nvm, also run `nvm alias default {major}`.\n\n\
-                 Node {found_major}.x support needs a matching better-sqlite3 ABI bundled before o8 can run on it.",
+                 Node {found_major}.x support needs matching native addon prebuilds before o8 can run on it.",
                 major = PREFERRED_NODE_MAJOR,
+                latest = LATEST_SUPPORTED_NODE_MAJOR,
                 raw = raw,
                 found_major = found_major
             ),
