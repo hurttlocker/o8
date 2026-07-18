@@ -51,6 +51,8 @@ export interface RuntimeActionResult {
   clientMutationId?: string;
   status: 'queued' | 'completed' | 'unavailable';
   note: string;
+  retryable?: boolean;
+  reason?: 'surface_not_ready';
   runId?: string;
   aborted?: boolean;
 }
@@ -516,6 +518,7 @@ function unavailable(
   action: RuntimeActionKind,
   note: string,
   clientMutationId?: string,
+  options: Pick<RuntimeActionResult, 'retryable' | 'reason'> = {},
 ): RuntimeActionResult {
   return {
     ok: false,
@@ -525,7 +528,27 @@ function unavailable(
     clientMutationId,
     status: 'unavailable',
     note,
+    ...options,
   };
+}
+
+function ownedCodexSurfaceNotReady(
+  agent: AgentSummary,
+  action: RuntimeActionKind,
+  clientMutationId?: string,
+): RuntimeActionResult {
+  return unavailable(
+    agent,
+    action,
+    'This worker is still finishing its current turn. The message can be delivered when it is ready.',
+    clientMutationId,
+    { retryable: true, reason: 'surface_not_ready' },
+  );
+}
+
+function isOwnedCodexSurfaceNotReadyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /still has an active run|does not have a thread id yet/i.test(message);
 }
 
 function actionUnavailable(
@@ -567,11 +590,21 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     return actionUnavailable(payload, surfaceId, '', 'Runtime surface not found.');
   }
 
+  const isOwnedCodexSteer = agent.runtime === 'codex'
+    && agent.runtimeSurface?.ownership === 'owned'
+    && (payload.action === 'steer' || payload.action === 'send_input');
+  if (isOwnedCodexSteer) {
+    const fresh = await getRuntimeInventorySnapshot({ fresh: true });
+    agent = findRuntimeAgent(fresh, surfaceId) ?? agent;
+  }
+
   const runtimeSurface = agent.runtimeSurface;
   if (!runtimeSurface) {
     return actionUnavailable(payload, agent.sessionKey, agent.runtime, 'Runtime surface metadata is unavailable.');
   }
-  auditRuntimeSteer(payload, agent.sessionKey);
+  if (!isOwnedCodexSteer) {
+    auditRuntimeSteer(payload, agent.sessionKey);
+  }
 
   switch (agent.runtime) {
     case 'codex': {
@@ -633,13 +666,20 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           return unavailable(agent, payload.action, 'message is required to resume an owned Codex session', payload.clientMutationId);
         }
         if (!runtimeSurface.capabilities.sendInput) {
-          return unavailable(
-            agent,
-            payload.action,
-            'This IDE-owned Codex surface cannot accept the next input yet. Wait for the active run to settle or for the session thread id to be discovered first.',
-          );
+          return ownedCodexSurfaceNotReady(agent, payload.action, payload.clientMutationId);
         }
-        const result = await continueOwnedCodexSession(runtimeSurface.id, message);
+        let result: Awaited<ReturnType<typeof continueOwnedCodexSession>>;
+        try {
+          result = await continueOwnedCodexSession(runtimeSurface.id, message);
+        } catch (error) {
+          if (isOwnedCodexSurfaceNotReadyError(error)) {
+            return ownedCodexSurfaceNotReady(agent, payload.action, payload.clientMutationId);
+          }
+          throw error;
+        }
+        if (result.ok) {
+          auditRuntimeSteer(payload, agent.sessionKey);
+        }
         return {
           ok: result.ok,
           action: payload.action,
