@@ -69,7 +69,13 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
       worktreePath: lane.worktreePath,
     });
     try {
-      updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
+      updateLane(lane.id, {
+        packetId: '',
+        worktreePath: null,
+        sessionKey: null,
+        outcome: 'discarded',
+        outcomeNote: 'Superseded by reset',
+      });
       console.log(`[reset-packet] cleared stale lane fields for ${lane.id}`);
       archiveLane(lane.id, 'user');
       console.log(`[reset-packet] Archived stale lane ${lane.id} for evicted packet ${input.packetId}`);
@@ -270,7 +276,15 @@ export async function resetPacket(input: ResetPacketInput) {
         // doesn't reuse a stale path. The clearWorktree branch cleanup below
         // uses the captured lane snapshot, so the archived row can be scrubbed
         // here without losing the target worktree path.
-        updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
+        updateLane(lane.id, {
+          packetId: '',
+          worktreePath: null,
+          sessionKey: null,
+          ...(!terminal ? {
+            outcome: 'discarded' as const,
+            outcomeNote: 'Superseded by reset',
+          } : {}),
+        });
         console.log(`[reset-packet] cleared stale lane fields for ${lane.id}`);
         if (terminal) {
           console.log(`[reset-packet] Unbound ${lane.status} lane ${lane.id} from packet ${packet.referenceLabel}`);

@@ -60,7 +60,7 @@ interface LaneSummary {
   sessionKey: string | null;
   packetId: string | null;
   status: LaneStatus;
-  outcome?: 'no_changes' | 'merged' | 'discarded' | null;
+  outcome?: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null;
   outcomeNote?: string | null;
   ownership: LaneOwnership;
   lastEventAt: string | null;

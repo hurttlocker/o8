@@ -14,7 +14,7 @@ export function deriveSpawnedAgentState(
   laneStatus: LaneStatus | null | undefined,
   visualStatus: VisualStatus,
   lastEventLabel: string | null | undefined,
-  outcome?: 'no_changes' | 'merged' | 'discarded' | null,
+  outcome?: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null,
 ): SpawnedAgentState {
   const canonical = laneStatus === 'awaiting_human'
     ? 'blocked'
@@ -26,6 +26,8 @@ export function deriveSpawnedAgentState(
   if (outcome === 'no_changes') label = 'Finished — no changes';
   if (outcome === 'merged') label = 'Merged';
   if (outcome === 'discarded') label = 'Discarded';
+  if (outcome === 'pr_opened') label = 'PR open';
+  if (outcome === 'asked') label = 'Asked';
   if (canonical === 'awaiting_review') label = lastEventLabel === 'pr_created' ? 'PR open' : 'Review ready';
   if (canonical === 'blocked') label = laneStatus === 'awaiting_input' ? 'Needs input' : 'Blocked';
   if (canonical === 'recovering') label = 'Recovering';

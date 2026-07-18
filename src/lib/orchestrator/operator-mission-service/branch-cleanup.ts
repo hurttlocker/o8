@@ -212,7 +212,7 @@ async function lanesForBranch(repoPath: string, branch: string) {
 }
 
 async function archiveLanesForBranch(repoPath: string, branch: string) {
-  const { updateLane } = await import('@/lib/lane/registry');
+  const { archiveLane, updateLane } = await import('@/lib/lane/registry');
   const lanes = await lanesForBranch(repoPath, branch);
   const worktreePaths = lanes
     .map((lane) => lane.worktreePath?.trim())
@@ -225,15 +225,10 @@ async function archiveLanesForBranch(repoPath: string, branch: string) {
       continue;
     }
 
-    const updated = updateLane(lane.id, {
-      status: 'archived',
-      packetId: '',
-      worktreePath: null,
-      writerToken: null,
-      lastEventAt: new Date().toISOString(),
-      lastEventLabel: 'archived',
-    }, 'system');
-    if (updated) archived += 1;
+    const updated = archiveLane(lane.id, 'system');
+    if (!updated) continue;
+    updateLane(lane.id, { packetId: '', worktreePath: null }, 'system');
+    archived += 1;
   }
 
   return { archived, worktreePaths };

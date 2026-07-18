@@ -21,7 +21,7 @@ export interface ExtraAgentRow {
   packetId: string | null;
   laneId: string | null;
   laneStatus: LaneStatus | null;
-  outcome: 'no_changes' | 'merged' | 'discarded' | null;
+  outcome: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null;
   outcomeNote: string | null;
   lastEventLabel: string | null;
   /** Latest review verdict was a rejection — drives the 'rejected' dot so the
@@ -71,7 +71,7 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
 function rowDotState(row: ExtraAgentRow): AgentDotState {
   const lane = row.laneStatus;
   if (row.outcome === 'merged') return 'merged';
-  if (row.outcome === 'no_changes' || row.outcome === 'discarded') return 'idle';
+  if (row.outcome === 'no_changes' || row.outcome === 'discarded' || row.outcome === 'pr_opened' || row.outcome === 'asked') return 'idle';
   // 'merged'/'released' are real lane terminal states (the DB carries them) —
   // they were missing here, so a merged packet's row kept the reviewing dot
   // (operator report 2026-07-15).
@@ -93,6 +93,8 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   if (row.outcome === 'merged') return 'merged';
   if (row.outcome === 'no_changes') return 'Finished — no changes';
   if (row.outcome === 'discarded') return 'discarded';
+  if (row.outcome === 'pr_opened') return 'PR open';
+  if (row.outcome === 'asked') return 'asked';
   if (row.rejected) return 'declined';
   if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
   if (lane === 'awaiting_input') return 'needs input';
@@ -242,7 +244,15 @@ export function ExtraAgentRowView({
             whiteSpace: 'nowrap',
           }}
         >
-          {row.outcome === 'merged' ? 'Merged' : row.outcome === 'no_changes' ? 'Finished — no changes' : 'Discarded'}
+          {row.outcome === 'merged'
+            ? 'Merged'
+            : row.outcome === 'no_changes'
+              ? 'Finished — no changes'
+              : row.outcome === 'discarded'
+                ? 'Discarded'
+                : row.outcome === 'pr_opened'
+                  ? 'PR open'
+                  : 'Asked'}
         </span>
       ) : null}
       {canRetry ? (
