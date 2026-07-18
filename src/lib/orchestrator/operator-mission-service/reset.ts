@@ -348,12 +348,24 @@ export async function resetPacket(input: ResetPacketInput) {
     }
   }
 
-  markPacketResetHeld(packet);
-
-  // Persist
-  const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-  updateOrchestratorMissionState(state);
-  log(`Reset packet ${packet.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
+  // #1527 — apply the hold under the lock against a FRESH read, never a
+  // whole-state write from the snapshot taken at function entry. The cleanup
+  // above spans seconds of async I/O; a concurrent locked write in that window
+  // (headless tick, a second reset) was clobbered by the stale write — and a
+  // second reset's stale snapshot still had THIS packet as 'queued', reverting
+  // the hold so the next dispatch tick relaunched it ("held" that didn't hold).
+  const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+  const { result: heldPacket } = await withLockedState((fresh) => {
+    const target = fresh.packets.find((candidate) => candidate.id === input.packetId);
+    if (!target) return null;
+    markPacketResetHeld(target);
+    return { referenceLabel: target.referenceLabel };
+  });
+  if (!heldPacket) {
+    log(`Reset packet ${packet.referenceLabel} (${input.packetId}) — packet left mission state during cleanup; lanes cleaned, no hold to record.`);
+  } else {
+    log(`Reset packet ${heldPacket.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
+  }
 
   return {
     reset: true,
