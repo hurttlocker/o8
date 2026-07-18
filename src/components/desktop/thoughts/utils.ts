@@ -217,13 +217,34 @@ export function mergeSameThreadHistoryLoad(
   if (liveEntries.length === 0) return { entries: fetchedEntries, preservedLiveEntries: false };
   if (fetchedEntries.length === 0) return { entries: liveEntries, preservedLiveEntries: true };
 
-  const fetchedIds = new Set(fetchedEntries.map((entry) => entry.id));
-  const hasLiveOnlyEntry = liveEntries.some((entry) => !fetchedIds.has(entry.id));
-  if (!hasLiveOnlyEntry) return { entries: fetchedEntries, preservedLiveEntries: false };
+  const liveById = new Map(liveEntries.map((entry) => [entry.id, entry]));
+  let preservedLiveEntries = false;
+  const entries = fetchedEntries.map((fetchedEntry) => {
+    const liveEntry = liveById.get(fetchedEntry.id);
+    if (!liveEntry) return fetchedEntry;
+    liveById.delete(fetchedEntry.id);
+
+    // The server increments persistedVersion on every incremental and terminal
+    // persist. A history request can race one of those writes, so an older page
+    // must not roll a newer live entry back to partial content. Fetched wins
+    // when revisions tie (including the legacy undefined/undefined case).
+    const liveVersion = liveEntry.persistedVersion ?? 0;
+    const fetchedVersion = fetchedEntry.persistedVersion ?? 0;
+    if (liveVersion <= fetchedVersion) return fetchedEntry;
+    preservedLiveEntries = true;
+    return liveEntry;
+  });
+
+  if (liveById.size > 0) {
+    preservedLiveEntries = true;
+    for (const liveEntry of liveEntries) {
+      if (liveById.has(liveEntry.id)) entries.push(liveEntry);
+    }
+  }
 
   return {
-    entries: mergeTranscriptEntries(fetchedEntries, liveEntries),
-    preservedLiveEntries: true,
+    entries,
+    preservedLiveEntries,
   };
 }
 
