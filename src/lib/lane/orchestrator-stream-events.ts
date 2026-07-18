@@ -1,8 +1,14 @@
+import { planFromToolInput, type OrchestratorPlanStep } from './orchestrator-plan';
+
 export type OrchestratorEvent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; id?: string | null; name: string; input: unknown }
   | { type: 'tool_result'; id?: string | null; name: string; input?: unknown; output: string; isError?: boolean }
+  // A COMPLETE plan snapshot (never a delta) — from Codex todo_list items or
+  // Claude TodoWrite/update_plan tool calls. ws-server maps it to the mobile
+  // `plan-update` orchestrator event. Step ids are stable within a turn.
+  | { type: 'plan'; explanation: string | null; steps: OrchestratorPlanStep[] }
   | { type: 'done'; sessionId: string | null; cost: number | null }
   | { type: 'error'; error: string }
   // ── Collide (MoA) — emitted ONLY by the collide backend (moa.ts). Proposer
@@ -161,6 +167,11 @@ export function processStreamEvent(
         };
         tracker.recordToolUse(nextTool);
         onEvent({ type: 'tool_use', ...nextTool });
+        // content_block_start rarely carries the full input (it streams via
+        // input_json_delta, which this parser doesn't accumulate) — the plan
+        // usually materializes from the assistant replay below instead.
+        const plan = planFromToolInput(nextTool.name, nextTool.input);
+        if (plan) onEvent({ type: 'plan', ...plan });
       }
       break;
     }
@@ -197,6 +208,8 @@ export function processStreamEvent(
           };
           tracker.recordToolUse(nextTool);
           onEvent({ type: 'tool_use', ...nextTool });
+          const plan = planFromToolInput(nextTool.name, nextTool.input);
+          if (plan) onEvent({ type: 'plan', ...plan });
         }
       });
       break;
