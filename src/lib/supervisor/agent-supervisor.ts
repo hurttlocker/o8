@@ -121,7 +121,6 @@ type TranscriptSourceCacheEntry = {
   paths: string[];
   resolvedAt: number;
 };
-
 // ── Constants ──
 
 const SUPERVISOR_HEARTBEAT_MS = 5_000;
@@ -131,7 +130,8 @@ const COMPLETED_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_STAGGER_WINDOW_MS = 5_000;
 const TRANSCRIPT_SOURCE_CACHE_TTL_MS = 15_000;
 const MISSING_TRANSCRIPT_SOURCE_CACHE_TTL_MS = 2_000;
-const STUCK_THRESHOLD_MS = 2 * 60 * 1000;       // 2 min no transcript change
+const FIRST_STEER_THRESHOLD_MS = 6 * 60 * 1000; // planning-heavy turns need a longer first window
+const STUCK_THRESHOLD_MS = 2 * 60 * 1000;       // subsequent steers retain the existing cadence
 const MAX_RETRIES = 1;                           // Auto-retry once on failure
 const MAX_STEERS = 2;                            // Auto-steer twice before escalate
 const COMPLETION_CLEANUP_MS = 60_000;            // Remove from watch 60s after done
@@ -144,7 +144,6 @@ const CLAUDE_PROJECTS_DIR = path.join(
 );
 
 // ── State ──
-
 const watchedAgents = new Map<string, WatchedAgent>();
 const transcriptSourceCache = new Map<string, TranscriptSourceCacheEntry>();
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -815,7 +814,8 @@ async function checkStuck(
   }
 
   const staleDuration = now - watched.lastActivityAt;
-  if (staleDuration < STUCK_THRESHOLD_MS) return;
+  const stuckThresholdMs = watched.steerCount === 0 ? FIRST_STEER_THRESHOLD_MS : STUCK_THRESHOLD_MS;
+  if (staleDuration < stuckThresholdMs) return;
 
   if (watched.steerCount < MAX_STEERS) {
     watched.steerCount += 1;
