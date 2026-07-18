@@ -14,6 +14,7 @@ export function deriveSpawnedAgentState(
   laneStatus: LaneStatus | null | undefined,
   visualStatus: VisualStatus,
   lastEventLabel: string | null | undefined,
+  outcome?: 'no_changes' | null,
 ): SpawnedAgentState {
   const canonical = laneStatus === 'awaiting_human'
     ? 'blocked'
@@ -22,11 +23,12 @@ export function deriveSpawnedAgentState(
   const scheme = packetStateColorScheme(stateKey);
   let label = scheme.label ?? 'Idle';
 
+  if (outcome === 'no_changes') label = 'Finished — no changes';
   if (canonical === 'awaiting_review') label = lastEventLabel === 'pr_created' ? 'PR open' : 'Review ready';
   if (canonical === 'blocked') label = laneStatus === 'awaiting_input' ? 'Needs input' : 'Blocked';
   if (canonical === 'recovering') label = 'Recovering';
   if (canonical === 'released') label = 'Merged';
-  if (canonical === 'archived') label = 'Archived';
+  if (canonical === 'archived' && outcome !== 'no_changes') label = 'Archived';
   if (canonical === 'idle') label = 'Idle';
   if (!canonical && visualStatus === 'waiting') label = 'Review ready';
   if (!canonical && visualStatus === 'error') label = 'Failed';

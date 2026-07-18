@@ -16,6 +16,7 @@ export type SupervisorInboxKind =
   | 'merge_blocked'
   | 'fetch_unreachable'
   | 'repo_misconfigured'
+  | 'packet_no_changes'
   // #1502 — a lane reported progress/heartbeat while its sessionKey was null:
   // the worker is running into the void (no transcript, no completion signal).
   // FAULT queue item — never self-closes.
@@ -116,6 +117,7 @@ export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
   merge_blocked: { defaultStatus: 'human_required' },
   fetch_unreachable: { defaultStatus: 'human_required', autoDismissAfterMs: 7 * 24 * HOUR_MS },
   no_session_binding: { defaultStatus: 'human_required' },
+  packet_no_changes: { defaultStatus: 'pending', autoDismissAfterMs: 7 * 24 * HOUR_MS },
 };
 
 function ensureSupervisorInboxTable() {

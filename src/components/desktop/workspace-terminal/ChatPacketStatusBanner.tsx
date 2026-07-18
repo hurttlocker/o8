@@ -22,7 +22,7 @@
  *   - Review diff    → onReview() (opens the wide review surface)
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 import type { PacketReviewState } from '@/lib/orchestrator/derive-review-state';
@@ -44,7 +44,7 @@ interface ChatPacketStatusBannerProps {
 }
 
 type Presentation = {
-  key: 'rejected' | 'ready' | 'awaiting' | 'merged' | 'failed' | 'recovering';
+  key: 'rejected' | 'ready' | 'awaiting' | 'merged' | 'failed' | 'recovering' | 'no_changes';
   label: string;
   detail: string;
   color: string;
@@ -68,6 +68,15 @@ const READY: Presentation = {
   color: '#15803d',
   background: 'rgba(22, 163, 74, 0.1)',
   border: 'rgba(22, 163, 74, 0.28)',
+};
+
+const NO_CHANGES: Presentation = {
+  key: 'no_changes',
+  label: 'Finished — no changes',
+  detail: 'The agent finished without making changes. There is no diff to review or merge.',
+  color: '#475569',
+  background: 'rgba(100, 116, 139, 0.08)',
+  border: 'rgba(100, 116, 139, 0.24)',
 };
 
 const PRESENTATION_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Presentation>> = {
@@ -110,6 +119,8 @@ interface ReviewStateResponse {
   lane?: string | null;
   packetId?: string | null;
   title?: string | null;
+  outcome?: 'no_changes' | null;
+  outcomeNote?: string | null;
   orchestratorReview?: { verdict?: string; summary?: string } | null;
 }
 
@@ -136,6 +147,8 @@ export function ChatPacketStatusBanner({
   const [resolvedPacketId, setResolvedPacketId] = useState<string | null>(null);
   const [resolvedTitle, setResolvedTitle] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState<string | null>(null);
+  const [resolvedOutcome, setResolvedOutcome] = useState<'no_changes' | null>(null);
+  const [resolvedOutcomeNote, setResolvedOutcomeNote] = useState<string | null>(null);
   const [reasonExpanded, setReasonExpanded] = useState(false);
 
   // Self-fetch the durable review-state so the banner works even when the packet
@@ -149,23 +162,41 @@ export function ChatPacketStatusBanner({
       : sessionKey
         ? `sessionKey=${encodeURIComponent(sessionKey)}`
         : null;
-    if (!query) { setReviewState(null); return; }
+    if (!query) {
+      setReviewState(null);
+      setResolvedOutcome(null);
+      setResolvedOutcomeNote(null);
+      return;
+    }
     let active = true;
     void (async () => {
       try {
         const res = await fetch(`/api/orchestrator/review-state?${query}`);
-        if (!res.ok) { if (active) setReviewState(null); return; }
+        if (!res.ok) {
+          if (active) {
+            setReviewState(null);
+            setResolvedOutcome(null);
+            setResolvedOutcomeNote(null);
+          }
+          return;
+        }
         const data = await res.json() as ReviewStateResponse;
         if (!active) return;
         setReviewState(data.state ?? null);
         setResolvedLaneId(data.lane ?? null);
         setResolvedPacketId(data.packetId ?? null);
         setResolvedTitle(data.title ?? null);
+        setResolvedOutcome(data.outcome ?? null);
+        setResolvedOutcomeNote(data.outcomeNote ?? null);
         // The rejection reason lives on the durable review summary — show it so
         // "declined" isn't a dead-end that forces you to open the diff to guess why.
         setReviewReason(data.orchestratorReview?.verdict === 'rejected' ? (data.orchestratorReview?.summary ?? null) : null);
       } catch {
-        if (active) setReviewState(null);
+        if (active) {
+          setReviewState(null);
+          setResolvedOutcome(null);
+          setResolvedOutcomeNote(null);
+        }
       }
     })();
     return () => { active = false; };
@@ -180,7 +211,8 @@ export function ChatPacketStatusBanner({
   // ready-to-merge are derived from the actual review + merge gate, so they're
   // more truthful than a status string that lags.
   const presentation: Presentation | undefined =
-    reviewState === 'needs-revision' ? REJECTED
+    resolvedOutcome === 'no_changes' ? NO_CHANGES
+    : reviewState === 'needs-revision' ? REJECTED
     : reviewState === 'ready-to-merge' ? READY
     : reviewState === 'merged' ? PRESENTATION_BY_STATUS.released
     : (status ? PRESENTATION_BY_STATUS[status] : undefined);
@@ -314,7 +346,7 @@ export function ChatPacketStatusBanner({
   const canRequestChanges = p.key === 'rejected' || p.key === 'awaiting' || p.key === 'failed';
   const canReview = Boolean(onReview) && (p.key === 'rejected' || p.key === 'ready' || p.key === 'awaiting');
   const canCreatePr = Boolean(effectiveLaneId) && (p.key === 'awaiting' || p.key === 'ready' || prOnlyMode);
-  const canDiscard = p.key !== 'merged' && p.key !== 'recovering';
+  const canDiscard = p.key !== 'merged' && p.key !== 'recovering' && p.key !== 'no_changes';
   const showActions = canMerge || canOverrideMerge || canRequestChanges || canReview || canCreatePr || canDiscard;
 
   const pill = (
@@ -407,7 +439,9 @@ export function ChatPacketStatusBanner({
           <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
             {p.key === 'awaiting' && prOnlyMode
               ? 'PR-only mode is active. Create a PR so a human can merge.'
-              : p.detail}
+              : p.key === 'no_changes' && resolvedOutcomeNote
+                ? resolvedOutcomeNote
+                : p.detail}
           </div>
           {p.key === 'rejected' && reviewReason ? (
             <div

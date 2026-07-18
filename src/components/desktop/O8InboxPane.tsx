@@ -15,6 +15,7 @@ const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   merge_blocked: 'Merge Blocked',
   fetch_unreachable: 'Fetch Unreachable',
   repo_misconfigured: 'Repo Misconfigured',
+  packet_no_changes: 'Finished · No Changes',
   silent_exit_verification_failed: 'Silent Exit · Verification Failed',
   silent_exit_no_work: 'Silent Exit · No Work',
   silent_exit_but_work_present: 'Silent Exit · Work Salvaged',

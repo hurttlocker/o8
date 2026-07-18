@@ -160,6 +160,8 @@ export async function GET(request: NextRequest) {
       // Title so a detached packet's decision banner can name itself instead of
       // falling back to a generic "Dispatched packet".
       title: packet.title ?? lane?.label ?? null,
+      outcome: lane?.outcome ?? null,
+      outcomeNote: lane?.outcomeNote ?? null,
     }, { headers: JSON_HEADERS });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to read review state.';

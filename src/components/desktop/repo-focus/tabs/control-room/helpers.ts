@@ -186,6 +186,8 @@ export function supervisorKindLabel(kind: SupervisorInboxItem['kind']): string {
       return 'Fetch unreachable';
     case 'repo_misconfigured':
       return 'Repo misconfigured';
+    case 'packet_no_changes':
+      return 'Finished — no changes';
     case 'silent_exit_verification_failed':
       return 'Silent exit';
     case 'silent_exit_no_work':

@@ -129,10 +129,11 @@ const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
-const { createLane, findLaneByPacket, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, findLaneByPacket, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
 const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
@@ -799,4 +800,59 @@ describe('seam G — merge truth verifies release claims and carries same-patch 
       currentHeadSha: changedHead,
     });
   }, 30_000);
+});
+
+// ── Seam H — no-commit completion remains operator-visible (#1578) ─────────
+
+describe('seam H — reconciled no-commit completion persists an outcome and inbox note', () => {
+  it('a persisted reviewing lane with a missing branch finishes as no_changes and creates a supervisor inbox row', async () => {
+    const repoPath = makeMergeRepo('o8-seam-H-no-changes-');
+    const packetId = 'pkt-seam-H-no-changes';
+    const packetTitle = 'Fix silent packet completion';
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'agent/never-created',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      label: packetTitle,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'agent_turn_completed');
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
+
+    expect(getLane(lane.id)).toMatchObject({
+      id: lane.id,
+      status: 'archived',
+      outcome: 'no_changes',
+      outcomeNote: 'Agent finished without making changes',
+    });
+
+    const inboxRow = getSqlite().prepare(`
+      SELECT repo_path, packet_id, kind, payload, status
+      FROM supervisor_inbox
+      WHERE packet_id = ? AND kind = 'packet_no_changes'
+      ORDER BY datetime(created_at) DESC
+      LIMIT 1
+    `).get(packetId) as {
+      repo_path: string;
+      packet_id: string;
+      kind: string;
+      payload: string;
+      status: string;
+    } | undefined;
+    expect(inboxRow).toMatchObject({
+      repo_path: repoPath,
+      packet_id: packetId,
+      kind: 'packet_no_changes',
+      status: 'pending',
+    });
+    expect(JSON.parse(inboxRow?.payload ?? '{}')).toMatchObject({
+      packetTitle,
+      outcome: 'no_changes',
+      note: expect.stringContaining('produced no changes'),
+    });
+  }, 20_000);
 });
