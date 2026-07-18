@@ -16,11 +16,11 @@
 
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { sep } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../../output.js';
-import { resolvePacketTarget } from './target.js';
+import { parsePacketArguments, resolvePacketTarget } from './target.js';
+import { detectWorktree } from './worktree-resolve.js';
 
 interface Lane {
   id: string;
@@ -50,102 +50,36 @@ interface CaptureArgs {
   clip: string | null;
 }
 
-interface WorktreeMatch { worktreePath: string; packetSlug: string }
-
-function detectWorktree(cwd: string): WorktreeMatch | null {
-  const parts = cwd.split(sep);
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const prev = parts[i - 1];
-    const cur = parts[i];
-    if (!cur || !cur.startsWith('packet-')) continue;
-    if (prev === '.cortex-worktrees') {
-      return { worktreePath: parts.slice(0, i + 1).join(sep), packetSlug: cur.slice('packet-'.length) };
-    }
-    if (prev === 'worktrees' && parts[i - 2] === '.claude') {
-      return { worktreePath: parts.slice(0, i + 1).join(sep), packetSlug: cur.slice('packet-'.length) };
-    }
-  }
-  return null;
-}
+const CAPTURE_URL_PATTERN = /^(https?:\/\/|file:\/\/|localhost(?::|\/)|127\.0\.0\.1(?::|\/))/i;
 
 export function parseCaptureArgs(rest: string[]): CaptureArgs {
-  let url: string | null = null;
-  let label: string | null = null;
-  let kind: 'screenshot' | 'video' = 'screenshot';
-  let phase: 'before' | 'after' | null = null;
-  let waitFor: string | null = null;
-  let settleMs = 0;
-  let pairId: string | null = null;
-  let fullPage = false;
-  let hover: string | null = null;
-  let click: string | null = null;
-  let clip: string | null = null;
-  let packetTarget: string | null = null;
-
-  const take = (tok: string, flag: string, i: { v: number }): string | null => {
-    if (tok.startsWith(`${flag}=`)) return tok.slice(flag.length + 1);
-    if (tok !== flag) return null;
-    const value = rest[++i.v];
-    if (!value || value.startsWith('-')) {
-      throw new CliError('invalid_args', `${flag} requires a value.`, EXIT.INVALID_ARGS);
-    }
-    return value;
-  };
-
-  for (let idx = 0; idx < rest.length; idx++) {
-    const tok = rest[idx];
-    const i = { v: idx };
-    let val: string | null;
-    if ((val = take(tok, '--packet', i)) !== null || (val = take(tok, '--lane', i)) !== null) {
-      if (packetTarget && packetTarget !== val.trim()) {
-        throw new CliError(
-          'invalid_args',
-          `Conflicting explicit packet targets: ${packetTarget} and ${val.trim()}.`,
-          EXIT.INVALID_ARGS,
-        );
-      }
-      packetTarget = val;
-    } else if ((val = take(tok, '--url', i)) !== null) url = val;
-    else if ((val = take(tok, '--label', i)) !== null) label = val;
-    else if ((val = take(tok, '--kind', i)) !== null) kind = val === 'video' ? 'video' : 'screenshot';
-    else if ((val = take(tok, '--wait-for', i)) !== null) waitFor = val;
-    else if ((val = take(tok, '--settle', i)) !== null) settleMs = Math.max(0, Math.min(10_000, Number(val) || 0));
-    else if ((val = take(tok, '--pair', i)) !== null) pairId = val;
-    else if ((val = take(tok, '--hover', i)) !== null) hover = val;
-    else if ((val = take(tok, '--click', i)) !== null) click = val;
-    else if ((val = take(tok, '--clip', i)) !== null) clip = val;
-    else if (tok === '--full-page' || tok === '--fullpage') fullPage = true;
-    else if (tok === '--before') phase = 'before';
-    else if (tok === '--after') phase = 'after';
-    else if (!tok.startsWith('-') && !url && /^(https?:\/\/|file:\/\/|localhost(?::|\/)|127\.0\.0\.1(?::|\/))/i.test(tok)) url = tok;
-    else if (!tok.startsWith('-') && !packetTarget) packetTarget = tok;
-    else if (!tok.startsWith('-') && !url) url = tok;
-    else if (tok.startsWith('-')) {
-      throw new CliError('invalid_args', `Unknown o8 packet capture flag: ${tok}.`, EXIT.INVALID_ARGS);
-    } else {
-      throw new CliError(
-        'invalid_args',
-        `Unexpected argument ${tok} for o8 packet capture.`,
-        EXIT.INVALID_ARGS,
-        'Pass the packet id once, positionally or with --packet <id>.',
-      );
-    }
-    idx = i.v;
-  }
+  const args = parsePacketArguments(rest, {
+    command: 'capture',
+    valueFlags: ['url', 'label', 'kind', 'wait-for', 'settle', 'pair', 'hover', 'click', 'clip'],
+    booleanFlags: ['full-page', 'before', 'after'],
+    aliases: { '--fullpage': '--full-page' },
+    targetFlags: ['packet', 'lane'],
+    positionalValues: [{ name: 'url', matches: (value) => CAPTURE_URL_PATTERN.test(value) }],
+  });
+  const beforeIndex = rest.lastIndexOf('--before');
+  const afterIndex = rest.lastIndexOf('--after');
+  const phase = beforeIndex < 0 && afterIndex < 0
+    ? null
+    : afterIndex > beforeIndex ? 'after' : 'before';
 
   return {
-    packetTarget: packetTarget?.trim() || null,
-    url: url?.trim() || null,
-    label: label?.trim() || null,
-    kind,
+    packetTarget: args.target,
+    url: args.values.url?.trim() || null,
+    label: args.values.label?.trim() || null,
+    kind: args.values.kind === 'video' ? 'video' : 'screenshot',
     phase,
-    waitFor: waitFor?.trim() || null,
-    settleMs,
-    pairId: pairId?.trim() || null,
-    fullPage,
-    hover: hover?.trim() || null,
-    click: click?.trim() || null,
-    clip: clip?.trim() || null,
+    waitFor: args.values['wait-for']?.trim() || null,
+    settleMs: Math.max(0, Math.min(10_000, Number(args.values.settle) || 0)),
+    pairId: args.values.pair?.trim() || null,
+    fullPage: args.booleans.has('full-page'),
+    hover: args.values.hover?.trim() || null,
+    click: args.values.click?.trim() || null,
+    clip: args.values.clip?.trim() || null,
   };
 }
 
@@ -232,25 +166,19 @@ export async function runPacketCapture(mode: OutputMode, rest: string[]): Promis
     );
   }
 
-  // An explicit target is fail-closed. Cwd association stays best-effort so a
-  // standalone capture can still be stored without a packet.
+  // Explicit and worker-env targets are fail-closed. Cwd association stays
+  // best-effort so a standalone capture can still be stored without a packet.
   const match = detectWorktree(process.cwd());
   const cfg = resolveConfig();
   let lane: Lane | null = null;
   let packetId: string | null = null;
-  if (args.packetTarget) {
+  try {
     const target = await resolvePacketTarget<Lane>(args.packetTarget);
     packetId = target.packetId;
     lane = target.lane;
-  } else if (match) {
-    try {
-      const lanesRes = await apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } });
-      const lanes = lanesRes.data?.lanes ?? [];
-      lane = lanes.find((l) => l.worktreePath === match.worktreePath)
-        ?? lanes.find((l) => l.worktreePath && l.worktreePath.endsWith(`packet-${match.packetSlug}`))
-        ?? null;
-    } catch { /* registry may be down — proceed unassigned */ }
-    packetId = lane?.packetId ?? match.packetSlug;
+  } catch (error) {
+    if (args.packetTarget || process.env.O8_WORKER_PACKET_ID?.trim()) throw error;
+    packetId = match?.packetSlug ?? null;
   }
 
   const capture = await captureViaDevBrowser(args);
