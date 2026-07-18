@@ -9,6 +9,10 @@ export interface PacketArgumentSpec {
   aliases?: Readonly<Record<string, string>>;
   allowTarget?: boolean;
   targetFlags?: readonly string[];
+  positionalValues?: readonly {
+    name: string;
+    matches: (value: string) => boolean;
+  }[];
 }
 
 export interface ParsedPacketArguments {
@@ -28,6 +32,7 @@ export interface PacketTargetLane {
 export interface ResolvedPacketTarget<T extends PacketTargetLane = PacketTargetLane> {
   input: string;
   explicit: boolean;
+  source: 'explicit' | 'env' | 'cwd';
   laneId: string;
   packetId: string | null;
   worktreePath: string | null;
@@ -47,9 +52,14 @@ function unexpectedArgument(command: string, argument: string, allowTarget: bool
   );
 }
 
-function requireFlagValue(rest: string[], index: number, flag: string): string {
+function requireFlagValue(
+  rest: string[],
+  index: number,
+  flag: string,
+  isKnownFlag: (token: string) => boolean,
+): string {
   const value = rest[index + 1];
-  if (!value || value.startsWith('-')) {
+  if (!value || isKnownFlag(value)) {
     throw new CliError(
       'invalid_args',
       `${flag} requires a value.`,
@@ -73,6 +83,19 @@ export function parsePacketArguments(
   const aliases = spec.aliases ?? {};
   const allowTarget = spec.allowTarget !== false;
   const targetFlags = new Set(spec.targetFlags ?? ['packet']);
+  const positionalValues = spec.positionalValues ?? [];
+  const knownFlags = new Set([
+    ...valueFlags,
+    ...booleanFlags,
+    ...targetFlags,
+  ]);
+  const isKnownFlag = (token: string): boolean => {
+    const canonical = aliases[token] ?? token;
+    if (!canonical.startsWith('-')) return false;
+    if (!canonical.startsWith('--')) return Object.hasOwn(aliases, token);
+    const name = canonical.slice(2).split('=', 1)[0];
+    return knownFlags.has(name);
+  };
   const values: Record<string, string> = {};
   const booleans = new Set<string>();
   let flagTarget: string | null = null;
@@ -89,7 +112,7 @@ export function parsePacketArguments(
       if (!allowTarget) throw unexpectedArgument(spec.command, token, false);
       const value = canonicalToken.includes('=')
         ? canonicalToken.slice(canonicalToken.indexOf('=') + 1)
-        : requireFlagValue(rest, index, `--${flagName}`);
+        : requireFlagValue(rest, index, `--${flagName}`, isKnownFlag);
       if (!canonicalToken.includes('=')) index += 1;
       if (!value.trim()) {
         throw new CliError('invalid_args', `--${flagName} requires a value.`, EXIT.INVALID_ARGS);
@@ -108,7 +131,7 @@ export function parsePacketArguments(
     if (flagName && valueFlags.has(flagName)) {
       const value = canonicalToken.includes('=')
         ? canonicalToken.slice(canonicalToken.indexOf('=') + 1)
-        : requireFlagValue(rest, index, `--${flagName}`);
+        : requireFlagValue(rest, index, `--${flagName}`, isKnownFlag);
       if (!canonicalToken.includes('=')) index += 1;
       values[flagName] = value;
       continue;
@@ -132,6 +155,14 @@ export function parsePacketArguments(
         `Unknown o8 packet ${spec.command} flag: ${token}.`,
         EXIT.INVALID_ARGS,
       );
+    }
+
+    const positionalValue = positionalValues.find((candidate) => (
+      values[candidate.name] === undefined && candidate.matches(token)
+    ));
+    if (positionalValue) {
+      values[positionalValue.name] = token;
+      continue;
     }
 
     if (!allowTarget || positionalTarget) {
@@ -169,23 +200,28 @@ export function resolvePacketTargetFromLanes<T extends PacketTargetLane>(
   explicitId: string | null,
   lanes: T[],
   cwdMatch: WorktreeMatch | null,
+  workerPacketId: string | null = null,
 ): ResolvedPacketTarget<T> {
-  const normalized = explicitId?.trim() || null;
-  if (normalized) {
+  const normalizedExplicit = explicitId?.trim() || null;
+  const normalizedWorker = workerPacketId?.trim() || null;
+  const namedTarget = normalizedExplicit ?? normalizedWorker;
+  if (namedTarget) {
     const lane = chooseLane(lanes.filter((candidate) => (
-      candidate.id === normalized || candidate.packetId === normalized
+      candidate.id === namedTarget || candidate.packetId === namedTarget
     )));
     if (!lane) {
+      const source = normalizedExplicit ? 'Explicit packet target' : 'Worker packet target from O8_WORKER_PACKET_ID';
       throw new CliError(
         'packet_target_not_found',
-        `Explicit packet target ${normalized} did not resolve to a registered packet or lane.`,
+        `${source} ${namedTarget} did not resolve to a registered packet or lane.`,
         EXIT.NOT_FOUND,
-        'The cwd packet was not used because an explicit target was supplied. Run `o8 status` to confirm the id.',
+        `The cwd packet was not used because ${normalizedExplicit ? 'an explicit target was supplied' : 'the worker environment named a target'}. Run \`o8 status\` to confirm the id.`,
       );
     }
     return {
-      input: normalized,
-      explicit: true,
+      input: namedTarget,
+      explicit: Boolean(normalizedExplicit),
+      source: normalizedExplicit ? 'explicit' : 'env',
       laneId: lane.id,
       packetId: lane.packetId,
       worktreePath: lane.worktreePath,
@@ -220,6 +256,7 @@ export function resolvePacketTargetFromLanes<T extends PacketTargetLane>(
   return {
     input: lane.packetId ?? lane.id,
     explicit: false,
+    source: 'cwd',
     laneId: lane.id,
     packetId: lane.packetId,
     worktreePath: lane.worktreePath,
@@ -238,6 +275,7 @@ export async function resolvePacketTarget<T extends PacketTargetLane = PacketTar
     explicitId,
     response.data?.lanes ?? [],
     detectWorktree(process.cwd()),
+    process.env.O8_WORKER_PACKET_ID ?? null,
   );
 }
 

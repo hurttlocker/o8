@@ -17,7 +17,7 @@
  *   o8 mission tail     [--mission <id>] [--timeout <ms|5m|90s>] [--poll ms]
  */
 
-import { apiFetch, CliError, EXIT } from '../api.js';
+import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../api.js';
 import { resolveConfig } from '../config.js';
 import {
   printHumanHeading,
@@ -233,6 +233,7 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<{ initiated?: boolean; dispatched?: number }>>(cfg, '/api/orchestrator/dispatch', {
     method: 'POST',
+    timeoutMs: wait ? SLOW_MUTATION_TIMEOUT_MS : undefined,
     body: { ...(missionId ? { missionId } : {}), wait },
   });
   const result = unwrap(res.data, 'Mission dispatch was rejected.');

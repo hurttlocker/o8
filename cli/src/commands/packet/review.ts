@@ -1,4 +1,4 @@
-import { apiFetch, CliError, EXIT } from '../../api.js';
+import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
   printHumanHeading,
@@ -89,6 +89,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     expectedHeadSha?: string;
   }>>(cfg, '/api/orchestrator/merge', {
     method: 'POST',
+    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
     body: {
       packetId,
       commitMessage: args.commitMessage ?? undefined,

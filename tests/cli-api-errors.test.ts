@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   apiFetch,
   DEFAULT_API_TIMEOUT_MS,
+  EXIT,
   type CliError,
 } from '../cli/src/api';
 import type { ResolvedConfig } from '../cli/src/config';
+import { printError } from '../cli/src/output';
 
 const config: ResolvedConfig = {
   apiPort: 47120,
@@ -58,6 +60,8 @@ describe('CLI apiFetch network error taxonomy', () => {
 
     await expect(apiFetch(config, '/api/lanes', { timeoutMs: 42_000 })).rejects.toMatchObject({
       code: 'server_timeout',
+      exit: EXIT.SERVER_TIMEOUT,
+      ambiguous: true,
       message: 'o8 app accepted the connection but /api/lanes did not answer within 42s.',
       hint: expect.stringContaining('server route is stalled, not unreachable'),
     });
@@ -127,6 +131,41 @@ describe('CLI apiFetch network error taxonomy', () => {
     await expect(apiFetch(config, '/api/body-stalled')).rejects.toMatchObject({
       code: 'server_timeout',
       message: expect.stringContaining('/api/body-stalled'),
+    });
+  });
+
+  it('serializes server_timeout as an ambiguous outcome with its own exit code', async () => {
+    rejectFetch(errorWithCause('ETIMEDOUT'));
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    let timeoutError: unknown;
+    try {
+      await apiFetch(config, '/api/orchestrator/merge');
+    } catch (error) {
+      timeoutError = error;
+    }
+
+    expect(printError(timeoutError, { human: false, verbose: false })).toBe(EXIT.SERVER_TIMEOUT);
+    const payload = JSON.parse(stderr.mock.calls.map(([chunk]) => String(chunk)).join(''));
+    expect(payload).toMatchObject({
+      schema: 'o8/cli/error/v1',
+      error: {
+        code: 'server_timeout',
+        ambiguous: true,
+      },
+    });
+  });
+
+  it('keeps definitive state conflicts on exit 5 with an unambiguous outcome', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ note: 'already merged' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await expect(apiFetch(config, '/api/orchestrator/merge')).rejects.toMatchObject({
+      code: 'conflict',
+      exit: EXIT.CONFLICT,
+      ambiguous: false,
     });
   });
 });

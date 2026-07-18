@@ -172,6 +172,10 @@ env:
 exit codes:
   0 ok   1 invalid args   2 connection refused
   3 unauthorized   4 not found   5 conflict
+  6 server timeout (ambiguous: the operation may have landed)
+
+error JSON:
+  error.ambiguous is true when retry safety cannot be inferred from the result
 `;
 
 /**

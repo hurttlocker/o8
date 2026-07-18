@@ -3,7 +3,8 @@
  *
  * Wraps fetch with bearer-token injection and translates HTTP failures into
  * the documented exit-code surface (#2 connection refused, #3 unauthorized,
- * #4 not found, #5 conflict). Every other error bubbles as exit 1.
+ * #4 not found, #5 conflict, #6 ambiguous server timeout). Every other error
+ * bubbles as exit 1.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ export const EXIT = {
   UNAUTHORIZED: 3,
   NOT_FOUND: 4,
   CONFLICT: 5,
+  SERVER_TIMEOUT: 6,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
@@ -28,6 +30,7 @@ export class CliError extends Error {
     message: string,
     public exit: ExitCode,
     public hint?: string,
+    public ambiguous = false,
   ) {
     super(message);
     this.name = 'CliError';
@@ -75,6 +78,7 @@ function buildUrl(base: string, path: string, query?: ApiRequestOptions['query']
 }
 
 export const DEFAULT_API_TIMEOUT_MS = 120_000;
+export const SLOW_MUTATION_TIMEOUT_MS = 300_000;
 
 const TIMEOUT_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT',
@@ -143,8 +147,9 @@ function throwNetworkError(
     throw new CliError(
       'server_timeout',
       `o8 app accepted the connection but ${path} did not answer within ${formatTimeoutSeconds(timeoutMs)}s.`,
-      EXIT.CONFLICT,
+      EXIT.SERVER_TIMEOUT,
       'The server route is stalled, not unreachable. Check the packet lane events and the app Activity view for the blocked operation.',
+      true,
     );
   }
 

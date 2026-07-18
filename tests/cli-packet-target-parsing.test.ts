@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CliError, EXIT } from '../cli/src/api';
-import { parseCaptureArgs } from '../cli/src/commands/packet/capture';
+import { parseCaptureArgs, runPacketCapture } from '../cli/src/commands/packet/capture';
 import { parsePacketCommitMessage } from '../cli/src/commands/packet/commit';
 import {
   PACKET_SUBCOMMANDS,
@@ -8,11 +8,16 @@ import {
   packetSubcommandHint,
 } from '../cli/src/commands/packet/help';
 import { parsePacketRecoveryArgs } from '../cli/src/commands/packet/recover';
-import { parseMirrorArgs } from '../cli/src/commands/packet/mirror-proof';
+import { parseMirrorArgs, runPacketMirrorProof } from '../cli/src/commands/packet/mirror-proof';
 import {
   resolvePacketTargetFromLanes,
   type PacketTargetLane,
 } from '../cli/src/commands/packet/target';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('packet CLI target parsing', () => {
   it.each([
@@ -62,19 +67,86 @@ describe('packet CLI target parsing', () => {
       .toThrow('Unexpected argument pkt-wrong for o8 packet commit.');
   });
 
-  it('keeps capture and mirror-proof positional operands distinct from packet targets', () => {
-    expect(parseCaptureArgs(['pkt-target', '--url', 'http://localhost:3000'])).toMatchObject({
+  it('consumes dash-prefixed free text unless it is a known flag for the command', () => {
+    expect(parsePacketRecoveryArgs('steer', ['--message', '-v flag is broken']).values.message)
+      .toBe('-v flag is broken');
+    expect(() => parsePacketRecoveryArgs('steer', ['--message', '--packet', 'pkt-target']))
+      .toThrow('--message requires a value.');
+  });
+
+  it('routes capture and mirror-proof positional targets through the shared parser', () => {
+    const capturePositional = parseCaptureArgs(['pkt-target', '--url', 'http://localhost:3000']);
+    const captureFlagged = parseCaptureArgs(['--packet', 'pkt-target', '--url', 'http://localhost:3000']);
+    expect(capturePositional).toMatchObject({
       packetTarget: 'pkt-target',
       url: 'http://localhost:3000',
     });
+    expect(captureFlagged).toEqual(capturePositional);
     expect(parseCaptureArgs(['http://localhost:3000'])).toMatchObject({
       packetTarget: null,
       url: 'http://localhost:3000',
     });
-    expect(parseMirrorArgs(['pkt-target', '--pr', '1463'])).toMatchObject({
+    const mirrorPositional = parseMirrorArgs(['pkt-target', '--pr', '1463']);
+    const mirrorFlagged = parseMirrorArgs(['--packet', 'pkt-target', '--pr', '1463']);
+    expect(mirrorPositional).toMatchObject({
       packetId: 'pkt-target',
       prNumber: 1463,
     });
+    expect(mirrorFlagged).toEqual(mirrorPositional);
+  });
+
+  it.each([
+    ['capture', () => runPacketCapture(
+      { human: false, verbose: false },
+      ['pkt-missing', '--url', 'http://localhost:3000'],
+    )],
+    ['mirror-proof', () => runPacketMirrorProof(
+      { human: false, verbose: false },
+      ['pkt-missing', '--pr', '1463', '--repo', 'owner/repo'],
+    )],
+  ])('%s fails closed when its explicit target does not resolve', async (_verb, run) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ lanes: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await expect(run()).rejects.toMatchObject({
+      code: 'packet_target_not_found',
+      exit: EXIT.NOT_FOUND,
+    });
+  });
+
+  it('resolves target precedence as explicit id, worker env, then cwd', () => {
+    const lanes: PacketTargetLane[] = [
+      { id: 'lane-explicit', packetId: 'pkt-explicit', worktreePath: null, status: 'working' },
+      { id: 'lane-env', packetId: 'pkt-env', worktreePath: null, status: 'working' },
+      {
+        id: 'lane-cwd',
+        packetId: 'pkt-cwd',
+        worktreePath: '/repo/.cortex-worktrees/packet-cwd',
+        status: 'working',
+      },
+    ];
+    const cwdMatch = {
+      worktreePath: '/repo/.cortex-worktrees/packet-cwd',
+      packetSlug: 'cwd',
+      layout: 'cortex-worktrees' as const,
+    };
+
+    expect(resolvePacketTargetFromLanes('pkt-explicit', lanes, cwdMatch, 'pkt-env')).toMatchObject({
+      packetId: 'pkt-explicit',
+      source: 'explicit',
+    });
+    expect(resolvePacketTargetFromLanes(null, lanes, cwdMatch, 'pkt-env')).toMatchObject({
+      packetId: 'pkt-env',
+      source: 'env',
+    });
+    expect(resolvePacketTargetFromLanes(null, lanes, cwdMatch, null)).toMatchObject({
+      packetId: 'pkt-cwd',
+      source: 'cwd',
+    });
+    expect(() => resolvePacketTargetFromLanes(null, lanes, cwdMatch, 'pkt-missing'))
+      .toThrow('Worker packet target from O8_WORKER_PACKET_ID pkt-missing did not resolve');
   });
 });
 
