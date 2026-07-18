@@ -1,3 +1,5 @@
+import type { RepoReadinessState } from '@/lib/repos/types';
+
 export type WorkflowStageKey =
   | 'queued'
   | 'working'
@@ -22,7 +24,7 @@ export interface WorkflowStageInput {
   latestText?: string | null;
   lastActivityAt?: number | null;
   hasMessages?: boolean;
-  readinessState?: 'ready' | 'needs_setup' | 'blocked' | 'unknown' | null;
+  readinessState?: RepoReadinessState | null;
   prState?: string | null;
   failedChecks?: number;
   pendingChecks?: number;
