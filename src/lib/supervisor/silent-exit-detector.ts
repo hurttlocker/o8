@@ -310,6 +310,44 @@ function enqueueSilentExitInbox(
 }
 
 /**
+ * #1500 — a verification-failed silent exit must leave a learning behind, or
+ * every respawn goes out with the identical brief and trips the identical
+ * wall. Persists the violation output as a packet-keyed attempt learning
+ * (readable by buildPacketPrompt regardless of worktree churn) and bumps the
+ * packet's attemptCount under lock so these failures spend the same bounded
+ * retry budget the ralph loop enforces — five blind identical retries can no
+ * longer be free.
+ */
+async function recordVerificationFailureLearning(
+  lane: Lane,
+  cwd: string,
+  verification: { kind: string; output: string },
+): Promise<void> {
+  const packetId = lane.packetId?.trim() ?? '';
+  try {
+    const { buildAttemptLearningFromFailure, persistAttemptLearnings } = await import('@/lib/orchestrator/attempt-log');
+    let attemptNumber = 1;
+    if (packetId) {
+      const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+      await withLockedState((state) => {
+        const packet = state.packets.find((candidate) => candidate.id === packetId);
+        if (!packet) return;
+        packet.attemptCount = (packet.attemptCount ?? 0) + 1;
+        attemptNumber = packet.attemptCount;
+      });
+    }
+    await persistAttemptLearnings(
+      cwd,
+      packetId,
+      attemptNumber,
+      buildAttemptLearningFromFailure(verification.output),
+    );
+  } catch (error) {
+    console.warn(`[silent-exit] Failed to record verification-failure learning for lane ${lane.id}:`, error);
+  }
+}
+
+/**
  * Triage a single lane whose session has gone away silently. Returns true
  * when we took any action so the caller can log the outcome.
  */
@@ -350,6 +388,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
       console.warn(
         `[silent-exit] Lane ${lane.id} post-silent-exit ${verification.kind} failed`,
       );
+      await recordVerificationFailureLearning(lane, cwd, verification);
       setLaneStatus(lane.id, 'awaiting_input', 'system', 'silent_exit_verification_failed');
       const postState = await collectWorktreeState(cwd, lane.baseBranch);
       enqueueSilentExitInbox(

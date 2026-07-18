@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
@@ -30,6 +31,15 @@ interface StoredAttemptLearning extends AttemptLearning {
 
 function getAttemptLearningsPath(worktreePath: string) {
   return path.join(worktreePath, ATTEMPT_LEARNINGS_RELATIVE_PATH);
+}
+
+// #1500 — learnings must survive worktree churn. A verification-failed respawn
+// often mints a FRESH worktree (clone from main), so a worktree-local learnings
+// file evaporates exactly when the next attempt needs it. The packet-keyed copy
+// in the data dir is the canonical store; the worktree copy remains for the
+// worker's own visibility mid-attempt.
+function getPacketLearningsPath(packetId: string) {
+  return path.join(getDataDir(), 'attempt-learnings', `${packetId}.md`);
 }
 
 function normalizeStringList(value: unknown, maxItems = MAX_FILES_CHANGED): string[] {
@@ -124,13 +134,8 @@ function renderAttemptLearnings(entries: StoredAttemptLearning[]) {
   return `${lines.join('\n')}\n`;
 }
 
-async function readStoredAttemptLearnings(worktreePath: string): Promise<StoredAttemptLearning[]> {
-  const normalizedWorktreePath = worktreePath.trim();
-  if (!normalizedWorktreePath) {
-    return [];
-  }
-
-  const raw = await readFile(getAttemptLearningsPath(normalizedWorktreePath), 'utf8').catch(() => '');
+async function parseLearningsFile(filePath: string): Promise<StoredAttemptLearning[]> {
+  const raw = await readFile(filePath, 'utf8').catch(() => '');
   if (!raw.trim()) {
     return [];
   }
@@ -156,17 +161,52 @@ async function readStoredAttemptLearnings(worktreePath: string): Promise<StoredA
   return entries.slice(-MAX_ATTEMPT_LEARNINGS);
 }
 
+async function readStoredAttemptLearnings(worktreePath: string): Promise<StoredAttemptLearning[]> {
+  const normalizedWorktreePath = worktreePath.trim();
+  if (!normalizedWorktreePath) {
+    return [];
+  }
+  return parseLearningsFile(getAttemptLearningsPath(normalizedWorktreePath));
+}
+
+async function readStoredPacketLearnings(packetId: string): Promise<StoredAttemptLearning[]> {
+  const normalizedPacketId = packetId.trim();
+  if (!normalizedPacketId) {
+    return [];
+  }
+  return parseLearningsFile(getPacketLearningsPath(normalizedPacketId));
+}
+
+function mergeLearningEntries(
+  primary: StoredAttemptLearning[],
+  secondary: StoredAttemptLearning[],
+): StoredAttemptLearning[] {
+  const byAttempt = new Map<number, StoredAttemptLearning>();
+  for (const entry of [...secondary, ...primary]) {
+    byAttempt.set(entry.attempt, entry);
+  }
+  return [...byAttempt.values()]
+    .sort((left, right) => left.attempt - right.attempt)
+    .slice(-MAX_ATTEMPT_LEARNINGS);
+}
+
 function extractTypecheckErrorLines(typecheckOutput?: string): string[] {
   if (!typecheckOutput?.trim()) {
     return [];
   }
 
   const seen = new Set<string>();
-  const lines = typecheckOutput
+  const allLines = typecheckOutput
     .replace(/\r\n/g, '\n')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && /error\b/i.test(line));
+    .filter((line) => line.length > 0);
+  const errorLines = allLines.filter((line) => /error\b/i.test(line));
+  // #1500 — rule-check violations ("file grew past the 800-line ceiling…")
+  // rarely contain the word "error". An empty extraction here collapsed the
+  // learning summary to a generic retry note, so the next attempt learned
+  // nothing. Fall back to the head of the output when no error-lines match.
+  const lines = errorLines.length > 0 ? errorLines : allLines;
 
   return lines.reduce<string[]>((current, line) => {
     if (current.length >= MAX_ERROR_LINES) {
@@ -251,16 +291,36 @@ export function buildAttemptLearningFromFailure(
   };
 }
 
-export async function readAttemptLearnings(worktreePath: string): Promise<AttemptLearning[]> {
-  const entries = await readStoredAttemptLearnings(worktreePath);
-  return entries.map((entry) => ({
+function toPublicLearning(entry: StoredAttemptLearning): AttemptLearning {
+  return {
     attempt: entry.attempt,
     timestamp: entry.timestamp,
     typecheckOutput: entry.typecheckOutput,
     selfReviewSummary: entry.selfReviewSummary,
     filesChanged: entry.filesChanged,
     summary: entry.summary,
-  }));
+  };
+}
+
+export async function readAttemptLearnings(worktreePath: string): Promise<AttemptLearning[]> {
+  const entries = await readStoredAttemptLearnings(worktreePath);
+  return entries.map(toPublicLearning);
+}
+
+/**
+ * #1500 — canonical read for respawn prompts: union of the packet-keyed store
+ * (survives worktree churn) and the worktree-local file (covers mid-attempt
+ * writes). Packet-store entries win on attempt-number collisions.
+ */
+export async function readPacketAttemptLearnings(
+  packetId: string,
+  worktreePath?: string | null,
+): Promise<AttemptLearning[]> {
+  const [packetEntries, worktreeEntries] = await Promise.all([
+    readStoredPacketLearnings(packetId),
+    worktreePath?.trim() ? readStoredAttemptLearnings(worktreePath) : Promise.resolve([]),
+  ]);
+  return mergeLearningEntries(packetEntries, worktreeEntries).map(toPublicLearning);
 }
 
 export async function persistAttemptLearnings(
@@ -270,12 +330,10 @@ export async function persistAttemptLearnings(
   learning: AttemptLearningDraft,
 ): Promise<void> {
   const normalizedWorktreePath = worktreePath.trim();
-  if (!normalizedWorktreePath) {
-    return;
-  }
+  const normalizedPacketId = packetId.trim();
 
   const nextEntry = normalizeAttemptLearning({
-    packetId,
+    packetId: normalizedPacketId || undefined,
     attempt,
     timestamp: new Date().toISOString(),
     ...learning,
@@ -284,10 +342,24 @@ export async function persistAttemptLearnings(
     return;
   }
 
-  const filePath = getAttemptLearningsPath(normalizedWorktreePath);
-  const currentEntries = await readStoredAttemptLearnings(normalizedWorktreePath);
-  const nextEntries = [...currentEntries, nextEntry].slice(-MAX_ATTEMPT_LEARNINGS);
+  if (normalizedWorktreePath) {
+    const filePath = getAttemptLearningsPath(normalizedWorktreePath);
+    const currentEntries = await readStoredAttemptLearnings(normalizedWorktreePath);
+    const nextEntries = mergeLearningEntries([nextEntry], currentEntries);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, renderAttemptLearnings(nextEntries), 'utf8');
+  }
 
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, renderAttemptLearnings(nextEntries), 'utf8');
+  // Packet-keyed copy — the one a fresh-worktree respawn actually reads.
+  if (normalizedPacketId) {
+    try {
+      const packetPath = getPacketLearningsPath(normalizedPacketId);
+      const currentEntries = await readStoredPacketLearnings(normalizedPacketId);
+      const nextEntries = mergeLearningEntries([nextEntry], currentEntries);
+      await mkdir(path.dirname(packetPath), { recursive: true });
+      await writeFile(packetPath, renderAttemptLearnings(nextEntries), 'utf8');
+    } catch (error) {
+      console.warn(`[attempt-log] Failed to persist packet-keyed learnings for ${normalizedPacketId}:`, error);
+    }
+  }
 }
