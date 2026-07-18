@@ -64,6 +64,8 @@ function readinessLabel(state: RepoReadiness['state']) {
       return 'Needs setup';
     case 'blocked':
       return 'Blocked';
+    case 'missing':
+      return 'Folder missing';
     default:
       return 'Unknown';
   }
@@ -104,6 +106,28 @@ export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoRe
 
 async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<RepoReadiness> {
   const cacheKey = repo.localPath;
+
+  // #1565 — a registered repo whose folder is GONE must surface as its own
+  // state at detection time. Every probe below fails soft (git errors →
+  // fallbacks), so a deleted/moved checkout used to read as 'unknown' (or
+  // even 'ready' via the saved contract) and the operator only learned the
+  // truth from a failed spawn.
+  if (!(await pathExists(repo.localPath))) {
+    const value: RepoReadiness = {
+      state: 'missing',
+      label: readinessLabel('missing'),
+      summary: `Repo folder not found at ${repo.localPath} — it may have been moved or deleted.`,
+      nextAction: 'Re-add the repo at its new location, or remove it from the registry.',
+      currentBranch: null,
+      onDefaultBranch: null,
+      originConfigured: false,
+      dirty: false,
+      missingEnvFiles: [],
+    };
+    readinessCache.set(cacheKey, { value, ts: Date.now() });
+    return value;
+  }
+
   const currentBranch = await getCurrentBranch(repo.localPath, repo.defaultBranch || 'main');
   const [dirty, packageJsonExists, nodeModulesExists, originConfigured, missingEnvFiles] = await Promise.all([
     hasDirtyWorktree(repo.localPath),
