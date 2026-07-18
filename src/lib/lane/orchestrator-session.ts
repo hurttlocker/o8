@@ -70,6 +70,7 @@ import {
   crashSurvivableOrchestratorEnabled,
   createOrchestratorTurnRecord,
   createOrchestratorTurnRecordForFiles,
+  discardOrchestratorTurnRecord,
   fileSize,
   finishOrchestratorTurn,
   isPidAlive,
@@ -712,7 +713,7 @@ function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, erro
   clearTimeout(turn.timeout);
   turn.stopCrashTail?.();
   turn.stopCrashTail = null;
-  finishOrchestratorTurn(turn.crashRecord);
+  finishOrchestratorTurn(turn.crashRecord, error ? 'failed' : 'completed');
   turn.crashRecord = null;
   if (turn.abortSignal && turn.abortListener) {
     turn.abortSignal.removeEventListener('abort', turn.abortListener);
@@ -907,7 +908,9 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     const updated = updateOrchestratorTurnPid(crashRecord, proc.pid ?? 0);
     w.crashStdoutPath = updated.stdoutPath;
     w.crashStderrPath = updated.stderrPath;
-    finishOrchestratorTurn(updated);
+    // This record only allocated the warm proc's stream files — per-turn
+    // records are created per send. Discard, don't settle (task #8 ledger).
+    discardOrchestratorTurnRecord(updated);
   }
   session.proc = proc;
   w.procConfig = config;

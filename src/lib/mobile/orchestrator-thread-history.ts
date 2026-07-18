@@ -22,6 +22,11 @@ type ChatHistoryMessage = {
   role?: string;
   content?: string;
   timestamp?: number;
+  // Task #8 — monotonic per-message persist version, bumped on every write of
+  // this message (incremental mid-stream persists included). The client's
+  // history merge compares versions instead of blind ID-membership replaces,
+  // so a stale fetch can never revert a completed answer to a partial one.
+  persistedVersion?: number;
 };
 
 type OrchestratorHistoryRecord = {
@@ -682,6 +687,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
       ...nextMessages[existingIndex],
       role: 'assistant',
       content,
+      persistedVersion: (nextMessages[existingIndex]?.persistedVersion ?? 0) + 1,
     };
   } else {
     // Defensive: if the most recent assistant message has identical content,
@@ -698,6 +704,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
           role: 'assistant',
           content,
           timestamp,
+          persistedVersion: 1,
         },
       ];
     }
