@@ -1107,6 +1107,24 @@ pub fn start(app: tauri::AppHandle) {
         );
     }
 
+    // Input Monitoring (#1537): a ListenOnly keyboard tap needs the SEPARATE
+    // kTCCServiceListenEvent grant. Without it the tap installs successfully and
+    // receives ZERO events ("Fn does nothing", no error) — and a listen-only tap
+    // never triggers the TCC prompt by itself, so a fresh install can never
+    // self-heal. IOHIDRequestAccess is the one call that actually presents the
+    // prompt; when the user already denied it is a silent no-op returning false.
+    if crate::mac_perms::input_monitoring_granted(false) {
+        tracing::info!("[fn-hotkey] Input Monitoring: granted");
+    } else if crate::mac_perms::input_monitoring_granted(true) {
+        tracing::info!("[fn-hotkey] Input Monitoring: granted after prompt");
+    } else {
+        tracing::error!(
+            "[fn-hotkey] Input Monitoring NOT granted — the keyboard tap will receive no \
+             events (Fn/Right-Option hotkeys dead) until you enable o8 in System Settings → \
+             Privacy & Security → Input Monitoring, then relaunch."
+        );
+    }
+
     // macOS Sequoia binds Fn to "Start Dictation" by default; Apple's dictation
     // intercepts the press before our tap can react. Surface it so onboarding
     // can nudge the user to set Fn → Do Nothing.
