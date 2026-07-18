@@ -5,9 +5,8 @@ import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
 import type { Lane } from '@/lib/lane/types';
-import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
-import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type {
   OrchestratorPacket,
   OrchestratorPacketReview,
@@ -204,24 +203,27 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   // that case until the merge happens via the lane-fallback merge path).
   let resolvedAuditApprovalId: string | null = auditApprovalId ?? null;
   if (missionPacket) {
-    const finalState = writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({
-      ...state,
-      packets: state.packets.map((candidate) => candidate.id === packet.id
-        ? {
-            ...candidate,
-            review: buildPacketReview(
-              input.findings,
-              input.approved,
-              summary,
-              reviewedHeadSha,
-              auditApprovalId,
-              input.directivesApplied,
-              input.directivesViolated,
-            ),
-          }
-        : candidate),
-    }));
-    resolvedAuditApprovalId = finalState.packets.find((candidate) => candidate.id === packet.id)?.review?.auditApprovalId ?? null;
+    // #1488 — mutate under the lock against a FRESH read, never a whole-state
+    // write from the snapshot taken at function entry: the reviewed-HEAD
+    // capture above does git I/O, and a packet created in that window (an
+    // o8_task_create queued packet has no lane to reconcile back from) was
+    // ERASED by the stale-snapshot write. withLockedState's end-of-lock
+    // reconcile+write persists the in-place mutation.
+    const { result: lockedReview } = await withLockedState((fresh) => {
+      const target = fresh.packets.find((candidate) => candidate.id === packet.id);
+      if (!target) return null;
+      target.review = buildPacketReview(
+        input.findings,
+        input.approved,
+        summary,
+        reviewedHeadSha,
+        auditApprovalId,
+        input.directivesApplied,
+        input.directivesViolated,
+      );
+      return target.review;
+    });
+    resolvedAuditApprovalId = lockedReview?.auditApprovalId ?? null;
   }
 
   log(`Recorded review for packet ${packet.id}${orphanLane ? ` (orphan via lane ${orphanLane.id})` : ''}.`, {
