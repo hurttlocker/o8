@@ -7,7 +7,7 @@
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import { printHumanHeading, printJson, type OutputMode } from '../../output.js';
-import { resolveLaneFromCwd } from './worktree-resolve.js';
+import { parsePacketArguments, resolvePacketTarget } from './target.js';
 
 interface PacketDiff {
   ok: boolean;
@@ -23,38 +23,21 @@ interface PacketDiff {
 }
 
 function parseDiffArgs(rest: string[]): { id: string | null; maxBytes: number | null } {
-  let id: string | null = null;
-  let maxBytes: number | null = null;
-  for (let i = 0; i < rest.length; i++) {
-    const arg = rest[i];
-    if (arg === '--max-bytes') {
-      const value = rest[i + 1];
-      const parsed = value ? Number.parseInt(value, 10) : NaN;
-      if (Number.isFinite(parsed) && parsed > 0) maxBytes = parsed;
-      i++;
-      continue;
-    }
-    if (arg.startsWith('-')) continue;
-    if (!id) id = arg.trim();
+  const args = parsePacketArguments(rest, {
+    command: 'diff',
+    valueFlags: ['max-bytes'],
+  });
+  const rawMaxBytes = args.values['max-bytes'];
+  const maxBytes = rawMaxBytes ? Number.parseInt(rawMaxBytes, 10) : null;
+  if (rawMaxBytes && (!Number.isFinite(maxBytes) || (maxBytes ?? 0) <= 0)) {
+    throw new CliError('invalid_args', '--max-bytes must be a positive integer.', EXIT.INVALID_ARGS);
   }
-  return { id, maxBytes };
+  return { id: args.target, maxBytes };
 }
 
 export async function runPacketDiff(mode: OutputMode, rest: string[]): Promise<number> {
   const { id: explicitId, maxBytes } = parseDiffArgs(rest);
-  let id = explicitId;
-  if (!id) {
-    const resolved = await resolveLaneFromCwd();
-    if (!resolved) {
-      throw new CliError(
-        'invalid_args',
-        'o8 packet diff [id] needs a packet/lane id (or run from inside a packet worktree).',
-        EXIT.INVALID_ARGS,
-        'Example: o8 packet diff pkt-abc — or just `o8 packet diff` from `.cortex-worktrees/packet-<id>`.',
-      );
-    }
-    id = resolved.laneId;
-  }
+  const id = (await resolvePacketTarget(explicitId)).laneId;
 
   const cfg = resolveConfig();
   const res = await apiFetch<PacketDiff>(

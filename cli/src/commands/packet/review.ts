@@ -1,4 +1,3 @@
-import { sep } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
@@ -7,22 +6,11 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
-
-interface Lane {
-  id: string;
-  label: string;
-  status: string;
-  branch: string;
-  baseBranch: string;
-  repoPath: string;
-  worktreePath: string | null;
-  packetId: string | null;
-}
-
-interface WorktreeMatch {
-  worktreePath: string;
-  packetSlug: string;
-}
+import {
+  parsePacketArguments,
+  requirePacketId,
+  resolvePacketTarget,
+} from './target.js';
 
 interface ReviewArgs {
   packetId: string | null;
@@ -37,60 +25,18 @@ interface OperatorResponse<T> {
   error?: { message?: string } | string;
 }
 
-function detectWorktree(cwd: string): WorktreeMatch | null {
-  const parts = cwd.split(sep);
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const prev = parts[i - 1];
-    const cur = parts[i];
-    if (!cur || !cur.startsWith('packet-')) continue;
-    if (prev === '.cortex-worktrees') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-      };
-    }
-    if (prev === 'worktrees' && parts[i - 2] === '.claude') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-      };
-    }
-  }
-  return null;
-}
-
 function parseReviewArgs(rest: string[]): ReviewArgs {
-  let packetId: string | null = null;
-  let approve = false;
-  let expectedHeadSha: string | null = null;
-  let commitMessage: string | null = null;
-
-  for (let i = 0; i < rest.length; i++) {
-    const tok = rest[i];
-    if (tok === '--approve') {
-      approve = true;
-    } else if (tok === '--expected-sha') {
-      expectedHeadSha = rest[++i] ?? null;
-    } else if (tok.startsWith('--expected-sha=')) {
-      expectedHeadSha = tok.slice('--expected-sha='.length);
-    } else if (tok === '--commit-message') {
-      commitMessage = rest[++i] ?? null;
-    } else if (tok.startsWith('--commit-message=')) {
-      commitMessage = tok.slice('--commit-message='.length);
-    } else if (tok === '--packet') {
-      packetId = rest[++i] ?? null;
-    } else if (tok.startsWith('--packet=')) {
-      packetId = tok.slice('--packet='.length);
-    } else if (!tok.startsWith('--') && !packetId) {
-      packetId = tok;
-    }
-  }
+  const args = parsePacketArguments(rest, {
+    command: 'review',
+    valueFlags: ['expected-sha', 'commit-message'],
+    booleanFlags: ['approve'],
+  });
 
   return {
-    packetId: packetId?.trim() || null,
-    approve,
-    expectedHeadSha: expectedHeadSha?.trim() || null,
-    commitMessage: commitMessage?.trim() || null,
+    packetId: args.target,
+    approve: args.booleans.has('approve'),
+    expectedHeadSha: args.values['expected-sha']?.trim() || null,
+    commitMessage: args.values['commit-message']?.trim() || null,
   };
 }
 
@@ -101,42 +47,6 @@ function responseError(payload: OperatorResponse<unknown> | null | undefined, fa
     return error.message;
   }
   return fallback;
-}
-
-function resolveLane(lanes: Lane[], match: WorktreeMatch): Lane | null {
-  return lanes.find((lane) => lane.worktreePath === match.worktreePath)
-    ?? lanes.find((lane) => lane.packetId && match.packetSlug.includes(lane.packetId))
-    ?? lanes.find((lane) => lane.worktreePath && lane.worktreePath.endsWith(`packet-${match.packetSlug}`))
-    ?? null;
-}
-
-async function resolvePacketId(explicitPacketId: string | null): Promise<string> {
-  if (explicitPacketId) {
-    return explicitPacketId;
-  }
-
-  const match = detectWorktree(process.cwd());
-  if (!match) {
-    throw new CliError(
-      'not_in_packet_worktree',
-      'Current directory is not inside an o8 packet worktree.',
-      EXIT.NOT_FOUND,
-      'Pass a packet id or run from a `.cortex-worktrees/packet-<id>` worktree.',
-    );
-  }
-
-  const cfg = resolveConfig();
-  const lanesRes = await apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } });
-  const lane = resolveLane(lanesRes.data?.lanes ?? [], match);
-  if (!lane?.packetId) {
-    throw new CliError(
-      'lane_not_found',
-      `No packet-bound lane registered for worktree ${match.worktreePath}.`,
-      EXIT.NOT_FOUND,
-      'The lane may have been archived or the registry is out of sync. Run `o8 status` to confirm.',
-    );
-  }
-  return lane.packetId;
 }
 
 export async function runPacketReview(mode: OutputMode, rest: string[]): Promise<number> {
@@ -150,7 +60,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     );
   }
 
-  const packetId = await resolvePacketId(args.packetId);
+  const packetId = requirePacketId(await resolvePacketTarget(args.packetId), 'review');
   const cfg = resolveConfig();
   const reviewRes = await apiFetch<OperatorResponse<{
     recorded: boolean;

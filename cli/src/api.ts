@@ -38,6 +38,8 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
+  /** Bound the complete request, including response-body reads. Defaults to 120s. */
+  timeoutMs?: number;
   /** Treat 404 as success and return null instead of throwing. */
   allowNotFound?: boolean;
 }
@@ -70,6 +72,100 @@ function buildUrl(base: string, path: string, query?: ApiRequestOptions['query']
     }
   }
   return url.toString();
+}
+
+export const DEFAULT_API_TIMEOUT_MS = 120_000;
+
+const TIMEOUT_CODES = new Set([
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'ETIMEDOUT',
+]);
+
+interface ErrorRecord {
+  name?: unknown;
+  message?: unknown;
+  code?: unknown;
+  cause?: unknown;
+}
+
+function asErrorRecord(value: unknown): ErrorRecord | null {
+  return value && typeof value === 'object' ? value as ErrorRecord : null;
+}
+
+function boundedErrorText(value: unknown, maxLength = 300): string {
+  const text = value instanceof Error ? value.message : String(value);
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
+}
+
+function transportErrorDetails(error: unknown): {
+  name: string;
+  message: string;
+  code: string | null;
+} {
+  const record = asErrorRecord(error);
+  const cause = asErrorRecord(record?.cause);
+  const codeValue = cause?.code ?? record?.code;
+  return {
+    name: typeof record?.name === 'string' ? record.name : '',
+    message: boundedErrorText(error),
+    code: typeof codeValue === 'string' ? codeValue : null,
+  };
+}
+
+function formatTimeoutSeconds(timeoutMs: number): string {
+  const seconds = timeoutMs / 1000;
+  return Number.isInteger(seconds)
+    ? String(seconds)
+    : seconds.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function throwNetworkError(
+  error: unknown,
+  cfg: ResolvedConfig,
+  path: string,
+  timeoutMs: number,
+): never {
+  const details = transportErrorDetails(error);
+  if (details.code === 'ECONNREFUSED' || /\bECONNREFUSED\b/i.test(details.message)) {
+    throw new CliError(
+      'connection_refused',
+      `o8 app refused the TCP connection to ${cfg.apiBase}.`,
+      EXIT.CONNECTION_REFUSED,
+      'Launch /Applications/o8.app or run `npm run dev` from the repo. Check ~/.o8/api-port for the picked port.',
+    );
+  }
+
+  const timedOut = (details.code ? TIMEOUT_CODES.has(details.code) : false)
+    || details.name === 'TimeoutError'
+    || details.name === 'AbortError';
+  if (timedOut) {
+    throw new CliError(
+      'server_timeout',
+      `o8 app accepted the connection but ${path} did not answer within ${formatTimeoutSeconds(timeoutMs)}s.`,
+      EXIT.CONFLICT,
+      'The server route is stalled, not unreachable. Check the packet lane events and the app Activity view for the blocked operation.',
+    );
+  }
+
+  const codeLabel = details.code ? ` (${details.code})` : '';
+  throw new CliError(
+    'network_error',
+    `Network error calling ${path}${codeLabel}: ${details.message}`,
+    EXIT.CONNECTION_REFUSED,
+  );
+}
+
+function parseResponseJson(text: string): Record<string, unknown> | null {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function readPortFile(dir: string | null, name: string): number | null {
@@ -175,6 +271,14 @@ export async function apiFetch<T = unknown>(
   opts: ApiRequestOptions = {},
 ): Promise<ApiResponse<T | null>> {
   const url = buildUrl(cfg.apiBase, path, opts.query);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_API_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new CliError(
+      'invalid_args',
+      'apiFetch timeoutMs must be a positive integer.',
+      EXIT.INVALID_ARGS,
+    );
+  }
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
@@ -183,26 +287,17 @@ export async function apiFetch<T = unknown>(
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 
   let res: Response;
+  let responseText: string;
   try {
     res = await fetch(url, {
       method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
       headers,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
     });
+    responseText = res.status === 204 ? '' : await res.text();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Node's fetch surfaces ECONNREFUSED as `cause: { code: 'ECONNREFUSED' }`
-    // but the message also contains "fetch failed" + "ECONNREFUSED". Detect
-    // either to stay forward-compatible across undici versions.
-    if (/ECONNREFUSED|fetch failed/i.test(msg)) {
-      throw new CliError(
-        'connection_refused',
-        `o8 desktop app is not reachable on ${cfg.apiBase}`,
-        EXIT.CONNECTION_REFUSED,
-        'Launch /Applications/o8.app or run `npm run dev` from the repo. Check ~/.o8/api-port for the picked port.',
-      );
-    }
-    throw new CliError('network_error', msg, EXIT.CONNECTION_REFUSED);
+    throwNetworkError(err, cfg, path, timeoutMs);
   }
 
   if (res.status === 401 || res.status === 403) {
@@ -221,13 +316,16 @@ export async function apiFetch<T = unknown>(
   }
   if (res.status === 409 || res.status === 422) {
     let detail = '';
-    try {
-      const json = await res.json() as { error?: string | { message?: string }; note?: string; message?: string };
-      const errorText = typeof json.error === 'string' ? json.error : json.error?.message;
-      detail = json.note || json.message || errorText || '';
-    } catch {
-      /* ignore */
-    }
+    const json = parseResponseJson(responseText);
+    const error = json?.error;
+    const errorText = typeof error === 'string'
+      ? error
+      : asErrorRecord(error)?.message;
+    detail = typeof json?.note === 'string'
+      ? json.note
+      : typeof json?.message === 'string'
+        ? json.message
+        : typeof errorText === 'string' ? errorText : '';
     throw new CliError(
       'conflict',
       `State machine rejected the operation (${res.status})${detail ? `: ${detail}` : '.'}`,
@@ -239,12 +337,23 @@ export async function apiFetch<T = unknown>(
     // reason the route already returned (#1464 was diagnosed blind because
     // of this branch).
     let detail = '';
-    try {
-      const json = await res.json() as { error?: string | { message?: string }; note?: string; message?: string };
-      const errorText = typeof json.error === 'string' ? json.error : json.error?.message;
-      detail = json.note || json.message || errorText || '';
-    } catch {
-      /* ignore */
+    let typedCode = '';
+    const json = parseResponseJson(responseText);
+    const error = json?.error;
+    const errorRecord = asErrorRecord(error);
+    const errorText = typeof error === 'string' ? error : errorRecord?.message;
+    typedCode = typeof errorRecord?.code === 'string' ? errorRecord.code : '';
+    detail = typeof json?.note === 'string'
+      ? json.note
+      : typeof json?.message === 'string'
+        ? json.message
+        : typeof errorText === 'string' ? errorText : '';
+    if (typedCode === 'mission_store_busy') {
+      throw new CliError(
+        typedCode,
+        detail || 'Mission store is busy dispatching — retry in a moment.',
+        EXIT.CONFLICT,
+      );
     }
     throw new CliError(
       'http_error',
@@ -254,10 +363,9 @@ export async function apiFetch<T = unknown>(
   }
 
   // Allow empty 204 / non-JSON 200 to coexist; default to null.
-  const text = await res.text();
-  if (!text) return { status: res.status, data: null };
+  if (!responseText) return { status: res.status, data: null };
   try {
-    return { status: res.status, data: JSON.parse(text) as T };
+    return { status: res.status, data: JSON.parse(responseText) as T };
   } catch {
     throw new CliError(
       'invalid_response',

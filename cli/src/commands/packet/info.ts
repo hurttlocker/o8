@@ -10,7 +10,6 @@
  */
 
 import { apiFetch } from '../../api.js';
-import { CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
   printHumanHeading,
@@ -20,6 +19,7 @@ import {
 } from '../../output.js';
 import { warnRuntimeDriftIfNeeded } from './runtime-drift.js';
 import { detectWorktree } from './worktree-resolve.js';
+import { parsePacketArguments, resolvePacketTarget } from './target.js';
 
 interface Lane {
   id: string;
@@ -61,35 +61,12 @@ function capEventPayload(payload: Record<string, unknown>): Record<string, unkno
   return { truncated: true, sizeChars: json.length, preview: json.slice(0, EVENT_PAYLOAD_CAP) };
 }
 
-export async function runPacketInfo(mode: OutputMode): Promise<number> {
-  const match = detectWorktree(process.cwd());
-  if (!match) {
-    throw new CliError(
-      'not_in_packet_worktree',
-      'Current directory is not inside an o8 packet worktree.',
-      EXIT.NOT_FOUND,
-      'Expected a path containing `.cortex-worktrees/packet-<id>` or `.claude/worktrees/packet-<id>`.',
-    );
-  }
-
+export async function runPacketInfo(mode: OutputMode, rest: string[]): Promise<number> {
+  const args = parsePacketArguments(rest, { command: 'info' });
+  const target = await resolvePacketTarget<Lane>(args.target);
   const cfg = resolveConfig();
-  const res = await apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } });
-  const lanes = res.data?.lanes ?? [];
-
-  // Prefer exact worktreePath match; fall back to packet slug substring.
-  const exactMatch = lanes.find((l) => l.worktreePath === match.worktreePath);
-  const slugMatch = exactMatch
-    ?? lanes.find((l) => l.packetId && match.packetSlug.includes(l.packetId))
-    ?? lanes.find((l) => l.worktreePath && l.worktreePath.endsWith(`packet-${match.packetSlug}`));
-
-  if (!slugMatch) {
-    throw new CliError(
-      'lane_not_found',
-      `No lane registered for worktree ${match.worktreePath}.`,
-      EXIT.NOT_FOUND,
-      'The lane may have been archived or the registry is out of sync. Run `o8 status` to confirm.',
-    );
-  }
+  const slugMatch = target.lane;
+  const match = slugMatch.worktreePath ? detectWorktree(slugMatch.worktreePath) : null;
 
   // Recent events + scope are independent of each other (both only need the
   // lane id) — fetch them in parallel to halve the round-trips in a packet loop.
@@ -121,7 +98,7 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
       baseBranch: slugMatch.baseBranch,
       repoPath: slugMatch.repoPath,
       worktreePath: slugMatch.worktreePath,
-      worktreeLayout: match.layout,
+      worktreeLayout: match?.layout ?? null,
       createdAt: slugMatch.createdAt,
       updatedAt: slugMatch.updatedAt,
       lastEventAt: slugMatch.lastEventAt,

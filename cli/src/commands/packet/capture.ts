@@ -20,6 +20,7 @@ import { sep } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../../output.js';
+import { resolvePacketTarget } from './target.js';
 
 interface Lane {
   id: string;
@@ -30,6 +31,7 @@ interface Lane {
 }
 
 interface CaptureArgs {
+  packetTarget: string | null;
   url: string | null;
   label: string | null;
   kind: 'screenshot' | 'video';
@@ -78,15 +80,32 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
   let hover: string | null = null;
   let click: string | null = null;
   let clip: string | null = null;
+  let packetTarget: string | null = null;
 
-  const take = (tok: string, flag: string, i: { v: number }): string | null =>
-    tok === flag ? (rest[++i.v] ?? null) : tok.startsWith(`${flag}=`) ? tok.slice(flag.length + 1) : null;
+  const take = (tok: string, flag: string, i: { v: number }): string | null => {
+    if (tok.startsWith(`${flag}=`)) return tok.slice(flag.length + 1);
+    if (tok !== flag) return null;
+    const value = rest[++i.v];
+    if (!value || value.startsWith('-')) {
+      throw new CliError('invalid_args', `${flag} requires a value.`, EXIT.INVALID_ARGS);
+    }
+    return value;
+  };
 
   for (let idx = 0; idx < rest.length; idx++) {
     const tok = rest[idx];
     const i = { v: idx };
     let val: string | null;
-    if ((val = take(tok, '--url', i)) !== null) url = val;
+    if ((val = take(tok, '--packet', i)) !== null || (val = take(tok, '--lane', i)) !== null) {
+      if (packetTarget && packetTarget !== val.trim()) {
+        throw new CliError(
+          'invalid_args',
+          `Conflicting explicit packet targets: ${packetTarget} and ${val.trim()}.`,
+          EXIT.INVALID_ARGS,
+        );
+      }
+      packetTarget = val;
+    } else if ((val = take(tok, '--url', i)) !== null) url = val;
     else if ((val = take(tok, '--label', i)) !== null) label = val;
     else if ((val = take(tok, '--kind', i)) !== null) kind = val === 'video' ? 'video' : 'screenshot';
     else if ((val = take(tok, '--wait-for', i)) !== null) waitFor = val;
@@ -98,11 +117,24 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
     else if (tok === '--full-page' || tok === '--fullpage') fullPage = true;
     else if (tok === '--before') phase = 'before';
     else if (tok === '--after') phase = 'after';
-    else if (!tok.startsWith('--') && !url) url = tok;
+    else if (!tok.startsWith('-') && !url && /^(https?:\/\/|file:\/\/|localhost(?::|\/)|127\.0\.0\.1(?::|\/))/i.test(tok)) url = tok;
+    else if (!tok.startsWith('-') && !packetTarget) packetTarget = tok;
+    else if (!tok.startsWith('-') && !url) url = tok;
+    else if (tok.startsWith('-')) {
+      throw new CliError('invalid_args', `Unknown o8 packet capture flag: ${tok}.`, EXIT.INVALID_ARGS);
+    } else {
+      throw new CliError(
+        'invalid_args',
+        `Unexpected argument ${tok} for o8 packet capture.`,
+        EXIT.INVALID_ARGS,
+        'Pass the packet id once, positionally or with --packet <id>.',
+      );
+    }
     idx = i.v;
   }
 
   return {
+    packetTarget: packetTarget?.trim() || null,
     url: url?.trim() || null,
     label: label?.trim() || null,
     kind,
@@ -200,12 +232,17 @@ export async function runPacketCapture(mode: OutputMode, rest: string[]): Promis
     );
   }
 
-  // Resolve packet context from the worktree (best-effort — capture still works
-  // unassigned, it just won't be linked to a packet's status payload).
+  // An explicit target is fail-closed. Cwd association stays best-effort so a
+  // standalone capture can still be stored without a packet.
   const match = detectWorktree(process.cwd());
   const cfg = resolveConfig();
   let lane: Lane | null = null;
-  if (match) {
+  let packetId: string | null = null;
+  if (args.packetTarget) {
+    const target = await resolvePacketTarget<Lane>(args.packetTarget);
+    packetId = target.packetId;
+    lane = target.lane;
+  } else if (match) {
     try {
       const lanesRes = await apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } });
       const lanes = lanesRes.data?.lanes ?? [];
@@ -213,8 +250,8 @@ export async function runPacketCapture(mode: OutputMode, rest: string[]): Promis
         ?? lanes.find((l) => l.worktreePath && l.worktreePath.endsWith(`packet-${match.packetSlug}`))
         ?? null;
     } catch { /* registry may be down — proceed unassigned */ }
+    packetId = lane?.packetId ?? match.packetSlug;
   }
-  const packetId = lane?.packetId ?? (match ? match.packetSlug : null);
 
   const capture = await captureViaDevBrowser(args);
   const bytesBase64 = (await readFile(capture.path)).toString('base64');
