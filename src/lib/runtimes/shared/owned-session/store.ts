@@ -15,7 +15,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
@@ -82,6 +82,7 @@ import type {
   OwnedTailEntry,
   OwnedTailGroup,
   OwnedChildExitOutcome,
+  ParsedRunLog,
 } from './types';
 import { stageMissingCliRun } from './missing-cli';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
@@ -213,17 +214,65 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
   // ── Run artifacts ──────────────────────────────────────────────────────────
 
+  // #1484 — the event-loop saturation fix. refreshSession / collectTailEntries
+  // / packet reviews call this for EVERY recent run on EVERY poll (inventory,
+  // status snapshots, the packet tab's transcript tail), and a streaming
+  // Codex run's stdout grows to megabytes — so three streaming lanes meant
+  // re-reading and re-JSON.parsing the same multi-MB logs dozens of times a
+  // second on the shared loop (10.9s wall for a trivial 500ms poll, threads
+  // parked in cvwait). Run logs are APPEND-ONLY: cache the parse keyed on the
+  // files' (size, mtime) and skip both the read and the parse when nothing
+  // changed — which is almost every poll, and permanently for finished runs.
+  const runArtifactCache = new Map<string, {
+    stdoutKey: string;
+    stderrKey: string;
+    stdoutRaw: string;
+    stderrRaw: string;
+    parsed: ParsedRunLog;
+  }>();
+  const RUN_ARTIFACT_CACHE_MAX = 48;
+
+  async function statKey(filePath: string): Promise<string> {
+    try {
+      const info = await stat(filePath);
+      return `${info.size}:${info.mtimeMs}`;
+    } catch {
+      return 'absent';
+    }
+  }
+
   async function readRunArtifacts(run: OwnedRunRecord) {
+    const [stdoutKey, stderrKey] = await Promise.all([
+      statKey(run.stdoutPath),
+      statKey(run.stderrPath),
+    ]);
+    const cached = runArtifactCache.get(run.id);
+    if (cached && cached.stdoutKey === stdoutKey && cached.stderrKey === stderrKey) {
+      // Refresh recency for the LRU eviction below.
+      runArtifactCache.delete(run.id);
+      runArtifactCache.set(run.id, cached);
+      return { stdoutRaw: cached.stdoutRaw, stderrRaw: cached.stderrRaw, parsed: cached.parsed };
+    }
+
     const [stdoutRaw, stderrRaw] = await Promise.all([
-      pathExists(run.stdoutPath).then((exists) => (exists ? readFile(run.stdoutPath, 'utf8').catch(() => '') : '')),
-      pathExists(run.stderrPath).then((exists) => (exists ? readFile(run.stderrPath, 'utf8').catch(() => '') : '')),
+      stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => ''),
+      stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => ''),
     ]);
 
-    return {
+    const entry = {
+      stdoutKey,
+      stderrKey,
       stdoutRaw,
       stderrRaw,
       parsed: adapter.parseRunLog(stdoutRaw, run),
     };
+    runArtifactCache.set(run.id, entry);
+    while (runArtifactCache.size > RUN_ARTIFACT_CACHE_MAX) {
+      const oldest = runArtifactCache.keys().next().value;
+      if (oldest === undefined) break;
+      runArtifactCache.delete(oldest);
+    }
+    return { stdoutRaw: entry.stdoutRaw, stderrRaw: entry.stderrRaw, parsed: entry.parsed };
   }
 
   async function readOwnedRunStdout(run: OwnedRunRecord): Promise<string> {
