@@ -122,9 +122,18 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
   if (!result.ok || result.status === 'unavailable') {
     const canTryOwnedResumeFallback = lane.sessionKey.startsWith('codex-owned:')
       && /cannot accept|not found|surface/i.test(result.note);
-    const resumed = canTryOwnedResumeFallback
+    // Adversarial F14 — re-check the lane right before spawning the fallback
+    // process: the operator may have archived it during the (multi-second)
+    // steer attempt, and only the lane STATUS write was protected — not the
+    // process spawn. A lane that went terminal mid-steer must not get a
+    // fresh runtime editing its worktree.
+    const freshLane = canTryOwnedResumeFallback ? findLaneByPacket(packetId) : null;
+    const laneStillLive = freshLane?.id === lane.id && freshLane.sessionKey === lane.sessionKey;
+    const resumed = canTryOwnedResumeFallback && laneStillLive
       ? await resumeExitedOwnedCodexSession(lane.sessionKey, message)
-      : null;
+      : canTryOwnedResumeFallback
+        ? { ok: false, note: 'Lane went terminal while the steer was in flight — not resuming a dead lane\'s session.' }
+        : null;
     if (!resumed?.ok) {
       recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
         packetId,
