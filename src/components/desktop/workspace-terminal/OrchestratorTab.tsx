@@ -380,6 +380,22 @@ function OrchestratorTabInner({
     }));
   }, [active, publishWorkspaceThread, tabId, chatChromeState.threadId]);
 
+  // #1554 root — stamp the tab⇄thread binding the moment the panel's thread
+  // id lands, regardless of tab activity. The menu bridge above is rightly
+  // active-gated (only the focused tab may drive the rename/share target),
+  // but the controller's blank-spawn reuse gate needs the binding even when
+  // the operator sent a turn and switched tabs before the chrome state
+  // flushed — that un-stamped used tab is exactly what "+ New session"
+  // refocused, resurrecting the old conversation (and its stale
+  // mission-complete card, #1566). The controller's duplicate-owner dedupe
+  // handles the two-tabs-one-thread case as before.
+  useEffect(() => {
+    if (!publishWorkspaceThread) return;
+    const threadId = chatChromeState.threadId;
+    if (!threadId) return;
+    publishWorkspaceThreadBinding(tabId, threadId);
+  }, [publishWorkspaceThread, tabId, chatChromeState.threadId]);
+
   // If the conversation this tab is showing gets deleted from the left rail
   // (ChatsTab → DELETE /api/v2/chat-history), the row vanishes on the left but
   // the center tab kept rendering the now-dead transcript ("gone on the agent
