@@ -4,15 +4,20 @@
  * Agent summary for the packet review header (Q ruling 2026-07-18, Codex
  * PR-view parity): the operator wants the agent's PROSE first — what it did,
  * in its own words — above the file rows and the diff. Resolves the lane →
- * packetId, then reads the packet transcript tail and lifts the last
- * assistant message as the summary. Best-effort: a missing transcript
+ * sessionKey/packetId, then reads the runtime transcript tail and lifts the
+ * last assistant message as the summary. Best-effort: a missing transcript
  * degrades to no prose (the header still shows the file summary).
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface LaneRecordResponse {
-  lane?: { packetId?: string | null; label?: string | null; status?: string | null; sessionKey?: string | null } | null;
+  lane?: {
+    packetId?: string | null;
+    label?: string | null;
+    status?: string | null;
+    sessionKey?: string | null;
+  } | null;
 }
 
 interface RuntimeTranscriptEntry {
@@ -27,31 +32,58 @@ interface RuntimeTranscriptResponse {
 export interface LaneReviewSummaryState {
   title: string | null;
   summary: string | null;
+  packetId: string | null;
+  laneStatus: string | null;
   loading: boolean;
+  refreshStatus: () => Promise<string | null>;
 }
 
-const EMPTY: LaneReviewSummaryState = { title: null, summary: null, loading: false };
-
 export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryState {
-  const [state, setState] = useState<LaneReviewSummaryState>(() => (
-    laneId ? { title: null, summary: null, loading: true } : EMPTY
-  ));
+  const [title, setTitle] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [packetId, setPacketId] = useState<string | null>(null);
+  const [laneStatus, setLaneStatus] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(() => Boolean(laneId));
+
+  // Cheap status re-read for the merge action's post-approve poll — returns
+  // the fresh status so callers can await it without racing setState.
+  const refreshStatus = useCallback(async (): Promise<string | null> => {
+    if (!laneId) return null;
+    try {
+      const res = await fetch(`/api/lanes/${encodeURIComponent(laneId)}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => null) as LaneRecordResponse | null;
+      const status = data?.lane?.status ?? null;
+      setLaneStatus(status);
+      return status;
+    } catch {
+      return null;
+    }
+  }, [laneId]);
 
   useEffect(() => {
     if (!laneId) {
-      setState(EMPTY);
+      setTitle(null);
+      setSummary(null);
+      setPacketId(null);
+      setLaneStatus(null);
+      setLoading(false);
       return;
     }
     let cancelled = false;
-    setState({ title: null, summary: null, loading: true });
+    setLoading(true);
+    setSummary(null);
     (async () => {
-      let title: string | null = null;
-      let summary: string | null = null;
+      let nextTitle: string | null = null;
+      let nextSummary: string | null = null;
+      let nextPacketId: string | null = null;
+      let nextStatus: string | null = null;
       try {
         const laneRes = await fetch(`/api/lanes/${encodeURIComponent(laneId)}`, { cache: 'no-store' });
         const laneData = await laneRes.json().catch(() => null) as LaneRecordResponse | null;
         const sessionKey = laneData?.lane?.sessionKey ?? null;
-        title = laneData?.lane?.label ?? null;
+        nextTitle = laneData?.lane?.label ?? null;
+        nextPacketId = laneData?.lane?.packetId ?? null;
+        nextStatus = laneData?.lane?.status ?? null;
         if (sessionKey) {
           // The runtime transcript is the same source the packet tab renders —
           // the packet-transcript route's control-plane resolution comes up
@@ -63,7 +95,7 @@ export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryS
           for (let i = entries.length - 1; i >= 0; i--) {
             const entry = entries[i];
             if (entry?.role === 'assistant' && typeof entry.text === 'string' && entry.text.trim().length > 0) {
-              summary = entry.text.trim();
+              nextSummary = entry.text.trim();
               break;
             }
           }
@@ -71,10 +103,16 @@ export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryS
       } catch {
         // best-effort — header degrades to the file summary alone
       }
-      if (!cancelled) setState({ title, summary, loading: false });
+      if (!cancelled) {
+        setTitle(nextTitle);
+        setSummary(nextSummary);
+        setPacketId(nextPacketId);
+        setLaneStatus(nextStatus);
+        setLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [laneId]);
 
-  return state;
+  return { title, summary, packetId, laneStatus, loading, refreshStatus };
 }

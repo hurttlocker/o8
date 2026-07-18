@@ -14,12 +14,25 @@
  * separation from the diff below — no card chrome.
  */
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 import { UI_FONT } from './constants';
 
 const MONO_FONT = 'var(--font-mono-system)';
 const CLAMP_LINES = 7;
+
+type MergePhase =
+  | { step: 'idle' }
+  | { step: 'merging' }
+  | { step: 'confirm'; approvalId: string; note: string }
+  | { step: 'merged' }
+  | { step: 'error'; note: string };
+
+interface MergeResponse {
+  ok?: boolean;
+  result?: { merged?: boolean; status?: string; note?: string; approvalId?: string | null } | null;
+  error?: { message?: string } | null;
+}
 
 export function LaneReviewSummaryHeader({
   summary,
@@ -27,15 +40,96 @@ export function LaneReviewSummaryHeader({
   totalAdditions,
   totalDeletions,
   onSelectFile,
+  packetId,
+  laneStatus,
+  refreshStatus,
+  onMerged,
 }: {
   summary: string | null;
   files: ReviewChangedFile[];
   totalAdditions: number;
   totalDeletions: number;
   onSelectFile: (path: string) => void;
+  packetId?: string | null;
+  laneStatus?: string | null;
+  refreshStatus?: () => Promise<string | null>;
+  onMerged?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [merge, setMerge] = useState<MergePhase>({ step: 'idle' });
   const longSummary = Boolean(summary && (summary.length > 620 || summary.split('\n').length > CLAMP_LINES));
+
+  const alreadyMerged = laneStatus === 'merged' || laneStatus === 'released' || laneStatus === 'completed';
+  const canMerge = Boolean(packetId) && !alreadyMerged;
+
+  // The governed merge — same endpoint as the packet banner. If the approvals
+  // policy raises a card, the CONFIRM step happens right here on the review
+  // surface (Q ruling 2026-07-18: the merge lives where the review lives,
+  // Codex-style — never bounce the operator to the inbox).
+  const runMerge = useCallback(async () => {
+    if (!packetId) return;
+    setMerge({ step: 'merging' });
+    try {
+      const res = await fetch('/api/orchestrator/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId }),
+      });
+      const payload = await res.json().catch(() => null) as MergeResponse | null;
+      if (!res.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? 'Unable to merge.');
+      }
+      const result = payload.result ?? null;
+      if (result?.merged) {
+        setMerge({ step: 'merged' });
+        onMerged?.();
+      } else if (result?.approvalId) {
+        // The governed merge raised (or found) a pending approval card — the
+        // operator-path response carries approvalId + note without the
+        // worker-branch's pending_operator_approval status, so key on the id.
+        setMerge({ step: 'confirm', approvalId: result.approvalId, note: result.note ?? 'Approval required.' });
+      } else {
+        throw new Error(result?.note ?? 'Merge was blocked.');
+      }
+    } catch (error) {
+      setMerge({ step: 'error', note: error instanceof Error ? error.message : 'Merge failed.' });
+    }
+  }, [onMerged, packetId]);
+
+  const confirmMerge = useCallback(async (approvalId: string) => {
+    setMerge({ step: 'merging' });
+    try {
+      const res = await fetch('/api/panel/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: approvalId, action: 'approve' }),
+      });
+      if (!res.ok) throw new Error('Unable to approve the merge.');
+      // The approval continuation performs the merge — poll the lane until it
+      // reaches a terminal state so the button tells the truth.
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        const status = await refreshStatus?.();
+        // 'archived' is post-merge cleanup's terminal state — in this poll it
+        // can only be reached through the approved merge continuation, so it
+        // counts as merged.
+        if (status === 'merged' || status === 'released' || status === 'completed' || status === 'archived') {
+          setMerge({ step: 'merged' });
+          onMerged?.();
+          return;
+        }
+        if (status === 'failed' || status === 'awaiting_orchestrator' || status === 'awaiting_human') {
+          setMerge({ step: 'error', note: 'Merge did not complete — see the packet card for the escalation.' });
+          return;
+        }
+      }
+      setMerge({ step: 'error', note: 'Merge is taking longer than expected — check the packet card.' });
+    } catch (error) {
+      setMerge({ step: 'error', note: error instanceof Error ? error.message : 'Approval failed.' });
+    }
+  }, [onMerged, refreshStatus]);
+
   if (!summary && files.length === 0) return null;
 
   return (
@@ -49,6 +143,83 @@ export function LaneReviewSummaryHeader({
         fontFamily: UI_FONT,
       }}
     >
+      {canMerge || merge.step === 'merged' || alreadyMerged ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' as const }}>
+          {merge.step === 'merged' || alreadyMerged ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                height: 26,
+                paddingLeft: 10,
+                paddingRight: 10,
+                borderRadius: 999,
+                background: 'var(--t-glass-muted)',
+                color: 'var(--t-terminal-ansi-bright-green, #16a34a)',
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              Merged into main
+            </span>
+          ) : merge.step === 'confirm' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => { void confirmMerge(merge.approvalId); }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  height: 28,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  border: 'none',
+                  borderRadius: 999,
+                  background: 'var(--t-accent)',
+                  color: 'var(--t-accent-contrast, #fff)',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  fontFamily: UI_FONT,
+                  cursor: 'pointer',
+                }}
+              >
+                Confirm merge
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                Governance card raised — confirming merges into main.
+              </span>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { void runMerge(); }}
+              disabled={merge.step === 'merging'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                height: 28,
+                paddingLeft: 12,
+                paddingRight: 12,
+                border: 'none',
+                borderRadius: 999,
+                background: 'var(--t-accent)',
+                color: 'var(--t-accent-contrast, #fff)',
+                fontSize: 11.5,
+                fontWeight: 600,
+                fontFamily: UI_FONT,
+                cursor: merge.step === 'merging' ? 'default' : 'pointer',
+                opacity: merge.step === 'merging' ? 0.6 : 1,
+              }}
+            >
+              {merge.step === 'merging' ? 'Merging…' : 'Approve & merge'}
+            </button>
+          )}
+          {merge.step === 'error' ? (
+            <span style={{ fontSize: 11, color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>{merge.note}</span>
+          ) : null}
+        </div>
+      ) : null}
+
       {summary ? (
         <>
           <div
