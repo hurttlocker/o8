@@ -219,7 +219,7 @@ export function FooterImage(props: FooterImageProps) {
     const onResize = () => resize();
     window.addEventListener('resize', onResize);
     return () => { cancelAnimationFrame(raf); io.disconnect(); window.removeEventListener('resize', onResize); gl.deleteProgram(prog); gl.deleteBuffer(buf); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   return (

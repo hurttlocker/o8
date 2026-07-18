@@ -9,7 +9,7 @@ import { selectorFor, SELECTOR_FOR_SOURCE } from './selector';
 /** Reconstruct `selectorFor` from the injectable source, exactly as the
  *  serialized engine context does. */
 function reifyFromSource(): (el: unknown) => string {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+
   return new Function(`${SELECTOR_FOR_SOURCE}; return selectorFor;`)() as (el: unknown) => string;
 }
 

@@ -257,10 +257,10 @@ export function useOrchestratorMobile({
   const activeThreadId = activeThread?.id ?? null;
   useEffect(() => {
     if (!activeThreadId) {
-      /* eslint-disable react-hooks/set-state-in-effect -- clearing transcript when the active thread is removed must run synchronously to avoid showing stale messages from the previous thread. */
+
       setTranscript([]);
       setTranscriptLoading(false);
-      /* eslint-enable react-hooks/set-state-in-effect */
+
       streamingBufferRef.current = null;
       return;
     }

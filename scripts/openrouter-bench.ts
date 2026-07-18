@@ -11,7 +11,7 @@
  * Output: markdown table to stdout. The 5/5 calls per prompt mirror the
  * 2026-04-30 bake-off so numbers are comparable.
  */
-/* eslint-disable no-console */
+
 
 const SYSTEM_PROMPT = `You are a concise engineering assistant answering questions using ONLY provided typed rows as sources.
 
@@ -278,7 +278,7 @@ async function main() {
   const reports: ModelReport[] = [];
   for (const model of CANDIDATES) {
     process.stderr.write(`[bench] probing ${model}...\n`);
-    // eslint-disable-next-line no-await-in-loop -- sequential to avoid rate-limit interference
+
     const r = await probeModel(model, calls);
     reports.push(r);
     process.stderr.write(

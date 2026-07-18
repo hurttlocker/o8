@@ -1,5 +1,5 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps -- extracted from Canvas.tsx */
+
 
 import React from 'react';
 import { ExternalLink, RefreshCw } from '../lucide-shims';

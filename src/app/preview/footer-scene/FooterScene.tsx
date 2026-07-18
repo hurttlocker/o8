@@ -365,7 +365,7 @@ export function FooterScene(props: FooterSceneProps) {
       window.removeEventListener('resize', onResize);
       gl.deleteProgram(prog); gl.deleteBuffer(buf);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   return (
