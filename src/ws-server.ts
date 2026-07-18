@@ -961,6 +961,14 @@ const lastOrchestratorActivityAt = new Map<string, number>();
 // Mirror of the client stall watchdog (useOrchestratorStream HEAL_STALE_AFTER_MS).
 const ORCH_SNAPSHOT_STALE_MS = 120_000;
 
+// Latest active plan snapshot per route session — the mobile recovery path.
+// Mobile subscribes without a `since` cursor (no seq replay), so after a
+// reconnect or orchestrator-status probe the ONLY way it regains the in-flight
+// turn's plan card is this point-in-time re-send. Full snapshots make
+// latest-wins correct; the lossy channel semantics are unchanged (we never
+// queue deltas — one snapshot, re-sent, replayed with `snapshot: true`).
+const latestOrchestratorPlanBySession = new Map<string, Record<string, unknown>>();
+
 function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
   lastOrchestratorActivityAt.set(sessionName, Date.now());
   // Stamp the event with a monotonic seq and buffer it so a (re)subscribing
@@ -971,6 +979,16 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
   try {
     const parsed = JSON.parse(rawMsg);
     if (parsed && parsed.channel === 'orchestrator') {
+      // Single chokepoint for the plan cache — every emitter site (main turn,
+      // rebound rehydrate, supervisor auto-queue) funnels through here.
+      if (parsed.event === 'plan-update' && parsed.data) {
+        latestOrchestratorPlanBySession.set(sessionName, parsed.data as Record<string, unknown>);
+      } else if (
+        parsed.event === 'error'
+        || (parsed.event === 'status' && (parsed.data?.status === 'ready' || parsed.data?.status === 'dead'))
+      ) {
+        latestOrchestratorPlanBySession.delete(sessionName);
+      }
       outMsg = orchestratorReplay.record(sessionName, parsed);
     }
   } catch {
@@ -1097,6 +1115,13 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
         data: { name: event.name, args: event.input, output: event.output, toolUseId: event.id ?? null, repoPath, threadId, backend, ...(event.isError ? { isError: true } : {}) },
       });
       break;
+    case 'plan':
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'plan-update',
+        data: { repoPath, threadId, turnId: assistantMessageId ?? null, explanation: event.explanation, steps: event.steps, backend },
+      });
+      break;
     case 'done':
       if (threadId && event.sessionId) {
         writeOrchestratorBackendSessionId(threadId, backend, event.sessionId);
@@ -1205,6 +1230,13 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
               backend: backend.id,
               ...(event.isError ? { isError: true } : {}),
             },
+          });
+          break;
+        case 'plan':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'plan-update',
+            data: { repoPath: next.repoPath, threadId: null, turnId: null, explanation: event.explanation, steps: event.steps, backend: backend.id },
           });
           break;
         case 'done':
@@ -3325,6 +3357,18 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
         console.log(`[ws-server] Replayed ${replay.length} orchestrator events to ${client.id} (since=${since}, ${backend.id}${threadId ? ` thread ${threadId}` : ''})`);
       }
     }
+
+    // Latest-plan recovery for cursor-less clients (mobile omits `since`): if
+    // a turn is genuinely live, re-send its newest plan snapshot so the plan
+    // card survives a reconnect. Gated on the HEALED status — a stale busy
+    // must not resurrect a dead turn's plan (the client treats plan-update as
+    // "turn is busy"). Sent after the seq replay so latest always wins.
+    if (snapshotStatus === 'busy') {
+      const planData = latestOrchestratorPlanBySession.get(routeSessionName);
+      if (planData) {
+        send(client, { channel: 'orchestrator', event: 'plan-update', data: { ...planData, snapshot: true } });
+      }
+    }
     console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}${agentId ? `/${agentId}` : ''}${threadId ? ` thread ${threadId}` : ''}) for ${repoPath}`);
   } catch (err) {
     send(client, {
@@ -3816,6 +3860,22 @@ async function handleOrchestratorSendMsgOnce(
             });
             break;
 
+          case 'plan':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'plan-update',
+              data: {
+                repoPath,
+                threadId,
+                turnId: assistantMessageId ?? null,
+                explanation: event.explanation,
+                steps: event.steps,
+                backend: turnBackend.id,
+                agent: turnAgentTag,
+              },
+            });
+            break;
+
           // ── Collide (MoA) — proposer pre-roll. Forwarded to the faint card; NEVER
           //    accumulated into assistantTextAccum so only the aggregator's reply is
           //    the persisted, visible answer.
@@ -4168,6 +4228,21 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
       agent: agentTag,
     },
   });
+
+  // Status-probe recovery: an active turn's latest plan snapshot rides along
+  // (marked `snapshot: true`) so a client that polled its way back mid-turn
+  // regains the plan card. The cache only exists while a turn is live — it is
+  // cleared at the broadcast chokepoint on ready/dead/error — and the same
+  // stale-busy heal window the subscribe path uses gates a wedged session.
+  if (status === 'busy' && sessionName) {
+    const lastActivityAt = lastOrchestratorActivityAt.get(sessionName) ?? 0;
+    if (Date.now() - lastActivityAt <= ORCH_SNAPSHOT_STALE_MS) {
+      const planData = latestOrchestratorPlanBySession.get(sessionName);
+      if (planData) {
+        send(client, { channel: 'orchestrator', event: 'plan-update', data: { ...planData, snapshot: true } });
+      }
+    }
+  }
 }
 
 async function syncClientInbox(client: ClientState) {
