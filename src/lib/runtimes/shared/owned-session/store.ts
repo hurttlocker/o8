@@ -320,6 +320,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     const stderrTail = await readAbnormalStderrTail(stderrPath, outcome);
     const childExit = stderrTail ? { ...outcome, stderrTail } : outcome;
 
+    let finishedClean = false;
     await withSurfaceLock(surfaceId, async () => {
       const current = await findSession(surfaceId);
       if (!current) return;
@@ -328,15 +329,17 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
         if (run.id !== runId) return run;
         dirty = true;
+        const nextOutcome = run.outcome === 'interrupted'
+          ? 'interrupted'
+          : childExit.classification === 'clean-exit'
+            ? 'finished'
+            : 'failed';
+        if (nextOutcome === 'finished') finishedClean = true;
         return {
           ...run,
           childExit,
           finishedAt: run.finishedAt ?? finishedAt,
-          outcome: run.outcome === 'interrupted'
-            ? 'interrupted'
-            : childExit.classification === 'clean-exit'
-              ? 'finished'
-              : 'failed',
+          outcome: nextOutcome,
         };
       };
 
@@ -348,6 +351,36 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       if (dirty) await saveSession(current);
     });
     invalidateFleetCache();
+
+    // #1523 — push completion instead of waiting for a poll. This is the one
+    // moment the runtime authoritatively knows the run ended clean; without
+    // the push, the lane transition raced the session_lost grace, the orphan
+    // sweep, and the 45s/90s salvage nets — and usually lost (field data:
+    // silent_exit_work_present / zombie_reap_salvaged were the COMMON endings
+    // for completed work). The supervisor's completionReported guard makes
+    // this idempotent with the poller path. Fire-and-forget: on failure the
+    // existing nets still catch the lane.
+    if (finishedClean) {
+      void notifySupervisorOfCleanExit(surfaceId);
+    }
+  }
+
+  async function notifySupervisorOfCleanExit(surfaceId: string): Promise<void> {
+    try {
+      const [{ resolvePortInfo }, { getOrCreateWsToken }] = await Promise.all([
+        import('@/lib/panel/api-port'),
+        import('@/lib/ws-auth'),
+      ]);
+      const { wsPort } = resolvePortInfo();
+      await fetch(`http://127.0.0.1:${wsPort}/supervisor/completed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
+        body: JSON.stringify({ surfaceId }),
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch (err) {
+      console.warn(`[owned-session] completion push failed for ${surfaceId} (salvage nets remain):`, err);
+    }
   }
 
   async function emitRuntimeFallbackNotification(

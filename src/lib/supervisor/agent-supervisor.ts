@@ -337,6 +337,24 @@ export function getWatchedAgents(repoPath?: string): WatchedAgent[] {
   return repoPath ? all.filter((agent) => agent.repoPath === repoPath) : all;
 }
 
+/**
+ * #1523 — push-based completion. Invoked (via the ws-server
+ * `/supervisor/completed` endpoint) when an owned worker's child exits clean.
+ * Drives the SAME handleStatusChange('finished') chain the poller uses
+ * (auto-commit → verification → agent_completed / ralph requeue), without
+ * waiting for a fleet snapshot to catch the dead session in a transient
+ * 'reviewing' state. The poller and the 45s/90s salvage nets remain as
+ * fallbacks; `completionReported` makes the two paths mutually idempotent.
+ * Returns false when the surface isn't watched (registration was lost) so the
+ * caller can re-register from the lane row and retry.
+ */
+export async function ingestAgentCompletionSignal(surfaceId: string): Promise<boolean> {
+  const watched = watchedAgents.get(surfaceId);
+  if (!watched || !callbacks) return false;
+  await handleStatusChange(watched, 'finished', Date.now());
+  return true;
+}
+
 export function getSupervisorFleetStatusSummary(repoPath?: string): SupervisorFleetStatusSummary[] {
   return buildFleetStatusSummaries(repoPath);
 }

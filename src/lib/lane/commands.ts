@@ -496,21 +496,35 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         // Register with supervisor for completion detection + stuck monitoring.
         // The supervisor runs in the ws-server process — use HTTP, not direct import.
-        try {
+        // #1523 hardening — a lost registration silently removed the PRIMARY
+        // completion path (the 3s fetch times out under load and the old
+        // single-attempt catch swallowed it), leaving only the salvage nets.
+        // Retry once, and name the lane in the failure so it's diagnosable.
+        {
           const { wsPort } = resolvePortInfo();
-          await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
-            body: JSON.stringify({
-              surfaceId: result.surfaceId,
-              repoPath: lane.repoPath,
-              name: lane.label || lane.branch,
-              prompt: command.prompt,
-            }),
-            signal: AbortSignal.timeout(3000),
-          });
-        } catch (regErr) {
-          console.warn(`[lane] Failed to register agent with supervisor:`, regErr);
+          let watchRegistered = false;
+          for (let attempt = 1; attempt <= 2 && !watchRegistered; attempt += 1) {
+            try {
+              await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
+                body: JSON.stringify({
+                  surfaceId: result.surfaceId,
+                  repoPath: lane.repoPath,
+                  name: lane.label || lane.branch,
+                  prompt: command.prompt,
+                }),
+                signal: AbortSignal.timeout(3000),
+              });
+              watchRegistered = true;
+            } catch (regErr) {
+              if (attempt === 2) {
+                console.warn(`[lane] Supervisor watch registration failed for lane ${command.laneId} (${result.surfaceId}) after 2 attempts — completion will rely on the push signal + salvage nets:`, regErr);
+              } else {
+                await new Promise((resolve) => setTimeout(resolve, 1_000));
+              }
+            }
+          }
         }
 
         const updated = getLane(command.laneId);

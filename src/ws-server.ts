@@ -116,9 +116,11 @@ import {
   registerWatchedAgent,
   unregisterWatchedAgent,
   getWatchedAgents,
+  ingestAgentCompletionSignal,
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
+import { isTerminalLaneStatus } from './lib/lane/types';
 import type { Lane } from './lib/lane/types';
 import { getPacketTailBatch, type PacketTailEvent } from './lib/lane/packet-tail';
 import { probeNoChangesProduced } from './lib/lane/no-changes-produced';
@@ -5514,6 +5516,53 @@ const httpServer = createServer((req, res) => {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
       }
+    });
+    return;
+  }
+
+  // #1523 — push-based completion. The owned-session store POSTs here when a
+  // worker child exits clean, so agent_completed no longer depends on a poll
+  // catching the dead session in a transient 'reviewing' snapshot before the
+  // session_lost grace / orphan sweep / salvage nets get to it. If the watch
+  // registration was lost (its 3s best-effort fetch can time out under load),
+  // re-register from the lane row and drive the same chain.
+  if (req.url === '/supervisor/completed' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      void (async () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string };
+          const surfaceId = typeof body.surfaceId === 'string' ? body.surfaceId.trim() : '';
+          if (!surfaceId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'surfaceId required' }));
+            return;
+          }
+
+          let ingested = await ingestAgentCompletionSignal(surfaceId);
+          if (!ingested) {
+            const { findLaneBySession } = await import('@/lib/lane/registry');
+            const lane = findLaneBySession(surfaceId);
+            if (lane && !isTerminalLaneStatus(lane.status)) {
+              registerWatchedAgent(surfaceId, lane.repoPath, lane.label || lane.branch, '');
+              ingested = await ingestAgentCompletionSignal(surfaceId);
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, ingested }));
+        } catch (err) {
+          console.error('[supervisor] completion-signal ingest failed:', err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'ingest failed' }));
+        }
+      })();
     });
     return;
   }
