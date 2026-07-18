@@ -808,7 +808,11 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         const prUrl = prResult.stdout.trim();
         const prNumber = parsePullRequestNumber(prUrl);
-        if (prNumber !== null) updateLane(command.laneId, { prNumber }, actor);
+        updateLane(command.laneId, {
+          ...(prNumber !== null ? { prNumber } : {}),
+          outcome: 'pr_opened',
+          outcomeNote: `Pull request opened: ${prUrl}`,
+        }, actor);
         setLaneStatus(command.laneId, 'reviewing', actor, 'pr_created');
         const updated = getLane(command.laneId);
         return { ok: true, laneId: command.laneId, note: `PR created: ${prUrl}`, lane: updated ?? undefined };

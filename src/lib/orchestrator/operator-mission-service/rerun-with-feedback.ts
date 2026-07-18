@@ -98,6 +98,12 @@ export function archiveLanesForPacket(packetId: string, referenceLabel: string):
         worktreePath = lane.worktreePath;
       }
       try {
+        if (!terminal) {
+          updateLane(lane.id, {
+            outcome: 'discarded',
+            outcomeNote: 'Superseded by rerun',
+          });
+        }
         // Clear packetId first so reconciler can't re-bind this lane.
         updateLane(lane.id, { packetId: '' });
         if (terminal) {

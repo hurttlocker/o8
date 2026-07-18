@@ -33,7 +33,7 @@
  *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -129,7 +129,8 @@ const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
-const { createLane, findLaneByPacket, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { archiveLane, createLane, findLaneByPacket, getLane, getLaneEvents, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+const { dispatch } = await import('@/lib/lane/commands');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -138,6 +139,8 @@ const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await im
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
+const { enforceWedgeTimeouts, WEDGE_AWAITING_ORCHESTRATOR_MS } = await import('@/lib/lane/wedge-timeouts');
+const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
@@ -855,4 +858,128 @@ describe('seam H — reconciled no-commit completion persists an outcome and inb
       note: expect.stringContaining('produced no changes'),
     });
   }, 20_000);
+});
+
+// ── Seam I — every archive has a durable ending (#1231) ────────────────────
+
+describe('seam I — archiveLane backfills a missing ending and reports the contract violation', () => {
+  it('a persisted lane archived without an outcome becomes no_changes and creates a supervisor inbox row', () => {
+    const repoPath = `/tmp/o8-seam-I-${Date.now()}`;
+    const packetId = `pkt-seam-I-${Date.now()}`;
+    const lane = createLane({
+      repoPath,
+      branch: 'agent/missing-ending',
+      runtime: 'codex',
+      packetId,
+      label: 'Archive contract seam',
+    });
+
+    expect(archiveLane(lane.id, 'system')).toMatchObject({
+      id: lane.id,
+      status: 'archived',
+      outcome: 'no_changes',
+      outcomeNote: 'Archived without a recorded ending',
+    });
+
+    const item = listInboxItems({ includeAllProjects: true })
+      .find((candidate) => candidate.packetId === packetId && candidate.kind === 'packet_no_changes');
+    expect(item).toMatchObject({
+      repoPath,
+      packetId,
+      status: 'human_required',
+      payload: {
+        laneId: lane.id,
+        laneLabel: 'Archive contract seam',
+        repoPath,
+        outcome: 'no_changes',
+        note: 'Archived without a recorded ending',
+      },
+    });
+  });
+});
+
+// ── Seam J — successful PR creation is a terminal outcome (#1231) ─────────
+
+describe('seam J — create_pr success persists the pull-request ending', () => {
+  it('the real lane command push/PR path stamps pr_opened with the PR reference', async () => {
+    const repoPath = makeMergeRepo('o8-seam-J-pr-');
+    const packetId = `pkt-seam-J-${Date.now()}`;
+    const branch = 'agent/seam-j-pr';
+    const worktreePath = await makeMergeWorktree(repoPath, packetId, branch);
+    commitMergeFile(worktreePath, 'pull-request.txt', 'ready for review\n', 'feat: PR outcome seam');
+    const lane = createLane({
+      repoPath,
+      worktreePath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      label: 'PR outcome seam',
+    });
+
+    const fakeBin = mkdtempSync(join(os.tmpdir(), 'o8-seam-J-bin-'));
+    tempDirs.push(fakeBin);
+    const fakeGh = join(fakeBin, 'gh');
+    writeFileSync(fakeGh, '#!/bin/sh\nprintf "%s\\n" "https://github.com/hurttlocker/o8/pull/1231"\n');
+    chmodSync(fakeGh, 0o755);
+    const previousPath = process.env.PATH ?? '';
+    process.env.PATH = `${fakeBin}:${previousPath}`;
+
+    try {
+      await expect(dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'user' })).resolves.toMatchObject({
+        ok: true,
+        note: 'PR created: https://github.com/hurttlocker/o8/pull/1231',
+      });
+    } finally {
+      process.env.PATH = previousPath;
+    }
+
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'reviewing',
+      prNumber: 1231,
+      outcome: 'pr_opened',
+      outcomeNote: 'Pull request opened: https://github.com/hurttlocker/o8/pull/1231',
+    });
+  }, 20_000);
+});
+
+// ── Seam K — awaiting_human always carries a question (#1231) ──────────────
+
+describe('seam K — awaiting_human escalation persists a specific supervisor question', () => {
+  it('the real wedge sweep creates the question row and archives the unanswered lane as asked', () => {
+    const now = Date.now();
+    const repoPath = `/tmp/o8-seam-K-${now}`;
+    const packetId = `pkt-seam-K-${now}`;
+    const lane = createLane({
+      repoPath,
+      branch: 'agent/awaiting-question',
+      runtime: 'codex',
+      packetId,
+      label: 'Question contract seam',
+    });
+    setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'worker_question');
+    updateLane(lane.id, {
+      lastEventAt: new Date(now - WEDGE_AWAITING_ORCHESTRATOR_MS - 1).toISOString(),
+    });
+
+    expect(listInboxItems({ includeAllProjects: true }).some((item) => item.packetId === packetId)).toBe(false);
+    expect(enforceWedgeTimeouts(now)).toHaveLength(1);
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'awaiting_human', outcome: null });
+    const item = listInboxItems({ includeAllProjects: true })
+      .find((candidate) => candidate.packetId === packetId && candidate.kind === 'bounded_retry_exhausted');
+    expect(item?.payload).toMatchObject({
+      laneId: lane.id,
+      laneLabel: 'Question contract seam',
+      blockedReason: 'orchestrator_wedge_timeout',
+      question: expect.stringContaining('Question contract seam'),
+    });
+    expect(item?.payload.question).toContain('retry, steer, or archive it?');
+
+    expect(archiveLane(lane.id, 'system')).toMatchObject({
+      status: 'archived',
+      outcome: 'asked',
+      outcomeNote: item?.payload.question,
+    });
+  });
 });

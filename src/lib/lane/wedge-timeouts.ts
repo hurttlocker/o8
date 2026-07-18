@@ -23,6 +23,7 @@
 
 import { createApproval } from '@/lib/approvals/store';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
+import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 import { appendEvent, getLaneEvents, listActiveLanes, setLaneStatus } from './registry';
 
 // Conservative defaults. Named + exported so tests and operators can reason
@@ -185,6 +186,30 @@ function raiseWedgeCard(lane: Lane, action: WedgeAction): void {
   }
 }
 
+function buildWedgeQuestion(lane: Lane, action: WedgeAction): string {
+  const elapsedMin = Math.round(action.elapsedMs / 60_000);
+  const label = lane.label || lane.branch || lane.id;
+  return `How should o8 proceed with "${label}" after the orchestrator did not answer for ${elapsedMin} minutes: retry, steer, or archive it?`;
+}
+
+function enqueueWedgeQuestion(lane: Lane, action: WedgeAction, question: string): void {
+  enqueueInboxItem({
+    repoPath: lane.repoPath,
+    packetId: lane.packetId,
+    kind: 'bounded_retry_exhausted',
+    status: 'human_required',
+    payload: {
+      laneId: lane.id,
+      laneLabel: lane.label,
+      worktreePath: lane.worktreePath,
+      sessionKey: lane.sessionKey,
+      blockedReason: action.blockedReason,
+      question,
+      note: question,
+    },
+  });
+}
+
 /**
  * Enforce wedge-timeouts across all active lanes. Called from the reaper tick.
  * Returns the actions taken (for logging/tests).
@@ -202,6 +227,9 @@ export function enforceWedgeTimeouts(now: number = Date.now()): WedgeTimeoutOutc
     const parkedSince = parkedSinceMs(lane);
     if (parkedSince !== null && hasWedgeEventSince(lane.id, parkedSince)) continue;
 
+    const question = action.to === 'awaiting_human'
+      ? buildWedgeQuestion(lane, action)
+      : null;
     appendEvent(lane.id, 'wedge_timeout', 'system', {
       from: action.from,
       to: action.to,
@@ -209,9 +237,11 @@ export function enforceWedgeTimeouts(now: number = Date.now()): WedgeTimeoutOutc
       thresholdMs: action.thresholdMs,
       blockedReason: action.blockedReason,
       action: action.kind,
+      ...(question ? { question } : {}),
     });
 
     if (action.transitions) {
+      if (action.to === 'awaiting_human' && question) enqueueWedgeQuestion(lane, action, question);
       setLaneStatus(lane.id, action.to, 'system', action.blockedReason);
     }
     if (action.raisesCard) {

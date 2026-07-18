@@ -4,9 +4,9 @@ export interface LaneArchiveSummary {
   source: 'zombie_reaper' | 'user' | 'orchestrator' | 'system';
   message: string;
   preservedBranch?: string | null;
-  /** Durable lane outcome, when stamped — lets banners label truthfully
-   *  (Merged / Discarded / No changes) instead of a generic Archived. */
-  outcome?: 'merged' | 'discarded' | 'no_changes' | null;
+  /** Durable lane outcome, when stamped — lets banners label the recorded
+   *  ending instead of falling back to a generic Archived. */
+  outcome?: 'merged' | 'discarded' | 'no_changes' | 'pr_opened' | 'asked' | null;
 }
 
 function stringField(value: unknown): string | null {
@@ -39,6 +39,12 @@ export function summarizeLaneArchive(
   }
   if (lane.outcome === 'no_changes') {
     return { source: 'system', outcome: 'no_changes', message: lane.outcomeNote ?? 'Agent finished without making changes.' };
+  }
+  if (lane.outcome === 'pr_opened') {
+    return { source: 'system', outcome: 'pr_opened', message: lane.outcomeNote ?? 'Agent opened a pull request for review.' };
+  }
+  if (lane.outcome === 'asked') {
+    return { source: 'system', outcome: 'asked', message: lane.outcomeNote ?? 'Agent ended with an unanswered question.' };
   }
 
   const zombie = latestEvent(events, (event) => event.verb === 'zombie_reap');
