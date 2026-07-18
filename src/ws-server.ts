@@ -1651,6 +1651,26 @@ function spawnTmuxAttachPty(
 
 const chatListeners = new Set<(delta: ChatDelta) => void>();
 
+// #1484 — busy-not-dead. A saturated-but-alive next-server loop made bridge
+// fetches time out, the exponential backoff latched 'down', and the client
+// parked on "Realtime bridge reconnecting… backing off" for up to 60s while
+// the fleet was fine. Before declaring any bridge channel down, probe the
+// cheapest endpoint (identity: no DB, no recompute) with a generous deadline.
+// Alive → reset the ramp (retries stay on the initial cadence, the channel
+// stays officially up); truly dead → the down transition proceeds as before.
+// Cost: one probe per DOWN transition attempt, i.e. at most once per 5
+// consecutive failures per channel.
+async function nextServerAliveDespiteBackpressure(): Promise<boolean> {
+  try {
+    const res = await fetch(buildNextUrl('/api/setup/identity'), {
+      signal: AbortSignal.timeout(15_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Sync helpers ──
 
 async function fetchSync(body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
@@ -2582,8 +2602,13 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
     if (typeof msg === 'string' && msg.includes('(404)')) return;
     const failure = recordRealtimeBridgeFailure(globalSnapshotBridgeBackoff);
     if (failure.transition === 'down') {
-      console.error('[ws-server] realtime global snapshot unavailable:', msg);
-      publishRealtimeBridgeConnectionState('global-snapshot', 'down', msg);
+      if (await nextServerAliveDespiteBackpressure()) {
+        recordRealtimeBridgeSuccess(globalSnapshotBridgeBackoff);
+        console.warn('[ws-server] realtime global snapshot slow but next-server alive — staying up:', msg);
+      } else {
+        console.error('[ws-server] realtime global snapshot unavailable:', msg);
+        publishRealtimeBridgeConnectionState('global-snapshot', 'down', msg);
+      }
     }
   } finally {
     globalSnapshotInFlight = false;
@@ -2703,8 +2728,13 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
     const reason = error instanceof Error ? error.message : 'unknown';
     const failure = recordRealtimeBridgeFailure(mobileInboxBridgeBackoff);
     if (failure.transition === 'down') {
-      console.error('[ws-server] realtime mobile inbox snapshot unavailable:', reason);
-      publishRealtimeBridgeConnectionState('mobile-inbox', 'down', reason);
+      if (await nextServerAliveDespiteBackpressure()) {
+        recordRealtimeBridgeSuccess(mobileInboxBridgeBackoff);
+        console.warn('[ws-server] realtime mobile inbox slow but next-server alive — staying up:', reason);
+      } else {
+        console.error('[ws-server] realtime mobile inbox snapshot unavailable:', reason);
+        publishRealtimeBridgeConnectionState('mobile-inbox', 'down', reason);
+      }
     }
   } finally {
     mobileSnapshotInFlight = false;
@@ -2810,8 +2840,15 @@ function startHeadlessTickBridge(intervalMs: number) {
         const reason = error instanceof Error ? error.message : String(error);
         const failure = recordRealtimeBridgeFailure(headlessTickBridgeBackoff);
         if (failure.transition === 'down') {
-          console.error('[headless] Tick bridge unavailable:', reason);
-          publishRealtimeBridgeConnectionState('headless-tick', 'down', reason);
+          void nextServerAliveDespiteBackpressure().then((alive) => {
+            if (alive) {
+              recordRealtimeBridgeSuccess(headlessTickBridgeBackoff);
+              console.warn('[headless] Tick bridge slow but next-server alive — staying up:', reason);
+            } else {
+              console.error('[headless] Tick bridge unavailable:', reason);
+              publishRealtimeBridgeConnectionState('headless-tick', 'down', reason);
+            }
+          });
         }
       })
       .finally(() => {
