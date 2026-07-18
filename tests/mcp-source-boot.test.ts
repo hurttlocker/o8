@@ -16,9 +16,10 @@
  * stdio MCP server parks on stdin indefinitely.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -61,6 +62,45 @@ function bootSurvives(entry: string): Promise<{ alive: boolean; exitCode: number
   });
 }
 
+function bootWithMissingInstalledAnchor(
+  entry: string,
+  launcherPath: string,
+  dataPath: string,
+  bundledPath: string,
+): Promise<{ exitCode: number | null; stderr: string }> {
+  return new Promise((resolve) => {
+    writeFileSync(launcherPath, `await import(${JSON.stringify(pathToFileURL(resolvePath(entry)).href)});\n`);
+    const child = spawn('npx', ['tsx', launcherPath], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        CORTEX_IDE_DATA_DIR: dataPath,
+        O8_DATA_DIR: dataPath,
+        O8_BUNDLED_MCP_PATH: bundledPath,
+        O8_BUNDLED_MCP_DIR: dirname(bundledPath),
+        O8_MCP_NODE22_CHECKED: '1',
+        WS_TOKEN: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve({ exitCode: null, stderr });
+    }, 5_000);
+
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ exitCode: code, stderr });
+    });
+  });
+}
+
 describe('source-launched MCP servers survive module load (tsx/CJS path)', () => {
   it('operator MCP server boots from source without a load-time crash', async () => {
     const result = await bootSurvives('src/lib/mcp/operator-mcp-server.ts');
@@ -71,4 +111,22 @@ describe('source-launched MCP servers survive module load (tsx/CJS path)', () =>
     const result = await bootSurvives('src/lib/mcp/cortex-mcp-server.ts');
     expect(result.alive, `cortex MCP exited at load (code ${result.exitCode}):\n${result.stderr.slice(0, 1500)}`).toBe(true);
   }, 20_000);
+
+  it.each([
+    ['operator', 'src/lib/mcp/operator-mcp-server.ts'],
+    ['cortex', 'src/lib/mcp/cortex-mcp-server.ts'],
+  ])('%s MCP exits before recreating data when its installed app anchor is gone', async (_label, entry) => {
+    const root = mkdtempSync(join(os.tmpdir(), 'o8-mcp-uninstall-'));
+    const launcherPath = join(root, `${_label}-launcher.mjs`);
+    const missingDataPath = join(root, 'data-must-not-exist');
+    const bundledPath = join(root, 'o8.app', 'Contents', 'Resources', 'server', `${_label}-mcp-server.mjs`);
+    try {
+      const result = await bootWithMissingInstalledAnchor(entry, launcherPath, missingDataPath, bundledPath);
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.stderr).toContain('installed o8.app is missing');
+      expect(existsSync(missingDataPath)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
 });

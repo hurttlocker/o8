@@ -1,33 +1,63 @@
 /**
- * Uninstall hygiene (#1333): the operator/cortex MCP servers are spawned by
- * EXTERNAL clients (Claude Desktop / Claude Code), not by o8.app — so when the
- * user drags o8 to the Trash, the app can't reap them. The orphan keeps
- * serving from memory (node holds the script after the file is deleted) and
- * resurrects `~/.o8` on its next DB/session touch. To a fresh user, an app
- * that survives its own uninstall and recreates its data dir reads as malware.
- *
- * The precise "the app was deleted" signal is the server's OWN script path
- * disappearing (Trash = the bundle moves out of /Applications, so the bundled
- * `Resources/server/*.mjs` path stops resolving). Poll it cheaply and exit
- * clean when it's gone. Dev runs (tsx from the repo) keep their path and are
- * never affected.
+ * Uninstall hygiene (#1333) for MCP servers owned by external clients.
+ * A running Node process keeps its loaded code after o8.app is removed, so it
+ * must watch the installed app anchor and stop before touching persistent data.
  */
 
 import { existsSync } from 'node:fs';
+import { isAbsolute, normalize } from 'node:path';
 
-const ORPHAN_CHECK_INTERVAL_MS = 45_000;
+const ORPHAN_CHECK_INTERVAL_MS = 60_000;
 
-export function exitWhenBundleDeleted(label: string): void {
-  const ownPath = process.argv[1];
-  if (!ownPath || !existsSync(ownPath)) return; // can't establish a baseline — never arm
+export interface BundledMcpEnvironment {
+  O8_BUNDLED_MCP_PATH?: string;
+  O8_BUNDLED_MCP_DIR?: string;
+}
 
+function appBundleRoot(candidate: string | undefined): string | null {
+  const path = candidate?.trim();
+  if (!path || !isAbsolute(path)) return null;
+  const match = path.match(/^(?:.*[\\/])?o8\.app(?=[\\/]+Contents(?:[\\/]|$))/i);
+  return match ? normalize(match[0]) : null;
+}
+
+/**
+ * Return the installed macOS app root only when a trusted bundled-path signal
+ * points inside an exact `o8.app/Contents` tree. Source/dev and lookalike paths
+ * deliberately fail open so a checkout can never kill its own MCP process.
+ */
+export function resolveInstalledAppAnchor(
+  scriptPath: string | undefined,
+  env: BundledMcpEnvironment,
+): string | null {
+  const normalizedScriptPath = scriptPath?.trim() ?? '';
+  if (/\.tsx?$/i.test(normalizedScriptPath)) return null;
+  return appBundleRoot(env.O8_BUNDLED_MCP_PATH)
+    ?? appBundleRoot(env.O8_BUNDLED_MCP_DIR)
+    ?? appBundleRoot(normalizedScriptPath);
+}
+
+export function exitWhenBundleDeleted(
+  label: string,
+  scriptPath = process.argv[1],
+  env: BundledMcpEnvironment = {
+    O8_BUNDLED_MCP_PATH: process.env.O8_BUNDLED_MCP_PATH,
+    O8_BUNDLED_MCP_DIR: process.env.O8_BUNDLED_MCP_DIR,
+  },
+): void {
+  const anchorPath = resolveInstalledAppAnchor(scriptPath, env);
+  if (!anchorPath) return;
+
+  const exitIfMissing = (): boolean => {
+    if (existsSync(anchorPath)) return false;
+    console.error(`[${label}] installed o8.app is missing at ${anchorPath}; exiting orphaned MCP server`);
+    process.exit(0);
+    return true;
+  };
+
+  if (exitIfMissing()) return;
   const timer = setInterval(() => {
-    if (!existsSync(ownPath)) {
-      clearInterval(timer);
-      console.error(`[${label}] bundle deleted (${ownPath}) — o8 was uninstalled; exiting so no orphan recreates ~/.o8`);
-      process.exit(0);
-    }
+    if (exitIfMissing()) clearInterval(timer);
   }, ORPHAN_CHECK_INTERVAL_MS);
-  // Never keep the process alive JUST for this check.
   timer.unref();
 }
