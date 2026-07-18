@@ -174,4 +174,8 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'voice', tabLabel: 'Voice', group: "Permissions", label: "Input Monitoring", description: "Required for the Fn key to receive events \u2014 stricter than Accessibility" },
   { tab: 'voice', tabLabel: 'Voice', group: "Transcription", label: "Groq API key", description: "Free at console.groq.com/keys \u2014 paste it here (password input + Save/Remove)" },
   { tab: 'voice', tabLabel: 'Voice', group: "Voice brain", label: "Escalation", description: "When to hand a request to the deeper brain (Off/Auto/Deep)" },
+  { tab: 'permissions', tabLabel: 'Permissions', group: "macOS permissions", label: "Microphone", description: "Grant mic access for dictation and Symon", keywords: ['permission', 'mic', 'tcc', 'privacy', 'grant', 'allow'] },
+  { tab: 'permissions', tabLabel: 'Permissions', group: "macOS permissions", label: "Accessibility", description: "Lets o8 see the focused window so dictation lands in the right app", keywords: ['permission', 'tcc', 'privacy', 'grant', 'allow'] },
+  { tab: 'permissions', tabLabel: 'Permissions', group: "macOS permissions", label: "Input Monitoring", description: "Required for the global Fn hotkey to receive key events", keywords: ['permission', 'tcc', 'privacy', 'grant', 'allow', 'fn', 'hotkey'] },
+  { tab: 'permissions', tabLabel: 'Permissions', group: "macOS permissions", label: "Screen Recording", description: "Powers Symon's screen sight — reading what's on screen to point and guide", keywords: ['permission', 'tcc', 'privacy', 'grant', 'allow', 'capture'] },
 ];

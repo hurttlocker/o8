@@ -391,6 +391,29 @@ export async function micPermissionGranted(): Promise<boolean | null> {
 }
 
 /**
+ * On-demand macOS Microphone prompt (AVFoundation) for the Permissions
+ * concierge fix flow. Fires the real prompt only when the status is
+ * notDetermined; an already-denied grant is left untouched (macOS won't
+ * re-prompt — the UI deep-links System Settings in that case). Returns the
+ * CURRENT status (true authorized / false denied / null never-asked); poll the
+ * non-prompting `micPermissionGranted()` to observe the resulting grant.
+ */
+export async function requestMicAccess(): Promise<boolean | null> {
+  return invoke<boolean | null>('request_mic_access_cmd');
+}
+
+/**
+ * Relaunch o8. Kills tracked child processes first, then `app.restart()` (see
+ * `restart_app` in src-tauri/src/lib.rs — the same command the updater flow
+ * uses). Accessibility / Input Monitoring / Screen Recording grants only take
+ * effect for a fresh process, so the Permissions tab offers this after such a
+ * grant lands mid-session. No-op outside Tauri.
+ */
+export async function restartApp(): Promise<void> {
+  await invoke('restart_app');
+}
+
+/**
  * Open a macOS System Settings pane by its URL / bundle target. Used to jump
  * the user to Accessibility / Input-Monitoring / Keyboard for granting.
  */
