@@ -406,6 +406,10 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
                 totalAdditions={visibleStats.additions}
                 totalDeletions={visibleStats.deletions}
                 onSelectFile={jumpToFile}
+                packetId={laneSummary.packetId}
+                laneStatus={laneSummary.laneStatus}
+                refreshStatus={laneSummary.refreshStatus}
+                onMerged={() => { void changes.refresh(); }}
               />
             ) : null}
             {visible.map((file) => (
