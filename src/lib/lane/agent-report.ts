@@ -12,6 +12,15 @@ export const AGENT_REPORT_REASONS: readonly AgentReportReason[] = [
   'unknown',
 ];
 
+export const PACKET_AGENT_REPORT_EVENTS = [
+  'progress',
+  'blocked',
+  'question',
+  'huddle',
+] as const;
+
+export type PacketAgentReportEvent = (typeof PACKET_AGENT_REPORT_EVENTS)[number];
+
 // `huddle` (#1282 / Huddle mode) is a worker's pre-implementation alignment
 // turn: it posts its plan + any pushback, which flips the lane to
 // `awaiting_orchestrator` exactly like `blocked`/`question` so the orchestrator
@@ -36,6 +45,11 @@ export interface AgentReportResult {
 
 export function isAgentReportReason(value: unknown): value is AgentReportReason {
   return typeof value === 'string' && AGENT_REPORT_REASONS.includes(value as AgentReportReason);
+}
+
+export function isPacketAgentReportEvent(value: unknown): value is PacketAgentReportEvent {
+  return typeof value === 'string'
+    && PACKET_AGENT_REPORT_EVENTS.includes(value as PacketAgentReportEvent);
 }
 
 export function normalizeAgentReportEvent(value: unknown): string {
