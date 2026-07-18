@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 import { execFileSync } from 'node:child_process';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { getBranchSnapshot, getCachedBranchSnapshot, refreshBranchSnapshot } from '@/lib/panel/branch-snapshot';
@@ -286,6 +287,9 @@ export async function DELETE(req: NextRequest) {
         if (line.startsWith('worktree ')) currentPath = line.slice(9);
         if (line.startsWith('branch refs/heads/') && line.slice(18) === branch && currentPath !== repoPath) {
           // Remove the worktree
+          if (!(await allowWorktreeRemoval(currentPath, { logPrefix: 'branch-cleanup' }))) {
+            return NextResponse.json({ error: `Worktree ${currentPath} still has a live process or could not be inspected; branch removal refused.` }, { status: 409 });
+          }
           git(repoPath, ['worktree', 'remove', currentPath, ...(force ? ['--force'] : [])], 10000);
           worktreeRemoved = true;
           break;

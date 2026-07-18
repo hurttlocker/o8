@@ -29,7 +29,7 @@ async function preserveHeadBeforeRemoval(lane: CleanupLane, worktreePath: string
 
 export async function cleanupLaneWorktree(
   lane: CleanupLane,
-  opts: { deleteBranch?: boolean; terminal?: boolean; force?: boolean } = {},
+  opts: { deleteBranch?: boolean; terminal?: boolean; force?: boolean; overrideLiveGuard?: true } = {},
 ): Promise<boolean> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -77,8 +77,11 @@ export async function cleanupLaneWorktree(
     const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
     if (worktree) {
       // manager.cleanup already calls preserveUncommittedWork internally
-      await manager.cleanup(worktree.id, { force: true, deleteBranch: opts.deleteBranch ?? true });
-      return true;
+      return manager.cleanup(worktree.id, {
+        force: true,
+        deleteBranch: opts.deleteBranch ?? true,
+        overrideLiveGuard: opts.overrideLiveGuard,
+      });
     }
   } catch (error) {
     console.warn(`[lane-worktree] Manager cleanup failed for ${lane.id}: ${formatError(error)}`);
@@ -91,6 +94,7 @@ export async function cleanupLaneWorktree(
     logPrefix: 'lane-worktree',
     // Already gated above — don't double-gate (avoids a duplicate prune_forced).
     skipPruneGate: true,
+    overrideLiveGuard: opts.overrideLiveGuard,
   });
 }
 

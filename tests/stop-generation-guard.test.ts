@@ -24,7 +24,7 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 vi.mock('@/lib/lane/reap-sessions', () => ({
-  interruptLaneSessions: vi.fn(async () => 0),
+  killLaneSessionsConfirmed: vi.fn(async () => []),
   archiveLaneSessions: vi.fn(async () => 0),
 }));
 
