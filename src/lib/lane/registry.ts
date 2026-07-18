@@ -9,6 +9,7 @@ import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
+import { reportMissingArchiveEnding, resolveArchiveEnding } from './archive-ending';
 import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
@@ -899,14 +900,12 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lan
   if (!lane) {
     return null;
   }
-
-  // Keep sessionKey on archive — it lets clients correlate archived lanes
-  // back to their spawned sessions (sidebar filter, history drawer). Since
-  // `findLaneBySession()` now excludes archived rows, leaving the key in
-  // place doesn't collide with future launches that reuse the same key.
-  // worktreePath stays nulled so the reaper doesn't re-enter cleanup.
+  const ending = resolveArchiveEnding(lane, getLaneEvents(lane.id, 100));
+  if (ending.contractViolation) reportMissingArchiveEnding(lane);
+  // Keep sessionKey for archived-session correlation; clear worktreePath so cleanup cannot re-enter.
   const updated = updateLane(laneId, {
     status: 'archived',
+    ...ending.updates,
     worktreePath: null,
     writerToken: null,
     lastEventAt: nowIso(),

@@ -138,6 +138,28 @@ export function useWorkspaceChatLifecycle({
         bannerSub: `${archiveSummary.message} The transcript stays for review.`,
       };
     }
+    if (archiveSummary?.outcome === 'pr_opened') {
+      return {
+        merged: false,
+        tone: 'var(--t-accent)',
+        iconBg: 'var(--t-panel)',
+        heroTitle: 'Pull request opened',
+        heroSub: archiveSummary.message,
+        bannerLabel: 'PR open · read-only',
+        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
+      };
+    }
+    if (archiveSummary?.outcome === 'asked') {
+      return {
+        merged: false,
+        tone: '#f59e0b',
+        iconBg: 'rgba(245, 158, 11, 0.10)',
+        heroTitle: 'Question unanswered',
+        heroSub: archiveSummary.message,
+        bannerLabel: 'Asked · read-only',
+        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
+      };
+    }
     return {
       merged: false,
       tone: 'var(--t-text-muted)',

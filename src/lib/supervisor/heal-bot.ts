@@ -61,6 +61,7 @@ export interface SupervisorInboxPayload {
   lastCommit?: string | null;
   transcriptTail?: string | null;
   note?: string | null;
+  question?: string | null;
   retryError?: string | null;
   healBot?: {
     attemptedAt?: string;
@@ -446,8 +447,11 @@ async function markHumanRequired(
   extras?: Partial<NonNullable<SupervisorInboxPayload['healBot']>>,
 ): Promise<void> {
   const completedAt = nowIso();
+  const lane = await resolveLane(item, payload);
+  const question = `How should o8 proceed with "${lane?.label || lane?.branch || lane?.id || item.packet_id || 'this lane'}" after automatic healing stopped: ${reason}?`;
   const nextPayload: SupervisorInboxPayload = {
     ...payload,
+    question,
     healBot: {
       ...payload.healBot,
       ...extras,
@@ -459,21 +463,17 @@ async function markHumanRequired(
 
   updateInboxItem(item.id, 'human_required', nextPayload, completedAt);
 
-  const lane = await resolveLane(item, payload);
   if (!lane) return;
-
   appendLaneHealEvent(lane.id, {
     outcome: nextPayload.healBot?.outcome ?? 'give_up',
     reason,
+    question,
     inboxItemId: item.id,
     packetId: item.packet_id,
   });
 
   const { setLaneStatus } = await import('@/lib/lane/registry');
-  // Layer-5 escalation: self-heal gave up, so this is the operator's call — park
-  // at `awaiting_human` (now a real persistable status, #1513) rather than the
-  // ambiguous `awaiting_input` (which reads as "the agent needs an answer").
-  // `status-events.ts` already narrates awaiting_human-from-failure as an escalation.
+  // Layer 5 parks on the operator with the specific question persisted above.
   setLaneStatus(lane.id, 'awaiting_human', 'system', 'heal_bot_give_up');
 }
 
