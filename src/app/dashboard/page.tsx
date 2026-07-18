@@ -3290,6 +3290,9 @@ function DashboardInner() {
     targetSessionKey?: string;
     supervisorStatus?: string | null;
     autoArchiveOnIdle?: boolean;
+    /** Agent-originated (Symon / supervisor auto-open): surface the worker
+     *  quietly — no active-tab switch, no global repo-scope flip. */
+    background?: boolean;
   }) => {
     const repos = globalRepoEntries.length > 0 ? globalRepoEntries : await loadRegisteredRepos();
     const repoEntry = repos.find((repo) => repo.localPath === request.repoPath);
@@ -3298,10 +3301,12 @@ function DashboardInner() {
       throw new Error(`No local checkout is registered for ${request.repoPath}. Open the repo locally before launching work there.`);
     }
 
-    setGlobalRepoId(repoEntry.id);
-    setGlobalRepoBranch(repoEntry.defaultBranch || 'main');
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
+    if (!request.background) {
+      setGlobalRepoId(repoEntry.id);
+      setGlobalRepoBranch(repoEntry.defaultBranch || 'main');
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
+      }
     }
 
     void fetch('/api/panel/repos', {
@@ -3347,6 +3352,7 @@ function DashboardInner() {
       supervisorStatus: request.supervisorStatus,
       autoArchiveOnIdle: request.autoArchiveOnIdle,
       orchestrationPacket,
+      background: request.background,
     });
     enqueueFtuxMilestone('firstAgentSpawned');
 
@@ -3392,6 +3398,12 @@ function DashboardInner() {
         targetSessionKey: detail.surfaceId,
         supervisorStatus: detail.status,
         autoArchiveOnIdle: false,
+        // Supervisor launches are agent-originated by definition (Symon
+        // dispatch, orchestrator delegate) — the worker tab lands in the
+        // rail like any dispatched agent, but the operator's active surface
+        // is never hijacked (Q ruling 2026-07-17). Human spawns go through
+        // o8:request-spawn-tab / New session, which keep focus.
+        background: true,
       }).catch((err) => {
         console.error('[dashboard] Failed to auto-open tab for orchestrator agent:', err);
       });

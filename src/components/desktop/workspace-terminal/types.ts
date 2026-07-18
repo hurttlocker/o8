@@ -156,6 +156,10 @@ export interface TerminalTabHandle {
     orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
     supervisorStatus?: string | null;
     autoArchiveOnIdle?: boolean;
+    /** Agent-originated launch (Symon / supervisor auto-open): create the tab
+     *  and surface it in the rail WITHOUT switching the active tab or
+     *  stealing the operator's screen (Q ruling 2026-07-17). */
+    background?: boolean;
   }) => string;
   openLlmChatSession: (options?: {
     repo?: RegisteredRepo;
