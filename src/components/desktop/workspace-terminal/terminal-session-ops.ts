@@ -138,6 +138,20 @@ export function computeCliChatSession(
         && tab.orchestrationPacket?.packetId === targetedPacketId
         && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
       ));
+  // #1553 — the same rebind-not-mint rule for PACKET-LESS lanes. A lane
+  // relaunch/retry mints a fresh sessionKey per attempt; with no packetId to
+  // match on, every attempt missed targetedExisting and stacked a new tab
+  // (the Polish ×5 / Huddle ×5 zombies). The lane id is stable across
+  // relaunches — retarget the lane's existing tab and let the match-and-update
+  // block below rebind chatSessionKey to the fresh key.
+  const targetedLaneId = options.laneId ?? null;
+  const laneExisting = options.createNew || !targetedLaneId
+    ? null
+    : currentTabs.find((tab) => (
+        tab.kind === 'chat'
+        && tab.laneId === targetedLaneId
+        && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+      ));
   const orphanLabelExisting = options.createNew || !options.targetSessionKey
     ? null
     : currentTabs.find((tab) => isOrphanSessionLabelMatch(tab, options, resolvedRuntime));
@@ -157,6 +171,7 @@ export function computeCliChatSession(
     ?? (options.createNew
       ? null
       : packetExisting
+        ?? laneExisting
         ?? (options.targetSessionKey
           ? targetedExisting ?? orphanLabelExisting ?? null
           : activeExisting
@@ -197,6 +212,7 @@ export function computeCliChatSession(
             label: cleanRuntimeSessionLabel(options.label ?? options.orchestrationPacket?.title) ?? tab.label,
             chatRuntime: resolvedRuntime,
             chatSessionKey: normalizedTargetSessionKey ?? tab.chatSessionKey,
+            laneId: options.laneId ?? tab.laneId ?? null,
             chatModel: options.modelId
               ?? (tab.chatRuntime === resolvedRuntime ? tab.chatModel : fallbackModelForRuntime),
             chatContinueLatest: tab.chatContinueLatest ?? false,
@@ -229,6 +245,7 @@ export function computeCliChatSession(
     tmuxSession: null,
     chatRuntime: resolvedRuntime,
     chatSessionKey: normalizedTargetSessionKey ?? undefined,
+    laneId: options.laneId ?? null,
     chatModel: options.modelId ?? (
       // claude-code runtime guard — see comment above.
       resolvedRuntime === 'claude-code' ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)

@@ -355,6 +355,7 @@ export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
       tmuxSession: tab.tmuxSession ?? undefined,
       chatRuntime: tab.chatRuntime,
       chatSessionKey: tab.chatSessionKey,
+      laneId: tab.laneId ?? undefined,
       claudeSessionId: tab.claudeSessionId,
       chatModel: tab.chatModel,
       chatContinueLatest: tab.chatContinueLatest,

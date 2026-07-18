@@ -350,6 +350,7 @@ export async function computeRestoredTabs(
         tmuxSession: null,
         chatRuntime: effectiveRuntime,
         chatSessionKey: restoredChatSessionKey,
+        laneId: savedTab.laneId ?? null,
         claudeSessionId: restoredClaudeSessionId || undefined,
         chatModel: effectiveModel,
         chatContinueLatest: restoredChatSessionKey ? savedTab.chatContinueLatest : false,
