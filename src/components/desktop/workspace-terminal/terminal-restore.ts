@@ -34,6 +34,33 @@ export interface ApplyPersistedStateResult {
 
 export type RestoreValidationMode = 'optimistic' | 'validated';
 
+const OWNED_SESSION_PREFIXES = [
+  'codex-owned:',
+  'gemini-owned:',
+  'opencode-owned:',
+  'cursor-owned:',
+  'grok-owned:',
+] as const;
+
+function unwrapRuntimeSessionKey(rawSessionKey: string): string {
+  for (const stalePrefix of ['codex:', 'claude-code:']) {
+    if (!rawSessionKey.startsWith(stalePrefix)) continue;
+    const inner = rawSessionKey.slice(stalePrefix.length);
+    if (
+      OWNED_SESSION_PREFIXES.some((prefix) => inner.startsWith(prefix))
+      || inner.startsWith('codex-discovered:')
+      || inner.startsWith('codex-live:')
+    ) {
+      return inner;
+    }
+  }
+  return rawSessionKey;
+}
+
+function isOwnedSessionKey(sessionKey: string): boolean {
+  return OWNED_SESSION_PREFIXES.some((prefix) => sessionKey.startsWith(prefix));
+}
+
 /**
  * The `thoughts-*` ids the operator has archived. Bounded + fail-open: a slow
  * or failed fetch returns `null`, which disables the archived-tab filter so we
@@ -73,6 +100,30 @@ async function fetchActiveLanePacketIds(): Promise<Set<string> | null> {
       .map((lane) => (lane && typeof lane === 'object' ? (lane as { packetId?: unknown }).packetId : null))
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
     return new Set(ids);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Active/archive state for persisted owned-runtime sessions. Bounded and
+ * fail-open like the other restore probes: only a successful positive state
+ * may remove a tab, while timeout, transport, and malformed responses return
+ * `null` and preserve the historical restore behavior.
+ */
+async function fetchOwnedSessionStates(sessionKeys: string[]): Promise<Record<string, string> | null> {
+  try {
+    const query = encodeURIComponent(sessionKeys.join(','));
+    const result = await Promise.race([
+      fetch(`/api/runtime/archive?sessionKeys=${query}`, { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null)),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+    ]);
+    const states = (result as { states?: unknown } | null)?.states;
+    if (!states || typeof states !== 'object' || Array.isArray(states)) return null;
+    const entries = Object.entries(states);
+    if (entries.some(([, state]) => typeof state !== 'string')) return null;
+    return Object.fromEntries(entries) as Record<string, string>;
   } catch {
     return null;
   }
@@ -128,6 +179,15 @@ export async function computeRestoredTabs(
     ? fetchActiveLanePacketIds()
     : Promise.resolve<Set<string> | null>(null);
 
+  const ownedSessionKeys = Array.from(new Set(saved.tabs.flatMap((tab) => {
+    if ((tab.kind ?? 'terminal') !== 'chat' || tab.orchestrationPacket) return [];
+    const effectiveSessionKey = unwrapRuntimeSessionKey(tab.chatSessionKey?.trim() ?? '');
+    return isOwnedSessionKey(effectiveSessionKey) ? [effectiveSessionKey] : [];
+  }))).slice(0, 100);
+  const ownedSessionStatesPromise = validationMode === 'validated' && ownedSessionKeys.length > 0
+    ? fetchOwnedSessionStates(ownedSessionKeys)
+    : Promise.resolve<Record<string, string> | null>(null);
+
   let alive: Set<string>;
   let liveRuntimeSessionKeys: Set<PersistedRuntimeSessionKey>;
 
@@ -159,6 +219,8 @@ export async function computeRestoredTabs(
   const archivedOrchestratorThreadIds = await archivedThreadIdsPromise;
   if (cancelled?.()) return null;
   const activeLanePacketIds = await activeLanePacketIdsPromise;
+  if (cancelled?.()) return null;
+  const ownedSessionStates = await ownedSessionStatesPromise;
   if (cancelled?.()) return null;
 
   const currentPreferredRepo = options.preferredRepo;
@@ -268,23 +330,7 @@ export async function computeRestoredTabs(
       // visible, then reclassify based on the unwrapped key.
       const rawSessionKey = savedTab.chatSessionKey?.trim() ?? '';
       const rawClaudeSessionId = savedTab.claudeSessionId?.trim() ?? '';
-      let unwrappedSessionKey = rawSessionKey;
-      for (const stalePrefix of ['codex:', 'claude-code:']) {
-        if (unwrappedSessionKey.startsWith(stalePrefix)) {
-          const inner = unwrappedSessionKey.slice(stalePrefix.length);
-          if (
-            inner.startsWith('gemini-owned:')
-            || inner.startsWith('opencode-owned:')
-            || inner.startsWith('cursor-owned:')
-            || inner.startsWith('grok-owned:')
-            || inner.startsWith('codex-owned:')
-            || inner.startsWith('codex-discovered:')
-            || inner.startsWith('codex-live:')
-          ) {
-            unwrappedSessionKey = inner;
-          }
-        }
-      }
+      const unwrappedSessionKey = unwrapRuntimeSessionKey(rawSessionKey);
       let effectiveRuntime = savedTab.chatRuntime;
       let effectiveModel = savedTab.chatModel;
       const effectiveSessionKey = unwrappedSessionKey;
@@ -311,6 +357,8 @@ export async function computeRestoredTabs(
       } else if (unwrappedSessionKey.startsWith('claude-code:') && effectiveRuntime !== 'claude-code') {
         effectiveRuntime = 'claude-code';
       }
+      const ownedSessionState = ownedSessionStates?.[effectiveSessionKey];
+      if (!badgePacketId && (ownedSessionState === 'archived' || ownedSessionState === 'missing')) continue;
       // Persist the unwrapped key so downstream endpoints route correctly.
       const savedChatSessionKey = effectiveSessionKey
         || savedTab.chatSessionKey

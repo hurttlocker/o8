@@ -668,6 +668,10 @@ export async function archiveOwnedCodexSession(surfaceId: string) {
   return codexStore.archiveSession(surfaceId);
 }
 
+export async function ownedCodexSessionState(surfaceId: string) {
+  return codexStore.sessionState(surfaceId);
+}
+
 export async function sweepOrphanedCodexSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
   return codexStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
 }

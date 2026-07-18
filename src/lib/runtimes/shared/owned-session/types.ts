@@ -22,6 +22,8 @@ export type OwnedRunOutcome = 'running' | 'finished' | 'interrupted' | 'failed';
 
 export type OwnedReviewDisposition = 'watching' | 'resolved';
 
+export type OwnedSessionState = 'active' | 'archived' | 'missing';
+
 export interface OwnedChildExitOutcome {
   code: number | null;
   signal: NodeJS.Signals | null;
@@ -285,6 +287,7 @@ export interface OwnedSessionStore {
   }>;
   getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket>;
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
+  sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
   /** #1292 — archive owned-session dirs not bound to an active lane (orphans) so
    *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions. */

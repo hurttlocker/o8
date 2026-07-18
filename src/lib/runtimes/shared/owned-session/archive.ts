@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir, readdir, rename } from 'node:fs/promises';
 
 import { metadataPath, nowIso, pathExists, readJsonFile, writeJsonFile } from './helpers';
-import type { OwnedSessionRecord } from './types';
+import type { OwnedSessionRecord, OwnedSessionState } from './types';
 
 export interface ArchiveOwnedSessionResult {
   archived: boolean;
@@ -32,6 +32,25 @@ export async function archivedSessionPathForSurfaceId(
   if (!sessionDirName) return null;
   const archivePath = path.join(archiveRootForOwnedSessionRoot(root), sessionDirName);
   return (await pathExists(archivePath)) ? archivePath : null;
+}
+
+export async function readOwnedSessionState(
+  root: string,
+  surfaceId: string,
+  surfacePrefix: string,
+): Promise<OwnedSessionState> {
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const sessionDir = path.join(root, entry.name);
+    const filePath = metadataPath(sessionDir);
+    if (!(await pathExists(filePath))) continue;
+    const session = await readJsonFile<OwnedSessionRecord>(filePath);
+    if (session.surfaceId === surfaceId) return 'active';
+  }
+  const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
+  if (archivePath && await pathExists(metadataPath(archivePath))) return 'archived';
+  return 'missing';
 }
 
 export interface RestoreOwnedSessionResult {

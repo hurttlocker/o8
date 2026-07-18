@@ -239,4 +239,5 @@ export const getOwnedCursorTelemetrySources = cursorStore.getTelemetrySources.bi
 export const setOwnedCursorReviewDisposition = cursorStore.setReviewDisposition.bind(cursorStore);
 export const invalidateOwnedCursorFleetCache = cursorStore.invalidateFleetCache.bind(cursorStore);
 export const archiveOwnedCursorSession = cursorStore.archiveSession.bind(cursorStore);
+export const ownedCursorSessionState = cursorStore.sessionState.bind(cursorStore);
 export const sweepOrphanedCursorSessions = cursorStore.sweepOrphanedSessions.bind(cursorStore);
