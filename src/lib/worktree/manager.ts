@@ -697,6 +697,32 @@ export class WorktreeManager {
         cwd: worktreePath,
         timeout: 5000,
       });
+      // #1469 — when LOCAL base is strictly ahead of origin (unpushed merge
+      // commits on main), rebasing onto origin linearizes the unpushed merges
+      // and conflicts deterministically — every dispatch failed until the
+      // operator happened to push. The local ref is the truth the next merge
+      // will land on; rebase onto it when it's ahead. (Diverged histories
+      // keep origin — a conflict there is real and must surface.)
+      try {
+        const { stdout: aheadRaw } = await execFileAsync(
+          'git',
+          ['rev-list', '--count', `${rebaseTarget}..${baseBranch}`],
+          { cwd: worktreePath, timeout: 5000 },
+        );
+        const { stdout: behindRaw } = await execFileAsync(
+          'git',
+          ['rev-list', '--count', `${baseBranch}..${rebaseTarget}`],
+          { cwd: worktreePath, timeout: 5000 },
+        );
+        const ahead = Number.parseInt(aheadRaw.trim(), 10) || 0;
+        const behind = Number.parseInt(behindRaw.trim(), 10) || 0;
+        if (ahead > 0 && behind === 0) {
+          console.log(
+            `[worktree-rebase] local ${baseBranch} is ${ahead} commit(s) ahead of ${rebaseTarget} (not behind) — rebasing onto local ${baseBranch}.`,
+          );
+          rebaseTarget = baseBranch;
+        }
+      } catch { /* comparison failed — keep origin target */ }
     } catch {
       rebaseTarget = baseBranch;
     }
