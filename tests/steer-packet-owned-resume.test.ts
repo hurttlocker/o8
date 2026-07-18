@@ -112,7 +112,9 @@ describe('steerPacket owned Codex resume fallback', () => {
     })).resolves.toMatchObject({
       packetId: 'pkt-owned-resume',
       laneId: lane.id,
-      note: 'Steered packet via warm session.',
+      // #1524 — the fallback resume's own note passes through (warm resume
+      // here; an archived session would read 'Cold resume: …').
+      note: expect.stringContaining('via resume'),
     });
 
     expect(performRuntimeActionMock).toHaveBeenCalledWith({
