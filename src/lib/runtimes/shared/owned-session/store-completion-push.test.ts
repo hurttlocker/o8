@@ -154,6 +154,27 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
     expect(JSON.parse(received[0].body)).toMatchObject({ surfaceId: launched.surfaceId });
   });
 
+  it('#1502 — telemetry sources survive archiving (headless worker transcripts)', { timeout: 20_000 }, async () => {
+    const child = Object.assign(new EventEmitter(), { pid: DEAD_PID, unref: vi.fn() });
+    spawnMock.mockReturnValue(child);
+
+    const { createOwnedSessionStore } = await import('./store');
+    const store = createOwnedSessionStore(pushAdapter());
+    const launched = await store.launch({ cwd: repoPath, prompt: 'headless work' });
+    expect(launched.ok).toBe(true);
+    const surfaceId = launched.surfaceId!;
+
+    // The #1502 shape: the worker finishes and the session is archived before
+    // anything reads the packet transcript.
+    await store.getRuntimeTail(surfaceId);
+    const archived = await store.archiveSession(surfaceId);
+    expect(archived.archived).toBe(true);
+
+    const sources = await store.getTelemetrySources(surfaceId);
+    expect(sources).not.toBeNull();
+    expect(sources?.stdoutPaths.length).toBeGreaterThan(0);
+  });
+
   it('drives the supervisor completion chain once, idempotently', async () => {
     const {
       ingestAgentCompletionSignal,

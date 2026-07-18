@@ -1088,12 +1088,22 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   // ── Telemetry / tail / review ──────────────────────────────────────────────
 
   async function getTelemetrySources(surfaceId: string) {
-    const session = await findSession(surfaceId);
+    // #1502 — archived fallback, same rule as getRuntimeTail (#1293). Headless
+    // workers complete-and-archive fast, so by the time the packet transcript
+    // is read the session is usually archived; without this fallback every
+    // headless worker's transcript (and lastTranscriptAt) read as empty. The
+    // run-log JSONL survives archiving — read it where it lives.
+    const activeSession = await findSession(surfaceId);
+    const session = activeSession ?? await findArchivedSession(surfaceId);
     if (!session) {
       return null;
     }
 
-    await refreshSession(session);
+    // refreshSession reconciles run liveness and MUTATES metadata — it must
+    // never run against an archived dir (see getRuntimeTail's rule).
+    if (activeSession) {
+      await refreshSession(session);
+    }
 
     return {
       threadId: session.threadId,
