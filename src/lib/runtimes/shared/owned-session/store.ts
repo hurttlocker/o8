@@ -83,7 +83,14 @@ import type {
 } from './types';
 import { stageMissingCliRun } from './missing-cli';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
+import {
+  prepareWorkerSandbox,
+  workerSandboxEnabled,
+  SandboxUnavailableError,
+} from './sandbox';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
+import { resolvePortInfo } from '@/lib/panel/api-port';
+import { writeFile as writeFileAsync } from 'node:fs/promises';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
@@ -720,6 +727,62 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       }
     }
 
+    // ── Tier-2 sandbox (#1325) ─────────────────────────────────────────────
+    // When enabled, wrap the worker child with `sandbox-exec` + a generated
+    // seatbelt profile so a malicious worker can't read the operator's on-disk
+    // secrets (~/.o8, ~/.tauri, the webview socket). Off by default; FAIL-CLOSED
+    // when on — a profile that can't be built refuses to spawn rather than
+    // silently running the worker unsandboxed. Disabled mode leaves
+    // spawnBinary/spawnArgs === binary/args (byte-identical to today).
+    let spawnBinary = binary;
+    let spawnArgs = args;
+    const sandboxEnvExtra: Record<string, string> = {};
+    if (workerSandboxEnabled()) {
+      try {
+        const prepared = await prepareWorkerSandbox({
+          runId,
+          profileDir: path.join(session.sessionDir, RUNS_DIR),
+          cwd: session.repoPath,
+          repoPath: session.repoPath,
+          binary,
+          args,
+        });
+        spawnBinary = prepared.binary;
+        spawnArgs = prepared.args;
+        // The sandbox denies reads of ~/.o8, so the worker's `o8` CLI can't
+        // resolve the API port from ~/.o8/api-port. Hand it the ports via env
+        // (resolved here in the trusted parent) so the RF-1 HTTP path survives.
+        const { apiPort, wsPort } = resolvePortInfo();
+        sandboxEnvExtra.O8_API_PORT = String(apiPort);
+        sandboxEnvExtra.O8_WS_PORT = String(wsPort);
+      } catch (error) {
+        const message = error instanceof SandboxUnavailableError
+          ? `${humanLabel} dispatch refused: worker sandbox is enabled (O8_WORKER_SANDBOX) but could not be provided — ${error.message}`
+          : `${humanLabel} dispatch refused: worker sandbox preparation failed — ${(error as Error).message}`;
+        console.error(`[owned-session] ${runtimeId} sandbox prep failed (fail-closed):`, error);
+        await writeFileAsync(stderrPath, `${message}\n`, 'utf8').catch(() => {});
+        const failedRun: OwnedRunRecord = {
+          id: runId,
+          mode,
+          prompt,
+          startedAt: nowIso(),
+          finishedAt: nowIso(),
+          pid: 0,
+          stdoutPath,
+          stderrPath,
+          outcome: 'failed',
+        };
+        session.latestPrompt = prompt;
+        session.latestSummary = message;
+        session.reviewDisposition = 'watching';
+        session.reviewDispositionUpdatedAt = nowIso();
+        session.activeRun = undefined;
+        session.recentRuns = [failedRun, ...session.recentRuns].slice(0, 16);
+        await saveSession(session);
+        return failedRun;
+      }
+    }
+
     let pid = 0;
     let terminalSessionName: string | undefined;
     let detachMode: 'bridge' | 'detached' = 'bridge';
@@ -728,7 +791,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
-    const cliCmd = [binary, ...args].map(quoteShellArg).join(' ');
+    const cliCmd = [spawnBinary, ...spawnArgs].map(quoteShellArg).join(' ');
     const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
 
     // Adapter-supplied env augmentation. Returned keys override anything
@@ -746,6 +809,8 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       // worker resolving its own approval — the CRIT-1 moat. The operator webview
       // + orchestrator MCP never carry it. (SECURITY_AUDIT_2026-07-02 §CRIT-1.)
       O8_WORKER_TOKEN: getOrCreateLocalWorkerToken(),
+      // Port hints for the sandboxed worker (empty unless the sandbox is on).
+      ...sandboxEnvExtra,
     };
 
     await ensureDispatchBackendReady(runtimeId, mode);
@@ -781,13 +846,13 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         // crashed mid-scoring-run (2026-07-04). Workers are batch compute; the
         // operator's UI is interactive and always wins the scheduler.
         const child = process.platform === 'win32'
-          ? spawn(binary, args, {
+          ? spawn(spawnBinary, spawnArgs, {
               cwd: session.repoPath,
               detached: true,
               stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
               env: { ...process.env, ...spawnEnv },
             })
-          : spawn('nice', ['-n', '10', binary, ...args], {
+          : spawn('nice', ['-n', '10', spawnBinary, ...spawnArgs], {
               cwd: session.repoPath,
               detached: true,
               stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
