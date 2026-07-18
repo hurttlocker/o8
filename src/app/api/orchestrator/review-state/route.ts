@@ -15,7 +15,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
-import { findLatestLaneByPacket, findLaneBySession } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, findLaneBySession, getLaneEvents } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import {
@@ -76,14 +76,43 @@ function toDurableOrchestratorReview(packetId: string, lane: Lane | null): Deriv
   };
 }
 
-function toMergeGate(preview: MergePreviewResult | null): DeriveReviewStateMergeGate | null {
+// #1476 lie 3b — the gate is recomputed on every poll, so its timestamp must
+// be "when could this last have changed" (the lane's latest event), never
+// now(). Stamping now() made stateChangedAt track poll cadence (~60s bumps
+// all session) instead of actual transitions.
+function toMergeGate(
+  preview: MergePreviewResult | null,
+  lastChangedAt: string | null,
+): DeriveReviewStateMergeGate | null {
   if (!preview) return null;
   return {
     verdict: preview.wouldMerge ? 'passing' : 'failing',
-    ts: new Date().toISOString(),
+    ts: lastChangedAt ?? new Date(0).toISOString(),
     checks: preview.checks.map((check) => check.name),
     diffBase: preview.diffBase,
   };
+}
+
+// #1476 lie 3a — final verdict fallback: the append-only review_recorded lane
+// event. Mission state is an in-memory singleton (evicted by the next
+// create_mission) and the approvals lookup is score-based (misses when the
+// lane's sessionKey detaches mid-merge); lane events are keyed by lane id
+// alone and never mutated, so a recorded verdict is always recoverable here.
+function toLaneEventOrchestratorReview(lane: Lane | null): DeriveReviewStateOrchestratorReview | null {
+  if (!lane) return null;
+  const events = getLaneEvents(lane.id);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.verb !== 'review_recorded') continue;
+    const payload = (event.payload ?? {}) as { approved?: unknown; summary?: unknown };
+    if (typeof payload.approved !== 'boolean') continue;
+    return {
+      verdict: payload.approved ? 'approved' : 'rejected',
+      ts: event.timestamp,
+      summary: typeof payload.summary === 'string' ? payload.summary : '',
+    };
+  }
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -139,8 +168,9 @@ export async function GET(request: NextRequest) {
     }
 
     const orchestratorReview = toOrchestratorReview(packet.review ?? null)
-      ?? toDurableOrchestratorReview(packetId, lane);
-    const mergeGate = toMergeGate(mergePreview);
+      ?? toDurableOrchestratorReview(packetId, lane)
+      ?? toLaneEventOrchestratorReview(lane);
+    const mergeGate = toMergeGate(mergePreview, lane?.lastEventAt ?? packet.lastEventAt ?? null);
 
     const { state, stateChangedAt } = derivePacketReviewState({
       packet,
