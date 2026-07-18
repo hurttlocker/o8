@@ -8,6 +8,7 @@ import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
+import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -189,6 +190,13 @@ export async function POST(request: NextRequest) {
     });
     return operatorSuccess(result, 201);
   } catch (error) {
+    if (error instanceof ControlPlaneLockTimeoutError) {
+      return operatorError(
+        'mission_store_busy',
+        'Mission store is busy dispatching — retry in a moment.',
+        503,
+      );
+    }
     const message = error instanceof Error ? error.message : 'Unable to create mission.';
     return operatorError('create_mission_failed', message, 500, error);
   }

@@ -37,6 +37,17 @@ const LOCK_STALE_MS = 10_000;
 const LOCK_RETRY_MS = 25;
 const LOCK_WAIT_BUDGET_MS = 8_000;
 
+export class ControlPlaneLockTimeoutError extends Error {
+  constructor(public readonly waitTimeoutMs: number) {
+    super(`Timed out after ${waitTimeoutMs}ms waiting for the orchestrator control-plane lock.`);
+    this.name = 'ControlPlaneLockTimeoutError';
+  }
+}
+
+interface ControlPlaneLockOptions {
+  waitTimeoutMs?: number;
+}
+
 function lockIsStale(): boolean {
   try {
     const meta = JSON.parse(readFileSync(LOCK_META, 'utf8')) as { at?: number };
@@ -82,14 +93,37 @@ function releaseFsLock(): void {
   }
 }
 
-async function acquireLock(): Promise<void> {
+async function acquireLock(options: ControlPlaneLockOptions = {}): Promise<void> {
   const waitForPrevious = lockTail;
   let release!: () => void;
   lockTail = new Promise<void>((resolve) => {
     release = resolve;
   });
   lockReleases.push(release);
-  await waitForPrevious;
+  const waitTimeoutMs = options.waitTimeoutMs;
+  if (waitTimeoutMs !== undefined) {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const outcome = await Promise.race([
+      waitForPrevious.then(() => 'acquired' as const),
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), waitTimeoutMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (outcome === 'timeout') {
+      // Keep the FIFO chain healthy after this waiter leaves. Once its
+      // predecessor releases, remove this abandoned queue slot and resolve it
+      // so later waiters can continue without acquiring or releasing the FS lock.
+      void waitForPrevious.then(() => {
+        const index = lockReleases.indexOf(release);
+        if (index >= 0) lockReleases.splice(index, 1);
+        release();
+      });
+      throw new ControlPlaneLockTimeoutError(waitTimeoutMs);
+    }
+  } else {
+    await waitForPrevious;
+  }
   await acquireFsLock();
 }
 
@@ -217,8 +251,11 @@ export async function syncOrchestratorControlPlaneState(state?: OrchestratorMiss
  * per-packet results) and do their own writeOrchestratorControlPlaneState —
  * a reconcile against not-yet-caught-up lane snapshots would rewrite them.
  */
-export async function withControlPlaneLock<T>(fn: () => T | Promise<T>): Promise<T> {
-  await acquireLock();
+export async function withControlPlaneLock<T>(
+  fn: () => T | Promise<T>,
+  options: ControlPlaneLockOptions = {},
+): Promise<T> {
+  await acquireLock(options);
   try {
     return await fn();
   } finally {
@@ -228,8 +265,9 @@ export async function withControlPlaneLock<T>(fn: () => T | Promise<T>): Promise
 
 export async function withLockedState<T>(
   fn: (state: OrchestratorMissionState) => T | Promise<T>,
+  options: ControlPlaneLockOptions = {},
 ): Promise<{ result: T; state: OrchestratorMissionState }> {
-  await acquireLock();
+  await acquireLock(options);
   try {
     const current = readOrchestratorControlPlaneState();
     const result = await fn(current);
