@@ -4,6 +4,9 @@ export interface LaneArchiveSummary {
   source: 'zombie_reaper' | 'user' | 'orchestrator' | 'system';
   message: string;
   preservedBranch?: string | null;
+  /** Durable lane outcome, when stamped — lets banners label truthfully
+   *  (Merged / Discarded / No changes) instead of a generic Archived. */
+  outcome?: 'merged' | 'discarded' | 'no_changes' | null;
 }
 
 function stringField(value: unknown): string | null {
@@ -19,10 +22,24 @@ function latestEvent(events: LaneEvent[], predicate: (event: LaneEvent) => boole
 }
 
 export function summarizeLaneArchive(
-  lane: Pick<Lane, 'status'>,
+  lane: Pick<Lane, 'status' | 'outcome' | 'outcomeNote'>,
   events: LaneEvent[],
 ): LaneArchiveSummary | null {
   if (lane.status !== 'archived' && lane.status !== 'completed') return null;
+
+  // The durable outcome outranks event archaeology — a lane that MERGED and
+  // was then archived by post-merge cleanup must never read "archived
+  // without merging" (live-hit 2026-07-18: the merged Seasonal-drink tab's
+  // banner lied). Same truth for deliberate discards and no-commit finishes.
+  if (lane.outcome === 'merged') {
+    return { source: 'system', outcome: 'merged', message: lane.outcomeNote ?? 'Merged into main and archived.' };
+  }
+  if (lane.outcome === 'discarded') {
+    return { source: 'user', outcome: 'discarded', message: lane.outcomeNote ?? 'Discarded by the operator.' };
+  }
+  if (lane.outcome === 'no_changes') {
+    return { source: 'system', outcome: 'no_changes', message: lane.outcomeNote ?? 'Agent finished without making changes.' };
+  }
 
   const zombie = latestEvent(events, (event) => event.verb === 'zombie_reap');
   if (zombie) {
