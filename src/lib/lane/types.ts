@@ -248,6 +248,11 @@ export type LaneEventVerb =
   // base snapshot). Payload: { packetId, baseBranch, note }
   | 'worktree_refreshed'
   | 'worktree_refresh_failed'
+  // Orchestrator review verdict, append-only (#1476 lie 3). Lane events are
+  // never rescored or evicted, so review-state can always recover the verdict
+  // even after mission-state resets or approval-context drift.
+  // Payload: { approved, summary, reviewedHeadSha, auditApprovalId }
+  | 'review_recorded'
   // Agent drove o8's embedded browser via `o8 browser` / o8_browser_* (#1232 phase 1).
   // Payload: { verb, selector?, surface?, ok, url? }
   | 'browser_acted'

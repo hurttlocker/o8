@@ -331,13 +331,19 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
       : approvalItems.length;
     const recentActivity = (data.recentActivity ?? []) as Array<Record<string, unknown>>;
 
-    const runningCount = agents.filter((a) => a.status === 'running' || a.status === 'working').length;
-    const lastEvent = recentActivity.length > 0
-      ? (recentActivity[0].target as string) || (recentActivity[0].action as string) || 'activity'
-      : 'none';
+    // #1476 lie 1 — the summary must be derived from the SAME agents array
+    // this payload ships. Trusting the API's summary string let the two
+    // answers drift ("0 agents running" beside agents[]={failed}); one
+    // derivation, one truth.
+    const { summarizeOperatorStatus } = await import('@/lib/orchestrator/operator-status-model');
+    const summary = summarizeOperatorStatus({
+      agents: agents as unknown as Parameters<typeof summarizeOperatorStatus>[0]['agents'],
+      approvalCount,
+      recentActivity,
+    });
 
     return jsonResult({
-      summary: data.summary || `${runningCount} agents running. ${approvalCount} approvals pending. Last: ${lastEvent}`,
+      summary,
       data: {
         agents,
         approvals: approvalItems,

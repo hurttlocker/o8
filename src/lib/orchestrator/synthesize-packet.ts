@@ -14,6 +14,7 @@
  * flow through audit + read paths.
  */
 import type { Lane, LaneStatus } from '@/lib/lane/types';
+import { packetStatusFromLaneStatus } from '@/lib/orchestrator/packet-state';
 import type {
   OrchestratorPacket,
   OrchestratorPacketStatus,
@@ -21,37 +22,15 @@ import type {
 } from '@/lib/orchestrator/types';
 
 /**
- * Conservative lane.status → packet.status mapping. Lane states that don't
- * have a direct packet equivalent collapse to the closest review-pipeline
- * concept (paused/awaiting_* → blocked; merging → awaiting_review).
+ * #1476 doctrine — ONE canonical lane.status → packet.status mapping. This was
+ * a third private copy (packet-state.ts and derive-review-state each had their
+ * own); the copies disagreed on awaiting_human (this one fell to its
+ * awaiting_review default instead of blocked). Everyone calls
+ * packetStatusFromLaneStatus now; unknown lane statuses collapse to blocked so
+ * they surface for attention rather than masquerading as review-ready.
  */
 function laneStatusToPacketStatus(status: LaneStatus): OrchestratorPacketStatus {
-  switch (status) {
-    case 'idle':
-      return 'idle';
-    case 'launching':
-      return 'launching';
-    case 'running':
-      return 'running';
-    case 'paused':
-      return 'idle';
-    case 'awaiting_input':
-    case 'awaiting_orchestrator':
-      return 'blocked';
-    case 'recovering':
-      return 'recovering';
-    case 'reviewing':
-    case 'merging':
-      return 'awaiting_review';
-    case 'failed':
-      return 'failed';
-    case 'completed':
-      return 'released';
-    case 'archived':
-      return 'archived';
-    default:
-      return 'awaiting_review';
-  }
+  return packetStatusFromLaneStatus(status) ?? 'blocked';
 }
 
 export function synthesizePacketFromLane(packetId: string, lane: Lane): OrchestratorPacket {
