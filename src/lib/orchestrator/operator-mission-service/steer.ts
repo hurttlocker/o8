@@ -82,12 +82,16 @@ async function resumeExitedOwnedCodexSession(surfaceId: string, message: string)
     return null;
   }
 
-  const sources = await getOwnedCodexTelemetrySources(surfaceId);
-  if (!sources?.threadId) {
-    return null;
+  // #1524 — no telemetry pre-gate: it returned null for archived sessions,
+  // silently killing the fallback in exactly the death scenarios steer exists
+  // to recover from. The store's resume now handles every case itself (cold
+  // restore from archive included) and throws a specific reason when it truly
+  // cannot — surface that reason instead of the generic steer failure.
+  try {
+    return await continueOwnedCodexSession(surfaceId, message);
+  } catch (error) {
+    return { ok: false, note: error instanceof Error ? error.message : String(error) };
   }
-
-  return continueOwnedCodexSession(surfaceId, message);
 }
 
 export async function steerPacket({ packetId, message, source }: SteerPacketInput): Promise<SteerPacketResult> {
@@ -114,6 +118,7 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
   });
 
   const result = await performRuntimeAction({ action: 'steer', surfaceId: lane.sessionKey, message, auditSteer: false });
+  let steeredNote = 'Steered packet via warm session.';
   if (!result.ok || result.status === 'unavailable') {
     const canTryOwnedResumeFallback = lane.sessionKey.startsWith('codex-owned:')
       && /cannot accept|not found|surface/i.test(result.note);
@@ -129,6 +134,10 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
       });
       throw new SteerPacketUnavailableError(resumed?.note || result.note || NO_STEERABLE_SESSION);
     }
+    // #1524 — the store's note distinguishes warm resume from cold
+    // (restored-from-archive) resume; pass it through so cost expectations
+    // stay honest for the orchestrator that chose layer 3 over layer 4.
+    steeredNote = resumed.note || 'Steered packet via session resume.';
   } else {
     rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
   }
@@ -150,5 +159,5 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
     throw new SteerPacketUnavailableError(NO_STEERABLE_SESSION);
   }
 
-  return { packetId, laneId: lane.id, note: 'Steered packet via warm session.' };
+  return { packetId, laneId: lane.id, note: steeredNote };
 }

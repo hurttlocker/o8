@@ -34,6 +34,53 @@ export async function archivedSessionPathForSurfaceId(
   return (await pathExists(archivePath)) ? archivePath : null;
 }
 
+export interface RestoreOwnedSessionResult {
+  restored: boolean;
+  sessionPath?: string;
+  note: string;
+}
+
+/**
+ * #1524 — the inverse of archiveOwnedSessionDir, for cold resume. The archive
+ * is a whole-dir rename, so restoring is renaming it back: run-artifact paths
+ * in the metadata were recorded absolute under the ACTIVE dir and were never
+ * rewritten on archive, so they become valid again the moment the dir returns.
+ * Only `sessionDir` (rewritten at archive time) needs restoring.
+ */
+export async function restoreArchivedOwnedSessionDir(
+  root: string,
+  surfaceId: string,
+  surfacePrefix: string,
+): Promise<RestoreOwnedSessionResult> {
+  const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
+  if (!archivePath) {
+    return { restored: false, note: 'No archived session directory was found.' };
+  }
+  const activePath = path.join(root, path.basename(archivePath));
+  if (await pathExists(activePath)) {
+    return { restored: false, note: `Active session path already exists: ${activePath}` };
+  }
+  await mkdir(root, { recursive: true });
+  await rename(archivePath, activePath);
+
+  try {
+    const activeMetadataPath = metadataPath(activePath);
+    const record = await readJsonFile<OwnedSessionRecord>(activeMetadataPath);
+    await writeJsonFile(activeMetadataPath, {
+      ...record,
+      sessionDir: activePath,
+      updatedAt: nowIso(),
+    });
+  } catch (error) {
+    console.warn(
+      `[owned-store] Restored ${surfaceId} from archive but failed to update metadata:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  return { restored: true, sessionPath: activePath, note: `Session restored from archive at ${activePath}.` };
+}
+
 export async function archiveOwnedSessionDir(
   root: string,
   session: OwnedSessionRecord,

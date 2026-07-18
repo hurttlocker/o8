@@ -31,6 +31,7 @@ import {
 import {
   archiveOwnedSessionDir,
   archivedSessionPathForSurfaceId,
+  restoreArchivedOwnedSessionDir,
 } from './archive';
 import type {
   AgentSummary,
@@ -853,7 +854,30 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   }
 
   async function resumeInner(surfaceId: string, prompt: string) {
-    const session = await findSession(surfaceId);
+    let session = await findSession(surfaceId);
+    let coldRestored = false;
+
+    // #1524 — cold resume. The session dir being archived (reset cleanup,
+    // silent-exit sweep, restart) used to make resume throw "session was not
+    // found" — killing steer (escalation layer 3) in exactly the scenarios
+    // that produce escalations. The runtime's own rollout lives outside our
+    // tree (e.g. ~/.codex/sessions), so when the archived metadata still holds
+    // a threadId the session is fully resumable: restore the dir and resume
+    // the persisted thread, clearly marked cold so cost expectations stay
+    // honest.
+    if (!session) {
+      const archived = await findArchivedSession(surfaceId);
+      if (archived?.threadId) {
+        const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);
+        if (restore.restored) {
+          session = await findSession(surfaceId);
+          coldRestored = Boolean(session);
+          if (coldRestored) invalidateFleetCache();
+        } else {
+          console.warn(`[owned-store] Cold-resume restore failed for ${surfaceId}: ${restore.note}`);
+        }
+      }
+    }
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
@@ -872,7 +896,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       ok: run.outcome !== 'failed',
       note: run.outcome === 'failed'
         ? session.latestSummary
-        : `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
+        : coldRestored
+          ? `Cold resume: the archived IDE-owned ${adapter.squadShortName} session was restored and its saved thread resumed (fresh process, no warm context beyond the thread).`
+          : `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
     };
   }
 
