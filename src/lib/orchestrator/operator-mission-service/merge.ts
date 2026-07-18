@@ -549,29 +549,40 @@ async function dispatchPacketMerge(
     return releasedAfterDispatch;
   }
 
+  // Adversarial F3 — the release mutation lands under the lock against a
+  // FRESH read; the old code mutated the pre-release snapshot and whole-state
+  // wrote it after the (async) dispatch tick, clobbering every concurrent
+  // locked write on the highest-traffic path in the app.
+  const { withLockedState, readOrchestratorControlPlaneState } = await loadControlPlane();
   if (result.ok) {
-    for (const packetState of synced.packets) {
-      if (packetState.id === input.packetId) {
-        packetState.status = 'released';
-        packetState.queueState = 'held';
-        packetState.releaseState = 'released';
-        packetState.releaseStatePayload = {
-          ...(packetState.releaseStatePayload ?? {}),
-          mergeCommit: result.mergeSha ?? null,
-          releasedAt: new Date().toISOString(),
-          source: 'approve_and_merge',
-        };
-        packetState.blockedReason = null;
-        if (packetState.lane) {
-          packetState.lane.lastEventLabel = 'merged';
-        }
-        break;
+    await withLockedState((fresh) => {
+      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
+      if (!packetState) return;
+      packetState.status = 'released';
+      packetState.queueState = 'held';
+      packetState.releaseState = 'released';
+      packetState.releaseStatePayload = {
+        ...(packetState.releaseStatePayload ?? {}),
+        mergeCommit: result.mergeSha ?? null,
+        releasedAt: new Date().toISOString(),
+        source: 'approve_and_merge',
+      };
+      packetState.blockedReason = null;
+      if (packetState.lane) {
+        packetState.lane.lastEventLabel = 'merged';
       }
-    }
+    });
   }
 
-  const afterDispatch = await runDispatchTick(synced);
-  writeOrchestratorControlPlaneState(afterDispatch);
+  // The dispatch tick stays OUTSIDE the lock (it clones worktrees and spawns
+  // sessions); its outcome is merged per changed packet under the lock so a
+  // write that landed mid-tick survives.
+  const tickBase = readOrchestratorControlPlaneState();
+  const afterDispatch = await runDispatchTick(tickBase);
+  const { mergeDispatchTickOutcome } = await loadDispatch();
+  await withLockedState((fresh) => {
+    mergeDispatchTickOutcome(fresh, tickBase, afterDispatch);
+  });
   if (result.ok) autoResolveMergedPacketVerificationIncidents({ packetId: packet.id, laneId: lane.id, event: 'approve_and_merge' });
 
   // #1492 — auto buy-in doc. Fire-and-forget so it NEVER blocks or fails a
