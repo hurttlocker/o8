@@ -928,8 +928,19 @@ export function useWorkspaceTerminalController(
     const result = computeCliChatSession(options, tabsRef.current, activeTabId);
     tabsRef.current = result.tabs;
     setTabs(result.tabs);
-    setActiveTabIdFromUser(result.activeTabId);
-    if (result.needsPersist) persistTabsNow(result.tabs, result.activeTabId);
+    if (options.background && activeTabId) {
+      // Agent-originated launch (Symon / supervisor auto-open): the tab is
+      // created and lands in the tab rail + right panel like any dispatched
+      // agent, but the operator's active surface is NOT hijacked — focus
+      // stays where it is (Q ruling 2026-07-17). Persist keeps the current
+      // active tab. (With no active tab at all — empty workspace — focusing
+      // the new tab is correct, so background only applies when the operator
+      // is actually somewhere.)
+      if (result.needsPersist) persistTabsNow(result.tabs, activeTabId);
+    } else {
+      setActiveTabIdFromUser(result.activeTabId);
+      if (result.needsPersist) persistTabsNow(result.tabs, result.activeTabId);
+    }
     return result.activeTabId;
   }, [activeTabId, persistTabsNow, setActiveTabIdFromUser]);
 

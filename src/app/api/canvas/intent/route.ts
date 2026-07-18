@@ -80,6 +80,39 @@ export async function POST(request: NextRequest) {
     let navigated = false;
 
     if (!probe.ready && ensure) {
+      // Spawn without hijack (Q ruling 2026-07-17): when the operator is NOT
+      // on the canvas, 'spawn-agents' must not yank the webview there. The
+      // workers spawn through the same governed seam the canvas rail uses
+      // (/api/orchestrator/spawn-prompt) and surface quietly in the IDE agent
+      // rail (supervisor launch → background tab); the canvas blooms the
+      // cards whenever the operator opens it. Needs an explicit repo in args
+      // — without one only the canvas page knows its active repo, so the
+      // legacy ensure-navigation below still applies.
+      if (verb === 'spawn-agents' && probe.route && probe.route !== CANVAS_ROUTE) {
+        const repoPath = typeof args.repo === 'string' ? args.repo.trim() : '';
+        const task = typeof args.task === 'string' ? args.task.trim() : '';
+        if (repoPath && task) {
+          const { POST: spawnPrompt } = await import('@/app/api/orchestrator/spawn-prompt/route');
+          const forwarded = new NextRequest(new Request('http://127.0.0.1/api/orchestrator/spawn-prompt', {
+            method: 'POST',
+            headers: request.headers,
+            body: JSON.stringify({
+              repoPath,
+              task,
+              count: typeof args.count === 'number' ? args.count : 1,
+              ...(origin === 'symon' ? { origin } : {}),
+            }),
+          }));
+          const res = await spawnPrompt(forwarded);
+          const data = await res.json().catch(() => null) as { ok?: boolean } | null;
+          return NextResponse.json({
+            ok: res.ok && data?.ok !== false,
+            verb,
+            note: 'spawned in the IDE — operator was not on the canvas, so no navigation; workers appear in the agent rail (and on the canvas when opened)',
+            ...(data && typeof data === 'object' ? { data } : {}),
+          });
+        }
+      }
       if (probe.route && probe.route !== CANVAS_ROUTE) {
         await new Promise((resolve) => setTimeout(resolve, NAV_CONFIRM_MS));
         const confirm = await probeDispatch(client, verb, args, origin);
