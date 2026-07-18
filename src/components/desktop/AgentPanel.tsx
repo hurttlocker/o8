@@ -21,6 +21,7 @@ import { Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } 
 import { MenuScale } from 'iconoir-react';
 import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
+import { deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
 
 // ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
 // MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
@@ -148,22 +149,16 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const focusActive = leftPanelFocus.active;
   const [projectsMenuOpen, setProjectsMenuOpen] = useState(false);
   const registeredRepoByPath = useMemo(() => new Map(registeredRepos.map((repo) => [repo.localPath, repo])), [registeredRepos]);
-  const activeProjectRepoSet = useMemo(() => {
-    if (!projects.activeProject) return null;
-    return new Set(projects.activeProject.repoPaths);
-  }, [projects.activeProject]);
-  const activeProjectReposForChats = useMemo(() => {
-    const projectPaths = projects.activeProject?.repoPaths ?? [];
-    if (projectPaths.length > 0) {
-      return projectPaths.flatMap((repoPath) => {
-        const registeredRepo = registeredRepoByPath.get(repoPath);
-        return registeredRepo ? [toRepoFocusRepo(registeredRepo)] : [];
-      });
-    }
-    return registeredRepos
-      .filter((repo) => !activeProjectRepoSet || activeProjectRepoSet.has(repo.localPath))
-      .map(toRepoFocusRepo);
-  }, [activeProjectRepoSet, projects.activeProject?.repoPaths, registeredRepoByPath, registeredRepos]);
+  const registeredFocusRepos = useMemo(() => registeredRepos.map(toRepoFocusRepo), [registeredRepos]);
+  const activeProjectReposForChats = useMemo(() => deriveActiveProjectRepos(
+    projects.activeProject?.repoPaths ?? null,
+    registeredFocusRepos,
+  ), [projects.activeProject?.repoPaths, registeredFocusRepos]);
+  const railReposForChats = useMemo(() => deriveAgentPanelRailRepos(
+    activeProjectReposForChats,
+    registeredFocusRepos,
+    (projects.ledger?.projects ?? []).flatMap((project) => project.repoPaths),
+  ), [activeProjectReposForChats, projects.ledger?.projects, registeredFocusRepos]);
 
   const activeProjectId = projects.activeProject?.id ?? null;
   const handleProjectRepoSelect = useCallback((repo: RepoFocusRepo) => {
@@ -184,9 +179,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     // gave the mismatch away. Prefer the rail's selected repo, then the active
     // project's first repo; only a truly project-less rail spawns unbound.
     const selectedRepo = leftPanelFocus.view?.selectedRepo ?? null;
-    const target = (selectedRepo && activeProjectRepoSet?.has(selectedRepo.localPath) ? selectedRepo : null)
-      ?? activeProjectReposForChats[0]
-      ?? null;
+    const target = resolveGlobalNewSessionRepo(selectedRepo, activeProjectReposForChats);
     if (target) {
       onCreateWorkspaceOrchestrator?.({
         name: target.name,
@@ -197,7 +190,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       return;
     }
     onCreateWorkspaceOrchestrator?.();
-  }, [onCreateWorkspaceOrchestrator, leftPanelFocus.view, activeProjectRepoSet, activeProjectReposForChats]);
+  }, [onCreateWorkspaceOrchestrator, leftPanelFocus.view, activeProjectReposForChats]);
   // Repo-header [+] — spawn a fresh orchestrator bound to that repo
   // (Cursor's contextual New Agent pattern).
   const handleCreateOrchestratorForRepo = useCallback((repo: RepoFocusRepo) => {
@@ -480,7 +473,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           ) : null}
 
           <ChatsTab
-            repos={activeProjectReposForChats}
+            repos={railReposForChats}
             ideWorkspaceSessions={ideWorkspaceSessions}
             activeSessionKey={activeSessionKey}
             onSelectSession={onSelectSession}
