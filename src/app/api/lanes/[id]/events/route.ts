@@ -3,6 +3,7 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { isLocalWorkerToken } from '@/lib/auth/worker-token';
 import {
   isAgentReportReason,
+  isPacketAgentReportEvent,
   normalizeAgentReportEvent,
   normalizeAgentReportMessage,
   normalizeAgentReportMetadata,
@@ -128,6 +129,9 @@ export async function POST(
   const event = normalizeAgentReportEvent(body.event);
   if (!event) {
     return NextResponse.json({ ok: false, note: 'Missing report event.' }, { status: 400 });
+  }
+  if (!isPacketAgentReportEvent(event)) {
+    return NextResponse.json({ ok: false, note: 'Invalid packet report event.' }, { status: 400 });
   }
 
   const reason = body.reason === undefined || body.reason === null || body.reason === ''
