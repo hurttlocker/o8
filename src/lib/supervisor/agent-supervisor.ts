@@ -1077,6 +1077,21 @@ async function resolveTranscriptSourcePathsFresh(surfaceId: string): Promise<str
     return transcriptPath ? [transcriptPath] : [];
   }
 
+  // #1502 — owned worker sessions write their JSONL run logs to stdoutPath;
+  // returning [] here made every codex/opencode-owned worker invisible to the
+  // supervisor's transcript batch status, which is half of why completed
+  // headless work read as a silent exit.
+  if (surfaceId.startsWith('codex-owned:')) {
+    const { getOwnedCodexTelemetrySources } = await import('@/lib/codex/owned');
+    const sources = await getOwnedCodexTelemetrySources(surfaceId).catch(() => null);
+    return sources?.stdoutPaths ?? [];
+  }
+  if (surfaceId.startsWith('claude-code-owned:')) {
+    const { getOwnedClaudeCodeTelemetrySources } = await import('@/lib/claude-code/owned');
+    const sources = await getOwnedClaudeCodeTelemetrySources(surfaceId).catch(() => null);
+    return sources?.stdoutPaths ?? [];
+  }
+
   return [];
 }
 
