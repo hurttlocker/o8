@@ -6,14 +6,14 @@ export interface NormalizeRuntimeStatusOptions {
   fallbackStatus?: OrchestratorPacketStatus | null;
 }
 
-export function isTerminalRuntimeStatus(status: string | null | undefined): boolean {
-  const normalized = status?.trim().toLowerCase() ?? '';
-  return normalized === 'reviewing'
-    || normalized === 'failed'
-    || normalized === 'released'
-    || normalized === 'archived'
-    || normalized.startsWith('silent_exit_');
-}
+// `isTerminalRuntimeStatus` (plan 010) was removed here (#1467). The audit
+// found every candidate consumer intentionally classifies on a DIFFERENT axis
+// (dispatch policy, release evidence, lane status, packet status) — wiring the
+// runtime-label classifier into any of them would have silently changed
+// behavior. The trap it guarded ("watchers sleep through parked packets") is
+// closed at the packet axis instead: `blocked` is in the watchers' attention
+// set (PACKET_ATTENTION_STATUSES in mcp/operator-handlers/mission.ts + the CLI
+// mirror in cli/src/commands/mission.ts).
 
 // ── Lane lifecycle ring buffer ──
 //

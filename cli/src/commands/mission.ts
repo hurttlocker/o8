@@ -67,11 +67,14 @@ interface MissionStopResult {
   [key: string]: unknown;
 }
 
-// Mirror of PACKET_TERMINAL_STATUSES in operator-handlers/mission.ts — the set
-// `wait_for_mission_ready` treats as "ready for the operator". Kept in sync by
-// the Stage-7 parity audit; duplicated here because the CLI is a standalone
-// bundle that cannot import from `@/lib`.
-const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived']);
+// Mirror of PACKET_ATTENTION_STATUSES in operator-handlers/mission.ts — the set
+// `wait_for_mission_ready` treats as "needs the operator's attention". Kept in
+// sync by the Stage-7 parity audit; duplicated here because the CLI is a
+// standalone bundle that cannot import from `@/lib`. `blocked` is included
+// (#1467): huddles, silent-exit parks, and dispatch failures all land there and
+// none progress without a decision — a watcher that sleeps through them
+// deadlocks against its own worker. Dependency-held packets stay `queued`.
+const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived', 'blocked']);
 
 /**
  * Duration flag parser — accepts `90s` / `45m` / `2h` suffixes, or a bare
