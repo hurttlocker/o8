@@ -1188,10 +1188,15 @@ export async function handleTaskPrune(args: Record<string, unknown>): Promise<Mc
   }
 }
 
-// Packet states that indicate Codex (or any runtime) is done with this
-// packet — either ready for human/orchestrator review, merged, or failed.
-// `running`, `queued`, and `blocked` are NOT terminal.
-const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived']);
+// Packet states that need the caller's attention — the runtime is done working
+// for now and a decision is required. `blocked` belongs here (#1467): it is what
+// awaiting_input / awaiting_orchestrator (huddle, #1495) / awaiting_human lanes
+// and dispatch failures map to, and none of those progress without a decision.
+// Excluding it deadlocked the loop: the orchestrator sat in wait_for_mission_ready
+// while its worker sat in awaiting_orchestrator waiting for the orchestrator.
+// Dependency-held packets stay `queued` (with blockedBy), so they never
+// false-wake this set. `running`, `queued`, `launching` are NOT included.
+const PACKET_ATTENTION_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived', 'blocked']);
 
 interface MinimalMissionPacket {
   id?: string;
@@ -1221,7 +1226,7 @@ function findTerminalPacket(
   const packets = status.packets ?? [];
   for (const p of packets) {
     if (packetIdFilter && p.id !== packetIdFilter) continue;
-    if (typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status)) {
+    if (typeof p.status === 'string' && PACKET_ATTENTION_STATUSES.has(p.status)) {
       return p;
     }
   }
