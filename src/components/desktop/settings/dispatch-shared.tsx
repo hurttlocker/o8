@@ -45,6 +45,7 @@ export interface OperatorDefaults {
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
+  reviewContinuation: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   orchestratorModel: string;

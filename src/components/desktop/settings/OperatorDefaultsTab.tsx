@@ -378,6 +378,15 @@ export function OperatorDefaultsTab() {
             divider
           />
           <SettingsRow
+            icon={<InboxIcon />}
+            label="Review continuation"
+            subtitle={lockedSub('reviewContinuation', 'When a mission lane reaches review, queue one orchestrator turn to review + merge it')}
+            checked={values.reviewContinuation}
+            disabled={envLocked('reviewContinuation') || busyField === 'reviewContinuation'}
+            onToggle={(next) => { updateField('reviewContinuation', next); }}
+            divider
+          />
+          <SettingsRow
             icon={<UpdateIcon />}
             label="Auto-apply updates"
             subtitle={lockedSub('autoApplyUpdates', 'Install downloaded updates when everything is idle')}

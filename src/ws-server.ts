@@ -142,6 +142,7 @@ import {
   getOperatorDefaultsSync,
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
+  resolveReviewContinuationSync,
   resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
@@ -727,6 +728,7 @@ async function forceCodexSelfReviewToReview(
   if (updated) {
     await enqueueAutoReview(updated.id);
     await triggerHeadlessSprintTick(updated.packetId ? [updated.packetId] : undefined);
+    queueReviewContinuation(updated);
   }
 
   resetSelfReviewStallGuard(surfaceId);
@@ -1164,6 +1166,16 @@ interface OrchestratorAutoMessage {
 const orchestratorAutoQueue: OrchestratorAutoMessage[] = [];
 const MAX_AUTO_QUEUE = 20;
 
+function enqueueOrchestratorAutoMessage(repoPath: string, message: string, label: string): void {
+  if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) {
+    orchestratorAutoQueue.shift(); // Drop oldest
+    console.warn('[supervisor] Auto-message queue overflow — dropped oldest');
+  }
+  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now() });
+  console.log(`[supervisor] Queued ${label} for ${repoPath} (${orchestratorAutoQueue.length} in queue)`);
+  void drainOrchestratorAutoQueue();
+}
+
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
   // Supervisor escalations spawn fresh orchestrator turns into the user's
   // chat — that's how codex agent narrative + bash runs end up bleeding into
@@ -1175,13 +1187,43 @@ function queueOrchestratorEscalation(repoPath: string, message: string): void {
     console.log(`[supervisor] Escalation suppressed (auto-escalate disabled): ${repoPath} — ${message.slice(0, 80)}`);
     return;
   }
-  if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) {
-    orchestratorAutoQueue.shift(); // Drop oldest
-    console.warn('[supervisor] Auto-message queue overflow — dropped oldest');
+  enqueueOrchestratorAutoMessage(repoPath, message, 'escalation');
+}
+
+// #1481 — review-ready self-continuation. When a MISSION lane lands at
+// review, the fleet must not park until the operator re-prompts: queue one
+// bounded orchestrator turn ("review + merge per the standing instruction").
+// Gated on its own operator setting (reviewContinuation, default ON —
+// distinct from the noisy failure-investigation escalations above), scoped to
+// packet-bound lanes, and deduped per lane so a flapping transition can't
+// spam turns. The operator prompt arms the loop; it is not its clock.
+const REVIEW_CONTINUATION_DEDUPE_MS = 10 * 60 * 1000;
+const reviewContinuationQueuedAt = new Map<string, number>();
+
+function queueReviewContinuation(lane: { id: string; label: string; repoPath: string; packetId?: string | null; branch?: string | null }): void {
+  if (!lane.packetId) return; // ad-hoc lanes have no mission contract to continue
+  if (!resolveReviewContinuationSync()) return;
+  const last = reviewContinuationQueuedAt.get(lane.id);
+  const now = Date.now();
+  if (last && now - last < REVIEW_CONTINUATION_DEDUPE_MS) return;
+  reviewContinuationQueuedAt.set(lane.id, now);
+  if (reviewContinuationQueuedAt.size > 200) {
+    for (const [key, ts] of reviewContinuationQueuedAt) {
+      if (now - ts > REVIEW_CONTINUATION_DEDUPE_MS) reviewContinuationQueuedAt.delete(key);
+    }
   }
-  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now() });
-  console.log(`[supervisor] Queued escalation for ${repoPath} (${orchestratorAutoQueue.length} in queue)`);
-  void drainOrchestratorAutoQueue();
+  enqueueOrchestratorAutoMessage(
+    lane.repoPath,
+    [
+      `[FLEET] Lane "${lane.label}" (${lane.id}, packet ${lane.packetId}) reached review-ready.`,
+      'Per the mission\'s standing instruction, continue the loop for THIS packet now:',
+      `1. o8_packet_diff / o8_merge_preview for packet ${lane.packetId}`,
+      '2. If the diff is clean, submit_review + approve_and_merge (rebase-before-merge discipline applies).',
+      '3. If it is not clean, record findings via submit_review(approved:false) or steer the worker — do not merge.',
+      'This is a bounded self-continuation turn (one per lane review transition; Settings → Dispatch & Supervision → Review continuation).',
+    ].join('\n'),
+    'review continuation',
+  );
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
@@ -7012,6 +7054,7 @@ async function bootstrapWsServer() {
               void triggerHeadlessSprintTick(packetId ? [packetId] : undefined).catch((err) => {
                 console.warn(`[supervisor] triggerHeadlessSprintTick errored (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
               });
+              queueReviewContinuation({ ...updated, packetId: packetId ?? updated.packetId });
             }
             console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
             return;
