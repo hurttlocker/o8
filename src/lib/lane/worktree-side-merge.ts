@@ -774,7 +774,14 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     await syncWorktreeBaseForCleanup(lane.repoPath, worktreePath, lane.baseBranch);
     await mgr.cleanup(worktreeId, { force: true, deleteBranch: true });
     void mgr.prune().catch(() => {});
-    updateLane(command.laneId, { worktreePath: null }, 'system');
+    updateLane(command.laneId, {
+      worktreePath: null,
+      // Durable terminal outcome — post-merge cleanup archives this lane
+      // soon after, and the rail's Recent group renders this chip so merged
+      // agents never evaporate from the clean view (Q ruling 2026-07-18).
+      outcome: 'merged',
+      outcomeNote: `Merged ${lane.branch} into ${lane.baseBranch}${pushedToOrigin ? ' and pushed to origin' : ''}.`,
+    }, 'system');
     setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
 
     // Coarse product signal: the governance loop closed. Fire-and-forget.

@@ -21,7 +21,7 @@ export interface ExtraAgentRow {
   packetId: string | null;
   laneId: string | null;
   laneStatus: LaneStatus | null;
-  outcome: 'no_changes' | null;
+  outcome: 'no_changes' | 'merged' | 'discarded' | null;
   outcomeNote: string | null;
   lastEventLabel: string | null;
   /** Latest review verdict was a rejection — drives the 'rejected' dot so the
@@ -70,7 +70,8 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
 
 function rowDotState(row: ExtraAgentRow): AgentDotState {
   const lane = row.laneStatus;
-  if (row.outcome === 'no_changes') return 'idle';
+  if (row.outcome === 'merged') return 'merged';
+  if (row.outcome === 'no_changes' || row.outcome === 'discarded') return 'idle';
   // 'merged'/'released' are real lane terminal states (the DB carries them) —
   // they were missing here, so a merged packet's row kept the reviewing dot
   // (operator report 2026-07-15).
@@ -89,7 +90,9 @@ function rowDotState(row: ExtraAgentRow): AgentDotState {
 
 function rowStatusLabel(row: ExtraAgentRow): string {
   const lane = row.laneStatus;
+  if (row.outcome === 'merged') return 'merged';
   if (row.outcome === 'no_changes') return 'Finished — no changes';
+  if (row.outcome === 'discarded') return 'discarded';
   if (row.rejected) return 'declined';
   if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
   if (lane === 'awaiting_input') return 'needs input';
@@ -226,18 +229,20 @@ export function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
-      {row.outcome === 'no_changes' ? (
+      {row.outcome ? (
         <span
           style={{
             flexShrink: 0,
-            color: 'var(--t-text-muted)',
+            color: row.outcome === 'merged'
+              ? 'var(--t-terminal-ansi-bright-green, #16a34a)'
+              : 'var(--t-text-muted)',
             fontSize: 9.5,
             fontWeight: 300,
             letterSpacing: '-0.3px',
             whiteSpace: 'nowrap',
           }}
         >
-          Finished — no changes
+          {row.outcome === 'merged' ? 'Merged' : row.outcome === 'no_changes' ? 'Finished — no changes' : 'Discarded'}
         </span>
       ) : null}
       {canRetry ? (

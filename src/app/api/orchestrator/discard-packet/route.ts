@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { dispatch } from '@/lib/lane/commands';
-import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, updateLane } from '@/lib/lane/registry';
 import { removeMergedWorktree } from '@/lib/orchestrator/worktree-cleanup';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
@@ -74,6 +74,15 @@ export async function POST(request: NextRequest) {
     if (!result.ok) {
       return operatorError('discard_failed', result.note ?? 'Unable to archive the lane.', 422);
     }
+    // Durable terminal outcome for the rail's Recent group (Q ruling
+    // 2026-07-18) — the operator dismissed this work on purpose; the chip
+    // should say so instead of the lane silently vanishing.
+    updateLane(lane.id, {
+      outcome: 'discarded',
+      outcomeNote: preservedBranch
+        ? `Discarded by the operator — work preserved on branch ${preservedBranch}.`
+        : 'Discarded by the operator.',
+    }, 'user');
 
     // Step 2 — free the worktree clone's disk. The commits already live on the
     // preserved branch ref (step 1), so removing the clone doesn't lose the work.
