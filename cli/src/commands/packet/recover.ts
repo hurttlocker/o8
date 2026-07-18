@@ -21,7 +21,13 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
-import { detectWorktree, resolveLaneFromCwd } from './worktree-resolve.js';
+import { detectWorktree } from './worktree-resolve.js';
+import {
+  parsePacketArguments,
+  requirePacketId,
+  resolvePacketTarget,
+  type ParsedPacketArguments,
+} from './target.js';
 
 interface OperatorResponse<T> {
   ok: boolean;
@@ -38,13 +44,26 @@ interface MergePreviewResult {
   error?: string;
 }
 
-function flag(rest: string[], name: string): string | null {
-  for (let i = 0; i < rest.length; i++) {
-    const tok = rest[i];
-    if (tok === `--${name}`) return rest[i + 1] ?? '';
-    if (tok.startsWith(`--${name}=`)) return tok.slice(name.length + 3);
+type RecoveryVerb = 'reset' | 'retry' | 'rerun' | 'steer' | 'approve-merge' | 'merge-preview';
+
+export function parsePacketRecoveryArgs(verb: RecoveryVerb, rest: string[]): ParsedPacketArguments {
+  if (verb === 'reset' || verb === 'retry') {
+    return parsePacketArguments(rest, { command: verb, valueFlags: ['reason'] });
   }
-  return null;
+  if (verb === 'rerun') {
+    return parsePacketArguments(rest, { command: verb, valueFlags: ['feedback'] });
+  }
+  if (verb === 'steer') {
+    return parsePacketArguments(rest, { command: verb, valueFlags: ['message'] });
+  }
+  if (verb === 'approve-merge') {
+    return parsePacketArguments(rest, {
+      command: verb,
+      valueFlags: ['commit-message', 'expected-sha', 'idempotency-key'],
+      booleanFlags: ['as-operator'],
+    });
+  }
+  return parsePacketArguments(rest, { command: verb });
 }
 
 function responseError(payload: OperatorResponse<unknown> | null | undefined, fallback: string): string {
@@ -56,26 +75,13 @@ function responseError(payload: OperatorResponse<unknown> | null | undefined, fa
   return fallback;
 }
 
-async function resolvePacketId(explicit: string | null): Promise<string> {
-  if (explicit?.trim()) return explicit.trim();
-  const resolved = await resolveLaneFromCwd();
-  if (!resolved?.packetId) {
-    throw new CliError(
-      'not_in_packet_worktree',
-      'No packet id given and the current directory is not inside a packet worktree.',
-      EXIT.NOT_FOUND,
-      'Pass --packet <id> or run from a `.cortex-worktrees/packet-<id>` worktree.',
-    );
-  }
-  return resolved.packetId;
-}
-
 async function doReset(mode: OutputMode, rest: string[], clearWorktree: boolean, verb: 'reset' | 'retry'): Promise<number> {
-  const packetId = await resolvePacketId(flag(rest, 'packet'));
+  const args = parsePacketRecoveryArgs(verb, rest);
+  const packetId = requirePacketId(await resolvePacketTarget(args.target), verb);
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/reset-packet', {
     method: 'POST',
-    body: { packetId, clearWorktree, reason: flag(rest, 'reason')?.trim() || undefined },
+    body: { packetId, clearWorktree, reason: args.values.reason?.trim() || undefined },
   });
   if (!res.data?.ok) {
     throw new CliError(`${verb}_failed`, responseError(res.data, `Packet ${verb} was rejected.`), EXIT.CONFLICT);
@@ -99,7 +105,8 @@ async function doReset(mode: OutputMode, rest: string[], clearWorktree: boolean,
 }
 
 async function runPacketRerun(mode: OutputMode, rest: string[]): Promise<number> {
-  const feedback = flag(rest, 'feedback')?.trim();
+  const args = parsePacketRecoveryArgs('rerun', rest);
+  const feedback = args.values.feedback?.trim();
   if (!feedback) {
     throw new CliError(
       'invalid_args',
@@ -108,7 +115,7 @@ async function runPacketRerun(mode: OutputMode, rest: string[]): Promise<number>
       'Example: o8 packet rerun --feedback "Typecheck failed on src/foo.ts:12 — fix the missing import."',
     );
   }
-  const packetId = await resolvePacketId(flag(rest, 'packet'));
+  const packetId = requirePacketId(await resolvePacketTarget(args.target), 'rerun');
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/rerun-with-feedback', {
     method: 'POST',
@@ -128,7 +135,8 @@ async function runPacketRerun(mode: OutputMode, rest: string[]): Promise<number>
 }
 
 async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<number> {
-  const packetId = await resolvePacketId(flag(rest, 'packet'));
+  const args = parsePacketRecoveryArgs('merge-preview', rest);
+  const packetId = requirePacketId(await resolvePacketTarget(args.target), 'merge-preview');
   const cfg = resolveConfig();
   // merge-preview returns the raw MergePreviewResult (not the {ok,result} envelope).
   const res = await apiFetch<MergePreviewResult>(cfg, '/api/orchestrator/merge-preview', {
@@ -155,7 +163,8 @@ async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<
 }
 
 async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number> {
-  const message = flag(rest, 'message')?.trim();
+  const args = parsePacketRecoveryArgs('steer', rest);
+  const message = args.values.message?.trim();
   if (!message) {
     throw new CliError(
       'invalid_args',
@@ -164,7 +173,7 @@ async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number>
       'Example: o8 packet steer --message "Also handle the empty-input case."',
     );
   }
-  const packetId = await resolvePacketId(flag(rest, 'packet'));
+  const packetId = requirePacketId(await resolvePacketTarget(args.target), 'steer');
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<{ laneId?: string; note?: string }>>(cfg, '/api/orchestrator/steer-packet', {
     method: 'POST',
@@ -194,16 +203,17 @@ function isWorkerContext(rest: string[]): boolean {
 }
 
 async function runPacketApproveMerge(mode: OutputMode, rest: string[]): Promise<number> {
-  const packetId = await resolvePacketId(flag(rest, 'packet'));
-  const worker = isWorkerContext(rest);
+  const args = parsePacketRecoveryArgs('approve-merge', rest);
+  const packetId = requirePacketId(await resolvePacketTarget(args.target), 'approve-merge');
+  const worker = isWorkerContext(args.booleans.has('as-operator') ? ['--as-operator'] : []);
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<{ merged?: boolean; status?: string; approvalId?: string; note?: string }>>(cfg, '/api/orchestrator/merge', {
     method: 'POST',
     body: {
       packetId,
-      commitMessage: flag(rest, 'commit-message')?.trim() || undefined,
-      expectedHeadSha: flag(rest, 'expected-sha')?.trim() || undefined,
-      idempotencyKey: flag(rest, 'idempotency-key')?.trim() || undefined,
+      commitMessage: args.values['commit-message']?.trim() || undefined,
+      expectedHeadSha: args.values['expected-sha']?.trim() || undefined,
+      idempotencyKey: args.values['idempotency-key']?.trim() || undefined,
       ...(worker ? { requestedByWorker: true } : {}),
     },
   });

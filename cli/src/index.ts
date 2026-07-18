@@ -41,6 +41,11 @@ import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
 import { runPacketStop } from './commands/packet/stop.js';
 import {
+  PACKET_COMMAND_LINES,
+  packetGroupUsage,
+  packetSubcommandHint,
+} from './commands/packet/help.js';
+import {
   runPacketMergePreview,
   runPacketRerun,
   runPacketApproveMerge,
@@ -69,7 +74,9 @@ function unknownSubcommandError(group: string, sub: string | undefined): CliErro
     `unknown_${group}_subcommand`,
     `Unknown ${group} subcommand: ${sub ?? '(none)'}`,
     EXIT.INVALID_ARGS,
-    `Run \`o8 ${group} --help\` to list available subcommands.`,
+    group === 'packet'
+      ? packetSubcommandHint()
+      : `Run \`o8 ${group} --help\` to list available subcommands.`,
   );
 }
 
@@ -149,25 +156,7 @@ commands:
   task report <id>     append a structured task progress event
   task archive <id>    prune/archive stale task-pool rows
   task prune <id>      permanently remove done/archived task-pool rows
-  packet info          info about the packet bound to the current worktree
-  packet scope [id]    one-call worker context (auto-resolves from cwd)
-  packet diff [id]     the packet's code diff vs base (committed + uncommitted)
-  packet commit -m ".." stage + commit the worktree with an explicit pathspec
-  packet heartbeat     update the current packet lane heartbeat
-  packet review        approve + merge a reviewed packet
-  packet reset         wipe a stuck packet's worktree + lane (then mission dispatch)
-  packet stop          interrupt the worker and hold the packet (resume with packet reset/rerun)
-  packet cancel        alias for packet stop; interrupt and hold the packet
-  packet retry         reset but KEEP the worktree (resume work; then mission dispatch)
-  packet rerun         fresh worker with --feedback (relaunches immediately)
-  packet steer         nudge a packet's warm session with --message (layer-3 escalation)
-  packet approve-merge merge through the gate (operator) — worker-context raises an approval card
-  packet merge-preview dry-run the 5-layer merge gate (wouldMerge + blockers)
-  packet report        append an agent_report event for this packet
-  packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
-  packet mirror-proof  mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
-  packet log [id]      read or follow packet lane events (--follow, --since)
-  packet runtime-drift detect and warn when a lane's bound runtime drifted
+${PACKET_COMMAND_LINES}
 
 flags:
   --json (default)     JSON output for agents
@@ -192,6 +181,7 @@ exit codes:
  * (caller falls back to the full USAGE).
  */
 function groupUsage(group: string): string | null {
+  if (group === 'packet') return packetGroupUsage();
   const lines = USAGE.split('\n').filter((line) => new RegExp(`^  ${group}( |$)`).test(line));
   if (lines.length === 0) return null;
   return `usage: o8 ${group} <subcommand> [flags]\n\n${lines.join('\n')}\n\nRun \`o8 --help\` for the full command surface.\n`;
@@ -254,7 +244,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       throw unknownSubcommandError('task', secondary);
     }
     case 'packet': {
-      if (secondary === 'info') return runPacketInfo(args.mode);
+      if (secondary === 'info') return runPacketInfo(args.mode, args.rest);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
       if (secondary === 'diff') return runPacketDiff(args.mode, args.rest);
       if (secondary === 'commit') return runPacketCommit(args.mode, args.rest);
@@ -271,7 +261,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'capture') return runPacketCapture(args.mode, args.rest);
       if (secondary === 'mirror-proof') return runPacketMirrorProof(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
-      if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode);
+      if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode, args.rest);
       throw unknownSubcommandError('packet', secondary);
     }
     case 'spec':

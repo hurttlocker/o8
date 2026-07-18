@@ -1,4 +1,3 @@
-import { sep } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
@@ -7,6 +6,7 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
+import { parsePacketArguments, resolvePacketTarget } from './target.js';
 
 const AGENT_REPORT_REASONS = new Set([
   'needs_clarification',
@@ -43,38 +43,12 @@ interface LaneEvent {
   timestamp: string;
 }
 
-interface WorktreeMatch {
-  worktreePath: string;
-  packetSlug: string;
-}
-
 interface ReportArgs {
+  packetId: string | null;
   event: string | null;
   reason: string | null;
   message: string | null;
   metadata: Record<string, unknown> | null;
-}
-
-function detectWorktree(cwd: string): WorktreeMatch | null {
-  const parts = cwd.split(sep);
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const prev = parts[i - 1];
-    const cur = parts[i];
-    if (!cur || !cur.startsWith('packet-')) continue;
-    if (prev === '.cortex-worktrees') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-      };
-    }
-    if (prev === 'worktrees' && parts[i - 2] === '.claude') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-      };
-    }
-  }
-  return null;
 }
 
 function parseMetadata(raw: string | null): Record<string, unknown> | null {
@@ -92,47 +66,18 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
 }
 
 export function parseReportArgs(rest: string[]): ReportArgs {
-  let event: string | null = null;
-  let reason: string | null = null;
-  let message: string | null = null;
-  let metaRaw: string | null = null;
-
-  for (let i = 0; i < rest.length; i++) {
-    const tok = rest[i];
-    if (tok === '--event') {
-      event = rest[++i] ?? null;
-    } else if (tok.startsWith('--event=')) {
-      event = tok.slice('--event='.length);
-    } else if (tok === '--reason') {
-      reason = rest[++i] ?? null;
-    } else if (tok.startsWith('--reason=')) {
-      reason = tok.slice('--reason='.length);
-    } else if (tok === '--message') {
-      message = rest[++i] ?? null;
-    } else if (tok.startsWith('--message=')) {
-      message = tok.slice('--message='.length);
-    } else if (tok === '--meta') {
-      metaRaw = rest[++i] ?? null;
-    } else if (tok.startsWith('--meta=')) {
-      metaRaw = tok.slice('--meta='.length);
-    } else if (!tok.startsWith('--') && !message) {
-      message = tok;
-    }
-  }
+  const args = parsePacketArguments(rest, {
+    command: 'report',
+    valueFlags: ['event', 'reason', 'message', 'meta'],
+  });
 
   return {
-    event: event?.trim() || null,
-    reason: reason?.trim() || null,
-    message: message?.trim() || null,
-    metadata: parseMetadata(metaRaw),
+    packetId: args.target,
+    event: args.values.event?.trim() || null,
+    reason: args.values.reason?.trim() || null,
+    message: args.values.message?.trim() || null,
+    metadata: parseMetadata(args.values.meta ?? null),
   };
-}
-
-function resolveLane(lanes: Lane[], match: WorktreeMatch): Lane | null {
-  return lanes.find((lane) => lane.worktreePath === match.worktreePath)
-    ?? lanes.find((lane) => lane.packetId && match.packetSlug.includes(lane.packetId))
-    ?? lanes.find((lane) => lane.worktreePath && lane.worktreePath.endsWith(`packet-${match.packetSlug}`))
-    ?? null;
 }
 
 export async function runPacketReport(mode: OutputMode, rest: string[]): Promise<number> {
@@ -154,34 +99,14 @@ export async function runPacketReport(mode: OutputMode, rest: string[]): Promise
     );
   }
 
-  const match = detectWorktree(process.cwd());
-  if (!match) {
-    throw new CliError(
-      'not_in_packet_worktree',
-      'Current directory is not inside an o8 packet worktree.',
-      EXIT.NOT_FOUND,
-      'Expected a path containing `.cortex-worktrees/packet-<id>` or `.claude/worktrees/packet-<id>`.',
-    );
-  }
-
+  const target = await resolvePacketTarget(args.packetId);
   const cfg = resolveConfig();
-  const lanesRes = await apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } });
-  const lane = resolveLane(lanesRes.data?.lanes ?? [], match);
-  if (!lane) {
-    throw new CliError(
-      'lane_not_found',
-      `No lane registered for worktree ${match.worktreePath}.`,
-      EXIT.NOT_FOUND,
-      'The lane may have been archived or the registry is out of sync. Run `o8 status` to confirm.',
-    );
-  }
-
   const reportRes = await apiFetch<{
     ok: boolean;
     lane: Lane;
     event: LaneEvent;
     statusChanged: boolean;
-  }>(cfg, `/api/lanes/${encodeURIComponent(lane.id)}/events`, {
+  }>(cfg, `/api/lanes/${encodeURIComponent(target.laneId)}/events`, {
     method: 'POST',
     body: {
       verb: 'agent_report',

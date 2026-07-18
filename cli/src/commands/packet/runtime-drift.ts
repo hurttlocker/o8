@@ -1,7 +1,7 @@
-import { apiFetch, CliError, EXIT } from '../../api.js';
+import { apiFetch, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import { printJson, printHumanKv, printHumanHeading, type OutputMode } from '../../output.js';
-import { resolveLaneFromCwd } from './worktree-resolve.js';
+import { parsePacketArguments, resolvePacketTarget } from './target.js';
 
 export interface RuntimeDriftFields {
   laneId?: string | null;
@@ -34,16 +34,9 @@ interface LaneScopeResponse {
   worktreePath: string | null;
 }
 
-export async function runPacketRuntimeDrift(mode: OutputMode): Promise<number> {
-  const resolved = await resolveLaneFromCwd();
-  if (!resolved) {
-    throw new CliError(
-      'not_in_packet_worktree',
-      'Current directory is not inside an o8 packet worktree.',
-      EXIT.NOT_FOUND,
-      'Run `o8 packet runtime-drift` from inside a `.cortex-worktrees/packet-<id>` directory.',
-    );
-  }
+export async function runPacketRuntimeDrift(mode: OutputMode, rest: string[]): Promise<number> {
+  const args = parsePacketArguments(rest, { command: 'runtime-drift' });
+  const resolved = await resolvePacketTarget(args.target);
 
   const cfg = resolveConfig();
   const scope = await apiFetch<LaneScopeResponse>(
@@ -64,7 +57,7 @@ export async function runPacketRuntimeDrift(mode: OutputMode): Promise<number> {
     declaredRuntime: declared,
     actualRuntime: actual,
     drift,
-    worktreePath: data?.worktreePath ?? resolved.match.worktreePath,
+    worktreePath: data?.worktreePath ?? resolved.worktreePath,
   };
 
   if (mode.human) {

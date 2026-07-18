@@ -11,7 +11,7 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
-import { resolveLaneFromCwd } from './worktree-resolve.js';
+import { parsePacketArguments, resolvePacketTarget } from './target.js';
 
 interface PacketTailBatch {
   schema: 'o8/packet.tail.batch/v1';
@@ -39,48 +39,25 @@ function parseSince(raw: string | null): number {
 }
 
 function parseLogArgs(rest: string[]): Omit<PacketLogArgs, 'packetId'> & { packetId: string | null } {
-  let packetId: string | null = null;
-  let follow = false;
-  let ndjson = false;
-  let since = 0;
+  const args = parsePacketArguments(rest, {
+    command: 'log',
+    valueFlags: ['since'],
+    booleanFlags: ['follow', 'ndjson'],
+    aliases: { '-f': '--follow' },
+  });
 
-  for (let i = 0; i < rest.length; i++) {
-    const tok = rest[i];
-    if (tok === '--follow' || tok === '-f') {
-      follow = true;
-    } else if (tok === '--ndjson') {
-      ndjson = true;
-    } else if (tok === '--since') {
-      since = parseSince(rest[++i] ?? null);
-    } else if (tok.startsWith('--since=')) {
-      since = parseSince(tok.slice('--since='.length));
-    } else if (tok.startsWith('-')) {
-      throw new CliError('invalid_args', `Unknown packet log flag: ${tok}`, EXIT.INVALID_ARGS);
-    } else if (!packetId) {
-      packetId = tok.trim();
-    } else {
-      throw new CliError('invalid_args', `Unexpected packet log argument: ${tok}`, EXIT.INVALID_ARGS);
-    }
-  }
-
-  return { packetId, follow, ndjson, since };
+  return {
+    packetId: args.target,
+    follow: args.booleans.has('follow'),
+    ndjson: args.booleans.has('ndjson'),
+    since: args.values.since ? parseSince(args.values.since) : 0,
+  };
 }
 
 async function resolvePacketIdForLog(rest: string[]): Promise<PacketLogArgs> {
   const parsed = parseLogArgs(rest);
-  if (parsed.packetId) {
-    return { ...parsed, packetId: parsed.packetId };
-  }
-  const resolved = await resolveLaneFromCwd();
-  if (resolved) {
-    return { ...parsed, packetId: resolved.laneId };
-  }
-  throw new CliError(
-    'invalid_args',
-    'o8 packet log [id] needs a packet/lane id (or run from inside a packet worktree).',
-    EXIT.INVALID_ARGS,
-    'Example: o8 packet log pkt-abc --follow — or just `o8 packet log` from `.cortex-worktrees/packet-<id>`.',
-  );
+  const target = await resolvePacketTarget(parsed.packetId);
+  return { ...parsed, packetId: target.laneId };
 }
 
 async function fetchBatch(

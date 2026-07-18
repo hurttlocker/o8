@@ -10,17 +10,22 @@ import { promisify } from 'node:util';
 import { CliError, EXIT } from '../../api.js';
 import { printHumanKv, printJson, type OutputMode } from '../../output.js';
 import { detectWorktree } from './worktree-resolve.js';
+import { parsePacketArguments } from './target.js';
 
 const execFileAsync = promisify(execFile);
 
-function readMessage(rest: string[]): string | null {
-  const i = rest.findIndex((arg) => arg === '-m' || arg === '--message');
-  if (i >= 0 && rest[i + 1]) return rest[i + 1];
-  return null;
+export function parsePacketCommitMessage(rest: string[]): string | null {
+  const args = parsePacketArguments(rest, {
+    command: 'commit',
+    valueFlags: ['message'],
+    aliases: { '-m': '--message' },
+    allowTarget: false,
+  });
+  return args.values.message?.trim() || null;
 }
 
 export async function runPacketCommit(mode: OutputMode, rest: string[]): Promise<number> {
-  const message = readMessage(rest);
+  const message = parsePacketCommitMessage(rest);
   if (!message) {
     throw new CliError(
       'invalid_args',

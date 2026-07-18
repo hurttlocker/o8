@@ -14,8 +14,8 @@
 import { execFileSync } from 'node:child_process';
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
-import { resolveLaneFromCwd } from './worktree-resolve.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../../output.js';
+import { resolvePacketTarget } from './target.js';
 
 interface MirrorArgs {
   prNumber: number | null;
@@ -30,8 +30,15 @@ export function parseMirrorArgs(rest: string[]): MirrorArgs {
   let packetId: string | null = null;
   let laneId: string | null = null;
 
-  const take = (tok: string, flag: string, i: { v: number }): string | null =>
-    tok === flag ? (rest[++i.v] ?? null) : tok.startsWith(`${flag}=`) ? tok.slice(flag.length + 1) : null;
+  const take = (tok: string, flag: string, i: { v: number }): string | null => {
+    if (tok.startsWith(`${flag}=`)) return tok.slice(flag.length + 1);
+    if (tok !== flag) return null;
+    const value = rest[++i.v];
+    if (!value || value.startsWith('-')) {
+      throw new CliError('invalid_args', `${flag} requires a value.`, EXIT.INVALID_ARGS);
+    }
+    return value;
+  };
 
   for (let idx = 0; idx < rest.length; idx++) {
     const tok = rest[idx];
@@ -41,8 +48,28 @@ export function parseMirrorArgs(rest: string[]): MirrorArgs {
     else if ((val = take(tok, '--repo', i)) !== null) repoSlug = val;
     else if ((val = take(tok, '--packet', i)) !== null) packetId = val;
     else if ((val = take(tok, '--lane', i)) !== null) laneId = val;
-    else if (!tok.startsWith('--') && prNumber === null && Number.isFinite(Number(tok))) prNumber = Number(tok);
+    else if (!tok.startsWith('-') && prNumber === null && Number.isFinite(Number(tok))) prNumber = Number(tok);
+    else if (!tok.startsWith('-') && !packetId) packetId = tok;
+    else if (tok.startsWith('-')) {
+      throw new CliError('invalid_args', `Unknown o8 packet mirror-proof flag: ${tok}.`, EXIT.INVALID_ARGS);
+    } else {
+      throw new CliError(
+        'invalid_args',
+        `Unexpected argument ${tok} for o8 packet mirror-proof.`,
+        EXIT.INVALID_ARGS,
+        'Pass the packet id once, positionally or with --packet <id>.',
+      );
+    }
     idx = i.v;
+  }
+
+  if (packetId && laneId && packetId !== laneId) {
+    throw new CliError(
+      'invalid_args',
+      `Conflicting explicit packet targets: ${packetId} and ${laneId}.`,
+      EXIT.INVALID_ARGS,
+      'Pass one packet or lane target.',
+    );
   }
 
   return {
@@ -76,20 +103,9 @@ export async function runPacketMirrorProof(mode: OutputMode, rest: string[]): Pr
     );
   }
 
-  // Resolve packet/lane: explicit flags win, else infer from the worktree.
-  let packetId = args.packetId;
-  let laneId = args.laneId;
-  if (!packetId && !laneId) {
-    const resolved = await resolveLaneFromCwd();
-    if (resolved) { packetId = resolved.packetId; laneId = resolved.laneId; }
-  }
-  if (!packetId && !laneId) {
-    throw new CliError(
-      'no_packet',
-      'Could not resolve a packet/lane. Run inside a packet worktree or pass --packet <id> / --lane <id>.',
-      EXIT.INVALID_ARGS,
-    );
-  }
+  const target = await resolvePacketTarget(args.packetId ?? args.laneId);
+  const packetId = target.packetId;
+  const laneId = target.laneId;
 
   const repoSlug = args.repoSlug ?? deriveRepoSlug();
   if (!repoSlug) {
