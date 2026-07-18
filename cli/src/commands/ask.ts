@@ -21,6 +21,8 @@ import {
 } from '../output.js';
 import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
 
+export const ASK_API_TIMEOUT_MS = 150_000;
+
 interface AskArgs {
   question: string | null;
   repo: string | null;
@@ -95,6 +97,7 @@ export async function runAsk(mode: OutputMode, rest: string[]): Promise<number> 
   const cfg = resolveConfig();
   const res = await apiFetch<AskAnswerResponse>(cfg, '/api/cortex/ask/answer', {
     method: 'POST',
+    timeoutMs: ASK_API_TIMEOUT_MS,
     body: {
       question: args.question,
       ...(args.terse ? { terse: true } : {}),

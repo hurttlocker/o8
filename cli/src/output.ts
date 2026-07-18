@@ -24,12 +24,14 @@ export function printError(err: unknown, mode: OutputMode): ExitCode {
         code: err.code,
         message: err.message,
         hint: err.hint ?? null,
+        ambiguous: err.ambiguous,
       },
     };
     if (mode.human) {
       process.stderr.write(`error: ${err.code}\n`);
       process.stderr.write(`  ${err.message}\n`);
       if (err.hint) process.stderr.write(`  hint: ${err.hint}\n`);
+      if (err.ambiguous) process.stderr.write('  outcome: ambiguous — the operation may have landed\n');
     } else {
       process.stderr.write(`${JSON.stringify(body, null, 2)}\n`);
     }
@@ -38,7 +40,7 @@ export function printError(err: unknown, mode: OutputMode): ExitCode {
   const message = err instanceof Error ? err.message : String(err);
   const body = {
     schema: 'o8/cli/error/v1',
-    error: { code: 'unexpected', message, hint: null },
+    error: { code: 'unexpected', message, hint: null, ambiguous: false },
   };
   if (mode.human) {
     process.stderr.write(`error: unexpected\n  ${message}\n`);

@@ -13,7 +13,7 @@
  *   o8 packet merge-preview [--packet <id>]            # dry-run the 5-layer merge gate
  */
 
-import { apiFetch, CliError, EXIT } from '../../api.js';
+import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
   printHumanHeading,
@@ -81,6 +81,7 @@ async function doReset(mode: OutputMode, rest: string[], clearWorktree: boolean,
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/reset-packet', {
     method: 'POST',
+    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
     body: { packetId, clearWorktree, reason: args.values.reason?.trim() || undefined },
   });
   if (!res.data?.ok) {
@@ -119,6 +120,7 @@ async function runPacketRerun(mode: OutputMode, rest: string[]): Promise<number>
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/rerun-with-feedback', {
     method: 'POST',
+    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
     body: { packetId, feedback },
   });
   if (!res.data?.ok) {
@@ -177,6 +179,7 @@ async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number>
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<{ laneId?: string; note?: string }>>(cfg, '/api/orchestrator/steer-packet', {
     method: 'POST',
+    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
     body: { packetId, message },
   });
   if (!res.data?.ok) {
@@ -209,6 +212,7 @@ async function runPacketApproveMerge(mode: OutputMode, rest: string[]): Promise<
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<{ merged?: boolean; status?: string; approvalId?: string; note?: string }>>(cfg, '/api/orchestrator/merge', {
     method: 'POST',
+    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
     body: {
       packetId,
       commitMessage: args.values['commit-message']?.trim() || undefined,
