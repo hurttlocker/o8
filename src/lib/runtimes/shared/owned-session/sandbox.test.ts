@@ -72,6 +72,16 @@ describe('buildSeatbeltProfile — policy shape', () => {
     expect(denyIdx).toBeGreaterThan(allowIdx);
   });
 
+  it('DENIES the gh credential store and never allow-lists ~/.zshenv', () => {
+    // ~/.config is read-allowed for git, but the gh token store inside it is
+    // denied last so a worker cannot lift the operator's GitHub OAuth token.
+    const ghDenyIdx = profile.indexOf('(subpath "/Users/op/.config/gh")');
+    expect(ghDenyIdx).toBeGreaterThan(profile.indexOf('(allow file-read* file-write*'));
+    // ~/.zshenv commonly exports operator API keys; workers inherit env from
+    // the trusted parent, so it must not appear in any allow.
+    expect(profile).not.toContain('.zshenv');
+  });
+
   it('ALLOWS the worktree + repo read+write and keeps network open (RF-1 HTTP)', () => {
     expect(profile).toContain('(subpath "/tmp/wt")');
     expect(profile).toContain('(subpath "/tmp/repo")');
