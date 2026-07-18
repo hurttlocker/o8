@@ -5,10 +5,9 @@ import { parsePacketStopArgs } from '../cli/src/commands/packet/stop';
 import { parseRunStopArgs } from '../cli/src/commands/run';
 
 describe('CLI stop command parsing', () => {
-  it('packet stop uses an explicit positional packet id before --packet', () => {
-    expect(parsePacketStopArgs(['pkt-pos', '--packet', 'pkt-flag'])).toEqual({
-      packetId: 'pkt-pos',
-    });
+  it('packet stop treats positional and --packet ids identically', () => {
+    expect(parsePacketStopArgs(['pkt-target'])).toEqual({ packetId: 'pkt-target' });
+    expect(parsePacketStopArgs(['--packet', 'pkt-target'])).toEqual({ packetId: 'pkt-target' });
   });
 
   it('packet stop rejects unknown extra positional args', () => {

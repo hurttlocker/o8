@@ -1,0 +1,49 @@
+export const PACKET_SUBCOMMANDS = [
+  'info',
+  'scope',
+  'diff',
+  'commit',
+  'heartbeat',
+  'review',
+  'reset',
+  'stop',
+  'cancel',
+  'retry',
+  'rerun',
+  'steer',
+  'approve-merge',
+  'merge-preview',
+  'report',
+  'capture',
+  'mirror-proof',
+  'log',
+  'runtime-drift',
+] as const;
+
+export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
+  packet scope [id]    one-call worker context (auto-resolves from cwd)
+  packet diff [id]     the packet's code diff vs base (committed + uncommitted)
+  packet commit -m ".." stage + commit the current worktree with an explicit pathspec
+  packet heartbeat [id] update a packet lane heartbeat
+  packet review [id]   approve + merge a reviewed packet
+  packet reset [id]    wipe a stuck packet's worktree + lane (then mission dispatch)
+  packet stop [id]     interrupt the worker and hold the packet (resume with packet reset/rerun)
+  packet cancel [id]   alias for packet stop; interrupt and hold the packet
+  packet retry [id]    reset but KEEP the worktree (resume work; then mission dispatch)
+  packet rerun [id]    fresh worker with --feedback (relaunches immediately)
+  packet steer [id]    nudge a packet's warm session with --message (layer-3 escalation)
+  packet approve-merge [id] merge through the gate (operator) — worker-context raises an approval card
+  packet merge-preview [id] dry-run the 5-layer merge gate (wouldMerge + blockers)
+  packet report [id]   append an agent_report event for this packet
+  packet capture [id]  screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
+  packet mirror-proof [id] mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
+  packet log [id]      read or follow packet lane events (--follow, --since)
+  packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
+
+export function packetGroupUsage(): string {
+  return `usage: o8 packet <subcommand> [flags]\n\n${PACKET_COMMAND_LINES}\n\nRun \`o8 --help\` for the full command surface.\n`;
+}
+
+export function packetSubcommandHint(): string {
+  return `Valid packet subcommands: ${PACKET_SUBCOMMANDS.join(', ')}.`;
+}
