@@ -75,6 +75,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.supervisorAutoEscalate = body.supervisorAutoEscalate;
   }
 
+  if (body.reviewContinuation !== undefined) {
+    if (typeof body.reviewContinuation !== 'boolean') {
+      throw new Error('reviewContinuation must be boolean.');
+    }
+    update.reviewContinuation = body.reviewContinuation;
+  }
+
   if (body.thinkingEffort !== undefined) {
     if (!isThinkingEffort(body.thinkingEffort)) {
       throw new Error('thinkingEffort must be a valid effort level.');
