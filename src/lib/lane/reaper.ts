@@ -20,6 +20,7 @@ import {
 } from './owned-session-liveness';
 import { decideRunningLaneSalvage } from './salvage';
 import { runDeadLaneSweep } from './dead-lane-archiver';
+import { assessStaleLaneLiveness } from './reaper-liveness';
 
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
@@ -163,6 +164,24 @@ export async function listZombieLaneCandidates(now: number = Date.now()): Promis
 
     const probe = await probeLaneOwner(lane);
     if (probe.alive !== false) continue;
+
+    // #1585: the lane heartbeat is a fragile, worker-volitional signal — it only
+    // advances when the worker itself runs `o8 packet heartbeat`, so a Codex
+    // worker deep in a long turn freezes it well inside the 90s window while
+    // streaming. Before reaping a stale-heartbeat lane the owner-probe called
+    // dead, require it to clear the secondary liveness gates: fresh transcript
+    // activity (streaming IS a heartbeat) + a live-process guard on the worktree
+    // (fail closed). This is what stopped the fleet-wide wipeout.
+    const liveness = await assessStaleLaneLiveness(lane, {
+      staleThresholdMs: LANE_HEARTBEAT_STALE_MS,
+      now,
+    });
+    if (liveness.keep) {
+      console.log(
+        `[lane-reaper] ${lane.id} stale ${Math.round(staleMs / 1000)}s but KEPT via ${liveness.source}: ${liveness.note}`,
+      );
+      continue;
+    }
 
     candidates.push({
       lane,
