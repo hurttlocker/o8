@@ -5715,6 +5715,7 @@ pub fn run() {
             capture_app_window,
             mac_perms::accessibility_permission_granted_cmd,
             mac_perms::input_monitoring_granted_cmd,
+            mac_perms::request_input_monitoring_cmd,
             mac_perms::fn_key_usage_type_cmd,
             mac_perms::screen_capture_granted_cmd,
             mac_perms::mic_permission_granted_cmd,

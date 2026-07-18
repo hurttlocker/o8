@@ -357,6 +357,13 @@ export async function inputMonitoringGranted(): Promise<boolean> {
   return result ?? false;
 }
 
+/** Fire the real macOS Input Monitoring prompt (IOHIDRequestAccess, #1537).
+ * Silent no-op returning false when the user already denied. */
+export async function requestInputMonitoring(): Promise<boolean> {
+  const result = await invoke<boolean>('request_input_monitoring_cmd');
+  return result ?? false;
+}
+
 /**
  * The current `AppleFnUsageType` (0 = "Do Nothing" — what o8 needs). null /
  * unset should be treated as 3 = "Start Dictation", which hijacks the Fn key.

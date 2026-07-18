@@ -227,6 +227,15 @@ pub fn input_monitoring_granted_cmd() -> bool {
     input_monitoring_granted(false)
 }
 
+/// Request Input Monitoring via `IOHIDRequestAccess` — the ONE call that
+/// actually presents the macOS prompt (a listen-only tap never triggers it on
+/// its own, #1537). Silent no-op returning false when the user already denied;
+/// returns the resulting grant state. For the permissions surface's fix flow.
+#[tauri::command]
+pub fn request_input_monitoring_cmd() -> bool {
+    input_monitoring_granted(true)
+}
+
 /// The current `AppleFnUsageType` (0 = Do Nothing — the value o8 needs; an unset
 /// / unreadable value returns null and should be treated as 3 = Start Dictation,
 /// which hijacks the Fn key).
