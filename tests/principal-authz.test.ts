@@ -335,3 +335,78 @@ describe('principal-authz — worker lane-event reports are accepted (post-CRIT-
     expect(res.status).toBe(401);
   });
 });
+
+describe('principal-authz — /api/lanes actor comes from the credential, never the body (#1173 H1)', () => {
+  // The hole: dispatch(body) with actor defaulting to trusted 'user' let ANY
+  // loopback caller (worker token, tokenless same-origin fetch) self-assert
+  // 'user' — which pre-approves merges and skips the governance card. The
+  // route now clamps: only the operator credential may act as 'user'; every
+  // other principal is forced to 'orchestrator'. Proven through the REAL
+  // route handler against a persisted lane, observing the lane event actor.
+  it('worker token archiving a lane is recorded as orchestrator even when the body claims user', async () => {
+    const lanesRoute = await import('@/app/api/lanes/route');
+    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const lane = createLane({
+      label: 'authz clamp lane (worker)',
+      repoPath: '/tmp/authz-clamp-repo',
+      branch: 'agent/authz-clamp-w',
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    const res = await lanesRoute.POST(req('http://localhost:3001/api/lanes', {
+      principal: 'worker',
+      body: { verb: 'archive', laneId: lane.id, actor: 'user' },
+    }));
+    expect(res.status).toBeLessThan(500);
+    const events = getLaneEvents(lane.id, 20);
+    const archived = events.filter((event) => event.verb === 'status_change')
+      .find((event) => (event.payload as { status?: string }).status === 'archived');
+    expect(archived).toBeTruthy();
+    expect(archived?.actor).toBe('orchestrator');
+  });
+
+  it('operator token keeps user-actor semantics', async () => {
+    const lanesRoute = await import('@/app/api/lanes/route');
+    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const lane = createLane({
+      label: 'authz clamp lane (operator)',
+      repoPath: '/tmp/authz-clamp-repo',
+      branch: 'agent/authz-clamp-o',
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    const res = await lanesRoute.POST(req('http://localhost:3001/api/lanes', {
+      principal: 'operator',
+      body: { verb: 'archive', laneId: lane.id },
+    }));
+    expect(res.status).toBeLessThan(500);
+    const events = getLaneEvents(lane.id, 20);
+    const archived = events.filter((event) => event.verb === 'status_change')
+      .find((event) => (event.payload as { status?: string }).status === 'archived');
+    expect(archived).toBeTruthy();
+    expect(archived?.actor).toBe('user');
+  });
+
+  it('tokenless loopback is clamped to orchestrator (fail-closed for the self-merge class)', async () => {
+    const lanesRoute = await import('@/app/api/lanes/route');
+    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const lane = createLane({
+      label: 'authz clamp lane (anon)',
+      repoPath: '/tmp/authz-clamp-repo',
+      branch: 'agent/authz-clamp-a',
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    const res = await lanesRoute.POST(anonymousLoopbackReq('http://localhost:3001/api/lanes', {
+      verb: 'archive',
+      laneId: lane.id,
+      actor: 'user',
+    }));
+    expect(res.status).toBeLessThan(500);
+    const events = getLaneEvents(lane.id, 20);
+    const archived = events.filter((event) => event.verb === 'status_change')
+      .find((event) => (event.payload as { status?: string }).status === 'archived');
+    expect(archived).toBeTruthy();
+    expect(archived?.actor).toBe('orchestrator');
+  });
+});
