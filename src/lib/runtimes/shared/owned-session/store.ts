@@ -28,11 +28,7 @@ import {
   signalBridgeTerminalSession,
   spawnBridgeTerminalSession,
 } from '@/lib/runtime/pty-bridge';
-import {
-  archiveOwnedSessionDir,
-  archivedSessionPathForSurfaceId,
-  restoreArchivedOwnedSessionDir,
-} from './archive';
+import { archiveOwnedSessionDir, archivedSessionPathForSurfaceId, readOwnedSessionState, restoreArchivedOwnedSessionDir } from './archive';
 import type {
   AgentSummary,
   EventItem,
@@ -1568,6 +1564,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     getRuntimeTail,
     getReviewPacket,
     getFleetAdditions,
+    sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
     archiveSession,
     sweepOrphanedSessions,
     getTelemetrySources,
