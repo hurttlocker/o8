@@ -39,6 +39,7 @@ import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { handleCodexJsonLine } from './codex-orchestrator-events';
 import {
   ensureRegisteredSession,
@@ -466,6 +467,18 @@ export async function sendToCodexOrchestrator(
   }
 
   session.status = 'busy';
+  // #1551 — preflight the repo path before ANY spawn work. The default
+  // backend had no preflight at all: a missing folder surfaced as
+  // "spawn codex ENOENT" (naming the healthy binary), and a non-git folder
+  // let codex boot and fail into a confusing tool-side error mid-turn.
+  try {
+    assertOrchestratorRepoPath(session.repoPath);
+  } catch (err) {
+    session.status = 'dead';
+    onEvent({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+    return;
+  }
   let codexHome: string;
   try {
     // A 'propose' turn gets the operator-stripped (read-only proposer) config —

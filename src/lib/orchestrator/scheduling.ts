@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
@@ -7,6 +7,7 @@ import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
+import { isGitWorkTreeSync } from '@/lib/lane/repo-preflight';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -67,17 +68,10 @@ const RECOVERY_COOLDOWN_MS = 60_000;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
 const execFileAsync = promisify(execFile);
 
-function isGitRepoSync(repoPath: string) {
-  try {
-    return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
-      encoding: 'utf-8',
-      timeout: 5_000,
-      maxBuffer: 128 * 1024,
-    }).trim() === 'true';
-  } catch {
-    return false;
-  }
-}
+// #1551 — one canonical work-tree probe, shared with both orchestrator spawn
+// preflights (repo-preflight.ts) so the dispatch gate and the spawn gate can
+// never drift.
+const isGitRepoSync = isGitWorkTreeSync;
 
 function createLaneBinding(
   packet: OrchestratorPacket,

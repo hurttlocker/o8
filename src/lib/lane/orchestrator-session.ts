@@ -46,6 +46,7 @@ import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { MODEL_IDS } from '@/lib/models';
 import { fableEnvOverride } from '@/lib/lane/fable-profile';
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { fingerprintMcpConfig, firstMcpConfigDivergence } from '@/lib/lane/orchestrator-mcp-fingerprint';
 import { buildOrchestratorArgs } from '@/lib/lane/orchestrator-spawn-args';
@@ -872,17 +873,10 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     stderrFd = openAppendFile(crashRecord.stderrPath);
   }
 
-  // Preflight the cwd (Sydney, FKAR3B/6JWBVV 2026-07-17): Node's spawn throws
-  // ENOENT when the WORKING DIRECTORY is missing, but its message names the
-  // BINARY — "spawn …/claude ENOENT" — which sent a whole debugging round
-  // chasing a healthy claude install while the real fault was a repo folder
-  // the operator had moved or deleted. Fail with the truth instead.
-  if (session.repoPath && !existsSync(session.repoPath)) {
-    throw new Error(
-      `This chat's repo folder no longer exists at ${session.repoPath} — it may have been moved or deleted. `
-      + 'Re-add the repo (or point its project at the new location in Settings → Projects), then start a new session.',
-    );
-  }
+  // Preflight the cwd (#1551, shared helper): missing folder OR non-git folder
+  // fails here with a human-actionable message instead of "spawn claude ENOENT"
+  // (which names the healthy binary) or a confusing mid-turn tool error.
+  assertOrchestratorRepoPath(session.repoPath);
   const proc = spawn(resolveClaudeBin(), args, {
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
@@ -962,6 +956,11 @@ export async function sendToOrchestrator(
   if (session.status === 'busy') {
     throw new Error('Orchestrator session is busy');
   }
+
+  // #1551 — preflight the repo path before ANY per-turn work (MCP config,
+  // warm-proc spawn). Missing folder OR non-git folder fails with a
+  // human-actionable message instead of "spawn claude ENOENT".
+  assertOrchestratorRepoPath(session.repoPath);
 
   if (consumeOrchestratorResetSignal(session.repoPath, session.threadId)) {
     session.claudeSessionId = null;
