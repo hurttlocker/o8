@@ -4,6 +4,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from '../lucide-shims';
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
 import { useLaneReviewChanges } from './useLaneReviewChanges';
+import { useLaneReviewSummary } from './useLaneReviewSummary';
+import { LaneReviewSummaryHeader } from './panel/LaneReviewSummaryHeader';
 import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewGitActions } from './ReviewGitActions';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -54,6 +56,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const localChanges = useWorkspaceChanges(reviewLaneId ? null : repoPath);
   const laneChanges = useLaneReviewChanges(reviewLaneId);
   const changes = reviewLaneId ? laneChanges : localChanges;
+  const laneSummary = useLaneReviewSummary(reviewLaneId);
   const [fileQuery, setFileQuery] = useState('');
   const [mode, setMode] = useState<DiffMode>('unified');
   const [wrap, setWrap] = useState(true);
@@ -395,7 +398,17 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             }
           />
         ) : (
-          visible.map((file) => (
+          <>
+            {reviewLaneId ? (
+              <LaneReviewSummaryHeader
+                summary={laneSummary.summary}
+                files={visible}
+                totalAdditions={visibleStats.additions}
+                totalDeletions={visibleStats.deletions}
+                onSelectFile={jumpToFile}
+              />
+            ) : null}
+            {visible.map((file) => (
             <ReviewFileRow
               key={file.path}
               file={file}
@@ -412,7 +425,8 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               selected={focusSignal.path === file.path}
               setRowRef={setRowRef}
             />
-          ))
+            ))}
+          </>
         )}
       </div>
       {hasFiles ? (
