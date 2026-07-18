@@ -7,7 +7,7 @@
 import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { prepareBetterSqlite3Bundle } from './native-bundle.mjs';
+import { prepareNativeBundle } from './native-bundle.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -432,10 +432,10 @@ try {
   }
 } catch { /* never let a cache failure stop the server booting */ }
 
-// Select the better-sqlite3 binary for the user's Node architecture before any
-// database code loads. The helper redirects the native require to prebuilds if
-// an installed app bundle is read-only and build/Release cannot be replaced.
-require('./native-addon-runtime.cjs').prepareBetterSqlite3(__dirname);
+// Select the better-sqlite3 and node-pty binaries for the user's Node ABI and
+// architecture before either package loads. The helper retains read-only
+// fallbacks for an installed app bundle whose build/Release cannot be replaced.
+require('./native-addon-runtime.cjs').prepareNativeAddons(__dirname);
 
 const http = require('node:http');
 const https = require('node:https');
@@ -511,12 +511,16 @@ for (const mod of nativeModules) {
 }
 
 try {
-  const nativeBundle = await prepareBetterSqlite3Bundle({ projectRoot: root, serverRoot: server });
-  console.log(`📦 Bundled better-sqlite3 x64 + arm64 (${nativeBundle.version}, node-v127)`);
-  console.log(`   asset: ${nativeBundle.assetUrl}`);
-  console.log(`   ${nativeBundle.cacheSource === 'cache' ? 'cache' : 'cached download'}: ${nativeBundle.cachePath}`);
+  const nativeBundle = await prepareNativeBundle({ projectRoot: root, serverRoot: server });
+  const abiSummary = Object.entries(nativeBundle.nodeAbis)
+    .map(([major, abi]) => `Node ${major}=ABI ${abi}`)
+    .join(', ');
+  console.log(`📦 Bundled better-sqlite3 + node-pty x64 + arm64 (${abiSummary})`);
+  for (const asset of nativeBundle.betterSqlite3.assets) {
+    console.log(`   ${asset.cacheSource === 'cache' ? 'cache' : 'cached download'}: ${asset.cachePath}`);
+  }
 } catch (error) {
-  console.error(`❌ better-sqlite3 dual-architecture export failed: ${error.message}`);
+  console.error(`❌ multi-ABI native addon export failed: ${error.message}`);
   process.exit(1);
 }
 
@@ -578,7 +582,7 @@ function compileServerBundle(label, entry, extraArgs = '') {
       `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${implementation} ${extraArgs}`,
       { cwd: root, stdio: 'inherit' },
     );
-    writeFileSync(join(server, `${label}.mjs`), `// Generated architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\nrequire('./native-addon-runtime.cjs').prepareBetterSqlite3(dirname(fileURLToPath(import.meta.url)));\nawait import('./${implementation}');\n`);
+    writeFileSync(join(server, `${label}.mjs`), `// Generated ABI-and-architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\nrequire('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));\nawait import('./${implementation}');\n`);
     console.log(`📦 Compiled ${label}.mjs + ${implementation}`);
   } catch (e) {
     console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);

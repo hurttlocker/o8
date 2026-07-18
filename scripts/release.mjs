@@ -35,7 +35,7 @@ const root = process.cwd();
 
 function runNativeGate(serverRoot) {
   verifyNativeBundle(serverRoot);
-  console.log('[release] native addon architecture gate passed');
+  console.log('[release] native addon ABI + architecture gate passed');
 }
 
 if (process.argv[2] === '--verify-native-bundle') {
@@ -53,11 +53,9 @@ if (process.argv[2] === '--verify-native-bundle') {
   }
 }
 
-// Node ABI guard: better-sqlite3 is compiled against the build-machine's Node
-// ABI (NODE_MODULE_VERSION). A v0.1.119 ship built on Node 25 produced an
-// ABI 141 binary that crashed on Node 22 users with "NODE_MODULE_VERSION 141
-// vs 127" — see #1015. The runtime app requires Node ≥22, so the build must
-// also be on Node 22 to keep ABIs aligned.
+// The authoring toolchain stays pinned to Node 22 via package.json + .nvmrc.
+// Runtime ABI compatibility is independent of this guard: tauri-export now
+// downloads and gates the Node 22 + 24 better-sqlite3 prebuilds explicitly.
 const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
 if (nodeMajor !== 22) {
   console.error(`[release] FATAL: builds must run on Node 22 LTS (current: ${process.version})`);
@@ -88,7 +86,7 @@ try {
   runNativeGate(PACKAGED_SERVER);
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);
-  console.error('[release] Refusing to publish a bundle without verified x64 + arm64 native addons.');
+  console.error('[release] Refusing to publish without Node 22 + 24, x64 + arm64 prebuilds for both native addons.');
   process.exit(1);
 }
 
