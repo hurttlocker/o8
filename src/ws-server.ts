@@ -6164,6 +6164,39 @@ function broadcastDiffStats() {
   });
 }
 
+// #1484 — incremental review scan. The 10s poll used to run a git change-set
+// probe against EVERY repo + EVERY worktree on every tick even when nothing
+// changed. Now: fs-watchers mark specific workspaces dirty; clean targets are
+// stat-gated on their .git HEAD+index mtimes (commits/stage churn) and
+// skipped; a 60s full sweep catches what neither signal covers (unstaged-only
+// edits in unwatched repos, worktrees whose .git is a pointer file). The
+// REPO_ROOT target always scans — its own unstaged edits are the Workspace
+// panel's live diff and carry no watcher signal.
+const reviewDirtyWorkspaces = new Set<string>();
+const reviewTargetScanMeta = new Map<string, string>();
+const REVIEW_FULL_SWEEP_MS = 60_000;
+let lastReviewFullSweepAt = 0;
+
+function markReviewWorkspaceDirty(base: string, filename: string | null): void {
+  if (!filename) return;
+  const firstSegment = filename.split(/[\\/]/, 1)[0];
+  if (!firstSegment) return;
+  reviewDirtyWorkspaces.add(resolve(base, firstSegment));
+}
+
+async function reviewTargetStatKey(workspacePath: string): Promise<string> {
+  const gitDir = resolve(workspacePath, '.git');
+  const parts = await Promise.all(['HEAD', 'index'].map(async (name) => {
+    try {
+      const info = await stat(resolve(gitDir, name));
+      return `${info.size}:${info.mtimeMs}`;
+    } catch {
+      return 'x';
+    }
+  }));
+  return parts.join('|');
+}
+
 async function broadcastReviewFileChanges() {
   if (!hasReviewSubscribers()) return;
 
@@ -6176,9 +6209,20 @@ async function broadcastReviewFileChanges() {
     }
   }
 
+  const now = Date.now();
+  const fullSweep = now - lastReviewFullSweepAt >= REVIEW_FULL_SWEEP_MS;
+  if (fullSweep) lastReviewFullSweepAt = now;
+
   let nextIndex = 0;
   const scanTarget = async (target: typeof targets[number]) => {
     try {
+      const isRoot = resolve(target.workspacePath) === REPO_ROOT;
+      const statKey = await reviewTargetStatKey(target.workspacePath);
+      if (!fullSweep && !isRoot && !reviewDirtyWorkspaces.has(target.workspacePath)) {
+        if (reviewTargetScanMeta.get(target.workspacePath) === statKey) return;
+      }
+      reviewDirtyWorkspaces.delete(target.workspacePath);
+      reviewTargetScanMeta.set(target.workspacePath, statKey);
       const summary = await getLiveReviewChangeSet(target.workspacePath, target.repoPath, target.sessionKey);
       const hash = JSON.stringify(summary.changedFiles.map((file) => [
         file.path,
@@ -6284,11 +6328,22 @@ function scheduleReviewRefresh(delayMs = 500) {
 // dispatch and may not exist at boot.
 const watchedWorktreeBases = new Set<string>();
 
-function ensureWorktreeWatchers() {
-  for (const base of [
+function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
+  // #1484 — watch every registered repo's worktree bases, not just the root
+  // repo's: dispatched workers live in other repos' .cortex-worktrees and
+  // their edits should mark the review scan dirty the same way. FSEvents
+  // recursive watches are kernel-coalesced and O(1) to establish per base.
+  const bases = [
     resolve(REPO_ROOT, '.cortex-worktrees'),
     resolve(REPO_ROOT, '.claude', 'worktrees'),
-  ]) {
+  ];
+  for (const repoPath of extraRepoPaths) {
+    const resolved = resolve(repoPath);
+    if (resolved === REPO_ROOT) continue;
+    bases.push(resolve(resolved, '.cortex-worktrees'));
+    bases.push(resolve(resolved, '.claude', 'worktrees'));
+  }
+  for (const base of bases) {
     if (watchedWorktreeBases.has(base) || !existsSync(base)) continue;
     try {
       watch(base, { recursive: true }, (_event, filename) => {
@@ -6296,6 +6351,7 @@ function ensureWorktreeWatchers() {
         // An UNKNOWN path is treated as real — fail safe, never fail silent.
         if (isWorktreeNoise(filename)) return;
         markConflictsDirty();
+        markReviewWorkspaceDirty(base, filename ?? null);
       }).on('error', (err) => {
         // Lost the signal — fall back to unconditional polling rather than go
         // blind. Never worse than the behaviour this replaced.
@@ -6358,8 +6414,13 @@ if (existsSync(GIT_DIR)) {
 ensureWorktreeWatchers();
 // A worktree base dir created after boot (first dispatch of the session) has no
 // watcher yet. Re-attaching is idempotent and costs a couple of stat()s, so a
-// slow re-check closes that gap without any hot-path work.
-setInterval(ensureWorktreeWatchers, 30_000).unref?.();
+// slow re-check closes that gap without any hot-path work — and pulls in the
+// registered-repo bases (#1484) once the repo list is readable.
+setInterval(() => {
+  void listRepoPaths()
+    .then((paths) => ensureWorktreeWatchers(paths))
+    .catch(() => ensureWorktreeWatchers());
+}, 30_000).unref?.();
 
 reviewPollTimer = setInterval(() => {
   scheduleReviewRefresh(0);
