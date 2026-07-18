@@ -630,6 +630,10 @@ export async function archiveOwnedGeminiSession(surfaceId: string) {
   return geminiStore.archiveSession(surfaceId);
 }
 
+export async function ownedGeminiSessionState(surfaceId: string) {
+  return geminiStore.sessionState(surfaceId);
+}
+
 export async function sweepOrphanedGeminiSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
   return geminiStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
 }

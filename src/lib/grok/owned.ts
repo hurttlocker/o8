@@ -256,4 +256,5 @@ export const getOwnedGrokTelemetrySources = grokStore.getTelemetrySources.bind(g
 export const setOwnedGrokReviewDisposition = grokStore.setReviewDisposition.bind(grokStore);
 export const invalidateOwnedGrokFleetCache = grokStore.invalidateFleetCache.bind(grokStore);
 export const archiveOwnedGrokSession = grokStore.archiveSession.bind(grokStore);
+export const ownedGrokSessionState = grokStore.sessionState.bind(grokStore);
 export const sweepOrphanedGrokSessions = grokStore.sweepOrphanedSessions.bind(grokStore);

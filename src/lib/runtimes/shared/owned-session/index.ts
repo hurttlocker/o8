@@ -9,6 +9,7 @@ export type {
   OwnedRunMode,
   OwnedRunOutcome,
   OwnedReviewDisposition,
+  OwnedSessionState,
   OwnedChildExitOutcome,
   OwnedRunRecord,
   OwnedSessionRecord,
