@@ -227,8 +227,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   const runArtifactCache = new Map<string, {
     stdoutKey: string;
     stderrKey: string;
-    stdoutRaw: string;
-    stderrRaw: string;
+    /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit (F19). */
+    stdoutRaw: string | null;
+    stderrRaw: string | null;
     parsed: ParsedRunLog;
   }>();
   const RUN_ARTIFACT_CACHE_MAX = 48;
@@ -242,6 +243,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     }
   }
 
+  // Adversarial F19 — retain raw log text only under this cap. The cache's
+  // win is skipping the re-PARSE; pinning up to 48 multi-MB raw stdout
+  // buffers was a new hundreds-of-MB retention risk. Oversized runs keep the
+  // parsed result cached and re-read raw from disk on hit (cheap vs parse).
+  const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
+
   async function readRunArtifacts(run: OwnedRunRecord) {
     const [stdoutKey, stderrKey] = await Promise.all([
       statKey(run.stdoutPath),
@@ -252,7 +259,15 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       // Refresh recency for the LRU eviction below.
       runArtifactCache.delete(run.id);
       runArtifactCache.set(run.id, cached);
-      return { stdoutRaw: cached.stdoutRaw, stderrRaw: cached.stderrRaw, parsed: cached.parsed };
+      if (cached.stdoutRaw !== null && cached.stderrRaw !== null) {
+        return { stdoutRaw: cached.stdoutRaw, stderrRaw: cached.stderrRaw, parsed: cached.parsed };
+      }
+      // Oversized run: parse stays cached, raw re-reads from disk.
+      const [rereadStdout, rereadStderr] = await Promise.all([
+        cached.stdoutRaw ?? (stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => '')),
+        cached.stderrRaw ?? (stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => '')),
+      ]);
+      return { stdoutRaw: rereadStdout, stderrRaw: rereadStderr, parsed: cached.parsed };
     }
 
     const [stdoutRaw, stderrRaw] = await Promise.all([
@@ -260,11 +275,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => ''),
     ]);
 
+    const withinRawCap = stdoutRaw.length + stderrRaw.length <= RAW_RETENTION_MAX_BYTES;
     const entry = {
       stdoutKey,
       stderrKey,
-      stdoutRaw,
-      stderrRaw,
+      stdoutRaw: withinRawCap ? stdoutRaw : null,
+      stderrRaw: withinRawCap ? stderrRaw : null,
       parsed: adapter.parseRunLog(stdoutRaw, run),
     };
     runArtifactCache.set(run.id, entry);
@@ -273,7 +289,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       if (oldest === undefined) break;
       runArtifactCache.delete(oldest);
     }
-    return { stdoutRaw: entry.stdoutRaw, stderrRaw: entry.stderrRaw, parsed: entry.parsed };
+    return { stdoutRaw, stderrRaw, parsed: entry.parsed };
   }
 
   async function readOwnedRunStdout(run: OwnedRunRecord): Promise<string> {

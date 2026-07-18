@@ -1713,6 +1713,29 @@ async function nextServerAliveDespiteBackpressure(): Promise<boolean> {
   }
 }
 
+// Adversarial F15 — the probe hits a DIFFERENT (cheapest) endpoint than the
+// channel that is failing, so a channel whose OWN route is genuinely broken
+// while the server is alive would be masked forever: every down transition
+// overridden, full-cadence hot retries, no operator signal. Cap consecutive
+// overrides per channel; a real channel success resets the count.
+const BRIDGE_PROBE_OVERRIDE_CAP = 5;
+const bridgeProbeOverrides = new Map<string, number>();
+
+function recordBridgeChannelSuccess(channel: string): void {
+  bridgeProbeOverrides.delete(channel);
+}
+
+async function shouldOverrideBridgeDown(channel: string): Promise<boolean> {
+  const overrides = bridgeProbeOverrides.get(channel) ?? 0;
+  if (overrides >= BRIDGE_PROBE_OVERRIDE_CAP) {
+    console.warn(`[ws-server] ${channel}: server alive but the channel itself failed ${overrides}x in a row — letting it latch down.`);
+    return false;
+  }
+  if (!(await nextServerAliveDespiteBackpressure())) return false;
+  bridgeProbeOverrides.set(channel, overrides + 1);
+  return true;
+}
+
 // ── Sync helpers ──
 
 async function fetchSync(body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
@@ -2572,6 +2595,7 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
   globalSnapshotInFlight = true;
   try {
     const snapshot = await fetchCommandCenterSnapshot(Boolean(options.fresh));
+    recordBridgeChannelSuccess('global-snapshot');
     const success = recordRealtimeBridgeSuccess(globalSnapshotBridgeBackoff);
     if (success.transition === 'up') {
       console.log('[ws-server] realtime global snapshot recovered');
@@ -2644,7 +2668,7 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
     if (typeof msg === 'string' && msg.includes('(404)')) return;
     const failure = recordRealtimeBridgeFailure(globalSnapshotBridgeBackoff);
     if (failure.transition === 'down') {
-      if (await nextServerAliveDespiteBackpressure()) {
+      if (await shouldOverrideBridgeDown('global-snapshot')) {
         recordRealtimeBridgeSuccess(globalSnapshotBridgeBackoff);
         console.warn('[ws-server] realtime global snapshot slow but next-server alive — staying up:', msg);
       } else {
@@ -2677,6 +2701,7 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
   mobileSnapshotInFlight = true;
   try {
     const inbox = await getMobileInboxSnapshot({ fresh });
+    recordBridgeChannelSuccess('mobile-inbox');
     const success = recordRealtimeBridgeSuccess(mobileInboxBridgeBackoff);
     if (success.transition === 'up') {
       console.log('[ws-server] realtime mobile inbox snapshot recovered');
@@ -2770,7 +2795,7 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
     const reason = error instanceof Error ? error.message : 'unknown';
     const failure = recordRealtimeBridgeFailure(mobileInboxBridgeBackoff);
     if (failure.transition === 'down') {
-      if (await nextServerAliveDespiteBackpressure()) {
+      if (await shouldOverrideBridgeDown('mobile-inbox')) {
         recordRealtimeBridgeSuccess(mobileInboxBridgeBackoff);
         console.warn('[ws-server] realtime mobile inbox slow but next-server alive — staying up:', reason);
       } else {
@@ -2872,6 +2897,7 @@ function startHeadlessTickBridge(intervalMs: number) {
     headlessTickBridgeInFlight = true;
     void triggerHeadlessSprintTick()
       .then(() => {
+        recordBridgeChannelSuccess('headless-tick');
         const success = recordRealtimeBridgeSuccess(headlessTickBridgeBackoff);
         if (success.transition === 'up') {
           console.log('[headless] Tick bridge recovered');
@@ -2882,7 +2908,7 @@ function startHeadlessTickBridge(intervalMs: number) {
         const reason = error instanceof Error ? error.message : String(error);
         const failure = recordRealtimeBridgeFailure(headlessTickBridgeBackoff);
         if (failure.transition === 'down') {
-          void nextServerAliveDespiteBackpressure().then((alive) => {
+          void shouldOverrideBridgeDown('headless-tick').then((alive) => {
             if (alive) {
               recordRealtimeBridgeSuccess(headlessTickBridgeBackoff);
               console.warn('[headless] Tick bridge slow but next-server alive — staying up:', reason);

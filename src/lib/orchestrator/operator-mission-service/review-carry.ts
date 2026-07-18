@@ -23,6 +23,7 @@ export async function carryReviewAcrossRebaseIfSamePatch(input: {
     input.lane.worktreePath || input.lane.repoPath,
     input.reviewedHeadSha,
     input.currentHeadSha,
+    input.lane.baseBranch || 'main',
   );
   if (!comparison.matches || !comparison.patchId) return false;
 

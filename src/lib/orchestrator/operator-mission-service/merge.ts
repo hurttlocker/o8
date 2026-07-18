@@ -258,10 +258,26 @@ async function getWaveMergeOrder(
     return null;
   }
 
-  const candidateWorktrees = candidates.map((candidate) => candidate.worktree);
+  // Adversarial F9 — the worktree dirty-files probe swallows partial failures
+  // (committed-diff vs an unreachable base resolves to ''), which since #1525
+  // could turn a real overlap into a false negative and let coupled siblings
+  // merge out of order. Augment each candidate with the lane's own diff facts:
+  // a second independent probe that can only ADD overlaps, never remove them.
+  const { getLaneDiffFacts } = await import('@/lib/lane/lane-diff-facts');
+  const enrichedCandidates = candidates.map((candidate) => {
+    try {
+      const facts = getLaneDiffFacts(candidate.lane);
+      const merged = new Set([...candidate.worktree.dirtyFiles, ...facts.changedFiles]);
+      return { ...candidate, worktree: { ...candidate.worktree, dirtyFiles: [...merged] } };
+    } catch {
+      return candidate;
+    }
+  });
+
+  const candidateWorktrees = enrichedCandidates.map((candidate) => candidate.worktree);
   const overlaps = detectFileOverlaps(candidateWorktrees);
   const recommendations = await recommendMergeOrder(candidateWorktrees, overlaps);
-  const candidateByWorktreeId = new Map(candidates.map((candidate) => [candidate.worktree.id, candidate] as const));
+  const candidateByWorktreeId = new Map(enrichedCandidates.map((candidate) => [candidate.worktree.id, candidate] as const));
 
   // #1525 — symmetric overlap index, so enforcement can be scoped to packets
   // that actually touch the same files.
