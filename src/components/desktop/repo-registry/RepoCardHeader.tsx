@@ -79,6 +79,7 @@ function RepoCardHeaderBase({
   const activeWorktree = (worktreeSummary?.worktrees ?? []).find((worktree) => worktree.path === activeWorkspacePath) ?? null;
   const activeWorktreeTone = activeWorktree ? worktreeStageTone(activeWorktree.status) : null;
   const readinessPalette = repo.readiness ? repoReadinessPalette(repo.readiness.state) : null;
+  const repoMissing = repo.readiness?.state === 'missing';
   const readinessDisplayLabel = repoReadinessDisplayLabel(repo.readiness?.state, repo.readiness?.label);
   const readinessExplanation = repoReadinessExplanation(repo.readiness);
   const activeWorktreeExplanation = worktreeStatusExplanation(activeWorktree);
@@ -88,7 +89,7 @@ function RepoCardHeaderBase({
   const showStatusInfo = Boolean(
     rowStatusLabel
     && rowStatusExplanation
-    && (activeWorktreeTone?.label || repo.readiness?.state === 'blocked' || repo.readiness?.state === 'needs_setup'),
+    && (activeWorktreeTone?.label || repoMissing || repo.readiness?.state === 'blocked' || repo.readiness?.state === 'needs_setup'),
   );
   /* --- Compact activity badges (PR count + CI dot on the row header) --- */
   const openPrCount = prPreviewLoaded ? prPreview.length : 0;
@@ -118,7 +119,7 @@ function RepoCardHeaderBase({
     // o8:resolve-blocker which the dashboard catches: focuses this
     // repo and injects a draft message into the orchestrator chat
     // explaining the issue so the user can ask the agent for help.
-    const isBlocker = showStatusInfo && Boolean(rowStatusExplanation);
+    const isBlocker = !repoMissing && showStatusInfo && Boolean(rowStatusExplanation);
     const handleBlockerClick = (event: React.MouseEvent<HTMLElement>) => {
       event.stopPropagation();
       if (typeof window === 'undefined') return;
@@ -237,25 +238,27 @@ function RepoCardHeaderBase({
                 >
                   {repo.name.toLowerCase()}
                 </span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); onToggle(); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onToggle(); } }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    color: 'var(--t-text-faint)',
-                    marginTop: 1,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {expanded
-                    ? <ChevronDownIcon size={12} />
-                    : <ChevronRightIcon size={12} />}
-                </span>
+                {!repoMissing ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onToggle(); } }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      color: 'var(--t-text-faint)',
+                      marginTop: 1,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {expanded
+                      ? <ChevronDownIcon size={12} />
+                      : <ChevronRightIcon size={12} />}
+                  </span>
+                ) : null}
                 {openPrCount > 0 ? (
                   <span
                     style={{
@@ -379,6 +382,62 @@ function RepoCardHeaderBase({
             </button>
           </div>
         </div>
+
+        {repoMissing ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              paddingTop: 6,
+              paddingRight: 12,
+              paddingBottom: 8,
+              paddingLeft: 26,
+              background: 'var(--t-danger-soft)',
+              borderBottom: '1px solid var(--t-danger-border)',
+            }}
+          >
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: 11,
+                lineHeight: '15px',
+                fontWeight: 300,
+                color: 'var(--t-text-secondary)',
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {repo.readiness?.summary}
+            </span>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove(repo);
+              }}
+              style={{
+                minHeight: 44,
+                paddingTop: 0,
+                paddingRight: 12,
+                paddingBottom: 0,
+                paddingLeft: 12,
+                border: '1px solid var(--t-danger-border)',
+                borderRadius: 8,
+                background: 'transparent',
+                color: 'var(--t-danger)',
+                cursor: 'pointer',
+                flexShrink: 0,
+                fontSize: 11,
+                fontWeight: 400,
+                fontFamily: 'var(--font-sans-system)',
+              }}
+            >
+              Remove repo
+            </button>
+          </div>
+        ) : null}
 
         {showHeaderHover ? (
           <RepoStatusHover

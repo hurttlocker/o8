@@ -97,7 +97,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
         model={renderModel}
       />
 
-      {props.expanded ? (
+      {props.expanded && props.repo.readiness?.state !== 'missing' ? (
         <RepoCardExpandedContent
           repo={props.repo}
           agentsByBranch={props.agentsByBranch}
@@ -112,7 +112,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
         />
       ) : null}
 
-      <RepoCardSettings repo={props.repo} model={renderModel} />
+      {props.repo.readiness?.state !== 'missing' ? <RepoCardSettings repo={props.repo} model={renderModel} /> : null}
 
       {contextMenu && typeof document !== 'undefined' ? createPortal(
         <div

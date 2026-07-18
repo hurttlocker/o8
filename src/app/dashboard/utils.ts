@@ -264,7 +264,7 @@ export function parseIssueNumber(value?: string | null) {
 export function readinessTone(state?: RepoReadiness['state'] | null): CommandPaletteStateTone {
   if (state === 'ready') return 'green';
   if (state === 'needs_setup') return 'amber';
-  if (state === 'blocked') return 'red';
+  if (state === 'missing' || state === 'blocked') return 'red';
   return 'slate';
 }
 
@@ -292,6 +292,7 @@ export function paletteWorkflowLabel(agent: PaletteAgentSummary) {
 }
 
 export function attentionRank(status: string) {
+  if (status === 'Folder missing') return 520;
   if (status === 'Needs setup') return 470;
   if (status === 'Blocked') return 500;
   if (status === 'Reviewing') return 420;

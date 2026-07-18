@@ -458,8 +458,9 @@ function RepoRegistryListBase({
                 agentsByBranch={effectiveAgentBranchMap.get(repo.name)}
                 orchestratorPackets={orchestratorPackets}
                 activePorts={portsByRepo.get(repo.name)}
-                expanded={expandedRepoIds.has(repo.id)}
+                expanded={repo.readiness?.state !== 'missing' && expandedRepoIds.has(repo.id)}
                 onToggle={() => setExpandedRepoIds((prev) => {
+                  if (repo.readiness?.state === 'missing') return prev;
                   const next = new Set(prev);
                   if (next.has(repo.id)) next.delete(repo.id);
                   else next.add(repo.id);

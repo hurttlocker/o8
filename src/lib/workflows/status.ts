@@ -106,6 +106,7 @@ export function deriveWorkflowStage(input: WorkflowStageInput): WorkflowStageBad
     || input.runtimeStatus === 'failed'
     || input.runtimeStatus === 'blocked'
     || input.readinessState === 'blocked'
+    || input.readinessState === 'missing'
     || /(blocked|unable|failed|error|not ready|missing|broken)/.test(latestText)
   ) {
     return workflowBadge('blocked');

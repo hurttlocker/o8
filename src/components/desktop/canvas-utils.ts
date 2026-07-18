@@ -36,6 +36,7 @@ export function readinessTone(readiness?: RepoReadiness | null) {
       return { background: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.16)', color: '#15803d' };
     case 'needs_setup':
       return { background: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.18)', color: '#b45309' };
+    case 'missing':
     case 'blocked':
       return { background: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.18)', color: '#b91c1c' };
     default:
