@@ -390,6 +390,39 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
       setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
 
+      // #1522 — a lane launching into an ALREADY-BOUND worktree skips the
+      // create-time pre-launch rebase entirely (isolate:false below), so a
+      // worktree provisioned earlier (queued dispatch:false mission, failed
+      // prior attempt) dispatched against its create-time base snapshot — and
+      // the resulting branch diffed everything merged in between as
+      // DELETIONS. Refresh the existing worktree onto current origin/base
+      // before every launch into it. A conflict means the branch carries real
+      // prior work against a moved base — proceed on the old base with an
+      // audit event (the worker/reviewer sees it); the dangerous zero-work
+      // stale snapshot always fast-forwards clean.
+      if (lane.worktreePath && lane.worktreePath !== lane.repoPath) {
+        try {
+          const { getWorktreeManager } = await import('@/lib/worktree');
+          await getWorktreeManager(lane.repoPath).rebaseOntoMain(lane.worktreePath, {
+            baseBranch: lane.baseBranch,
+            branchName: lane.branch,
+          });
+          appendEvent(command.laneId, 'worktree_refreshed', 'system', {
+            packetId: lane.packetId,
+            baseBranch: lane.baseBranch,
+            note: `Existing worktree rebased onto current origin/${lane.baseBranch} before launch.`,
+          });
+        } catch (err) {
+          const note = err instanceof Error ? err.message : String(err);
+          appendEvent(command.laneId, 'worktree_refresh_failed', 'system', {
+            packetId: lane.packetId,
+            baseBranch: lane.baseBranch,
+            note,
+          });
+          console.warn(`[lane] pre-launch worktree refresh failed for ${command.laneId} — launching on the existing base: ${note}`);
+        }
+      }
+
       try {
         const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
         const result = await launchRuntimeSurface({

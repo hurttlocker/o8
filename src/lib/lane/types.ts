@@ -243,6 +243,11 @@ export type LaneEventVerb =
   // Worker consulted the Engineering Brain via `o8 ask` (2026-06-11).
   // Payload: { question, class, cacheHit, sourcesConsidered, citedCount, topTitles }
   | 'brain_consulted'
+  // Pre-launch refresh of an already-bound worktree onto current origin/base
+  // (#1522 — queued dispatch:false missions must not launch on a create-time
+  // base snapshot). Payload: { packetId, baseBranch, note }
+  | 'worktree_refreshed'
+  | 'worktree_refresh_failed'
   // Agent drove o8's embedded browser via `o8 browser` / o8_browser_* (#1232 phase 1).
   // Payload: { verb, selector?, surface?, ok, url? }
   | 'browser_acted'
