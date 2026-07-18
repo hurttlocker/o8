@@ -233,7 +233,19 @@ describe('merged-by-ancestry reconciliation', () => {
     const lane = seedLaneOnly(clone, 'agent/deleted-after-manual-merge');
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
-    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLane(lane.id)).toMatchObject({ status: 'archived', outcome: 'no_changes' });
+  }, 20_000);
+
+  it('finishes an orphaned branch at the base head as no changes instead of merged', async () => {
+    const { clone } = makeRepo('o8-lane-only-no-commits');
+    const lane = seedLaneOnly(clone);
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      outcome: 'no_changes',
+      outcomeNote: 'Agent finished without making changes',
+    });
   }, 20_000);
 
   it('never touches an orphaned lane with unmerged branch content', async () => {

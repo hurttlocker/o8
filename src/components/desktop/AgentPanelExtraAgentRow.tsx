@@ -21,6 +21,8 @@ export interface ExtraAgentRow {
   packetId: string | null;
   laneId: string | null;
   laneStatus: LaneStatus | null;
+  outcome: 'no_changes' | null;
+  outcomeNote: string | null;
   lastEventLabel: string | null;
   /** Latest review verdict was a rejection — drives the 'rejected' dot so the
    *  sidebar agrees with the decision banner (which reads the same verdict).
@@ -68,6 +70,7 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
 
 function rowDotState(row: ExtraAgentRow): AgentDotState {
   const lane = row.laneStatus;
+  if (row.outcome === 'no_changes') return 'idle';
   // 'merged'/'released' are real lane terminal states (the DB carries them) —
   // they were missing here, so a merged packet's row kept the reviewing dot
   // (operator report 2026-07-15).
@@ -86,6 +89,7 @@ function rowDotState(row: ExtraAgentRow): AgentDotState {
 
 function rowStatusLabel(row: ExtraAgentRow): string {
   const lane = row.laneStatus;
+  if (row.outcome === 'no_changes') return 'Finished — no changes';
   if (row.rejected) return 'declined';
   if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
   if (lane === 'awaiting_input') return 'needs input';
@@ -222,6 +226,20 @@ export function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
+      {row.outcome === 'no_changes' ? (
+        <span
+          style={{
+            flexShrink: 0,
+            color: 'var(--t-text-muted)',
+            fontSize: 9.5,
+            fontWeight: 300,
+            letterSpacing: '-0.3px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Finished — no changes
+        </span>
+      ) : null}
       {canRetry ? (
         <span
           title="Retry failed packet"
