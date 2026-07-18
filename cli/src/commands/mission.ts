@@ -13,8 +13,8 @@
  *   o8 mission dispatch [--mission <id>]
  *   o8 mission status   [--mission <id>] [--cost]
  *   o8 mission stop     --mission <id>
- *   o8 mission wait     [--mission <id>] [--packet <id>] [--timeout ms] [--poll ms]
- *   o8 mission tail     [--mission <id>] [--timeout ms] [--poll ms]
+ *   o8 mission wait     [--mission <id>] [--packet <id>] [--timeout <ms|5m|90s>] [--poll ms]
+ *   o8 mission tail     [--mission <id>] [--timeout <ms|5m|90s>] [--poll ms]
  */
 
 import { apiFetch, CliError, EXIT } from '../api.js';
@@ -81,7 +81,7 @@ const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed
  * review). Cap 6h — long worker runs must be watchable end to end.
  */
 const DURATION_CAP_MS = 6 * 60 * 60 * 1000;
-function parseDurationMs(raw: string | null | undefined, defaultMs: number): number {
+export function parseDurationMs(raw: string | null | undefined, defaultMs: number): number {
   const trimmed = raw?.trim() ?? '';
   if (!trimmed) return defaultMs;
   const match = trimmed.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)?$/i);

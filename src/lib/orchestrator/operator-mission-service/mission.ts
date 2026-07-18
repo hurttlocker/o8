@@ -41,6 +41,7 @@ import type {
 } from './types';
 
 const INLINE_BRANCH_MAX_LENGTH = 60;
+export const MISSION_CREATE_LOCK_WAIT_MS = 30_000;
 
 function branchTargetForIssue(issue: LoadedIssue) {
   if (!isInlineIssue(issue)) {
@@ -207,11 +208,14 @@ export async function createMission(input: CreateMissionInput) {
     updatedAt: new Date().toISOString(),
   });
 
-  const { state: persisted } = await withLockedState((current) => {
-    // Replace the mission under the control-plane lock so a concurrent
-    // headless tick cannot restore a stale mission after createMission returns.
-    Object.assign(current, mission);
-  });
+  const { state: persisted } = await withLockedState(
+    (current) => {
+      // Replace the mission under the control-plane lock so a concurrent
+      // headless tick cannot restore a stale mission after createMission returns.
+      Object.assign(current, mission);
+    },
+    { waitTimeoutMs: MISSION_CREATE_LOCK_WAIT_MS },
+  );
   const waves = new Map(buildDependencyGraph(persisted.packets).map((node) => [node.packetId, node.wave] as const));
 
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);

@@ -133,7 +133,12 @@ const { archiveLane, createLane, findLaneByPacket, getLane, getLaneEvents, setLa
 const { dispatch } = await import('@/lib/lane/commands');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const {
+  readOrchestratorControlPlaneState,
+  withControlPlaneLock,
+  writeOrchestratorControlPlaneState,
+} = await import('@/lib/orchestrator/control-plane');
+const { MISSION_CREATE_LOCK_WAIT_MS } = await import('@/lib/orchestrator/operator-mission-service/mission');
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
 const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service');
 const { recordMission } = await import('@/lib/db/missions-store');
@@ -301,9 +306,89 @@ describe('seam C — typecheckAutoRetries survives the orchestrator-state persis
   });
 });
 
-// ── Seam E — omitted mission runtime uses the effective paired default ──────
+// ── Seam E — mission create bounds the dispatch-held state lock ─────────────
 
-describe('seam E — create-mission without a runtime uses the paired operator default', () => {
+describe('seam E — create-mission fails loudly when dispatch holds the mission store lock', () => {
+  const url = 'http://localhost:3001/api/orchestrator/create-mission';
+
+  it('returns mission_store_busy within the acquisition bound instead of hanging', async () => {
+    const beforeMissionId = readOrchestratorControlPlaneState().missionId;
+    const beforeMissionRows = (getSqlite().prepare('SELECT COUNT(*) AS count FROM missions').get() as { count: number }).count;
+    let releaseHolder!: () => void;
+    let markHolderReady!: () => void;
+    const holderReady = new Promise<void>((resolve) => {
+      markHolderReady = resolve;
+    });
+    const holder = withControlPlaneLock(async () => {
+      markHolderReady();
+      await new Promise<void>((resolve) => {
+        releaseHolder = resolve;
+      });
+    });
+    await holderReady;
+
+    const originalSetTimeout = globalThis.setTimeout.bind(globalThis);
+    const lockTimeoutControl: { trigger?: () => void } = {};
+    let markTimeoutScheduled!: () => void;
+    const timeoutScheduled = new Promise<void>((resolve) => {
+      markTimeoutScheduled = resolve;
+    });
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((...args) => {
+      const timer = originalSetTimeout(...args);
+      const [handler, delay] = args;
+      if (delay === MISSION_CREATE_LOCK_WAIT_MS && typeof handler === 'function') {
+        lockTimeoutControl.trigger = () => handler();
+        markTimeoutScheduled();
+      }
+      return timer;
+    });
+
+    try {
+      const responsePromise = createMissionRoute.POST(operatorReq(url, {
+        repoPath: process.cwd(),
+        issues: [{
+          number: 90_146_600,
+          title: 'bound mission create lock wait',
+          body: 'Exercise the real route while dispatch owns the control-plane lock.',
+          url: '',
+        }],
+      }));
+      await Promise.race([
+        timeoutScheduled,
+        new Promise<never>((_, reject) => {
+          originalSetTimeout(() => reject(new Error('mission-create lock timeout was not scheduled')), 5_000);
+        }),
+      ]);
+
+      const startedAt = performance.now();
+      if (!lockTimeoutControl.trigger) {
+        throw new Error('mission-create lock timeout callback was not captured');
+      }
+      lockTimeoutControl.trigger();
+      const res = await responsePromise;
+      expect(performance.now() - startedAt).toBeLessThan(1_000);
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toEqual({
+        ok: false,
+        error: {
+          code: 'mission_store_busy',
+          message: 'Mission store is busy dispatching — retry in a moment.',
+        },
+      });
+      expect(readOrchestratorControlPlaneState().missionId).toBe(beforeMissionId);
+      const afterMissionRows = (getSqlite().prepare('SELECT COUNT(*) AS count FROM missions').get() as { count: number }).count;
+      expect(afterMissionRows).toBe(beforeMissionRows);
+    } finally {
+      timeoutSpy.mockRestore();
+      releaseHolder();
+      await holder;
+    }
+  });
+});
+
+// ── Seam F — omitted mission runtime uses the effective paired default ──────
+
+describe('seam F — create-mission without a runtime uses the paired operator default', () => {
   const url = 'http://localhost:3001/api/orchestrator/create-mission';
 
   it('orchestratorBackend=codex + no explicit dispatch choice creates Claude Code packets', async () => {
