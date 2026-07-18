@@ -46,6 +46,26 @@ const ORCHESTRATOR_MODEL_STORAGE_PREFIX = 'o8:orchestrator:model:';
 const ORCHESTRATOR_PRELUDE_STORAGE_PREFIX = 'o8:orchestrator:resume-prelude:';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
 const MAX_RECOVERY_ATTEMPTS = 2;
+
+// #1469 — human sentences for the lane-event labels that park a lane
+// awaiting_input. The real failure reason must reach the packet card, not
+// just next-server.log.
+function friendlyAwaitingInputReason(label: string | null | undefined): string | null {
+  switch (label) {
+    case 'rebase_conflict':
+      return 'Rebase onto the base branch conflicted — resolve the conflict (see Inbox for the conflicting files), then retry.';
+    case 'fetch_unreachable':
+      return 'Could not fetch the base branch from origin — check the remote/network, then retry.';
+    case 'worktree_refresh_failed':
+      return 'Refreshing the worktree onto the current base failed — see lane events for the git output.';
+    case 'silent_exit_verification_failed':
+      return 'The worker exited and its salvaged work failed verification — operator review required.';
+    case 'silent_exit_no_work':
+      return 'The worker exited without producing any changes.';
+    default:
+      return null;
+  }
+}
 // Mirrors MAX_LAUNCH_ATTEMPTS in scheduling.ts (duplicated across files like the
 // recovery cap above) — the packet-scoped launch/attach retry ceiling.
 const MAX_LAUNCH_ATTEMPTS = 5;
@@ -999,7 +1019,20 @@ export function reconcileOrchestratorMissionState(
       }
       if (ds === 'running') { next.status = 'running'; return next; }
       if (ds === 'launching') { next.status = 'launching'; return next; }
-      if (ds === 'awaiting_input') { next.status = 'blocked'; next.blockedReason = 'Awaiting operator input'; return next; }
+      if (ds === 'awaiting_input') {
+        next.status = 'blocked';
+        // #1469 — preserve the REAL reason. The dag fold-back and the
+        // rebase-conflict path both set a truthful blockedReason (conflicting
+        // files, fetch failure) before the lane parks awaiting_input;
+        // hardcoding the generic string here clobbered it, leaving the
+        // operator staring at 'Awaiting operator input' while the actual
+        // error lived only in next-server.log. Mirrors the
+        // awaiting_orchestrator branch below.
+        next.blockedReason = packet.blockedReason
+          ?? friendlyAwaitingInputReason(domainLane.lastEventLabel)
+          ?? 'Awaiting operator input';
+        return next;
+      }
       if (ds === 'awaiting_orchestrator') { next.status = 'blocked'; next.blockedReason = domainLane.lastEventLabel ?? 'Awaiting orchestrator'; return next; }
       if (ds === 'paused' && domainLane.sessionKey) { next.status = 'idle'; return next; }
       if (ds === 'paused' && !domainLane.sessionKey) {
