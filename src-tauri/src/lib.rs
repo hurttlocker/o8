@@ -5719,6 +5719,7 @@ pub fn run() {
             mac_perms::fn_key_usage_type_cmd,
             mac_perms::screen_capture_granted_cmd,
             mac_perms::mic_permission_granted_cmd,
+            mac_perms::request_mic_access_cmd,
             background::autostart_is_enabled,
             background::autostart_set,
             background::background_mode_is_enabled,
