@@ -6,9 +6,13 @@ import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
+function withinScope(input: ResetPacketInput, laneId: string): boolean {
+  return !input.scope || input.scope.laneIds.includes(laneId);
+}
+
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
-  const allBound = listLanes().filter((lane) => lane.packetId === input.packetId);
+  const allBound = listLanes().filter((lane) => lane.packetId === input.packetId && withinScope(input, lane.id));
 
   if (allBound.length === 0) {
     throw new Error(`Packet ${input.packetId} not found — no mission packet and no lane.`);
@@ -103,7 +107,11 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
 
     // F33 fallback (#1025): mirror the in-mission reset sweep for packets
     // missing from current mission state but still backed by durable lanes.
-    try {
+    // Scoped (backgrounded-stop) resets skip the prefix glob entirely — a
+    // re-dispatch during the cleanup window creates a dir matching the same
+    // packet prefix, and the glob would rm -rf the LIVE worker's checkout.
+    // The captured cleanupTargets above already pruned this stop's worktrees.
+    if (!input.scope) try {
       const { readdir, rm } = await import('node:fs/promises');
       const path = await import('node:path');
       // #1215 — derive repos from ALL bound lanes (terminal included) so a
@@ -236,7 +244,7 @@ export async function resetPacket(input: ResetPacketInput) {
   const cleanupTargets: ResetCleanupTarget[] = [];
   try {
     const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
-    const bound = listLanes().filter((lane) => lane.packetId === packet.id);
+    const bound = listLanes().filter((lane) => lane.packetId === packet.id && withinScope(input, lane.id));
     if (bound.length === 0) {
       console.log(`[reset-packet] No lane bound to packet ${packet.referenceLabel} (${packet.id})`);
     }
@@ -327,7 +335,10 @@ export async function resetPacket(input: ResetPacketInput) {
     // Sweep `<repo>/.cortex-worktrees/packet-pkt-<id>*` on disk and remove
     // anything that survived. Otherwise the next create() retry loop bumps
     // the suffix and the slow node_modules clone runs again from scratch.
-    try {
+    // Scoped (backgrounded-stop) resets skip the glob — it would rm -rf a
+    // re-dispatched packet's live worktree (same prefix). The captured
+    // cleanupTargets above already pruned this stop's own worktrees.
+    if (!input.scope) try {
       const { readdir, rm } = await import('node:fs/promises');
       const path = await import('node:path');
       const baseDir = path.join(state.repoPath, '.cortex-worktrees');
@@ -358,6 +369,14 @@ export async function resetPacket(input: ResetPacketInput) {
   const { result: heldPacket } = await withLockedState((fresh) => {
     const target = fresh.packets.find((candidate) => candidate.id === input.packetId);
     if (!target) return null;
+    // Generation guard for backgrounded cleanup: if the packet has moved on
+    // from the operator-stopped hold this cleanup belongs to (a legitimate
+    // re-dispatch cleared it / bound a new lane), the stale cleanup must NOT
+    // stomp the live state back to draft/held.
+    if (input.scope?.skipHoldIfStateMoved && (!target.operatorStopped || target.lane)) {
+      log(`Reset packet ${target.referenceLabel} (${input.packetId}) — state moved on during background cleanup; hold skipped.`);
+      return { referenceLabel: target.referenceLabel };
+    }
     markPacketResetHeld(target);
     return { referenceLabel: target.referenceLabel };
   });

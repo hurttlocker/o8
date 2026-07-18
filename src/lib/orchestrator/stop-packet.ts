@@ -35,10 +35,39 @@ export interface StopAllResult {
  * prune the worktree — no relaunch. The interrupt MUST run before resetPacket
  * nulls sessionKey, or the runtime process is orphaned (#1286).
  */
+// #1528 review F10 — one stop per packet at a time. Two concurrent stops
+// would double the backgrounded cleanup (duplicate archive/prune races) and
+// each would clear the other's operatorStopped provenance via the reset hold.
+const stopsInFlight = new Set<string>();
+
 export async function stopPacket(packetId: string): Promise<StopPacketResult> {
   const { listLanes } = await import('@/lib/lane/registry');
   const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service');
 
+  if (stopsInFlight.has(packetId)) {
+    return {
+      ok: true,
+      packetId,
+      interruptedSessions: 0,
+      archivedLanes: 0,
+      worktreePruned: false,
+      killConfirmed: true,
+      note: `A stop for ${packetId} is already in progress — not starting a second.`,
+    };
+  }
+  stopsInFlight.add(packetId);
+  try {
+    return await stopPacketInner(packetId, resetPacket, listLanes);
+  } finally {
+    stopsInFlight.delete(packetId);
+  }
+}
+
+async function stopPacketInner(
+  packetId: string,
+  resetPacket: typeof import('@/lib/orchestrator/operator-mission-service').resetPacket,
+  listLanes: typeof import('@/lib/lane/registry').listLanes,
+): Promise<StopPacketResult> {
   const lanes = listLanes().filter((lane) => lane.packetId === packetId);
 
   // #1528 — idempotent no-op: nothing bound anywhere means nothing to stop.
@@ -93,6 +122,13 @@ export async function stopPacket(packetId: string): Promise<StopPacketResult> {
     packetId,
     clearWorktree: true,
     reason: 'stopped by operator (#1286)',
+    // Generation scope: only the lanes captured at stop entry. A re-dispatch
+    // during the cleanup window binds a NEW lane + worktree this cleanup must
+    // never touch, and the hold is skipped if the packet's state moved on.
+    scope: {
+      laneIds: lanes.map((lane) => lane.id),
+      skipHoldIfStateMoved: true,
+    },
   }).then((reset) => {
     const pruned = (reset as { worktreePruned?: boolean }).worktreePruned === true;
     console.log(`[stop-packet] background cleanup finished for ${packetId}${pruned ? ' (worktree pruned)' : ''}`);
