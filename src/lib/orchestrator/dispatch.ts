@@ -14,5 +14,6 @@ export {
   buildRemainingLaunchBudget,
   type DispatchLaunchBudget,
   getDispatchBlocker,
+  mergeDispatchTickOutcome,
   runDispatchTick,
 } from './scheduling';

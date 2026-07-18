@@ -406,6 +406,36 @@ export function getDispatchBlocker(
  * dispatch via the lane command bus.
  * Returns the updated mission state.
  */
+/**
+ * Merge a dispatch tick's outcome onto FRESH locked state, per packet —
+ * never a whole-state overwrite. The tick runs outside the control-plane
+ * lock (it clones worktrees and spawns sessions, seconds of work), so by the
+ * time its result exists, concurrent locked writes (reviews, task creates,
+ * resets) may have landed. Only packets the tick actually changed (or added)
+ * are copied over; everything else keeps the fresh state. Adversarial F3 —
+ * the old `writeOrchestratorControlPlaneState(afterDispatch)` from the
+ * pre-tick snapshot clobbered every concurrent write on the merge path.
+ */
+export function mergeDispatchTickOutcome(
+  fresh: OrchestratorMissionState,
+  tickBase: OrchestratorMissionState,
+  afterDispatch: OrchestratorMissionState,
+): void {
+  const baseById = new Map(tickBase.packets.map((packet) => [packet.id, JSON.stringify(packet)] as const));
+  const freshIndexById = new Map(fresh.packets.map((packet, index) => [packet.id, index] as const));
+  for (const packet of afterDispatch.packets) {
+    const before = baseById.get(packet.id);
+    if (before !== undefined && before === JSON.stringify(packet)) continue;
+    const index = freshIndexById.get(packet.id);
+    if (index === undefined) {
+      fresh.packets.push(packet);
+    } else {
+      fresh.packets[index] = packet;
+    }
+  }
+  fresh.updatedAt = afterDispatch.updatedAt ?? fresh.updatedAt;
+}
+
 export async function runDispatchTick(
   state: OrchestratorMissionState,
   options: { launchBudget?: DispatchLaunchBudget; enforceBootRecoveryGuard?: boolean; missionArchived?: boolean } = {},
