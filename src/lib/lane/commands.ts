@@ -15,7 +15,8 @@ import type {
   Lane,
 } from '@/lib/lane/types';
 import type { ApprovalRisk } from '@/lib/approvals/types';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   createLane,
   getLane,
@@ -400,10 +401,22 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // prior work against a moved base — proceed on the old base with an
       // audit event (the worker/reviewer sees it); the dangerous zero-work
       // stale snapshot always fast-forwards clean.
-      if (lane.worktreePath && lane.worktreePath !== lane.repoPath) {
+      // Adversarial F12 — realpath-normalize before comparing: a symlinked or
+      // trailing-slash worktreePath equal to the primary checkout must never
+      // let the refresh rebase the OPERATOR's working tree.
+      const refreshTarget = (() => {
+        if (!lane.worktreePath) return null;
+        try {
+          const wt = realpathSync(lane.worktreePath);
+          return wt === realpathSync(lane.repoPath) ? null : wt;
+        } catch {
+          return null; // unresolvable path — the missing-cwd guard above already handles it
+        }
+      })();
+      if (refreshTarget) {
         try {
           const { getWorktreeManager } = await import('@/lib/worktree');
-          await getWorktreeManager(lane.repoPath).rebaseOntoMain(lane.worktreePath, {
+          await getWorktreeManager(lane.repoPath).rebaseOntoMain(refreshTarget, {
             baseBranch: lane.baseBranch,
             branchName: lane.branch,
           });
@@ -419,6 +432,25 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             baseBranch: lane.baseBranch,
             note,
           });
+          // Adversarial F11 — a conflict abort is best-effort inside the
+          // manager; verify the tree is actually OUT of rebase state before
+          // launching a worker into it. A half-rebased tree (conflict
+          // markers, .git/rebase-merge) must park, not launch.
+          const rebasing = ['rebase-merge', 'rebase-apply'].some((marker) => {
+            try {
+              return existsSync(join(refreshTarget, '.git', marker));
+            } catch {
+              return false;
+            }
+          });
+          if (rebasing) {
+            setLaneStatus(command.laneId, 'failed', 'system', 'worktree_mid_rebase');
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: `Worktree at ${refreshTarget} is stuck mid-rebase after a failed refresh (${note}). Reset the packet to re-provision.`,
+            };
+          }
           console.warn(`[lane] pre-launch worktree refresh failed for ${command.laneId} — launching on the existing base: ${note}`);
         }
       }
