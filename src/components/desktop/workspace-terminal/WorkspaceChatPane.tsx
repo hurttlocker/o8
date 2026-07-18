@@ -331,7 +331,16 @@ function WorkspaceChatPaneBase({
                           mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
                           onReview={
                             orchestratorData?.onOpenO8Panel
-                              ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
+                              ? () => orchestratorData.onOpenO8Panel?.({
+                                  tab: 'review',
+                                  // Bind the review surface to THIS packet's lane —
+                                  // without it the panel falls back to "Local
+                                  // changes" of the globally-scoped repo and the
+                                  // operator reviews an unrelated diff (hero-path
+                                  // walk, 2026-07-18).
+                                  reviewLaneId: livePacket?.lane?.laneId ?? null,
+                                  repoPath: livePacket?.lane?.repoPath ?? null,
+                                })
                               : undefined
                           }
                         />
@@ -588,7 +597,12 @@ function WorkspaceChatPaneBase({
                 mergeModeNote={livePacket?.lane?.mergeModeNote ?? null}
                 onReview={
                   orchestratorData?.onOpenO8Panel
-                    ? () => orchestratorData.onOpenO8Panel?.({ tab: 'review' })
+                    ? () => orchestratorData.onOpenO8Panel?.({
+                        tab: 'review',
+                        // Same packet binding as the lifecycle banner above.
+                        reviewLaneId: livePacket?.lane?.laneId ?? null,
+                        repoPath: livePacket?.lane?.repoPath ?? null,
+                      })
                     : undefined
                 }
               />
