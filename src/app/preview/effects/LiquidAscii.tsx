@@ -300,7 +300,7 @@ export function LiquidAscii(props: LiquidAsciiProps) {
       container.removeEventListener('pointerenter', onPointerEnter);
       container.removeEventListener('pointerleave', onPointerLeave);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [cellSize, fillHeight]);
 
   const width = props.width ?? DEFAULTS.width;

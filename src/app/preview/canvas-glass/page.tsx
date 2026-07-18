@@ -1341,8 +1341,8 @@ export default function CanvasGlassPreviewPage() {
     let freeDist = Infinity;
     let best = { x: minX, y: minY };
     let bestOverlap = Infinity;
-    let nearestFree: { x: number; y: number } | null = null;
-    let nearestDist = Infinity;
+    const nearestFree: { x: number; y: number } | null = null;
+    const nearestDist = Infinity;
     for (let y = minY; y <= maxY; y += 56) {
       for (let x = minX; x <= maxX; x += 64) {
         let overlap = 0;

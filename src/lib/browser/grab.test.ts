@@ -28,7 +28,7 @@ function fakeButton(): Element {
 }
 
 function reifyFromSource(): (el: unknown, selector: string) => GrabbedElement {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+
   return new Function(`${GRAB_PAYLOAD_SOURCE}; return buildGrabbedElement;`)() as (
     el: unknown,
     selector: string,
