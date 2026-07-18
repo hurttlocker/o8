@@ -10,6 +10,7 @@ import {
   finishOrchestratorTurn,
   isPidAlive,
   listActiveOrchestratorTurns,
+  listOrchestratorTurnsForThread,
   readJsonlLines,
 } from './orchestrator-crash-survival';
 import { rehydrateCodexOrchestratorTurns } from './codex-orchestrator-session';
@@ -64,6 +65,32 @@ describe('orchestrator crash survival helpers', () => {
 
     finishOrchestratorTurn(record);
     expect(listActiveOrchestratorTurns()).toHaveLength(0);
+  });
+
+  it('task #8 — a settled turn stays queryable per thread with its outcome', () => {
+    const record = createOrchestratorTurnRecord({
+      backend: 'claude',
+      sessionName: 'cortex-orchestrator-ledger',
+      repoPath: root,
+      threadId: 'thoughts-ledger',
+      pid: process.pid,
+      assistantMessageId: 'assistant-ledger',
+    });
+
+    finishOrchestratorTurn(record, 'failed');
+    // Settled ≠ active: crash recovery must not re-tail it…
+    expect(listActiveOrchestratorTurns()).toHaveLength(0);
+    // …but the ledger still answers "how did this thread's last turn end" —
+    // the server truth the client reconciles phantom timers / dropped
+    // transcript turns against. Old behavior deleted the record here.
+    const turns = listOrchestratorTurnsForThread('thoughts-ledger');
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({
+      id: record.id,
+      outcome: 'failed',
+      assistantMessageId: 'assistant-ledger',
+    });
+    expect(turns[0].settledAt).toBeTypeOf('number');
   });
 
   it('reads jsonl lines from an offset', () => {

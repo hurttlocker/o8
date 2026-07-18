@@ -3440,6 +3440,30 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
       && Date.now() - lastActivityAt > ORCH_SNAPSHOT_STALE_MS
         ? 'ready'
         : session.status;
+
+    // Task #8 — server turn truth rides every (re)subscribe snapshot. The
+    // newest ledger record for this thread lets the client reconcile against
+    // reality instead of elapsed-silence heuristics: a running timer with no
+    // active ledger turn is a phantom (clear it); a settled turn whose
+    // assistantMessageId is missing from the visible transcript means the
+    // live buffer lost a persisted turn (refetch, don't replace).
+    let turn: Record<string, unknown> | null = null;
+    if (threadId) {
+      try {
+        const { listOrchestratorTurnsForThread } = await import('@/lib/lane/orchestrator-crash-survival');
+        const latest = listOrchestratorTurnsForThread(threadId)[0];
+        if (latest) {
+          turn = {
+            id: latest.id,
+            startedAt: latest.startedAt,
+            settledAt: latest.settledAt ?? null,
+            outcome: latest.outcome ?? null,
+            assistantMessageId: latest.assistantMessageId ?? null,
+          };
+        }
+      } catch { /* ledger read is best-effort — snapshot still ships */ }
+    }
+
     send(client, {
       channel: 'orchestrator',
       event: 'status',
@@ -3449,7 +3473,7 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
       // the first-turn threadId mint forces a mid-turn re-subscribe, and a
       // snapshot 'ready' landing right after the client set 'busy' is exactly
       // what silently killed first-turn streaming until a reload.
-      data: { status: snapshotStatus, snapshot: true, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
+      data: { status: snapshotStatus, snapshot: true, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag, turn },
     });
 
     // Replay anything this client missed on the in-flight turn (reload /

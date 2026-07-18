@@ -307,7 +307,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
       if (lineState.threadId) session!.threadId = lineState.threadId;
       session!.status = 'ready';
       emit({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
-      finishOrchestratorTurn(record);
+      finishOrchestratorTurn(record, 'completed');
     };
     const replay = readJsonlLines(record.stdoutPath, record.stdoutOffset ?? 0).lines;
     for (const line of replay) {
@@ -581,7 +581,7 @@ export async function sendToCodexOrchestrator(
     } catch (err) {
       if (stdoutFd !== null) closeSync(stdoutFd);
       if (stderrFd !== null) closeSync(stderrFd);
-      finishOrchestratorTurn(crashRecord);
+      finishOrchestratorTurn(crashRecord, 'failed');
       session.status = 'dead';
       const note = err instanceof Error ? err.message : String(err);
       onEvent({ type: 'error', error: note });
@@ -641,7 +641,7 @@ export async function sendToCodexOrchestrator(
       if (firstEventTimeout) clearTimeout(firstEventTimeout);
       if (drain) drainCrashOutput();
       else stopCrashTail?.();
-      finishOrchestratorTurn(crashRecord);
+      finishOrchestratorTurn(crashRecord, error ? 'failed' : 'completed');
       detachUserAbortListener();
       session.proc = null;
       if (lineState.threadId) session.threadId = lineState.threadId;

@@ -6,6 +6,8 @@ import type { OrchestratorEvent } from './orchestrator-stream-events';
 
 export type CrashSurvivableOrchestratorBackend = 'claude' | 'codex';
 
+export type OrchestratorTurnOutcome = 'completed' | 'failed' | 'interrupted';
+
 export interface OrchestratorTurnRecord {
   id: string;
   backend: CrashSurvivableOrchestratorBackend;
@@ -17,6 +19,13 @@ export interface OrchestratorTurnRecord {
   stderrPath: string;
   stdoutOffset?: number;
   startedAt: number;
+  // Task #8 — turn ledger. A finished turn is MARKED settled (settledAt +
+  // outcome), not deleted, so the ledger is the durable answer to "is a turn
+  // in flight for this thread, and how did the last one end" — the server
+  // truth that replaces the client's elapsed-silence heuristics. Settled
+  // records prune after TURN_LEDGER_RETENTION_MS.
+  settledAt?: number | null;
+  outcome?: OrchestratorTurnOutcome | null;
   assistantMessageId?: string | null;
   assistantStartedAtMs?: number | null;
   model?: string | null;
@@ -138,12 +147,39 @@ export function updateOrchestratorTurnPid(record: OrchestratorTurnRecord, pid: n
   return next;
 }
 
-export function finishOrchestratorTurn(record?: OrchestratorTurnRecord | null): void {
+/**
+ * Delete a record outright — for records that never represented a live turn
+ * (e.g. the warm-spawn path allocates one just for its stream-file paths).
+ * A settled-marker here would pollute the per-thread ledger with bogus
+ * instantly-settled turns.
+ */
+export function discardOrchestratorTurnRecord(record?: OrchestratorTurnRecord | null): void {
   if (!record) return;
   rmSync(recordPath(record.id), { force: true });
 }
 
-export function listActiveOrchestratorTurns(): OrchestratorTurnRecord[] {
+// Settled turns are kept this long as the durable "how did the last turn end"
+// answer, then pruned together with their stream files.
+const TURN_LEDGER_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+export function finishOrchestratorTurn(
+  record?: OrchestratorTurnRecord | null,
+  outcome: OrchestratorTurnOutcome = 'completed',
+): void {
+  if (!record) return;
+  // Task #8 — mark settled instead of deleting. The record is the server's
+  // durable turn truth: a client reconciling a phantom running timer or a
+  // dropped transcript turn needs "this turn settled at T with outcome O",
+  // which deletion destroyed.
+  try {
+    const settled: OrchestratorTurnRecord = { ...record, settledAt: Date.now(), outcome };
+    writeFileSync(recordPath(record.id), `${JSON.stringify(settled, null, 2)}\n`, 'utf8');
+  } catch {
+    rmSync(recordPath(record.id), { force: true });
+  }
+}
+
+function readAllTurnRecords(): OrchestratorTurnRecord[] {
   const dir = rootDir();
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
@@ -156,6 +192,38 @@ export function listActiveOrchestratorTurns(): OrchestratorTurnRecord[] {
         return [];
       }
     });
+}
+
+function pruneSettledTurns(records: OrchestratorTurnRecord[]): void {
+  const cutoff = Date.now() - TURN_LEDGER_RETENTION_MS;
+  for (const record of records) {
+    if (!record.settledAt || record.settledAt >= cutoff) continue;
+    rmSync(recordPath(record.id), { force: true });
+    // Stream files live in the ledger dir only for records the ledger created
+    // (createOrchestratorTurnRecord); externally-owned paths are left alone.
+    if (record.stdoutPath.startsWith(rootDir())) rmSync(record.stdoutPath, { force: true });
+    if (record.stderrPath.startsWith(rootDir())) rmSync(record.stderrPath, { force: true });
+  }
+}
+
+export function listActiveOrchestratorTurns(): OrchestratorTurnRecord[] {
+  const records = readAllTurnRecords();
+  pruneSettledTurns(records);
+  return records.filter((record) => !record.settledAt);
+}
+
+/**
+ * Task #8 — the per-thread turn ledger read. Returns this thread's turns,
+ * newest first (active turn, if any, is first). Feeds the subscribe snapshot
+ * so the client reconciles its running timer / transcript against server
+ * truth instead of elapsed-silence heuristics.
+ */
+export function listOrchestratorTurnsForThread(threadId: string): OrchestratorTurnRecord[] {
+  const normalized = threadId.trim();
+  if (!normalized) return [];
+  return readAllTurnRecords()
+    .filter((record) => record.threadId === normalized)
+    .sort((left, right) => right.startedAt - left.startedAt);
 }
 
 export function isPidAlive(pid?: number): boolean {
