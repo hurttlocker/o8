@@ -1,4 +1,5 @@
 import type { OrchestratorEvent } from './orchestrator-stream-events';
+import { planFromCodexTodoList, planFromToolInput, type OrchestratorPlanSnapshot } from './orchestrator-plan';
 
 export interface ParsedCodexLine {
   type?: string;
@@ -11,6 +12,10 @@ export interface ParsedCodexLine {
 export interface CodexLineHandlerState {
   threadId: string | null;
   cost: number | null;
+  /** Last emitted plan snapshot (serialized) — codex re-sends the identical
+   * todo_list on started AND completed; suppress the duplicate. Per-turn:
+   * every sendTurn/rebound creates a fresh state literal. */
+  lastPlanJson?: string;
 }
 
 const GPT_5_5_INPUT_USD_PER_MILLION = 2.5;
@@ -21,6 +26,18 @@ function safeObject(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function emitPlanOnce(
+  plan: OrchestratorPlanSnapshot | null,
+  state: CodexLineHandlerState,
+  onEvent: (event: OrchestratorEvent) => void,
+): void {
+  if (!plan) return;
+  const serialized = JSON.stringify(plan);
+  if (state.lastPlanJson === serialized) return;
+  state.lastPlanJson = serialized;
+  onEvent({ type: 'plan', explanation: plan.explanation, steps: plan.steps });
 }
 
 function computeUsdCost(usage: ParsedCodexLine['usage']): number | null {
@@ -59,6 +76,24 @@ export function handleCodexJsonLine(
     }
 
     const item = safeObject(parsed.item);
+
+    // todo_list rides item.started / item.updated / item.completed and is a
+    // FULL list every time — normalize each into a complete plan snapshot.
+    if (
+      (type === 'item.started' || type === 'item.updated' || type === 'item.completed')
+      && item?.type === 'todo_list'
+    ) {
+      emitPlanOnce(planFromCodexTodoList(item), state, onEvent);
+      return true;
+    }
+
+    // Older proto dialect: update_plan surfaces as an event_msg with
+    // { explanation?, plan: [{ step, status }] }.
+    if (type === 'event_msg' && payload?.type === 'plan_update') {
+      emitPlanOnce(planFromToolInput('update_plan', payload), state, onEvent);
+      return true;
+    }
+
     if (type === 'item.completed' && item?.type === 'agent_message') {
       const text = typeof item.text === 'string' ? item.text : '';
       if (text) onEvent({ type: 'text', text });
