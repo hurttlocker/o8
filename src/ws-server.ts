@@ -44,7 +44,7 @@
 
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -6226,8 +6226,42 @@ function markReviewWorkspaceDirty(base: string, filename: string | null): void {
   reviewDirtyWorkspaces.add(resolve(base, firstSegment));
 }
 
+// Adversarial F5 — in a `git worktree` checkout, `.git` is a FILE containing
+// a `gitdir: <path>` pointer, not a directory. Stat'ing `<file>/HEAD` throws,
+// so every worktree target resolved to a constant 'x|x' key and the stat-gate
+// was permanently inert (stale diffs until the 60s full sweep). Resolve the
+// real gitdir through the pointer, cached per workspace (the pointer never
+// changes for a live worktree).
+const reviewGitDirCache = new Map<string, string>();
+
+async function resolveReviewGitDir(workspacePath: string): Promise<string> {
+  const cached = reviewGitDirCache.get(workspacePath);
+  if (cached) return cached;
+  const dotGit = resolve(workspacePath, '.git');
+  let gitDir = dotGit;
+  try {
+    const info = await stat(dotGit);
+    if (info.isFile()) {
+      const pointer = await readFile(dotGit, 'utf8');
+      const match = pointer.match(/^gitdir:\s*(.+)\s*$/m);
+      if (match?.[1]) {
+        const target = match[1].trim();
+        gitDir = isAbsolute(target) ? target : resolve(workspacePath, target);
+      }
+    }
+  } catch {
+    // Missing .git — keep the default; stat below reports 'x' honestly.
+  }
+  reviewGitDirCache.set(workspacePath, gitDir);
+  if (reviewGitDirCache.size > 300) {
+    const oldest = reviewGitDirCache.keys().next().value;
+    if (oldest !== undefined) reviewGitDirCache.delete(oldest);
+  }
+  return gitDir;
+}
+
 async function reviewTargetStatKey(workspacePath: string): Promise<string> {
-  const gitDir = resolve(workspacePath, '.git');
+  const gitDir = await resolveReviewGitDir(workspacePath);
   const parts = await Promise.all(['HEAD', 'index'].map(async (name) => {
     try {
       const info = await stat(resolve(gitDir, name));
@@ -6248,6 +6282,11 @@ async function broadcastReviewFileChanges() {
   for (const key of [...reviewTargetHashes.keys()]) {
     if (!liveTargetKeys.has(key)) {
       reviewTargetHashes.delete(key);
+      // F20 — the stat-gate maps grow with worktree churn unless pruned with
+      // their target.
+      reviewTargetScanMeta.delete(key);
+      reviewDirtyWorkspaces.delete(key);
+      reviewGitDirCache.delete(key);
     }
   }
 
