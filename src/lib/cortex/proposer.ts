@@ -300,7 +300,7 @@ function buildDraftDirective(filePattern: string, fixPattern: string, hits: numb
  */
 function readRecentOutcomes(windowDays: number): OutcomeRow[] {
   // Lazy require so this module stays tree-shake-friendly for client builds.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+
   const dbModule = require('@/lib/db') as typeof import('@/lib/db');
   const db = dbModule.getDb();
   if (!db) return [];

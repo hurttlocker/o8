@@ -326,7 +326,7 @@ export function ShaderCard(props: ShaderCardProps) {
       gl.deleteProgram(prog);
       gl.deleteBuffer(buf);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   return (

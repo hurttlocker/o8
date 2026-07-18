@@ -343,7 +343,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     } catch {
       // disposed mid-update; the next mount attaches fresh
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
+
   }, [connectionEpoch, tmuxSession, sendTerminalAttach]);
 
   // Live-update xterm theme on theme switch without recreating the terminal.

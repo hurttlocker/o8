@@ -1,5 +1,5 @@
 'use client';
-/* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
+
 
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -166,7 +166,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           },
         }));
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- tabsBroadcastSignature stands in for tabsForBroadcast (content equality)
+
     }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible]);
 
     // Listen for chat-history rename so the workspace tab's label

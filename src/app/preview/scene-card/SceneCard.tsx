@@ -133,7 +133,7 @@ export function SceneCard(props: SceneCardProps) {
     };
     raf = requestAnimationFrame(draw);
     return () => { if (raf) cancelAnimationFrame(raf); gl.deleteProgram(prog); gl.deleteBuffer(buf); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   return (

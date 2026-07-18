@@ -1,5 +1,6 @@
 import nextVitals from 'eslint-config-next/core-web-vitals';
 import nextTs from 'eslint-config-next/typescript';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 const wkWebViewApiGuardMessage = 'Use safeRequestIdleCallback from @/lib/util/webview-safe — requestIdleCallback is undefined in the macOS WKWebView (see directive cortex-ide-wkwebview-api-guard).';
 
@@ -11,6 +12,7 @@ const config = [
       '.next/**',
       '**/.next/**',
       '.cortex-worktrees/**',
+      '.claude/worktrees/**',
       'node_modules/**',
       '**/node_modules/**',
       '**/.cortex-worktrees/**',
@@ -25,6 +27,14 @@ const config = [
       'tmp/**',
       'next-env.d.ts',
     ],
+  },
+  {
+    files: ['**/*.cjs'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      // CommonJS files require() by definition — the TS-oriented rule doesn't apply.
+      '@typescript-eslint/no-require-imports': 'off',
+    },
   },
   {
     rules: {
