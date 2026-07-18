@@ -41,6 +41,21 @@ export async function stopPacket(packetId: string): Promise<StopPacketResult> {
 
   const lanes = listLanes().filter((lane) => lane.packetId === packetId);
 
+  // #1528 — idempotent no-op: nothing bound anywhere means nothing to stop.
+  // Stopping an already-gone packet must return success in milliseconds, never
+  // fall through to resetPacket's "not found" throw.
+  if (lanes.length === 0 && !(await packetKnownToMissionState(packetId))) {
+    return {
+      ok: true,
+      packetId,
+      interruptedSessions: 0,
+      archivedLanes: 0,
+      worktreePruned: false,
+      killConfirmed: true,
+      note: `Nothing to stop — no live lanes and no mission packet for ${packetId}.`,
+    };
+  }
+
   // #1471 S1 — confirmed kill FIRST. Escalate SIGINT→SIGTERM→SIGKILL and verify
   // exit before touching lane state, so we never archive + prune a worktree out
   // from under a worker that is still churning (the zombie the stop verb exists
@@ -68,22 +83,71 @@ export async function stopPacket(packetId: string): Promise<StopPacketResult> {
     };
   }
 
-  const reset = await resetPacket({
+  // #1528 — stop's contract is answered at kill-confirm. Hold the packet under
+  // the lock NOW (cheap, blocks every relaunch path), then background the
+  // archive + worktree prune: rm -rf of a node_modules-cloned worktree runs for
+  // minutes and used to hold this response open until undici's client timeout
+  // fired and the CLI misreported connection_refused while the server listened.
+  await markPacketStoppedHeld(packetId);
+  void resetPacket({
     packetId,
     clearWorktree: true,
     reason: 'stopped by operator (#1286)',
+  }).then((reset) => {
+    const pruned = (reset as { worktreePruned?: boolean }).worktreePruned === true;
+    console.log(`[stop-packet] background cleanup finished for ${packetId}${pruned ? ' (worktree pruned)' : ''}`);
+  }).catch((error) => {
+    console.warn(`[stop-packet] background cleanup failed for ${packetId} — packet stays held:`, error);
   });
-  const worktreePruned = (reset as { worktreePruned?: boolean }).worktreePruned === true;
 
   return {
     ok: true,
     packetId,
     interruptedSessions: reaped,
     archivedLanes: lanes.length,
-    worktreePruned,
+    worktreePruned: false,
     killConfirmed: true,
-    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live session${reaped === 1 ? '' : 's'}, archived ${lanes.length} lane${lanes.length === 1 ? '' : 's'}${worktreePruned ? ', pruned worktree' : ''}. Not relaunched.`,
+    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live session${reaped === 1 ? '' : 's'}; held against relaunch. Archiving ${lanes.length} lane${lanes.length === 1 ? '' : 's'} + pruning the worktree in the background (audit via lane events). Not relaunched.`,
   };
+}
+
+/** #1528 — cheap existence probe so stop can no-op honestly. */
+async function packetKnownToMissionState(packetId: string): Promise<boolean> {
+  try {
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    if (readOrchestratorControlPlaneState().packets.some((packet) => packet.id === packetId)) return true;
+  } catch { /* fall through to registry probe */ }
+  try {
+    const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
+    return Boolean(findMissionRegistryEntryByPacketId(packetId, { includeArchived: false }));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * #1528 — the anti-relaunch guard that must be DURABLE before the response
+ * returns: operatorStopped + held under the control-plane lock, so the
+ * backgrounded cleanup can take minutes without a dispatch tick relaunching
+ * the packet in the window. Best-effort — a failed write is logged, and the
+ * backgrounded resetPacket applies the same hold again when it lands.
+ */
+async function markPacketStoppedHeld(packetId: string): Promise<void> {
+  try {
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    await withLockedState((state) => {
+      const packet = state.packets.find((candidate) => candidate.id === packetId);
+      if (!packet) return;
+      packet.operatorStopped = true;
+      packet.queueState = 'held';
+      packet.status = 'blocked';
+      packet.blockedReason = 'operator_stopped';
+      packet.lastEventAt = new Date().toISOString();
+      packet.lastEventLabel = 'operator_stopped';
+    });
+  } catch (error) {
+    console.warn(`[stop-packet] failed to mark packet ${packetId} operator-stopped before background cleanup:`, error);
+  }
 }
 
 /**
