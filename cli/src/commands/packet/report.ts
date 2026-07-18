@@ -8,6 +8,17 @@ import {
 } from '../../output.js';
 import { parsePacketArguments, resolvePacketTarget } from './target.js';
 
+export const PACKET_REPORT_EVENTS = [
+  'progress',
+  'blocked',
+  'question',
+  'huddle',
+] as const;
+
+export type PacketReportEvent = (typeof PACKET_REPORT_EVENTS)[number];
+
+const PACKET_REPORT_EVENT_SET = new Set<string>(PACKET_REPORT_EVENTS);
+
 const AGENT_REPORT_REASONS = new Set([
   'needs_clarification',
   'missing_context',
@@ -45,7 +56,7 @@ interface LaneEvent {
 
 interface ReportArgs {
   packetId: string | null;
-  event: string | null;
+  event: PacketReportEvent | null;
   reason: string | null;
   message: string | null;
   metadata: Record<string, unknown> | null;
@@ -71,10 +82,29 @@ export function parseReportArgs(rest: string[]): ReportArgs {
     valueFlags: ['event', 'reason', 'message', 'meta'],
   });
 
+  const event = args.values.event?.trim() || null;
+  if (event && !PACKET_REPORT_EVENT_SET.has(event)) {
+    throw new CliError(
+      'invalid_args',
+      `Unknown packet report event: ${event}`,
+      EXIT.INVALID_ARGS,
+      `Use one of: ${PACKET_REPORT_EVENTS.join(', ')}.`,
+    );
+  }
+  const reason = args.values.reason?.trim() || null;
+  if (reason && !AGENT_REPORT_REASONS.has(reason)) {
+    throw new CliError(
+      'invalid_args',
+      `Unknown report reason: ${reason}`,
+      EXIT.INVALID_ARGS,
+      'Use one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.',
+    );
+  }
+
   return {
     packetId: args.target,
-    event: args.values.event?.trim() || null,
-    reason: args.values.reason?.trim() || null,
+    event: event as PacketReportEvent | null,
+    reason,
     message: args.values.message?.trim() || null,
     metadata: parseMetadata(args.values.meta ?? null),
   };
@@ -90,15 +120,6 @@ export async function runPacketReport(mode: OutputMode, rest: string[]): Promise
       'Example: o8 packet report --event blocked --reason needs_clarification --message "Need product direction."',
     );
   }
-  if (args.reason && !AGENT_REPORT_REASONS.has(args.reason)) {
-    throw new CliError(
-      'invalid_args',
-      `Unknown report reason: ${args.reason}`,
-      EXIT.INVALID_ARGS,
-      'Use one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.',
-    );
-  }
-
   const target = await resolvePacketTarget(args.packetId);
   const cfg = resolveConfig();
   const reportRes = await apiFetch<{
