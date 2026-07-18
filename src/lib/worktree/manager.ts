@@ -36,6 +36,7 @@ import type {
 } from './types';
 import { getApfsCowCapability } from './apfs';
 import { resetTrackedWorkspaceChanges } from './clean';
+import { hasLiveProcessInside } from './live-process-guard';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
@@ -1340,18 +1341,30 @@ export class WorktreeManager {
     const now = Date.now();
     const pruned: string[] = [];
 
-    // Guard: never prune worktrees with active lanes
-    let activeLanePaths: Set<string> | null = null;
+    // Guard: never prune a worktree bound to a NON-TERMINAL lane. "Active" is
+    // the canonical terminal-states truth — every lane whose status is not in
+    // {failed, completed, archived} protects its worktree (blocked /
+    // awaiting_input / awaiting_orchestrator / reviewing / paused / launching /
+    // recovering all count). #1585: the old guard read `listActiveLanes()`
+    // AND fell back to prune-guard-free when the registry import threw — a
+    // null guard reaped every live worker's worktree. Fail CLOSED now: if the
+    // registry can't be read we cannot tell active from terminal, so we abort
+    // the whole prune pass rather than reap blind.
+    let activeLanePaths: Set<string>;
     try {
-      const { listActiveLanes } = await import('@/lib/lane/registry');
-      const activeLanes = listActiveLanes();
+      const { listLanes } = await import('@/lib/lane/registry');
+      const { isLaneTerminal } = await import('@/lib/lane/terminal-states');
       activeLanePaths = new Set(
-        activeLanes
+        listLanes()
+          .filter((l) => !isLaneTerminal(l.status))
           .map((l) => l.worktreePath)
           .filter((p): p is string => Boolean(p)),
       );
-    } catch {
-      // Lane registry not available — skip guard
+    } catch (err) {
+      console.warn(
+        `[worktree-prune] lane registry unavailable — aborting prune pass (fail closed): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
     }
 
     const handledIds = new Set<string>();
@@ -1360,8 +1373,13 @@ export class WorktreeManager {
       if (now - wt.lastActivityAt > maxAgeMs && wt.status !== 'active') {
         // Check if this worktree backs an active lane
         const wtPath = path.join(this.worktreeBase, wt.id);
-        if (activeLanePaths?.has(wtPath)) {
+        if (activeLanePaths.has(wtPath) || activeLanePaths.has(wt.path)) {
           console.log(`[worktree-prune] Skipping ${wt.id} — active lane bound to this worktree`);
+          continue;
+        }
+        // Never delete a worktree that a live process is still cwd'd inside.
+        if (await hasLiveProcessInside(wt.path)) {
+          console.log(`[worktree-prune] SKIPPED ${wt.id} — live process(es) inside`);
           continue;
         }
         await this.cleanup(wt.id, { force: true, deleteBranch: true });
@@ -1382,11 +1400,24 @@ export class WorktreeManager {
         if (handledIds.has(entry.name)) continue;
         if (!entry.name.startsWith('packet-')) continue;
         const orphanPath = path.join(this.worktreeBase, entry.name);
-        if (activeLanePaths?.has(orphanPath)) continue;
-        const lastActivity = await this.getLastModified(orphanPath).catch(() => 0);
-        if (lastActivity > 0 && now - lastActivity <= maxAgeMs) continue;
+        if (activeLanePaths.has(orphanPath)) continue;
+        // #1585: an UNKNOWN mtime must mean KEEP, never delete. The old code
+        // (`.catch(() => 0)`) turned a failed probe into epoch 0 and fell
+        // through to `rm -rf` — a fresh worktree whose stat momentarily failed
+        // read as "infinitely old". Probe failure / zero / non-finite → skip.
+        const mtime = await this.probeMtimeMs(orphanPath);
+        if (mtime === null) {
+          console.warn(`[worktree-prune] SKIPPED orphan ${entry.name} — mtime probe failed/unknown (never deleting on unknown age)`);
+          continue;
+        }
+        if (now - mtime <= maxAgeMs) continue;
+        // Never delete a worktree that a live process is still cwd'd inside.
+        if (await hasLiveProcessInside(orphanPath)) {
+          console.log(`[worktree-prune] SKIPPED ${entry.name} — live process(es) inside`);
+          continue;
+        }
         await rm(orphanPath, { recursive: true, force: true });
-        console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - lastActivity) / 3_600_000)}h)`);
+        console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h)`);
         pruned.push(entry.name);
       }
     } catch (err) {
@@ -1462,6 +1493,10 @@ export class WorktreeManager {
     );
     const candidates = all
       .filter((_, i) => inScope[i])
+      // #1585: an unknown / zero / non-finite mtime must NOT sort as "oldest"
+      // and get reaped first — that ranked the NEWEST worktrees for deletion.
+      // Exclude unknown-age candidates from retention entirely.
+      .filter((wt) => Number.isFinite(wt.lastActivityAt) && wt.lastActivityAt > 0)
       // Oldest first — the retention victim order.
       .sort((a, b) => a.lastActivityAt - b.lastActivityAt);
 
@@ -1480,6 +1515,13 @@ export class WorktreeManager {
       // Guard 3: never delete a worktree with uncommitted work.
       if (await this.hasUncommittedChanges(wt.path)) {
         console.log(`[worktree-retention] Skipping ${wt.id} — uncommitted changes present (refusing to delete dirty worktree)`);
+        continue;
+      }
+
+      // Guard 4 (#1585): never delete a worktree that a live process is cwd'd
+      // inside, no matter how old — deleting a live worker's cwd aborts its turn.
+      if (await hasLiveProcessInside(wt.path)) {
+        console.log(`[worktree-prune] SKIPPED ${wt.id} — live process(es) inside`);
         continue;
       }
 
@@ -1773,6 +1815,22 @@ export class WorktreeManager {
       return s.mtimeMs;
     } catch {
       return Date.now();
+    }
+  }
+
+  /**
+   * Probe a directory's mtime, returning `null` when the age is UNKNOWN (stat
+   * failed, or the mtime is zero/non-finite). Unlike {@link getLastModified},
+   * this NEVER masks a failed probe as "now" or "epoch 0" — the caller decides
+   * what unknown age means. The prune orphan-sweep uses it so an unknown mtime
+   * is KEPT, never treated as infinitely old and reaped (#1585).
+   */
+  private async probeMtimeMs(dirPath: string): Promise<number | null> {
+    try {
+      const s = await stat(dirPath);
+      return Number.isFinite(s.mtimeMs) && s.mtimeMs > 0 ? s.mtimeMs : null;
+    } catch {
+      return null;
     }
   }
 
