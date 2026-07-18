@@ -166,7 +166,7 @@ export function usePaletteActions({
       readinessNextAction: workflowContextAgent?.repoReadiness?.nextAction ?? globalRepoEntry?.readiness?.nextAction ?? null,
     });
     const repoAttention = globalRepoEntries
-      .filter((entry) => entry.readiness?.state === 'blocked' || entry.readiness?.state === 'needs_setup')
+      .filter((entry) => entry.readiness?.state === 'missing' || entry.readiness?.state === 'blocked' || entry.readiness?.state === 'needs_setup')
       .sort((a, b) => {
         const aScore = attentionRank(a.readiness?.label ?? '');
         const bScore = attentionRank(b.readiness?.label ?? '');

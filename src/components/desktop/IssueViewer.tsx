@@ -33,6 +33,7 @@ export const IssueViewer = memo(function IssueViewer({
   const [error, setError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [localRepo, setLocalRepo] = useState<Pick<RepoRegistryEntry, 'name' | 'localPath' | 'readiness'> | null>(null);
+  const repoMissing = localRepo?.readiness?.state === 'missing';
 
   useEffect(() => {
     let cancelled = false;
@@ -220,7 +221,7 @@ export const IssueViewer = memo(function IssueViewer({
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button
                 type="button"
-                disabled={launching}
+                disabled={launching || repoMissing}
                 onClick={() => {
                   setLaunching(true);
                   void onLaunchWorkspaceTask({
@@ -235,19 +236,19 @@ export const IssueViewer = memo(function IssueViewer({
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 8,
-                  height: 32,
+                  minHeight: 44,
                   padding: '0 12px',
                   borderRadius: 10,
                   border: '1px solid rgba(37, 99, 235, 0.18)',
                   background: 'rgba(37, 99, 235, 0.08)',
-                  color: launching ? '#94a3b8' : '#1d4ed8',
+                  color: launching || repoMissing ? 'var(--t-text-faint)' : 'var(--t-accent)',
                   fontSize: 12,
                   fontWeight: 700,
-                  cursor: launching ? 'default' : 'pointer',
+                  cursor: launching || repoMissing ? 'default' : 'pointer',
                 }}
               >
                 <Play size={13} />
-                {launching ? 'Launching…' : 'Launch In Workspace'}
+                {repoMissing ? 'Folder missing' : launching ? 'Launching…' : 'Launch In Workspace'}
               </button>
               </div>
             </div>
