@@ -6959,7 +6959,7 @@ async function bootstrapWsServer() {
                 const {
                   buildAttemptLearningFromFailure,
                   persistAttemptLearnings,
-                  readAttemptLearnings,
+                  readPacketAttemptLearnings,
                 } = await import('@/lib/orchestrator/attempt-log');
                 const {
                   markRalphRetryRequeued,
@@ -7029,7 +7029,7 @@ async function bootstrapWsServer() {
                 }
 
                 const currentLearning = buildAttemptLearningFromFailure(verification.output);
-                const priorLearnings = await readAttemptLearnings(completionCwd);
+                const priorLearnings = await readPacketAttemptLearnings(packetId, completionCwd);
                 const learningSummary = [
                   ...priorLearnings.map((learning) => `- Attempt ${learning.attempt}: ${learning.summary}`),
                   `- Attempt ${attemptNumber}: ${currentLearning.summary}`,
