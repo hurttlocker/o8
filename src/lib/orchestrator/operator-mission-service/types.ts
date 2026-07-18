@@ -93,6 +93,12 @@ export interface ApproveAndMergeInput {
   packetId: string;
   commitMessage?: string;
   expectedHeadSha?: string;
+  /** 'user' when the call carries a live human-operator principal (the
+   *  desktop Approve & merge click, the operator CLI). The operator's
+   *  explicit action IS the approval — one click merges, no second inbox
+   *  card (Q ruling 2026-07-18, Codex merge parity). Orchestrator/worker
+   *  callers omit it and keep the full approval gate. */
+  actor?: 'user' | 'orchestrator';
 }
 
 export interface PickComparisonWinnerInput {

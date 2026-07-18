@@ -636,13 +636,23 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   }
   const latestMergeApproval = await findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
   if (latestMergeApproval?.status === 'pending') {
-    return withGateVerdict(packet.id, {
-      merged: false,
-      note: latestMergeApproval.policyRuleId === 'merge-gate-violation'
-        ? 'Merge gate enforcement: human review required.'
-        : `Approval required: ${latestMergeApproval.title}`,
-      approvalId: latestMergeApproval.id,
-    }, packet.review?.approved === true);
+    // A live human operator clicking merge IS the approval — resolve the
+    // pending card (full audit trail) and fall through to the merge instead
+    // of bouncing the human to the inbox for a second click (Q ruling
+    // 2026-07-18). Gate violations stay a hard stop even for the operator:
+    // that card carries findings a human must actually read.
+    if (input.actor === 'user' && latestMergeApproval.policyRuleId !== 'merge-gate-violation') {
+      const { resolveApproval } = await import('@/lib/approvals/store');
+      resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator merged directly from the review surface.');
+    } else {
+      return withGateVerdict(packet.id, {
+        merged: false,
+        note: latestMergeApproval.policyRuleId === 'merge-gate-violation'
+          ? 'Merge gate enforcement: human review required.'
+          : `Approval required: ${latestMergeApproval.title}`,
+        approvalId: latestMergeApproval.id,
+      }, packet.review?.approved === true);
+    }
   }
   if (latestMergeApproval?.status === 'approved' && (lane.status === 'completed' || lane.status === 'archived')) {
     const { syncOrchestratorControlPlaneState } = await loadControlPlane();

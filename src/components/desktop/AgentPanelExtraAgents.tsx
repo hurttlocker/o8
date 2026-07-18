@@ -60,6 +60,8 @@ interface LaneSummary {
   sessionKey: string | null;
   packetId: string | null;
   status: LaneStatus;
+  outcome?: 'no_changes' | null;
+  outcomeNote?: string | null;
   ownership: LaneOwnership;
   lastEventAt: string | null;
   lastEventLabel: string | null;
@@ -192,6 +194,8 @@ function buildRows(
       packetId: lane.packetId,
       laneId: lane.id,
       laneStatus: lane.status,
+      outcome: lane.outcome ?? null,
+      outcomeNote: lane.outcomeNote ?? null,
       lastEventLabel: lane.lastEventLabel,
       rejected: lane.packetId ? rejectedPacketIds.has(lane.packetId) : false,
     });
@@ -215,6 +219,8 @@ function buildRows(
       packetId: null,
       laneId: null,
       laneStatus: null,
+      outcome: null,
+      outcomeNote: null,
       lastEventLabel: null,
     });
   }
@@ -466,10 +472,10 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePack
 
     try {
       const [lanesRes, snapshotRes, reposRes, approvalsRes] = await Promise.allSettled([
-        // No `active=true` filter — operator wants every spawned agent
-        // visible regardless of state (reviewing / awaiting_input / idle /
-        // failed). Was hiding the entire backlog of MCP-dispatched packets.
-        fetch('/api/lanes', { signal: controller.signal }),
+        // Pull terminal rows too, then retain only the explicit no-change
+        // terminal outcome alongside live rows. A completed no-op must remain
+        // visible without flooding the rail with the full archive backlog.
+        fetch('/api/lanes?active=false', { signal: controller.signal }),
         fetch('/api/command-center/snapshot', { signal: controller.signal }),
         fetch('/api/panel/repos', { signal: controller.signal }),
         // Approvals feed the 'rejected' dot — the durable review verdict the
@@ -483,7 +489,10 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePack
       let laneList: LaneSummary[] = [];
       if (lanesRes.status === 'fulfilled' && lanesRes.value.ok) {
         const json = await lanesRes.value.json() as { lanes?: LaneSummary[] };
-        laneList = json.lanes ?? [];
+        laneList = (json.lanes ?? []).filter((lane) => (
+          (lane.status !== 'archived' && lane.status !== 'completed')
+          || lane.outcome === 'no_changes'
+        ));
         setLanes(laneList);
       }
 
@@ -495,6 +504,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePack
             laneId: lane.id,
             packetId: lane.packetId as string,
             status: lane.status,
+            outcome: lane.outcome ?? null,
             sessionKey: lane.sessionKey,
             lastEventLabel: lane.lastEventLabel,
           }));

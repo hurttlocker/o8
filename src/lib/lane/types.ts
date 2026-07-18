@@ -55,6 +55,8 @@ const LANE_STATUS_RECORD = {
 
 export const LANE_STATUSES = Object.keys(LANE_STATUS_RECORD) as LaneStatus[];
 
+export type LaneOutcome = 'no_changes';
+
 /**
  * @deprecated Thin delegate kept for back-compat. The unified terminal-state
  * truth now lives in `lane/terminal-states.ts`. This predicate is the
@@ -92,6 +94,8 @@ export interface Lane {
   packetId: string | null;
   prNumber: number | null;
   status: LaneStatus;
+  outcome?: LaneOutcome | null;
+  outcomeNote?: string | null;
   ownership: LaneOwnership;
   writerToken: string | null;
   lastHeartbeatAt: number | null;

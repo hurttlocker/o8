@@ -89,7 +89,7 @@ function mapLaneRow(row: LaneRow | undefined): Lane | null {
     runtime: row.runtime as LaneRuntime,
     sessionKey: row.sessionKey,
     packetId: row.packetId, prNumber: row.prNumber,
-    status: row.status as LaneStatus,
+    status: row.status as LaneStatus, outcome: row.outcome as Lane['outcome'], outcomeNote: row.outcomeNote,
     ownership: row.ownership as LaneOwnership,
     writerToken: row.writerToken,
     lastHeartbeatAt: row.lastHeartbeatAt,
@@ -297,7 +297,7 @@ export function createLane(opts: {
     runtime: opts.runtime,
     sessionKey: opts.sessionKey ?? null,
     packetId: opts.packetId ?? null, prNumber: null,
-    status: 'idle',
+    status: 'idle', outcome: null, outcomeNote: null,
     ownership: opts.ownership ?? 'managed',
     writerToken: null,
     lastHeartbeatAt: null,
@@ -408,7 +408,7 @@ export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane 
 
 export function updateLane(
   laneId: string,
-  updates: Partial<Pick<Lane, 'status' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastHeartbeatAt' | 'lastEventAt' | 'lastEventLabel' | 'packetId' | 'prNumber'>>,
+  updates: Partial<Pick<Lane, 'status' | 'outcome' | 'outcomeNote' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastHeartbeatAt' | 'lastEventAt' | 'lastEventLabel' | 'packetId' | 'prNumber'>>,
   actor: LaneEventActor = 'system',
 ): Lane | null {
   const db = getSqlite();
@@ -431,7 +431,7 @@ export function updateLane(
     const changes: Record<string, unknown> = {};
     const nextValues: Partial<typeof lanes.$inferInsert> = {};
     const updatableKeys: Array<keyof typeof updates> = [
-      'status',
+      'status', 'outcome', 'outcomeNote',
       'sessionKey',
       'worktreePath',
       'writerToken',

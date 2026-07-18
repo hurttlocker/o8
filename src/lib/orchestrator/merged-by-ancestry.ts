@@ -1,8 +1,9 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { promisify } from 'node:util';
 
-import { appendEvent, archiveLane, getLane, listLanes } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, getLane, listLanes, updateLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import {
   readOrchestratorControlPlaneState,
@@ -11,13 +12,15 @@ import {
 import { MergedByAncestryBackoff } from '@/lib/orchestrator/merged-by-ancestry-backoff';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BASE_BRANCH = 'main';
 const MERGED_BY_ANCESTRY_SOURCE = 'merged_by_ancestry_reconcile';
 
-type MergeEvidenceKind = 'ancestor' | 'patch-id' | 'branch-missing';
+type MergeEvidenceKind = 'ancestor' | 'patch-id' | 'no-changes';
+type NoChangesReason = 'branch_missing' | 'branch_matches_base';
 
 interface MergeEvidence {
   kind: MergeEvidenceKind;
@@ -28,6 +31,7 @@ interface MergeEvidence {
   baseSha: string;
   mergeBaseSha?: string;
   patchId?: string;
+  noChangesReason?: NoChangesReason;
 }
 
 interface Candidate {
@@ -249,29 +253,29 @@ async function squashPatchExistsOnBase(
 
 async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEvidence | null> {
   const { repoPath, branch, baseBranch } = candidate;
-  if (!branch || branch === baseBranch) return null;
+  if (!branch) return null;
 
   await refreshOriginBase(repoPath, baseBranch);
 
   const branchRef = await resolveBranchRef(repoPath, branch);
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
-  if (!branchRef && baseRef && candidate.packet === null) {
-    // Lane-only candidate whose branch resolves NOWHERE (not local, not on
-    // origin) while the repo itself is healthy: the branch was deleted after
-    // an external merge, or its worktree clone was pruned. Either way no
-    // review or merge can ever act on this lane again — leaving it in the
-    // rail with live-looking status is a lie. Archive-only evidence; never
-    // claims "merged".
+  const noChangesEligible = candidate.packet === null
+    || candidate.packet.status === 'awaiting_review';
+  if (!branchRef && baseRef && noChangesEligible) {
+    // A settled lane whose branch resolves nowhere has no reviewable commit.
+    // Preserve that terminal truth explicitly instead of archiving it as an
+    // ambiguous branch-reconciliation cleanup.
     if (await isGitRepo(repoPath)) {
       const baseSha = await revParse(repoPath, baseRef);
       if (baseSha) {
         return {
-          kind: 'branch-missing',
+          kind: 'no-changes',
           repoPath,
           branchRef: branch,
           baseRef,
           headSha: '',
           baseSha,
+          noChangesReason: 'branch_missing',
         };
       }
     }
@@ -284,6 +288,24 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
     revParse(repoPath, baseRef),
   ]);
   if (!headSha || !baseSha) return null;
+
+  const publishedBranchExists = branch !== baseBranch
+    && await refExists(repoPath, `origin/${branch}`);
+  if (
+    noChangesEligible
+    && headSha === baseSha
+    && (branch === baseBranch || !publishedBranchExists)
+  ) {
+    return {
+      kind: 'no-changes',
+      repoPath,
+      branchRef,
+      baseRef,
+      headSha,
+      baseSha,
+      noChangesReason: 'branch_matches_base',
+    };
+  }
 
   if (await isAncestor(repoPath, headSha, baseRef)) {
     return {
@@ -352,7 +374,7 @@ function buildCandidates(): Candidate[] {
       !coveredLaneIds.has(lane.id)
       && LANE_ONLY_SWEEPABLE_STATUSES.has(lane.status)
       && Boolean(lane.branch)
-      && lane.branch !== lane.baseBranch
+      && (lane.branch !== lane.baseBranch || Boolean(lane.packetId))
     ))
     .map((lane) => {
       const worktree = lane.worktreePath && existsSync(lane.worktreePath) ? lane.worktreePath : null;
@@ -426,19 +448,61 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
   }
 }
 
-// A branch that no longer exists anywhere cannot be reviewed or merged —
-// archive the lane (honest "set aside") WITHOUT claiming it merged. Applies
-// to lane-only candidates exclusively (see detectMergedByAncestry).
-function archiveBranchMissingLane(candidate: Candidate, evidence: MergeEvidence): void {
-  if (!candidate.laneId) return;
-  appendEvent(candidate.laneId, 'status_change', 'system', {
-    reason: 'branch_missing_reconciled',
-    branch: evidence.branchRef,
-    baseRef: evidence.baseRef,
-    baseSha: evidence.baseSha,
-    repoPath: evidence.repoPath,
+async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidence): Promise<void> {
+  const finishedAt = new Date().toISOString();
+  const note = 'Agent finished without making changes';
+  const packetId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;
+  const packetTitle = candidate.packet?.title ?? candidate.lane?.label ?? packetId ?? 'Dispatched packet';
+
+  if (candidate.packet) {
+    await withLockedState((state) => {
+      const packet = state.packets.find((item) => item.id === candidate.packet?.id);
+      if (!packet) return;
+      packet.status = 'archived';
+      packet.queueState = 'held';
+      packet.blockedReason = null;
+      packet.archivedAt = finishedAt;
+      packet.lastEventAt = finishedAt;
+      packet.lastEventLabel = 'finished_no_changes';
+    });
+  }
+
+  if (candidate.laneId) {
+    updateLane(candidate.laneId, {
+      outcome: 'no_changes',
+      outcomeNote: note,
+      lastEventAt: finishedAt,
+      lastEventLabel: 'finished_no_changes',
+    }, 'system');
+    appendEvent(candidate.laneId, 'status_change', 'system', {
+      reason: evidence.noChangesReason === 'branch_missing'
+        ? 'branch_missing_reconciled'
+        : 'branch_matches_base_reconciled',
+      outcome: 'no_changes',
+      note,
+      branch: evidence.branchRef,
+      baseRef: evidence.baseRef,
+      baseSha: evidence.baseSha,
+      repoPath: evidence.repoPath,
+    });
+    archiveLane(candidate.laneId, 'system');
+  }
+
+  const repoPath = candidate.lane?.repoPath || evidence.repoPath;
+  const repoName = basename(repoPath);
+  enqueueInboxItem({
+    repoPath,
+    packetId,
+    kind: 'packet_no_changes',
+    status: 'pending',
+    payload: {
+      laneId: candidate.laneId,
+      packetTitle,
+      repoName,
+      outcome: 'no_changes',
+      note: `${packetTitle} in ${repoName} produced no changes.`,
+    },
   });
-  archiveLane(candidate.laneId, 'system');
 }
 
 export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySweepResult> {
@@ -466,8 +530,8 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
         skipped += 1;
         continue;
       }
-      if (evidence.kind === 'branch-missing') {
-        archiveBranchMissingLane(candidate, evidence);
+      if (evidence.kind === 'no-changes') {
+        await finishWithoutChanges(candidate, evidence);
       } else {
         await releasePacket(candidate, evidence);
       }

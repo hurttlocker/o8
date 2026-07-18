@@ -149,7 +149,7 @@ export function SpawnedAgentHoverCard({
   if (!anchorRect || typeof document === 'undefined') return null;
 
   const position = resolveHoverPosition(anchorRect);
-  const state = deriveSpawnedAgentState(row.laneStatus, row.status, row.lastEventLabel);
+  const state = deriveSpawnedAgentState(row.laneStatus, row.status, row.lastEventLabel, row.outcome);
 
   return createPortal(
     <div
