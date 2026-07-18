@@ -30,6 +30,27 @@ describe('mergeSameThreadHistoryLoad', () => {
     expect(result.entries).toEqual([user, assistant]);
   });
 
+  it('keeps a newer live revision when a stale fetch returns the same assistant id with partial text', () => {
+    const user = { ...entry('u1', 'user', 'review and merge', 1), persistedVersion: 1 };
+    const newerLive = { ...entry('a1', 'assistant', 'The complete persisted answer.', 2), persistedVersion: 3 };
+    const staleFetched = { ...entry('a1', 'assistant', 'The partial persisted', 2), persistedVersion: 2 };
+
+    const result = mergeSameThreadHistoryLoad([user, newerLive], [user, staleFetched]);
+
+    expect(result.preservedLiveEntries).toBe(true);
+    expect(result.entries).toEqual([user, newerLive]);
+  });
+
+  it('uses the fetched revision when persisted versions tie', () => {
+    const live = { ...entry('a1', 'assistant', 'Live text', 2), persistedVersion: 2 };
+    const fetched = { ...entry('a1', 'assistant', 'Fetched text', 2), persistedVersion: 2 };
+
+    const result = mergeSameThreadHistoryLoad([live], [fetched]);
+
+    expect(result.preservedLiveEntries).toBe(false);
+    expect(result.entries).toEqual([fetched]);
+  });
+
   it('does not turn an empty fetched thread into a destructive clear', () => {
     const user = entry('u1', 'user', 'review and merge', 1);
 

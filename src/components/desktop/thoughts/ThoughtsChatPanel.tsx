@@ -476,7 +476,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   } = useThoughtsComposerAttachments({ hostRef: composerDropHostRef });
   // Index of the attachment currently open in the screenshot annotator (or null).
   const [annotatingIndex, setAnnotatingIndex] = useState<number | null>(null);
-
+  const settledAssistantRefetchRef = useRef<() => void>(() => {});
   // 'single' means two different things by tab kind (operator, 2026-07-06):
   // on a LOCKED tab (kind:'chat', dedicated CLI session) it is the classic
   // single-runtime composer; on an unlocked ORCHESTRATOR tab it is SOLO —
@@ -498,17 +498,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     seededPlanText: planText,
     hasHistory: chatMessages.length > 0,
     threadId,
-    // Empty-state first-message path: the hook mints a thoughts-* id inside
-    // send() so ws-server can persist the assistant reply. Mirror it into
-    // our local state + ref so the post-send persist effect (line ~972)
-    // skips its own mint and the next render syncs the WS subscription.
     onThreadIdMint: useCallback((id: string) => {
       if (threadIdRef.current === id) return;
       threadIdRef.current = id;
       setThreadId(id);
     }, []),
+    onSettledAssistantMissing: useCallback(() => settledAssistantRefetchRef.current(), []),
   });
-
   // Surface per-packet lifecycle moments (merge, self-heal / needs-human) as
   // status cards in the orchestrator transcript. Also delivers the
   // Mission-complete card for MCP-dispatched missions (the chat-stream rotation
@@ -1352,8 +1348,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   });
 
   const handleLoadThread = useCallback(async (tabId: string) => {
-    // Drop duplicate history loads for this tab while one is in flight or just
-    // settled, then claim both refs for the duration.
     const now = Date.now();
     if (inFlightLoadKeyRef.current === tabId) return;
     if (lastLoadKeyRef.current === tabId && now - lastLoadAtRef.current < 800) {
@@ -1365,8 +1359,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const myGeneration = ++loadGenerationRef.current;
     cancelBackfill();
     try {
-      // Bound history load with a timeout + one retry so socket starvation
-      // cannot permanently wedge the thread on an empty state.
       const fetchHistoryOnce = async (): Promise<Response | null> => {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 6000);
@@ -1463,6 +1455,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, startBackfill]);
 
+  settledAssistantRefetchRef.current = () => {
+    const activeThreadId = threadIdRef.current;
+    if (!activeThreadId) return;
+    lastLoadKeyRef.current = null;
+    lastLoadAtRef.current = 0;
+    void handleLoadThread(activeThreadId);
+  };
   const suggestions = useMemo(
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),
     [agents, sessionTargets],
@@ -2419,6 +2418,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             onDismissSuggestions={dismissSuggestedReplies}
             onRestoreSuggestions={restoreSuggestedReplies}
             turnSummary={turnSummary}
+            onRetryDelivery={orchStream.retryPendingSend}
             onScroll={loadOlderHistoryOnScroll}
           />
         </div>

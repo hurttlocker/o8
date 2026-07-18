@@ -18,19 +18,21 @@ import {
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import {
-  appendOrchestratorDeliveryFailureEntry,
-  armOrchestratorSendWatchdog,
   createOrchestratorClientMessageId,
   deliverOrchestratorPayload,
-  settleOrchestratorSendWatchdog,
   type PendingOrchestratorSend,
 } from './use-orchestrator-stream/delivery';
+import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import {
   primeCompactedOrchestratorSession,
   refreshOrchestratorTokenTelemetry,
   requestOrchestratorCompaction,
 } from './use-orchestrator-stream/session';
+import {
+  appendSnapshotTurnFailure,
+  useNoSnapshotBusyFallback,
+} from './use-orchestrator-stream/snapshot-reconcile';
 import {
   DEFAULT_ORCHESTRATOR_MODEL,
   ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR,
@@ -55,6 +57,7 @@ import {
 import {
   createOrchestratorMessageHandler,
   type CurrentAssistantStreamState,
+  type OrchestratorSnapshotTurn,
 } from './use-orchestrator-stream/socket';
 
 export {
@@ -92,6 +95,7 @@ interface OrchestratorStreamResult {
     tokensAfter: number;
   } | null>;
   reset: () => void;
+  retryPendingSend: (clientMessageId: string) => void;
   connected: boolean;
 }
 
@@ -188,6 +192,9 @@ export function useOrchestratorStream(
      * silently drops on reload. See bug investigation 2026-05-27.
      */
     onThreadIdMint?: (threadId: string) => void;
+    /** Requests a same-thread history refresh when server turn truth says a
+     * settled assistant message is missing from the visible transcript. */
+    onSettledAssistantMissing?: (assistantMessageId: string) => void;
   },
 ): OrchestratorStreamResult {
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
@@ -222,6 +229,8 @@ export function useOrchestratorStream(
   if (threadId) threadIdRef.current = threadId;
   const onThreadIdMintRef = useRef(options?.onThreadIdMint);
   onThreadIdMintRef.current = options?.onThreadIdMint;
+  const onSettledAssistantMissingRef = useRef(options?.onSettledAssistantMissing);
+  onSettledAssistantMissingRef.current = options?.onSettledAssistantMissing;
   const runningTotalRef = useRef(runningTotal);
   runningTotalRef.current = runningTotal;
   const mountedRef = useRef(false);
@@ -249,13 +258,17 @@ export function useOrchestratorStream(
   const pendingMissionCompletionRef = useRef<OrchestratorMissionCompletedDetail | null>(null);
   const transitionStripTimerRef = useRef<number | null>(null);
   const pendingSendWatchdogRef = useRef<PendingOrchestratorSend | null>(null);
+  const pendingActivityHandlerRef = useRef<(event: {
+    event: string;
+    data?: Record<string, unknown>;
+    observedAt: number;
+  }) => void>(() => {});
 
-  // #539 — reconnect reconciliation. eventCountRef advances on every relevant
-  // orchestrator event; lastEventAtRef tracks wall-clock time of the last
-  // event. Together they let us detect stale "busy" state after a ws-server
-  // restart (no events arrive post-reconnect) or a dead backend turn (no
-  // events for > HEAL_STALE_AFTER_MS while the UI still thinks it's working).
+  // Server turn truth on subscribe snapshots is the primary reconciliation
+  // seam. These elapsed/event refs remain only as a compatibility fallback
+  // when a subscription receives no snapshot at all.
   const eventCountRef = useRef(0);
+  const snapshotSeenRef = useRef(false);
   const turnTranscriptEventCountRef = useRef(0);
   const lastEventAtRef = useRef<number>(Date.now());
   // Wall-clock of the most recent local send(). The 3s reconnect heal uses this
@@ -264,25 +277,6 @@ export function useOrchestratorStream(
   // cold-starting the orchestrator before its first event), not stale carryover.
   const lastSendAtRef = useRef(0);
   const RECONNECT_HEAL_DELAY_MS = 3000;
-  // 2026-06-22 latch audit: was 300_000 (5 min) — too long, an operator watched
-  // a dead turn count "Working" up for minutes. The server now synthesizes a
-  // terminal 'ready' when the stream resolves without 'done', so this client
-  // watchdog only has to catch the rarer truly-wedged child that never closes.
-  // 120s applies to a turn that produced NOTHING (accepted, not even a thinking
-  // token) — a genuinely dead start, safe to heal fast.
-  const HEAL_STALE_AFTER_MS = 120_000;
-  // But once a turn HAS emitted transcript (thinking / a tool-use), it is
-  // demonstrably alive — a founders-rail tool loop goes silent for the whole
-  // duration of a server-side run_terminal_command (build/test), which routinely
-  // exceeds 120s. Healing then falsely tells the operator to resend, and the
-  // resend ABORTS the still-running server turn mid-edit (adversarial review
-  // 2026-07-15, HIGH). For an active-but-silent turn, wait past the SERVER's own
-  // authoritative inactivity watchdog (o8 backend = 5 min) so the server
-  // terminalizes first with a real error; this client timer is only the backstop
-  // for a dropped terminal event (socket flap).
-  const HEAL_ACTIVE_TURN_STALE_MS = 390_000;
-  const HEAL_POLL_INTERVAL_MS = 15_000;
-
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -503,17 +497,17 @@ export function useOrchestratorStream(
     setBusyState(createIdleBusyState());
   }, []);
 
-  // #539 — clear any stale "running" state when the client's local view of
-  // a busy turn no longer matches reality. Used by both the reconnect heal
-  // and the heartbeat-based stall detector. Idempotent — safe to call when
-  // nothing needs healing.
+  // Clear stale local running state after authoritative server reconciliation
+  // (or the no-snapshot compatibility fallback). Idempotent — safe to call
+  // when nothing needs healing.
   const healStaleBusyState = useCallback((reason: string) => {
     const hasStaleStatus = statusRef.current === 'busy';
     const hasOrphanAssistant = currentAssistantRef.current !== null;
+    const hasActiveTurn = activeTurnRef.current !== null;
     const hasRunningTools = messagesRef.current.some((m) =>
       m.toolCalls?.some((t) => t.status === 'running'),
     );
-    if (!hasStaleStatus && !hasOrphanAssistant && !hasRunningTools) return;
+    if (!hasStaleStatus && !hasOrphanAssistant && !hasActiveTurn && !hasRunningTools) return;
 
     console.warn(`[orchestrator-stream] Healing stale busy state: ${reason}`);
     if (hasStaleStatus) {
@@ -533,12 +527,25 @@ export function useOrchestratorStream(
     }
   }, [endTurn]);
 
+  const reconcileSnapshotTerminalTurn = useCallback((
+    turn: OrchestratorSnapshotTurn | null,
+    wasRunning: boolean,
+  ) => {
+    const wasLocallyRunning = wasRunning || activeTurnRef.current !== null;
+    healStaleBusyState(turn
+      ? `server turn ${turn.id} settled (${turn.outcome ?? 'unknown outcome'})`
+      : 'server reports no turn for this thread');
+    if (!wasLocallyRunning || turn?.outcome !== 'failed') return;
+
+    appendSnapshotTurnFailure(turn.id, setMessages, messagesRef);
+  }, [healStaleBusyState]);
+
   const settlePendingSend = useCallback((event: {
     event: string;
     data?: Record<string, unknown>;
     observedAt: number;
   }) => {
-    settleOrchestratorSendWatchdog(pendingSendWatchdogRef, event);
+    pendingActivityHandlerRef.current(event);
   }, []);
 
   const flushCurrentAssistant = useCallback(() => {
@@ -629,11 +636,12 @@ export function useOrchestratorStream(
     ws.onopen = () => {
       everOpened = true;
       setConnected(true);
+      snapshotSeenRef.current = false;
       // Don't clobber a live turn's "busy" on a mid-turn reconnect. Downgrading
       // to 'connecting' here made the working indicator (and the streaming reply,
       // via socket.ts's currentAssistant guard) vanish on a network flap. A
-      // genuinely stale busy is still caught by the heal below + the 5-min
-      // stall watchdog.
+      // genuinely stale busy is reconciled by the subscribe snapshot's turn
+      // ledger, with the elapsed fallback reserved for no-snapshot servers.
       setStatus(statusRef.current === 'busy' ? 'busy' : 'connecting');
 
       // Subscribe to orchestrator channel
@@ -650,7 +658,7 @@ export function useOrchestratorStream(
 
       console.log('[orchestrator-stream] Connected, subscribing...');
 
-      // #539 — reconnect heal. If this is a fresh connect, status is already
+      // Reconnect compatibility heal. If this is a fresh connect, status is already
       // 'connecting' and the heal is a no-op. If we're reconnecting after a
       // ws-server restart or a network flap, any "busy" state we carried over
       // is potentially stale. Give the server 3 seconds to push events for a
@@ -659,10 +667,11 @@ export function useOrchestratorStream(
       const openedAt = Date.now();
       setTimeout(() => {
         if (ws !== wsRef.current) return;
+        if (snapshotSeenRef.current) return;
         if (eventCountRef.current !== countAtOpen) return;
         // A send fired after this socket opened → the busy is fresh (the
         // orchestrator may still be cold-starting before its first event), not
-        // stale carryover. Leave it; the 5-min stall watchdog is the backstop.
+        // stale carryover. Leave it; server turn truth is the backstop.
         if (lastSendAtRef.current >= openedAt) return;
         if (statusRef.current === 'busy' || currentAssistantRef.current) {
           healStaleBusyState('reconnect with no follow-up events after 3s');
@@ -676,6 +685,7 @@ export function useOrchestratorStream(
       currentWs: ws,
       currentAssistantRef,
       eventCountRef,
+      snapshotSeenRef,
       threadIdRef,
       finalizeFirstTurnPlanCapture,
       firstTurnPlanChunksRef,
@@ -687,6 +697,12 @@ export function useOrchestratorStream(
       lastEventAtRef,
       messagesRef,
       onOrchestratorActivity: settlePendingSend,
+      onSnapshotTurnTerminal: reconcileSnapshotTerminalTurn,
+      onSettledAssistantMissing: (turn) => {
+        if (turn.assistantMessageId) {
+          onSettledAssistantMissingRef.current?.(turn.assistantMessageId);
+        }
+      },
       resetEpochRef,
       setMessages,
       setStatus,
@@ -718,7 +734,27 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, settlePendingSend]);
+  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend]);
+
+  const setPendingStatusReady = useCallback(() => {
+    const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
+    setBusyState(createIdleBusyState());
+    activeTurnRef.current = null;
+    currentAssistantRef.current = null;
+    resetFirstTurnPlanCapture();
+  }, [connected, resetFirstTurnPlanCapture]);
+  const setPendingStatusBusy = useCallback(() => {
+    statusRef.current = 'busy';
+    setStatus('busy');
+  }, []);
+  const durablePendingSend = useDurablePendingSend({
+    repoPath, threadId, pendingRef: pendingSendWatchdogRef, messagesRef, setMessages,
+    getWebSocket: () => wsRef.current, connect,
+    setStatusBusy: setPendingStatusBusy, setStatusReady: setPendingStatusReady,
+  });
+  pendingActivityHandlerRef.current = durablePendingSend.observeActivity;
 
   useEffect(() => {
     if (!repoPath || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -727,6 +763,7 @@ export function useOrchestratorStream(
     // session). Reset the replay cursor and ask for the whole in-flight turn so
     // a clobbered/raced status can't leave us with no stream.
     lastSeqRef.current = 0;
+    snapshotSeenRef.current = false;
     wsRef.current.send(JSON.stringify({
       type: 'orchestrator-subscribe',
       repoPath,
@@ -862,43 +899,10 @@ export function useOrchestratorStream(
     };
   }, [primeCompactedSession, repoPath, requestCompaction, runningTotal, status]);
 
-  // #539 — stall watchdog. If the UI stays in 'busy' state for > 5 minutes
-  // without any events from the stream, the backend turn is almost certainly
-  // dead even if the WS is still connected. Heal so the composer unlocks.
-  useEffect(() => {
-    if (!repoPath) return;
-
-    const interval = setInterval(() => {
-      if (statusRef.current !== 'busy') return;
-      const quietFor = Date.now() - lastEventAtRef.current;
-      // A turn that already produced transcript is alive but may be mid-tool
-      // (silent server-side command). Only heal it well past the server's own
-      // inactivity watchdog so we never pre-empt real work; a turn that emitted
-      // nothing at all is a dead start and heals at the short deadline.
-      const sawTranscript = turnTranscriptEventCountRef.current > 0;
-      const deadline = sawTranscript ? HEAL_ACTIVE_TURN_STALE_MS : HEAL_STALE_AFTER_MS;
-      if (quietFor >= deadline) {
-        if (!sawTranscript) {
-          const at = Date.now();
-          setMessages((prev) => {
-            const next = [...prev, {
-              id: `orch-stale-no-events-${at}`,
-              role: 'system' as const,
-              text: 'Orchestrator error: This turn produced no transcript events before the client watchdog expired. Re-send to retry.',
-              isError: true,
-              timestamp: at,
-              timestampLabel: formatTimestampLabel(at),
-            }];
-            messagesRef.current = next;
-            return next;
-          });
-        }
-        healStaleBusyState(`no events for ${Math.round(quietFor / 1000)}s while status=busy (deadline ${Math.round(deadline / 1000)}s)`);
-      }
-    }, HEAL_POLL_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [repoPath, healStaleBusyState]);
+  useNoSnapshotBusyFallback({
+    repoPath, snapshotSeenRef, statusRef, lastEventAtRef,
+    turnTranscriptEventCountRef, messagesRef, setMessages, healStaleBusyState,
+  });
 
   const compactNow = useCallback(async (_options?: { keepTailCount?: number; source?: 'manual' | 'handoff' }) => {
     const activeRepoPath = repoPathRef.current;
@@ -1050,12 +1054,14 @@ export function useOrchestratorStream(
           return;
         }
       }
+      const clientMessageId = createOrchestratorClientMessageId();
+      const sentAtMs = Date.now();
       const userEntry: MobileTranscriptEntry = {
-        id: `orch-user-${Date.now()}`,
+        id: `orch-user-${clientMessageId}`,
         role: 'user',
         text: displayMessage,
-        timestamp: Date.now(),
-        timestampLabel: formatTimestampLabel(Date.now()),
+        timestamp: sentAtMs,
+        timestampLabel: formatTimestampLabel(sentAtMs),
       };
       messagesRef.current = [...messagesRef.current, userEntry, ...localEntriesAfterUser];
       setMessages((prev) => [...prev, userEntry, ...localEntriesAfterUser]);
@@ -1091,7 +1097,6 @@ export function useOrchestratorStream(
       if (solo) {
         outboundMessage = `${SOLO_TURN_HINT}\n\n${outboundMessage}`;
       }
-      const clientMessageId = createOrchestratorClientMessageId();
       turnTranscriptEventCountRef.current = 0;
       const payload = JSON.stringify({
         type: 'orchestrator-send',
@@ -1114,6 +1119,15 @@ export function useOrchestratorStream(
         ...(collideBaseBackend ? { collideBaseBackend } : {}),
         ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       });
+      const pendingRecord = {
+        text: outboundMessage,
+        displayMessage,
+        threadId: threadIdRef.current!,
+        clientMessageId,
+        sentAtMs,
+        wirePayload: payload,
+      };
+      durablePendingSend.recordPending(pendingRecord);
       const delivered = await deliverOrchestratorPayload({
         payload,
         getWebSocket: () => wsRef.current,
@@ -1122,38 +1136,17 @@ export function useOrchestratorStream(
 
       if (!delivered) {
         activeTurnBackendRef.current = null;
-        const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
-        statusRef.current = nextStatus;
-        setStatus(nextStatus);
-        resetFirstTurnPlanCapture();
-        appendOrchestratorDeliveryFailureEntry(setMessages, messagesRef);
+        durablePendingSend.failPending(pendingRecord);
         return;
       }
 
       const deliveredAt = Date.now();
       lastSendAtRef.current = deliveredAt;
       lastEventAtRef.current = deliveredAt;
-      armOrchestratorSendWatchdog({
-        clientMessageId,
-        deliveredAt,
-        originalText: displayMessage,
-        pendingRef: pendingSendWatchdogRef,
-        setStatusReady: () => {
-          const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
-          statusRef.current = nextStatus;
-          setStatus(nextStatus);
-          setBusyState(createIdleBusyState());
-          activeTurnRef.current = null;
-          currentAssistantRef.current = null;
-          resetFirstTurnPlanCapture();
-        },
-        setMessages,
-        messagesRef,
-      });
-      statusRef.current = 'busy';
-      setStatus('busy');
+      durablePendingSend.armRecord(pendingRecord, deliveredAt);
+      setPendingStatusBusy();
     })();
-  }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction, resetFirstTurnPlanCapture]);
+  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy]);
 
   return {
     messages,
@@ -1172,6 +1165,7 @@ export function useOrchestratorStream(
     ),
     compactNow,
     reset,
+    retryPendingSend: (clientMessageId) => { void durablePendingSend.retryPending(clientMessageId); },
     connected,
   };
 }

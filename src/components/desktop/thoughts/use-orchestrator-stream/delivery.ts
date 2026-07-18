@@ -3,6 +3,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { formatTimestampLabel } from './shared';
 
 const RETRY_INTERVAL_MS = 200;
+const DELIVERY_FAILURE_ID_PREFIX = 'orch-delivery-error-';
 export const ORCHESTRATOR_SEND_RETRY_TIMEOUT_MS = 5000;
 export const ORCHESTRATOR_SEND_ACK_TIMEOUT_MS = 4000;
 
@@ -18,6 +19,7 @@ export interface PendingOrchestratorSend {
   originalText: string;
   timeoutId: ReturnType<typeof setTimeout>;
   failureEntryId: string;
+  onSettled?: () => void;
 }
 
 interface ArmOrchestratorSendWatchdogOptions {
@@ -29,6 +31,7 @@ interface ArmOrchestratorSendWatchdogOptions {
   setMessages: Dispatch<SetStateAction<MobileTranscriptEntry[]>>;
   messagesRef: MutableRefObject<MobileTranscriptEntry[]>;
   timeoutMs?: number;
+  onSettled?: () => void;
 }
 
 interface OrchestratorWatchdogEvent {
@@ -57,6 +60,12 @@ export function createOrchestratorDeliveryFailureEntry(options?: {
     timestamp,
     timestampLabel: formatTimestampLabel(timestamp),
   };
+}
+
+export function deliveryFailureClientMessageId(entryId: string): string | null {
+  if (!entryId.startsWith(DELIVERY_FAILURE_ID_PREFIX)) return null;
+  const clientMessageId = entryId.slice(DELIVERY_FAILURE_ID_PREFIX.length);
+  return clientMessageId || null;
 }
 
 export function appendOrchestratorDeliveryFailureEntry(
@@ -89,9 +98,10 @@ export function armOrchestratorSendWatchdog({
   setMessages,
   messagesRef,
   timeoutMs = ORCHESTRATOR_SEND_ACK_TIMEOUT_MS,
+  onSettled,
 }: ArmOrchestratorSendWatchdogOptions): void {
   if (pendingRef.current) clearPendingOrchestratorSend(pendingRef.current);
-  const failureEntryId = `orch-delivery-error-${clientMessageId}`;
+  const failureEntryId = `${DELIVERY_FAILURE_ID_PREFIX}${clientMessageId}`;
   const timeoutId = setTimeout(() => {
     const pending = pendingRef.current;
     if (!pending || pending.clientMessageId !== clientMessageId) return;
@@ -102,7 +112,7 @@ export function armOrchestratorSendWatchdog({
       originalText,
     });
   }, timeoutMs);
-  pendingRef.current = { clientMessageId, deliveredAt, originalText, timeoutId, failureEntryId };
+  pendingRef.current = { clientMessageId, deliveredAt, originalText, timeoutId, failureEntryId, onSettled };
 }
 
 function isLiveOrchestratorActivity(eventName: string, data?: Record<string, unknown>): boolean {
@@ -116,6 +126,17 @@ function isLiveOrchestratorActivity(eventName: string, data?: Record<string, unk
     || eventName === 'error';
 }
 
+export function isOrchestratorSendSettlementEvent(
+  send: { clientMessageId: string; deliveredAt: number },
+  event: OrchestratorWatchdogEvent,
+): boolean {
+  const isMatchingAck = event.event === 'send-ack'
+    && event.data?.clientMessageId === send.clientMessageId;
+  const isPostSendActivity = event.observedAt >= send.deliveredAt
+    && isLiveOrchestratorActivity(event.event, event.data);
+  return isMatchingAck || isPostSendActivity;
+}
+
 export function settleOrchestratorSendWatchdog(
   pendingRef: MutableRefObject<PendingOrchestratorSend | null>,
   event: OrchestratorWatchdogEvent,
@@ -123,14 +144,11 @@ export function settleOrchestratorSendWatchdog(
   const pending = pendingRef.current;
   if (!pending) return false;
 
-  const isMatchingAck = event.event === 'send-ack'
-    && event.data?.clientMessageId === pending.clientMessageId;
-  const isPostSendActivity = event.observedAt >= pending.deliveredAt
-    && isLiveOrchestratorActivity(event.event, event.data);
-  if (!isMatchingAck && !isPostSendActivity) return false;
+  if (!isOrchestratorSendSettlementEvent(pending, event)) return false;
 
   clearPendingOrchestratorSend(pending);
   pendingRef.current = null;
+  pending.onSettled?.();
   return true;
 }
 

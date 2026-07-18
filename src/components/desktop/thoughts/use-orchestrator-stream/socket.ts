@@ -12,6 +12,14 @@ interface RefLike<T> {
   current: T;
 }
 
+export interface OrchestratorSnapshotTurn {
+  id: string;
+  startedAt: number;
+  settledAt: number | null;
+  outcome: 'completed' | 'failed' | 'interrupted' | null;
+  assistantMessageId: string | null;
+}
+
 export interface CurrentAssistantStreamState {
   id: string;
   chunks: string[];
@@ -38,6 +46,7 @@ interface CreateOrchestratorMessageHandlerOptions {
   currentWs: WebSocket;
   currentAssistantRef: RefLike<CurrentAssistantStreamState | null>;
   eventCountRef: RefLike<number>;
+  snapshotSeenRef?: RefLike<boolean>;
   /** Highest event seq applied for this session — drives replay de-dup. */
   lastSeqRef: RefLike<number>;
   finalizeFirstTurnPlanCapture: () => void;
@@ -70,6 +79,8 @@ interface CreateOrchestratorMessageHandlerOptions {
     data?: Record<string, unknown>;
     observedAt: number;
   }) => void;
+  onSnapshotTurnTerminal?: (turn: OrchestratorSnapshotTurn | null, wasRunning: boolean) => void;
+  onSettledAssistantMissing?: (turn: OrchestratorSnapshotTurn) => void;
   resetEpochRef: RefLike<number>;
   setMessages: Dispatch<SetStateAction<MobileTranscriptEntry[]>>;
   setStatus: Dispatch<SetStateAction<OrchestratorStreamStatus>>;
@@ -90,6 +101,28 @@ const VERBATIM_STREAM_BACKENDS = new Set(['o8']);
 // send OR event keeps lastEventAt fresh (send() stamps it), preserving the race
 // guard; only a truly silent turn heals.
 const ORCH_SNAPSHOT_BUSY_RECONCILE_MS = 6000;
+
+function parseSnapshotTurn(value: unknown): OrchestratorSnapshotTurn | null | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') return undefined;
+  const turn = value as Record<string, unknown>;
+  if (typeof turn.id !== 'string' || typeof turn.startedAt !== 'number') return undefined;
+  if (turn.settledAt !== null && typeof turn.settledAt !== 'number') return undefined;
+  if (
+    turn.outcome !== null
+    && turn.outcome !== 'completed'
+    && turn.outcome !== 'failed'
+    && turn.outcome !== 'interrupted'
+  ) return undefined;
+  if (turn.assistantMessageId !== null && typeof turn.assistantMessageId !== 'string') return undefined;
+  return {
+    id: turn.id,
+    startedAt: turn.startedAt,
+    settledAt: turn.settledAt,
+    outcome: turn.outcome,
+    assistantMessageId: turn.assistantMessageId,
+  };
+}
 
 function createAssistantState(
   resetEpochRef: RefLike<number>,
@@ -207,8 +240,7 @@ export function createOrchestratorMessageHandler(
     // view's stall clock only listens to its OWN turn's events. Every real
     // turn emission stamps data.threadId, so on a bound view an UNSTAMPED
     // event (session-wide broadcasts, e.g. the supervisor auto-queue) still
-    // paints below but must not keep resetting the #539 stall watchdog — that
-    // starvation is how a wedged turn's busy latch survives indefinitely.
+    // paints below but must not keep resetting the no-snapshot fallback clock.
     if (msg.data?.snapshot !== true) {
       const ownThreadId = options.threadIdRef?.current ?? null;
       if (!ownThreadId || evtThreadId === ownThreadId) {
@@ -346,11 +378,59 @@ export function createOrchestratorMessageHandler(
         // clobber the in-flight turn, and the output guard above would then
         // silently drop every token (dead until reload). So a snapshot may
         // resync an idle client (settle 'ready', or move UP to 'busy' on a
-        // reload into an active turn) but must NEVER downgrade or finalize a
-        // live local 'busy'. 2026-06-18.
+        // reload into an active turn) but a LEGACY snapshot without turn-ledger
+        // truth must never downgrade or finalize a live local 'busy'.
         const isSnapshot = msg.data?.snapshot === true;
+        if (isSnapshot && options.snapshotSeenRef) options.snapshotSeenRef.current = true;
+        const hasTurnTruth = isSnapshot
+          && Object.prototype.hasOwnProperty.call(msg.data ?? {}, 'turn');
+        const snapshotTurn = hasTurnTruth ? parseSnapshotTurn(msg.data?.turn) : undefined;
         if (newStatus === 'ready' || newStatus === 'busy' || newStatus === 'dead') {
           if (isSnapshot) {
+            // The turn ledger is authoritative when present. An unsettled turn
+            // is running even if the legacy session status drifted; null or a
+            // settled record means any local timer/assistant/tool state is a
+            // phantom and must be cleared immediately, without an elapsed-time
+            // guess. Snapshots from older servers still use the race guard below.
+            if (snapshotTurn !== undefined) {
+              if (snapshotTurn?.settledAt === null) {
+                options.statusRef.current = 'busy';
+                options.setStatus('busy');
+                break;
+              }
+
+              // Ledger says no active turn — but a JUST-SENT local turn may
+              // not have its record yet: the first-turn threadId mint forces a
+              // re-subscribe that races the send handler's awaits, so the
+              // snapshot can ship turn:null (or the PRIOR settled turn) while
+              // the new turn is spawning. Within the reconcile window a fresh
+              // local busy keeps the legacy race guard; a genuinely phantom
+              // timer is quiet past it and still clears, just bounded-late.
+              const localQuietForMs = observedAt - options.lastEventAtRef.current;
+              if (options.statusRef.current === 'busy' && localQuietForMs < ORCH_SNAPSHOT_BUSY_RECONCILE_MS) {
+                break;
+              }
+
+              const wasRunning = options.statusRef.current === 'busy'
+                || options.currentAssistantRef.current !== null
+                || options.messagesRef.current.some((message) =>
+                  message.toolCalls?.some((tool) => tool.status === 'running'),
+                );
+              if (options.currentAssistantRef.current) options.flushCurrentAssistant();
+              options.onSnapshotTurnTerminal?.(snapshotTurn, wasRunning);
+              options.currentAssistantRef.current = null;
+              options.statusRef.current = 'ready';
+              options.setStatus('ready');
+              if (
+                snapshotTurn
+                && snapshotTurn.settledAt !== null
+                && snapshotTurn.assistantMessageId
+                && !options.messagesRef.current.some((message) => message.id === snapshotTurn.assistantMessageId)
+              ) {
+                options.onSettledAssistantMissing?.(snapshotTurn);
+              }
+              break;
+            }
             if (options.statusRef.current === 'busy' && newStatus !== 'busy') {
               // RC1 seam 3/4 — a snapshot terminal (ready/dead) normally must NOT
               // downgrade a live busy (first-turn re-subscribe race). But when the

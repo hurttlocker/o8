@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import {
   armOrchestratorSendWatchdog,
+  deliveryFailureClientMessageId,
   settleOrchestratorSendWatchdog,
   type PendingOrchestratorSend,
 } from './delivery';
@@ -85,5 +86,10 @@ describe('orchestrator delivery watchdog', () => {
     expect(h.messages[0]?.id).toBe('orch-delivery-error-send-1');
     expect(h.messages[0]?.text).toContain('Message may not have been delivered');
     expect(h.messages[0]?.text).toContain('ship it');
+  });
+
+  it('recovers the original clientMessageId from the existing retry entry id', () => {
+    expect(deliveryFailureClientMessageId('orch-delivery-error-send-1')).toBe('send-1');
+    expect(deliveryFailureClientMessageId('orch-error-send-1')).toBeNull();
   });
 });

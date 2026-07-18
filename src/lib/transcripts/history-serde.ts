@@ -5,6 +5,7 @@ export type StoredTranscriptMessage = {
   role?: MobileTranscriptEntry['role'];
   content?: string;
   text?: string;
+  persistedVersion?: number;
   type?: MobileTranscriptEntry['type'];
   media?: MobileTranscriptEntry['media'];
   toolCalls?: MobileTranscriptEntry['toolCalls'];
@@ -71,6 +72,9 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
     id: message.id as string,
     role: message.role as MobileTranscriptEntry['role'],
     text,
+    persistedVersion: typeof message.persistedVersion === 'number'
+      ? message.persistedVersion
+      : undefined,
     type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
     media: message.media,
     toolCalls: message.toolCalls,
@@ -111,6 +115,7 @@ export function serializeTranscriptForStorage(
     id: entry.id,
     role: entry.role,
     content: entry.text,
+    persistedVersion: entry.persistedVersion,
     type: entry.type,
     media: entry.media,
     toolCalls: entry.toolCalls,
