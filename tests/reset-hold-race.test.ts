@@ -29,7 +29,10 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 let releaseCleanupGate: () => void = () => {};
 const cleanupGate = new Promise<void>((resolve) => { releaseCleanupGate = resolve; });
 vi.mock('@/lib/lane/reap-sessions', () => ({
-  interruptLaneSessions: vi.fn(() => cleanupGate),
+  killLaneSessionsConfirmed: vi.fn(async () => {
+    await cleanupGate;
+    return [];
+  }),
   archiveLaneSessions: vi.fn(async () => {}),
 }));
 

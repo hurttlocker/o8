@@ -18,10 +18,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetCodexProcessCwdIndexForTesting, setCodexProcessReaderForTesting } from '@/lib/runtimes/shared/codex-process-cwd';
 import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-index';
+import * as liveProcessGuard from '@/lib/worktree/live-process-guard';
 
 // Point the SQLite store + owned root at temp dirs BEFORE importing the registry.
 process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-reaper-liveness-'));
@@ -156,7 +157,12 @@ describe('zombie reaper secondary liveness gates (#1585)', () => {
     const now = Date.now();
     const lane = makeRunningLane(wt, sessionKey, now);
 
+    // A saturated full-suite host can make the real 2s lsof probe time out;
+    // production correctly keeps the lane fail-closed in that case. This case
+    // specifically proves the clean "no process" branch, so make it explicit.
+    const liveProbe = vi.spyOn(liveProcessGuard, 'hasLiveProcessInside').mockResolvedValue(false);
     const candidates = await listZombieLaneCandidates(now);
+    liveProbe.mockRestore();
 
     const candidate = candidates.find((c) => c.lane.id === lane.id);
     expect(candidate).toBeDefined();

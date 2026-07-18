@@ -61,6 +61,13 @@ vi.doMock('@/lib/github-broker/sync', () => ({
   }),
 }));
 
+// This suite exercises reaper reconciliation and sweep selection. Keep its
+// destructive seam deterministic under the full suite's process load; the
+// live-process guard's real lsof behavior is covered by prune-safety tests.
+vi.doMock('@/lib/worktree/live-process-guard', () => ({
+  allowWorktreeRemoval: vi.fn(async () => true),
+}));
+
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { runWorktreeReaperTick } = await import('@/lib/lane/worktree-reaper');

@@ -1,13 +1,23 @@
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
-import { interruptLaneSessions, archiveLaneSessions } from '@/lib/lane/reap-sessions';
+import { archiveLaneSessions, killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { removeCortexWorktreePath } from '@/lib/lane/worktree-clone-removal';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 function withinScope(input: ResetPacketInput, laneId: string): boolean {
   return !input.scope || input.scope.laneIds.includes(laneId);
+}
+
+async function confirmedKilledLaneIds(lanes: Parameters<typeof killLaneSessionsConfirmed>[0]) {
+  const outcomes = await killLaneSessionsConfirmed(lanes);
+  return new Set(
+    outcomes
+      .filter((outcome) => outcome.confirmed || outcome.alreadyDead)
+      .map((outcome) => outcome.laneId),
+  );
 }
 
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
@@ -41,8 +51,8 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   // #1292 — reap the live runtime procs BEFORE we null their sessionKeys. A
   // reset that leaves the codex exec running lets it later exit/fail and the
   // agent-supervisor relaunches it into a SIBLING lane (the zombie-multiply).
-  // Interrupt is a clean stop (not `failed`), so it does not auto-retry.
-  await interruptLaneSessions(bound);
+  // The confirmed-kill ladder verifies exit before any live-guard override is granted.
+  const confirmedKills = await confirmedKilledLaneIds(bound);
   // #1292 ROOT (the real one) — archive the owned-session DIR (move to
   // -archive) so startup discovery (computeFleetAdditions, no retirement gate)
   // can't re-find the orphan and re-create a phantom lane. Reset previously left
@@ -71,6 +81,7 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
       repoPath: lane.repoPath,
       branch: lane.branch,
       worktreePath: lane.worktreePath,
+      overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
     });
     try {
       updateLane(lane.id, {
@@ -112,7 +123,7 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
     // packet prefix, and the glob would rm -rf the LIVE worker's checkout.
     // The captured cleanupTargets above already pruned this stop's worktrees.
     if (!input.scope) try {
-      const { readdir, rm } = await import('node:fs/promises');
+      const { readdir } = await import('node:fs/promises');
       const path = await import('node:path');
       // #1215 — derive repos from ALL bound lanes (terminal included) so a
       // packet stranded on only-terminal lanes still gets its worktree dirs
@@ -125,9 +136,16 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
         const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
         for (const name of orphans) {
           const full = path.join(baseDir, name);
-          await rm(full, { recursive: true, force: true }).catch(() => {});
-          worktreePruned = true;
-          log(`[lane-reset] Removed orphan worktree dir ${full} for evicted packet ${input.packetId}`);
+          const removed = await removeCortexWorktreePath({
+            repoRoot: repoPath,
+            worktreePath: full,
+            logPrefix: 'lane-reset-orphan',
+            operatorForce: true,
+          });
+          if (removed) {
+            worktreePruned = true;
+            log(`[lane-reset] Removed orphan worktree dir ${full} for evicted packet ${input.packetId}`);
+          }
         }
       }
     } catch (error) {
@@ -250,7 +268,7 @@ export async function resetPacket(input: ResetPacketInput) {
     }
     // #1292 — reap live runtime procs BEFORE nulling sessionKey below, or a
     // killed orphan re-triggers the supervisor auto-retry into a sibling lane.
-    await interruptLaneSessions(bound);
+    const confirmedKills = await confirmedKilledLaneIds(bound);
     // #1292 ROOT (the real one) — archive the owned-session DIR so startup
     // discovery can't re-find the orphan and re-create a phantom lane (see
     // resetPacketViaLaneFallback above).
@@ -276,6 +294,7 @@ export async function resetPacket(input: ResetPacketInput) {
           repoPath: lane.repoPath,
           branch: lane.branch,
           worktreePath: lane.worktreePath,
+          overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
         });
       }
       try {
@@ -339,7 +358,7 @@ export async function resetPacket(input: ResetPacketInput) {
     // re-dispatched packet's live worktree (same prefix). The captured
     // cleanupTargets above already pruned this stop's own worktrees.
     if (!input.scope) try {
-      const { readdir, rm } = await import('node:fs/promises');
+      const { readdir } = await import('node:fs/promises');
       const path = await import('node:path');
       const baseDir = path.join(state.repoPath, '.cortex-worktrees');
       const dirs = await readdir(baseDir).catch(() => [] as string[]);
@@ -347,9 +366,16 @@ export async function resetPacket(input: ResetPacketInput) {
       const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
       for (const name of orphans) {
         const full = path.join(baseDir, name);
-        await rm(full, { recursive: true, force: true }).catch(() => {});
-        worktreePruned = true;
-        log(`[lane-reset] Removed orphan worktree dir ${full} for packet ${packet.referenceLabel}`);
+        const removed = await removeCortexWorktreePath({
+          repoRoot: state.repoPath,
+          worktreePath: full,
+          logPrefix: 'lane-reset-orphan',
+          operatorForce: true,
+        });
+        if (removed) {
+          worktreePruned = true;
+          log(`[lane-reset] Removed orphan worktree dir ${full} for packet ${packet.referenceLabel}`);
+        }
       }
     } catch (error) {
       log(
