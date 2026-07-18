@@ -13,7 +13,10 @@ export function isRepoWorkspaceIsolationPreference(value: unknown): value is Rep
     && (REPO_WORKSPACE_ISOLATION_PREFERENCES as readonly string[]).includes(value);
 }
 
-export type RepoReadinessState = 'ready' | 'needs_setup' | 'blocked' | 'unknown';
+// 'missing' (#1565) — the registered localPath no longer exists on disk
+// (moved/deleted). First-class state so the rail can flag it at DETECTION
+// time instead of the operator discovering it via a failed spawn.
+export type RepoReadinessState = 'ready' | 'needs_setup' | 'blocked' | 'missing' | 'unknown';
 
 export interface RepoReadiness {
   state: RepoReadinessState;

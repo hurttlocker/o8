@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 // Old Cortex Go binary removed — cortexRecall no longer available
 import { enrichRepoReadinessList } from '@/lib/repos/readiness';
 import { listRepos } from '@/lib/repos/registry';
+import type { RepoReadinessState } from '@/lib/repos/types';
 
 const execFileAsync = promisify(execFile);
 const FTUX_CACHE_TTL_MS = 20_000;
@@ -20,7 +21,7 @@ interface TopicMatcher {
 interface BaseRepoContext {
   name: string;
   localPath: string;
-  readinessState: 'ready' | 'needs_setup' | 'blocked' | 'unknown';
+  readinessState: RepoReadinessState;
 }
 
 interface BaseFtuxContext {
