@@ -4,7 +4,7 @@ import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestra
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
-import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
+import { readPacketAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
 import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
@@ -286,9 +286,14 @@ export async function buildPacketPrompt(
   worktreePath?: string | null,
 ) {
   const dependencySections = await buildDependencyContextSections(packet, allPackets);
-  const priorAttemptLearningSections = packet.attemptCount && packet.attemptCount > 0 && worktreePath?.trim()
-    ? buildAttemptLearningSections(await readAttemptLearnings(worktreePath))
-    : [];
+  // #1500 — read learnings unconditionally by packet id. The old gate
+  // (`attemptCount > 0` + worktree-local file) went dark on exactly the
+  // respawns that needed it: silent-exit verification failures never bumped
+  // attemptCount, and a fresh-clone worktree had no learnings file — so five
+  // identical briefs went out against the same violation.
+  const priorAttemptLearningSections = buildAttemptLearningSections(
+    await readPacketAttemptLearnings(packet.id, worktreePath),
+  );
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
   const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
