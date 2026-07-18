@@ -55,6 +55,27 @@ interface MergeOrderCandidate {
 
 interface OrderedMergeCandidate extends MergeOrderCandidate {
   recommendation: MergeOrderRecommendation;
+  /** Worktree ids whose diffs touch at least one file this candidate also touches (#1525). */
+  overlappingWorktreeIds: Set<string>;
+}
+
+/**
+ * #1525 — the merge sequence for a requested packet. The recommended order is
+ * a heuristic (bigger diffs first); it must only be ENFORCED between packets
+ * whose diffs actually overlap. Parallel packets with disjoint files merge in
+ * any order — earlier-positioned disjoint siblings are not prerequisites.
+ */
+export function selectMergeSequence<T extends { worktree: { id: string }; overlappingWorktreeIds: Set<string> }>(
+  ordered: T[],
+  targetIndex: number,
+): T[] {
+  const target = ordered[targetIndex];
+  if (!target) return [];
+  return [
+    ...ordered.slice(0, targetIndex).filter((candidate) =>
+      target.overlappingWorktreeIds.has(candidate.worktree.id)),
+    target,
+  ];
 }
 
 export class HeadShaMismatchError extends Error {
@@ -242,9 +263,25 @@ async function getWaveMergeOrder(
   const recommendations = await recommendMergeOrder(candidateWorktrees, overlaps);
   const candidateByWorktreeId = new Map(candidates.map((candidate) => [candidate.worktree.id, candidate] as const));
 
+  // #1525 — symmetric overlap index, so enforcement can be scoped to packets
+  // that actually touch the same files.
+  const overlapsByWorktreeId = new Map<string, Set<string>>();
+  for (const overlap of overlaps) {
+    if (!overlapsByWorktreeId.has(overlap.worktreeA)) overlapsByWorktreeId.set(overlap.worktreeA, new Set());
+    if (!overlapsByWorktreeId.has(overlap.worktreeB)) overlapsByWorktreeId.set(overlap.worktreeB, new Set());
+    overlapsByWorktreeId.get(overlap.worktreeA)!.add(overlap.worktreeB);
+    overlapsByWorktreeId.get(overlap.worktreeB)!.add(overlap.worktreeA);
+  }
+
   const ordered = recommendations.flatMap((recommendation) => {
     const candidate = candidateByWorktreeId.get(recommendation.worktreeId);
-    return candidate ? [{ ...candidate, recommendation }] : [];
+    return candidate
+      ? [{
+          ...candidate,
+          recommendation,
+          overlappingWorktreeIds: overlapsByWorktreeId.get(candidate.worktree.id) ?? new Set<string>(),
+        }]
+      : [];
   });
 
   if (ordered.length <= 1) {
@@ -682,7 +719,9 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     return approveAndMergeSinglePacket(input);
   }
 
-  const mergeSequence = orderedWavePackets.slice(0, targetIndex + 1);
+  // #1525 — only overlap-coupled siblings are prerequisites; disjoint
+  // parallel packets merge in any order.
+  const mergeSequence = selectMergeSequence(orderedWavePackets, targetIndex);
   const mergedPrerequisites: string[] = [];
   let requestedResult: MergePacketResult | null = null;
 
