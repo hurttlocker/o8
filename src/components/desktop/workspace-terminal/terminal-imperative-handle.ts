@@ -244,17 +244,33 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     setTabLabelIfAuto: (match, label) => {
       const next = label.trim();
       if (!next) return false;
-      const keys = [match.sessionKey, match.packetId].filter((k): k is string => Boolean(k));
-      if (keys.length === 0) return false;
+      if (!match.sessionKey && !match.packetId) return false;
       // Find the target first (no setTabs yet) so we only schedule a state
       // update when something ACTUALLY changes — `previous.map` always returns a
       // fresh array, which would re-render on every packet tick otherwise.
-      const target = deps.tabsRef.current.find((tab) => keys.some((key) => (
-        tab.id === key
-        || tab.chatSessionKey === key
-        || tab.orchestrationPacket?.packetId === key
-      )));
+      //
+      // #1475 — match by the IMMUTABLE packetId first. chatSessionKey gets
+      // REBOUND by supervisor retries (terminal-session-ops match-and-update),
+      // so a sessionKey hit can land on a tab that now belongs to a different
+      // packet — that's how "hey buddy" cross-wired onto the current dispatch's
+      // tab. A sessionKey-only hit on a tab bound to a DIFFERENT packet is
+      // refused outright: never write one packet's label onto another's tab.
+      const byPacket = match.packetId
+        ? deps.tabsRef.current.find((tab) => tab.orchestrationPacket?.packetId === match.packetId)
+        : null;
+      const bySession = !byPacket && match.sessionKey
+        ? deps.tabsRef.current.find((tab) => (
+            tab.id === match.sessionKey || tab.chatSessionKey === match.sessionKey
+          ))
+        : null;
+      const target = byPacket ?? bySession;
       if (!target) return false;
+      if (
+        !byPacket
+        && match.packetId
+        && target.orchestrationPacket?.packetId
+        && target.orchestrationPacket.packetId !== match.packetId
+      ) return false;
       // Matched — but frozen by a user rename, or already correct: nothing to do.
       if (target.labelSource === 'user' || target.label === next) return true;
       deps.setTabs((previous) => previous.map((tab) => (

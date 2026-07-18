@@ -739,6 +739,7 @@ export function useWorkspaceTerminal({
           worktreeStatus: targetScope.worktreeStatus ?? null,
         } : undefined,
         targetSessionKey: lane.sessionKey,
+        laneId: lane.laneId ?? null,
         label: packetTitle,
         createNew: false,
         orchestrationPacket: lane.packetId
