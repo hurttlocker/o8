@@ -881,25 +881,48 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
-    await refreshSession(session);
 
-    if (session.activeRun && isPidAlive(session.activeRun.pid)) {
-      throw new Error(`This owned ${adapter.squadShortName} session still has an active run. Wait for it to settle or interrupt it first.`);
-    }
-    if (!session.threadId) {
-      throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
-    }
-
-    const run = await spawnOwnedRun(session, prompt.trim(), 'resume');
-    invalidateFleetCache();
-    return {
-      ok: run.outcome !== 'failed',
-      note: run.outcome === 'failed'
-        ? session.latestSummary
-        : coldRestored
-          ? `Cold resume: the archived IDE-owned ${adapter.squadShortName} session was restored and its saved thread resumed (fresh process, no warm context beyond the thread).`
-          : `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
+    // Adversarial F13 — a restored dir whose resume then FAILS must not stay
+    // in the active tree: discovery has no retirement gate, so an unbound
+    // restored dir re-spawns as a phantom lane (the #1292 multiply class).
+    // Roll the restore back whenever the cold resume doesn't complete.
+    const rollbackColdRestore = async () => {
+      if (!coldRestored || !session) return;
+      try {
+        await archiveOwnedSessionDir(root, session);
+        invalidateFleetCache();
+      } catch (error) {
+        console.warn(`[owned-store] Failed to re-archive ${surfaceId} after aborted cold resume:`, error);
+      }
     };
+
+    try {
+      await refreshSession(session);
+
+      if (session.activeRun && isPidAlive(session.activeRun.pid)) {
+        throw new Error(`This owned ${adapter.squadShortName} session still has an active run. Wait for it to settle or interrupt it first.`);
+      }
+      if (!session.threadId) {
+        throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
+      }
+
+      const run = await spawnOwnedRun(session, prompt.trim(), 'resume');
+      if (run.outcome === 'failed' && coldRestored) {
+        await rollbackColdRestore();
+      }
+      invalidateFleetCache();
+      return {
+        ok: run.outcome !== 'failed',
+        note: run.outcome === 'failed'
+          ? session.latestSummary
+          : coldRestored
+            ? `Cold resume: the archived IDE-owned ${adapter.squadShortName} session was restored and its saved thread resumed (fresh process, no warm context beyond the thread).`
+            : `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
+      };
+    } catch (error) {
+      await rollbackColdRestore();
+      throw error;
+    }
   }
 
   function interrupt(surfaceId: string) {
@@ -1422,6 +1445,18 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   // caller's grace are interrupted and marked orphaned before archive. The dominant case
   // is handled by reset archiving its own dir — this is the self-healing belt-
   // and-suspenders for orphans from OTHER paths (supervisor relaunch, crashes).
+  // Adversarial F6 — a session's "last activity" must include metadata
+  // updates (a cold-resume restore stamps updatedAt), or a just-restored
+  // session with an old run reads as stale and gets re-archived out from
+  // under the in-flight resume.
+  function sessionLastActivityMs(session: OwnedSessionRecord): number {
+    const latest = latestRun(session);
+    const candidates = [latest?.finishedAt, latest?.startedAt, session.updatedAt]
+      .map((value) => (value ? new Date(value).getTime() : Number.NaN))
+      .filter((value) => Number.isFinite(value));
+    return candidates.length > 0 ? Math.max(...candidates) : 0;
+  }
+
   async function sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number> {
     let archived = 0;
     for (const sessionDir of await listSessionDirs()) {
@@ -1429,14 +1464,22 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         if (!(await pathExists(metadataPath(sessionDir)))) continue;
         const session = await loadSession(sessionDir);
         if (activeSurfaceIds.has(session.surfaceId)) continue; // bound to a live lane — keep
-        const latest = latestRun(session);
-        const lastActivity = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
-        if (Date.now() - new Date(lastActivity).getTime() < maxAgeMs) continue; // recently active — keep
-        if (session.activeRun) {
-          await markActiveRunOrphaned(session, `No lane referenced this owned ${runtimeId} session within ${Math.round(maxAgeMs / 1000)}s of launch.`);
-        }
-        const result = await archiveOwnedSessionDir(root, session);
-        if (result.archived) archived += 1;
+        if (Date.now() - sessionLastActivityMs(session) < maxAgeMs) continue; // recently active — keep
+        // F6 — archive under the surface lock so an in-flight resume (which
+        // holds the same lock) serializes with the sweep, and re-validate
+        // freshness under the lock before touching anything.
+        const didArchive = await withSurfaceLock(session.surfaceId, async () => {
+          if (!(await pathExists(metadataPath(sessionDir)))) return false;
+          const current = await loadSession(sessionDir);
+          if (activeSurfaceIds.has(current.surfaceId)) return false;
+          if (Date.now() - sessionLastActivityMs(current) < maxAgeMs) return false;
+          if (current.activeRun) {
+            await markActiveRunOrphaned(current, `No lane referenced this owned ${runtimeId} session within ${Math.round(maxAgeMs / 1000)}s of launch.`);
+          }
+          const result = await archiveOwnedSessionDir(root, current);
+          return result.archived;
+        });
+        if (didArchive) archived += 1;
       } catch { /* best-effort per dir — never block startup */ }
     }
     if (archived > 0) invalidateFleetCache();
