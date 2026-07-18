@@ -14,6 +14,8 @@ interface LaneArchiveSummary {
   source: string;
   message: string;
   preservedBranch?: string | null;
+  /** Durable lane outcome, when stamped — mirrors lane/archive-summary.ts. */
+  outcome?: 'merged' | 'discarded' | 'no_changes' | null;
 }
 
 interface LaneLifecycleEventData {

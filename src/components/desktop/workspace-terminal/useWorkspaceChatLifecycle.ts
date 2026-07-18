@@ -102,6 +102,42 @@ export function useWorkspaceChatLifecycle({
         bannerSub: 'This session ended without merging. The transcript stays for review.',
       };
     }
+    // Durable lane outcome outranks the generic archived copy — a merged
+    // lane archived by cleanup must read Merged, not "without merging"
+    // (live-hit 2026-07-18).
+    if (archiveSummary?.outcome === 'merged') {
+      return {
+        merged: true,
+        tone: '#22c55e',
+        iconBg: 'rgba(34, 197, 94, 0.10)',
+        heroTitle: 'Merged & archived',
+        heroSub: archiveSummary.message,
+        bannerLabel: 'Merged · read-only',
+        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
+      };
+    }
+    if (archiveSummary?.outcome === 'discarded') {
+      return {
+        merged: false,
+        tone: 'var(--t-text-muted)',
+        iconBg: 'var(--t-panel)',
+        heroTitle: 'Discarded',
+        heroSub: archiveSummary.message,
+        bannerLabel: 'Discarded · read-only',
+        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
+      };
+    }
+    if (archiveSummary?.outcome === 'no_changes') {
+      return {
+        merged: false,
+        tone: 'var(--t-text-muted)',
+        iconBg: 'var(--t-panel)',
+        heroTitle: 'Finished — no changes',
+        heroSub: archiveSummary.message,
+        bannerLabel: 'No changes · read-only',
+        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
+      };
+    }
     return {
       merged: false,
       tone: 'var(--t-text-muted)',

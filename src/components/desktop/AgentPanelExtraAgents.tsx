@@ -60,7 +60,7 @@ interface LaneSummary {
   sessionKey: string | null;
   packetId: string | null;
   status: LaneStatus;
-  outcome?: 'no_changes' | null;
+  outcome?: 'no_changes' | 'merged' | 'discarded' | null;
   outcomeNote?: string | null;
   ownership: LaneOwnership;
   lastEventAt: string | null;
@@ -108,6 +108,8 @@ export interface AgentPanelExtraAgentsProps {
 
 const FONT = 'var(--font-sans-system)';
 const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
+const RECENT_TERMINAL_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RECENT_TERMINAL_CAP_PER_REPO = 8;
 
 // ── Helpers ──
 
@@ -266,7 +268,17 @@ function groupRows(
   }
 
   const groups = [...byRepo.values()].sort((a, b) => a.label.localeCompare(b.label));
-  for (const group of groups) group.rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  for (const group of groups) {
+    group.rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    // Live work leads; the day's finished agents follow as the Recent tail
+    // (recency-sorted, capped) so the rail reads "what's happening, then
+    // what happened" without flooding on a heavy mission day.
+    const live = group.rows.filter((row) => !(row.laneStatus === 'archived' || row.laneStatus === 'completed'));
+    const terminal = group.rows
+      .filter((row) => row.laneStatus === 'archived' || row.laneStatus === 'completed')
+      .slice(0, RECENT_TERMINAL_CAP_PER_REPO);
+    group.rows = [...live, ...terminal];
+  }
   return groups;
 }
 
@@ -489,10 +501,18 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePack
       let laneList: LaneSummary[] = [];
       if (lanesRes.status === 'fulfilled' && lanesRes.value.ok) {
         const json = await lanesRes.value.json() as { lanes?: LaneSummary[] };
-        laneList = (json.lanes ?? []).filter((lane) => (
-          (lane.status !== 'archived' && lane.status !== 'completed')
-          || lane.outcome === 'no_changes'
-        ));
+        laneList = (json.lanes ?? []).filter((lane) => {
+          const terminal = lane.status === 'archived' || lane.status === 'completed';
+          if (!terminal) return true;
+          // Recent group (Q ruling 2026-07-18: terminal agents live in the
+          // CLEAN view, not behind a click): outcome-stamped terminal lanes
+          // from the last 24h stay on the rail with their truthful chip.
+          // Legacy archives with no outcome (reset/rerun cleanup noise) stay
+          // hidden — resurrecting history isn't the point, the day's work is.
+          if (!lane.outcome) return false;
+          const at = Date.parse(lane.lastEventAt ?? '');
+          return Number.isFinite(at) && Date.now() - at < RECENT_TERMINAL_WINDOW_MS;
+        });
         setLanes(laneList);
       }
 
