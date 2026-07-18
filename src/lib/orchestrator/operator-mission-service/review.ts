@@ -226,6 +226,26 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     resolvedAuditApprovalId = lockedReview?.auditApprovalId ?? null;
   }
 
+  // #1476 lie 3 — the verdict must survive mission-state eviction AND
+  // approval-context drift (mid-merge the lane's sessionKey detaches and the
+  // score-based approvals lookup can miss). Lane events are append-only and
+  // keyed by lane id alone, so review-state can always recover the latest
+  // verdict from here as its final fallback.
+  const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
+  if (verdictLane) {
+    try {
+      const { appendEvent } = await import('@/lib/lane/registry');
+      appendEvent(verdictLane.id, 'review_recorded', 'orchestrator', {
+        approved: input.approved,
+        summary,
+        reviewedHeadSha: reviewedHeadSha ?? null,
+        auditApprovalId: resolvedAuditApprovalId,
+      });
+    } catch (error) {
+      console.warn(`[review] Failed to append review_recorded event for packet ${input.packetId}:`, error);
+    }
+  }
+
   log(`Recorded review for packet ${packet.id}${orphanLane ? ` (orphan via lane ${orphanLane.id})` : ''}.`, {
     approved: input.approved,
     findings: input.findings.length,
