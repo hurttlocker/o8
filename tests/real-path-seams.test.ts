@@ -141,6 +141,11 @@ const { getSqlite } = await import('@/lib/db');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 const { enforceWedgeTimeouts, WEDGE_AWAITING_ORCHESTRATOR_MS } = await import('@/lib/lane/wedge-timeouts');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
+const {
+  markRalphRetryRequeued,
+  resolvePostCompletionPacket,
+  transitionPostCompletionLaneToReviewing,
+} = await import('@/lib/supervisor/post-completion-packet');
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
@@ -981,5 +986,71 @@ describe('seam K — awaiting_human escalation persists a specific supervisor qu
       outcome: 'asked',
       outcomeNote: item?.payload.question,
     });
+  });
+});
+
+// ── Seam L — bounded retries preserve packet identity (#1521) ───────────────
+
+describe('seam L — ralph retry and post-completion lookup preserve the persisted packet binding', () => {
+  it('ralph requeue against a persisted lane emits the real packetId, never an empty string', () => {
+    const now = Date.now();
+    const packetId = `pkt-seam-L-requeue-${now}`;
+    const lane = createLane({
+      repoPath: `/tmp/o8-seam-L-requeue-${now}`,
+      branch: 'agent/ralph-requeue',
+      runtime: 'codex',
+      packetId,
+      label: 'Ralph retry identity seam',
+    });
+
+    const result = markRalphRetryRequeued(lane.id, '');
+
+    expect(result).toMatchObject({ packetId, lane: { id: lane.id, packetId } });
+    const event = getLaneEvents(lane.id).find((candidate) =>
+      candidate.verb === 'update'
+      && candidate.payload.lastEventLabel === 'ralph_retry_requeued'
+    );
+    expect(event?.payload.packetId).toBe(packetId);
+    expect(event?.payload.packetId).not.toBe('');
+  });
+
+  it('empty post-completion payload resolves through the persisted lane and transitions to reviewing', async () => {
+    const now = Date.now();
+    const repoPath = `/tmp/o8-seam-L-completion-${now}`;
+    const packetId = `pkt-seam-L-completion-${now}`;
+    const lane = createLane({
+      repoPath,
+      branch: 'agent/post-completion-fallback',
+      runtime: 'codex',
+      packetId,
+      label: 'Post-completion packet fallback seam',
+    });
+    setLaneStatus(lane.id, 'running', 'system', 'session_running');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      repoPath,
+      packets: [packetFixture({
+        id: packetId,
+        status: 'running',
+        queueState: 'queued',
+        maxAttempts: 3,
+      })],
+    });
+
+    await expect(resolvePostCompletionPacket(lane.id, '')).resolves.toMatchObject({
+      packetId,
+      snapshot: { attemptCount: 0, maxAttempts: 3 },
+    });
+    const transition = transitionPostCompletionLaneToReviewing(lane.id, '');
+
+    expect(transition.packetId).toBe(packetId);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'reviewing',
+      packetId,
+      lastEventLabel: 'agent_completed',
+    });
+    expect(getLaneEvents(lane.id).some((event) =>
+      event.payload.lastEventLabel === 'post_completion_typecheck_packet_not_found'
+    )).toBe(false);
   });
 });

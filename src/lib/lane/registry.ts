@@ -410,7 +410,7 @@ export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane 
 export function updateLane(
   laneId: string,
   updates: Partial<Pick<Lane, 'status' | 'outcome' | 'outcomeNote' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastHeartbeatAt' | 'lastEventAt' | 'lastEventLabel' | 'packetId' | 'prNumber'>>,
-  actor: LaneEventActor = 'system',
+  actor: LaneEventActor = 'system', eventPayload: Record<string, unknown> = {},
 ): Lane | null {
   const db = getSqlite();
   let updatedLane: Lane | null = null;
@@ -471,9 +471,9 @@ export function updateLane(
     updateLaneRecord(laneId, nextValues);
 
     if (statusChanged) {
-      statusChangeEventId = appendEvent(laneId, 'status_change', actor, { status: changes.status }).id;
+      statusChangeEventId = appendEvent(laneId, 'status_change', actor, { status: changes.status, ...eventPayload }).id;
     } else {
-      appendEvent(laneId, 'update', actor, changes);
+      appendEvent(laneId, 'update', actor, { ...changes, ...eventPayload });
     }
 
     updatedLane = getLane(laneId);

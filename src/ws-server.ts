@@ -6747,27 +6747,7 @@ async function bootstrapWsServer() {
 
             if (!verification.ok) {
               console.warn(`[supervisor] Agent ${surfaceId} failed post-completion ${verification.kind} in ${completionCwd}`);
-              const packetId = lane.packetId?.trim();
-              if (!packetId) {
-                setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_missing');
-                await enqueueVerificationFailureInboxItem({
-                  repoPath: lane.repoPath,
-                  kind: 'packet_missing',
-                  laneId: lane.id,
-                  worktreePath: completionCwd,
-                  sessionKey: surfaceId,
-                  baseBranch: lane.baseBranch,
-                  packetTitle: lane.label,
-                  verificationKind: verification.kind,
-                  error: verification.output,
-                  note: 'Cannot enter the bounded retry flow without a packet binding.',
-                });
-                return {
-                  block: true,
-                  detail: `Post-completion ${verification.kind} failed, but the lane is not bound to a packet. Operator input is required.`,
-                };
-              }
-
+              let retryPacketId = lane.packetId?.trim() || undefined;
               try {
                 const { withLockedState } = await import('@/lib/orchestrator/control-plane');
                 const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
@@ -6776,26 +6756,18 @@ async function bootstrapWsServer() {
                   persistAttemptLearnings,
                   readAttemptLearnings,
                 } = await import('@/lib/orchestrator/attempt-log');
+                const {
+                  markRalphRetryRequeued,
+                  resolvePostCompletionPacket,
+                } = await import('@/lib/supervisor/post-completion-packet');
 
-                const { result: packetSnapshot } = await withLockedState((state) => {
-                  const packet = state.packets.find((candidate) => candidate.id === packetId);
-                  if (!packet) {
-                    return null;
-                  }
+                const packetResolution = await resolvePostCompletionPacket(lane.id, lane.packetId);
 
-                  return {
-                    attemptCount: packet.attemptCount ?? 0,
-                    maxAttempts: packet.maxAttempts ?? 3,
-                    referenceLabel: packet.referenceLabel,
-                    title: packet.title,
-                  };
-                });
-
-                if (!packetSnapshot) {
+                if (!packetResolution) {
                   setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_not_found');
                   await enqueueVerificationFailureInboxItem({
                     repoPath: lane.repoPath,
-                    packetId,
+                    packetId: lane.packetId?.trim() || undefined,
                     kind: 'packet_missing',
                     laneId: lane.id,
                     worktreePath: completionCwd,
@@ -6812,6 +6784,9 @@ async function bootstrapWsServer() {
                   };
                 }
 
+                const { packetId, snapshot: packetSnapshot } = packetResolution;
+                retryPacketId = packetId;
+
                 const currentAttempt = packetSnapshot.attemptCount;
                 const maxAttempts = Math.max(1, packetSnapshot.maxAttempts);
                 const attemptNumber = currentAttempt + 1;
@@ -6825,15 +6800,7 @@ async function bootstrapWsServer() {
                     buildAttemptLearningFromFailure(verification.output, completionContext.selfReview),
                   );
                   await autoCommitCompletionWorktree(completionCwd, lane.label);
-                  updateLane(
-                    lane.id,
-                    {
-                      packetId: '',
-                      lastEventAt: new Date().toISOString(),
-                      lastEventLabel: 'ralph_retry_requeued',
-                    },
-                    'system',
-                  );
+                  markRalphRetryRequeued(lane.id, packetId);
                   await withLockedState((state) => {
                     const packet = state.packets.find((candidate) => candidate.id === packetId);
                     if (!packet) {
@@ -6885,11 +6852,13 @@ async function bootstrapWsServer() {
                   detail: `Post-completion ${verification.kind} failed after ${attemptNumber}/${maxAttempts} attempts. Operator input is required.`,
                 };
               } catch (retryError) {
-                updateLane(lane.id, { packetId }, 'system');
+                if (retryPacketId) {
+                  updateLane(lane.id, { packetId: retryPacketId }, 'system');
+                }
                 setLaneStatus(lane.id, 'awaiting_input', 'system', 'ralph_retry_failed');
                 await enqueueVerificationFailureInboxItem({
                   repoPath: lane.repoPath,
-                  packetId,
+                  packetId: retryPacketId,
                   kind: 'verification_failed',
                   laneId: lane.id,
                   worktreePath: completionCwd,
@@ -6918,9 +6887,11 @@ async function bootstrapWsServer() {
               console.warn(`[supervisor] Auto-commit check failed for ${completionCwd}:`, commitErr);
             }
 
-            const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
+            const { transitionPostCompletionLaneToReviewing } = await import('@/lib/supervisor/post-completion-packet');
+            const reviewTransition = transitionPostCompletionLaneToReviewing(lane.id, lane.packetId);
+            const updated = reviewTransition.lane;
             if (updated) {
-              const packetId = updated.packetId ?? lane.packetId;
+              const packetId = reviewTransition.packetId ?? updated.packetId ?? lane.packetId;
               const sessionKey = updated.sessionKey ?? surfaceId;
               if (packetId) {
                 try {
