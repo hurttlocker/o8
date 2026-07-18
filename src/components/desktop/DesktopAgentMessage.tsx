@@ -26,8 +26,10 @@ import { useSmoothText } from '@/components/desktop/thoughts/chat-panel/use-smoo
 import { parseDesignDrawContext } from '@/components/desktop/thoughts/chat-panel/design-draw-context';
 import { DesignDrawContextCard } from '@/components/desktop/thoughts/chat-panel/DesignDrawContextCard';
 import { OrchestratorStatusCard } from '@/components/desktop/thoughts/chat-panel/OrchestratorStatusCard';
+import { NoGitRepoErrorCure } from '@/components/desktop/thoughts/chat-panel/NoGitRepoErrorCure';
 import { detectOrchestratorStatusEvent } from '@/lib/orchestrator/status-events';
 import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
+import { parseNoGitRepoError } from '@/lib/transcripts/no-git-repo-error';
 import {
   hydrateOrchestratorTurnPinEntry,
   persistOrchestratorTurnPin,
@@ -197,6 +199,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // Error notices are system entries that reported a broken turn — tinted so
   // they don't read as ordinary system news. Everything else stays neutral.
   const isErrorNotice = entry.role === 'system' && resolveIsErrorNotice(entry);
+  const noGitRepoError = useMemo(
+    () => isErrorNotice ? parseNoGitRepoError(displayText) : null,
+    [displayText, isErrorNotice],
+  );
   const deliveryRetryId = onRetryDelivery ? deliveryFailureClientMessageId(entry.id) : null;
   // Smooth (typewriter) reveal for the in-flight assistant reply — paces out
   // bursty deltas so words flow in. No-op (returns full text) for user/history.
@@ -544,6 +550,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           {showMarkdown
             ? renderedMarkdown
             : <div style={{ whiteSpace: 'pre-wrap' }}>{revealedText}</div>}
+          {noGitRepoError ? <NoGitRepoErrorCure repoPath={noGitRepoError.repoPath} /> : null}
         </div>
       ) : null}
 
