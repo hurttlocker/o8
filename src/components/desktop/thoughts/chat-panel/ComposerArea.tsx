@@ -166,12 +166,27 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       if (msg.role !== 'assistant') continue;
       const tools = msg.toolCalls ?? [];
       const running = tools.filter((t) => t.status === 'running' || t.status === 'calling');
-      if (running.length > 0) return running;
+      if (running.length > 0) {
+        // Stale-turn gate (Q's iMac, 2026-07-17: "225:16 · 1 running" — a
+        // dead turn from a previous app run restores with a tool call whose
+        // completion event never landed, and the bar counted forever while
+        // the composer sat locked in "Queue for next turn"). A genuinely
+        // live turn keeps the stream busy (displayWaiting) — including
+        // durable-turn reattach — and stream flicker gaps are seconds, so an
+        // idle stream plus a message older than the ceiling means the tool
+        // is dead history, not work. Server-authoritative healing (#8) is
+        // the structural fix; this stops the lie at the surface.
+        const STALE_TURN_MS = 30 * 60 * 1000;
+        const stale = !displayWaiting
+          && typeof msg.timestamp === 'number'
+          && Date.now() - msg.timestamp > STALE_TURN_MS;
+        return stale ? [] : running;
+      }
       // Stop at the most recent assistant message — older tool calls are done.
       break;
     }
     return [];
-  }, [chatMessages, isOrchestratorMode]);
+  }, [chatMessages, isOrchestratorMode, displayWaiting]);
   const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       if (chatMessages[i].role === 'user') return chatMessages[i];
