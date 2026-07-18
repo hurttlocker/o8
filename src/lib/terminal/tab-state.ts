@@ -26,6 +26,9 @@ export interface PersistedTab {
   tmuxSession?: string; // last known tmux session name (may still be alive)
   chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
+  /** Stable lane identity behind a dispatched chat tab (#1553) — survives the
+   *  per-attempt sessionKey churn so relaunches retarget instead of minting. */
+  laneId?: string | null;
   claudeSessionId?: string; // persisted Claude Code session_id for --resume
   chatModel?: string;
   chatContinueLatest?: boolean;

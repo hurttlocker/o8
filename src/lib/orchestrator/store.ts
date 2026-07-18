@@ -73,25 +73,64 @@ const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 
 /**
- * Mission IDs that have already had a "Mission complete" card delivered this
- * session. Shared so the two delivery paths never double-card the same mission:
+ * Mission IDs that have already had a "Mission complete" card delivered.
+ * Shared so the two delivery paths never double-card the same mission:
  *  - the chat-driven rotation path (showMissionThreadTransition) claims it
  *    immediately when it shows its card, and
  *  - the lifecycle-driven status feed (useOrchestratorStatusFeed) is the
  *    fallback for MCP-dispatched missions, which the chat path never sees.
- * In-memory + per-session by design: a mission completed in a prior session
- * shouldn't re-card on launch.
+ * Persisted to localStorage (#1475): a purely in-memory set is empty on every
+ * boot, so a mission that completed inside the detector's 5-minute stale
+ * window re-carded into the fresh transcript with a new timestamp — a false
+ * "your dispatch caused merges" signal. Server-side callers (no window) keep
+ * the in-memory set; the detector paths all run in the browser.
  */
-const cardedMissionIds = new Set<string>();
+const CARDED_MISSIONS_STORAGE_KEY = 'o8:carded-mission-ids:v1';
+const CARDED_MISSIONS_MAX = 100;
+let cardedMissionIds: Set<string> | null = null;
+
+function loadCardedMissionIds(): Set<string> {
+  if (cardedMissionIds) return cardedMissionIds;
+  const ids = new Set<string>();
+  if (typeof window !== 'undefined') {
+    try {
+      const parsed: unknown = JSON.parse(window.localStorage.getItem(CARDED_MISSIONS_STORAGE_KEY) ?? '[]');
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) {
+          if (typeof id === 'string' && id) ids.add(id);
+        }
+      }
+    } catch { /* corrupt entry — start fresh */ }
+  }
+  cardedMissionIds = ids;
+  return ids;
+}
+
+function persistCardedMissionIds(ids: Set<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(CARDED_MISSIONS_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch { /* quota — in-memory dedupe still holds for this session */ }
+}
 
 export function hasMissionBeenCarded(missionId: string | null | undefined): boolean {
   const id = missionId?.trim();
-  return Boolean(id) && cardedMissionIds.has(id as string);
+  return Boolean(id) && loadCardedMissionIds().has(id as string);
 }
 
 export function markMissionCarded(missionId: string | null | undefined): void {
   const id = missionId?.trim();
-  if (id) cardedMissionIds.add(id);
+  if (!id) return;
+  const ids = loadCardedMissionIds();
+  if (ids.has(id)) return;
+  ids.add(id);
+  // Set iteration is insertion-ordered — trim oldest once over the cap.
+  while (ids.size > CARDED_MISSIONS_MAX) {
+    const oldest = ids.values().next().value;
+    if (oldest === undefined) break;
+    ids.delete(oldest);
+  }
+  persistCardedMissionIds(ids);
 }
 
 interface StoredOrchestratorPrelude {

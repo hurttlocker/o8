@@ -71,6 +71,14 @@ export interface TerminalTab {
   lastActivity: number;
   chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
   chatSessionKey?: string;
+  /**
+   * #1553 — the STABLE lane identity behind a dispatched chat tab. A lane
+   * relaunch/retry mints a fresh sessionKey per attempt, so sessionKey-based
+   * reuse minted a new tab per attempt (Polish ×5 / Huddle ×5 zombies). The
+   * lane id never changes across relaunches; computeCliChatSession retargets
+   * the existing tab for the same lane instead of stacking duplicates.
+   */
+  laneId?: string | null;
   claudeSessionId?: string;
   chatModel?: string;
   chatContinueLatest?: boolean;
@@ -153,6 +161,9 @@ export interface TerminalTabHandle {
     createNew?: boolean;
     label?: string;
     targetSessionKey?: string;
+    /** Stable lane identity — lets a relaunch with a fresh sessionKey retarget
+     *  the lane's existing tab instead of minting a duplicate (#1553). */
+    laneId?: string | null;
     orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
     supervisorStatus?: string | null;
     autoArchiveOnIdle?: boolean;
