@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -8,6 +9,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -15,8 +17,12 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const BETTER_SQLITE3_NODE_ABI = '127';
-const ADDON_NAME = 'better_sqlite3.node';
+export const SUPPORTED_NODE_MAJORS = [22, 24];
+export const NATIVE_ABI_MANIFEST = 'native-addon-abis.json';
+const NODE_RELEASE_INDEX_URL = 'https://nodejs.org/dist/index.json';
+const BETTER_SQLITE3_ADDON = 'better_sqlite3.node';
+const NODE_PTY_ADDON = 'pty.node';
+const NODE_PTY_HELPER = 'spawn-helper';
 
 function readMachOArchitecture(filePath) {
   const header = readFileSync(filePath).subarray(0, 8);
@@ -41,8 +47,55 @@ function assertMachOArchitecture(filePath, expectedArch) {
   return { path: filePath, arch: actualArch };
 }
 
-export function betterSqlite3Asset(version) {
-  const filename = `better-sqlite3-v${version}-node-v${BETTER_SQLITE3_NODE_ABI}-darwin-arm64.tar.gz`;
+export function deriveNodeAbis(releases, nodeMajors = SUPPORTED_NODE_MAJORS) {
+  const nodeAbis = {};
+  for (const major of nodeMajors) {
+    const matching = releases.filter((release) => {
+      const releaseMajor = Number.parseInt(String(release.version || '').replace(/^v/, '').split('.')[0], 10);
+      return releaseMajor === major && release.modules;
+    });
+    const modules = [...new Set(matching.map((release) => String(release.modules)))];
+    if (modules.length !== 1) {
+      throw new Error(`nodejs.org release index did not resolve one ABI for Node ${major}: ${modules.join(', ') || 'none'}`);
+    }
+    nodeAbis[String(major)] = modules[0];
+  }
+  return nodeAbis;
+}
+
+async function loadNodeReleaseIndex(cacheRoot) {
+  const cachePath = join(cacheRoot, 'nodejs.org', 'index.json');
+  if (existsSync(cachePath)) {
+    return { releases: JSON.parse(readFileSync(cachePath, 'utf8')), cachePath, cacheSource: 'cache' };
+  }
+
+  let response;
+  try {
+    response = await fetch(NODE_RELEASE_INDEX_URL, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new Error(`Node ABI lookup failed and no cache exists at ${cachePath}: ${error.message}`);
+  }
+  if (!response.ok) {
+    throw new Error(`Node ABI lookup returned HTTP ${response.status}: ${NODE_RELEASE_INDEX_URL}`);
+  }
+
+  const releases = await response.json();
+  mkdirSync(dirname(cachePath), { recursive: true });
+  const partialPath = `${cachePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(partialPath, `${JSON.stringify(releases, null, 2)}\n`);
+    renameSync(partialPath, cachePath);
+  } finally {
+    rmSync(partialPath, { force: true });
+  }
+  return { releases, cachePath, cacheSource: 'download' };
+}
+
+export function betterSqlite3Asset(version, abi, arch) {
+  const filename = `better-sqlite3-v${version}-node-v${abi}-darwin-${arch}.tar.gz`;
   return {
     filename,
     url: `https://github.com/WiseLibs/better-sqlite3/releases/download/v${version}/${filename}`,
@@ -73,58 +126,148 @@ async function ensureCachedAsset(asset, cachePath) {
   return 'download';
 }
 
-export async function prepareBetterSqlite3Bundle({ projectRoot, serverRoot, cacheRoot } = {}) {
-  if (process.versions.modules !== BETTER_SQLITE3_NODE_ABI) {
-    throw new Error(`better-sqlite3 export requires Node ABI ${BETTER_SQLITE3_NODE_ABI}; current ABI is ${process.versions.modules}`);
-  }
+function copyExecutable(source, destination) {
+  mkdirSync(dirname(destination), { recursive: true });
+  copyFileSync(source, destination);
+  chmodSync(destination, statSync(source).mode & 0o777);
+}
 
-  const resolvedProjectRoot = resolve(projectRoot ?? process.cwd());
-  const resolvedServerRoot = resolve(serverRoot ?? join(resolvedProjectRoot, 'out', 'server'));
-  const packageRoot = join(resolvedProjectRoot, 'node_modules', 'better-sqlite3');
+async function prepareBetterSqlite3Bundle({ projectRoot, serverRoot, cacheRoot, nodeAbis }) {
+  const packageRoot = join(projectRoot, 'node_modules', 'better-sqlite3');
   const packageJsonPath = join(packageRoot, 'package.json');
   if (!existsSync(packageJsonPath)) {
     throw new Error(`better-sqlite3 is not installed at ${packageRoot}`);
   }
 
   const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-  const asset = betterSqlite3Asset(version);
-  const resolvedCacheRoot = resolve(cacheRoot ?? join(homedir(), '.o8-build-cache', 'native'));
-  const cachePath = join(resolvedCacheRoot, 'better-sqlite3', version, asset.filename);
-  const cacheSource = await ensureCachedAsset(asset, cachePath);
-
-  const moduleRoot = join(resolvedServerRoot, 'node_modules', 'better-sqlite3');
-  const localAddon = join(moduleRoot, 'build', 'Release', ADDON_NAME);
-  assertMachOArchitecture(localAddon, 'x64');
-
-  const x64Dest = join(moduleRoot, 'prebuilds', 'darwin-x64', ADDON_NAME);
-  mkdirSync(dirname(x64Dest), { recursive: true });
-  copyFileSync(localAddon, x64Dest);
-
-  const extractRoot = mkdtempSync(join(tmpdir(), 'o8-better-sqlite3-'));
-  const extractedAddon = join(extractRoot, 'build', 'Release', ADDON_NAME);
-  try {
-    execFileSync('tar', ['-xzf', cachePath, '-C', extractRoot, `build/Release/${ADDON_NAME}`], { stdio: 'pipe' });
-    assertMachOArchitecture(extractedAddon, 'arm64');
-    const arm64Dest = join(moduleRoot, 'prebuilds', 'darwin-arm64', ADDON_NAME);
-    mkdirSync(dirname(arm64Dest), { recursive: true });
-    copyFileSync(extractedAddon, arm64Dest);
-  } catch (error) {
-    throw new Error(`failed to extract a valid arm64 addon from ${cachePath}: ${error.stderr?.toString().trim() || error.message}`);
-  } finally {
-    rmSync(extractRoot, { recursive: true, force: true });
+  const moduleRoot = join(serverRoot, 'node_modules', 'better-sqlite3');
+  const assets = [];
+  for (const abi of Object.values(nodeAbis)) {
+    for (const arch of ['x64', 'arm64']) {
+      const asset = betterSqlite3Asset(version, abi, arch);
+      const cachePath = join(cacheRoot, 'better-sqlite3', version, asset.filename);
+      const cacheSource = await ensureCachedAsset(asset, cachePath);
+      const extractRoot = mkdtempSync(join(tmpdir(), 'o8-better-sqlite3-'));
+      const extractedAddon = join(extractRoot, 'build', 'Release', BETTER_SQLITE3_ADDON);
+      try {
+        execFileSync('tar', ['-xzf', cachePath, '-C', extractRoot, `build/Release/${BETTER_SQLITE3_ADDON}`], { stdio: 'pipe' });
+        assertMachOArchitecture(extractedAddon, arch);
+        const destination = join(moduleRoot, 'prebuilds', `node-v${abi}`, `darwin-${arch}`, BETTER_SQLITE3_ADDON);
+        copyExecutable(extractedAddon, destination);
+      } catch (error) {
+        throw new Error(`failed to extract a valid ${arch} addon from ${cachePath}: ${error.stderr?.toString().trim() || error.message}`);
+      } finally {
+        rmSync(extractRoot, { recursive: true, force: true });
+      }
+      assets.push({ abi, arch, url: asset.url, cachePath, cacheSource });
+    }
   }
 
-  return { assetUrl: asset.url, cachePath, cacheSource, version };
+  return { version, assets };
+}
+
+function prepareNodePtyBundle({ projectRoot, serverRoot, nodeAbis }) {
+  const packageRoot = join(projectRoot, 'node_modules', 'node-pty');
+  const packageJsonPath = join(packageRoot, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    throw new Error(`node-pty is not installed at ${packageRoot}`);
+  }
+
+  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  const moduleRoot = join(serverRoot, 'node_modules', 'node-pty');
+  for (const abi of Object.values(nodeAbis)) {
+    for (const arch of ['x64', 'arm64']) {
+      const sourceDir = join(packageRoot, 'prebuilds', `darwin-${arch}`);
+      const sourceAddon = join(sourceDir, NODE_PTY_ADDON);
+      const sourceHelper = join(sourceDir, NODE_PTY_HELPER);
+      assertMachOArchitecture(sourceAddon, arch);
+      assertMachOArchitecture(sourceHelper, arch);
+
+      // node-pty's official Darwin prebuilds use Node-API, so one published
+      // binary works across Node module ABIs. Keep an ABI-keyed copy for each
+      // supported runtime so the runtime selector and ship gate use one layout.
+      const destinationDir = join(moduleRoot, 'prebuilds', `node-v${abi}`, `darwin-${arch}`);
+      copyExecutable(sourceAddon, join(destinationDir, NODE_PTY_ADDON));
+      copyExecutable(sourceHelper, join(destinationDir, NODE_PTY_HELPER));
+    }
+  }
+  return { version };
+}
+
+export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot } = {}) {
+  const resolvedProjectRoot = resolve(projectRoot ?? process.cwd());
+  const resolvedServerRoot = resolve(serverRoot ?? join(resolvedProjectRoot, 'out', 'server'));
+  const resolvedCacheRoot = resolve(cacheRoot ?? join(homedir(), '.o8-build-cache', 'native'));
+  const nodeIndex = await loadNodeReleaseIndex(resolvedCacheRoot);
+  const nodeAbis = deriveNodeAbis(nodeIndex.releases);
+  const betterSqlite3 = await prepareBetterSqlite3Bundle({
+    projectRoot: resolvedProjectRoot,
+    serverRoot: resolvedServerRoot,
+    cacheRoot: resolvedCacheRoot,
+    nodeAbis,
+  });
+  const nodePty = prepareNodePtyBundle({
+    projectRoot: resolvedProjectRoot,
+    serverRoot: resolvedServerRoot,
+    nodeAbis,
+  });
+
+  const manifest = {
+    schema: 'o8/native-addon-abis/v1',
+    source: NODE_RELEASE_INDEX_URL,
+    nodeAbis,
+    addons: {
+      'better-sqlite3': betterSqlite3.version,
+      'node-pty': nodePty.version,
+    },
+  };
+  writeFileSync(join(resolvedServerRoot, NATIVE_ABI_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+  return { nodeAbis, nodeIndex, betterSqlite3, nodePty };
+}
+
+function readNativeAbiManifest(serverRoot) {
+  const manifestPath = join(serverRoot, NATIVE_ABI_MANIFEST);
+  if (!existsSync(manifestPath)) {
+    throw new Error(`missing native ABI manifest: ${manifestPath}`);
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  for (const major of SUPPORTED_NODE_MAJORS) {
+    if (!manifest.nodeAbis?.[String(major)]) {
+      throw new Error(`native ABI manifest is missing Node ${major}`);
+    }
+  }
+  return manifest;
 }
 
 export function verifyNativeBundle(serverRoot, log = console.log) {
   const resolvedServerRoot = resolve(serverRoot);
-  const required = [
-    ['better-sqlite3 x64', join(resolvedServerRoot, 'node_modules', 'better-sqlite3', 'prebuilds', 'darwin-x64', ADDON_NAME), 'x64'],
-    ['better-sqlite3 arm64', join(resolvedServerRoot, 'node_modules', 'better-sqlite3', 'prebuilds', 'darwin-arm64', ADDON_NAME), 'arm64'],
-    ['node-pty arm64', join(resolvedServerRoot, 'node_modules', 'node-pty', 'prebuilds', 'darwin-arm64', 'pty.node'), 'arm64'],
-  ];
+  const manifest = readNativeAbiManifest(resolvedServerRoot);
+  const required = [];
+  for (const major of SUPPORTED_NODE_MAJORS) {
+    const abi = String(manifest.nodeAbis[String(major)]);
+    for (const arch of ['x64', 'arm64']) {
+      const abiRoot = join('prebuilds', `node-v${abi}`, `darwin-${arch}`);
+      required.push([
+        `better-sqlite3 Node ${major} ABI ${abi} ${arch}`,
+        join(resolvedServerRoot, 'node_modules', 'better-sqlite3', abiRoot, BETTER_SQLITE3_ADDON),
+        arch,
+      ]);
+      required.push([
+        `node-pty Node ${major} ABI ${abi} ${arch}`,
+        join(resolvedServerRoot, 'node_modules', 'node-pty', abiRoot, NODE_PTY_ADDON),
+        arch,
+      ]);
+      required.push([
+        `node-pty helper Node ${major} ABI ${abi} ${arch}`,
+        join(resolvedServerRoot, 'node_modules', 'node-pty', abiRoot, NODE_PTY_HELPER),
+        arch,
+      ]);
+    }
+  }
 
+  // fsevents is an optional chokidar dependency and its universal Darwin
+  // binary registers through Node-API, not NODE_MODULE_VERSION. Chokidar also
+  // catches an unavailable optional watcher, so it needs no per-ABI copies.
   const verified = [];
   for (const [label, filePath, expectedArch] of required) {
     try {
@@ -146,9 +289,12 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
   }
   try {
     if (command === 'prepare') {
-      const result = await prepareBetterSqlite3Bundle({ serverRoot: targetArg });
-      console.log(`[native-export] asset ${result.assetUrl}`);
-      console.log(`[native-export] ${result.cacheSource === 'cache' ? 'using cache' : 'cached download'} ${result.cachePath}`);
+      const result = await prepareNativeBundle({ serverRoot: targetArg });
+      console.log(`[native-export] Node ABIs ${JSON.stringify(result.nodeAbis)} from ${result.nodeIndex.cachePath}`);
+      for (const asset of result.betterSqlite3.assets) {
+        console.log(`[native-export] ${asset.cacheSource === 'cache' ? 'using cache' : 'cached download'} ${asset.cachePath}`);
+      }
+      console.log(`[native-export] node-pty ${result.nodePty.version} Node-API prebuilds copied for every supported ABI`);
     } else {
       verifyNativeBundle(targetArg);
     }
