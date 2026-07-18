@@ -14,6 +14,7 @@ import type {
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
 import { resolveIsErrorNotice } from '@/lib/transcripts/error-notice';
+import { deliveryFailureClientMessageId } from '@/components/desktop/thoughts/use-orchestrator-stream/delivery';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
@@ -43,6 +44,7 @@ interface DesktopAgentMessageProps {
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
+  onRetryDelivery?: (clientMessageId: string) => void;
 }
 
 function mediaHref(path: string) {
@@ -186,6 +188,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onApplyToFile,
   onOpenInCanvas,
   onRunInTerminal,
+  onRetryDelivery,
 }: DesktopAgentMessageProps) {
   const isUser = entry.role === 'user';
   // Sanitize regex chain runs on every render unless memoized — heavy on
@@ -194,6 +197,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // Error notices are system entries that reported a broken turn — tinted so
   // they don't read as ordinary system news. Everything else stays neutral.
   const isErrorNotice = entry.role === 'system' && resolveIsErrorNotice(entry);
+  const deliveryRetryId = onRetryDelivery ? deliveryFailureClientMessageId(entry.id) : null;
   // Smooth (typewriter) reveal for the in-flight assistant reply — paces out
   // bursty deltas so words flow in. No-op (returns full text) for user/history.
   const revealedText = useSmoothText(displayText, entry.role === 'assistant' && isStreaming);
@@ -502,7 +506,17 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       ) : null}
 
       {hasText ? (
-        <div style={{
+        <div
+          role={deliveryRetryId ? 'button' : undefined}
+          tabIndex={deliveryRetryId ? 0 : undefined}
+          onClick={deliveryRetryId ? () => onRetryDelivery?.(deliveryRetryId) : undefined}
+          onKeyDown={deliveryRetryId ? (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onRetryDelivery?.(deliveryRetryId);
+            }
+          } : undefined}
+          style={{
           maxWidth: '90%',
           color: entry.role === 'system' ? 'var(--t-text-secondary)' : 'var(--t-text)',
           fontSize: 13,
@@ -525,6 +539,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           // Flat: the panel shadow read as a stuck hover state against the
           // transcript's flat agent text.
           boxShadow: 'none',
+          cursor: deliveryRetryId ? 'pointer' : undefined,
         }}>
           {showMarkdown
             ? renderedMarkdown

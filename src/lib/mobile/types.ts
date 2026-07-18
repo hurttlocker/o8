@@ -307,6 +307,8 @@ export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  /** Monotonic server persistence revision for this message. */
+  persistedVersion?: number;
   pinned?: boolean;
   type?: 'message' | 'compaction' | 'command';
   media?: MobileTranscriptMedia[];

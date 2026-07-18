@@ -81,6 +81,7 @@ interface ChatMessageListProps {
   // assistant message. The card renders inline directly after that message.
   turnSummary?: TurnSummary | null;
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
+  onRetryDelivery?: (clientMessageId: string) => void;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -106,6 +107,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   suggestedRepliesPending = false,
   turnSummary = null,
   onScroll,
+  onRetryDelivery,
 }, chatEndRef) {
   // Parallel tool work emitted as separate tool-only assistant messages
   // renders as ONE merged cluster (a single counted "Running N commands"
@@ -242,6 +244,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                 isLast={index === displayMessages.length - 1 && !displayWaiting}
                 isStreaming={isLatestAssistant && !!displayWaiting}
                 repoPath={repoPath}
+                onRetryDelivery={onRetryDelivery}
               />
               {summaryAnchorsAfter && turnSummary ? (
                 <TurnSummaryCard summary={turnSummary} />

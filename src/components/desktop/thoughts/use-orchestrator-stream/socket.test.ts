@@ -38,12 +38,16 @@ function makeHarness(initial: {
   const setMessages = vi.fn();
   const scheduleFlushCurrentAssistant = vi.fn();
   const flushCurrentAssistant = vi.fn();
+  const snapshotSeenRef = { current: false };
+  const onSnapshotTurnTerminal = vi.fn();
+  const onSettledAssistantMissing = vi.fn();
 
   const handler = createOrchestratorMessageHandler({
     captureFirstTurnPlanRef: { current: false },
     currentWs: ws,
     currentAssistantRef,
     eventCountRef: { current: 0 },
+    snapshotSeenRef,
     lastSeqRef,
     finalizeFirstTurnPlanCapture: vi.fn(),
     firstTurnPlanChunksRef: { current: [] as string[] },
@@ -53,6 +57,8 @@ function makeHarness(initial: {
     lastBackendRef,
     lastEventAtRef,
     messagesRef,
+    onSnapshotTurnTerminal,
+    onSettledAssistantMissing,
     resetEpochRef,
     setMessages,
     setStatus,
@@ -77,6 +83,9 @@ function makeHarness(initial: {
     setMessages,
     scheduleFlushCurrentAssistant,
     flushCurrentAssistant,
+    snapshotSeenRef,
+    onSnapshotTurnTerminal,
+    onSettledAssistantMissing,
   };
 }
 
@@ -218,6 +227,107 @@ describe('orchestrator socket — RC1 seam 3: stale-busy reconcile (latched comp
 
     h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'busy', snapshot: true } });
     expect(h.statusRef.current).toBe('busy');
+  });
+});
+
+describe('orchestrator socket — server turn-truth reconcile', () => {
+  it('keeps a FRESH local busy when the snapshot has no turn — the mint re-subscribe races the send handler', () => {
+    // First-turn threadId mint forces a re-subscribe that can be served
+    // before the send handler creates the turn record. turn:null there must
+    // not kill the turn the client just sent (the old first-turn-streaming
+    // regression). lastEventAt defaults to now — a fresh send.
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'busy', snapshot: true, turn: null },
+    });
+
+    expect(h.statusRef.current).toBe('busy');
+    expect(h.onSnapshotTurnTerminal).not.toHaveBeenCalled();
+  });
+
+  it('clears a QUIET local busy when the snapshot says the thread has no turn', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg], lastEventAt: Date.now() - 10_000 });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'busy', snapshot: true, turn: null },
+    });
+
+    expect(h.snapshotSeenRef.current).toBe(true);
+    expect(h.statusRef.current).toBe('ready');
+    expect(h.setStatus).toHaveBeenCalledWith('ready');
+    expect(h.onSnapshotTurnTerminal).toHaveBeenCalledWith(null, true);
+  });
+
+  it('clears running state and requests history when a settled failed answer is missing', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg], lastEventAt: Date.now() - 10_000 });
+    const turn = {
+      id: 'turn-1',
+      startedAt: 100,
+      settledAt: 200,
+      outcome: 'failed',
+      assistantMessageId: 'assistant-1',
+    };
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'ready', snapshot: true, turn },
+    });
+
+    expect(h.statusRef.current).toBe('ready');
+    expect(h.onSnapshotTurnTerminal).toHaveBeenCalledWith(turn, true);
+    expect(h.onSettledAssistantMissing).toHaveBeenCalledWith(turn);
+  });
+
+  it('does not refetch when the settled assistant is already visible', () => {
+    const assistant = { ...userMsg, id: 'assistant-1', role: 'assistant' as const, text: 'Done.' };
+    const h = makeHarness({ status: 'ready', messages: [userMsg, assistant] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'ready',
+        snapshot: true,
+        turn: {
+          id: 'turn-1',
+          startedAt: 100,
+          settledAt: 200,
+          outcome: 'completed',
+          assistantMessageId: 'assistant-1',
+        },
+      },
+    });
+
+    expect(h.onSettledAssistantMissing).not.toHaveBeenCalled();
+  });
+
+  it('treats an unsettled ledger turn as running even when the legacy status says ready', () => {
+    const h = makeHarness({ status: 'connecting', messages: [userMsg] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'ready',
+        snapshot: true,
+        turn: {
+          id: 'turn-1',
+          startedAt: 100,
+          settledAt: null,
+          outcome: null,
+          assistantMessageId: 'assistant-1',
+        },
+      },
+    });
+
+    expect(h.statusRef.current).toBe('busy');
+    expect(h.setStatus).toHaveBeenCalledWith('busy');
   });
 });
 
