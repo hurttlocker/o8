@@ -3,6 +3,7 @@ import type { RepoFocusRepo } from './repo-focus/types';
 import {
   deriveActiveProjectRepos,
   deriveAgentPanelRailRepos,
+  canCreateOrchestratorForRepo,
   resolveGlobalNewSessionRepo,
 } from './agent-panel-repo-selection';
 
@@ -28,6 +29,25 @@ describe('resolveGlobalNewSessionRepo', () => {
     const activeProjectRepo = repo('active-project');
 
     expect(resolveGlobalNewSessionRepo(null, [activeProjectRepo])).toBe(activeProjectRepo);
+  });
+});
+
+describe('canCreateOrchestratorForRepo', () => {
+  it('rejects a repo whose registered folder is missing', () => {
+    const missingRepo = repo('missing');
+    missingRepo.readiness = {
+      state: 'missing',
+      label: 'Folder missing',
+      summary: `Repo folder not found at ${missingRepo.localPath}.`,
+      currentBranch: null,
+      onDefaultBranch: null,
+      originConfigured: false,
+      dirty: false,
+      missingEnvFiles: [],
+    };
+
+    expect(canCreateOrchestratorForRepo(missingRepo)).toBe(false);
+    expect(canCreateOrchestratorForRepo(repo('ready'))).toBe(true);
   });
 });
 

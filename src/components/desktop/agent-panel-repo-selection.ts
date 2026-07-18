@@ -19,6 +19,10 @@ export function resolveGlobalNewSessionRepo(
   return selectedRepo ?? activeProjectRepos[0] ?? null;
 }
 
+export function canCreateOrchestratorForRepo(repo: RepoFocusRepo | null | undefined): repo is RepoFocusRepo {
+  return Boolean(repo && repo.readiness?.state !== 'missing');
+}
+
 export function deriveAgentPanelRailRepos(
   activeProjectRepos: RepoFocusRepo[],
   registeredRepos: RepoFocusRepo[],

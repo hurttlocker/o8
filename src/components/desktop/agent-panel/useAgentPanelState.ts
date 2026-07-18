@@ -97,13 +97,16 @@ export function useAgentPanelState({
         remoteUrl?: string | null;
         defaultBranch: string;
         setup: { installOnCreateWorkspace: boolean };
-        readiness?: { state: string; nextAction?: string } | null;
+        readiness?: { state: string; summary?: string; nextAction?: string } | null;
       }>;
     };
 
     const repoEntry = (data.repos ?? []).find((repo) => repoSlugFromRemoteUrl(repo.remoteUrl ?? null) === request.repo);
     if (!repoEntry) {
       throw new Error(`No local checkout is registered for ${request.repo}. Open the repo locally before launching an agent on it.`);
+    }
+    if (repoEntry.readiness?.state === 'missing') {
+      throw new Error(repoEntry.readiness.summary ?? `Repo folder not found at ${repoEntry.localPath}.`);
     }
     if (repoEntry.readiness?.state === 'blocked') {
       throw new Error(`Repo ${request.repo} is blocked: ${repoEntry.readiness.nextAction ?? 'resolve the issue before launching an agent.'}`);

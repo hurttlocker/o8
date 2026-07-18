@@ -347,15 +347,15 @@ export function repoReadinessPalette(state?: RepoReadinessState) {
       return { background: THEME_SUCCESS_SOFT, border: THEME_SUCCESS_BORDER, color: THEME_SUCCESS_TEXT };
     case 'needs_setup':
       return { background: THEME_ACCENT_SOFT, border: THEME_ACCENT_BORDER, color: THEME_ACCENT };
-    case 'blocked':
-      return { background: THEME_WORKTREE_SOFT, border: THEME_WORKTREE_BORDER, color: THEME_WORKTREE_TEXT };
+    case 'missing': return { background: 'var(--t-danger-soft)', border: 'var(--t-danger-border)', color: 'var(--t-danger)' };
+    case 'blocked': return { background: THEME_WORKTREE_SOFT, border: THEME_WORKTREE_BORDER, color: THEME_WORKTREE_TEXT };
     default:
       return { background: 'var(--t-divider-subtle)', border: 'var(--t-panel-border)', color: 'var(--t-text-secondary)' };
   }
 }
 
 export function repoReadinessDisplayLabel(state?: RepoReadinessState, label?: string | null) {
-  if (state === 'blocked') return 'Needs attention';
+  if (state === 'missing' || state === 'blocked') return state === 'missing' ? 'Folder missing' : 'Needs attention';
   return label ?? null;
 }
 

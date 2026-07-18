@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import { clearLastOrchestratorThreadForId } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
+import { canCreateOrchestratorForRepo } from '../../agent-panel-repo-selection';
 import {
   normalizeRepoPath,
   packetBelongsToRepo,
@@ -11,6 +12,7 @@ import {
 } from '../utils';
 import { SessionRow } from './AgentRows';
 import { ChatGroupPicker } from './chats/ChatGroupPicker';
+import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
   CONVERSATIONS_GROUP_KEY,
@@ -555,11 +557,9 @@ export function ChatsTab({
   }, [allowedSections, remainingHistorySlots, sectionLabel, visibleChatHistory, visibleOrchestratorHistory]);
   const showMergedPackets = groupMode === 'sections' && !compact && visibleMergedPackets.length > 0;
   const showArchivedHistory = groupMode === 'sections' && !compact && visibleArchivedHistory.length > 0;
-  // Repo drawers count as content even when every group is empty — a fresh
-  // repo still shows its header + scoped "No sessions yet" + the [+] spawn.
+  // Repo drawers count as content when empty: a fresh repo still shows its header and scoped action.
   const showRepoDrawers = compact && groupMode === 'flat' && chatGroupBy === 'repo' && flatHistoryRepoGroups.length > 0;
-  // Packets nested under a VISIBLE thread row this render — the bottom
-  // Spawned-agents section hides these so a worker never lists twice.
+  // Packets nested under a visible thread row stay out of the bottom Spawned-agents section.
   // Workers whose thread isn't in the rail (archived thread, other repo,
   // external CLI spawn with no thread) keep their bottom-section home.
   const nestedPacketIds = useMemo<ReadonlySet<string>>(() => {
@@ -664,6 +664,7 @@ export function ChatsTab({
                   const isConversations = group.key === CONVERSATIONS_GROUP_KEY;
                   const groupCollapsed = collapsedRepoGroups.has(group.key);
                   const groupRepo = isConversations ? undefined : repoByGroupKey.get(group.key);
+                  const groupRepoMissing = groupRepo?.readiness?.state === 'missing';
                   return (
                     <div key={group.key}>
                       <RepoGroupLabel
@@ -671,12 +672,13 @@ export function ChatsTab({
                         noIcon={isConversations}
                         collapsed={groupCollapsed}
                         onToggle={() => toggleRepoGroup(group.key)}
-                        onCreate={groupRepo && onCreateOrchestratorForRepo
+                        onCreate={canCreateOrchestratorForRepo(groupRepo) && onCreateOrchestratorForRepo
                           ? () => onCreateOrchestratorForRepo(groupRepo)
                           : undefined}
                         createTitle={groupRepo ? `New session in ${groupRepo.name}` : undefined}
                         trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
                       />
+                      {groupRepoMissing ? <MissingRepoRailNotice summary={groupRepo.readiness?.summary ?? ''} /> : null}
                       {groupCollapsed ? null : (
                         <>
                           {group.items.map((item) => {
@@ -702,10 +704,8 @@ export function ChatsTab({
                               </div>
                             );
                           })}
-                          {/* Scoped empty state — Cursor's "No agents yet"
-                              under a fresh repo header. Replaced by the
-                              first session row the moment one exists. */}
-                          {group.items.length === 0 && !isConversations ? (
+                          {/* A fresh repo keeps its scoped empty state until its first session appears. */}
+                          {group.items.length === 0 && !isConversations && !groupRepoMissing ? (
                             <div
                               style={{
                                 paddingTop: 3,

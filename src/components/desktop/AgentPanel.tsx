@@ -21,7 +21,7 @@ import { Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } 
 import { MenuScale } from 'iconoir-react';
 import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
-import { deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
+import { canCreateOrchestratorForRepo, deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
 
 // ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
 // MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
@@ -173,13 +173,13 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const effectiveTitlebarSpacerHeight = Math.min(titlebarSpacerHeight, 10);
   const handleCreateOrchestrator = useCallback(() => {
     // #1572: the global New session must inherit what the rail is looking at.
-    // Spawning repo-less fell back to the last-used workspace — with another
-    // project selected in the rail, the thread bound to the WRONG repo and a
+    // Spawning repo-less fell back to the last-used workspace — with another project selected in the rail, the thread bound to the WRONG repo and a
     // "build this" turn dispatched a worker into it before the tiny breadcrumb
     // gave the mismatch away. Prefer the rail's selected repo, then the active
     // project's first repo; only a truly project-less rail spawns unbound.
     const selectedRepo = leftPanelFocus.view?.selectedRepo ?? null;
     const target = resolveGlobalNewSessionRepo(selectedRepo, activeProjectReposForChats);
+    if (target && !canCreateOrchestratorForRepo(target)) return;
     if (target) {
       onCreateWorkspaceOrchestrator?.({
         name: target.name,
@@ -1514,7 +1514,7 @@ function ProjectRepoContext({
                   fontWeight: 500,
                 }}
               >
-                {repo.readiness?.state === 'blocked' ? 'attention' : repo.defaultBranch || 'main'}
+                {repo.readiness?.state === 'missing' ? 'folder missing' : repo.readiness?.state === 'blocked' ? 'attention' : repo.defaultBranch || 'main'}
               </span>
             </button>
           );
@@ -1533,8 +1533,8 @@ function projectRepoChipTone(repo: RepoFocusRepo): {
   hoverBackground: string;
 } {
   switch (repo.readiness?.state) {
-    case 'blocked':
-    case 'needs_setup':
+    case 'missing': return { dot: 'var(--t-danger)', meta: 'var(--t-danger)', border: 'var(--t-danger-border)', background: 'var(--t-danger-soft)', hoverBorder: 'var(--t-danger)', hoverBackground: 'var(--t-danger-soft)' };
+    case 'blocked': case 'needs_setup':
       return {
         dot: '#FF5A1F',
         meta: '#FF5A1F',
