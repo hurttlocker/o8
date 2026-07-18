@@ -200,8 +200,20 @@ try {
 
 const uploadArgs = [DMG, APP_TAR, APP_SIG, latestJsonPath, fixedJsonPath];
 
+// #1486 — an existing release for the CURRENT version almost always means the
+// operator forgot `npm version patch`: silently replacing the published
+// assets under the same tag re-signs history and updaters never see a new
+// build (the 2026-07-08 #1499 incident). Refuse unless explicitly overridden.
+if (releaseExists && process.env.O8_RELEASE_CLOBBER !== '1') {
+  console.error(`[release] REFUSING: ${tag} is already published. Did you forget to bump?`);
+  console.error('[release]   npm version patch && git push origin main --follow-tags && npm run ship');
+  console.error('[release] To deliberately replace the existing release assets in place:');
+  console.error('[release]   O8_RELEASE_CLOBBER=1 npm run ship');
+  process.exit(1);
+}
+
 if (releaseExists) {
-  console.log(`[release] ${tag} already exists — replacing assets`);
+  console.log(`[release] ${tag} already exists — replacing assets (O8_RELEASE_CLOBBER=1)`);
   execFileSync('gh', [
     'release', 'edit', tag,
     '--title', `o8 ${tag}`,
