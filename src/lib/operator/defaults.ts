@@ -156,6 +156,14 @@ export interface OperatorDefaults {
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
+  /**
+   * #1481 — when a mission lane reaches review-ready, queue a bounded
+   * self-continuation turn on the orchestrator ("review + merge per the
+   * standing instruction") instead of parking until the operator re-prompts.
+   * Distinct from supervisorAutoEscalate (noisy failure investigations,
+   * default off): this is the core review loop, default on.
+   */
+  reviewContinuation: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   /** Opt-in: replay the repo's test command against a rebased branch in the
@@ -373,6 +381,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   overlapGate: 'advisory',
   healBotEnabled: true,
   supervisorAutoEscalate: false,
+  reviewContinuation: true,
   // Operator-pinned: Opus 4.8 with max thinking is the default orchestrator
   // brain. Subscription-billed via the REPL migration, so cost is the user's
   // existing Claude Code MAX plan — not a per-token API charge.
@@ -494,6 +503,7 @@ interface StoredOperatorDefaults {
   overlapGate?: OverlapGateMode;
   healBotEnabled?: boolean;
   supervisorAutoEscalate?: boolean;
+  reviewContinuation?: boolean;
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
   mergeTestReplayEnabled?: boolean;
@@ -570,6 +580,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.supervisorAutoEscalate === 'boolean') {
     result.supervisorAutoEscalate = stored.supervisorAutoEscalate;
+  }
+  if (typeof stored.reviewContinuation === 'boolean') {
+    result.reviewContinuation = stored.reviewContinuation;
   }
   if (stored.thinkingEffort && isThinkingEffort(stored.thinkingEffort)) {
     result.thinkingEffort = stored.thinkingEffort;
@@ -754,6 +767,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     healBotEnabled: envHeal ?? fileValues.healBotEnabled ?? OPERATOR_DEFAULTS_FALLBACK.healBotEnabled,
     supervisorAutoEscalate:
       envEsc ?? fileValues.supervisorAutoEscalate ?? OPERATOR_DEFAULTS_FALLBACK.supervisorAutoEscalate,
+    reviewContinuation:
+      fileValues.reviewContinuation ?? OPERATOR_DEFAULTS_FALLBACK.reviewContinuation,
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
@@ -808,6 +823,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     healBotEnabled: envHeal !== null ? 'env' : fileValues.healBotEnabled !== undefined ? 'file' : 'default',
     supervisorAutoEscalate:
       envEsc !== null ? 'env' : fileValues.supervisorAutoEscalate !== undefined ? 'file' : 'default',
+    reviewContinuation: fileValues.reviewContinuation !== undefined ? 'file' : 'default',
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
@@ -917,6 +933,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.supervisorAutoEscalate !== undefined) {
     stored.supervisorAutoEscalate = Boolean(update.supervisorAutoEscalate);
+  }
+  if (update.reviewContinuation !== undefined) {
+    stored.reviewContinuation = Boolean(update.reviewContinuation);
   }
   if (update.thinkingEffort !== undefined) {
     if (!isThinkingEffort(update.thinkingEffort)) {
@@ -1118,6 +1137,10 @@ export function resolveOverlapGateSync(): OverlapGateMode {
 
 export function resolveSupervisorAutoEscalateSync(): boolean {
   return getOperatorDefaultsSync().values.supervisorAutoEscalate;
+}
+
+export function resolveReviewContinuationSync(): boolean {
+  return getOperatorDefaultsSync().values.reviewContinuation;
 }
 
 export function resolveHealBotEnabledSync(): boolean {
