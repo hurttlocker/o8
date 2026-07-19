@@ -29,8 +29,39 @@ Why:
 
 ## Adding a new runtime to o8
 
-Adding a 5th (or 6th…) runtime adapter is a **6-file patch**. After step 5 the
-compiler tells you exactly which genuine dispatch switches need a new case.
+For a one-shot or resumable CLI with line/JSONL output, the owned-session adapter
+is now one declarative registry entry. `registerDeclarativeOwnedRuntime` turns
+that entry into both an `OwnedRuntimeAdapter` and a `createOwnedSessionStore`
+instance:
+
+```ts
+const registration = registerDeclarativeOwnedRuntime({
+  runtimeId: 'example',
+  binaryName: 'example',
+  launchArgs: ['run', '--json', '{{prompt}}'],
+  resumeArgs: ['resume', '{{threadId}}', '{{prompt}}'],
+  parseRunLog: {
+    patterns: [
+      { eventType: 'init', threadIdPaths: ['sessionId'] },
+      { eventType: 'message', kind: 'message', textPaths: ['content'] },
+      { eventType: 'done', completedTurn: true },
+    ],
+  },
+  stderrNoise: [/harmless warning/i],
+  // surface/root/label fields from OwnedRuntimeAdapter
+});
+```
+
+Templates support `{{cwd}}`, `{{prompt}}`, `{{model}}`, `{{effort}}`, and
+`{{threadId}}`; conditional argument groups omit optional values. Pattern rows
+map JSON event types or plain-line regexes to normalized entries, thread IDs,
+and completion. OpenCode is the shipped example in `src/lib/opencode/owned.ts`.
+
+Use the specialized path below when the CLI is interactive or stateful enough
+to need custom process control. Pi stays specialized because its RPC stream has
+bidirectional permission responses; Codex and Claude Code also stay hand-written.
+When adding a new runtime ID to the dispatch surface, keep steps 4 and 5 so the
+compiler still identifies genuine runtime-specific switches.
 
 ### 1. `src/lib/<runtime>/owned.ts`
 

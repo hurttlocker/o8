@@ -29,6 +29,7 @@ function providerForRuntime(runtime: OrchestratorRuntime): WorkerProvider {
     case 'opencode': return 'opencode';
     case 'cursor': return 'cursor';
     case 'grok': return 'grok';
+    case 'pi': return 'pi';
     case 'codex':
     default: return 'codex';
   }
@@ -52,6 +53,7 @@ const WORKER_PROVIDERS: readonly WorkerProvider[] = [
   'opencode',
   'cursor',
   'grok',
+  'pi',
 ];
 
 const ORCHESTRATOR_RUNTIMES: readonly OrchestratorRuntime[] = [
@@ -62,6 +64,7 @@ const ORCHESTRATOR_RUNTIMES: readonly OrchestratorRuntime[] = [
   'opencode',
   'cursor',
   'grok',
+  'pi',
 ];
 
 export interface ResolveWorkerRoutingInput {

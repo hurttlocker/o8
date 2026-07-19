@@ -249,6 +249,7 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
     || value === 'opencode'
     || value === 'cursor'
     || value === 'grok'
+    || value === 'pi'
   ) {
     return value;
   }
