@@ -34,20 +34,50 @@ Request body (all fields optional; legacy `{}` remains valid):
 {
   "workspaceMode": "code",
   "currentRoute": "/symon",
+  "sourceRoute": "/chat",
   "repoPath": "/absolute/repository/path",
+  "repoName": "o8-mobile",
+  "branch": "main",
+  "threadId": "thread-7",
+  "sessionKey": "run:42",
+  "threadTitle": "Voice interface work",
+  "backend": "default",
+  "agentId": "worker-2",
+  "agentName": "Builder",
+  "selectedFile": "src/app/symon.tsx",
+  "controlTab": "changes",
+  "runStatus": "review",
   "activeSurface": "symon"
 }
 ```
 
 This is bounded workspace context, not a second persona or a free-form prompt. The
-server accepts only the `"o8"` and `"code"` workspace modes, a route-shaped
-`currentRoute`, an absolute portable-ASCII `repoPath` without whitespace or
-traversal, and an identifier-shaped
-`activeSurface`; overlong, malformed, control/markup-bearing, and unknown fields
-are ignored. Valid fields are appended to the existing Symon + phone-surface
-instructions inside a server-authored data-only block. They scope tool choices and
-presentation but cannot change Symon's identity, safety policy, or instruction
-hierarchy.
+server accepts only the `"o8"` and `"code"` workspace modes; route-shaped
+`currentRoute` / `sourceRoute`; an absolute portable-ASCII `repoPath`; a relative
+portable-ASCII `selectedFile`; bounded identifier, branch, and display-label
+fields; and the frozen enum values shown above. Paths reject whitespace,
+traversal, duplicate separators, control characters, and markup. Overlong,
+malformed, prompt-shaped, and unknown fields are ignored. The complete request
+body is capped at 4096 characters, while legacy `{}` remains valid.
+
+Valid fields are serialized as JSON inside the frozen
+`[[O8_PHONE_CONTEXT_V1_START]]` / `[[O8_PHONE_CONTEXT_V1_END]]` markers after the
+existing Symon persona and phone-surface guidance. This server-authored block is
+data only: it can scope tool selection and presentation, but it cannot change
+Symon's identity, safety policy, or instruction hierarchy. The markers also let a
+live client replace navigation context without duplicating or editing the trusted
+instruction prefix.
+
+When `workspaceMode` is `"code"`, the server additionally teaches the phone mint
+the Code surface pack: `RepoState`, `ChangeSummary`, `CheckRunList`, `AgentRun`,
+`DiffPreview`, `CommitSummary`, `ApprovalDecision`, `CodeAction`, and
+`CodeActionRow`. Code cards may show only current tool-grounded facts and exact
+tool-supplied target IDs; navigation context is a hint for which read-only lookup
+to make, never evidence of repository state. Diffs stay revisioned and bounded,
+and truncated results say so. The `continue-run`, `steer-run`, `approve`, and
+`reject` actions always flow through the existing native confirmation step. Life
+(`workspaceMode: "o8"`) keeps the generic phone vocabulary and never receives the
+Code authoring instructions.
 
 Success `200`:
 ```json
