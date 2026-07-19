@@ -29,7 +29,25 @@ The phone is a **dumb pipe** for tools: it never executes anything.
 
 Mints an ephemeral OpenAI Realtime client token carrying the **same session config the desk-mic session uses** — model, voice, instructions, and the full tool schema set. Config parity is a hard requirement: the implementation must assemble it from the same source the desktop realtime client uses (`src/lib/voice/realtime-client.ts` session config + the Rust-supplied tool schemas that reach the webview today), not a copy-paste snapshot.
 
-Request body: `{}` (reserved for future fields; unknown fields ignored).
+Request body (all fields optional; legacy `{}` remains valid):
+```json
+{
+  "workspaceMode": "code",
+  "currentRoute": "/symon",
+  "repoPath": "/absolute/repository/path",
+  "activeSurface": "symon"
+}
+```
+
+This is bounded workspace context, not a second persona or a free-form prompt. The
+server accepts only the `"o8"` and `"code"` workspace modes, a route-shaped
+`currentRoute`, an absolute portable-ASCII `repoPath` without whitespace or
+traversal, and an identifier-shaped
+`activeSurface`; overlong, malformed, control/markup-bearing, and unknown fields
+are ignored. Valid fields are appended to the existing Symon + phone-surface
+instructions inside a server-authored data-only block. They scope tool choices and
+presentation but cannot change Symon's identity, safety policy, or instruction
+hierarchy.
 
 Success `200`:
 ```json
@@ -116,6 +134,9 @@ The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedA
 - The ephemeral client token is short-lived (~60s window to connect) and single-session; it is returned once and never persisted server-side.
 - Tool execution runs the **same** SafetyClass gate + confirm registry as desk mode — Agent mode grants zero new capability, it only moves the microphone.
 - The BYOK OpenAI key never leaves the Mac; only the ephemeral token does.
+- Phone workspace context is a small typed app-state envelope, never raw prompt
+  text. The mint bounds and validates every accepted field and never copies unknown
+  or malformed request content into Realtime instructions.
 
 ## Mobile build checklist (from this contract)
 
