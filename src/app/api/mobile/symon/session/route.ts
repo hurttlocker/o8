@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
@@ -131,8 +131,23 @@ async function reachWebview(): Promise<BridgeResult> {
 }
 
 export async function POST(request: NextRequest) {
-  const denied = requirePanelAuth(request);
-  if (denied) return denied;
+  // Accept the operator credential OR an enrolled device — the phone reaches this
+  // over the relay with its per-device bearer + a non-loopback client-addr, which
+  // requirePanelAuth rejected (that was the "This phone isn't authorized" 401). A
+  // dispatched worker never runs a voice session.
+  const principal = resolveRequestPrincipal(request);
+  if (principal === 'worker') {
+    return NextResponse.json(
+      { ok: false, error: 'locked', detail: 'Symon Agent mode is not available to a dispatched worker.' },
+      { status: 403 },
+    );
+  }
+  if (principal !== 'operator' && principal !== 'device') {
+    return NextResponse.json(
+      { ok: false, error: 'unauthorized', detail: 'Symon Agent mode requires the operator credential or an enrolled device.' },
+      { status: 401 },
+    );
+  }
 
   // Access gating — mirrors the desk mint exactly (realtime-access.ts).
   const byokKey = await resolveOpenAIKey();

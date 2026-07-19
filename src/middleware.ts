@@ -111,7 +111,7 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // operator credential. New mobile routes fail closed until named here.
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|enhance|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session)?|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
-  { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults)\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults|projects|search)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/v2\/chat-history(?:\/list)?\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/v2\/repos\/?$/ },
@@ -124,6 +124,17 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // gated per-principal, never loopback-trusted; its handler accepts operator +
   // device and still 403s a worker. Real-path coverage: tests/principal-authz.
   { methods: new Set(['POST']), path: /^\/api\/orchestrator\/steer-packet\/?$/ },
+  // Phone-facing surfaces reached OUTSIDE /api/mobile/* (the app grew into these
+  // and each failed closed until named). All device-safe: repo o8.md notes (read
+  // + autosave write), fleet runtime inventory, review diffs, dictation + TTS.
+  // The repo-spec/asset srcPath (local-file) branch is separately blocked to
+  // devices in its handler.
+  { methods: new Set(['GET', 'PUT', 'POST']), path: /^\/api\/repo-spec\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/repo-spec\/asset\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/runtime\/inventory\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/worktrees\/(?:diff|diff-summary)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/dictation\/(?:polish|transcribe)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/tts\/?$/ },
 ];
 
 const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [

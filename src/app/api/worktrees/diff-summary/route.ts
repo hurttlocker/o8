@@ -16,7 +16,7 @@ import { homedir } from 'node:os';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { findLaneBySession } from '@/lib/lane/registry';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import {
   collectWorktreeDiffSnapshot,
   type WorktreeDiffFile,
@@ -61,8 +61,15 @@ function resolveWorktreeForSession(
 }
 
 export async function GET(req: NextRequest) {
-  const denied = requirePanelAuth(req);
-  if (denied) return denied;
+  // Operator or the operator's enrolled phone may read review diff summaries; a
+  // dispatched worker has no need for them.
+  const principal = resolveRequestPrincipal(req);
+  if (principal === 'worker') {
+    return NextResponse.json({ error: 'A dispatched worker cannot read review diffs.' }, { status: 403 });
+  }
+  if (principal !== 'operator' && principal !== 'device') {
+    return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+  }
 
   const sessionKey = req.nextUrl.searchParams.get('sessionKey');
   const worktreePathParam = resolvePath(req.nextUrl.searchParams.get('worktreePath'));
