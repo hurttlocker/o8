@@ -31,6 +31,7 @@ interface RepoCardHeaderProps {
   activeWorkspacePath?: string | null;
   onToggle: () => void;
   onSelectRepo: () => void;
+  onLocate: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
@@ -50,6 +51,7 @@ function RepoCardHeaderBase({
   activeWorkspacePath = null,
   onToggle,
   onSelectRepo,
+  onLocate,
   onRemove,
   onSelectPR: _onSelectPR,
   onReviewPR: _onReviewPR,
@@ -411,31 +413,56 @@ function RepoCardHeaderBase({
             >
               {repo.readiness?.summary}
             </span>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onRemove(repo);
-              }}
-              style={{
-                minHeight: 44,
-                paddingTop: 0,
-                paddingRight: 12,
-                paddingBottom: 0,
-                paddingLeft: 12,
-                border: '1px solid var(--t-danger-border)',
-                borderRadius: 8,
-                background: 'transparent',
-                color: 'var(--t-danger)',
-                cursor: 'pointer',
-                flexShrink: 0,
-                fontSize: 11,
-                fontWeight: 400,
-                fontFamily: 'var(--font-sans-system)',
-              }}
-            >
-              Remove repo
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onLocate(repo);
+                }}
+                style={{
+                  minHeight: 44,
+                  paddingTop: 0,
+                  paddingRight: 10,
+                  paddingBottom: 0,
+                  paddingLeft: 10,
+                  border: '1px solid var(--t-divider)',
+                  borderRadius: 8,
+                  background: 'var(--t-input-bg)',
+                  color: 'var(--t-text)',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                Locate folder…
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemove(repo);
+                }}
+                style={{
+                  minHeight: 44,
+                  paddingTop: 0,
+                  paddingRight: 12,
+                  paddingBottom: 0,
+                  paddingLeft: 12,
+                  border: '1px solid var(--t-danger-border)',
+                  borderRadius: 8,
+                  background: 'transparent',
+                  color: 'var(--t-danger)',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 400,
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                Remove repo
+              </button>
+            </div>
           </div>
         ) : null}
 
