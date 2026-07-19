@@ -694,6 +694,7 @@ function makeDirtyGitRepo(): string {
   writeFileSync(join(repoPath, 'tracked.txt'), 'base\n');
   git(repoPath, ['add', 'tracked.txt']);
   git(repoPath, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-m', 'base']);
+  git(repoPath, ['checkout', '-b', 'inline/seam-f']);
   writeFileSync(join(repoPath, 'tracked.txt'), 'moving target\n');
   return repoPath;
 }

@@ -1010,8 +1010,8 @@ export async function handlePacketDiff(args: Record<string, unknown>): Promise<M
       ? Math.floor(args.maxBytes)
       : undefined;
     const qs = maxBytes ? `?maxBytes=${maxBytes}` : '';
-    const data = await apiFetch(`/api/lanes/${encodeURIComponent(id)}/diff${qs}`);
-    return jsonResult(data);
+    const data = await apiFetch(`/api/lanes/${encodeURIComponent(id)}/diff${qs}`, { acceptedErrorStatuses: [409] });
+    return { ...jsonResult(data), isError: Boolean(data && typeof data === 'object' && 'error' in (data as Record<string, unknown>)) };
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_packet_diff failed: ${errorText(error)}`);
     return textResult(`Failed to read packet diff: ${errorText(error)}`, true);
