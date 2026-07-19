@@ -135,6 +135,10 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/worktrees\/(?:diff|diff-summary)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/dictation\/(?:polish|transcribe)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/tts\/?$/ },
+  // Pairing refresh: an enrolled phone re-pulls host/port config when the
+  // desktop's ports or relay change (#1529). The handler returns token:'' to a
+  // device — the operator ws-token is NEVER handed to a device principal.
+  { methods: new Set(['GET']), path: /^\/api\/panel\/mobile-pairing\/?$/ },
 ];
 
 const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
