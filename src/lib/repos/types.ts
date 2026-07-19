@@ -92,6 +92,7 @@ export interface RepoRegistryCloneBody {
 export interface RepoRegistryUpdateBody {
   action: 'update';
   id: string;
+  localPath?: string;
   setup?: RepoSetupConfig;
   lastOpenedAt?: string | null;
 }

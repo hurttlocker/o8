@@ -13,10 +13,14 @@ import {
   validateRepo,
 } from '@/lib/repos/registry';
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
-import { removeRepoPathFromProjects } from '@/lib/repos/projects';
+import { removeRepoPathFromProjects, repointRepoPathInProjects } from '@/lib/repos/project-path-mutations';
 import { removeRepoFromPool } from '@/lib/repos/remove';
-import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readiness';
-import { triggerScan, triggerScanIfStale, startChangePolling } from '@/lib/skeleton/autoscan';
+import { enrichRepoReadiness, enrichRepoReadinessList, invalidateRepoReadiness } from '@/lib/repos/readiness';
+import { repointRepoPathReferences } from '@/lib/repos/path-repoint';
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
+import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
+import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
+import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -233,10 +237,32 @@ export async function POST(request: Request) {
         if (!('id' in body) || !body.id) {
           return NextResponse.json({ error: 'id is required.' }, { status: 400 });
         }
+        if ('localPath' in body && body.localPath !== undefined && !body.localPath.trim()) {
+          return NextResponse.json({ error: 'localPath must be a Git repository folder.' }, { status: 400 });
+        }
+        if ('localPath' in body && body.localPath !== undefined) {
+          try {
+            assertOrchestratorRepoPath(body.localPath);
+          } catch (error) {
+            return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid repository folder.' }, { status: 400 });
+          }
+        }
+        const previous = (await listRepos()).find((repo) => repo.id === body.id);
         const repo = await updateRepo(body.id, {
+          localPath: 'localPath' in body ? body.localPath : undefined,
           setup: 'setup' in body ? body.setup : undefined,
           lastOpenedAt: 'lastOpenedAt' in body ? body.lastOpenedAt : undefined,
         });
+        if (previous && previous.localPath !== repo.localPath) {
+          await repointRepoPathInProjects(previous.localPath, repo.localPath);
+          repointRepoPathReferences(previous.localPath, repo.localPath);
+          invalidateRepoReadiness(previous.localPath, repo.localPath);
+          invalidateAnswerCache();
+          clearSkeletonCache(previous.localPath);
+          stopChangePolling(previous.localPath);
+          triggerScan(repo.localPath);
+          startChangePolling(repo.localPath);
+        }
         return NextResponse.json({ repo: await enrichRepoReadiness(repo) });
       }
       case 'touch': {

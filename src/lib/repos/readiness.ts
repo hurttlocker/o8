@@ -75,6 +75,13 @@ function readinessLabel(state: RepoReadiness['state']) {
 // the same window only schedules one underlying recompute per repo.
 const inFlightRefreshes = new Map<string, Promise<RepoReadiness>>();
 
+export function invalidateRepoReadiness(...repoPaths: string[]) {
+  for (const repoPath of repoPaths) {
+    readinessCache.delete(repoPath);
+    inFlightRefreshes.delete(repoPath);
+  }
+}
+
 export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoReadiness> {
   const cacheKey = repo.localPath;
   const cached = readinessCache.get(cacheKey);
