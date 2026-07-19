@@ -410,9 +410,13 @@ export class RelayConnector {
     if (this.liveDeviceCount > 0) return;
     if ((safe(() => this.config.blockedApprovalCount()) ?? 0) <= 0) return;
     const tokens = safe(() => listRemoteNotificationTokens()) ?? [];
-    const target = tokens[0];
-    if (!target) return; // no alert-capable token registered yet (mobile must add it)
-    this.sendControl({ t: 'push-req', apnsAlertToken: target.token, environment: target.environment, kind: 'approval' });
+    if (tokens.length === 0) return; // no alert-capable token registered yet (mobile must add it)
+    // Fan out to EVERY enrolled phone — any of the operator's devices can act on
+    // a blocked approval when they're all asleep, not just the first-registered
+    // one. (Everything else in the relay data plane is already per-device.)
+    for (const target of tokens) {
+      this.sendControl({ t: 'push-req', apnsAlertToken: target.token, environment: target.environment, kind: 'approval' });
+    }
   }
 
   // ── send helpers ──
