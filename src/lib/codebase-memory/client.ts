@@ -3,15 +3,17 @@
  *
  * #742 — surfaces a small, typed call-graph helper for the Context Recall
  * Card so it can render a "Symbol graph" row alongside directives and
- * recent outcomes. We piggyback on `callCodebaseMemoryTool` rather than
- * wiring a dedicated MCP transport; the boot indexer already proves the
- * spawn-per-call pattern is fast enough for sub-second UI use.
+ * recent outcomes. Related trace/search calls share one MCP session because
+ * process initialization dominates the underlying graph queries.
  */
 
 import 'server-only';
 
 import { resolveCodebaseMemoryBin } from './binary';
-import { callCodebaseMemoryTool } from './mcp-client';
+import {
+  withCodebaseMemoryToolSession,
+  type CodebaseMemoryToolCaller,
+} from './mcp-client';
 
 const TRACE_TOOL_NAME = 'trace_path';
 const SEARCH_TOOL_NAME = 'search_graph';
@@ -145,7 +147,11 @@ export async function extractGraphResolvedSymbols(
   const candidates = extractSymbols(text, Math.max(limit, limit * 5));
   if (candidates.length === 0) return { symbols: [], edges: [], unavailable: false };
 
-  const traced = await traceSymbols({ repoPath, symbols: candidates });
+  const traced = await traceSymbols({
+    repoPath,
+    symbols: candidates,
+    resolvedLimit: limit,
+  });
   if (traced.unavailable) {
     return {
       symbols: candidates.slice(0, limit),
@@ -331,15 +337,12 @@ interface FindSymbolResult {
  * the prior "no definition recorded" string-on-falsy.
  */
 async function findSymbolDefinition(
-  binPath: string,
-  repoPath: string,
+  callTool: CodebaseMemoryToolCaller,
   project: string,
   symbol: string,
   timeoutMs: number,
 ): Promise<FindSymbolResult> {
-  const callResult = await callCodebaseMemoryTool({
-    binPath,
-    cwd: repoPath,
+  const callResult = await callTool({
     toolName: SEARCH_TOOL_NAME,
     args: { query: symbol, project },
     timeoutMs,
@@ -386,6 +389,9 @@ export interface TraceSymbolsOptions {
    *  (#742 acceptance criteria) gets clamped to whatever the binary returns
    *  in practice; this is the worst-case ceiling. */
   timeoutMs?: number;
+  /** Stop once this many graph-backed symbols resolve. The context builder
+   * only renders three, so tracing later candidates would waste tool calls. */
+  resolvedLimit?: number;
 }
 
 export interface TraceSymbolsResult {
@@ -402,6 +408,7 @@ export async function traceSymbols({
   repoPath,
   symbols,
   timeoutMs = 4000,
+  resolvedLimit,
 }: TraceSymbolsOptions): Promise<TraceSymbolsResult> {
   const binPath = resolveCodebaseMemoryBin();
   if (!binPath) return { unavailable: true, edges: [] };
@@ -411,84 +418,90 @@ export async function traceSymbols({
   // cwd, so without this every call returned "project not found or not
   // indexed" and the SYMBOL GRAPH row was permanently unavailable.
   const project = repoPathToProjectName(repoPath);
+  let resolvedCount = 0;
+  const session = await withCodebaseMemoryToolSession(
+    { binPath, cwd: repoPath, timeoutMs },
+    async (callTool) => {
+      for (const symbol of symbols) {
+        const callResult = await callTool({
+          toolName: TRACE_TOOL_NAME,
+          args: { function_name: symbol, project },
+          timeoutMs,
+        });
+        let edge: SymbolEdge;
 
-  for (const symbol of symbols) {
-    const callResult = await callCodebaseMemoryTool({
-      binPath,
-      cwd: repoPath,
-      toolName: TRACE_TOOL_NAME,
-      args: { function_name: symbol, project },
-      timeoutMs,
-    });
+        // Phase 4 (#739–#741): when trace_path errors out — including the
+        // common "function not found" path for non-callable symbols — still
+        // try search_graph, but keep it on this initialized MCP process.
+        if (!callResult.ok) {
+          const fallback = await findSymbolDefinition(callTool, project, symbol, timeoutMs);
+          edge = {
+            symbol,
+            kind: fallback.kind,
+            file: fallback.file,
+            line: fallback.line,
+            neighbours: [],
+            reason: fallback.reason ?? 'trace-error',
+            error: fallback.reason ? null : callResult.error,
+          };
+        } else {
+          const parsed = parseTracePathResult(callResult.result);
+          if (!parsed) {
+            edge = { symbol, neighbours: [] };
+          } else if (parsed.error) {
+            const fallback = await findSymbolDefinition(callTool, project, symbol, timeoutMs);
+            edge = {
+              symbol,
+              kind: fallback.kind,
+              file: fallback.file,
+              line: fallback.line,
+              neighbours: [],
+              reason: fallback.reason ?? 'trace-error',
+              error: fallback.reason ? null : parsed.error,
+            };
+          } else {
+            let { file, line } = pluckDefinitionLocation(parsed);
+            let kind: string | null = null;
+            let reason: SymbolEdgeReason | null = null;
+            // #898: v0.6.0 trace responses omit the subject location, so use
+            // search_graph on the same session to recover file/start_line.
+            if (!file || line == null) {
+              const fallback = await findSymbolDefinition(callTool, project, symbol, timeoutMs);
+              file = file ?? fallback.file;
+              line = line ?? fallback.line;
+              kind = fallback.kind;
+              reason = fallback.reason;
+            }
+            edge = {
+              symbol,
+              kind,
+              file,
+              line,
+              neighbours: pluckNeighbours(parsed),
+              reason,
+            };
+          }
+        }
 
-    // Phase 4 (#739–#741): when trace_path errors out — including the
-    // common "function not found" path the binary returns for non-callable
-    // symbols (interfaces, types, components, etc.) — still try
-    // search_graph so the recall card can show a structured "not in
-    // project graph" hint instead of a raw error string.
-    if (!callResult.ok) {
-      const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
-      edges.push({
+        edges.push(edge);
+        if (!edge.error && (Boolean(edge.file) || Boolean(edge.line) || edge.neighbours.length > 0)) {
+          resolvedCount += 1;
+          if (resolvedLimit && resolvedCount >= resolvedLimit) break;
+        }
+      }
+    },
+  );
+
+  if (!session.ok) {
+    return {
+      unavailable: false,
+      edges: symbols.map((symbol) => ({
         symbol,
-        kind: fallback.kind,
-        file: fallback.file,
-        line: fallback.line,
         neighbours: [],
-        // Surface the search_graph signal when present (unknown vs no-line),
-        // otherwise fall back to a generic trace-error reason that the UI
-        // can render without the raw process error string.
-        reason: fallback.reason ?? 'trace-error',
-        // Keep the original error around for debugging — UI only renders
-        // it when a structured `reason` isn't set.
-        error: fallback.reason ? null : callResult.error,
-      });
-      continue;
-    }
-
-    const parsed = parseTracePathResult(callResult.result);
-    if (!parsed) {
-      edges.push({ symbol, neighbours: [] });
-      continue;
-    }
-    if (parsed.error) {
-      // Same idea as the !callResult.ok branch — degrade through
-      // search_graph so the row shows useful context.
-      const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
-      edges.push({
-        symbol,
-        kind: fallback.kind,
-        file: fallback.file,
-        line: fallback.line,
-        neighbours: [],
-        reason: fallback.reason ?? 'trace-error',
-        error: fallback.reason ? null : parsed.error,
-      });
-      continue;
-    }
-
-    let { file, line } = pluckDefinitionLocation(parsed);
-    let kind: string | null = null;
-    let reason: SymbolEdgeReason | null = null;
-    // #898 / Phase 4: if trace_path didn't carry the location (v0.6.0
-    // shape), look it up via search_graph. The binary indexes file_path +
-    // start_line per node — this is just an extra lookup, not a re-parse.
-    // The fallback also tells us whether the symbol is genuinely unknown
-    // vs. matched-but-line-less, which we surface via `reason`.
-    if (!file || line == null) {
-      const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
-      file = file ?? fallback.file;
-      line = line ?? fallback.line;
-      kind = fallback.kind;
-      reason = fallback.reason;
-    }
-    edges.push({
-      symbol,
-      kind,
-      file,
-      line,
-      neighbours: pluckNeighbours(parsed),
-      reason,
-    });
+        error: session.error,
+        reason: 'trace-error',
+      })),
+    };
   }
 
   return { unavailable: false, edges };
