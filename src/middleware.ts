@@ -109,7 +109,7 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
   // this list: devices*, push-url, symon/tool, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.
-  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|enhance|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session)?|sync)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|enhance|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session)?|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
@@ -119,6 +119,11 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['POST']), path: /^\/api\/runtime\/launch\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/worktrees\/merge\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/orchestrator\/reset-session\/?$/ },
+  // Layer-3 steer from the phone. The relay connector forwards the per-device
+  // bearer verbatim (stamping a NON-loopback client-addr), so the steer route is
+  // gated per-principal, never loopback-trusted; its handler accepts operator +
+  // device and still 403s a worker. Real-path coverage: tests/principal-authz.
+  { methods: new Set(['POST']), path: /^\/api\/orchestrator\/steer-packet\/?$/ },
 ];
 
 const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [

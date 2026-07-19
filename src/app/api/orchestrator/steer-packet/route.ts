@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server';
-import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { steerPacket } from '@/lib/orchestrator/operator-mission-service';
 import { SteerPacketUnavailableError } from '@/lib/orchestrator/operator-mission-service/steer';
@@ -19,14 +18,22 @@ export const dynamic = 'force-dynamic';
  * middleware (loopback + token under /api/orchestrator/).
  */
 export async function POST(request: NextRequest) {
-  const denied = requirePanelAuth(request);
-  if (denied) return denied;
-
-  // Operator/orchestrator-only: steering a packet is a control-plane verb; a
-  // dispatched worker has no business steering any packet (incl. others'). It
-  // presents the local-worker token via its CLI (§HIGH-4).
-  if (resolveRequestPrincipal(request) !== 'operator') {
+  // Steering a packet is a control-plane verb, gated per-principal (loopback is
+  // transport, not identity — fail-closed). The OPERATOR (desktop/MCP/CLI
+  // ws-token) and an ENROLLED MOBILE DEVICE (per-device bearer) may steer: the
+  // operator's phone is a first-class remote control (#relay managed access). The
+  // relay connector forwards the device bearer verbatim and stamps a NON-loopback
+  // client-addr, so this route is never loopback-trusted — hence a principal gate
+  // here instead of requirePanelAuth (which would 401 the forwarded device). A
+  // dispatched WORKER never may steer (incl. others' packets) — it presents the
+  // local-worker token via its CLI (§HIGH-4). Absent/unknown credential → 401.
+  // Real-path coverage: tests/principal-authz.test.ts.
+  const principal = resolveRequestPrincipal(request);
+  if (principal === 'worker') {
     return operatorError('forbidden', 'Steering packets is operator-only; a dispatched worker cannot call this.', 403);
+  }
+  if (principal !== 'operator' && principal !== 'device') {
+    return operatorError('unauthorized', 'Steering packets requires the operator credential or an enrolled device.', 401);
   }
 
   const body = await parseJsonBody(request);
