@@ -56,6 +56,7 @@ import { fetchWorkerRun } from '@/lib/worker/runs';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { parseGitDiff } from '@/lib/worktree/diff-parser';
+import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
 
@@ -149,6 +150,7 @@ function buildLanePolicyContext(
     hasApprovedReview?: boolean;
   },
 ) {
+  const requireApproval = resolveRequireApprovalSync();
   // Auto-approve only when the orchestrator has a durable, HEAD-matched,
   // approved orchestrator_review row. In-progress auto-review, advisory
   // orchestratorReviewed, and gatePassed no longer authorize by themselves.
@@ -160,6 +162,7 @@ function buildLanePolicyContext(
     fileSizeLimitExceeded: opts?.fileSizeLimitExceeded === true,
   }, {
     workspacePath: lane.repoPath,
+    requireApproval,
   });
 }
 

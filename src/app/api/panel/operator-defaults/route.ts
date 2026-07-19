@@ -5,6 +5,7 @@ import {
   isCollideAggregator,
   isOrchestratorBackendSetting,
   isPrLinkDestination,
+  isRequireApproval,
   isReviewerBackendSetting,
   isSubscriptionProfile,
   updateOperatorDefaults,
@@ -94,6 +95,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('promptCachingEnabled must be boolean.');
     }
     update.promptCachingEnabled = body.promptCachingEnabled;
+  }
+
+  if (body.requireApproval !== undefined) {
+    if (!isRequireApproval(body.requireApproval)) {
+      throw new Error('requireApproval must be one of "high-risk", "always", "never".');
+    }
+    update.requireApproval = body.requireApproval;
   }
 
   if (body.orchestratorModel !== undefined) {

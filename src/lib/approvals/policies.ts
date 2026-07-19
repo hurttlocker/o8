@@ -13,6 +13,7 @@ import path from 'node:path';
 import { loadUserPolicies, mergePolicies, watchPolicies } from '@/lib/approvals/policy-loader';
 import type { ApprovalRisk, PolicyRule, PolicyRuleOverride } from '@/lib/approvals/types';
 import { classifyCommand } from '@/lib/llm/tools';
+import type { RequireApproval } from '@/lib/operator/defaults';
 
 // ── Types ──
 
@@ -35,6 +36,8 @@ export interface PolicyContext {
   runtime?: string;
   /** Session key for audit context */
   sessionKey?: string;
+  /** Resolved operator posture for lane merge approvals. */
+  requireApproval?: RequireApproval;
 }
 
 /**
@@ -197,6 +200,20 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
   },
 
   {
+    id: 'auto_approve_lane_merge',
+    name: 'Full-autonomy lane merge',
+    description: 'Allow normal lane merge or PR actions when the operator explicitly selected full autonomy.',
+    risk: 'low',
+    enabled: true,
+    requiresApproval: false,
+    matches: (ctx) => {
+      if (ctx.toolName !== 'lane_command' || ctx.requireApproval !== 'never') return false;
+      const verb = ctx.args?.verb as string | undefined;
+      return verb === 'merge' || verb === 'create_pr';
+    },
+  },
+
+  {
     id: 'auto_approve_orchestrator_review',
     name: 'Auto-approve orchestrator review',
     description: 'Allow merge or PR actions that come from an active orchestrator auto-review pass.',
@@ -204,7 +221,7 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
     enabled: true,
     requiresApproval: false,
     matches: (ctx) => {
-      if (ctx.toolName !== 'lane_command') return false;
+      if (ctx.toolName !== 'lane_command' || ctx.requireApproval === 'always') return false;
       const verb = ctx.args?.verb as string | undefined;
       return (verb === 'merge' || verb === 'create_pr') && ctx.args?.autoReview === true;
     },
