@@ -6,7 +6,7 @@ export interface LaneArchiveSummary {
   preservedBranch?: string | null;
   /** Durable lane outcome, when stamped — lets banners label the recorded
    *  ending instead of falling back to a generic Archived. */
-  outcome?: 'merged' | 'discarded' | 'no_changes' | 'pr_opened' | 'asked' | null;
+  outcome?: 'merged' | 'discarded' | 'closed_unmerged' | 'no_changes' | 'pr_opened' | 'asked' | null;
 }
 
 function stringField(value: unknown): string | null {
@@ -36,6 +36,9 @@ export function summarizeLaneArchive(
   }
   if (lane.outcome === 'discarded') {
     return { source: 'user', outcome: 'discarded', message: lane.outcomeNote ?? 'Discarded by the operator.' };
+  }
+  if (lane.outcome === 'closed_unmerged') {
+    return { source: 'user', outcome: 'closed_unmerged', message: lane.outcomeNote ?? 'Closed unmerged by the operator.' };
   }
   if (lane.outcome === 'no_changes') {
     return { source: 'system', outcome: 'no_changes', message: lane.outcomeNote ?? 'Agent finished without making changes.' };
