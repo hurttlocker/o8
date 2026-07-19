@@ -124,12 +124,34 @@ function argsForMcpServer(server: { command: string; path: string }): string[] {
   return server.command === 'npx' ? ['tsx', server.path] : [server.path];
 }
 
+let pinnedToolSpinePorts: { apiBase: string; wsPort: string } | null = null;
+
+function resolveToolSpinePorts(): { apiBase: string; wsPort: string } {
+  // A server process has one port identity. Sidecar files can be rewritten by
+  // another app launch while this process is still warm; re-reading them here
+  // would make identical turns produce different MCP configs and recycle the
+  // resident orchestrator. A process restart intentionally resolves afresh.
+  if (!pinnedToolSpinePorts) {
+    const ports = resolvePortInfo();
+    pinnedToolSpinePorts = {
+      apiBase: `http://127.0.0.1:${ports.apiPort}`,
+      wsPort: String(ports.wsPort),
+    };
+  }
+  return pinnedToolSpinePorts;
+}
+
+export function resolveToolSpineApiBase(): string {
+  return resolveToolSpinePorts().apiBase;
+}
+
 export function resolveToolSpineWsPort(): string {
-  // Keep the MCP child on the same port identity as this server process.
-  // The former file-first resolver let an unrelated sidecar rewrite of
-  // ~/.o8/ws-port override a pinned O8_WS_PORT/WS_PORT and rotate the warm-proc
-  // hash even though this process was still listening on its original port.
-  return String(resolvePortInfo().wsPort);
+  return resolveToolSpinePorts().wsPort;
+}
+
+/** Test-only reset for exercising two independent process identities. */
+export function resetToolSpinePortIdentityForTests(): void {
+  pinnedToolSpinePorts = null;
 }
 
 /**
@@ -174,8 +196,7 @@ export function buildToolRegistry(
   options?: { profile?: ToolProfile },
 ): ToolRegistry {
   const repoSlug = detectRepoSlug(repoPath);
-  const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
-  const apiBase = getApiBase();
+  const apiBase = resolveToolSpineApiBase();
 
   const cortexServer = resolveCortexMcpServerPath();
   const operatorServer = resolveOperatorMcpServerPath();

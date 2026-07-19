@@ -119,12 +119,21 @@ function findLaneByPacketId(packetId: string): Lane | null {
   return listLanes().find((lane) => lane.packetId === packetId) ?? null;
 }
 
-function packetPaths(packet: OrchestratorPacket | null): string[] {
+function packetOverlapPaths(packet: OrchestratorPacket | null): string[] {
   if (!packet) return [];
   const paths = packet.allowedFiles && packet.allowedFiles.length > 0
     ? packet.allowedFiles
     : packet.predictedFiles ?? [];
   return [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+}
+
+function packetAllowedPaths(packet: OrchestratorPacket | null): string[] {
+  if (!packet) return [];
+  if (packet.allowedFiles && packet.allowedFiles.length > 0) {
+    return [...new Set(packet.allowedFiles.map((path) => path.trim()).filter(Boolean))];
+  }
+  const inlineIssue = (packet.issue?.number ?? 0) >= 90001 && !packet.issue?.url;
+  return inlineIssue ? ['**/*'] : packetOverlapPaths(packet);
 }
 
 function normalizePathPattern(path: string): string {
@@ -241,7 +250,7 @@ function relatedPacketsFor(
     const lane = lanesByPacket.get(packet.id) ?? null;
     if (!lane || INACTIVE_LANE_STATUSES.has(lane.status)) return [];
 
-    const overlaps = overlappingPaths(targetPaths, packetPaths(packet));
+    const overlaps = overlappingPaths(targetPaths, packetOverlapPaths(packet));
     if (overlaps.length === 0) return [];
     return [{
       packetId: packet.id,
@@ -299,7 +308,8 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
   const packetId = packetIdInput ?? lane.packetId;
   const packet = packetId ? mission.packets.find((candidate) => candidate.id === packetId) ?? null : null;
   const repoPath = lane.worktreePath || lane.repoPath;
-  const allowedPaths = packetPaths(packet);
+  const allowedPaths = packetAllowedPaths(packet);
+  const overlapPaths = packetOverlapPaths(packet);
   const [directives, headSha, runtimeProcess] = await Promise.all([
     readDirectivesForRepo(lane.repoPath),
     readHeadSha(repoPath),
@@ -340,7 +350,7 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
     allowedPaths,
     blockedPaths: BLOCKED_PATHS,
     directives,
-    relatedPackets: relatedPacketsFor(packetId, allowedPaths, mission.packets),
+    relatedPackets: relatedPacketsFor(packetId, overlapPaths, mission.packets),
     project: {
       id: projectContext.id,
       name: projectContext.name,

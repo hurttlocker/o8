@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { readClaudeConfig, atomicWriteConfig } from '@/lib/mcp/claude-desktop-config-io';
 import { getMcpSetupReadiness } from '@/lib/mcp/setup-readiness';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
@@ -64,6 +64,30 @@ function getTargetConfigPath(target: Target): string {
 function normalizeTarget(value: unknown): Target {
   if (value === 'claude-code') return 'claude-code';
   return 'claude-desktop';
+}
+
+function normalizeProjectPath(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const candidate = isAbsolute(value.trim()) ? value.trim() : resolve(value.trim());
+  if (!existsSync(candidate) || !statSync(candidate).isDirectory()) {
+    throw new Error(`Project path is not a directory: ${candidate}`);
+  }
+  return candidate;
+}
+
+function removeManagedServers(config: ReturnType<typeof readClaudeConfig>): string[] {
+  const servers = config.mcpServers && typeof config.mcpServers === 'object'
+    ? config.mcpServers as Record<string, unknown>
+    : null;
+  if (!servers) return [];
+  const removed: string[] = [];
+  for (const name of ['o8', 'codebase-memory']) {
+    if (name in servers) {
+      delete servers[name];
+      removed.push(name);
+    }
+  }
+  return removed;
 }
 
 export async function GET(request: Request) {
@@ -134,10 +158,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => ({})) as { target?: unknown; remove?: unknown };
+    const body = await request.json().catch(() => ({})) as {
+      target?: unknown;
+      remove?: unknown;
+      projectPath?: unknown;
+    };
     const target = normalizeTarget(body.target);
     const remove = body.remove === true;
     const path = getTargetConfigPath(target);
+    const projectPath = target === 'claude-code' ? normalizeProjectPath(body.projectPath) : null;
+    const projectConfigPath = projectPath ? join(projectPath, '.mcp.json') : null;
     const mcpReady = getMcpSetupReadiness();
     if (!remove && !mcpReady.ready) {
       return NextResponse.json(
@@ -152,42 +182,45 @@ export async function POST(request: Request) {
     }
 
     const config = readClaudeConfig(path);
-    if (!config.mcpServers || typeof config.mcpServers !== 'object') {
-      config.mcpServers = {};
-    }
-    const servers = config.mcpServers as Record<string, unknown>;
 
     if (remove) {
-      const removed: string[] = [];
-      if ('o8' in servers) {
-        delete servers['o8'];
-        removed.push('o8');
+      const removed = removeManagedServers(config);
+      const projectConfig = projectConfigPath ? readClaudeConfig(projectConfigPath) : null;
+      const projectRemoved = projectConfig ? removeManagedServers(projectConfig) : [];
+      if (removed.length > 0) atomicWriteConfig(path, config);
+      if (projectConfigPath && projectConfig && projectRemoved.length > 0) {
+        atomicWriteConfig(projectConfigPath, projectConfig);
       }
-      if ('codebase-memory' in servers) {
-        delete servers['codebase-memory'];
-        removed.push('codebase-memory');
-      }
-      if (removed.length > 0) {
-        atomicWriteConfig(path, config);
-        return NextResponse.json({ ok: true, action: 'removed', path, removed });
-      }
-      return NextResponse.json({ ok: true, action: 'no-op', path, detail: 'o8 was not registered' });
+      return NextResponse.json({
+        ok: true,
+        action: removed.length > 0 || projectRemoved.length > 0 ? 'removed' : 'no-op',
+        path,
+        removed,
+        projectConfigPath,
+        projectRemoved,
+        ...(removed.length === 0 && projectRemoved.length === 0 ? { detail: 'o8 was not registered' } : {}),
+      });
     }
 
     // Merge via the Tool-Spine claude-desktop projection: spreads every existing
     // server + top-level key, overwrites only o8 + codebase-memory, strips the
     // stdio `type`. codebase-memory is opt-in — the registry omits it when its
     // binary is absent (cold first launch), so it's simply not in `installed`.
-    const registry = buildToolRegistry(process.cwd());
+    const registry = buildToolRegistry(projectPath ?? process.cwd());
     const installed = entriesForSurface(registry, 'claude-desktop').map((entry) => entry.name);
     const merged = toClaudeDesktopJson(registry, config);
     atomicWriteConfig(path, merged);
+    if (projectConfigPath) {
+      const projectConfig = readClaudeConfig(projectConfigPath);
+      atomicWriteConfig(projectConfigPath, toClaudeDesktopJson(registry, projectConfig));
+    }
 
     return NextResponse.json({
       ok: true,
       action: 'installed',
       target,
       path,
+      projectConfigPath,
       installed,
       codebaseMemoryAvailable: installed.includes('codebase-memory'),
       detail:
