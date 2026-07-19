@@ -173,6 +173,16 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
           description: 'Orchestrator thinking-effort level.',
         },
+        codexWorkerEffort: {
+          type: 'string',
+          enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
+          description: 'Thinking-effort level for Codex packet workers.',
+        },
+        claudeWorkerEffort: {
+          type: 'string',
+          enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
+          description: 'Thinking-effort level for Claude Code packet workers.',
+        },
         overlapGate: {
           type: 'string',
           enum: ['advisory', 'strict'],
@@ -186,6 +196,15 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'string',
           enum: ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi'],
           description: 'Default worker runtime for dispatches.',
+        },
+        defaultDispatchModel: {
+          type: 'string',
+          description: 'Default worker model id. Pass an empty string to restore the selected runtime default.',
+        },
+        workersUseBrain: {
+          type: 'string',
+          enum: ['off', 'auto', 'all'],
+          description: 'Whether packet workers are taught to consult the Engineering Brain.',
         },
         healBotEnabled: {
           type: 'boolean',
@@ -209,9 +228,13 @@ const OPERATOR_DEFAULTS_KEYS = [
   'orchestratorBackend',
   'collideAggregator',
   'thinkingEffort',
+  'codexWorkerEffort',
+  'claudeWorkerEffort',
   'overlapGate',
   'parallelCap',
   'defaultDispatchRuntime',
+  'defaultDispatchModel',
+  'workersUseBrain',
   'healBotEnabled',
   'supervisorAutoEscalate',
   'promptCachingEnabled',
@@ -219,6 +242,24 @@ const OPERATOR_DEFAULTS_KEYS = [
 
 export async function handleOperatorDefaults(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
+    const supportedKeys = new Set<string>(OPERATOR_DEFAULTS_KEYS);
+    const unknownKeys = Object.keys(args)
+      .filter((key) => !supportedKeys.has(key))
+      .sort();
+    if (unknownKeys.length > 0) {
+      return {
+        ...jsonResult({
+          ok: false,
+          error: {
+            code: 'unknown_operator_default_keys',
+            message: `Unsupported o8_operator_defaults key${unknownKeys.length === 1 ? '' : 's'}: ${unknownKeys.join(', ')}`,
+            unknownKeys,
+            supportedKeys: [...OPERATOR_DEFAULTS_KEYS],
+          },
+        }),
+        isError: true,
+      };
+    }
     const update: Record<string, unknown> = {};
     for (const key of OPERATOR_DEFAULTS_KEYS) {
       if (args[key] !== undefined) update[key] = args[key];

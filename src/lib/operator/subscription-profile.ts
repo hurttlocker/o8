@@ -140,7 +140,9 @@ export function resolveSubscriptionProfileRouting(
     return {
       ok: true,
       requestedRuntime: input.requestedRuntime ?? null,
-      requestedModel: input.requestedModel?.trim() || null,
+      requestedModel: input.requestedModel?.trim()
+        || input.defaultDispatchModel?.trim()
+        || null,
     };
   }
 
