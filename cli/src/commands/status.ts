@@ -63,6 +63,10 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   const approvals = approvalsRes.data?.approvals ?? [];
 
   const running = activeLanes.filter((l) => RUNNING_STATUSES.has(l.status));
+  // Review packets remain active but are not always included in an upstream
+  // running summary. Read the full lane set so a packet that needs an operator
+  // decision cannot disappear behind a zero-count status snapshot.
+  const awaitingReview = allLanes.filter((l) => l.status === 'reviewing');
   const recentMerges = allLanes
     .filter((l) => l.status === 'completed')
     .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
@@ -75,12 +79,15 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     schema: 'o8/cli/status/v1',
     counts: {
       runningPackets: running.length,
+      awaitingReview: awaitingReview.length,
       activeLanes: activeLanes.length,
       recentMerges: recentMerges.length,
       pendingApprovals: approvals.length,
     },
     activeLanesTruncated: activeLanes.length > LANE_CAP,
+    awaitingReviewTruncated: awaitingReview.length > LANE_CAP,
     runningPackets: running.slice(0, LANE_CAP).map(summarizeLane),
+    awaitingReview: awaitingReview.slice(0, LANE_CAP).map(summarizeLane),
     activeLanes: activeLanes.slice(0, LANE_CAP).map(summarizeLane),
     recentMerges: recentMerges.map(summarizeLane),
     pendingApprovals: approvals.map((a) => ({
@@ -97,7 +104,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   if (mode.human) {
     printHumanHeading(`o8 status (${cfg.apiBase})`);
     process.stdout.write(
-      `  running ${color(String(running.length), 'green')}` +
+        `  running ${color(String(running.length), 'green')}` +
+        `   review ${color(String(awaitingReview.length), 'yellow')}` +
         `   active ${activeLanes.length}` +
         `   merges ${recentMerges.length}` +
         `   approvals ${color(String(approvals.length), 'yellow')}\n`,
@@ -105,6 +113,10 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     if (running.length > 0) {
       printHumanHeading('running');
       for (const l of running) process.stdout.write(formatLaneLine(l));
+    }
+    if (awaitingReview.length > 0) {
+      printHumanHeading('awaiting review');
+      for (const l of awaitingReview) process.stdout.write(formatLaneLine(l));
     }
     if (recentMerges.length > 0) {
       printHumanHeading('recent merges');

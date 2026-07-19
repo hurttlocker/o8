@@ -25,6 +25,7 @@ const CONTROL_PLANE_VERBS: Array<{ verb: string; cli: string; mcp: string; route
   { verb: 'reset / retry packet', cli: 'o8 packet reset | retry', mcp: 'reset_packet / retry_packet', route: 'src/app/api/orchestrator/reset-packet/route.ts' },
   { verb: 'rerun with feedback', cli: 'o8 packet rerun', mcp: 'rerun_with_feedback', route: 'src/app/api/orchestrator/rerun-with-feedback/route.ts' },
   { verb: 'steer packet', cli: 'o8 packet steer', mcp: 'steer_packet', route: 'src/app/api/orchestrator/steer-packet/route.ts' },
+  { verb: 'close packet unmerged', cli: 'o8 packet close', mcp: 'close_packet_unmerged', route: 'src/app/api/orchestrator/discard-packet/route.ts' },
   { verb: 'inbox approve / reject', cli: 'o8 inbox approve | reject', mcp: 'o8_approve / o8_reject', route: 'src/app/api/panel/approvals/route.ts' },
   { verb: 'inbox list', cli: 'o8 inbox list', mcp: 'o8_status', route: 'src/app/api/operator/status/route.ts' },
 ];

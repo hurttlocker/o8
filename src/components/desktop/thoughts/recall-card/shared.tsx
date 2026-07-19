@@ -7,6 +7,12 @@
  * consistent without re-declaring the same chrome.
  */
 
+import {
+  closeUnmergedDispositionLabel,
+  isCloseUnmergedDisposition,
+  type CloseUnmergedDisposition,
+} from '@/lib/orchestrator/close-unmerged';
+
 export interface DirectiveSummary {
   id: string;
   title: string;
@@ -26,7 +32,7 @@ export interface DirectiveSummary {
 
 export interface RecentOutcome {
   id: string;
-  outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted';
+  outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted' | CloseUnmergedDisposition;
   summary: string;
   runtime: string;
   branch: string | null;
@@ -164,6 +170,13 @@ export function outcomeTone(outcome: RecentOutcome['outcome'], reviewApproved: b
   }
   if (outcome === 'partial') return { color: '#b45309', dot: '#f59e0b', label: 'partial' };
   if (outcome === 'interrupted') return { color: 'var(--t-text-muted)', dot: 'var(--t-text-muted)', label: 'stopped' };
+  if (isCloseUnmergedDisposition(outcome)) {
+    return {
+      color: 'var(--t-text-muted)',
+      dot: 'var(--t-text-muted)',
+      label: closeUnmergedDispositionLabel(outcome),
+    };
+  }
   return { color: '#b91c1c', dot: '#ef4444', label: 'failed' };
 }
 

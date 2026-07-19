@@ -52,6 +52,7 @@ import {
 } from '@/lib/cortex/directives/filter';
 import { getProjectContext, type ProjectContext } from '@/lib/projects/context';
 import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
+import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 
 import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 
@@ -66,7 +67,7 @@ const NEIGHBOUR_LIMIT = 4;
 type DirectiveEntry = ParsedDirective;
 
 interface OutcomeRow {
-  outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted';
+  outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted' | CloseUnmergedDisposition;
   summary: string;
   runtime: string;
   branch: string | null;
@@ -208,6 +209,11 @@ function outcomeBadge(row: OutcomeRow): string {
       return '[PARTIAL]';
     case 'interrupted':
       return '[INTERRUPTED]';
+    case 'adopted_elsewhere':
+    case 'superseded':
+    case 'spec_changed':
+    case 'wontfix':
+      return '[CLOSED]';
     default:
       return '[?]';
   }
