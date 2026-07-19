@@ -25,8 +25,12 @@ export interface FocusRepoWorkspaceTabDetail {
 
 export function dispatchFocusRepoWorkspaceTab(detail: FocusRepoWorkspaceTabDetail): boolean {
   if (typeof window === 'undefined') return false;
-  window.dispatchEvent(new CustomEvent(FOCUS_REPO_WORKSPACE_TAB_EVENT, { detail }));
-  return true;
+  const event = new CustomEvent(FOCUS_REPO_WORKSPACE_TAB_EVENT, {
+    cancelable: true,
+    detail,
+  });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
