@@ -1,11 +1,13 @@
 /**
- * defaultRange() — the ship-time trap.
+ * defaultRange() and releaseRange() — the ship-time ranges.
  *
  * release.mjs runs AFTER `npm version patch` has tagged HEAD, so a naive
  * `<latest-tag>..HEAD` is EMPTY at ship time — every Fixes-Report trailer
  * between the previous release and this one silently drops, and the receipt
- * loop never fires. Real-path test: a real temp git repo, real tags, the real
- * defaultRange()/collectFixedIds chain.
+ * loop never fires. defaultRange() serves ad-hoc publish:fixed runs, while
+ * releaseRange() stays on the version tag when concurrent work advances HEAD.
+ * Real-path test: a real temp git repo, real tags, the real range and
+ * collectFixedIds() chain.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -15,7 +17,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — plain .mjs build script, no type declarations by design
-import { collectFixedIds, defaultRange } from '../scripts/lib/fixed-reports.mjs';
+import { collectFixedIds, defaultRange, releaseRange } from '../scripts/lib/fixed-reports.mjs';
 
 let repo: string;
 let previousCwd: string;
@@ -71,5 +73,22 @@ describe('defaultRange — ship-time tagged HEAD', () => {
     git(['tag', 'v0.1.0']);
 
     expect(defaultRange()).toBe('HEAD~20..HEAD');
+  });
+});
+
+describe('releaseRange — concurrent commit during ship', () => {
+  it('stays anchored to the release tag when HEAD advances during the build', () => {
+    commit('base');
+    git(['tag', 'v0.1.1']);
+    commit('fix: included in release\n\nFixes-Report: FYPPHK');
+    commit('release: 0.1.2');
+    git(['tag', 'v0.1.2']);
+    commit('fix: concurrent session\n\nFixes-Report: LATER1');
+
+    expect(releaseRange('v0.1.2')).toBe('v0.1.1..v0.1.2');
+    expect([...collectFixedIds(releaseRange('v0.1.2')).keys()]).toEqual(['FYPPHK']);
+
+    expect(defaultRange()).toBe('v0.1.2..HEAD');
+    expect([...collectFixedIds(defaultRange()).keys()]).toEqual(['LATER1']);
   });
 });

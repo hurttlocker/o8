@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { buildManifest, defaultRange, readPublished, resolveNewFixes } from './lib/fixed-reports.mjs';
+import { buildManifest, readPublished, releaseRange, resolveNewFixes } from './lib/fixed-reports.mjs';
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
@@ -66,6 +66,15 @@ if (nodeMajor !== 22) {
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const tag = `v${version}`;
+
+try {
+  const headTag = execFileSync('git', ['describe', '--tags', '--exact-match', 'HEAD'], { encoding: 'utf8' }).trim();
+  if (headTag !== tag) {
+    console.warn(`[release] WARNING: HEAD is ${headTag}, not ${tag}; fixed-report receipts will scan ${releaseRange(tag)}.`);
+  }
+} catch {
+  console.warn(`[release] WARNING: HEAD is not ${tag}; fixed-report receipts will scan ${releaseRange(tag)}.`);
+}
 
 const BUNDLE = join(root, 'src-tauri/target/release/bundle');
 const DMG = join(BUNDLE, 'dmg', `o8_${version}_x64.dmg`);
@@ -172,7 +181,7 @@ try {
   console.warn(`[release] ⚠ intake-channel sync failed: ${err?.message ?? err}`);
   console.warn('[release]   only self-filed reports will resolve — fixes for other people\'s bugs will be skipped.');
 }
-const { entries: pendingFixes, missing: unknownFixes } = resolveNewFixes(defaultRange(), version);
+const { entries: pendingFixes, missing: unknownFixes } = resolveNewFixes(releaseRange(tag), version);
 const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
 writeFileSync(fixedJsonPath, JSON.stringify(fixedManifest, null, 2));
@@ -282,7 +291,7 @@ try {
   // publish:fixed picks up anything missed (published.json is the dedupe).
   if (pendingFixes.length > 0) {
     try {
-      await publishFixed({ range: defaultRange() });
+      await publishFixed({ range: releaseRange(tag) });
     } catch (err) {
       console.error(`[release] #fixed announce failed (release is fine):`, err?.message ?? err);
       console.error(`[release] re-run later with: npm run publish:fixed`);

@@ -134,6 +134,20 @@ export function defaultRange() {
 }
 
 /**
+ * The commits carried by one versioned release. Unlike defaultRange(), this is
+ * anchored to the supplied tag so a concurrent commit that reaches HEAD while
+ * the build or notarization runs cannot replace the release's receipt range.
+ */
+export function releaseRange(tag) {
+  try {
+    return `${git(['describe', '--tags', '--abbrev=0', `${tag}^`])}..${tag}`;
+  } catch {
+    // The release tag is the only tag in history.
+    return `${tag}~20..${tag}`;
+  }
+}
+
+/**
  * Every `Fixes-Report:` trailer in the range → the commit that carried it.
  * Accepts `Fixes-Report: A7F3K2` and `Fixes-Report: A7F3K2, B2M9QP`.
  */
