@@ -33,6 +33,7 @@ export interface RepoCardProps {
   onLaunchAgent: (repo: RepoRegistryEntry) => void;
   onOpenWorkspace: (repo: RepoRegistryEntry) => void;
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
+  onLocate: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
