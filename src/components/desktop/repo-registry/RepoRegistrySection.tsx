@@ -1,7 +1,5 @@
 'use client';
 
-import { requestPrompt } from '@/components/shared/ConfirmToastHost';
-
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { openExternalUrl } from '@/lib/desktop/open-external';
@@ -27,6 +25,7 @@ import {
 } from './shared';
 import { RepoRegistryList } from './RepoRegistryList';
 import { RepoRegistryModals } from './RepoRegistryModals';
+import { pickRepoFolder } from './pickRepoFolder';
 
 function RepoRegistrySectionBase({
   onSelectSession,
@@ -362,38 +361,17 @@ function RepoRegistrySectionBase({
     }
   }, []);
 
-  const pickFolderPath = useCallback(async () => {
-    let folderPath: string | null = null;
-
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const result = await open({ directory: true, title: 'Select project folder' });
-      if (typeof result === 'string') folderPath = result;
-    } catch {
-      try {
-        const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
-        const data = await response.json() as { path?: string | null };
-        if (typeof data.path === 'string') folderPath = data.path;
-      } catch {
-        folderPath = await requestPrompt({ title: 'Open folder', message: 'Enter the folder path to add as a repository.', placeholder: '/path/to/folder' });
-      }
-    }
-
-    const trimmedPath = folderPath?.trim() ?? '';
-    return trimmedPath.length > 0 ? trimmedPath : null;
-  }, []);
-
   const handleBrowseForRepo = useCallback(async () => {
     setAddOpen(true);
     setValidationError(null);
     setValidationResult(null);
     setValidating(false);
     setAdding(false);
-    const folderPath = await pickFolderPath();
+    const folderPath = await pickRepoFolder('Select project folder', 'Enter the folder path to add as a repository.');
     if (!folderPath) return;
     setRepoPathInput(folderPath);
     await validateRepoPath(folderPath);
-  }, [pickFolderPath, validateRepoPath]);
+  }, [validateRepoPath]);
 
   const handleAddRepo = useCallback(async () => {
     const localPath = repoPathInput.trim();
@@ -640,6 +618,22 @@ function RepoRegistrySectionBase({
     }
   }, [onRepoRemoved, removeTarget]);
 
+  const locateRepo = useCallback(async (repo: RepoRegistryEntry) => {
+    const localPath = await pickRepoFolder('Locate moved repository folder', 'Enter the new folder path for this repository.');
+    if (!localPath) return;
+    setLoadError(null);
+    try {
+      const data = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update', id: repo.id, localPath }),
+      });
+      setRepos((current) => sortRepoEntries(current.map((entry) => (entry.id === repo.id ? data.repo : entry))));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to locate repository folder.');
+    }
+  }, []);
+
   const activeRepoEntry = useMemo(
     () => repos.find((repo) => repo.localPath === activeRepoLocalPath) ?? null,
     [activeRepoLocalPath, repos],
@@ -737,6 +731,7 @@ function RepoRegistrySectionBase({
         launchIntoWorkspace={launchIntoWorkspace}
         openWorkspaceModal={openWorkspaceModal}
         handleOpenGitHub={handleOpenGitHub}
+        locateRepo={locateRepo}
         setRemoveTarget={setRemoveTarget}
         handleSaveSetup={handleSaveSetup}
         onSelectSession={onSelectSession}

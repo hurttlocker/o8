@@ -27,6 +27,7 @@ interface RepoRegistryListProps {
   launchIntoWorkspace: (repo: RepoRegistryEntry) => Promise<void>;
   openWorkspaceModal: (repo: RepoRegistryEntry) => void;
   handleOpenGitHub: (repo: RepoRegistryEntry) => void;
+  locateRepo: (repo: RepoRegistryEntry) => void;
   setRemoveTarget: (repo: RepoRegistryEntry | null) => void;
   handleSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
@@ -82,6 +83,7 @@ function RepoRegistryListBase({
   launchIntoWorkspace,
   openWorkspaceModal,
   handleOpenGitHub,
+  locateRepo,
   setRemoveTarget,
   handleSaveSetup,
   onSelectSession,
@@ -445,6 +447,7 @@ function RepoRegistryListBase({
                 }}
                 onOpenWorkspace={openWorkspaceModal}
                 onOpenGitHub={handleOpenGitHub}
+                onLocate={locateRepo}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
                 onSelectSession={onSelectSession}

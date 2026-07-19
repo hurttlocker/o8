@@ -483,6 +483,7 @@ async function scheduleSpecIngest(repoPath: string, repoSlug: string): Promise<v
 export async function updateRepo(
   id: string,
   updates: {
+    localPath?: string;
     setup?: RepoSetupConfig;
     lastOpenedAt?: string | null;
   },
@@ -493,14 +494,30 @@ export async function updateRepo(
     throw new Error('Repository not found.');
   }
 
+  const candidate = updates.localPath === undefined ? null : await inspectLocalRepo(updates.localPath);
+  if (candidate && store.repos.some((repo) => repo.id !== id && repo.localPath === candidate.localPath)) {
+    throw new Error('Another registered repository already uses that folder.');
+  }
+
   const next: RepoRegistryEntry = {
     ...existing,
+    ...(candidate ? {
+      name: candidate.name,
+      localPath: candidate.localPath,
+      remoteUrl: candidate.remoteUrl,
+      defaultBranch: candidate.defaultBranch,
+      isGitRepo: candidate.isGitRepo,
+    } : {}),
     setup: normalizeSetupConfig(updates.setup ?? existing.setup),
     lastOpenedAt: updates.lastOpenedAt === undefined ? existing.lastOpenedAt : updates.lastOpenedAt,
   };
 
   const repos = store.repos.map((repo) => (repo.id === id ? next : repo));
   await writeStore({ version: 1, repos });
+  if (candidate) {
+    fireSignatureRecompute();
+    void scheduleSpecIngest(next.localPath, next.name);
+  }
   return next;
 }
 

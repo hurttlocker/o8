@@ -91,6 +91,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
         activeWorkspacePath={props.activeWorkspacePath}
         onToggle={props.onToggle}
         onSelectRepo={props.onSelectRepo ?? (() => {})}
+        onLocate={props.onLocate}
         onRemove={props.onRemove}
         onSelectPR={props.onSelectPR}
         onReviewPR={props.onReviewPR}
