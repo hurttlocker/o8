@@ -237,7 +237,7 @@ export async function POST(request: Request) {
         if (!('id' in body) || !body.id) {
           return NextResponse.json({ error: 'id is required.' }, { status: 400 });
         }
-        if ('localPath' in body && body.localPath !== undefined && !body.localPath.trim()) {
+        if ('localPath' in body && body.localPath !== undefined && (typeof body.localPath !== 'string' || !body.localPath.trim())) {
           return NextResponse.json({ error: 'localPath must be a Git repository folder.' }, { status: 400 });
         }
         if ('localPath' in body && body.localPath !== undefined) {
