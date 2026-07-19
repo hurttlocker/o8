@@ -99,7 +99,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
   if (body.requireApproval !== undefined) {
     if (!isRequireApproval(body.requireApproval)) {
-      throw new Error('requireApproval must be one of "high-risk", "always", "never".');
+      throw new Error('requireApproval must be one of "high-risk", "surface", "always", "never".');
     }
     update.requireApproval = body.requireApproval;
   }

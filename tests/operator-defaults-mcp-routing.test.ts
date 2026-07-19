@@ -175,7 +175,7 @@ describe('MCP operator defaults and dispatch routing', () => {
       defaultDispatchModel: expect.any(Object),
       workersUseBrain: expect.any(Object),
       requireApproval: expect.objectContaining({
-        enum: ['high-risk', 'always', 'never'],
+        enum: ['high-risk', 'surface', 'always', 'never'],
       }),
     });
 

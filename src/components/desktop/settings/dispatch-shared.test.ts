@@ -4,6 +4,7 @@ import {
   DISPATCH_RUNTIME_OPTIONS,
   nextPickerHighlightIndex,
   PICKER_MENU_POPOVER_BG,
+  REQUIRE_APPROVAL_OPTIONS,
   resolvePickerGroupOpen,
 } from './dispatch-shared';
 
@@ -32,6 +33,10 @@ describe('settings dispatch picker menu surface', () => {
     expect(openPicker).toBe('codex-effort');
     expect(resolvePickerGroupOpen(openPicker, 'subscription-profile', false)).toBe('codex-effort');
     expect(resolvePickerGroupOpen(openPicker, 'codex-effort', false)).toBeNull();
+  });
+
+  it('offers the dispatcher-routed surface merge posture', () => {
+    expect(REQUIRE_APPROVAL_OPTIONS).toContainEqual({ value: 'surface', label: 'Surface' });
   });
 
   it('wraps arrow navigation and supports first/last keyboard jumps', () => {

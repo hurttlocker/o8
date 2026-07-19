@@ -397,6 +397,7 @@ export async function createMission(input: CreateMissionInput) {
           huddle: input.huddle,
           comparisonModels: input.comparisonModels,
           orchestratorThreadId: input.orchestratorThreadId,
+          dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
         } satisfies CreateMissionRequest),
       },
     );
@@ -441,6 +442,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           huddle: input.huddle,
           comparisonModels: input.comparisonModels,
           orchestratorThreadId: input.orchestratorThreadId,
+          dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
         } satisfies CreateMissionRequest),
       },
     );

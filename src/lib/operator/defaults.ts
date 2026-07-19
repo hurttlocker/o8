@@ -106,10 +106,10 @@ export type { TargetingTier } from './targeting-tier';
 
 export type SettingSource = 'env' | 'file' | 'default';
 
-export type RequireApproval = 'high-risk' | 'always' | 'never';
+export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval {
-  return value === 'high-risk' || value === 'always' || value === 'never';
+  return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never';
 }
 
 export interface OperatorDefaults {
@@ -922,7 +922,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.requireApproval !== undefined) {
     if (!isRequireApproval(update.requireApproval)) {
-      throw new Error('requireApproval must be one of "high-risk", "always", "never".');
+      throw new Error('requireApproval must be one of "high-risk", "surface", "always", "never".');
     }
     stored.requireApproval = update.requireApproval;
   }

@@ -102,6 +102,10 @@ export async function createMission(input: CreateMissionInput) {
     existingBranchPolicy: input.existingBranchPolicy,
   });
 
+  const dispatcher = input.dispatcher
+    ?? (typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
+      ? { surface: 'orchestrator' as const, id: input.orchestratorThreadId.trim() }
+      : { surface: 'operator' as const, id: 'desktop' });
   const packets = loadedIssues.map((issue, index) => {
     const dependencyNumbers = explicitDependencies[index].length > 0
       ? explicitDependencies[index]
@@ -189,6 +193,7 @@ export async function createMission(input: CreateMissionInput) {
       ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
         ? { orchestratorThreadId: input.orchestratorThreadId.trim() }
         : {}),
+      dispatcher,
       // Best-of-N: stamp the seed packet so fanOutComparisonPackets (scheduling.ts)
       // splits it into N sibling candidates, one per model, each its own worktree.
       ...(input.comparisonModels && input.comparisonModels.length > 0
