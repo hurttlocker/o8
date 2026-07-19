@@ -346,6 +346,38 @@ describe('panelGateMiddleware — per-device capability scope', () => {
   });
 
   it.each([
+    ['/api/repo-spec', 'GET'],
+    ['/api/repo-spec', 'PUT'],
+    ['/api/repo-spec/asset', 'POST'],
+    ['/api/runtime/inventory', 'GET'],
+    ['/api/worktrees/diff', 'GET'],
+    ['/api/worktrees/diff-summary', 'GET'],
+    ['/api/dictation/transcribe', 'POST'],
+    ['/api/tts', 'POST'],
+    ['/api/panel/projects', 'GET'],
+    ['/api/panel/search', 'GET'],
+  ])(
+    'allows the phone-facing surfaces reached outside /api/mobile/*: %s %s',
+    (pathname, method) => {
+      // Repo o8.md notes, fleet inventory, review diffs, dictation/TTS, projects
+      // + search — each previously 403'd the phone at the middleware.
+      expect(deviceRequest(pathname, method).status).toBe(200);
+    },
+  );
+
+  it.each([
+    ['/api/repo-spec', 'DELETE'],
+    ['/api/runtime/inventory', 'POST'],
+    ['/api/worktrees/diff', 'POST'],
+    ['/api/panel/projects', 'POST'],
+  ])(
+    'still denies non-granted methods on the new surfaces: %s %s',
+    (pathname, method) => {
+      expect(deviceRequest(pathname, method).status).toBe(403);
+    },
+  );
+
+  it.each([
     ['/api/mobile/devices', 'GET'],
     ['/api/mobile/devices/revoke', 'POST'],
     ['/api/mobile/push-url', 'POST'],
