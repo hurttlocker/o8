@@ -67,3 +67,4 @@ src-tauri/sidecars/speech-local/.build/
 
 # Local scratch output (release cards, one-off renders) — never repo content
 scratch/
+.tmp-owned-push-*/
