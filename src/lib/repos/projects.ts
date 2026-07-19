@@ -8,17 +8,16 @@ import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { readRepoPathRegistry } from './repo-path-registry';
 import {
-  addRepoToProject,
   createProject as createSqliteProject,
   deleteProject as deleteSqliteProject,
   getProjectBySlug as getSqliteProjectBySlug,
   getProjectWithRepos as getSqliteProjectWithRepos,
   listProjects as listSqliteProjects,
-  removeRepoFromProject,
   updateProject as updateSqliteProject,
 } from '@/lib/projects/store';
 import { listRepos } from './registry';
 import { removeRepoFromPool } from './remove';
+import { reconcileSqliteProjectRepos } from './project-membership';
 
 const PROJECTS_DIR = path.join(os.homedir(), '.o8');
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
@@ -677,31 +676,6 @@ function resolveSqliteProject(ledgerProject: { id: string; name: string }) {
  * panel-rail membership edit (move/drag) actually stick instead of being
  * overwritten by the SQLite-derived ledger projection on the next read.
  */
-async function reconcileSqliteProjectRepos(ledgerProject: ProjectRecord, repoPaths: string[]): Promise<void> {
-  const repos = await listRepos();
-  const idByPath = new Map(repos.map((repo) => [normalizeRepoPath(repo.localPath), repo.id]));
-  const targetRepoIds = new Set(
-    repoPaths
-      .map((repoPath) => idByPath.get(normalizeRepoPath(repoPath)))
-      .filter((id): id is string => Boolean(id)),
-  );
-
-  let sqlite = resolveSqliteProject(ledgerProject);
-  if (!sqlite) {
-    const created = createSqliteProject({ name: ledgerProject.name, slug: projectNameToSlug(ledgerProject.name), description: null });
-    sqlite = getSqliteProjectWithRepos(created.id);
-  }
-  if (!sqlite) return;
-
-  const currentRepoIds = new Set(sqlite.repos.map((link) => link.repoId));
-  for (const repoId of targetRepoIds) {
-    if (!currentRepoIds.has(repoId)) addRepoToProject(sqlite.id, repoId, null, 'manual');
-  }
-  for (const repoId of currentRepoIds) {
-    if (!targetRepoIds.has(repoId)) removeRepoFromProject(sqlite.id, repoId);
-  }
-}
-
 export async function setProjectRepos(projectId: string, repoPaths: string[]): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
   const project = ledger.projects.find((p) => p.id === projectId);
@@ -712,24 +686,6 @@ export async function setProjectRepos(projectId: string, repoPaths: string[]): P
     await reconcileSqliteProjectRepos(project, normalized);
   }
   return getProjectsLedger();
-}
-
-export async function removeRepoPathFromProjects(repoPath: string): Promise<ProjectsLedger> {
-  const ledger = await getProjectsLedger();
-  const normalizedRepoPath = normalizeRepoPath(repoPath);
-  let mutated = false;
-  const projects = ledger.projects.map((project) => {
-    const repoPaths = project.repoPaths.filter((candidate) => normalizeRepoPath(candidate) !== normalizedRepoPath);
-    if (repoPaths.length !== project.repoPaths.length) {
-      mutated = true;
-      return { ...project, repoPaths };
-    }
-    return project;
-  });
-  const next = preferConcreteActiveProject({ ...ledger, projects });
-  if (!mutated && next.activeProjectId === ledger.activeProjectId) return ledger;
-  await writeLedger(next);
-  return next;
 }
 
 export async function upsertProjectLedgerRecord(input: {
