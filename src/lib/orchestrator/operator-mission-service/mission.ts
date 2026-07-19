@@ -18,6 +18,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { recommendRuntime } from '@/lib/dispatch/routing';
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
+import { rearmHeldPacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-result';
 import {
   buildMissionId,
   buildMissionPrompt,
@@ -321,26 +322,17 @@ export async function dispatchMission(input: DispatchMissionInput) {
   if (requestedMissionId && requestedMissionId !== currentMissionId) {
     const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (stored) => {
       const registryBefore = reconcileOrchestratorControlPlaneState(stored);
-      for (const packet of registryBefore.packets) {
-        if (packet.queueState === 'held') packet.queueState = 'queued';
-      }
+      rearmHeldPacketsForExplicitDispatch(registryBefore);
       const afterDispatch = await runDispatchTick(registryBefore, { launchBudget: buildRemainingLaunchBudget() });
-      const beforeByPacketId = new Map(registryBefore.packets.map((packet) => [packet.id, packet] as const));
-      const dispatched = afterDispatch.packets.filter((packet) => {
-        const previous = beforeByPacketId.get(packet.id);
-        const hadLane = Boolean(previous?.lane?.laneId || previous?.lane?.sessionKey);
-        const hasLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey);
-        return !hadLane && hasLane;
-      }).length;
-      return { state: afterDispatch, result: dispatched };
+      return { state: afterDispatch, result: summarizeDispatchMission(registryBefore, afterDispatch) };
     });
 
     const packetIds = new Set(finalState.packets.map((packet) => packet.id));
     const dag = buildDagMetadata(finalState.packets);
-    log(`Dispatched mission ${finalState.missionId || requestedMissionId} with ${result} packet launches.`);
+    log(`Dispatched mission ${finalState.missionId || requestedMissionId} with ${result.dispatched} packet launches.`);
 
     return {
-      dispatched: result,
+      ...result,
       waves: dag.totalWaves,
       activeAgents: missionAgentKeys(packetIds),
     };
@@ -352,9 +344,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
     // (so reset doesn't boomerang); an explicit dispatch_mission is the operator
     // opting back in, so promote held -> queued here before dispatching.
-    for (const packet of current.packets) {
-      if (packet.queueState === 'held') packet.queueState = 'queued';
-    }
+    rearmHeldPacketsForExplicitDispatch(current);
     const afterDispatch = await runDispatchTick(current, { launchBudget: buildRemainingLaunchBudget() });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this
@@ -363,24 +353,16 @@ export async function dispatchMission(input: DispatchMissionInput) {
     Object.assign(current, afterDispatch);
     writeOrchestratorControlPlaneState(afterDispatch);
 
-    const beforeByPacketId = new Map(before.packets.map((packet) => [packet.id, packet] as const));
-    const dispatched = afterDispatch.packets.filter((packet) => {
-      const previous = beforeByPacketId.get(packet.id);
-      const hadLane = Boolean(previous?.lane?.laneId || previous?.lane?.sessionKey);
-      const hasLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey);
-      return !hadLane && hasLane;
-    }).length;
-
-    return dispatched;
+    return summarizeDispatchMission(before, afterDispatch);
   });
 
   const packetIds = new Set(finalState.packets.map((packet) => packet.id));
   const dag = buildDagMetadata(finalState.packets);
 
-  log(`Dispatched mission ${finalState.missionId || 'current'} with ${result} packet launches.`);
+  log(`Dispatched mission ${finalState.missionId || 'current'} with ${result.dispatched} packet launches.`);
 
   return {
-    dispatched: result,
+    ...result,
     waves: dag.totalWaves,
     activeAgents: missionAgentKeys(packetIds),
   };
