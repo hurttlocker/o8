@@ -19,10 +19,11 @@
 
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { pickMobilePairingHosts, type ReachableMobileHostKind } from '@/lib/panel/lan-ip';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { mobileE2eeEnabled } from '@/lib/mobile/e2ee-flag';
 import { createEnrollCode } from '@/lib/mobile/device-registry';
 import { getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
@@ -49,8 +50,22 @@ interface MobilePairingResponse {
   sIdent?: string;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // An enrolled PHONE (per-device token, over the relay) refreshes its pairing
+    // config here — but it must NEVER receive the operator ws-token: an E2EE phone
+    // authenticates with its own device token and already ignores parsed.token
+    // (o8-mobile refreshPairingConfig). Returning the ws-token to a device would
+    // hand a scoped credential full operator authority. So a device gets host/port
+    // refresh only, with token: '' (isO8Config still requires the string field) and
+    // no fresh enroll code. Operator/loopback (the desktop-webview QR path) is
+    // unchanged. A dispatched worker has no business pairing.
+    const principal = resolveRequestPrincipal(request);
+    if (principal === 'worker') {
+      return NextResponse.json({ error: 'A dispatched worker cannot read pairing config.' }, { status: 403 });
+    }
+    const isDevice = principal === 'device';
+
     const { apiPort, wsPort } = resolvePortInfo();
     const pairingHosts = pickMobilePairingHosts();
     const primary = pairingHosts[0] ?? { host: null, kind: null };
@@ -63,12 +78,15 @@ export async function GET() {
         .filter((h): h is string => h !== null),
       apiPort,
       wsPort,
-      token: getOrCreateWsToken(),
+      // Operator/loopback QR needs the real ws-token; a device gets an empty
+      // string (its own device token authenticates it, and its client ignores
+      // this field) so the operator credential never crosses to a device.
+      token: isDevice ? '' : getOrCreateWsToken(),
     };
     // E2EE mode — additionally carry a one-time enroll code + the pinned server
-    // identity. A new mobile app prefers these (per-device token + E2EE); an old
-    // app falls back to `token`. Once every client is upgraded, drop `token`.
-    if (mobileE2eeEnabled()) {
+    // identity for the desktop QR only. A device is already enrolled; minting a
+    // fresh enroll code on every pairing refresh would be wasteful and risky.
+    if (mobileE2eeEnabled() && !isDevice) {
       payload.enroll = createEnrollCode(Date.now());
       payload.sIdent = getServerIdentityPublicKey();
     }

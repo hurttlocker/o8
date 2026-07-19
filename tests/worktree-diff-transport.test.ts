@@ -13,6 +13,7 @@ import { NextRequest } from 'next/server';
 
 import { GET as getDiff } from '@/app/api/worktrees/diff/route';
 import { GET as getDiffSummary } from '@/app/api/worktrees/diff-summary/route';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 const tempDirs: string[] = [];
 
@@ -34,8 +35,12 @@ function makeRepo(): string {
 
 function request(route: 'diff' | 'diff-summary', params: Record<string, string>): NextRequest {
   const query = new URLSearchParams(params);
+  // These routes now authorize via resolveRequestPrincipal (operator + device,
+  // worker 403). Loopback alone is anonymous by design, so present the REAL
+  // operator ws-token as a bearer — this drives the actual principal resolver
+  // (not a mock) and proves the route accepts the operator principal.
   return new NextRequest(`http://127.0.0.1/api/worktrees/${route}?${query.toString()}`, {
-    headers: { host: '127.0.0.1' },
+    headers: { host: '127.0.0.1', authorization: `Bearer ${getOrCreateWsToken()}` },
   });
 }
 
