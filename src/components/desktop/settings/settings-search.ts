@@ -62,10 +62,10 @@ export function searchSettings(
 
 /** Registry population is generated from the tab inventory — see module doc. */
 export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
-  { tab: 'general', tabLabel: 'General', group: "Account", label: "o8 account", description: "Sign in with GitHub, manage the account, or sign out", keywords: ['sign in', 'sign out', 'login', 'identity', 'profile', 'github'] },
+  { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Identity", description: "Connect GitHub, manage the account, or sign out", keywords: ['sign in', 'sign out', 'login', 'identity', 'profile', 'github'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share usage data", description: "Coarse feature counts that help improve o8", keywords: ['telemetry', 'usage', 'analytics', 'privacy'] },
-  { tab: 'general', tabLabel: 'General', group: "Account", label: "Plan", description: "Your current plan and founder status", keywords: ['founder', 'free', 'subscription'] },
-  { tab: 'general', tabLabel: 'General', group: "Account", label: "Upgrade to Founders", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
+  { tab: 'general', tabLabel: 'General', group: "Plan", label: "Plan", description: "Your current plan and founder status", keywords: ['founder', 'free', 'subscription'] },
+  { tab: 'general', tabLabel: 'General', group: "Plan", label: "Upgrade to Founders", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
   { tab: 'general', tabLabel: 'General', group: "Startup", label: "Launch at login", description: "Start o8 automatically when you sign in to your Mac", keywords: ['autostart', 'boot', 'startup'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share crash & error data — also required to send bug reports", description: "Optionally send scrubbed error messages, stack traces, and user-initiated bug reports", keywords: ['telemetry', 'sentry', 'privacy', 'bug reports'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Send local crash log to the o8 team", description: "Upload the local ~/.o8/telemetry crash log", keywords: ['telemetry', 'privacy'] },
@@ -103,9 +103,8 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'billing', tabLabel: 'Plan & Billing', group: "What's included", label: "Voice & dictation", description: "Local Symon dictation and read-aloud \u2014 free forever." },
   { tab: 'connections', tabLabel: 'Mobile', group: "Paired devices", label: "Refresh" },
   { tab: 'connections', tabLabel: 'Mobile', group: "Pairing", label: "Show pairing QR", description: "button dispatching the mobile pairing QR fullscreen view" },
-  { tab: 'git-prs', tabLabel: 'Git & PRs', group: "Device flow", label: "Sign in with GitHub", description: "Start the device code flow (else: Requires GITHUB_OAUTH_CLIENT_ID)" },
-  { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub App", label: "App settings", description: "External link to cortex-dev-agent App settings" },
-  { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub App", label: "Open installation", description: "External link to the App installation settings" },
+  { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Repository & CLI access", description: "Connect GitHub through device flow or an access token" },
+  { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Automation app", description: "Install or manage the o8 GitHub App" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Danger", label: "Factory reset", description: "Wipes ~/.o8 \u2014 sessions, keys, mission state, watched repos; opens confirm modal" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Demo sequence", label: "Run demo sequence", description: "Button drives live webview dashboard \u2192 Orchestrator tab \u2192 quick action, read-only", founders: true },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Loop status", label: "Recent merges", description: "Disclosure toggle expanding the last 5 merge commits (interactive only when commits exist)", founders: true },

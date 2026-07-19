@@ -86,8 +86,8 @@ function loadPanelToken(): string | null {
 const ALLOWLIST_READ_ONLY: RegExp[] = [
   // Health check for the Tauri shell to know the bundled server is up.
   /^\/api\/panel\/status(\/|$)/,
-  // v2 auth endpoints (login, callback) must be reachable.
-  /^\/api\/v2\/auth(\/|$)/,
+  // Session inspection authenticates with the o8-token cookie in its handler.
+  /^\/api\/v2\/auth\/session\/?$/,
   // VAPID public key — public by definition; the mobile client needs it
   // to call pushManager.subscribe before any token handshake.
   /^\/api\/mobile\/push\/public-key(\/|$)/,
@@ -96,8 +96,8 @@ const ALLOWLIST_READ_ONLY: RegExp[] = [
 ];
 
 const ALLOWLIST_ANY_METHOD: RegExp[] = [
-  // v2/auth needs POST for the handshake.
-  /^\/api\/v2\/auth(\/|$)/,
+  // Logout authenticates and revokes the o8-token cookie in its handler.
+  /^\/api\/v2\/auth\/logout\/?$/,
   // Mobile device enrollment (#5): an UNPAIRED phone has no bearer token yet, so
   // this bootstrap POST bypasses the bearer gate. It is NOT unauthenticated — the
   // handler requires a valid single-use enroll code (and the E2EE flag) before

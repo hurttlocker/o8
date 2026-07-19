@@ -81,12 +81,12 @@ const routes = routeFiles.map((file) => ({ file, pathname: fileToPathname(file) 
 
 const SELF_AUTH = [/^\/api\/worker(\/|$)/, /^\/api\/cloud(\/|$)/, /^\/api\/github\/webhook(\/|$)/];
 const PUBLIC_ANY = [
-  /^\/api\/v2\/auth(\/|$)/,
+  /^\/api\/v2\/auth\/logout\/?$/,
   /^\/api\/mobile\/enroll(\/|$)/,
 ];
 const PUBLIC_READ = [
   /^\/api\/panel\/status(\/|$)/,
-  /^\/api\/v2\/auth(\/|$)/,
+  /^\/api\/v2\/auth\/session\/?$/,
   /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
   /^\/api\/mobile\/push\/public-key(\/|$)/,
 ];
@@ -190,6 +190,11 @@ describe('route-coverage — every /api route resolves to an explicit middleware
 //    neighbors — a filesystem walk can't synthesize a `/api/workerfoo` sibling.
 
 describe('route-coverage — path-boundary safety (trailing-slash / prefix confusion)', () => {
+  it('does not leave the deleted GitHub exchange under a public v2 auth prefix', () => {
+    expect(status('/api/v2/auth/github', 'GET', LAN)).toBe(401);
+    expect(status('/api/v2/auth/github', 'POST', LAN)).toBe(401);
+  });
+
   it('a gated base and its trailing-slash + child are all denied from LAN', () => {
     expect(status('/api/board', 'GET', LAN)).toBe(401);
     expect(status('/api/board/', 'GET', LAN)).toBe(401);

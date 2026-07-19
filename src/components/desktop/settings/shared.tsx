@@ -19,12 +19,6 @@ export interface GitHubAccount {
   protocol: string;
 }
 
-export interface GitHubRepo {
-  nameWithOwner: string;
-  isPrivate: boolean;
-  updatedAt: string;
-}
-
 export interface GitHubBrokerStatus {
   configured: boolean;
   appId: string | null;
@@ -48,6 +42,7 @@ export interface GitHubBrokerStatus {
 
 export interface GitHubDeviceFlowState {
   flowId: string;
+  csrfToken: string;
   userCode: string;
   verificationUri: string;
   verificationUriComplete?: string;
@@ -57,7 +52,7 @@ export interface GitHubDeviceFlowState {
   note?: string;
 }
 
-export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
+export type GitHubActionKind = 'refresh' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
 export type SettingsTab = 'general' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'permissions' | 'billing' | 'diagnostics' | 'about';
 

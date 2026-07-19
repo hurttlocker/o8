@@ -4,15 +4,14 @@
  * SettingsPage — Thin shell that manages tab routing and GitHub state.
  *
  * All tab bodies live in `./settings/*.tsx`.
- * GitHub state (accounts, repos, deviceFlow, brokerStatus) is managed here
- * and passed as props to GitHubTab because it requires cross-tab persistence.
+ * GitHub state (identity, gh CLI, device flow, broker status) is managed here
+ * and passed to the single Git & PRs connection surface.
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import type {
   SettingsTab,
   GitHubAccount,
-  GitHubRepo,
   GitHubBrokerStatus,
   GitHubDeviceFlowState,
   GitHubActionKind,
@@ -30,7 +29,6 @@ import {
   KeyIcon,
   MobileIcon,
   LayersIcon,
-  UserIcon,
   PaletteIcon,
   ActivityIcon,
   InfoIcon,
@@ -58,6 +56,7 @@ import { BillingTab } from './settings/BillingTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
 import { AnalyticsPage } from './AnalyticsPage';
+import { useO8Auth } from '@/components/auth/O8AuthProvider';
 
 export type { SettingsTab } from './settings/shared';
 
@@ -111,6 +110,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const { founder } = useEntitlement();
+  const auth = useO8Auth();
   const searchMatches = useMemo(
     () => searchSettings(SETTINGS_SEARCH_REGISTRY, searchQuery, { founder: Boolean(founder) }),
     [searchQuery, founder],
@@ -118,13 +118,13 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const searching = searchQuery.trim().length >= 2;
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
-  const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [repoCount, setRepoCount] = useState(0);
   const [brokerStatus, setBrokerStatus] = useState<GitHubBrokerStatus | null>(null);
   const [deviceFlowEnabled, setDeviceFlowEnabled] = useState(false);
   const [deviceFlow, setDeviceFlow] = useState<GitHubDeviceFlowState | null>(null);
   const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const [connectAfterSignIn, setConnectAfterSignIn] = useState(false);
   const githubStatusLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -156,8 +156,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
       } else {
         setAccounts([]);
       }
-      const nextRepos = Array.isArray(data.repos) ? data.repos : [];
-      setRepos(nextRepos);
       setRepoCount(Array.isArray(data.repos) ? data.repos.length : Number(data.repos ?? 0));
       setBrokerStatus(data.broker ?? null);
       setDeviceFlowEnabled(Boolean(data.deviceFlowEnabled ?? true));
@@ -176,13 +174,13 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   }, [activeTab, loadGitHubStatus]);
 
   const runGitHubAction = useCallback(async (
-    action: Extract<GitHubActionKind, 'switch' | 'logout' | 'login_token'>,
+    action: Extract<GitHubActionKind, 'logout' | 'login_token'>,
     payload: { user?: string; token?: string },
   ) => {
     setActionBusy(action);
     setActionNote(null);
     try {
-      const res = await fetch('/api/panel/github-auth', {
+      const res = await fetch('/api/panel/github-device', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...payload }),
@@ -192,21 +190,13 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
         throw new Error(data.error || 'GitHub action failed');
       }
       setActionNote(data.note || 'GitHub settings updated.');
-      const refreshRes = await fetch('/api/panel/github-status');
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        setAccounts(refreshData.accounts || []);
-        const nextRepos = Array.isArray(refreshData.repos) ? refreshData.repos : [];
-        setRepos(nextRepos);
-        setRepoCount(Array.isArray(refreshData.repos) ? refreshData.repos.length : Number(refreshData.repos ?? 0));
-        setBrokerStatus(refreshData.broker ?? null);
-      }
+      await loadGitHubStatus();
     } catch (error) {
       setActionNote(error instanceof Error ? error.message : 'GitHub action failed.');
     } finally {
       setActionBusy(null);
     }
-  }, []);
+  }, [loadGitHubStatus]);
 
   const startDeviceFlow = useCallback(async () => {
     setActionBusy('login_device');
@@ -223,6 +213,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
       }
       setDeviceFlow({
         flowId: data.flowId,
+        csrfToken: data.csrfToken,
         userCode: data.userCode,
         verificationUri: data.verificationUri,
         verificationUriComplete: data.verificationUriComplete,
@@ -244,7 +235,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
       const res = await fetch('/api/panel/github-device', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'poll', flowId }),
+        body: JSON.stringify({ action: 'poll', flowId, csrfToken: deviceFlow?.csrfToken }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -268,13 +259,13 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
       setActionNote(data.note || 'GitHub device login finished.');
 
       if (data.status === 'complete') {
-        await loadGitHubStatus(true);
+        await loadGitHubStatus();
       }
     } catch (error) {
       setDeviceFlow(null);
       setActionNote(error instanceof Error ? error.message : 'GitHub device login failed.');
     }
-  }, [loadGitHubStatus]);
+  }, [deviceFlow?.csrfToken, loadGitHubStatus]);
 
   const cancelDeviceFlow = useCallback(async (flowId: string) => {
     setActionBusy('cancel_device');
@@ -305,7 +296,28 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
     return () => window.clearTimeout(timeout);
   }, [deviceFlow, pollDeviceFlow]);
 
+  const connectGitHub = useCallback(() => {
+    if (auth.clerkEnabled && auth.isLoaded && !auth.signedIn) {
+      setConnectAfterSignIn(true);
+      auth.signIn();
+      return;
+    }
+    void startDeviceFlow();
+  }, [auth, startDeviceFlow]);
+
+  useEffect(() => {
+    if (!connectAfterSignIn || !auth.isLoaded || !auth.signedIn || loading) return;
+    setConnectAfterSignIn(false);
+    if (accounts.some((account) => account.active)) return;
+    if (!deviceFlowEnabled) {
+      setActionNote('GitHub identity connected. Use an access token to add repository and CLI access on this build.');
+      return;
+    }
+    void startDeviceFlow();
+  }, [accounts, auth.isLoaded, auth.signedIn, connectAfterSignIn, deviceFlowEnabled, loading, startDeviceFlow]);
+
   const githubConnection: GitHubConnectionProps = {
+    auth,
     accounts,
     repoCount,
     broker: brokerStatus,
@@ -317,7 +329,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
     onLoginWithToken: (token: string) => { void runGitHubAction('login_token', { token }); },
     deviceFlowEnabled,
     deviceFlow,
-    onStartDeviceFlow: () => { void startDeviceFlow(); },
+    onConnect: connectGitHub,
     onPollDeviceFlow: (flowId: string) => { void pollDeviceFlow(flowId); },
     onCancelDeviceFlow: (flowId: string) => { void cancelDeviceFlow(flowId); },
   };
