@@ -195,6 +195,104 @@ describe('headless mission registry dispatch', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
   });
 
+  it('retry_packet re-arms an archived registry packet and dispatch_mission relaunches it', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry archived retry A', repoPath);
+    const second = await createInlineMission('registry archived retry B', repoPath);
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    const initialDispatch = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }));
+    expect(initialDispatch.dispatched).toBe(1);
+
+    const { archiveLane, findLaneByPacket, getLane } = await import('@/lib/lane/registry');
+    const oldLane = findLaneByPacket(packetId!);
+    expect(oldLane?.id).toMatch(/^lane-/);
+    archiveLane(oldLane!.id, 'system');
+
+    const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    await withMissionRegistryState(first.missionId, (current) => {
+      const packet = current.packets.find((candidate) => candidate.id === packetId);
+      expect(packet).toBeTruthy();
+      packet!.status = 'archived';
+      packet!.queueState = 'queued';
+      packet!.archivedAt = '2026-07-18T12:00:00.000Z';
+      return { state: current, result: null };
+    });
+
+    const retryResult = parseJsonResult<{ reset?: boolean }>(await handleRetryPacket({
+      packetId: packetId!,
+      reason: 'retry archived packet',
+    }));
+    const resetPacket = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    expect(retryResult.reset).toBe(true);
+    expect(resetPacket).toMatchObject({
+      status: 'draft',
+      queueState: 'held',
+      archivedAt: null,
+      lane: null,
+    });
+    expect(getLane(oldLane!.id)?.packetId).toBeFalsy();
+
+    const redispatch = parseJsonResult<{
+      dispatched?: number;
+      skipped?: Array<{ packetId: string; reason: string }>;
+    }>(await handleDispatchMission({ missionId: first.missionId }));
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const relaunched = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    expect(redispatch.dispatched).toBe(1);
+    expect(redispatch.skipped).toEqual([]);
+    expect(relaunched?.status).toBe('launching');
+    expect(relaunched?.queueState).toBe('queued');
+    expect(relaunched?.lane?.laneId).toMatch(/^lane-/);
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  }, 20_000);
+
+  it('dispatch_mission reports an archived terminal-lane skip with a retry action', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry terminal skip A', repoPath);
+    const second = await createInlineMission('registry terminal skip B', repoPath);
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+
+    const { handleDispatchMission } = await import('@/lib/mcp/operator-handlers/mission');
+    const initialDispatch = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }));
+    expect(initialDispatch.dispatched).toBe(1);
+
+    const { archiveLane, findLaneByPacket } = await import('@/lib/lane/registry');
+    const lane = findLaneByPacket(packetId!);
+    expect(lane?.id).toMatch(/^lane-/);
+    archiveLane(lane!.id, 'system');
+
+    const result = parseJsonResult<{
+      dispatched?: number;
+      skipped?: Array<{
+        packetId: string;
+        reason: string;
+        suggestedAction?: string;
+      }>;
+    }>(await handleDispatchMission({ missionId: first.missionId }));
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const terminalPacket = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+
+    expect(result.dispatched).toBe(0);
+    expect(result.skipped).toEqual([expect.objectContaining({
+      packetId,
+      reason: 'archived',
+      suggestedAction: 'retry_packet',
+    })]);
+    expect(terminalPacket?.status).toBe('archived');
+    expect(terminalPacket?.queueState).toBe('held');
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  }, 20_000);
+
   it('rerun_with_feedback relaunches a non-current registry packet through the real MCP handler', async () => {
     const repoPath = createTempRepo();
     stubMissionApiFetch();

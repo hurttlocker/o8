@@ -179,6 +179,8 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.status = 'draft';
   packet.queueState = 'held';
   packet.releaseState = 'pending';
+  packet.releaseStatePayload = null;
+  packet.archivedAt = null;
   packet.blockedReason = null;
   packet.lane = null;
   packet.review = null;
