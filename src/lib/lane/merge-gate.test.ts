@@ -39,6 +39,24 @@ function initRepo(): string {
   return repoPath;
 }
 
+function initExtractionRepo(): string {
+  const repoPath = mkdtempSync(join(tmpdir(), 'o8-merge-gate-extraction-'));
+  tempDirs.push(repoPath);
+  git(repoPath, ['init', '-q', '-b', 'main']);
+  git(repoPath, ['config', 'user.email', 'test@o8.dev']);
+  git(repoPath, ['config', 'user.name', 'o8 test']);
+  const routeLines = [
+    'export function keepRouteHandler() { return "kept"; }',
+    ...Array.from({ length: 60 }, (_, index) => `export function retained${index}() { return ${index}; }`),
+    ...Array.from({ length: 60 }, (_, index) => `export function extracted${index}() { return ${index}; }`),
+    '',
+  ];
+  writeFileSync(join(repoPath, 'route.ts'), routeLines.join('\n'));
+  git(repoPath, ['add', 'route.ts']);
+  git(repoPath, ['commit', '-q', '-m', 'base']);
+  return repoPath;
+}
+
 function commitAll(cwd: string, message: string): string {
   git(cwd, ['add', '-A']);
   git(cwd, ['commit', '-q', '-m', message]);
@@ -149,6 +167,63 @@ describe('merge gate governance invariants', () => {
         severity: 'block',
         label: 'eval() — code injection risk',
         file: 'safe.ts',
+      }),
+    ]));
+  }, 20_000);
+
+  it('passes an oversized extract-to-new-module relocation through the real merge gate', async () => {
+    const repoPath = initExtractionRepo();
+    await scanRepo({ repoPath, chunks: false });
+    git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
+    const extractedLines = Array.from(
+      { length: 60 },
+      (_, index) => `export function extracted${index}() { return ${index}; }`,
+    );
+    const retainedLines = Array.from(
+      { length: 60 },
+      (_, index) => `export function retained${index}() { return ${index}; }`,
+    );
+    writeFileSync(join(repoPath, 'route.ts'), [
+      'export function keepRouteHandler() { return "kept"; }',
+      ...retainedLines,
+      '',
+    ].join('\n'));
+    writeFileSync(join(repoPath, 'extracted.ts'), `${extractedLines.join('\n')}\n`);
+    commitAll(repoPath, 'refactor: extract route helpers');
+    expect(git(repoPath, ['diff', '--numstat', 'main...HEAD'])).toContain('0\t60\troute.ts');
+
+    const result = await runMergeGate(laneFixture(repoPath));
+
+    expect(result.passed).toBe(true);
+    expect(result.violations).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'budget' }),
+    ]));
+  }, 20_000);
+
+  it('still blocks a genuine oversized deletion with no relocated module', async () => {
+    const repoPath = initExtractionRepo();
+    await scanRepo({ repoPath, chunks: false });
+    git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
+    const retainedLines = Array.from(
+      { length: 60 },
+      (_, index) => `export function retained${index}() { return ${index}; }`,
+    );
+    writeFileSync(join(repoPath, 'route.ts'), [
+      'export function keepRouteHandler() { return "kept"; }',
+      ...retainedLines,
+      '',
+    ].join('\n'));
+    commitAll(repoPath, 'refactor: remove route helpers');
+
+    const result = await runMergeGate(laneFixture(repoPath));
+
+    expect(result.passed).toBe(false);
+    expect(result.violations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: 'budget',
+        severity: 'block',
+        label: 'Delete budget exceeded',
+        file: 'route.ts',
       }),
     ]));
   }, 20_000);
