@@ -164,7 +164,7 @@ afterAll(() => {
 });
 
 describe('MCP operator defaults and dispatch routing', () => {
-  it('sets codexWorkerEffort through the registered MCP schema and real handler', async () => {
+  it('sets worker effort and merge approval posture through the registered MCP schema and real handler', async () => {
     const { STATUS_TOOLS, handleOperatorDefaults } = await import('@/lib/mcp/operator-handlers/status');
     const tool = STATUS_TOOLS.find((candidate) => candidate.name === 'o8_operator_defaults');
     const properties = tool?.inputSchema.properties as Record<string, unknown> | undefined;
@@ -174,14 +174,20 @@ describe('MCP operator defaults and dispatch routing', () => {
       claudeWorkerEffort: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
       workersUseBrain: expect.any(Object),
+      requireApproval: expect.objectContaining({
+        enum: ['high-risk', 'always', 'never'],
+      }),
     });
 
-    const result = await handleOperatorDefaults({ codexWorkerEffort: 'xhigh' });
+    const result = await handleOperatorDefaults({ codexWorkerEffort: 'xhigh', requireApproval: 'always' });
     expect(result.isError).not.toBe(true);
-    expect(resultJson(result).values).toMatchObject({ codexWorkerEffort: 'xhigh' });
+    expect(resultJson(result).values).toMatchObject({ codexWorkerEffort: 'xhigh', requireApproval: 'always' });
 
     const { getOperatorDefaults } = await import('@/lib/operator/defaults');
-    expect((await getOperatorDefaults()).values.codexWorkerEffort).toBe('xhigh');
+    expect((await getOperatorDefaults()).values).toMatchObject({
+      codexWorkerEffort: 'xhigh',
+      requireApproval: 'always',
+    });
   });
 
   it('rejects unknown MCP keys as a structured error without applying a partial update', async () => {

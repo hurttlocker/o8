@@ -218,6 +218,11 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Enable prompt caching for orchestrator sessions.',
         },
+        requireApproval: {
+          type: 'string',
+          enum: ['high-risk', 'always', 'never'],
+          description: 'Human approval posture for lane merges. "high-risk" preserves the default behavior; "always" gates every merge; "never" enables normal full autonomy.',
+        },
       },
     },
   },
@@ -238,6 +243,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'healBotEnabled',
   'supervisorAutoEscalate',
   'promptCachingEnabled',
+  'requireApproval',
 ] as const;
 
 export async function handleOperatorDefaults(args: Record<string, unknown>): Promise<McpToolResult> {

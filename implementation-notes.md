@@ -41,3 +41,13 @@
 - Workspace restore reconciliation: persisted tabs now paint optimistically and retain the existing liveness/archive/lane filters as a generation-fenced background reconciliation.
 - Repo-switch performance: AgentPanel now restores per-repo agent snapshots before reconciling; its unrendered commits/issues/PR reads were removed, while mounted activity surfaces retain their own fresh fetches.
 
+## Governance approval posture (#1549)
+
+- Persist `requireApproval` through the existing operator-defaults store and expose it through `o8_operator_defaults`.
+- Carry the resolved mode into the existing lane policy context so `always` falls through to the current `lane-merge` approval rule.
+- Keep `auto-review.ts` unchanged because standard and second-pass merge attempts already reach the same command policy gate.
+
+## Deviations
+
+- The packet path inventory omitted the operator-defaults store, API route, and test paths; the real persisted resolution seam required those files, so the implementation includes them instead of faking policy-only wiring.
+- Extracted the existing Targeting Machine tier helpers into `src/lib/operator/targeting-tier.ts` because the first rule-check rejected any growth in the already-over-ceiling `defaults.ts`; public exports and behavior remain unchanged.

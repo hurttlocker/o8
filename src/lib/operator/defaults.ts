@@ -18,6 +18,13 @@ import {
   type SubscriptionProfile,
 } from './subscription-profile';
 import { resolveWorkerEffortDefault } from './worker-effort-default';
+import {
+  coerceStoredTier,
+  envTargetingTier,
+  isTargetingTier,
+  mergeTier,
+  type TargetingTier,
+} from './targeting-tier';
 
 export { isSubscriptionProfile };
 
@@ -80,6 +87,8 @@ export type {
   CollideAggregator,
   PrLinkDestination,
 } from './defaults-env';
+export { coerceStoredTier, isTargetingTier, mergeTier } from './targeting-tier';
+export type { TargetingTier } from './targeting-tier';
 
 
 /**
@@ -97,57 +106,10 @@ export type {
 
 export type SettingSource = 'env' | 'file' | 'default';
 
-/**
- * Targeting Machine tier — which CLI / model / effort to use for a role. The
- * Targeting Machine has two symmetric triads: `targetingTriage` (the cheap
- * scorer/rationale tier, default low effort) and `targetingAction` (the premium
- * "point a real agent here" tier, default high effort). `model: ''` = the
- * runtime's default model. Each subfield is env-overridable:
- * `O8_TRIAGE_RUNTIME` / `O8_TRIAGE_MODEL` / `O8_TRIAGE_EFFORT` (and `O8_ACTION_*`).
- */
-export interface TargetingTier {
-  runtime: OrchestratorRuntime;
-  /** Model id; '' = the runtime's default model. */
-  model: string;
-  effort: ThinkingEffort;
-}
+export type RequireApproval = 'high-risk' | 'always' | 'never';
 
-export function isTargetingTier(value: unknown): value is TargetingTier {
-  if (!value || typeof value !== 'object') return false;
-  const o = value as Record<string, unknown>;
-  return isDispatchRuntime(o.runtime) && typeof o.model === 'string' && isThinkingEffort(o.effort);
-}
-
-/** Coerce a stored/persisted value into a full tier, filling gaps from `fallback`. */
-export function coerceStoredTier(raw: unknown, fallback: TargetingTier): TargetingTier | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const o = raw as Record<string, unknown>;
-  return {
-    runtime: isDispatchRuntime(o.runtime) ? o.runtime : fallback.runtime,
-    model: typeof o.model === 'string' ? o.model : fallback.model,
-    effort: isThinkingEffort(o.effort) ? o.effort : fallback.effort,
-  };
-}
-
-/** Per-subfield env overrides for a tier — returns only the subfields env set. */
-function envTargetingTier(prefix: 'TRIAGE' | 'ACTION'): Partial<TargetingTier> | null {
-  const out: Partial<TargetingTier> = {};
-  const runtime = process.env[`O8_${prefix}_RUNTIME`]?.trim();
-  if (runtime && isDispatchRuntime(runtime)) out.runtime = runtime;
-  const model = process.env[`O8_${prefix}_MODEL`];
-  if (typeof model === 'string') out.model = model.trim();
-  const effort = process.env[`O8_${prefix}_EFFORT`]?.trim();
-  if (effort && isThinkingEffort(effort)) out.effort = effort;
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-/** Merge env (partial) over file (full) over fallback, subfield by subfield. */
-export function mergeTier(env: Partial<TargetingTier> | null, file: TargetingTier | undefined, fallback: TargetingTier): TargetingTier {
-  return {
-    runtime: env?.runtime ?? file?.runtime ?? fallback.runtime,
-    model: env?.model ?? file?.model ?? fallback.model,
-    effort: env?.effort ?? file?.effort ?? fallback.effort,
-  };
+export function isRequireApproval(value: unknown): value is RequireApproval {
+  return value === 'high-risk' || value === 'always' || value === 'never';
 }
 
 export interface OperatorDefaults {
@@ -169,6 +131,8 @@ export interface OperatorDefaults {
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
+  /** Human approval posture for lane merges. Hard governance gates still apply. */
+  requireApproval: RequireApproval;
   orchestratorModel: string;
   defaultDispatchRuntime: OrchestratorRuntime;
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
@@ -388,6 +352,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   thinkingEffort: 'max',
   promptCachingEnabled: true,
   mergeTestReplayEnabled: false,
+  requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
   defaultDispatchRuntime: 'codex',
   codexWorkerEffort: 'adaptive',
@@ -507,6 +472,7 @@ interface StoredOperatorDefaults {
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
   mergeTestReplayEnabled?: boolean;
+  requireApproval?: RequireApproval;
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchRuntimeExplicit?: boolean;
@@ -592,6 +558,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
+  }
+  if (isRequireApproval(stored.requireApproval)) {
+    result.requireApproval = stored.requireApproval;
   }
   if (typeof stored.orchestratorModel === 'string' && stored.orchestratorModel.trim()) {
     result.orchestratorModel = stored.orchestratorModel.trim();
@@ -774,6 +743,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
+    requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime,
     codexWorkerEffort:
@@ -828,6 +798,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
+    requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
     codexWorkerEffort:
@@ -948,6 +919,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
+  }
+  if (update.requireApproval !== undefined) {
+    if (!isRequireApproval(update.requireApproval)) {
+      throw new Error('requireApproval must be one of "high-risk", "always", "never".');
+    }
+    stored.requireApproval = update.requireApproval;
   }
   if (update.orchestratorModel !== undefined) {
     const trimmed = update.orchestratorModel.trim();
@@ -1153,6 +1130,10 @@ export function resolvePromptCachingEnabledSync(): boolean {
 
 export function resolveMergeTestReplayEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.mergeTestReplayEnabled;
+}
+
+export function resolveRequireApprovalSync(): RequireApproval {
+  return getOperatorDefaultsSync().values.requireApproval;
 }
 
 export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
