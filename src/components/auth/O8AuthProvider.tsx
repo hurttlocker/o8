@@ -83,12 +83,14 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
 
   const clearSignedOutEntitlement = useCallback(async () => {
     syncAbortRef.current?.abort();
+    window.dispatchEvent(new CustomEvent('o8:entitlement-refresh', {
+      detail: { signedOut: true },
+    }));
     await fetch('/api/panel/entitlement/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ signedOut: true }),
     }).catch(() => {});
-    window.dispatchEvent(new Event('o8:entitlement-refresh'));
   }, []);
 
   // Pull THIS account's license from the license server and cache it locally so

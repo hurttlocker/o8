@@ -83,7 +83,7 @@ export function GlassCardShell({
   minW: number;
   minH: number;
   /** Subtle centered label under the grab pill — the card's identity. */
-  title?: string;
+  title?: ReactNode;
   /** Quiet right-of-title metadata (branch, status %, path tail). */
   badge?: ReactNode;
   /** Extra hover-ghost buttons, left of the close ✕ (e.g. dock, open). */

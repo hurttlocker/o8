@@ -42,6 +42,7 @@ export const AGENT_FULL_W = 420;
 export const AGENT_FULL_H = 280;
 export const AGENT_COMPACT_W = 280;
 export const AGENT_COMPACT_H = 92;
+export const AGENT_CONTENT_FADE_MS = 150;
 
 export interface AgentCard {
   id: number;
@@ -224,6 +225,22 @@ export function AgentGlassCard({
   // tool-call pill clusters, turn summaries, errors) — the same parsed structure
   // the desktop packet tabs read, so both sides render identical truth.
   const blocks = useMemo(() => buildAgentTranscriptBlocks(transcript.events), [transcript.events]);
+  const hasCommittedContent = Boolean(card.title.trim() || blocks.length > 0 || transcript.status !== 'idle');
+  const [contentVisible, setContentVisible] = useState(false);
+
+  // The shell and its first meaningful content commit on separate frames while
+  // transcript hydration starts. Ramp the header and body together so text
+  // joins the card entrance instead of popping in after the glass settles.
+  useEffect(() => {
+    if (!hasCommittedContent || contentVisible) return undefined;
+    const frame = window.requestAnimationFrame(() => setContentVisible(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [contentVisible, hasCommittedContent]);
+
+  const contentFadeStyle: CSSProperties = {
+    opacity: contentVisible ? 1 : 0,
+    transition: `opacity ${AGENT_CONTENT_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+  };
 
   // Honest settled duration — lane start → the lane's own last-event freeze
   // point. Only when NOT live and the lane still exposes an end timestamp; null
@@ -301,9 +318,9 @@ export function AgentGlassCard({
       cornerHandles
       minW={card.expanded ? AGENT_FULL_MIN_W : AGENT_MIN_W}
       minH={card.expanded ? AGENT_FULL_MIN_H : AGENT_MIN_H}
-      title={card.codename || `Agent ${card.number}`}
+      title={<span style={contentFadeStyle}>{card.codename || `Agent ${card.number}`}</span>}
       badge={
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : undefined }}>
+        <span style={{ ...contentFadeStyle, display: 'inline-flex', alignItems: 'center', gap: 5, color: phase.key === 'blocked' || phase.key === 'error' ? phase.color : undefined }}>
           <span aria-hidden style={{ width: 5, height: 5, borderRadius: 3, background: phase.color, flexShrink: 0 }} />
           {live && elapsed
             ? elapsed
@@ -324,7 +341,7 @@ export function AgentGlassCard({
         // it the composer pill's var(--cnv-tint)/var(--cnv-edge) + the sent-line
         // bubbles' var(--cnv-tint-deep) resolve the BASE (near-white) values and
         // read as a light-gray blob on the dark canvas.
-        <div style={{ ...chatVocabularyRebind(), display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
+        <div style={{ ...chatVocabularyRebind(), ...contentFadeStyle, display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
           {/* Phase + task — the role label voice addresses ("the auth agent"). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
             <span style={{ display: 'inline-flex', width: 16, height: 16, flexShrink: 0 }}>
@@ -455,7 +472,7 @@ export function AgentGlassCard({
         </div>
       ) : (
         /* COMPACT — the status tile (the pre-v2 card). */
-        <div style={{ ...chatVocabularyRebind(), display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
+        <div style={{ ...chatVocabularyRebind(), ...contentFadeStyle, display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, height: card.h, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <span style={{ display: 'inline-flex', width: 16, height: 16, flexShrink: 0 }}>
               <PhaseRing phase={phase} />
