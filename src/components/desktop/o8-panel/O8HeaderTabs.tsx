@@ -34,6 +34,17 @@ function IconActivity({ size = 16, color = 'currentColor' }: { size?: number; co
   );
 }
 
+// Gauge — the Resources tab (per-session CPU/RAM Activity Monitor).
+function IconGauge({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
+      <path d="M4 15a8 8 0 0 1 16 0" />
+      <path d="M12 15l4-4" />
+      <circle cx="12" cy="15" r="1" />
+    </svg>
+  );
+}
+
 // Crosshair — "aim your agents here". The v1 wedge; a prominent main tab.
 function IconTargets({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
@@ -71,6 +82,7 @@ function IconGlobe({ size = 15, color = 'currentColor' }: { size?: number; color
 const O8_TABS: O8TabDef[] = [
   { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
   { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
+  { id: 'resources', label: 'Resources', icon: (c) => <IconGauge size={15} color={c} /> },
   { id: 'browser', label: 'Browser', icon: (c) => <IconGlobe size={15} color={c} /> },
   { id: 'targets', label: 'Targeting', icon: (c) => <IconTargets size={15} color={c} /> },
   // Iconoir PageEdit — operator-locked for the o8.md spec tab. Document
