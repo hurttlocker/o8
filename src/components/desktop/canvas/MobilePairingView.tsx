@@ -27,11 +27,17 @@ const APP_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 interface PairingPayload {
+  /** Protocol version — the phone reads it to pick the enroll vs legacy path. */
+  v?: number;
   host: string | null;
   hosts?: string[];
   apiPort: number;
   wsPort: number;
   token: string;
+  /** Single-use enroll code (E2EE mode only) — POSTed to /api/mobile/enroll. */
+  enroll?: string;
+  /** base64 server Ed25519 identity pub (E2EE mode only) — the phone pins it. */
+  sIdent?: string;
   error?: string;
 }
 
@@ -71,12 +77,22 @@ export function MobilePairingView() {
         const hosts = Array.isArray(data.hosts) && data.hosts.length > 0
           ? data.hosts
           : [data.host];
+        // Preserve the E2EE handshake fields (v / enroll / sIdent) the pairing
+        // API emits — a new o8-mobile app reads `v`, POSTs `enroll` to
+        // /api/mobile/enroll for a per-device token, and pins `sIdent`. Dropping
+        // them forced the phone onto the legacy shared-token path, so managed
+        // relay (which needs the enrolled per-device credential) never worked.
+        // enroll/sIdent are present only in E2EE mode; spread them conditionally
+        // so the legacy payload is unchanged when E2EE is off.
         const qrPayload = JSON.stringify({
+          v: data.v,
           host: data.host,
           hosts,
           apiPort: data.apiPort,
           wsPort: data.wsPort,
           token: data.token,
+          ...(data.enroll ? { enroll: data.enroll } : {}),
+          ...(data.sIdent ? { sIdent: data.sIdent } : {}),
         });
         const qrDataUrl = await toDataURL(qrPayload, {
           width: 480,
