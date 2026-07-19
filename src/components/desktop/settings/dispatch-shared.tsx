@@ -7,7 +7,7 @@
  * (epic #1450 — settings professionalization).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MODEL_IDS } from '@/lib/models';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -154,18 +154,58 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: st
 
 export const PICKER_MENU_POPOVER_BG = 'var(--t-panel-solid)';
 
-export function PickerMenu<T extends string>({ value, options, onChange, disabled, minWidth }: {
+export function resolvePickerGroupOpen(current: string | null, pickerId: string, nextOpen: boolean): string | null {
+  if (nextOpen) return pickerId;
+  return current === pickerId ? null : current;
+}
+
+export function nextPickerHighlightIndex(
+  current: number,
+  optionCount: number,
+  key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End',
+): number {
+  if (optionCount <= 0) return -1;
+  if (key === 'Home') return 0;
+  if (key === 'End') return optionCount - 1;
+  if (key === 'ArrowUp') return current <= 0 ? optionCount - 1 : current - 1;
+  return current < 0 || current >= optionCount - 1 ? 0 : current + 1;
+}
+
+export function PickerMenu<T extends string>({ value, options, onChange, disabled, minWidth, open: controlledOpen, onOpenChange }: {
   value: T;
   options: Array<{ value: T; label: string; detail?: string }>;
   onChange: (next: T) => void;
   disabled?: boolean;
   minWidth?: number;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
+  const listboxId = useId();
+  const open = controlledOpen ?? uncontrolledOpen;
   const active = options.find((opt) => opt.value === value);
+  const activeIndex = options.findIndex((opt) => opt.value === value);
+
+  const setOpen = useCallback((nextOpen: boolean) => {
+    if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+    if (nextOpen) {
+      setAnchorRect(triggerRef.current?.getBoundingClientRect() ?? null);
+      setHighlightedIndex(activeIndex >= 0 ? activeIndex : 0);
+    }
+    onOpenChange?.(nextOpen);
+  }, [activeIndex, controlledOpen, onOpenChange]);
+
+  const chooseHighlighted = useCallback(() => {
+    const option = options[highlightedIndex];
+    if (!option) return;
+    onChange(option.value);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, [highlightedIndex, onChange, options, setOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -175,7 +215,11 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
       setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('mousedown', closeOnOutsidePointer);
     document.addEventListener('keydown', closeOnEscape);
@@ -183,7 +227,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
       document.removeEventListener('mousedown', closeOnOutsidePointer);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -193,11 +237,30 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
         onClick={() => {
           if (disabled) return;
-          const next = !open;
-          setAnchorRect(next ? triggerRef.current?.getBoundingClientRect() ?? null : null);
-          setOpen(next);
+          setOpen(!open);
+        }}
+        onKeyDown={(event) => {
+          if (disabled) return;
+          if (!open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+            event.preventDefault();
+            setOpen(true);
+            setHighlightedIndex(nextPickerHighlightIndex(activeIndex, options.length, event.key));
+            return;
+          }
+          if (!open) return;
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            chooseHighlighted();
+            return;
+          }
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+            event.preventDefault();
+            const navigationKey = event.key;
+            setHighlightedIndex((current) => nextPickerHighlightIndex(current, options.length, navigationKey));
+          }
         }}
         style={{
           minWidth: minWidth ?? 140,
@@ -242,9 +305,11 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
       </button>
       {open && !disabled && anchorRect && typeof document !== 'undefined' ? createPortal((
         <div
+          id={listboxId}
           ref={popoverRef}
           role="listbox"
           aria-label="Settings picker options"
+          aria-activedescendant={highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
           onMouseDown={(event) => event.preventDefault()}
           style={{
             position: 'fixed',
@@ -254,7 +319,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
             border: `1px solid ${RAMS_CONTROL_BORDER}`,
             borderRadius: 9,
             background: PICKER_MENU_POPOVER_BG,
-            zIndex: 20,
+            zIndex: 10000,
             paddingTop: 4,
             paddingBottom: 4,
             paddingLeft: 0,
@@ -266,15 +331,18 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
             boxShadow: 'var(--t-panel-shadow)',
           }}
         >
-          {options.map((opt) => {
+          {options.map((opt, index) => {
             const isActive = opt.value === value;
+            const isHighlighted = index === highlightedIndex;
             return (
               <button
                 key={opt.value}
+                id={`${listboxId}-option-${index}`}
                 type="button"
                 role="option"
                 aria-selected={isActive}
                 onClick={() => { onChange(opt.value); setOpen(false); }}
+                onMouseEnter={() => setHighlightedIndex(index)}
                 style={{
                   minHeight: 44,
                   justifyContent: 'center',
@@ -283,7 +351,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
                   paddingLeft: 12,
                   paddingRight: 12,
                   border: 'none',
-                  background: 'transparent',
+                  background: isHighlighted ? 'var(--t-hover)' : 'transparent',
                   color: isActive ? RAMS_ACCENT : 'var(--t-text)',
                   fontSize: 12,
                   fontWeight: isActive ? 500 : 400,

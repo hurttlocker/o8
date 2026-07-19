@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DISPATCH_RUNTIME_OPTIONS,
+  nextPickerHighlightIndex,
   PICKER_MENU_POPOVER_BG,
+  resolvePickerGroupOpen,
 } from './dispatch-shared';
 
 describe('settings dispatch picker menu surface', () => {
@@ -20,5 +22,22 @@ describe('settings dispatch picker menu surface', () => {
       .map((option) => option.label);
 
     expect(labels).toEqual(['Codex', 'Claude Code']);
+  });
+
+  it('keeps only one Dispatch Runtime picker open at a time', () => {
+    let openPicker: string | null = null;
+    openPicker = resolvePickerGroupOpen(openPicker, 'subscription-profile', true);
+    openPicker = resolvePickerGroupOpen(openPicker, 'codex-effort', true);
+
+    expect(openPicker).toBe('codex-effort');
+    expect(resolvePickerGroupOpen(openPicker, 'subscription-profile', false)).toBe('codex-effort');
+    expect(resolvePickerGroupOpen(openPicker, 'codex-effort', false)).toBeNull();
+  });
+
+  it('wraps arrow navigation and supports first/last keyboard jumps', () => {
+    expect(nextPickerHighlightIndex(0, 4, 'ArrowUp')).toBe(3);
+    expect(nextPickerHighlightIndex(3, 4, 'ArrowDown')).toBe(0);
+    expect(nextPickerHighlightIndex(2, 4, 'Home')).toBe(0);
+    expect(nextPickerHighlightIndex(1, 4, 'End')).toBe(3);
   });
 });
