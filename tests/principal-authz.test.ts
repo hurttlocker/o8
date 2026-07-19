@@ -19,6 +19,7 @@
  * import, because worker-token.ts and the DB resolve their dir at module load.
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -35,8 +36,16 @@ vi.mock('@/lib/realtime/publisher', () => ({
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-principal-authz-'));
 const WORKER_TOKEN = 'local-worker-token-cafebabe0123456789abcdef01';
 const WS_TOKEN = 'operator-ws-token-0123456789abcdefaaaa';
+// An enrolled per-device bearer (managed remote access). The middleware + steer
+// route resolve it against the registry's derived active-token-hash file.
+const DEVICE_TOKEN = 'enrolled-device-token-cafef00d0123456789abcd';
 writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
 writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf-8');
+writeFileSync(
+  join(dataDir, 'mobile-device-tokens'),
+  `${createHash('sha256').update(DEVICE_TOKEN).digest('hex')}\n`,
+  'utf-8',
+);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
@@ -186,6 +195,45 @@ describe('principal-authz — packet control verbs reject worker principals (HIG
       expect(res.status).toBe(401);
     });
   }
+});
+
+// Managed remote access (#relay): steer-packet is the ONE control verb the
+// operator's phone may drive. It must accept an enrolled per-device bearer while
+// still rejecting a worker — driven through the REAL route handler, because the
+// route replaced requirePanelAuth with a principal gate and the relay connector
+// forwards the device bearer with a NON-loopback client-addr (never loopback-
+// trusted). The premise-encoding trap here would be testing resolveRequestPrincipal
+// in isolation; instead we invoke steer.POST with the device credential.
+describe('principal-authz — steer-packet accepts an enrolled mobile device (managed relay)', () => {
+  const url = 'http://localhost:3001/api/orchestrator/steer-packet';
+
+  function deviceReq(body: unknown): NextRequest {
+    return new NextRequest(url, {
+      method: 'POST',
+      headers: { host: 'localhost:3001', authorization: `Bearer ${DEVICE_TOKEN}` },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('DEVICE token → NOT 403 and NOT 401 (passes the principal gate, reaches real logic)', async () => {
+    const res = await steer.POST(deviceReq({ packetId: 'pkt-does-not-exist', message: 'go' }));
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(401);
+  });
+
+  it('a device is NOT a worker: the worker is still 403 on the same verb', async () => {
+    const res = await steer.POST(req(url, { principal: 'worker', body: { packetId: 'pkt-x', message: 'go' } }));
+    expect(res.status).toBe(403);
+  });
+
+  it('an unknown/garbage bearer stays anonymous → 401 (fail-closed)', async () => {
+    const res = await steer.POST(new NextRequest(url, {
+      method: 'POST',
+      headers: { host: 'localhost:3001', authorization: 'Bearer not-an-enrolled-device-tokenaaaaaaaa' },
+      body: JSON.stringify({ packetId: 'pkt-x', message: 'go' }),
+    }));
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('principal-authz — session rules writes are operator-only (#1329 HIGH-4)', () => {

@@ -329,6 +329,16 @@ describe('panelGateMiddleware — per-device capability scope', () => {
   });
 
   it.each([
+    ['/api/mobile/terminal-sessions', 'GET'],
+    ['/api/mobile/terminal-input', 'POST'],
+    ['/api/orchestrator/steer-packet', 'POST'],
+  ])('allows the mobile terminal + layer-3 steer capabilities: %s', (pathname, method) => {
+    // Managed remote access: the phone lists/types into live PTYs and steers a
+    // packet over the encrypted relay, which forwards the per-device bearer.
+    expect(deviceRequest(pathname, method).status).toBe(200);
+  });
+
+  it.each([
     ['/api/mobile/devices', 'GET'],
     ['/api/mobile/devices/revoke', 'POST'],
     ['/api/mobile/push-url', 'POST'],
