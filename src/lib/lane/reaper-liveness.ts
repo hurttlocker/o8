@@ -22,7 +22,7 @@
  *      frozen heartbeat.
  *   2. LIVE-PROCESS GUARD — `hasLiveProcessInside(worktree)` (reused from the
  *      worktree-pruner fix, d0c14791) answers "does any live process have its cwd
- *      inside this worktree?" via `lsof +D`. A detached `codex exec` worker is
+ *      inside this worktree?" via an ANDed `lsof -d cwd +D` query. A detached `codex exec` worker is
  *      exactly this case. It fails CLOSED: any probe uncertainty (error/timeout/
  *      missing binary) reads as "live" so the lane is KEPT — we would rather leak
  *      a stale lane than abort a live worker.

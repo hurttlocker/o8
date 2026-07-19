@@ -700,6 +700,7 @@ function WorkspaceChatPaneBase({
       ) : null}
 
       <WorkspaceChatComposer
+        active={active}
         chat={chat}
         tab={tab}
         isLaneArchived={laneRetired}

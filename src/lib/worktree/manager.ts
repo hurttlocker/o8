@@ -35,15 +35,16 @@ import type {
   WorkspaceIsolationPreference,
 } from './types';
 import { getApfsCowCapability } from './apfs';
+import { worktreeActivityMtimeMs } from './activity';
 import { resetTrackedWorkspaceChanges } from './clean';
 import { allowWorktreeRemoval } from './live-process-guard';
+import { resolveWorktreeRootLayout } from './root-layout';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
 } from './errors';
 
 const execFileAsync = promisify(execFile);
-const WORKTREE_DIR_NAME = '.cortex-worktrees';
 const META_FILENAME = '.meta.json';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
@@ -228,12 +229,17 @@ function resolveIsolationPreference(opts: CreateWorktreeOptions): WorkspaceIsola
 export class WorktreeManager {
   private repoRoot: string;
   private worktreeBase: string;
+  private worktreeBases: string[];
   private metaPath: string;
+  private legacyMetaPath: string;
 
   constructor(repoRoot: string) {
-    this.repoRoot = repoRoot;
-    this.worktreeBase = path.join(repoRoot, WORKTREE_DIR_NAME);
+    this.repoRoot = path.resolve(repoRoot);
+    const layout = resolveWorktreeRootLayout(this.repoRoot);
+    this.worktreeBase = layout.primaryBase;
+    this.worktreeBases = layout.bases;
     this.metaPath = path.join(this.worktreeBase, META_FILENAME);
+    this.legacyMetaPath = path.join(layout.legacyBase, META_FILENAME);
   }
 
   // ── Create ──
@@ -274,9 +280,9 @@ export class WorktreeManager {
       );
     }
     const isClaudeUnmanaged = opts.agentType === 'claude-code' && !opts.managed;
-    const probeWorktreeDir = (id: string) => isClaudeUnmanaged
-      ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
-      : path.join(this.worktreeBase, id);
+    const probeWorktreeDirs = (id: string) => isClaudeUnmanaged
+      ? [path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)]
+      : this.worktreeBases.map((base) => path.join(base, id));
     const branchExists = async (name: string) => {
       try {
         await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], { cwd: this.repoRoot, timeout: 5_000 });
@@ -301,8 +307,11 @@ export class WorktreeManager {
     // collisions when the caller didn't pin one.
     const branchPinned = !!opts.branchName?.trim();
     let attemptBranch = desiredBranch;
+    const anyDirExists = async (id: string) => (
+      (await Promise.all(probeWorktreeDirs(id).map(dirExists))).some(Boolean)
+    );
     let collided = existingMeta[taskId]
-      || (await dirExists(probeWorktreeDir(taskId)))
+      || (await anyDirExists(taskId))
       || (!branchPinned && (await branchExists(attemptBranch)));
     while (collided) {
       const suffix = Math.random().toString(36).slice(2, 6);
@@ -312,7 +321,7 @@ export class WorktreeManager {
       // branch name is the lane's identity and must survive the loop.
       attemptBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
       collided = existingMeta[taskId]
-        || (await dirExists(probeWorktreeDir(taskId)))
+        || (await anyDirExists(taskId))
         || (!branchPinned && (await branchExists(attemptBranch)));
     }
     const branchName = attemptBranch;
@@ -856,18 +865,24 @@ export class WorktreeManager {
       Object.entries(meta).map(async ([id, entry]): Promise<WorktreeInfo | null> => {
         const worktreePath = entry.claudeManaged
           ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
-          : path.join(this.worktreeBase, id);
+          : await this.resolveManagedWorktreePath(id);
         const gitWt = gitWorktrees.find((g) => g.path === worktreePath || g.branch?.includes(id));
 
         // Check if directory actually exists
         const exists = await this.pathExists(worktreePath);
         if (!exists && !entry.claudeManaged) return null; // Cleaned up externally
 
-        const [dirtyFiles, lastActivity, diskUsageBytes] = await Promise.all([
+        const [dirtyFiles, diskUsageBytes] = await Promise.all([
           exists ? this.getDirtyFiles(worktreePath, entry.baseBranch) : Promise.resolve([]),
-          exists ? this.getLastModified(worktreePath) : Promise.resolve(entry.createdAt),
           exists && opts.withDiskUsage ? this.getDiskUsage(worktreePath) : Promise.resolve(0),
         ]);
+        const lastActivity = exists
+          ? await worktreeActivityMtimeMs({
+              worktreePath,
+              sessionKey: entry.sessionKey,
+              changedPaths: dirtyFiles,
+            })
+          : entry.createdAt;
         const status = this.inferStatus(lastActivity, dirtyFiles, entry);
         const isolationKind = entry.isolationKind ?? 'git-worktree';
 
@@ -910,10 +925,11 @@ export class WorktreeManager {
         const id = path.basename(gitWt.path);
         const branch = gitWt.branch ?? `worktree/unknown/${id}`;
         const agentType = branch.includes('/codex/') ? 'codex' : 'claude-code';
-        const [lastActivity, dirtyFiles] = await Promise.all([
-          this.getLastModified(gitWt.path).catch(() => Date.now()),
-          this.getDirtyFiles(gitWt.path, 'main').catch(() => []),
-        ]);
+        const dirtyFiles = await this.getDirtyFiles(gitWt.path, 'main').catch(() => []);
+        const lastActivity = await worktreeActivityMtimeMs({
+          worktreePath: gitWt.path,
+          changedPaths: dirtyFiles,
+        });
         const ageMs = Date.now() - lastActivity;
         const status: WorktreeStatus = ageMs > STALE_THRESHOLD_MS
           ? 'stale'
@@ -1283,14 +1299,17 @@ export class WorktreeManager {
     // `git status` WALKS UP to the repo root and `add -A + commit` lands on
     // the operator's main. No lane-lifecycle git write may ever target a
     // registered repo root — refuse the whole cleanup instead.
-    const worktreePath = path.join(this.worktreeBase, worktreeId);
+    const worktreePath = await this.resolveManagedWorktreePath(worktreeId);
     const resolvedTarget = path.resolve(worktreePath);
-    const resolvedBase = path.resolve(this.worktreeBase);
+    const resolvedBases = this.worktreeBases.map((base) => path.resolve(base));
+    const containingBase = resolvedBases.find((base) => (
+      resolvedTarget === base || resolvedTarget.startsWith(`${base}${path.sep}`)
+    ));
     if (
       !worktreeId.trim()
-      || resolvedTarget === resolvedBase
+      || resolvedBases.includes(resolvedTarget)
       || resolvedTarget === path.resolve(this.repoRoot)
-      || !resolvedTarget.startsWith(`${resolvedBase}${path.sep}`)
+      || !containingBase
     ) {
       console.error(`[worktree-prune] REFUSED cleanup for unsafe worktreeId ${JSON.stringify(worktreeId)} → ${resolvedTarget} (repo-root write guard, #1404)`);
       return false;
@@ -1406,12 +1425,13 @@ export class WorktreeManager {
       return [];
     }
 
-    const handledIds = new Set<string>();
+    const handledPaths = new Set(
+      await Promise.all(worktrees.map((worktree) => this.canonicalPath(worktree.path))),
+    );
     for (const wt of worktrees) {
-      handledIds.add(wt.id);
       if (now - wt.lastActivityAt > maxAgeMs && wt.status !== 'active') {
         // Check if this worktree backs an active lane
-        const wtPath = path.join(this.worktreeBase, wt.id);
+        const wtPath = wt.path;
         const [canonicalWtPath, canonicalListedPath] = await Promise.all([
           this.canonicalPath(wtPath),
           this.canonicalPath(wt.path),
@@ -1434,27 +1454,29 @@ export class WorktreeManager {
     // disk fills within a few dispatch days (we hit 100% in May 2026).
     try {
       const { readdir } = await import('node:fs/promises');
-      const entries = await readdir(this.worktreeBase, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        if (handledIds.has(entry.name)) continue;
-        if (!entry.name.startsWith('packet-')) continue;
-        const orphanPath = path.join(this.worktreeBase, entry.name);
-        if (activeLanePaths.has(await this.canonicalPath(orphanPath))) continue;
-        // #1585: an UNKNOWN mtime must mean KEEP, never delete. The old code
-        // (`.catch(() => 0)`) turned a failed probe into epoch 0 and fell
-        // through to `rm -rf` — a fresh worktree whose stat momentarily failed
-        // read as "infinitely old". Probe failure / zero / non-finite → skip.
-        const mtime = await this.probeMtimeMs(orphanPath);
-        if (mtime === null) {
-          console.warn(`[worktree-prune] SKIPPED orphan ${entry.name} — mtime probe failed/unknown (never deleting on unknown age)`);
-          continue;
+      for (const worktreeBase of this.worktreeBases) {
+        const entries = await readdir(worktreeBase, { withFileTypes: true }).catch(() => []);
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          if (!entry.name.startsWith('packet-')) continue;
+          const orphanPath = path.join(worktreeBase, entry.name);
+          const canonicalOrphanPath = await this.canonicalPath(orphanPath);
+          if (handledPaths.has(canonicalOrphanPath) || activeLanePaths.has(canonicalOrphanPath)) continue;
+          // #1585: an UNKNOWN mtime must mean KEEP, never delete. The old code
+          // (`.catch(() => 0)`) turned a failed probe into epoch 0 and fell
+          // through to `rm -rf` — a fresh worktree whose stat momentarily failed
+          // read as "infinitely old". Probe failure / zero / non-finite → skip.
+          const mtime = await this.probeMtimeMs(orphanPath);
+          if (mtime === null) {
+            console.warn(`[worktree-prune] SKIPPED orphan ${entry.name} — mtime probe failed/unknown (never deleting on unknown age)`);
+            continue;
+          }
+          if (now - mtime <= maxAgeMs) continue;
+          if (!(await allowWorktreeRemoval(orphanPath, { logPrefix: 'worktree-prune-orphan' }))) continue;
+          await rm(orphanPath, { recursive: true, force: true });
+          console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h)`);
+          pruned.push(entry.name);
         }
-        if (now - mtime <= maxAgeMs) continue;
-        if (!(await allowWorktreeRemoval(orphanPath, { logPrefix: 'worktree-prune-orphan' }))) continue;
-        await rm(orphanPath, { recursive: true, force: true });
-        console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h)`);
-        pruned.push(entry.name);
       }
     } catch (err) {
       console.warn(`[worktree-prune] Orphan scan failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1480,7 +1502,7 @@ export class WorktreeManager {
   }
 
   /**
-   * Enforce the `.cortex-worktrees` retention ceilings (count + total GB).
+   * Enforce the managed-worktree retention ceilings (count + total GB).
    *
    * Triple-guarded, in this order — when ANY guard is unsure, the worktree is
    * KEPT, never removed:
@@ -1520,13 +1542,13 @@ export class WorktreeManager {
     if (maxCount <= 0 && maxTotalGb <= 0) return [];
 
     // Measure disk usage (needed for the size axis). Only candidate worktrees
-    // living DIRECTLY under THIS repo's .cortex-worktrees are in scope — this
-    // excludes claude-managed trees (.claude/worktrees) and is symlink-safe
+    // living DIRECTLY under this repo's primary or legacy managed bases are in
+    // scope — this excludes claude-managed trees (.claude/worktrees) and is symlink-safe
     // (macOS /var → /private/var would defeat a plain string prefix match).
     const all = await this.list({ withDiskUsage: maxTotalGb > 0 });
     const inScope = await Promise.all(
       all.map(async (wt) => (
-        (await this.samePath(path.dirname(wt.path), this.worktreeBase))
+        (await this.isManagedWorktreeBase(path.dirname(wt.path)))
         && !activeLanePaths?.has(await this.canonicalPath(wt.path))
       )),
     );
@@ -1584,7 +1606,7 @@ export class WorktreeManager {
         cwd: worktreePath,
         timeout: 5000,
       });
-      if (path.resolve(toplevelRaw.trim()) !== path.resolve(worktreePath)) return true;
+      if (!(await this.samePath(toplevelRaw.trim(), worktreePath))) return true;
       const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
         cwd: worktreePath,
         timeout: 5000,
@@ -1632,7 +1654,7 @@ export class WorktreeManager {
         'git', ['rev-parse', '--show-toplevel'],
         { cwd: worktreePath, timeout: 5000 },
       );
-      if (path.resolve(toplevelRaw.trim()) !== path.resolve(worktreePath)) {
+      if (!(await this.samePath(toplevelRaw.trim(), worktreePath))) {
         console.error(`[worktree-prune] REFUSED preserve for ${worktreeId}: git toplevel ${toplevelRaw.trim()} != ${worktreePath} (repo-root write guard, #1404)`);
         return 'skip';
       }
@@ -1855,19 +1877,10 @@ export class WorktreeManager {
     }
   }
 
-  private async getLastModified(dirPath: string): Promise<number> {
-    try {
-      const s = await stat(dirPath);
-      return s.mtimeMs;
-    } catch {
-      return Date.now();
-    }
-  }
-
   /**
    * Probe a directory's mtime, returning `null` when the age is UNKNOWN (stat
-   * failed, or the mtime is zero/non-finite). Unlike {@link getLastModified},
-   * this NEVER masks a failed probe as "now" or "epoch 0" — the caller decides
+   * failed, or the mtime is zero/non-finite). This NEVER masks a failed probe
+   * as "now" or "epoch 0" — the caller decides
    * what unknown age means. The prune orphan-sweep uses it so an unknown mtime
    * is KEPT, never treated as infinitely old and reaped (#1585).
    */
@@ -1900,6 +1913,21 @@ export class WorktreeManager {
     }
   }
 
+  private async resolveManagedWorktreePath(worktreeId: string): Promise<string> {
+    for (const base of this.worktreeBases) {
+      const candidate = path.join(base, worktreeId);
+      if (await this.pathExists(candidate)) return candidate;
+    }
+    return path.join(this.worktreeBase, worktreeId);
+  }
+
+  private async isManagedWorktreeBase(candidate: string): Promise<boolean> {
+    for (const base of this.worktreeBases) {
+      if (await this.samePath(candidate, base)) return true;
+    }
+    return false;
+  }
+
   private async samePath(a: string, b: string): Promise<boolean> {
     if (a === b) return true;
     const [canonicalA, canonicalB] = await Promise.all([
@@ -1927,9 +1955,9 @@ export class WorktreeManager {
 
   // ── Metadata Persistence ──
 
-  private async loadAllMeta(): Promise<Record<string, WorktreeMetaEntry>> {
+  private async readMetaStore(metaPath: string): Promise<Record<string, WorktreeMetaEntry>> {
     try {
-      const raw = await readFile(this.metaPath, 'utf-8');
+      const raw = await readFile(metaPath, 'utf-8');
       const store = JSON.parse(raw) as WorktreeMetaStore;
       return store.worktrees;
     } catch {
@@ -1937,9 +1965,21 @@ export class WorktreeManager {
     }
   }
 
+  private async loadAllMeta(): Promise<Record<string, WorktreeMetaEntry>> {
+    const [legacy, primary] = await Promise.all([
+      this.readMetaStore(this.legacyMetaPath),
+      this.readMetaStore(this.metaPath),
+    ]);
+    return { ...legacy, ...primary };
+  }
+
+  private async writeMetaStoreAt(metaPath: string, store: WorktreeMetaStore): Promise<void> {
+    await mkdir(path.dirname(metaPath), { recursive: true });
+    await writeFile(metaPath, JSON.stringify(store, null, 2), 'utf-8');
+  }
+
   private async writeMetaStore(store: WorktreeMetaStore): Promise<void> {
-    await mkdir(path.dirname(this.metaPath), { recursive: true });
-    await writeFile(this.metaPath, JSON.stringify(store, null, 2), 'utf-8');
+    await this.writeMetaStoreAt(this.metaPath, store);
   }
 
   private async saveMeta(id: string, entry: WorktreeMetaEntry): Promise<void> {
@@ -1949,9 +1989,16 @@ export class WorktreeManager {
   }
 
   private async removeMeta(id: string): Promise<void> {
-    const existing = await this.loadAllMeta();
+    const [existing, legacy] = await Promise.all([
+      this.loadAllMeta(),
+      this.readMetaStore(this.legacyMetaPath),
+    ]);
     delete existing[id];
     await this.writeMetaStore({ version: 1, worktrees: existing });
+    if (id in legacy) {
+      delete legacy[id];
+      await this.writeMetaStoreAt(this.legacyMetaPath, { version: 1, worktrees: legacy });
+    }
   }
 
   private async updateMetaStatus(id: string, status: WorktreeStatus): Promise<void> {

@@ -6,6 +6,12 @@
 
 export { WorktreeManager, WorktreeFetchUnreachableError, WorktreeRebaseConflictError } from './manager';
 export { WorktreeOriginMissingError } from './errors';
+export {
+  LEGACY_WORKTREE_DIR_NAME,
+  WORKTREE_ROOT_ENV,
+  resolveWorktreeRootLayout,
+  worktreeRepoKey,
+} from './root-layout';
 
 export {
   prepareLaunchWorktree,

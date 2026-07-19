@@ -51,7 +51,7 @@ import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
 type LaneOwnership = 'managed' | 'attached';
 
-interface LaneSummary {
+export interface LaneSummary {
   id: string;
   label: string;
   repoPath: string;
@@ -69,7 +69,7 @@ interface LaneSummary {
 
 type AgentStatus = 'idle' | 'running' | 'blocked' | 'waiting' | 'reviewing' | 'failed' | 'completed';
 
-interface AgentSummary {
+export interface AgentSummary {
   id: string;
   name: string;
   runtime: string;
@@ -81,14 +81,14 @@ interface AgentSummary {
   workspace?: string;
 }
 
-interface RegisteredRepo {
+export interface RegisteredRepo {
   id: string;
   name: string;
   localPath: string;
   exists?: boolean;
 }
 
-interface ExtraAgentGroup {
+export interface ExtraAgentGroup {
   key: string;
   label: string;
   rows: ExtraAgentRow[];
@@ -280,6 +280,28 @@ function groupRows(
     group.rows = [...live, ...terminal];
   }
   return groups;
+}
+
+export function deriveSpawnedAgentGroups({
+  lanes,
+  agents,
+  repos,
+  rejectedPacketIds = new Set<string>(),
+  archivedSessionKeys = new Set<string>(),
+  hidePacketIds,
+}: {
+  lanes: LaneSummary[];
+  agents: AgentSummary[];
+  repos: RegisteredRepo[];
+  rejectedPacketIds?: ReadonlySet<string>;
+  archivedSessionKeys?: ReadonlySet<string>;
+  hidePacketIds?: ReadonlySet<string>;
+}): ExtraAgentGroup[] {
+  const rows = buildRows(lanes, agents, rejectedPacketIds).filter((row) => (
+    !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))
+    && !(row.packetId && hidePacketIds?.has(row.packetId))
+  ));
+  return groupRows(rows, repos);
 }
 
 function GroupHeader({
@@ -587,17 +609,16 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession, hidePack
     };
   }, [cancelHoverClose, fetchData]);
 
-  const rows = useMemo(() => buildRows(lanes, agents, rejectedPacketIds), [lanes, agents, rejectedPacketIds]);
-  const visibleRows = useMemo(
-    () => rows.filter((row) => (
-      !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))
-      // Workers already nested under their orchestrator thread in the rail
-      // above (ownership nesting, 2026-07-12) — never list twice.
-      && !(row.packetId && hidePacketIds?.has(row.packetId))
-    )),
-    [rows, archivedSessionKeys, hidePacketIds],
-  );
-  const groups = useMemo(() => groupRows(visibleRows, repos), [visibleRows, repos]);
+  const groups = useMemo(() => deriveSpawnedAgentGroups({
+    lanes,
+    agents,
+    repos,
+    rejectedPacketIds,
+    archivedSessionKeys,
+    // Workers truthfully nested under a same-repo orchestrator thread stay
+    // out of this section; cross-repo mission workers are deliberately kept.
+    hidePacketIds,
+  }), [lanes, agents, repos, rejectedPacketIds, archivedSessionKeys, hidePacketIds]);
 
   if (groups.length === 0) return null;
 

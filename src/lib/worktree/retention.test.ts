@@ -94,12 +94,21 @@ beforeAll(async () => {
     }
   }
 
-  // Stamp deterministic mtimes LAST (writing the dirty file touched a dir mtime),
-  // so getLastModified() yields the oldest-first order we assert on.
+  // Stamp deterministic filesystem + git-admin activity LAST. Retention uses
+  // the max of both, so a commit can refresh activity even when the root dir
+  // mtime stays old.
   const now = Date.now();
   for (const wt of WORKTREES) {
     const when = new Date(now - wt.ageMinutes * 60_000);
-    await utimes(path.join(base, wt.id), when, when);
+    const wtPath = path.join(base, wt.id);
+    const gitAdminPaths = await Promise.all(['HEAD', 'index'].map(async (name) => {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', name], { cwd: wtPath });
+      return path.resolve(wtPath, stdout.trim());
+    }));
+    await Promise.all([
+      utimes(wtPath, when, when),
+      ...gitAdminPaths.map((gitPath) => utimes(gitPath, when, when).catch(() => {})),
+    ]);
   }
 }, 60_000);
 

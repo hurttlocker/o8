@@ -21,6 +21,7 @@ import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
 
 interface WorkspaceChatComposerProps {
+  active: boolean;
   chat: ChatPaneState;
   tab: TerminalTab;
   isLaneArchived: boolean;
@@ -35,6 +36,7 @@ interface WorkspaceChatComposerProps {
  * of the input so the surface reads like one clean message box.
  */
 function WorkspaceChatComposerBase({
+  active,
   chat,
   tab,
   isLaneArchived,
@@ -354,6 +356,7 @@ function WorkspaceChatComposerBase({
         <div style={{ paddingTop: attachments.attachedImages.length > 0 ? 2 : 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }}>
           <textarea
             ref={chat.composeRef}
+            data-o8-active-composer={active ? 'true' : undefined}
             name="workspaceComposeMessage"
             aria-label={`Message ${chat.runtimeLabel}`}
             value={chat.draft}

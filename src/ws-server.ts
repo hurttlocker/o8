@@ -71,6 +71,7 @@ import {
 import { ToolCallTracker, TOOL_TIMEOUT_MS } from '@/lib/mobile/symon-tool-relay';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import '@/lib/ws-runtime-env';
+import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
@@ -6300,22 +6301,24 @@ async function getReviewWatchTargets() {
     targets.push({ repoPath, workspacePath: repoPath });
 
     try {
-      const metaPath = resolve(repoPath, '.cortex-worktrees', '.meta.json');
-      if (!(await pathExists(metaPath))) continue;
-      const raw = await readFile(metaPath, 'utf-8');
-      const meta = JSON.parse(raw) as {
-        worktrees?: Record<string, { id: string; sessionKey?: string; claudeManaged?: boolean }>;
-      };
-      for (const worktree of Object.values(meta.worktrees ?? {})) {
-        const workspacePath = worktree.claudeManaged
-          ? resolve(repoPath, '.claude', 'worktrees', worktree.id)
-          : resolve(repoPath, '.cortex-worktrees', worktree.id);
-        if (!(await pathExists(workspacePath))) continue;
-        targets.push({
-          repoPath,
-          workspacePath,
-          sessionKey: worktree.sessionKey,
-        });
+      for (const worktreeBase of resolveWorktreeRootLayout(repoPath).bases) {
+        const metaPath = resolve(worktreeBase, '.meta.json');
+        if (!(await pathExists(metaPath))) continue;
+        const raw = await readFile(metaPath, 'utf-8');
+        const meta = JSON.parse(raw) as {
+          worktrees?: Record<string, { id: string; sessionKey?: string; claudeManaged?: boolean }>;
+        };
+        for (const worktree of Object.values(meta.worktrees ?? {})) {
+          const workspacePath = worktree.claudeManaged
+            ? resolve(repoPath, '.claude', 'worktrees', worktree.id)
+            : resolve(worktreeBase, worktree.id);
+          if (!(await pathExists(workspacePath))) continue;
+          targets.push({
+            repoPath,
+            workspacePath,
+            sessionKey: worktree.sessionKey,
+          });
+        }
       }
     } catch {
       // Ignore repos without a readable worktree store
@@ -6562,15 +6565,11 @@ function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
   // repo's: dispatched workers live in other repos' .cortex-worktrees and
   // their edits should mark the review scan dirty the same way. FSEvents
   // recursive watches are kernel-coalesced and O(1) to establish per base.
-  const bases = [
-    resolve(REPO_ROOT, '.cortex-worktrees'),
-    resolve(REPO_ROOT, '.claude', 'worktrees'),
-  ];
-  for (const repoPath of extraRepoPaths) {
-    const resolved = resolve(repoPath);
-    if (resolved === REPO_ROOT) continue;
-    bases.push(resolve(resolved, '.cortex-worktrees'));
-    bases.push(resolve(resolved, '.claude', 'worktrees'));
+  const repoPaths = new Set([REPO_ROOT, ...extraRepoPaths.map((repoPath) => resolve(repoPath))]);
+  const bases: string[] = [];
+  for (const repoPath of repoPaths) {
+    bases.push(...resolveWorktreeRootLayout(repoPath).bases);
+    bases.push(resolve(repoPath, '.claude', 'worktrees'));
   }
   for (const base of bases) {
     if (watchedWorktreeBases.has(base) || !existsSync(base)) continue;

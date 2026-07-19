@@ -7,7 +7,8 @@
  * (epic #1450 — settings professionalization).
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MODEL_IDS } from '@/lib/models';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
@@ -151,7 +152,7 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: st
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
 ];
 
-export const PICKER_MENU_POPOVER_BG = 'var(--t-chat-surface-bg, var(--t-bg-card, var(--t-panel)))';
+export const PICKER_MENU_POPOVER_BG = 'var(--t-panel-solid)';
 
 export function PickerMenu<T extends string>({ value, options, onChange, disabled, minWidth }: {
   value: T;
@@ -161,19 +162,46 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
   minWidth?: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const active = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
   return (
     <div style={{ position: 'relative' }}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => { if (!disabled) setOpen((o) => !o); }}
-        onBlur={() => { window.setTimeout(() => setOpen(false), 120); }}
+        onClick={() => {
+          if (disabled) return;
+          const next = !open;
+          setAnchorRect(next ? triggerRef.current?.getBoundingClientRect() ?? null : null);
+          setOpen(next);
+        }}
         style={{
           minWidth: minWidth ?? 140,
-          minHeight: 32,
+          minHeight: 44,
           paddingTop: 0,
           paddingBottom: 0,
           paddingLeft: 14,
@@ -212,15 +240,16 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
-      {open && !disabled ? (
+      {open && !disabled && anchorRect && typeof document !== 'undefined' ? createPortal((
         <div
+          ref={popoverRef}
           role="listbox"
           aria-label="Settings picker options"
           onMouseDown={(event) => event.preventDefault()}
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
+            position: 'fixed',
+            top: anchorRect.bottom + 6,
+            right: Math.max(8, window.innerWidth - anchorRect.right),
             minWidth: minWidth ?? 220,
             border: `1px solid ${RAMS_CONTROL_BORDER}`,
             borderRadius: 9,
@@ -234,6 +263,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
             flexDirection: 'column',
             maxHeight: 280,
             overflowY: 'auto',
+            boxShadow: 'var(--t-panel-shadow)',
           }}
         >
           {options.map((opt) => {
@@ -246,7 +276,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
                 aria-selected={isActive}
                 onClick={() => { onChange(opt.value); setOpen(false); }}
                 style={{
-                  minHeight: 36,
+                  minHeight: 44,
                   justifyContent: 'center',
                   paddingTop: 8,
                   paddingBottom: 8,
@@ -281,7 +311,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
             );
           })}
         </div>
-      ) : null}
+      ), document.body) : null}
     </div>
   );
 }
