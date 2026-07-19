@@ -123,6 +123,16 @@ export function MobilePairingView() {
     return () => { cancelled = true; };
   }, [reloadKey]);
 
+  // The enroll code baked into the QR is single-use with a 5-min TTL (desktop
+  // device-registry). Silently re-mint the QR every 4 min so a scan never hits
+  // an expired code — the #1 cause of "enroll failed: 403" when this screen sits
+  // open. The re-fetch runs in the background; the visible QR only swaps once
+  // the fresh one is ready, so there's no spinner flash.
+  useEffect(() => {
+    const id = setInterval(() => setReloadKey((k) => k + 1), 4 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const retry = useCallback(() => {
     setState({ status: 'loading' });
     setReloadKey((k) => k + 1);
