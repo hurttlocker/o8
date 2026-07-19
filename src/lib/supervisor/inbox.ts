@@ -16,6 +16,7 @@ export type SupervisorInboxKind =
   | 'merge_blocked'
   | 'fetch_unreachable'
   | 'repo_misconfigured'
+  | 'launch_agent_crash_loop'
   | 'packet_no_changes'
   // #1502 — a lane reported progress/heartbeat while its sessionKey was null:
   // the worker is running into the void (no transcript, no completion signal).
@@ -116,6 +117,7 @@ export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
   verification_failed: { defaultStatus: 'human_required' },
   merge_blocked: { defaultStatus: 'human_required' },
   fetch_unreachable: { defaultStatus: 'human_required', autoDismissAfterMs: 7 * 24 * HOUR_MS },
+  launch_agent_crash_loop: { defaultStatus: 'human_required' },
   no_session_binding: { defaultStatus: 'human_required' },
   packet_no_changes: { defaultStatus: 'pending', autoDismissAfterMs: 7 * 24 * HOUR_MS },
 };
@@ -243,6 +245,9 @@ function buildIncidentKey(input: {
       ?? payloadString(input.payload, 'error')
       ?? payloadString(input.payload, 'note'),
   );
+  const incidentIdentity = input.kind === 'launch_agent_crash_loop'
+    ? payloadString(input.payload, 'label') ?? errorLine
+    : errorLine;
   const anchor = input.packetId ?? laneId ?? worktreePath ?? input.repoPath;
   return [
     input.repoPath,
@@ -250,7 +255,7 @@ function buildIncidentKey(input: {
     anchor,
     stage ?? '',
     verificationKind ?? '',
-    incidentHash(errorLine),
+    incidentHash(incidentIdentity),
   ].join('\u0000');
 }
 

@@ -10,16 +10,15 @@
 //! that stream to SFSpeechRecognizer + the Whisper WAV exactly as its own tap
 //! used to.
 //!
-//! The pump runs only while a dictation session is live (plus the brief
-//! open/close edges), so the mic-in-use indicator behaves like push-to-talk —
-//! no always-hot engine, no 15s linger, and the entire engine
-//! stall/rebuild/zero-fill class is unreachable in this mode.
+//! The pump stays open for a bounded 15-second linger after key-up. That keeps
+//! back-to-back dictations off the cold device-open path (#1544) while retaining
+//! the privacy boundary: no session activity extends the deadline forever.
 
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -34,6 +33,7 @@ const CHUNK_FRAMES: usize = 1024;
 /// (hence the old 200ms); that concern now belongs to the duck-settle gate
 /// below, so the pure device-warmup floor can be smaller.
 const WARMUP_DISCARD_MS: f64 = 120.0;
+const PUMP_LINGER: Duration = Duration::from_secs(15);
 
 /// Lets the capture pump hold the start of a message until the audio duck has
 /// actually lowered system volume — so playing audio can't bleed in before the
@@ -71,7 +71,36 @@ fn gate_discard(buffer_len: usize, warmup_frames_left: usize, duck_ready: bool) 
 pub struct AudioPump {
     fifo_path: PathBuf,
     running: Arc<AtomicBool>,
+    control: Arc<Mutex<PumpControl>>,
     worker: Option<std::thread::JoinHandle<()>>,
+}
+
+struct PumpControl {
+    session_active: bool,
+    session_generation: u64,
+    duck_gate: Option<DuckGate>,
+    linger_until: Option<Instant>,
+    shutdown: bool,
+}
+
+impl Default for PumpControl {
+    fn default() -> Self {
+        Self {
+            session_active: false,
+            session_generation: 0,
+            duck_gate: None,
+            linger_until: None,
+            shutdown: false,
+        }
+    }
+}
+
+fn should_close_lingering_pump(active: bool, linger_until: Option<Instant>, now: Instant) -> bool {
+    !active && linger_until.is_some_and(|deadline| now >= deadline)
+}
+
+fn session_warmup_frames(cold_start: bool, cold_warmup_frames: usize) -> usize {
+    if cold_start { cold_warmup_frames } else { 0 }
 }
 
 impl AudioPump {
@@ -81,6 +110,7 @@ impl AudioPump {
         Ok(Self {
             fifo_path,
             running: Arc::new(AtomicBool::new(false)),
+            control: Arc::new(Mutex::new(PumpControl::default())),
             worker: None,
         })
     }
@@ -97,22 +127,51 @@ impl AudioPump {
     /// duck has landed; `None` opens the gate immediately (only the warmup floor
     /// is paid). The device opens right away either way, overlapping the duck.
     pub fn start(&mut self, duck_gate: Option<DuckGate>) -> Result<(), String> {
-        if self.running.load(Ordering::SeqCst) {
+        let mut duck_gate = duck_gate;
+        let reused = {
+            let mut control = self.control.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self.running.load(Ordering::SeqCst) && !control.shutdown {
+                control.session_active = true;
+                control.session_generation = control.session_generation.wrapping_add(1);
+                control.duck_gate = duck_gate.take();
+                control.linger_until = None;
+                true
+            } else {
+                false
+            }
+        };
+        if reused {
+            log::info!("[stt-capture] pump reused during 15s linger");
             return Ok(());
         }
         self.reap_worker();
 
+        {
+            let mut control = self.control.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.session_active = true;
+            control.session_generation = control.session_generation.wrapping_add(1);
+            control.duck_gate = duck_gate;
+            control.linger_until = None;
+            control.shutdown = false;
+        }
         let running = Arc::clone(&self.running);
         running.store(true, Ordering::SeqCst);
+        let control = Arc::clone(&self.control);
         let fifo_path = self.fifo_path.clone();
 
         // The cpal stream must live on a thread we control: streams are !Send
         // on macOS, so build + hold it inside the worker.
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
-        let worker = std::thread::Builder::new()
+        let worker = match std::thread::Builder::new()
             .name("stt-capture-pump".into())
-            .spawn(move || pump_thread(fifo_path, running, ready_tx, duck_gate))
-            .map_err(|e| format!("capture pump thread spawn failed: {e}"))?;
+            .spawn(move || pump_thread(fifo_path, running, control, ready_tx))
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                self.running.store(false, Ordering::SeqCst);
+                return Err(format!("capture pump thread spawn failed: {error}"));
+            }
+        };
         self.worker = Some(worker);
 
         match ready_rx.recv_timeout(std::time::Duration::from_secs(5)) {
@@ -128,8 +187,27 @@ impl AudioPump {
         }
     }
 
-    /// Stop streaming and release the input device (mic indicator goes dark).
+    /// Stop forwarding session audio, then release the device after a bounded
+    /// linger so a follow-up dictation can reuse the already-warm stream.
     pub fn stop(&mut self) {
+        if !self.running.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut control = self.control.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        control.session_active = false;
+        control.duck_gate = None;
+        control.linger_until = Some(Instant::now() + PUMP_LINGER);
+        log::info!("[stt-capture] session stopped; pump lingering for 15s");
+    }
+
+    fn shutdown(&mut self) {
+        {
+            let mut control = self.control.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.session_active = false;
+            control.duck_gate = None;
+            control.linger_until = None;
+            control.shutdown = true;
+        }
         self.running.store(false, Ordering::SeqCst);
         self.reap_worker();
     }
@@ -143,7 +221,7 @@ impl AudioPump {
 
 impl Drop for AudioPump {
     fn drop(&mut self) {
-        self.stop();
+        self.shutdown();
     }
 }
 
@@ -170,8 +248,8 @@ fn create_fifo(path: &Path) -> Result<(), String> {
 fn pump_thread(
     fifo_path: PathBuf,
     running: Arc<AtomicBool>,
+    control: Arc<Mutex<PumpControl>>,
     ready_tx: std::sync::mpsc::Sender<Result<(), String>>,
-    duck_gate: Option<DuckGate>,
 ) {
     let host = cpal::default_host();
     let Some(device) = host.default_input_device() else {
@@ -275,20 +353,77 @@ fn pump_thread(
     // running in parallel — in the common no-music case the gate flips ready
     // before the first buffer even arrives and only the warmup floor is paid.
     // Total discard is bounded by warmup-floor + duck-cap worth of audio.
-    let warmup_floor_frames = (src_rate * WARMUP_DISCARD_MS / 1000.0) as usize;
+    let cold_warmup_floor_frames = (src_rate * WARMUP_DISCARD_MS / 1000.0) as usize;
+    let mut warmup_floor_frames = cold_warmup_floor_frames;
     let mut warmup_frames_left = warmup_floor_frames;
-    let duck_cap = duck_gate.as_ref().map_or(Duration::ZERO, |g| g.cap);
-    let duck_settled = duck_gate.map(|g| g.settled);
-    let gate_start = Instant::now();
+    let mut duck_cap = Duration::ZERO;
+    let mut duck_settled: Option<Arc<AtomicBool>> = None;
+    let mut gate_start = Instant::now();
     let mut discarded_frames: usize = 0;
     let mut gate_open_logged = false;
+    let mut active_generation = 0u64;
+    let mut was_active = false;
 
     while running.load(Ordering::SeqCst) && !err_flag.load(Ordering::SeqCst) {
+        let should_exit = {
+            let state = control.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if state.shutdown || should_close_lingering_pump(
+                state.session_active,
+                state.linger_until,
+                Instant::now(),
+            ) {
+                running.store(false, Ordering::SeqCst);
+                true
+            } else {
+                false
+            }
+        };
+        if should_exit {
+            break;
+        }
+
         let mut mono = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
             Ok(m) => m,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
+
+        let session_update = {
+            let mut state = control.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !state.session_active {
+                None
+            } else if state.session_generation != active_generation {
+                Some((state.session_generation, state.duck_gate.take()))
+            } else {
+                Some((active_generation, None))
+            }
+        };
+        let Some((generation, new_duck_gate)) = session_update else {
+            if was_active {
+                src_buf.clear();
+                src_pos = 0.0;
+                out_chunk.clear();
+                was_active = false;
+            }
+            continue;
+        };
+
+        if generation != active_generation {
+            let cold_start = active_generation == 0;
+            active_generation = generation;
+            was_active = true;
+            src_buf.clear();
+            src_pos = 0.0;
+            out_chunk.clear();
+            warmup_floor_frames = session_warmup_frames(cold_start, cold_warmup_floor_frames);
+            warmup_frames_left = warmup_floor_frames;
+            duck_cap = new_duck_gate.as_ref().map_or(Duration::ZERO, |gate| gate.cap);
+            duck_settled = new_duck_gate.map(|gate| gate.settled);
+            gate_start = Instant::now();
+            discarded_frames = 0;
+            gate_open_logged = false;
+        }
+
         if warmup_frames_left > 0 || !gate_open_logged {
             // `None` gate → duck half is open from the start (warmup floor only).
             let duck_ready = duck_settled.as_ref().map_or(true, |flag| {
@@ -344,6 +479,7 @@ fn pump_thread(
         }
     }
 
+    running.store(false, Ordering::SeqCst);
     drop(stream); // release the device — mic indicator off
     let _ = fifo.flush();
     log::info!("[stt-capture] pump stopped");
@@ -351,8 +487,26 @@ fn pump_thread(
 
 #[cfg(test)]
 mod tests {
-    use super::{duck_gate_open, gate_discard};
-    use std::time::Duration;
+    use super::{
+        duck_gate_open, gate_discard, session_warmup_frames, should_close_lingering_pump,
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn linger_closes_only_after_deadline_while_idle() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(15);
+        assert!(!should_close_lingering_pump(false, Some(deadline), now));
+        assert!(should_close_lingering_pump(false, Some(deadline), deadline));
+        assert!(!should_close_lingering_pump(true, Some(deadline), deadline));
+        assert!(!should_close_lingering_pump(false, None, deadline));
+    }
+
+    #[test]
+    fn warm_reuse_skips_the_cold_device_discard() {
+        assert_eq!(session_warmup_frames(true, 5_760), 5_760);
+        assert_eq!(session_warmup_frames(false, 5_760), 0);
+    }
 
     #[test]
     fn duck_gate_opens_when_settled() {

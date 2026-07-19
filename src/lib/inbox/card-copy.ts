@@ -101,6 +101,11 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
         headline: 'The repository setup is incomplete; fix the repo configuration before retrying.',
         subline: supervisorMetadata(item, [item.errorExcerpt]),
       };
+    case 'launch_agent_crash_loop':
+      return {
+        headline: 'An o8 background service is restarting repeatedly; inspect its LaunchAgent logs before retrying it.',
+        subline: supervisorMetadata(item, [item.errorExcerpt]),
+      };
     default:
       return {
         headline: itemPacketLabel(item) ?? item.errorExcerpt,
