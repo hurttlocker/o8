@@ -11,7 +11,8 @@
  *     ok: true,
  *     outcomes: Array<{
  *       id: string;
- *       outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted';
+ *       outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted'
+ *         | 'adopted_elsewhere' | 'superseded' | 'spec_changed' | 'wontfix';
  *       summary: string;
  *       runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode';
  *       branch: string | null;
