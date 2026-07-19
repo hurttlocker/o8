@@ -8,6 +8,8 @@
     <string>o8 uses Apple Speech Recognition to turn your voice into text before polish runs.</string>
     <key>NSAccessibilityUsageDescription</key>
     <string>o8 uses Accessibility to capture the global Fn hotkey and paste dictated text into the app you are working in.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>o8 uses Automation to restore focus after a voice action completes.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Symon reads your calendar to answer "what's on my calendar" by voice.</string>
     <key>NSRemindersFullAccessUsageDescription</key>
