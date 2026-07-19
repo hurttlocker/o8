@@ -19,6 +19,7 @@ import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
+import { resolveLaneReviewTarget } from './review-target';
 
 // ── Public Types ──
 
@@ -158,11 +159,15 @@ export async function buildPreviewForLane(
   packetId: string,
   options: MergePreviewOptions = {},
 ): Promise<MergePreviewResult> {
+  const target = resolveLaneReviewTarget(lane);
+  const resolvedLane = lane.worktreePath === target.cwd
+    ? lane
+    : { ...lane, worktreePath: target.cwd };
   const orchestratorApproved = options.orchestratorApproved ?? hasApprovedOrchestratorReview(packetId);
-  const gateResult = await runMergeGate(lane, undefined, orchestratorApproved);
+  const gateResult = await runMergeGate(resolvedLane, undefined, orchestratorApproved);
   const checks = buildCheckList(gateResult);
   const blockers = buildBlockerList(gateResult);
-  const dirtyDetail = readDirtyWorktreeDetail(lane.worktreePath ?? lane.repoPath);
+  const dirtyDetail = readDirtyWorktreeDetail(target.cwd);
   if (dirtyDetail) {
     const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
     if (cleanCheck) {

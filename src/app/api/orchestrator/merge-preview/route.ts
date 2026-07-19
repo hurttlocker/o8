@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { previewPacketMerge } from '@/lib/lane/preview-merge';
+import { branchUnresolvedPayload, LaneBranchUnresolvedError } from '@/lib/lane/review-target';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,9 @@ export async function GET(request: NextRequest) {
     const preview = await previewPacketMerge(packetId);
     return NextResponse.json(preview);
   } catch (error) {
+    if (error instanceof LaneBranchUnresolvedError) {
+      return NextResponse.json(branchUnresolvedPayload(error), { status: 409 });
+    }
     const message = error instanceof Error ? error.message : 'merge preview failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

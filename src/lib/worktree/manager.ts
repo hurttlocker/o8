@@ -216,7 +216,8 @@ function sanitizeBranchName(name: string) {
     .replace(/\/+/g, '/')
     .replace(/-+/g, '-')
     .replace(/^[-/.]+|[-/.]+$/g, '')
-    .slice(0, 120);
+    .slice(0, 120)
+    .replace(/^[-/.]+|[-/.]+$/g, '');
 }
 
 function resolveIsolationPreference(opts: CreateWorktreeOptions): WorkspaceIsolationPreference {
@@ -266,6 +267,12 @@ export class WorktreeManager {
     // find a free slot.
     const existingMeta = await this.loadAllMeta();
     const desiredBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
+    const pinnedLaneBranch = opts.packetId ? opts.branchName?.trim() : undefined;
+    if (pinnedLaneBranch && desiredBranch !== pinnedLaneBranch) {
+      throw new Error(
+        `Lane branch binding mismatch before worktree creation: recorded "${pinnedLaneBranch}", normalized "${desiredBranch}".`,
+      );
+    }
     const isClaudeUnmanaged = opts.agentType === 'claude-code' && !opts.managed;
     const probeWorktreeDir = (id: string) => isClaudeUnmanaged
       ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
@@ -390,6 +397,9 @@ export class WorktreeManager {
     // the caller can surface it to the operator instead of spawning codex into
     // a broken tree.
     try {
+      if (pinnedLaneBranch) {
+        await this.assertCreatedWorktreeBranch(worktreePath, pinnedLaneBranch);
+      }
       await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
     } catch (err) {
       // Best-effort cleanup of the partially-created worktree. Conflict is
@@ -554,6 +564,10 @@ export class WorktreeManager {
         cwd: worktreePath,
         timeout: 30_000,
       });
+
+      if (opts.packetId && opts.branchName?.trim()) {
+        await this.assertCreatedWorktreeBranch(worktreePath, opts.branchName.trim());
+      }
 
       try {
         await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
@@ -1727,6 +1741,19 @@ export class WorktreeManager {
       return stdout.trim() || 'main';
     } catch {
       return 'main';
+    }
+  }
+
+  private async assertCreatedWorktreeBranch(worktreePath: string, expectedBranch: string): Promise<void> {
+    const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+      cwd: worktreePath,
+      timeout: 5000,
+    });
+    const actualBranch = stdout.trim();
+    if (actualBranch !== expectedBranch) {
+      throw new Error(
+        `Lane branch binding mismatch after worktree creation: recorded "${expectedBranch}", actual "${actualBranch || '(detached)'}".`,
+      );
     }
   }
 
