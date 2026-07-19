@@ -22,6 +22,7 @@ import { MenuScale } from 'iconoir-react';
 import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
 import { canCreateOrchestratorForRepo, deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
+import { dispatchFocusRepoWorkspaceTab } from '@/lib/desktop/events';
 
 // ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
 // MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
@@ -50,17 +51,6 @@ const PROJECT_HISTORY_SECTIONS = ['orchestrator', 'chat'] as const;
 const MINI_FLAT_BUTTON_BG = 'transparent';
 const MINI_FLAT_HOVER_BG = 'var(--t-hover)';
 const MINI_ROW_DIVIDER = '1px solid color-mix(in srgb, var(--t-divider-subtle) 62%, transparent)';
-
-function repoFocusRepoFromPath(localPath: string): RepoFocusRepo {
-  const name = (localPath.split('/').filter(Boolean).pop() ?? localPath) || 'repo';
-  return {
-    id: `project-path:${localPath}`,
-    name,
-    localPath,
-    remoteUrl: null,
-    defaultBranch: 'main',
-  };
-}
 
 export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) {
   const {
@@ -243,6 +233,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const handleMiniRepoSelect = useCallback((project: ProjectRecord, repoPath: string) => {
     const repo = registeredRepoByPath.get(repoPath);
     if (activeProjectId !== project.id) void projects.switchActive(project.id);
+    if (dispatchFocusRepoWorkspaceTab({ repoId: repo?.id, repoPath })) return;
     onSelectRepo?.(repo?.id ?? repoPath);
   }, [activeProjectId, onSelectRepo, projects, registeredRepoByPath]);
   // The chevron explicitly opens the control room (project focus drawer).
@@ -351,6 +342,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onSearch={onOpenCommandPalette}
           projects={projects.ledger?.projects ?? []}
           activeProjectId={projects.ledger?.activeProjectId ?? null}
+          selectedRepoPath={selectedRepoLocalPath ?? null}
           registeredRepoByPath={registeredRepoByPath}
           projectsOpen={projectsMenuOpen}
           onProjectsOpenChange={setProjectsMenuOpen}
@@ -529,6 +521,7 @@ function MiniAgentPanelHeader({
   onSearch,
   projects,
   activeProjectId,
+  selectedRepoPath,
   registeredRepoByPath,
   projectsOpen,
   onProjectsOpenChange,
@@ -544,6 +537,7 @@ function MiniAgentPanelHeader({
   onSearch?: () => void;
   projects: ProjectRecord[];
   activeProjectId: string | null;
+  selectedRepoPath: string | null;
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
   projectsOpen: boolean;
   onProjectsOpenChange: (open: boolean) => void;
@@ -677,6 +671,7 @@ function MiniAgentPanelHeader({
           <MiniProjectsMenu
             projects={projects}
             activeProjectId={activeProjectId}
+            selectedRepoPath={selectedRepoPath}
             registeredRepoByPath={registeredRepoByPath}
             onProjectSelect={onProjectSelect}
             onRepoSelect={onRepoSelect}
@@ -970,6 +965,7 @@ function MiniAgentPanelAction({
 function MiniProjectsMenu({
   projects,
   activeProjectId,
+  selectedRepoPath,
   registeredRepoByPath,
   onProjectSelect,
   onRepoSelect,
@@ -979,6 +975,7 @@ function MiniProjectsMenu({
 }: {
   projects: ProjectRecord[];
   activeProjectId: string | null;
+  selectedRepoPath: string | null;
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
   onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
@@ -1212,20 +1209,22 @@ function MiniProjectsMenu({
                 <div style={{ paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
                   {visibleRepoPaths.map((repoPath) => {
                     const repo = registeredRepoByPath.get(repoPath);
-                    const label = repo?.name ?? repoFocusRepoFromPath(repoPath).name;
+                    const label = repo?.name ?? repoPath.split('/').filter(Boolean).at(-1) ?? repoPath;
+                    const selected = selectedRepoPath?.replace(/\/+$/, '') === repoPath.replace(/\/+$/, '');
                     return (
                       <button
                         key={`${project.id}:${repoPath}`}
                         type="button"
                         onClick={() => onRepoSelect(project, repoPath)}
                         aria-label={`${label} repository`}
+                        aria-current={selected ? 'page' : undefined}
                         style={{
                           width: '100%',
                           minHeight: 22,
                           borderWidth: 0,
                           borderRadius: 0,
-                          background: 'transparent',
-                          color: 'var(--t-text-muted)',
+                          background: selected ? 'var(--t-hover)' : 'transparent',
+                          color: selected ? 'var(--t-text)' : 'var(--t-text-muted)',
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
@@ -1249,8 +1248,8 @@ function MiniProjectsMenu({
                         }}
                         onMouseLeave={(event) => {
                           closeRepoHover();
-                          event.currentTarget.style.background = 'transparent';
-                          event.currentTarget.style.color = 'var(--t-text-muted)';
+                          event.currentTarget.style.background = selected ? 'var(--t-hover)' : 'transparent';
+                          event.currentTarget.style.color = selected ? 'var(--t-text)' : 'var(--t-text-muted)';
                         }}
                       >
                         <span
@@ -1259,7 +1258,7 @@ function MiniProjectsMenu({
                             width: 3,
                             height: 3,
                             borderRadius: 999,
-                            background: 'var(--t-text-faint)',
+                            background: selected ? 'var(--t-accent)' : 'var(--t-text-faint)',
                             flexShrink: 0,
                           }}
                         />
