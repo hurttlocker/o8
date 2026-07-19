@@ -36,6 +36,30 @@ if (!process.env.O8_TEST_DATA_DIR_PINNED) {
   process.env.CORTEX_IDE_DATA_DIR = dir;
   process.env.O8_DATA_DIR = dir;
   process.env.O8_TEST_DATA_DIR_PINNED = dir;
+
+  // Layer 3 — sever the OWNED-RUNTIME-ROOT leak (#1585, 2026-07-18).
+  // The data-dir redirect above pins getDb()/lane-registry to a temp dir, but
+  // each owned-session adapter defaults its OWN root to the real
+  // ~/.o8/owned-<runtime> (rootDefault in src/lib/*/owned.ts). So a test that
+  // imports an owned-session module ran its import/launch-time orphan sweep
+  // against the operator's PRODUCTION session dirs while pointed at an empty
+  // isolated lane DB — every live worker looked "orphaned" and got SIGINT'd
+  // (four fleet wipes; the workers running `o8 run -- npm test` were the
+  // killer). Redirect every owned root under the worker's temp dir so a test
+  // can never see, let alone signal, a real session. Keep in sync with the
+  // rootEnvVar of each adapter in src/lib/<runtime>/owned.ts.
+  const ownedRootEnvVars = [
+    'CORTEX_IDE_OWNED_CODEX_ROOT',
+    'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
+    'O8_OWNED_GEMINI_ROOT',
+    'O8_OWNED_OPENCODE_ROOT',
+    'O8_OWNED_CURSOR_ROOT',
+    'O8_OWNED_GROK_ROOT',
+    'O8_OWNED_PI_ROOT',
+  ];
+  for (const envVar of ownedRootEnvVars) {
+    process.env[envVar] = path.join(dir, envVar.toLowerCase());
+  }
 }
 
 // Layer 2 — sever the live-server escape hatch: any code path that resolves
