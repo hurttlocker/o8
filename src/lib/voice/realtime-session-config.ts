@@ -123,6 +123,38 @@ export const PHONE_SURFACE_INSTRUCTIONS =
   'root = Surface("A simple plan", null, [steps])\n' +
   'steps = Checklist("Next steps", [{"id":"one","label":"Pick a date","checked":false},{"id":"two","label":"Confirm who is coming","checked":false}])';
 
+/**
+ * Appended only when the PHONE launches Symon from the Code workspace. The
+ * renderer remains shared with Life, but these components carry revisioned
+ * repository/run identities and governed actions that make sense only in Code.
+ */
+export const PHONE_CODE_SURFACE_INSTRUCTIONS =
+  '\n\nCODE WORKSPACE SURFACES. In Code, prefer the following components when trusted tool results ' +
+  'supply the facts and identifiers. Never infer a targetId, sessionKey, path, ref, SHA, count, ' +
+  'check state, progress value, approval scope, or diff line. A launch-context value may select ' +
+  'which tool to call, but it is not proof of repository state. Fetch current state first, keep ' +
+  'diffs bounded to the supplied revision, and mark truncated data honestly. Signatures:\n' +
+  '• RepoState(targetId, name, path|null, branch, headSha|null, state, changedFiles, ahead?, behind?) ' +
+  'where state = clean|modified|conflicted|syncing|unavailable.\n' +
+  '• ChangeSummary(targetId, title, baseRef|null, headRef|null, filesChanged, additions, deletions, files, truncated?) ' +
+  'where files contain {path,status,additions?,deletions?} and status = added|modified|deleted|renamed|untracked.\n' +
+  '• CheckRunList(targetId, title, checks) where checks contain {id,name,status,detail?,duration?} and ' +
+  'status = queued|running|passed|failed|cancelled.\n' +
+  '• AgentRun(targetId, agent, task, status, phase|null, repo|null, progress|null, sessionKey|null).\n' +
+  '• DiffPreview(targetId, file, language|null, hunks, truncated?) where each hunk is ' +
+  '{header,lines:[{kind,oldLine?,newLine?,content}]} and kind = context|addition|deletion.\n' +
+  '• CommitSummary(targetId, sha, title, author, relativeTime|null, filesChanged, additions, deletions).\n' +
+  '• ApprovalDecision(targetId, title, summary, requestedBy, repo|null, risk, scope, sessionKey|null) ' +
+  'where risk = low|medium|high.\n' +
+  '• CodeAction(label, verb, targetId, sessionKey|null, disabled?) where verb = inspect-changes|' +
+  'inspect-diff|open-checks|open-commit|open-thread|continue-run|steer-run|approve|reject.\n' +
+  '• CodeActionRow([actions], align?) where align = left|right|spread and actions are named CodeAction references.\n' +
+  'Every action must reuse an exact tool-supplied targetId; never put source code, shell text, or prose ' +
+  'in an action identifier. inspect/open actions only navigate to existing targets. continue-run, ' +
+  'steer-run, approve, and reject are consequential and must flow through the existing native ' +
+  'confirmation step; never claim they happened because a button was rendered. Pair every ' +
+  'ApprovalDecision with explicit approve and reject actions for the same targetId.';
+
 export interface RealtimeMintInputs {
   /** Realtime model id. */
   model: string;
