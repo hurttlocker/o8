@@ -58,6 +58,71 @@ export const DEFAULT_INSTRUCTIONS =
   'answers the question. When something is ambiguous, ask one short question instead ' +
   'of guessing.';
 
+// ── Phone-only: the client-rendered surface tool ─────────────────────────────
+// The paired PHONE (never the Mac) renders the returned openui-lang program as a
+// visual card under Symon's spoken reply, using the same o8 gen-UI catalog Ask
+// uses. The mobile client intercepts this tool call locally and does NOT relay
+// it to the Mac, so there is no Rust handler and the desk-mic session never sees
+// it — the session route appends the tool + guidance to the PHONE mint only.
+// Keep the tool name + `program` arg in lockstep with the mobile client's
+// SYMON_SURFACE_TOOL interceptor (o8-mobile: src/features/symon/use-symon-agent.ts).
+
+/** Shared contract token — must equal the mobile SYMON_SURFACE_TOOL constant. */
+export const SURFACE_TOOL_NAME = 'render_surface';
+
+/** OpenAI-realtime-shaped tool schema (matches the `{ type:'function', … }` set). */
+export const RENDER_SURFACE_TOOL: Record<string, unknown> = {
+  type: 'function',
+  name: SURFACE_TOOL_NAME,
+  description:
+    'Render a compact visual card on the operator’s PHONE screen, under your spoken reply — ' +
+    'a checklist, a few key stats, a status, a small comparison. Call it when a glanceable layout ' +
+    'helps more than speech (steps to follow, numbers to scan, options to weigh). You STILL speak a ' +
+    'short summary and never read the card aloud. Most replies need no card — only call it when it ' +
+    'genuinely helps. The single argument `program` is a raw openui-lang program for the o8 surface ' +
+    'catalog described in your instructions (no <o8-surface> wrapper, no code fences).',
+  parameters: {
+    type: 'object',
+    properties: {
+      program: {
+        type: 'string',
+        description:
+          'A raw openui-lang program. First line is the root Surface; each named child is its own ' +
+          'statement referenced from a parent’s children array. Use ONLY facts already in the conversation.',
+      },
+    },
+    required: ['program'],
+  },
+};
+
+/**
+ * Appended to {@link DEFAULT_INSTRUCTIONS} for the PHONE mint only. Teaches Symon
+ * a compact, reliable core of the o8 gen-UI catalog — deliberately a subset of
+ * the mobile authoring library (which owns the RENDER catalog and stays the
+ * source of truth). Signatures are positional and match the render library's
+ * schemas exactly; `dotState` = idle | running | review | rejected | failed | merged.
+ */
+export const PHONE_SURFACE_INSTRUCTIONS =
+  '\n\nSHOWING THINGS ON THE PHONE. When a glanceable visual would help more than speech — steps to ' +
+  'follow, a handful of numbers, a status, options to weigh — call the render_surface tool with an ' +
+  'openui-lang `program`, then speak a one-line summary. Do not read the card aloud, do not describe ' +
+  'its markup, and skip it for ordinary replies. Use only facts already in the conversation — never ' +
+  'invent numbers, sources, weather, or air quality. ' +
+  'openui-lang: one statement per line as `name = Component(args)`. The FIRST line must be ' +
+  '`root = Surface(title, subtitle_or_null, [childName, …])`, and each childName is its own statement ' +
+  'below it. Positional arguments (JSON for objects/arrays, bare names for child references):\n' +
+  '• Surface(title, subtitle|null, [children]) — required root shell.\n' +
+  '• TextBlock(content, "muted"|"highlight"|null) — one short supporting line.\n' +
+  '• Metric(label, value, "up"|"down"|"flat"|null, dotState|null) — one number.\n' +
+  '• StatusCard(title, dotState, message, sourceLabel|null, progressPct|null) — one status.\n' +
+  '• StatTiles([{"label":"…","value":"…"}, …]) — up to six compact facts.\n' +
+  '• Checklist(title, [{"id":"a","label":"…","checked":false}, …]) — tappable steps.\n' +
+  '• OptionList(question, [{"id":"a","label":"…"}, …]) — a local single choice.\n' +
+  '• Comparison(title, [{"id":"a","title":"…","facts":[{"label":"…","value":"…"}]}, …]) — weigh 2–4 options.\n' +
+  'Example:\n' +
+  'root = Surface("A simple plan", null, [steps])\n' +
+  'steps = Checklist("Next steps", [{"id":"one","label":"Pick a date","checked":false},{"id":"two","label":"Confirm who is coming","checked":false}])';
+
 export interface RealtimeMintInputs {
   /** Realtime model id. */
   model: string;

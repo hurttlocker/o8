@@ -11,6 +11,8 @@ import {
   REALTIME_MODEL,
   DEFAULT_VOICE,
   DEFAULT_INSTRUCTIONS,
+  PHONE_SURFACE_INSTRUCTIONS,
+  RENDER_SURFACE_TOOL,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
   REALTIME_BASE_URL,
   CLIENT_SECRETS_URL,
@@ -178,8 +180,11 @@ export async function POST(request: NextRequest) {
           {
             model,
             voice,
-            instructions: DEFAULT_INSTRUCTIONS,
-            tools: bridge.tools,
+            // Phone-only superset: the desk-mic tool set + the client-rendered
+            // surface tool, and the persona + its surface-authoring guidance.
+            // Only the phone has a surface renderer, so the desk mint is untouched.
+            instructions: DEFAULT_INSTRUCTIONS + PHONE_SURFACE_INSTRUCTIONS,
+            tools: [...bridge.tools, RENDER_SURFACE_TOOL],
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
             micProfile: 'near_field',
           },

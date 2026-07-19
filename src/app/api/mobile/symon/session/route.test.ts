@@ -82,7 +82,13 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     // Config parity: instructions + tools (+auto) + input transcription baked in.
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(sentBody.session.instructions).toContain('You are Symon');
-    expect(sentBody.session.tools).toHaveLength(1);
+    // Phone-only superset: the desk tool set PLUS the client-rendered surface
+    // tool, and the persona carries the surface-authoring guidance.
+    expect(sentBody.session.instructions).toContain('render_surface');
+    expect(sentBody.session.tools).toHaveLength(2);
+    expect(
+      sentBody.session.tools.map((t: { name?: string }) => t.name),
+    ).toContain('render_surface');
     expect(sentBody.session.tool_choice).toBe('auto');
     expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
     expect(sentBody.session.audio.output.voice).toBe('marin');
