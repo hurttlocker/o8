@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { ownedTranscriptMtimeMs } from '@/lib/lane/reaper-liveness';
 import type { Lane } from '@/lib/lane/types';
 
 const execFileAsync = promisify(execFile);
@@ -10,6 +11,7 @@ const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
 const AUTO_COMMIT_AFTER_VERIFIED_IDLE_MS = 2 * 60_000;
 const SELF_REVIEW_HARD_DEADLINE_MS = 5 * 60_000;
+const SELF_REVIEW_ACTIVITY_WINDOW_MS = SELF_REVIEW_HARD_DEADLINE_MS;
 const STALL_SIGNAL_MS = 10 * 60_000;
 const MIN_PROBE_INTERVAL_MS = 15_000;
 
@@ -31,6 +33,7 @@ interface GuardState {
   lastProbeAt: number;
   lastEditSignature: string | null;
   lastEditAt: number;
+  lastTranscriptActivityAt: number | null;
   verifiedAt: number | null;
   signalSentAt: number | null;
   forceStartedAt: number | null;
@@ -76,10 +79,30 @@ interface VerificationEvidence {
   selfReviewLikely: boolean;
 }
 
+export interface SelfReviewStallWorkPreservation {
+  committed: boolean;
+  hasReviewableDiff: boolean;
+  captureRef?: string;
+  error?: string;
+}
+
 const states = new Map<string, GuardState>();
 
 export function resetSelfReviewStallGuard(surfaceId: string): void {
   states.delete(surfaceId);
+}
+
+export async function hasFreshSelfReviewTranscriptActivity(
+  surfaceId: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  try {
+    const activityAt = await ownedTranscriptMtimeMs(surfaceId);
+    return activityAt !== null
+      && Math.max(0, now - activityAt) <= SELF_REVIEW_ACTIVITY_WINDOW_MS;
+  } catch {
+    return false;
+  }
 }
 
 export async function probeSelfReviewStall(
@@ -110,6 +133,7 @@ export async function probeSelfReviewStall(
     lastProbeAt: 0,
     lastEditSignature: null,
     lastEditAt: snapshot.latestFileMtimeMs ?? now,
+    lastTranscriptActivityAt: null,
     verifiedAt: null,
     signalSentAt: null,
     forceStartedAt: null,
@@ -127,6 +151,33 @@ export async function probeSelfReviewStall(
     }
   }
 
+  // #1589: transcript activity is worker liveness. The guard is reached from a
+  // supervisor transcript-progress callback, but its deadline previously used
+  // only file mtimes. A worker could spend five minutes researching, testing, or
+  // reviewing without touching a file and get interrupted while its owned run
+  // log was still streaming. Read the same runs/*.jsonl pulse used by the zombie
+  // reaper and extend the deadline from the newest real activity.
+  let transcriptActivityAt: number | null = null;
+  try {
+    transcriptActivityAt = await ownedTranscriptMtimeMs(input.surfaceId);
+  } catch {
+    transcriptActivityAt = null;
+  }
+  if (transcriptActivityAt !== null) {
+    state.lastTranscriptActivityAt = Math.max(
+      state.lastTranscriptActivityAt ?? 0,
+      transcriptActivityAt,
+    );
+  }
+  const transcriptActivityAgeMs = state.lastTranscriptActivityAt === null
+    ? null
+    : Math.max(0, now - state.lastTranscriptActivityAt);
+  const hasFreshTranscriptActivity = transcriptActivityAgeMs !== null
+    && transcriptActivityAgeMs <= SELF_REVIEW_ACTIVITY_WINDOW_MS;
+  if (hasFreshTranscriptActivity) {
+    state.forceStartedAt = null;
+  }
+
   const verification = detectVerificationEvidence(input.transcript);
   if (verification.typecheckPassed && verification.lintPassed && !state.verifiedAt) {
     state.verifiedAt = now;
@@ -136,6 +187,7 @@ export async function probeSelfReviewStall(
   if (
     !state.signalSentAt
     && runningMs >= STALL_SIGNAL_MS
+    && !hasFreshTranscriptActivity
     && snapshot.head === state.initialHead
     // Tuning (2026-07-03): only ALARM when there is genuinely no reviewable
     // output. If committed work already exists ahead of base, the worker is
@@ -150,7 +202,7 @@ export async function probeSelfReviewStall(
     state.signalSentAt = now;
     return {
       kind: 'signal-stall',
-      reason: 'Codex has active transcript updates but has not committed after 10 minutes.',
+      reason: 'Codex has not committed after 10 minutes and its transcript activity is stale.',
       runningMs,
       head: snapshot.head,
     };
@@ -160,19 +212,31 @@ export async function probeSelfReviewStall(
     return { kind: 'none' };
   }
 
-  const idleMs = now - Math.max(state.lastEditAt, state.verifiedAt ?? 0);
-  if (state.verifiedAt && idleMs >= AUTO_COMMIT_AFTER_VERIFIED_IDLE_MS) {
+  if (hasFreshTranscriptActivity) {
+    return { kind: 'none' };
+  }
+
+  const latestActivityAt = Math.max(
+    state.lastEditAt,
+    state.lastTranscriptActivityAt ?? 0,
+  );
+  const selfReviewIdleMs = now - latestActivityAt;
+  const idleMs = now - Math.max(latestActivityAt, state.verifiedAt ?? 0);
+  if (
+    state.verifiedAt
+    && selfReviewIdleMs >= SELF_REVIEW_HARD_DEADLINE_MS
+    && idleMs >= AUTO_COMMIT_AFTER_VERIFIED_IDLE_MS
+  ) {
     state.forceStartedAt = now;
     return {
       kind: 'force-review',
-      reason: 'Transcript shows typecheck and lint passed, and no file edits landed for two minutes.',
+      reason: 'Transcript shows typecheck and lint passed, and worktree/transcript activity is past the hard deadline.',
       idleMs,
       verification,
       cwd: snapshot.cwd,
     };
   }
 
-  const selfReviewIdleMs = now - state.lastEditAt;
   if (
     // Salvage on EITHER a self-review-shaped transcript OR the presence of
     // committed work ahead of base (2026-07-03 tuning): the regex was too
@@ -185,7 +249,7 @@ export async function probeSelfReviewStall(
     state.forceStartedAt = now;
     return {
       kind: 'force-review',
-      reason: 'Codex appears stuck in self-review after the last file edit hard deadline.',
+      reason: 'Codex appears stuck in self-review after the last worktree/transcript activity hard deadline.',
       idleMs: selfReviewIdleMs,
       verification,
       cwd: snapshot.cwd,
@@ -193,6 +257,41 @@ export async function probeSelfReviewStall(
   }
 
   return { kind: 'none' };
+}
+
+/**
+ * Preserve commit-worthy work before the ws-server transitions a genuinely idle
+ * self-review stall. The out-of-band capture is the last-resort recovery ref;
+ * the normal path still uses the existing completion auto-commit seam so the
+ * lane's branch itself becomes reviewable.
+ */
+export async function preserveSelfReviewStallWork(
+  lane: Pick<Lane, 'id' | 'label' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
+  cwd: string,
+): Promise<SelfReviewStallWorkPreservation> {
+  const [{ captureWorktreeState }, completion] = await Promise.all([
+    import('@/lib/lane/worktree-capture'),
+    import('@/lib/supervisor/completion-verification'),
+  ]);
+  const capture = await captureWorktreeState(cwd, lane.id, lane.repoPath);
+
+  let committed = false;
+  try {
+    committed = await completion.autoCommitCompletionWorktree(cwd, lane.label);
+  } catch (error) {
+    return {
+      committed: false,
+      hasReviewableDiff: await completion.hasReviewableCompletionDiff(cwd, lane.baseBranch),
+      captureRef: capture.ref,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  return {
+    committed,
+    hasReviewableDiff: await completion.hasReviewableCompletionDiff(cwd, lane.baseBranch),
+    captureRef: capture.ref,
+  };
 }
 
 function detectVerificationEvidence(entries: TranscriptEntryLike[]): VerificationEvidence {

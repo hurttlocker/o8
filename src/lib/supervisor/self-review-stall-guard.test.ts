@@ -10,16 +10,23 @@
  * against a REAL temp git repo (the guard shells out to git), not a mock.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { probeSelfReviewStall, resetSelfReviewStallGuard, type SelfReviewStallProbeInput } from './self-review-stall-guard';
+import {
+  preserveSelfReviewStallWork,
+  probeSelfReviewStall,
+  resetSelfReviewStallGuard,
+  type SelfReviewStallProbeInput,
+} from './self-review-stall-guard';
 
 const STALL_SIGNAL_MS = 10 * 60_000;
+const SELF_REVIEW_HARD_DEADLINE_MS = 5 * 60_000;
 let repo = '';
+let ownedSessionDir = '';
 const surfaceId = 'codex-owned:test-stall';
 
 function git(...args: string[]) {
@@ -34,13 +41,28 @@ beforeEach(() => {
   writeFileSync(join(repo, 'base.txt'), 'base\n');
   git('add', '-A');
   git('commit', '-qm', 'base');
+  git('checkout', '-qb', 'packet');
   resetSelfReviewStallGuard(surfaceId);
 });
 
 afterEach(() => {
   resetSelfReviewStallGuard(surfaceId);
+  if (ownedSessionDir) rmSync(ownedSessionDir, { recursive: true, force: true });
   rmSync(repo, { recursive: true, force: true });
 });
+
+function writeOwnedTranscript(activityAt: number): void {
+  const ownedRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  if (!ownedRoot) throw new Error('Test isolation did not configure the owned Codex root.');
+  ownedSessionDir = join(ownedRoot, 'self-review-stall-test');
+  const runsDir = join(ownedSessionDir, 'runs');
+  mkdirSync(runsDir, { recursive: true });
+  writeFileSync(join(ownedSessionDir, 'session.json'), JSON.stringify({ surfaceId }));
+  const runPath = join(runsDir, 'active.jsonl');
+  writeFileSync(runPath, '{"type":"item.started"}\n');
+  const activityDate = new Date(activityAt);
+  utimesSync(runPath, activityDate, activityDate);
+}
 
 function laneInput(now: number): SelfReviewStallProbeInput {
   return {
@@ -82,5 +104,47 @@ describe('self-review stall guard — committed-work tuning', () => {
     const first = await probeSelfReviewStall(laneInput(t0));
     const second = await probeSelfReviewStall(laneInput(t0 + STALL_SIGNAL_MS + 60_000));
     expect([first.kind, second.kind]).toContain('signal-stall');
+  });
+
+  it('keeps fresh-transcript WIP running past the self-review hard deadline', async () => {
+    const now = Date.now();
+    const scratchPath = join(repo, 'in-progress.ts');
+    writeFileSync(scratchPath, 'export const stillWorking = true;\n');
+    const oldEdit = new Date(now - SELF_REVIEW_HARD_DEADLINE_MS - 60_000);
+    utimesSync(scratchPath, oldEdit, oldEdit);
+    writeOwnedTranscript(now - 1_000);
+
+    const input = laneInput(now);
+    input.startedAt = now - STALL_SIGNAL_MS - 60_000;
+    input.transcript = [{ id: 'review', role: 'assistant', text: 'Reviewing my diff and iterating on the remaining cases.' }];
+
+    await expect(probeSelfReviewStall(input)).resolves.toEqual({ kind: 'none' });
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' })).toContain('in-progress.ts');
+  });
+
+  it('auto-commits genuinely idle WIP before the force-review transition', async () => {
+    const now = Date.now();
+    const scratchPath = join(repo, 'idle-wip.ts');
+    writeFileSync(scratchPath, 'export const preserved = true;\n');
+    const staleAt = now - SELF_REVIEW_HARD_DEADLINE_MS - 60_000;
+    const staleDate = new Date(staleAt);
+    utimesSync(scratchPath, staleDate, staleDate);
+    writeOwnedTranscript(staleAt);
+
+    const input = laneInput(now);
+    input.startedAt = now - STALL_SIGNAL_MS - 60_000;
+    input.transcript = [{ id: 'review', role: 'assistant', text: 'Reviewing my diff before completion.' }];
+    const firstDecision = await probeSelfReviewStall(input);
+    expect(firstDecision.kind).toBe('signal-stall');
+    input.now = now + 16_000;
+    const decision = await probeSelfReviewStall(input);
+
+    expect(decision.kind).toBe('force-review');
+    if (decision.kind !== 'force-review') throw new Error('Expected force-review decision.');
+    const preservation = await preserveSelfReviewStallWork(input.lane, decision.cwd);
+    expect(preservation).toMatchObject({ committed: true, hasReviewableDiff: true });
+    expect(preservation.captureRef).toBe('refs/o8-capture/lane-x');
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' })).toBe('');
+    expect(execFileSync('git', ['rev-list', '--count', 'main..HEAD'], { cwd: repo, encoding: 'utf8' }).trim()).toBe('1');
   });
 });
