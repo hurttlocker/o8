@@ -130,13 +130,16 @@ export interface ApiFetchOptions extends RequestInit {
    *  Use a higher value for endpoints that legitimately take longer
    *  (e.g. /api/cortex/ask/answer can spend 10–40s in the classifier — see #1115). */
   timeoutMs?: number;
+  /** Return a JSON error body for explicitly accepted HTTP statuses instead of
+   * throwing. Used by read tools that surface structured fail-closed errors. */
+  acceptedErrorStatuses?: number[];
 }
 
 export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<unknown> {
   let lastError: Error | undefined;
   const timeoutMs = init?.timeoutMs ?? FETCH_TIMEOUT_MS;
   // Strip timeoutMs from the RequestInit so fetch doesn't see it.
-  const { timeoutMs: _omit, ...fetchInit } = init ?? {};
+  const { timeoutMs: _omit, acceptedErrorStatuses = [], ...fetchInit } = init ?? {};
   void _omit;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -166,6 +169,14 @@ export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<un
         // were a successful payload (a 403/500 body has no `ok` field and
         // used to masquerade as success-shaped data downstream).
         const bodyText = await res.text().catch(() => '');
+        if (acceptedErrorStatuses.includes(res.status)) {
+          try {
+            return JSON.parse(bodyText) as unknown;
+          } catch {
+            // Fall through to the normal HTTP error when the accepted status
+            // did not carry the structured JSON contract the caller expects.
+          }
+        }
         const snippet = bodyText.slice(0, 300).replace(/\s+/g, ' ').trim();
         const httpError = new Error(
           `o8 API ${res.status} for ${path}${snippet ? `: ${snippet}` : ''}`,

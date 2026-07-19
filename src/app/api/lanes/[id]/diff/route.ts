@@ -5,6 +5,11 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
+import {
+  branchUnresolvedPayload,
+  LaneBranchUnresolvedError,
+  resolveLaneReviewTarget,
+} from '@/lib/lane/review-target';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 32 * 1024 * 1024;
@@ -33,9 +38,14 @@ export async function GET(
     return NextResponse.json({ ok: false, note: 'No lane found for that id/packet.' }, { status: 404 });
   }
 
-  const cwd = lane.worktreePath ?? lane.repoPath;
-  if (!cwd) {
-    return NextResponse.json({ ok: false, note: 'Lane has no worktree or repo path.' }, { status: 409 });
+  let cwd: string;
+  try {
+    cwd = resolveLaneReviewTarget(lane).cwd;
+  } catch (error) {
+    if (error instanceof LaneBranchUnresolvedError) {
+      return NextResponse.json(branchUnresolvedPayload(error), { status: 409 });
+    }
+    throw error;
   }
 
   const url = new URL(req.url);
@@ -77,7 +87,7 @@ export async function GET(
         base,
         diffBase,
         branch: lane.branch,
-        worktreePath: lane.worktreePath ?? null,
+        worktreePath: cwd,
         stat: stat.trim(),
         diff,
         sizeBytes,

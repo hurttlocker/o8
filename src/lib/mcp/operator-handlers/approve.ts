@@ -166,8 +166,14 @@ export async function handleMergePreview(args: Record<string, unknown>): Promise
   try {
     // #2 Stage 5: route through /api/orchestrator/merge-preview (in-process
     // previewPacketMerge retired here) so CLI + MCP share one gate-preview path.
-    const preview = await apiFetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(packetId)}`);
-    return jsonResult(preview);
+    const preview = await apiFetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(packetId)}`, {
+      acceptedErrorStatuses: [409],
+    });
+    const structuredError = preview && typeof preview === 'object'
+      && 'error' in (preview as Record<string, unknown>);
+    return structuredError
+      ? { ...jsonResult(preview), isError: true }
+      : jsonResult(preview);
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_merge_preview failed: ${errorText(error)}`);
     return textResult(`Failed to preview merge: ${errorText(error)}`, true);

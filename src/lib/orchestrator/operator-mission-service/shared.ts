@@ -37,7 +37,7 @@ export function slugify(value: string, maxLength = 48) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-  return slug.slice(0, maxLength) || 'work';
+  return slug.slice(0, maxLength).replace(/-+$/g, '') || 'work';
 }
 
 /** Inline/ad-hoc issues use synthetic numbers starting at 90001 and have no URL. */
