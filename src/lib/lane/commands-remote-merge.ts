@@ -1,0 +1,235 @@
+import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
+import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
+import { getLane, setLaneStatus } from '@/lib/lane/registry';
+import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { fetchWorkerRun } from '@/lib/worker/runs';
+
+type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
+
+function formatLaneCommandError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const stderr = 'stderr' in error ? String((error as { stderr?: unknown }).stderr ?? '').trim() : '';
+  const stdout = 'stdout' in error ? String((error as { stdout?: unknown }).stdout ?? '').trim() : '';
+
+  return stderr || stdout || error.message;
+}
+
+export async function performRemoteCustomerMerge(
+  lane: Lane,
+  command: MergeCommand,
+  actor: LaneEventActor,
+): Promise<LaneCommandResult> {
+  if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
+  const workerRun = fetchWorkerRun(lane.id);
+  if (!workerRun?.remoteBranch) {
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'remote_branch_missing');
+    return { ok: false, laneId: command.laneId, note: 'No remote branch recorded for this lane.' };
+  }
+
+  const fetched = await fetchWorkerBranch(lane.repoPath, workerRun.remoteBranch, workerRun.id);
+  if (!fetched.ok) {
+    console.warn(`[remote-merge] ${fetched.note}`);
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
+    return { ok: false, laneId: command.laneId, note: fetched.note };
+  }
+
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+
+  let savedBranch: string | null = null;
+
+  try {
+    savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: lane.repoPath,
+      maxBuffer: 1024 * 1024,
+    })).stdout.trim();
+
+    if (command.commitMessage) {
+      try {
+        await execFileAsync('git', ['add', '-A'], { cwd: fetched.tempWorktreePath });
+        const { stdout: porcelain } = await execFileAsync(
+          'git', ['status', '--porcelain'],
+          { cwd: fetched.tempWorktreePath, timeout: 5000 },
+        );
+        if (porcelain.trim()) {
+          await execFileAsync('git', ['commit', '-m', command.commitMessage], {
+            cwd: fetched.tempWorktreePath,
+          });
+        }
+      } catch { /* nothing to commit */ }
+    }
+
+    const actualBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: fetched.tempWorktreePath,
+      maxBuffer: 1024 * 1024,
+    })).stdout.trim();
+    console.log(`[remote-merge] Actual worktree branch: ${actualBranch} (base ref: ${fetched.baseRef})`);
+
+    let rebaseFailed = false;
+    try {
+      await execFileAsync('git', ['rebase', lane.baseBranch], { cwd: fetched.tempWorktreePath });
+      console.log(`[remote-merge] Rebased ${actualBranch} onto ${lane.baseBranch}`);
+    } catch {
+      try {
+        await execFileAsync('git', ['rebase', '--abort'], { cwd: fetched.tempWorktreePath });
+      } catch {
+        // already clean
+      }
+      rebaseFailed = true;
+      console.log(`[remote-merge] Rebase failed for ${actualBranch}, attempting direct merge`);
+    }
+
+    if (!rebaseFailed) {
+      const typecheck = await runLaneRebaseTypecheck({
+        cwd: fetched.tempWorktreePath,
+        actualBranch,
+        logPrefix: 'remote-merge',
+      });
+      if (!typecheck.ok) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'typecheck_failed');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${typecheck.output}`,
+        };
+      }
+    }
+
+    if (command.strategy === 'manual') {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'manual_resolution_unsupported');
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: 'Manual conflict resolution is not supported for remote-customer merges.',
+      };
+    }
+
+    await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
+
+    try {
+      const mergeArgs = ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`];
+      if (command.strategy === 'ours' || command.strategy === 'theirs') {
+        mergeArgs.push('-X', command.strategy);
+      }
+      mergeArgs.push(actualBranch);
+      await execFileAsync('git', mergeArgs, { cwd: lane.repoPath });
+    } catch (mergeErr) {
+      let conflictFiles: string[] = [];
+      try {
+        const { stdout: unmerged } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], {
+          cwd: lane.repoPath,
+        });
+        conflictFiles = unmerged.trim().split('\n').filter(Boolean);
+      } catch {
+        // best effort
+      }
+
+      try {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: lane.repoPath });
+      } catch {
+        // already clean
+      }
+
+      const mergeMessage = formatLaneCommandError(mergeErr);
+      const conflictLabel = rebaseFailed
+        ? `Rebase failed, merge also failed: ${mergeMessage}`
+        : `Merge failed after rebase: ${mergeMessage}`;
+      const conflictSuffix = conflictFiles.length > 0
+        ? `\n\nConflicting files:\n${conflictFiles.map((file) => `- ${file}`).join('\n')}`
+        : '';
+      console.warn(`[remote-merge] ${conflictLabel}`);
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_conflict');
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: `${conflictLabel}${conflictSuffix}`,
+      };
+    }
+
+    let pushedToOrigin = false;
+    let pushError: string | undefined;
+    try {
+      await execFileAsync('git', ['push', 'origin', lane.baseBranch], {
+        cwd: lane.repoPath,
+        timeout: 60_000,
+      });
+      pushedToOrigin = true;
+      console.log(`[remote-merge] Pushed ${lane.baseBranch} to origin after merging ${actualBranch}`);
+    } catch (pushErr) {
+      pushError = formatLaneCommandError(pushErr);
+      console.warn(`[remote-merge] Push to origin failed for ${lane.baseBranch} after merging ${actualBranch}: ${pushError}`);
+    }
+
+    try {
+      await execFileAsync('git', ['push', 'origin', '--delete', workerRun.remoteBranch], {
+        cwd: lane.repoPath,
+        timeout: 60_000,
+      });
+      console.log(`[remote-merge] Deleted remote branch ${workerRun.remoteBranch}`);
+    } catch (deleteErr) {
+      console.warn(
+        `[remote-merge] Failed to delete remote branch ${workerRun.remoteBranch}: ${formatLaneCommandError(deleteErr)}`,
+      );
+    }
+
+    setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
+
+    let decompositionNote = '';
+    try {
+      const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
+      const decomposition = await enqueueDecompositionsAfterMerge({
+        repoPath: lane.repoPath,
+        runtime: lane.runtime,
+      });
+      if (decomposition.enqueued > 0) {
+        const names = decomposition.candidates
+          .map((candidate) => candidate.relativePath)
+          .join(', ');
+        decompositionNote = ` Enqueued ${decomposition.enqueued} decomposition dispatch${decomposition.enqueued === 1 ? '' : 'es'} for over-ceiling file${decomposition.enqueued === 1 ? '' : 's'}: ${names}.`;
+      }
+    } catch (decompositionError) {
+      console.warn(
+        `[remote-merge] Decomposition scan failed for ${lane.repoPath}: ${decompositionError instanceof Error ? decompositionError.message : String(decompositionError)}`,
+      );
+    }
+
+    const updated = getLane(command.laneId);
+    const mergeNote = pushedToOrigin
+      ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.${decompositionNote}`
+      : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
+    return {
+      ok: true,
+      laneId: command.laneId,
+      note: mergeNote,
+      lane: updated ?? undefined,
+      pushedToOrigin,
+      pushError,
+    };
+  } catch (error) {
+    const message = formatLaneCommandError(error);
+    console.error(`[remote-merge] Merge failed for lane ${lane.id}: ${message}`);
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
+    return { ok: false, laneId: command.laneId, note: message };
+  } finally {
+    if (savedBranch) {
+      try {
+        await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
+      } catch (restoreError) {
+        console.warn(`[remote-merge] Failed to restore branch ${savedBranch}: ${formatLaneCommandError(restoreError)}`);
+      }
+    }
+
+    try {
+      await cleanupRemoteMergeWorktree(lane.repoPath, fetched.tempWorktreePath);
+    } catch (cleanupError) {
+      console.warn(
+        `[remote-merge] Failed to clean up temp worktree ${fetched.tempWorktreePath}: ${formatLaneCommandError(cleanupError)}`,
+      );
+    }
+  }
+}
