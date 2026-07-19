@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { extname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -74,6 +75,14 @@ export async function POST(request: NextRequest) {
   let rawName: string;
 
   if (srcPath) {
+    // srcPath reads an arbitrary server-local file (the Tauri Finder-drag bridge)
+    // — operator/loopback only. A device token (the phone) may only upload body
+    // bytes, never name a server path, or this becomes a local-file read/exfil
+    // primitive over the relay. The asset route is device-allowlisted for the
+    // body-bytes upload the phone actually uses; this branch stays operator-only.
+    if (resolveRequestPrincipal(request) === 'device') {
+      return NextResponse.json({ ok: false, error: 'srcPath is not permitted for this credential' }, { status: 403 });
+    }
     if (!existsSync(srcPath) || !statSync(srcPath).isFile()) {
       return NextResponse.json({ ok: false, error: 'srcPath not a readable file' }, { status: 400 });
     }
