@@ -3274,8 +3274,28 @@ mod stt_engine {
         let _ = app.emit("o8:stt-event", payload);
     }
 
-    fn emit_agent_stt(app: &AppHandle, payload: serde_json::Value) {
-        emit_stt(app, "system", payload);
+    fn with_agent_lane(mut payload: serde_json::Value) -> serde_json::Value {
+        if let Some(record) = payload.as_object_mut() {
+            record.insert("lane".to_string(), serde_json::Value::String("agent".to_string()));
+        }
+        payload
+    }
+
+    pub(crate) fn emit_agent_stt(app: &AppHandle, payload: serde_json::Value) {
+        emit_stt(app, "system", with_agent_lane(payload));
+    }
+
+    fn emit_session_stt(
+        app: &AppHandle,
+        origin: &str,
+        session_id: Option<u64>,
+        payload: serde_json::Value,
+    ) {
+        if origin == "system" && crate::fn_hotkey::is_agent_event_session(session_id) {
+            emit_agent_stt(app, payload);
+        } else {
+            emit_stt(app, origin, payload);
+        }
     }
 
     /// Forward one TranscriptEvent to the webview. Partial/Level events are
@@ -3288,16 +3308,18 @@ mod stt_engine {
                 if origin == "system" {
                     crate::live_dictation::queue_partial(session_id, text.clone());
                 }
-                emit_stt(
+                emit_session_stt(
                     app,
                     origin,
+                    Some(session_id),
                     serde_json::json!({ "type": "partial", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
             TE::Level { session_id, level } => {
-                emit_stt(
+                emit_session_stt(
                     app,
                     origin,
+                    Some(session_id),
                     serde_json::json!({ "type": "level", "origin": origin, "sessionId": session_id, "level": level }),
                 );
             }
@@ -3311,16 +3333,18 @@ mod stt_engine {
                 // Apple's final transcript so the dock cannot stay stuck forever.
                 stash_final(session_id, text.clone());
                 schedule_final_fallback(app.clone(), session_id);
-                emit_stt(
+                emit_session_stt(
                     app,
                     origin,
+                    Some(session_id),
                     serde_json::json!({ "type": "final", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
             TE::AudioFile { session_id, path } => {
-                emit_stt(
+                emit_session_stt(
                     app,
                     origin,
+                    Some(session_id),
                     serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }),
                 );
                 if let Some(apple_text) = take_final(session_id) {
@@ -3343,9 +3367,10 @@ mod stt_engine {
                 }
             }
             TE::Status { session_id, text } => {
-                emit_stt(
+                emit_session_stt(
                     app,
                     origin,
+                    session_id,
                     serde_json::json!({ "type": "status", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
@@ -3364,11 +3389,16 @@ mod stt_engine {
                     #[cfg(target_os = "macos")]
                     crate::spatial_ink_window::disarm(app);
                 }
-                emit_stt(
+                let is_agent = crate::fn_hotkey::is_agent_event_session(session_id);
+                emit_session_stt(
                     app,
                     origin,
+                    session_id,
                     serde_json::json!({ "type": "error", "origin": origin, "sessionId": session_id, "text": text }),
                 );
+                if is_agent {
+                    crate::fn_hotkey::clear_agent_event_session(session_id);
+                }
             }
             TE::Complete { session_id } => {
                 if let Some(apple_text) = take_final(session_id) {
@@ -3379,11 +3409,16 @@ mod stt_engine {
                         run_finalize(app.clone(), session_id, String::new(), apple_text);
                     }
                 }
-                emit_stt(
+                let is_agent = crate::fn_hotkey::is_agent_event_session(Some(session_id));
+                emit_session_stt(
                     app,
                     origin,
+                    Some(session_id),
                     serde_json::json!({ "type": "complete", "origin": origin, "sessionId": session_id }),
                 );
+                if is_agent {
+                    crate::fn_hotkey::clear_agent_event_session(Some(session_id));
+                }
             }
             TE::Ready => {
                 emit_stt(
@@ -3464,7 +3499,13 @@ mod stt_engine {
     /// always-on dock morphs back to idle on the system paths (Fn / Ask /
     /// Agent all run system-origin), and the in-window composer path gets an
     /// empty `polished` so its pill settles without inserting anything.
-    fn finalize_bail_empty(app: &AppHandle, session_id: u64, audio_file: &str, apple_text: &str) {
+    fn finalize_bail_empty(
+        app: &AppHandle,
+        session_id: u64,
+        audio_file: &str,
+        apple_text: &str,
+        is_agent: bool,
+    ) {
         if !audio_file.is_empty() {
             let _ = std::fs::remove_file(audio_file);
         }
@@ -3474,8 +3515,13 @@ mod stt_engine {
             #[cfg(target_os = "macos")]
             crate::spatial_ink_window::disarm(app);
             let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-            let _ = app.emit("o8:stt-event", idle);
+            if is_agent {
+                emit_agent_stt(app, idle);
+                crate::fn_hotkey::clear_agent_event_session(Some(session_id));
+            } else {
+                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                let _ = app.emit("o8:stt-event", idle);
+            }
         } else {
             let _ = app.emit(
                 "o8:stt-event",
@@ -3551,7 +3597,7 @@ mod stt_engine {
                                 stats.rms_dbfs,
                                 stats.duration_ms
                             );
-                            finalize_bail_empty(&app, session_id, &audio_file, &apple_text);
+                            finalize_bail_empty(&app, session_id, &audio_file, &apple_text, is_agent);
                             return;
                         }
                         log::info!(
@@ -3620,7 +3666,7 @@ mod stt_engine {
                     raw_text.chars().count(),
                     whisper_used
                 );
-                finalize_bail_empty(&app, session_id, &audio_file, &apple_text);
+                finalize_bail_empty(&app, session_id, &audio_file, &apple_text, is_agent);
                 return;
             }
 
@@ -4191,6 +4237,18 @@ mod stt_engine {
             assert!(mark_finalizing(101));
             assert!(!mark_finalizing(100));
             assert!(!mark_finalizing(101));
+        }
+
+        #[test]
+        fn agent_stt_payloads_are_always_lane_tagged() {
+            let payload = with_agent_lane(serde_json::json!({
+                "type": "partial",
+                "origin": "system",
+                "text": "spawn two agents"
+            }));
+
+            assert_eq!(payload["lane"], "agent");
+            assert_eq!(payload["type"], "partial");
         }
     }
 }

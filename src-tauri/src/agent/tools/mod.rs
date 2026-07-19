@@ -8,6 +8,7 @@
 //! card via `super::confirm_if_needed`.
 
 pub mod apps;
+mod canvas_spawn_recovery;
 pub mod csv;
 pub mod filesystem;
 pub mod git_github;

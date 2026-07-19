@@ -1343,9 +1343,46 @@ pub async fn canvas_intent(verb: &str, args: Value) -> Result<Value, String> {
         ));
     }
     let body = canvas_intent_body(verb, &args);
+    let spawn_probe = if verb == "spawn-agents" {
+        o8_http::get_json_timeout("/api/lanes?active=true", 2)
+            .await
+            .ok()
+            .map(|response| super::canvas_spawn_recovery::LaneSnapshot::from_response(&response))
+    } else {
+        None
+    };
     // The route SPA-navigates to the canvas and waits (≤10s) for the intent
     // listener to mount before dispatching — give it headroom past that.
-    let resp = o8_http::post_json_timeout("/api/canvas/intent", body, 15).await?;
+    let resp = match o8_http::post_json_timeout("/api/canvas/intent", body, 15).await {
+        Ok(response) => response,
+        Err(error) if verb == "spawn-agents" && o8_http::is_timeout_error(&error) => {
+            let task = args.get("task").and_then(Value::as_str).unwrap_or("");
+            let repo = args.get("repo").and_then(Value::as_str);
+            if let Some(before) = spawn_probe {
+                for attempt in 0..5 {
+                    if let Ok(current) = o8_http::get_json_timeout("/api/lanes?active=true", 3).await {
+                        let lane_ids = before.confirmed_spawned_lane_ids(&current, repo, task);
+                        if !lane_ids.is_empty() {
+                            return Ok(json!({
+                                "ok": true,
+                                "verb": verb,
+                                "verifiedAfterTimeout": true,
+                                "laneIds": lane_ids,
+                                "note": "spawn request timed out, but new matching lanes confirm it landed"
+                            }));
+                        }
+                    }
+                    if attempt < 4 {
+                        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    }
+                }
+            }
+            return Err(format!(
+                "{error}; no new matching lane appeared, so the non-idempotent spawn was not retried"
+            ));
+        }
+        Err(error) => return Err(error),
+    };
 
     if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         // Soft page-side failure (`note`) or hard miss (`error`, e.g. the canvas

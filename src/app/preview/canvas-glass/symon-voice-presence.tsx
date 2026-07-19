@@ -164,15 +164,9 @@ export function SymonVoicePresencePill() {
 
   const label = state?.phase === 'listening' ? 'Listening' : state?.phase === 'processing' ? 'Thinking' : 'Working';
 
-  // Suppress the in-canvas LISTENING / partial-text rendering: the always-on-top
-  // outside-the-window HUD (`/agent-partials`, src-tauri/src/agent_partials_window.rs)
-  // now owns the live black partials during an agent dictation, so painting them
-  // here too would double up on the same bottom-center region. The state machine
-  // still runs — we only gate the paint — and the non-listening 'processing' /
-  // 'working' roles (which the outside HUD does NOT show) still render.
   return (
     <AnimatePresence>
-      {state && state.phase !== 'listening' ? (
+      {state ? (
         <motion.div
           initial={{ opacity: 0, y: 12, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
