@@ -59,10 +59,18 @@ export function composerModeSpec(mode: ComposerMode): ComposerModeSpec {
   return COMPOSER_MODES.find((m) => m.id === mode) ?? COMPOSER_MODES[0];
 }
 
-/** Prepend the active mode's directive. Slash commands pass through. */
-export function applyComposerModeDirective(message: string, mode: ComposerMode): string {
-  if (message.startsWith('/')) return message;
+/**
+ * Keep the operator's text distinct from the model-facing mode directive.
+ * Slash commands pass through so the route parser still sees their prefix.
+ */
+export function composeComposerModeMessage(message: string, mode: ComposerMode): {
+  displayMessage: string;
+  wireMessage: string;
+} {
+  if (message.startsWith('/')) return { displayMessage: message, wireMessage: message };
   const spec = composerModeSpec(mode);
-  if (!spec.directive) return message;
-  return `${spec.directive}\n\n${message}`;
+  return {
+    displayMessage: message,
+    wireMessage: spec.directive ? `${spec.directive}\n\n${message}` : message,
+  };
 }

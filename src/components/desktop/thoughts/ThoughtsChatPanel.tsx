@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
-import { applyComposerModeDirective, type ComposerMode } from './composer-mode';
+import { composeComposerModeMessage, type ComposerMode } from './composer-mode';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
@@ -1808,10 +1808,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const handleTaskSend = useCallback(async (explicitText?: string) => {
     const rawMsg = (explicitText ?? input).trim();
     if (!rawMsg) return;
-    // Composer mode (Cursor-parity, Q 2026-07-17): prepend the active mode's
-    // directive — visible, honest prompt-shaping that works on every backend.
-    // Build adds nothing; slash commands pass through untouched.
-    const msg = applyComposerModeDirective(rawMsg, composerModeRef.current);
+    // The mode directive goes to the model, while bubbles and auto-titles keep
+    // the operator's exact words. Slash commands pass through untouched.
+    const { displayMessage, wireMessage } = composeComposerModeMessage(rawMsg, composerModeRef.current);
 
     track('orchestrator.message'); // coarse usage signal (analytics epic #1249) — no content
 
@@ -1821,7 +1820,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // handler instead of dispatching on this tab. Only honor when the
     // tab is not lockedMode (Fleet-level Orchestrator tabs only).
     if (!lockedMode) {
-      const routing = parseModeRoutingPrefix(msg);
+      const routing = parseModeRoutingPrefix(wireMessage);
       if (routing) {
         if (routing.target.kind === 'single' && onSpawnSingleTab) {
           stashPendingComposerDraft(routing.target, routing.body);
@@ -1875,7 +1874,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (isChatMode) {
       setInput('');
       latestInputRef.current = '';
-      const userEntry = createChatUserEntry(msg);
+      const userEntry = createChatUserEntry(displayMessage);
       const assistantEntry = createChatAssistantEntry(selectedChatModel, (userEntry.timestamp ?? Date.now()) + 1);
       let assistantText = '';
       setChatMessages((prev) => [...prev, userEntry, assistantEntry]);
@@ -1887,7 +1886,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // per-tab picker choice server-side.
         await sendScratchChatMessage({
           history: chatMessages,
-          message: msg,
+          message: wireMessage,
           context: resolvedRepoPath ? { repoPath: resolvedRepoPath } : undefined,
           enableTools: true,
           modelOverride: chatOpenrouterModel ?? null,
@@ -1932,7 +1931,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const userMsg: MobileTranscriptEntry = {
         id: `local-user-${Date.now()}`,
         role: 'user',
-        text: msg,
+        text: displayMessage,
         timestamp: Date.now(),
         timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
@@ -1941,7 +1940,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setWaitingForReply(true);
 
       try {
-        const launch = await ensureSingleRuntimeSession(msg);
+        const launch = await ensureSingleRuntimeSession(wireMessage);
         if (!launch?.sessionKey) {
           throw new Error('Unable to launch selected runtime');
         }
@@ -1951,7 +1950,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           const response = await fetch('/api/runtime/action', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg }),
+            body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: wireMessage }),
           });
 
           if (!response.ok) {
@@ -1981,7 +1980,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return;
     }
 
-    if (isOrchestratorMode && await runLocalOrchestratorSlash(msg)) {
+    if (isOrchestratorMode && await runLocalOrchestratorSlash(wireMessage)) {
       setInput('');
       return;
     }
@@ -1990,7 +1989,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const attachments = attachedImages.length > 0
         ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
         : undefined;
-      const outgoing = msg;
+      const outgoing = wireMessage;
       const orchOptions = {
         permissionMode,
         backend: composerBackendTurnOverride(orchestratorBackend),
@@ -2006,11 +2005,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // KEEP the composer text so the user's message isn't lost to the void
         // (the fresh-user "I typed and nothing happened" trap). Leave the toggle
         // armed — nothing dispatched, so the clarify intent still stands.
-        orchStream.send(outgoing, orchOptions);
+        orchStream.send(outgoing, { ...orchOptions, displayMessage });
         return;
       }
       setInput('');
-      orchStream.send(outgoing, orchOptions);
+      orchStream.send(outgoing, { ...orchOptions, displayMessage });
       clearAttachments();
       return;
     }
@@ -2020,7 +2019,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const userMsg: MobileTranscriptEntry = {
       id: `local-user-${Date.now()}`,
       role: 'user',
-      text: msg,
+      text: displayMessage,
       timestamp: Date.now(),
       timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
@@ -2039,8 +2038,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: isRuntimeSession
-          ? JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg })
-          : JSON.stringify({ action: 'resume', sessionKey, message: msg }),
+          ? JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: wireMessage })
+          : JSON.stringify({ action: 'resume', sessionKey, message: wireMessage }),
       });
 
       if (!response.ok) {
