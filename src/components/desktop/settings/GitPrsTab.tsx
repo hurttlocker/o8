@@ -3,9 +3,8 @@
 /**
  * GitPrsTab — the Git & PRs settings page (Cursor-parity pass).
  *
- * Leads with the GitHub CONNECTION (identity / sign-in / GitHub App, shared with
- * the legacy Connectors tab via GitHubConnectionSections) so there is one GitHub
- * story, then the three operator knobs — each gating a real code site: the prefix
+ * Leads with the single GitHub connection surface (identity / repo access /
+ * automation app), then the three operator knobs — each gating a real code site: the prefix
  * o8 puts on branches it opens from issues, whether agent commits carry a
  * Co-Authored-By trailer, and whether a PR row opens in the embedded panel or the
  * OS browser. Every knob write goes through the same gated

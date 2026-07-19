@@ -391,7 +391,7 @@ describe('panelGateMiddleware — per-device capability scope', () => {
   it.each([
     '/api/browser/agent',
     '/api/panel/file-io?path=/etc/hosts',
-    '/api/panel/github-auth',
+    '/api/panel/github-device',
     '/api/setup/mcp-servers',
     '/api/orchestrator/merge',
   ])('denies device credentials outside the mobile capability set: %s', (pathname) => {
