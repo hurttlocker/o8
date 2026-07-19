@@ -23,6 +23,7 @@ import { isSafeGitRef } from '@/lib/git/refs';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { getAllCached } from '@/lib/skeleton';
 import { checkUntrackedImports } from './check-untracked-imports';
+import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
 import type { Lane } from './types';
 
@@ -422,6 +423,7 @@ function checkDiffBudgets(
   if (numstat.length === 0) return [];
 
   const skeleton = getAllCached(repoPath);
+  const relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch);
   const violations: MergeViolation[] = [];
 
   for (const { file, insertions, deletions } of numstat) {
@@ -433,15 +435,17 @@ function checkDiffBudgets(
       PRESERVATION_MIN_DELETE_BUDGET,
       Math.ceil(skelFile.lineCount * PRESERVATION_DELETE_BUDGET_RATIO),
     );
+    const relocatedDeletions = Math.min(deletions, relocationCredits.get(file) ?? 0);
+    const budgetedDeletions = deletions - relocatedDeletions;
 
-    if (deletions > deleteBudget) {
-      const wouldBlock = deletions > deleteBudget * BUDGET_BLOCK_MULTIPLIER;
+    if (budgetedDeletions > deleteBudget) {
+      const wouldBlock = budgetedDeletions > deleteBudget * BUDGET_BLOCK_MULTIPLIER;
       const severity: 'block' | 'warn' = wouldBlock && !orchestratorApproved ? 'block' : 'warn';
       violations.push({
         category: 'budget',
         severity,
         label: 'Delete budget exceeded',
-        detail: `${file}: deleted ${deletions} lines (budget: ${deleteBudget}, original: ${skelFile.lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
+        detail: `${file}: deleted ${deletions} lines${relocatedDeletions > 0 ? ` (${relocatedDeletions} relocated, ${budgetedDeletions} budgeted)` : ''} (budget: ${deleteBudget}, original: ${skelFile.lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
         file,
       });
     }
