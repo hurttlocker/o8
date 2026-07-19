@@ -596,8 +596,8 @@ export class WorktreeManager {
           timeout: 15_000,
         });
       } catch (err) {
-        console.warn(
-          `[worktree] HEAD reset after CoW clone failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        throw new Error(
+          `Fresh-worktree sanitation failed; refusing to dispatch into a clone that may contain source WIP: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
 
