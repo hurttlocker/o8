@@ -33,6 +33,7 @@ export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
 export type AutoApplyUpdates = 'off' | 'when-idle';
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
 export type PrLinkDestination = 'in-app' | 'browser';
+export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export interface TargetingTierUI {
   runtime: DispatchRuntime;
@@ -47,6 +48,7 @@ export interface OperatorDefaults {
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
   reviewContinuation: boolean;
+  requireApproval: RequireApproval;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   orchestratorModel: string;
@@ -101,6 +103,13 @@ export interface OperatorDefaultsResponse {
 }
 
 export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it to manage from Settings.';
+
+export const REQUIRE_APPROVAL_OPTIONS: Array<{ value: RequireApproval; label: string }> = [
+  { value: 'always', label: 'Always' },
+  { value: 'surface', label: 'Surface' },
+  { value: 'high-risk', label: 'Risk' },
+  { value: 'never', label: 'Never' },
+];
 
 export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
   { value: 'both', label: 'Both houses', detail: 'Use Claude and Codex together with the existing paired defaults.' },

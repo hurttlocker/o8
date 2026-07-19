@@ -272,6 +272,8 @@ export interface OrchestratorPacket {
    * mirrors the {@link OrchestratorPacket.useBrain} precedent).
    */
   orchestratorThreadId?: string | null;
+  /** Surface that created this packet. Review-worthy work routes back here. */
+  dispatcher?: PacketDispatcherAttribution | null;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */
   prompt?: string;
   /** Files allowed to be touched by this packet. Alias of predictedFiles when present. */
@@ -360,6 +362,13 @@ export interface OrchestratorPacket {
     generatedAt?: string | null;
     error?: string | null;
   } | null;
+}
+
+export type PacketDispatcherSurface = 'orchestrator' | 'operator' | 'agent';
+
+export interface PacketDispatcherAttribution {
+  surface: PacketDispatcherSurface;
+  id: string;
 }
 
 /** A single multiple-choice quiz question in a packet explainer (#1491). */

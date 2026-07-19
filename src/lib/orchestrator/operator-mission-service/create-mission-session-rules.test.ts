@@ -50,6 +50,7 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     const packet = persisted.packets.find((candidate) => candidate.id === result.packets[0]!.id);
     expect(packet).toBeDefined();
     expect(packet!.orchestratorThreadId).toBe('thoughts-e2e');
+    expect(packet!.dispatcher).toEqual({ surface: 'orchestrator', id: 'thoughts-e2e' });
 
     // And the worker prompt built from that persisted packet inherits the rules.
     const prompt = await buildPacketPrompt(packet!, persisted.packets);
@@ -68,5 +69,6 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     const packet = persisted.packets.find((candidate) => candidate.id === result.packets[0]!.id);
     expect(packet).toBeDefined();
     expect(packet!.orchestratorThreadId).toBeUndefined();
+    expect(packet!.dispatcher).toEqual({ surface: 'operator', id: 'desktop' });
   });
 });

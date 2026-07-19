@@ -9,6 +9,15 @@ export function normalizePacketType(value: unknown): OrchestratorPacketType | un
   return value === 'decompose' ? 'decompose' : undefined;
 }
 
+export function normalizePacketDispatcher(value: unknown): OrchestratorPacket['dispatcher'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as { surface?: unknown; id?: unknown };
+  const surface = candidate.surface;
+  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+  if ((surface !== 'orchestrator' && surface !== 'operator' && surface !== 'agent') || !id) return undefined;
+  return { surface, id };
+}
+
 /**
  * Normalise the decomposition metadata block carried by `packetType: 'decompose'`
  * packets. Returns undefined if any required field is missing or malformed so

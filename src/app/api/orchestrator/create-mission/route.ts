@@ -9,6 +9,8 @@ import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import type { PacketDispatcherAttribution } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -65,6 +67,25 @@ function normalizeComparisonModels(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const models = value.map((model) => String(model).trim()).filter(Boolean).slice(0, MAX_COMPARISON_MODELS);
   return models.length > 0 ? models : undefined;
+}
+
+function resolveDispatcher(request: NextRequest, record: Record<string, unknown>): PacketDispatcherAttribution {
+  const principal = resolveRequestPrincipal(request);
+  const workerPacketId = request.headers.get('x-o8-worker-packet-id')?.trim() ?? '';
+  if (principal === 'worker') {
+    return { surface: 'agent', id: workerPacketId || 'unknown-worker' };
+  }
+
+  const threadId = typeof record.orchestratorThreadId === 'string' ? record.orchestratorThreadId.trim() : '';
+  if (threadId) return { surface: 'orchestrator', id: threadId };
+
+  const declared = asRecord(record.dispatcher);
+  const declaredSurface = declared?.surface;
+  const declaredId = typeof declared?.id === 'string' ? declared.id.trim() : '';
+  if (declaredSurface === 'orchestrator' && declaredId) {
+    return { surface: 'orchestrator', id: declaredId };
+  }
+  return { surface: 'operator', id: declaredSurface === 'operator' && declaredId ? declaredId : 'desktop' };
 }
 
 export async function POST(request: NextRequest) {
@@ -184,6 +205,7 @@ export async function POST(request: NextRequest) {
       ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()
         ? { orchestratorThreadId: record.orchestratorThreadId.trim() }
         : {}),
+      dispatcher: resolveDispatcher(request, record),
       ...(normalizeComparisonModels(record.comparisonModels)
         ? { comparisonModels: normalizeComparisonModels(record.comparisonModels) }
         : {}),

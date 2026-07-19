@@ -7,6 +7,7 @@ import { parseGitDiff } from '@/lib/worktree/diff-parser';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { resolvePacketDispatcher } from '@/lib/orchestrator/dispatcher-attribution';
 
 async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
   const cwd = lane.worktreePath || lane.repoPath;
@@ -76,6 +77,7 @@ export function buildLanePolicyContext(
     fileSizeLimitExceeded?: boolean;
     gatePassed?: boolean;
     hasApprovedReview?: boolean;
+    surfaceReviewRequired?: boolean;
   },
 ) {
   const requireApproval = resolveRequireApprovalSync();
@@ -85,6 +87,7 @@ export function buildLanePolicyContext(
     laneId: lane.id,
     autoReview,
     fileSizeLimitExceeded: opts?.fileSizeLimitExceeded === true,
+    surfaceReviewRequired: opts?.surfaceReviewRequired === true,
   }, {
     workspacePath: lane.repoPath,
     requireApproval,
@@ -113,6 +116,12 @@ export async function createLaneActionApproval(
 ): Promise<LaneCommandResult> {
   const rawDiff = await getDiffForLane(lane);
   const files = parseGitDiff(rawDiff);
+  const surfaceRoute = resolveRequireApprovalSync() === 'surface' && lane.packetId
+    ? resolvePacketDispatcher(lane.packetId) ?? {
+        dispatcher: { surface: 'operator' as const, id: 'desktop' },
+        missionId: null,
+      }
+    : null;
   const approval = createApproval({
     source: 'runtime',
     runtime: lane.runtime,
@@ -130,6 +139,12 @@ export async function createLaneActionApproval(
     conflictReport: input.conflictReport,
     risk: input.risk,
     policyRuleId: input.policyRuleId,
+    args: surfaceRoute ? {
+      approvalRoute: 'dispatcher',
+      dispatcherSurface: surfaceRoute.dispatcher.surface,
+      dispatcherId: surfaceRoute.dispatcher.id,
+      ...(surfaceRoute.missionId ? { dispatcherMissionId: surfaceRoute.missionId } : {}),
+    } : undefined,
     metadata: {
       Lane: lane.id,
       Branch: lane.branch,
@@ -137,6 +152,12 @@ export async function createLaneActionApproval(
       Runtime: lane.runtime,
       ...(lane.packetId ? { Packet: lane.packetId } : {}),
       ...(input.expectedHeadSha ? { 'Expected HEAD': input.expectedHeadSha } : {}),
+      ...(surfaceRoute ? {
+        'Approval Route': 'dispatcher',
+        'Dispatcher Surface': surfaceRoute.dispatcher.surface,
+        'Dispatcher ID': surfaceRoute.dispatcher.id,
+        ...(surfaceRoute.missionId ? { 'Dispatcher Mission': surfaceRoute.missionId } : {}),
+      } : {}),
       ...input.metadata,
     },
     continuation: {
@@ -149,21 +170,33 @@ export async function createLaneActionApproval(
     },
   });
   await recordReviewLessonsForApproval(approval.id, lane, input.reviewSummary, files);
-  setLaneStatus(lane.id, 'awaiting_input', actor, 'approval_required');
+  setLaneStatus(lane.id, 'awaiting_input', actor, surfaceRoute ? 'dispatcher_review_required' : 'approval_required');
   void publishRealtimeMutation({
     mutation: {
       mutationId: `approval-create-${approval.id}`,
       source: 'desktop',
       action: 'approve',
       sessionKey: approval.sessionKey,
-      surfaceId: approval.sessionKey,
+      surfaceId: surfaceRoute?.dispatcher.id ?? approval.sessionKey,
       status: 'pending',
       note: `Approval required: ${approval.title}`,
       createdAt: new Date().toISOString(),
     },
-    refreshTargets: ['global', 'mobileInbox'],
-    sessionKeys: [approval.sessionKey],
+    refreshTargets: surfaceRoute ? ['global'] : ['global', 'mobileInbox'],
+    sessionKeys: [surfaceRoute?.dispatcher.id ?? approval.sessionKey],
     fresh: true,
   });
+  if (surfaceRoute?.dispatcher.surface === 'agent' && surfaceRoute.dispatcher.id !== lane.packetId) {
+    const dispatcherPacketId = surfaceRoute.dispatcher.id;
+    void import('@/lib/orchestrator/operator-mission-service/steer')
+      .then(({ steerPacket }) => steerPacket({
+        packetId: dispatcherPacketId,
+        source: 'orchestrator',
+        message: `Packet ${lane.packetId ?? lane.id} needs your review before merge. Inspect it with o8 packet diff ${lane.packetId ?? ''} and respond to approval ${approval.id}.`,
+      }))
+      .catch((error) => {
+        console.error(`[surface-approval] Failed to ping agent dispatcher ${dispatcherPacketId}:`, error);
+      });
+  }
   return { ok: false, laneId: lane.id, note: input.note, approvalId: approval.id };
 }

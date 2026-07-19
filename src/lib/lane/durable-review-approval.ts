@@ -1,6 +1,13 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { Lane } from '@/lib/lane/types';
 
+export interface DurableReviewAssessment {
+  approved: boolean;
+  highConfidence: boolean;
+  approvalId: string | null;
+  reason: string;
+}
+
 function reviewedHeadForApproval(approval: ApprovalRecord): string | undefined {
   const argsHead = approval.args?.reviewedHeadSha;
   if (typeof argsHead === 'string') {
@@ -12,9 +19,9 @@ function reviewedHeadForApproval(approval: ApprovalRecord): string | undefined {
 
 // Durable approved-review reader. This is the only signal that authorizes a
 // non-user merge or PR action to skip the operator approval card.
-export async function hasDurableApprovedReview(
+export async function assessDurableApprovedReview(
   lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath'>,
-): Promise<boolean> {
+): Promise<DurableReviewAssessment> {
   try {
     const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
       import('@/lib/approvals/store'),
@@ -29,26 +36,48 @@ export async function hasDurableApprovedReview(
     const approved = approvals.filter(
       (approval) => approval.toolName === 'orchestrator_review' && approval.status === 'approved',
     );
-    if (approved.length === 0) return false;
+    if (approved.length === 0) {
+      return { approved: false, highConfidence: false, approvalId: null, reason: 'No durable approved AI review exists.' };
+    }
 
     const cwd = lane.worktreePath || lane.repoPath;
-    if (!cwd) return false;
+    if (!cwd) return { approved: false, highConfidence: false, approvalId: null, reason: 'Lane has no reviewable repository path.' };
 
     let currentHead: string | undefined;
     try {
       currentHead = normalizeHeadSha(await readHeadSha(cwd));
     } catch {
-      return false;
+      return { approved: false, highConfidence: false, approvalId: null, reason: 'Current HEAD could not be verified against the AI review.' };
     }
-    if (!currentHead) return false;
+    if (!currentHead) return { approved: false, highConfidence: false, approvalId: null, reason: 'Current HEAD is unavailable.' };
 
-    return approved.some((approval) => {
+    const matching = approved.find((approval) => {
       const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
       return reviewed !== undefined
         && reviewed === currentHead
         && !(approval.args?.requiresSecondPass === true && approval.args?.secondPassAgreed !== true);
     });
+    if (!matching) {
+      return { approved: false, highConfidence: false, approvalId: null, reason: 'The approved AI review does not authorize the current HEAD.' };
+    }
+
+    const highConfidence = matching.risk === 'low'
+      && typeof matching.args?.parseWarning !== 'string';
+    return {
+      approved: true,
+      highConfidence,
+      approvalId: matching.id,
+      reason: highConfidence
+        ? 'Current HEAD has a clean, finding-free AI review.'
+        : 'The AI review has findings or parser uncertainty.',
+    };
   } catch {
-    return false;
+    return { approved: false, highConfidence: false, approvalId: null, reason: 'Durable AI review lookup failed.' };
   }
+}
+
+export async function hasDurableApprovedReview(
+  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath'>,
+): Promise<boolean> {
+  return (await assessDurableApprovedReview(lane)).approved;
 }

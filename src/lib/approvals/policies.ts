@@ -214,6 +214,20 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
   },
 
   {
+    id: 'surface-dispatcher-review',
+    name: 'Dispatcher-routed merge review',
+    description: 'Route review-worthy work back to the packet dispatcher while easy reviewed merges continue in the loop.',
+    risk: 'high',
+    enabled: true,
+    requiresApproval: true,
+    matches: (ctx) => {
+      if (ctx.toolName !== 'lane_command' || ctx.requireApproval !== 'surface') return false;
+      const verb = ctx.args?.verb as string | undefined;
+      return verb === 'merge' && ctx.args?.surfaceReviewRequired === true;
+    },
+  },
+
+  {
     id: 'auto_approve_orchestrator_review',
     name: 'Auto-approve orchestrator review',
     description: 'Allow merge or PR actions that come from an active orchestrator auto-review pass.',

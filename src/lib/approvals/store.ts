@@ -332,7 +332,8 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
       .orderBy(desc(approvalsTable.createdAt))
       .all()
       .map((row) => mapApprovalRow(row)!)
-      .filter((approval): approval is ApprovalRecord => approval !== null);
+      .filter((approval): approval is ApprovalRecord => approval !== null)
+      .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
   }
 
   if (status !== 'all' && sessionKey) {
@@ -348,7 +349,8 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
       .orderBy(desc(approvalsTable.createdAt))
       .all()
       .map((row) => mapApprovalRow(row)!)
-      .filter((approval): approval is ApprovalRecord => approval !== null);
+      .filter((approval): approval is ApprovalRecord => approval !== null)
+      .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
   }
 
   if (status !== 'all') {
@@ -361,7 +363,8 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
       .orderBy(desc(approvalsTable.createdAt))
       .all()
       .map((row) => mapApprovalRow(row)!)
-      .filter((approval): approval is ApprovalRecord => approval !== null);
+      .filter((approval): approval is ApprovalRecord => approval !== null)
+      .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
   }
 
   const rows = projectId
@@ -379,7 +382,8 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
 
   return rows
     .map((row) => mapApprovalRow(row)!)
-    .filter((approval): approval is ApprovalRecord => approval !== null);
+    .filter((approval): approval is ApprovalRecord => approval !== null)
+    .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
 }
 
 export function getApproval(id: string) {
