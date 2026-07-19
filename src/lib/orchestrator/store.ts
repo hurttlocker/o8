@@ -1009,8 +1009,8 @@ export function reconcileOrchestratorMissionState(
       blockedReason: null,
     };
 
-    if (packet.archivedAt) {
-      next.status = 'archived';
+    if (packet.archivedAt || packet.status === 'archived') {
+      next.status = 'archived'; next.queueState = 'held';
       next.blockedReason = null;
       return next;
     }
@@ -1049,7 +1049,7 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'reviewing') { next.status = 'awaiting_review'; return next; }
       if (ds === 'merging') { next.status = 'awaiting_review'; next.blockedReason = 'Merge in progress'; return next; }
       if (ds === 'completed') { next.status = 'released'; next.releaseState = 'released'; return next; }
-      if (ds === 'archived') { next.status = 'archived'; return next; }
+      if (ds === 'archived') { next.status = 'archived'; next.queueState = 'held'; return next; }
       if (ds === 'recovering') { next.status = 'recovering'; next.blockedReason = domainLane.lastEventLabel ?? 'Lane recovering'; return next; }
       if (ds === 'failed') {
         next.status = 'failed';
