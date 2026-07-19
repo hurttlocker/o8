@@ -338,6 +338,13 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     expect(deviceRequest(pathname, method).status).toBe(200);
   });
 
+  it('allows the Ask generative-surface stream to enrolled devices', () => {
+    // The o8/Life "Ask" surface streams from /api/mobile/genui/stream; it was
+    // absent from the device allowlist, so a paired phone got a 403 "Device
+    // token is not authorized for this endpoint" on every Ask turn.
+    expect(deviceRequest('/api/mobile/genui/stream', 'POST').status).toBe(200);
+  });
+
   it.each([
     ['/api/mobile/devices', 'GET'],
     ['/api/mobile/devices/revoke', 'POST'],
