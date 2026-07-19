@@ -24,6 +24,30 @@ describe('subscription profile resolver', () => {
     });
   });
 
+  it('applies the configured worker model in both-house mode while preserving an explicit override', () => {
+    expect(resolveSubscriptionProfileRouting({
+      profile: 'both',
+      requestedRuntime: 'codex',
+      requestedModel: null,
+      defaultDispatchModel: MODEL_IDS.codexDefault,
+    })).toEqual({
+      ok: true,
+      requestedRuntime: 'codex',
+      requestedModel: MODEL_IDS.codexDefault,
+    });
+
+    expect(resolveSubscriptionProfileRouting({
+      profile: 'both',
+      requestedRuntime: 'codex',
+      requestedModel: MODEL_IDS.codexWorkerDefault,
+      defaultDispatchModel: MODEL_IDS.codexDefault,
+    })).toEqual({
+      ok: true,
+      requestedRuntime: 'codex',
+      requestedModel: MODEL_IDS.codexWorkerDefault,
+    });
+  });
+
   it('pins Claude-only to Claude orchestration, workers, reviews, and Sonnet', () => {
     expect(resolveSubscriptionProfileHouseDefaults('claude-only')).toEqual({
       orchestratorBackend: 'claude',
