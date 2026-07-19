@@ -19,7 +19,7 @@ keep working unchanged** — the relay is only the off-network reach path (const
 | `APNS_KEY_ID` | for push | 10-char Apple key id. |
 | `APNS_TEAM_ID` | for push | 10-char Apple team id. |
 | `APNS_BUNDLE_ID` | — | iOS bundle id (default `com.marquisehurtt.o8mobile`). |
-| `APNS_ENV` | — | `sandbox` (TestFlight/dev) or `production` (App Store). Default `sandbox`. |
+| `APNS_ENV` | — | **Fallback default only** — the live environment is carried **per `push-req`** and `sendApprovalAlert()` selects the endpoint from it, so leave it unset in prod. Local **dev** builds → `sandbox`; **TestFlight AND App Store** → `production` (TestFlight uses PRODUCTION APNs, NOT sandbox). |
 | `RELAY_MAX_TUNNEL_BYTES` | — | In-tunnel response ceiling before 413 (default 32MB). |
 | `PORT` | — | Railway sets this automatically. |
 
