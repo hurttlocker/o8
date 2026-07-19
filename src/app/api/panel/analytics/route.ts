@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { hydrateUsageLogAnalytics } from './usage-log-analytics';
 import { getDb } from '@/lib/db';
 import { sessionOutcomes, approvals } from '@/lib/db/schema';
+import { CLOSE_UNMERGED_DISPOSITIONS } from '@/lib/orchestrator/close-unmerged';
 import { gte, sql } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
@@ -255,11 +256,16 @@ function computeMoatMetrics(sinceTs: number): {
       .from(sessionOutcomes)
       .where(gte(sql`strftime('%s', ${sessionOutcomes.completedAt}) * 1000`, sinceTs))
       .all();
-    const total = outcomes.length;
-    const succeeded = outcomes.filter((o) => o.outcome === 'succeeded').length;
-    const partial = outcomes.filter((o) => o.outcome === 'partial').length;
-    const failed = outcomes.filter((o) => o.outcome === 'failed' || o.outcome === 'interrupted').length;
-    const mergedClean = outcomes.filter((o) => o.mergedClean === true).length;
+    // An operator-closed packet has no merge/retry verdict, so it must not
+    // depress the autonomous work success rate as though it had failed.
+    const scoredOutcomes = outcomes.filter(
+      (outcome) => !(CLOSE_UNMERGED_DISPOSITIONS as readonly string[]).includes(outcome.outcome),
+    );
+    const total = scoredOutcomes.length;
+    const succeeded = scoredOutcomes.filter((o) => o.outcome === 'succeeded').length;
+    const partial = scoredOutcomes.filter((o) => o.outcome === 'partial').length;
+    const failed = scoredOutcomes.filter((o) => o.outcome === 'failed' || o.outcome === 'interrupted').length;
+    const mergedClean = scoredOutcomes.filter((o) => o.mergedClean === true).length;
     autonomy = {
       total, succeeded, partial, failed, mergedClean,
       successRate: total > 0 ? (succeeded / total) * 100 : 0,
