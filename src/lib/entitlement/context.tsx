@@ -98,6 +98,18 @@ function coerceFounder(value: unknown): FounderInfo | null {
   };
 }
 
+export function shouldUseSignedOutEntitlement(input: {
+  clerkEnabled: boolean;
+  isLoaded: boolean;
+  signedIn: boolean;
+}): boolean {
+  return input.clerkEnabled && input.isLoaded && !input.signedIn;
+}
+
+export function isSignedOutEntitlementRefresh(detail: unknown): boolean {
+  return Boolean(detail && typeof detail === 'object' && (detail as { signedOut?: unknown }).signedOut === true);
+}
+
 export function EntitlementProvider({ children }: { children: React.ReactNode }) {
   const [plan, setPlan] = useState<Plan>('free');
   const [flags, setFlags] = useState<EntitlementFlags>(FREE_FLAGS);
@@ -112,10 +124,26 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
   // route as evidence — a genuine cross-user mismatch still drops the cached
   // license, while an unknown subject keeps it (#1483). Null when signed-out /
   // Clerk-disabled / still loading; that path keeps the license by design.
-  const { user } = useO8Auth();
+  const auth = useO8Auth();
+  const { user } = auth;
   const activeSubject = user?.id ?? null;
+  const signedOut = shouldUseSignedOutEntitlement(auth);
+
+  const applyFreeEntitlement = useCallback(() => {
+    setPlan('free');
+    setFlags(FREE_FLAGS);
+    setFounder(null);
+    setActualPlan('free');
+    setActualFounder(null);
+    setOverrideActive(false);
+    setLoading(false);
+  }, []);
 
   const load = useCallback(async () => {
+    if (signedOut) {
+      applyFreeEntitlement();
+      return;
+    }
     try {
       const url = activeSubject
         ? `/api/panel/entitlement?subject=${encodeURIComponent(activeSubject)}`
@@ -143,31 +171,36 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
     } catch (error) {
       // Never crash the dashboard — fall back to free.
       console.error('[entitlement] client fetch failed, defaulting to free:', error);
-      setPlan('free');
-      setFlags(FREE_FLAGS);
-      setFounder(null);
-      setActualPlan('free');
-      setActualFounder(null);
-      setOverrideActive(false);
+      applyFreeEntitlement();
     } finally {
       setLoading(false);
     }
-  }, [activeSubject]);
+  }, [activeSubject, applyFreeEntitlement, signedOut]);
 
   // Initial load.
   useEffect(() => {
     void load();
   }, [load]);
 
+  // Clerk sign-out is session truth. Clear the in-memory plan immediately so a
+  // persisted founder badge cannot survive while the teardown request runs.
+  useEffect(() => {
+    if (signedOut) applyFreeEntitlement();
+  }, [applyFreeEntitlement, signedOut]);
+
   // Re-pull when the entitlement changes underneath us (e.g. after the sign-in
   // sync applies a founder/subscription license) so the UI flips live.
   useEffect(() => {
-    const onRefresh = () => {
+    const onRefresh = (event: Event) => {
+      if (isSignedOutEntitlementRefresh((event as CustomEvent<unknown>).detail)) {
+        applyFreeEntitlement();
+        return;
+      }
       void load();
     };
     window.addEventListener('o8:entitlement-refresh', onRefresh);
     return () => window.removeEventListener('o8:entitlement-refresh', onRefresh);
-  }, [load]);
+  }, [applyFreeEntitlement, load]);
 
   const value = useMemo<EntitlementContextValue>(
     () => ({

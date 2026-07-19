@@ -183,11 +183,11 @@ export const CARD_ENTRANCE = {
   reducedMs: 90,
   staggerMs: 60,
   sweepMs: 220,
-  ease: 'cubic-bezier(0.34, 1.3, 0.64, 1)',
+  ease: 'cubic-bezier(0.22, 1, 0.36, 1)',
   keyframes: `
 @keyframes cnv-card-enter {
   0% { opacity: 0; transform: scale(0.96); }
-  72% { opacity: 1; transform: scale(1.012); }
+  72% { opacity: 1; transform: scale(1.006); }
   100% { opacity: 1; transform: none; }
 }
 @keyframes cnv-card-border-draw {

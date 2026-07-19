@@ -92,7 +92,7 @@ import { DispatchDock, phaseFor, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
 import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 import { SymonVoicePresencePill } from './symon-voice-presence';
-
+import { useCanvasQuickActions } from './use-canvas-quick-actions';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
   id: string;
@@ -385,6 +385,7 @@ export default function CanvasGlassPreviewPage() {
   const [recentThreads, setRecentThreads] = useState<CanvasThreadRow[]>([]);
   const [recentCommits, setRecentCommits] = useState<CommitRow[]>([]);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const { guardSubmit: guardSlashSubmit, onChange: handleComposerChange, palette: quickActionPalette } = useCanvasQuickActions(setComposerValue, composerInputRef);
   // Shared identity hook (Clerk) — safe even with no keys: returns a disabled,
   // signed-out state, so the account control degrades to a "Sign in" door.
   const auth = useO8Auth();
@@ -1177,17 +1178,16 @@ export default function CanvasGlassPreviewPage() {
       reader.readAsDataURL(file);
     }
   }, []);
-
   const submit = useCallback(() => {
     const prompt = composerValue.trim();
     const images = composerImages;
     if (!prompt && images.length === 0) return;
+    if (guardSlashSubmit(prompt)) return;
     if (sendPrompt(prompt || 'Take a look at these.', images.length ? images : undefined)) {
       setComposerValue('');
       setComposerImages([]);
     }
-  }, [composerImages, composerValue, sendPrompt]);
-
+  }, [composerImages, composerValue, guardSlashSubmit, sendPrompt]);
   const chooseModel = useCallback((value: string) => {
     setOrchModel(value);
     // Drawer stays open — the merged picker lets you set model AND thinking in
@@ -5253,7 +5253,7 @@ export default function CanvasGlassPreviewPage() {
         <textarea
           ref={composerInputRef}
           value={composerValue}
-          onChange={(event) => setComposerValue(event.target.value)}
+          onChange={handleComposerChange}
           onKeyDown={(event) => {
             // Enter sends; Shift+Enter drops a newline (the field grows to fit).
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -5446,7 +5446,7 @@ export default function CanvasGlassPreviewPage() {
           </>
         ) : null}
       </AnimatePresence>
-
+      {quickActionPalette}
       {/* Glass tuner — drops down under the "Canvas" word in the top dock. */}
       <AnimatePresence>
         {tunerOpen ? (

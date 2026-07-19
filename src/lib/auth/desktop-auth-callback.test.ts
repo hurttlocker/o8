@@ -41,15 +41,18 @@ describe('consumeDesktopAuthCallback', () => {
 
   it('reports state mismatch without burning the ticket', async () => {
     const signIn = makeSignIn();
+    const retrySignIn = vi.fn();
     await consumeDesktopAuthCallback(callbackUrl(), {
       signIn,
       clerk: makeClerk(),
       getExpectedState: () => 'different',
       clearExpectedState: vi.fn(),
+      retrySignIn,
     });
 
     expect(signIn.ticket).not.toHaveBeenCalled();
     expect(getDesktopAuthError()?.message).toContain('did not match');
+    expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
   it('reports Clerk ticket exchange longMessage', async () => {
@@ -70,6 +73,7 @@ describe('consumeDesktopAuthCallback', () => {
   });
 
   it('reports finalize failures', async () => {
+    const retrySignIn = vi.fn();
     const signIn = makeSignIn({
       finalize: vi.fn(async () => ({ error: { longMessage: 'finalize failed upstream' } })),
     });
@@ -78,9 +82,29 @@ describe('consumeDesktopAuthCallback', () => {
       clerk: makeClerk(),
       getExpectedState: () => 'state_123',
       clearExpectedState: vi.fn(),
+      retrySignIn,
     });
 
     expect(getDesktopAuthError()?.message).toBe('finalize failed upstream');
+    expect(retrySignIn).toHaveBeenCalledOnce();
+  });
+
+  it('regenerates sign-in when a ticket exchange throws after consuming the ticket', async () => {
+    const retrySignIn = vi.fn();
+    await consumeDesktopAuthCallback(callbackUrl('ticket_raced'), {
+      signIn: makeSignIn({
+        ticket: vi.fn(async () => {
+          throw new Error('ticket exchange raced');
+        }),
+      }),
+      clerk: makeClerk(),
+      getExpectedState: () => 'state_123',
+      clearExpectedState: vi.fn(),
+      retrySignIn,
+    });
+
+    expect(getDesktopAuthError()?.message).toBe('ticket exchange raced');
+    expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
   it('reports setActive failures', async () => {
