@@ -48,6 +48,14 @@ function reasonFromUnknown(value: unknown, fallback: string): string {
   return fallback;
 }
 
+function regenerateDesktopSignIn(options: ConsumeDesktopAuthCallbackOptions): void {
+  try {
+    options.retrySignIn?.();
+  } catch (error) {
+    console.error('[auth] failed to regenerate desktop sign-in:', error);
+  }
+}
+
 export async function consumeDesktopAuthCallback(
   raw: string,
   options: ConsumeDesktopAuthCallbackOptions,
@@ -66,7 +74,7 @@ export async function consumeDesktopAuthCallback(
   if (!ticket) return;
   if (consumedTickets.has(ticket)) {
     reportDesktopAuthError('This sign-in link was already used. Try signing in again.');
-    options.retrySignIn?.();
+    regenerateDesktopSignIn(options);
     return;
   }
 
@@ -74,6 +82,7 @@ export async function consumeDesktopAuthCallback(
   if (expected && state !== expected) {
     console.warn('[auth] callback state mismatch — ignoring');
     reportDesktopAuthError('The sign-in response did not match this app session. Try signing in again.');
+    regenerateDesktopSignIn(options);
     return;
   }
 
@@ -84,7 +93,7 @@ export async function consumeDesktopAuthCallback(
       const reason = reasonFromUnknown(error, 'The sign-in ticket could not be exchanged.');
       console.error('[auth] ticket sign-in failed:', error);
       reportDesktopAuthError(reason);
-      options.retrySignIn?.();
+      regenerateDesktopSignIn(options);
       return;
     }
 
@@ -92,6 +101,7 @@ export async function consumeDesktopAuthCallback(
       const status = options.signIn.status || 'unknown';
       console.warn('[auth] ticket sign-in incomplete:', status);
       reportDesktopAuthError(`Clerk returned an incomplete sign-in status: ${status}.`);
+      regenerateDesktopSignIn(options);
       return;
     }
 
@@ -100,6 +110,7 @@ export async function consumeDesktopAuthCallback(
       const reason = reasonFromUnknown(finalizeError, 'The sign-in session could not be finalized.');
       console.error('[auth] finalize failed:', finalizeError);
       reportDesktopAuthError(reason);
+      regenerateDesktopSignIn(options);
       return;
     }
 
@@ -112,6 +123,7 @@ export async function consumeDesktopAuthCallback(
       const reason = reasonFromUnknown(activateErr, 'The signed-in session could not be activated.');
       console.error('[auth] post-finalize session activation failed:', activateErr);
       reportDesktopAuthError(reason);
+      regenerateDesktopSignIn(options);
       return;
     }
 
@@ -124,5 +136,6 @@ export async function consumeDesktopAuthCallback(
     const reason = reasonFromUnknown(err, 'The sign-in ticket exchange failed unexpectedly.');
     console.error('[auth] ticket exchange threw:', err);
     reportDesktopAuthError(reason);
+    regenerateDesktopSignIn(options);
   }
 }
