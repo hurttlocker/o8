@@ -24,6 +24,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { useOrchestratorData } from '../orchestrator-data-context';
 import { relativeAge } from '../agent-panel/shared';
 import { PacketCard } from '../thoughts/mission-panel/PacketCard';
+import { PacketCloseUnmergedActions } from '../thoughts/mission-panel/PacketCloseUnmergedActions';
 import type { EditingField, ReviewPanelState } from '../thoughts/mission-panel/types';
 
 interface O8ActivityPacketRowProps {
@@ -177,6 +178,22 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
       body: JSON.stringify({ verb: 'stop', laneId, actor: 'user' }),
     }).catch(() => {});
   }, [packet.lane?.laneId, patchPacket]);
+
+  const handleCloseUnmerged = useCallback(() => {
+    data?.onMissionStateChange?.((current) => ({
+      ...current,
+      packets: current.packets.map((candidate) => candidate.id === packet.id
+        ? {
+            ...candidate,
+            status: 'archived',
+            queueState: 'held',
+            archivedAt: new Date().toISOString(),
+            blockedReason: null,
+            lastEventLabel: 'closed_unmerged',
+          }
+        : candidate),
+    }));
+  }, [data, packet.id]);
 
   const handleReviewAction = useCallback(
     async (verb: 'create_pr' | 'merge') => {
@@ -510,6 +527,9 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
             onStop={handleStop}
             onOpenReviewDiff={handleOpenReviewDiff}
           />
+          {packet.status === 'awaiting_review' ? (
+            <PacketCloseUnmergedActions packetId={packet.id} onClosed={handleCloseUnmerged} />
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -58,7 +58,7 @@ export const LANE_STATUSES = Object.keys(LANE_STATUS_RECORD) as LaneStatus[];
 /** Terminal outcome of a lane's work — stamped once at the seam that ends
  *  the work (merge success, no-commit reconciliation, operator discard) so
  *  the rail can show truthful "what happened" chips after archive. */
-export type LaneOutcome = 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked';
+export type LaneOutcome = 'no_changes' | 'merged' | 'discarded' | 'closed_unmerged' | 'pr_opened' | 'asked';
 
 /**
  * @deprecated Thin delegate kept for back-compat. The unified terminal-state

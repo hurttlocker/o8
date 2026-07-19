@@ -29,13 +29,7 @@ import { join, resolve } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
-import {
-  APPROVE_TOOLS,
-  handleApprove,
-  handleApproveAndMerge,
-  handleMergePreview,
-  handleReject,
-} from '@/lib/mcp/operator-handlers/approve';
+import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview, handleReject } from '@/lib/mcp/operator-handlers/approve';
 import {
   CORTEX_TOOLS,
   handleAsk,
@@ -46,44 +40,16 @@ import {
   handleDigest,
   handleFetchRaw,
 } from '@/lib/mcp/operator-handlers/digest';
-import {
-  SPEC_TOOLS,
-  handleSpecRead,
-  handleSpecReviewIndex,
-  handleSpecPendingFeedback,
-  handleSpecValidate,
-  handleSpecComment,
-  handleSpecReply,
-  handleSpecResolve,
-  handleSpecSuggest,
-} from '@/lib/mcp/operator-handlers/spec';
+import { SPEC_TOOLS, handleSpecRead, handleSpecReviewIndex, handleSpecPendingFeedback, handleSpecValidate, handleSpecComment, handleSpecReply, handleSpecResolve, handleSpecSuggest } from '@/lib/mcp/operator-handlers/spec';
 import {
   TARGETING_TOOLS,
   handleTargets,
 } from '@/lib/mcp/operator-handlers/targeting';
 import {
-  MISSION_TOOLS,
-  handleCreateMission,
-  handleDispatchMission,
-  handleGetMissionStatus,
-  handleGetPacketScope,
-  handlePacketDiff,
-  handleMissionTail,
-  handleReportPacketEvent,
-  handleRerunWithFeedback,
-  handleResetPacket,
-  handleRetryPacket,
-  handleReviewState,
-  handleSubmitReview,
-  handleTaskArchive,
-  handleTaskBlock,
-  handleTaskBrief,
-  handleTaskClaim,
-  handleTaskCreate,
-  handleTaskDispatch,
-  handleTaskList,
-  handleTaskPrune,
-  handleTaskReport,
+  MISSION_TOOLS, handleCreateMission, handleDispatchMission, handleGetMissionStatus, handleGetPacketScope,
+  handlePacketDiff, handleMissionTail, handleReportPacketEvent, handleRerunWithFeedback, handleResetPacket,
+  handleRetryPacket, handleReviewState, handleSubmitReview, handleTaskArchive, handleTaskBlock, handleTaskBrief,
+  handleTaskClaim, handleTaskCreate, handleTaskDispatch, handleTaskList, handleTaskPrune, handleTaskReport,
   handleWaitForMissionReady,
 } from '@/lib/mcp/operator-handlers/mission';
 import {
@@ -98,6 +64,10 @@ import {
   handleCanvas,
   handleRender,
 } from '@/lib/mcp/operator-handlers/canvas';
+import {
+  CLOSE_PACKET_TOOLS,
+  handleClosePacketUnmerged,
+} from '@/lib/mcp/operator-handlers/close-packet';
 import {
   type McpTool,
   type McpToolResult,
@@ -541,6 +511,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((t) => t.name === 'o8_task_prune'),
   ...MISSION_TOOLS.filter((t) => t.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((t) => t.name === 'submit_review'),
+  ...CLOSE_PACKET_TOOLS,
   ...APPROVE_TOOLS.filter((t) => t.name === 'approve_and_merge'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_merge_preview'),
   ...MISSION_TOOLS.filter((t) => t.name === 'reset_packet'),
@@ -600,6 +571,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_prune: handleTaskPrune,
   wait_for_mission_ready: handleWaitForMissionReady,
   submit_review: handleSubmitReview,
+  close_packet_unmerged: handleClosePacketUnmerged,
   approve_and_merge: handleApproveAndMerge,
   o8_merge_preview: handleMergePreview,
   reset_packet: handleResetPacket,
