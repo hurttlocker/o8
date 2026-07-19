@@ -150,7 +150,7 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
   sessionKey: text('session_key'),
   laneId: text('lane_id'),
   packetId: text('packet_id'),
-  outcome: text('outcome', { enum: ['succeeded', 'failed', 'partial', 'interrupted'] }).notNull(),
+  outcome: text('outcome', { enum: ['succeeded', 'failed', 'partial', 'interrupted', 'adopted_elsewhere', 'superseded', 'spec_changed', 'wontfix'] }).notNull(),
   summary: text('summary').notNull(),
   planText: text('plan_text'),
   attempts: integer('attempts').notNull().default(1),
@@ -402,7 +402,7 @@ export const lanes = sqliteTable('lanes', {
   status: text('status', {
     enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human', 'recovering', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
   }).notNull(),
-  outcome: text('outcome', { enum: ['no_changes', 'merged', 'discarded', 'pr_opened', 'asked'] }),
+  outcome: text('outcome', { enum: ['no_changes', 'merged', 'discarded', 'closed_unmerged', 'pr_opened', 'asked'] }),
   outcomeNote: text('outcome_note'),
   ownership: text('ownership', { enum: ['managed', 'attached'] }).notNull(),
   writerToken: text('writer_token'),

@@ -1,9 +1,10 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, or } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getDb, laneEvents, sessionOutcomes } from '@/lib/db';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import {
@@ -670,5 +671,73 @@ export async function markOutcomeMerged({
     }
   } catch (err) {
     console.warn('[session-outcome-merge] mergedClean update failed:', err);
+  }
+}
+
+/**
+ * Replace the provisional worker-completion result with the operator's final
+ * disposition when work is intentionally closed without merging.
+ */
+export async function markOutcomeClosedUnmerged({
+  laneId,
+  packetId,
+  disposition,
+  lane,
+  summary,
+}: {
+  laneId?: string | null;
+  packetId?: string | null;
+  disposition: CloseUnmergedDisposition;
+  lane?: Pick<Lane, 'id' | 'repoPath' | 'branch' | 'runtime' | 'sessionKey' | 'createdAt'> | null;
+  summary?: string | null;
+}): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const trimmedLane = laneId?.trim() || null;
+  const trimmedPacket = packetId?.trim() || null;
+  if (!trimmedLane && !trimmedPacket) return;
+
+  try {
+    const completedAt = new Date().toISOString();
+    const outcomeSummary = summary?.trim() || 'Closed unmerged by the operator.';
+    const targets = [
+      trimmedLane ? eq(sessionOutcomes.laneId, trimmedLane) : null,
+      trimmedPacket ? eq(sessionOutcomes.packetId, trimmedPacket) : null,
+    ].filter((target): target is NonNullable<typeof target> => target !== null);
+    const updated = await db.update(sessionOutcomes)
+      .set({
+        outcome: disposition,
+        summary: outcomeSummary,
+        completedAt,
+        mergedClean: false,
+      })
+      .where(targets.length === 1 ? targets[0] : or(...targets))
+      .run();
+    const changes = (updated as unknown as { changes?: number }).changes ?? 0;
+    if (changes === 0 && lane) {
+      const outcomeId = `outcome-close-${trimmedPacket ?? trimmedLane}-${completedAt.slice(0, 19)}`;
+      await db.insert(sessionOutcomes).values({
+        id: outcomeId,
+        repoPath: lane.repoPath,
+        branch: lane.branch,
+        runtime: lane.runtime,
+        sessionKey: lane.sessionKey,
+        laneId: trimmedLane ?? lane.id,
+        packetId: trimmedPacket,
+        outcome: disposition,
+        summary: outcomeSummary,
+        startedAt: lane.createdAt,
+        completedAt,
+        mergedClean: false,
+      }).onConflictDoNothing();
+    }
+    try {
+      const { invalidateAnswerCache } = await import('@/lib/cortex/qa/ask');
+      invalidateAnswerCache();
+    } catch {
+      // Best-effort — a ledger close must not fail because the cache is unavailable.
+    }
+  } catch (err) {
+    console.warn('[session-outcome-close-unmerged] update failed:', err);
   }
 }
