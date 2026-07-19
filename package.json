@@ -17,7 +17,7 @@
     "build": "sh -c 'node scripts/bust-stale-patch-cache.mjs && env -u TURBOPACK -u NEXT_DEPLOYMENT_ID -u __NEXT_PRIVATE_ORIGIN -u __NEXT_PRIVATE_STANDALONE_CONFIG NODE_ENV=production NODE_OPTIONS=--max-old-space-size=24576 next build --webpack'",
     "start": "sh -c 'next start -p \"${PORT:-3001}\"'",
     "lint": "eslint .",
-    "typecheck": "rm -rf .next/types .next/dev/types && next typegen && tsc --noEmit",
+    "typecheck": "node scripts/typecheck.mjs",
     "rule-check": "tsx scripts/rule-check.ts",
     "eval:qa": "tsx src/lib/cortex/qa/eval/runner.ts",
     "smoke:qa": "NODE_OPTIONS=\"--import=./scripts/register-server-only-stub.mjs\" tsx tests/qa-eval/smoke.ts",

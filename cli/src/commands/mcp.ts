@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../api.js';
@@ -5,6 +6,18 @@ import { resolveConfig } from '../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../output.js';
 
 type McpTarget = 'print' | 'claude-code' | 'cursor';
+
+function resolveProjectPath(): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: 5_000,
+    }).trim() || process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
 
 function parseMcpArgs(sub: string | undefined, rest: string[]): { target: McpTarget } {
   if (sub !== 'install') {
@@ -35,7 +48,7 @@ export async function runMcp(mode: OutputMode, sub: string | undefined, rest: st
   if (args.target === 'claude-code') {
     const res = await apiFetch<Record<string, unknown>>(cfg, '/api/setup/claude-desktop', {
       method: 'POST',
-      body: { target: 'claude-code' },
+      body: { target: 'claude-code', projectPath: resolveProjectPath() },
     });
     const payload = {
       schema: 'o8/cli/mcp-install/v1',
