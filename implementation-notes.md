@@ -51,3 +51,14 @@
 
 - The packet path inventory omitted the operator-defaults store, API route, and test paths; the real persisted resolution seam required those files, so the implementation includes them instead of faking policy-only wiring.
 - Extracted the existing Targeting Machine tier helpers into `src/lib/operator/targeting-tier.ts` because the first rule-check rejected any growth in the already-over-ceiling `defaults.ts`; public exports and behavior remain unchanged.
+
+## Declarative CLI runtime adapter notes
+
+- Added a declarative owned-session registry that renders CLI argument templates and normalizes JSONL or line-pattern logs into the existing `OwnedRuntimeAdapter` contract.
+- Registered OpenCode through the declarative path while preserving its existing universal runtime adapter and public owned-session wrappers.
+- Routed Pi as its own runtime/provider through the real mission path and exposed OpenCode and Pi in the MCP `create_mission` schema.
+- Kept Pi's bidirectional RPC and permission bridge on its existing specialized implementation.
+
+## Deviations
+
+- The branch already used `dispatchable_runtimes` enforcement rather than `codex_only_production`; it was left unchanged because enforcement changes are explicitly outside this packet.
