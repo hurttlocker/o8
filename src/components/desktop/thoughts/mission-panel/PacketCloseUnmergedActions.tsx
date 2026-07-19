@@ -5,7 +5,7 @@ import {
   CLOSE_UNMERGED_DISPOSITIONS,
   closeUnmergedDispositionLabel,
   type CloseUnmergedDisposition,
-} from '@/lib/orchestrator/close-unmerged';
+} from '@/lib/orchestrator/close-unmerged-shared';
 
 interface PacketCloseUnmergedActionsProps {
   packetId: string;

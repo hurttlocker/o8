@@ -7,42 +7,27 @@ import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { markOutcomeClosedUnmerged } from '@/lib/orchestrator/context-relay';
 import { removeMergedWorktree } from '@/lib/orchestrator/worktree-cleanup';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
+// #1570 build fix: the client-safe vocabulary (dispositions, labels, types)
+// lives in a server-import-free module so client components can use it without
+// dragging this server pipeline (+ its transitive `server-only`) into the bundle.
+import {
+  CLOSE_UNMERGED_DISPOSITIONS,
+  isCloseUnmergedDisposition,
+  closeUnmergedDispositionLabel,
+  closeUnmergedOutcomeNote,
+  type CloseUnmergedDisposition,
+  type CloseUnmergedResult,
+} from './close-unmerged-shared';
 
-/**
- * Explicit operator dispositions for work that is intentionally not merged.
- * These are shared by the control plane and every operator surface so a close
- * is recorded consistently instead of inheriting a stop or failure label.
- */
-export const CLOSE_UNMERGED_DISPOSITIONS = [
-  'adopted_elsewhere',
-  'superseded',
-  'spec_changed',
-  'wontfix',
-] as const;
-
-export type CloseUnmergedDisposition = typeof CLOSE_UNMERGED_DISPOSITIONS[number];
-
-export type CloseUnmergedResult =
-  | {
-    ok: true;
-    result: {
-      closed: true;
-      discarded: true;
-      disposition: CloseUnmergedDisposition;
-      laneId: string;
-      packetId: string;
-      worktreeRemoved: boolean;
-      preservedBranch: string | null;
-      note: string;
-    };
-  }
-  | {
-    ok: false;
-    code: string;
-    message: string;
-    status: 400 | 404 | 409 | 422 | 500;
-    error?: unknown;
-  };
+// Re-export the shared vocabulary so existing server-side importers of this
+// module keep working unchanged.
+export {
+  CLOSE_UNMERGED_DISPOSITIONS,
+  isCloseUnmergedDisposition,
+  closeUnmergedDispositionLabel,
+  closeUnmergedOutcomeNote,
+};
+export type { CloseUnmergedDisposition, CloseUnmergedResult };
 
 const execFileAsync = promisify(execFile);
 const CLOSEABLE_LANE_STATUSES = new Set([
@@ -55,34 +40,6 @@ const CLOSEABLE_LANE_STATUSES = new Set([
   'reviewing',
   'failed',
 ]);
-
-const DISPOSITION_LABELS: Record<CloseUnmergedDisposition, string> = {
-  adopted_elsewhere: 'Adopted elsewhere',
-  superseded: 'Superseded',
-  spec_changed: 'Spec changed',
-  wontfix: "Won't fix",
-};
-
-export function isCloseUnmergedDisposition(value: unknown): value is CloseUnmergedDisposition {
-  return typeof value === 'string'
-    && (CLOSE_UNMERGED_DISPOSITIONS as readonly string[]).includes(value);
-}
-
-export function closeUnmergedDispositionLabel(disposition: CloseUnmergedDisposition): string {
-  return DISPOSITION_LABELS[disposition];
-}
-
-export function closeUnmergedOutcomeNote(input: {
-  disposition: CloseUnmergedDisposition;
-  note?: string | null;
-  preservedBranch?: string | null;
-}): string {
-  const details = input.note?.trim();
-  const preserved = input.preservedBranch
-    ? ` Work preserved on branch ${input.preservedBranch}.`
-    : '';
-  return `Closed unmerged — ${closeUnmergedDispositionLabel(input.disposition)}.${preserved}${details ? ` ${details}` : ''}`;
-}
 
 export async function closePacketUnmerged(input: {
   packetId: string;

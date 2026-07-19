@@ -11,7 +11,7 @@ import {
   closeUnmergedDispositionLabel,
   isCloseUnmergedDisposition,
   type CloseUnmergedDisposition,
-} from '@/lib/orchestrator/close-unmerged';
+} from '@/lib/orchestrator/close-unmerged-shared';
 
 export interface DirectiveSummary {
   id: string;
