@@ -24,6 +24,8 @@ import { listActiveOrchestratorTurns } from '@/lib/lane/orchestrator-crash-survi
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import { getCodexDiscoveredFleetAdditions } from '@/lib/codex/sessions';
 import { findLiveClaudeProcesses } from '@/lib/runtimes/claude-code';
+import { routeAction } from '@/lib/runtimes/registry';
+import type { RuntimeId } from '@/lib/runtimes/types';
 import type { Lane } from '@/lib/lane/types';
 
 const execFileAsync = promisify(execFile);
@@ -36,6 +38,8 @@ export interface ResourceRow {
   label: string;
   repo: string | null;
   runtime: string | null;
+  /** Runtime session key for the graceful-stop path; null for un-sessioned rows. */
+  sessionKey: string | null;
   pid: number | null;
   /** CPU percent of a single core, summed over the pid's subtree, or null when unresolved. */
   cpuPercent: number | null;
@@ -66,6 +70,7 @@ interface SessionCandidate {
   label: string;
   repo: string | null;
   runtime: string | null;
+  sessionKey: string | null;
   pid: number | null;
 }
 
@@ -245,6 +250,7 @@ async function collectSessionCandidates(): Promise<SessionCandidate[]> {
         label,
         repo,
         runtime: turn.backend,
+        sessionKey: lane?.sessionKey ?? null,
         pid: Number.isFinite(turn.pid) ? turn.pid : null,
       });
     }
@@ -267,6 +273,7 @@ async function collectSessionCandidates(): Promise<SessionCandidate[]> {
         label: lane?.label || agent.name,
         repo: repo ?? null,
         runtime: 'codex',
+        sessionKey: agent.sessionKey ?? null,
         pid,
       });
     }
@@ -284,6 +291,9 @@ async function collectSessionCandidates(): Promise<SessionCandidate[]> {
         label: repo ? `${repo} • claude` : `claude (pid ${proc.pid})`,
         repo,
         runtime: 'claude-code',
+        // findLiveClaudeProcesses yields pid+cwd only — no durable session key,
+        // so these fall to the guarded SIGTERM path rather than a graceful stop.
+        sessionKey: null,
         pid: proc.pid,
       });
     }
@@ -328,6 +338,7 @@ export async function collectResourceUsage(): Promise<ResourceUsageResult> {
       label: candidate.label,
       repo: candidate.repo,
       runtime: candidate.runtime,
+      sessionKey: candidate.sessionKey,
       pid: candidate.pid,
       cpuPercent,
       memBytes,
@@ -358,6 +369,7 @@ export async function collectResourceUsage(): Promise<ResourceUsageResult> {
       label: classification.hint,
       repo: repoHintFromCommand(row.command) ?? shortCommand(row.command),
       runtime: classification.runtime,
+      sessionKey: null,
       pid: row.pid,
       cpuPercent: sum.cpu,
       memBytes: sum.memBytes,
@@ -387,4 +399,92 @@ export async function collectResourceUsage(): Promise<ResourceUsageResult> {
       ramTotalBytes,
     },
   };
+}
+
+// ── Terminate a row (Kill action) ──
+
+export interface KillResourceResult {
+  ok: boolean;
+  method?: 'interrupt' | 'signal';
+  error?: string;
+}
+
+function runtimeIdForRow(row: ResourceRow): RuntimeId | null {
+  if (row.runtime === 'codex') return 'codex';
+  if (row.runtime === 'claude-code' || row.runtime === 'claude') return 'claude-code';
+  return null;
+}
+
+/**
+ * HARD guard — never terminate an o8 core process. Refuses:
+ *  - `process.pid` (this server) and its entire ANCESTOR chain (Tauri sidecar…)
+ *  - the bundled o8 server (`out/server/server.js`) and the ws-server
+ *  - the tmux server/client (killing it would nuke every pane)
+ */
+function isProtectedPid(pid: number, byPid: Map<number, PsRow>): boolean {
+  const selfChain = new Set<number>();
+  let cursor: number | undefined = process.pid;
+  const visited = new Set<number>();
+  while (cursor && cursor > 1 && !visited.has(cursor)) {
+    visited.add(cursor);
+    selfChain.add(cursor);
+    cursor = byPid.get(cursor)?.ppid;
+  }
+  if (selfChain.has(pid)) return true;
+
+  const row = byPid.get(pid);
+  if (!row) return false;
+  const command = row.command;
+  if (command.includes('out/server/server.js')) return true;
+  if (command.includes('ws-server')) return true;
+  if (/\btmux\b/.test(command)) return true;
+  return false;
+}
+
+/**
+ * Terminate one resource row. Safety-guarded: only acts on a pid present in the
+ * CURRENT sessions[]/processes[] snapshot, and hard-refuses o8's own processes.
+ * Session rows with a sessionKey prefer the runtime adapter's graceful interrupt;
+ * everything else falls back to a guarded SIGTERM. Never throws.
+ */
+export async function killResourceRow(input: { pid: number; key?: string | null }): Promise<KillResourceResult> {
+  const pid = Number(input.pid);
+  if (!Number.isInteger(pid) || pid <= 1) {
+    return { ok: false, error: 'A valid process id is required.' };
+  }
+
+  // 1) The pid MUST be in the current attribution snapshot.
+  const usage = await collectResourceUsage();
+  const row = [...usage.sessions, ...usage.processes].find(
+    (candidate) => candidate.pid === pid && (!input.key || candidate.key === input.key),
+  );
+  if (!row) {
+    return { ok: false, error: 'That process is no longer in the resource list.' };
+  }
+
+  // 2) Hard guard against o8's own processes.
+  const rows = await sweepProcesses();
+  const byPid = new Map<number, PsRow>(rows.map((entry) => [entry.pid, entry]));
+  if (isProtectedPid(pid, byPid)) {
+    return { ok: false, error: 'Refusing to terminate an o8 core process (server, ws-server, tmux, or this process chain).' };
+  }
+
+  // 3) Graceful stop for sessions the runtime adapter can interrupt.
+  const runtimeId = runtimeIdForRow(row);
+  if (row.kind === 'session' && row.sessionKey && runtimeId) {
+    try {
+      const result = await routeAction(runtimeId, 'interrupt', row.sessionKey);
+      if (result?.ok) return { ok: true, method: 'interrupt' };
+    } catch {
+      // fall through to the signal path
+    }
+  }
+
+  // 4) Guarded SIGTERM fallback for un-sessioned agent processes.
+  try {
+    process.kill(pid, 'SIGTERM');
+    return { ok: true, method: 'signal' };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Failed to terminate process.' };
+  }
 }
