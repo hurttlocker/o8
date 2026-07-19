@@ -3,10 +3,13 @@ import { createConnection, type Socket } from 'node:net';
 import * as os from 'node:os';
 
 import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
+import {
+  createCodedError, getErrorCode, isMutationAckTimeout, queueCommandWrite,
+  type PendingRequest,
+} from '@/lib/mcp/o8-webview-command-transport';
 
 const DEFAULT_WINDOW_LABEL = 'main';
 const REQUEST_TIMEOUT_MS = 30_000;
-const MUTATION_ACK_TIMEOUT_RE = /(?:timeout waiting for .* response|request timed out|timed out after)/i;
 
 /**
  * Commands safe to re-fire after a reconnect: pure reads with no side
@@ -22,12 +25,6 @@ const RECONNECT_RETRY_SAFE_COMMANDS = new Set([
 ]);
 const UNAVAILABLE_MESSAGE = 'o8 webview tools unavailable — launch o8 with --features dev-mcp-plugin or use the signed build';
 const JPEG_MIME_TYPE = 'image/jpeg';
-
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: unknown) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
 
 interface SocketResponse {
   id?: string;
@@ -64,25 +61,6 @@ interface PageMapResult {
   viewport?: { width?: number; height?: number };
   elements?: PageMapElement[];
   content?: string;
-}
-
-function createCodedError(message: string, code?: string): Error {
-  const error = new Error(message) as Error & { code?: string };
-  if (code) {
-    error.code = code;
-  }
-  return error;
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-    ? error.code
-    : undefined;
-}
-
-function isMutationAckTimeout(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return MUTATION_ACK_TIMEOUT_RE.test(message);
 }
 
 function extractDataUrlPayload(value: unknown): { base64: string; mimeType: string } {
@@ -570,6 +548,12 @@ export class O8WebviewClient {
     return { result: normalizeTextResult(result) };
   }
 
+  async queueEvalJs(code: string): Promise<void> {
+    await this.queueCommand('execute_js', {
+      window_label: DEFAULT_WINDOW_LABEL,
+      code,
+    });
+  }
   private async focusedValueEndsWith(text: string): Promise<boolean> {
     const suffix = JSON.stringify(text);
     const raw = await this.evalJs(`(() => {
@@ -736,6 +720,22 @@ export class O8WebviewClient {
         this.pending.delete(requestId);
         reject(this.normalizeConnectionError(error));
       });
+    });
+  }
+
+  private async queueCommand(command: string, payload: Record<string, unknown>): Promise<void> {
+    await this.ensureConnected();
+    if (!this.socket) {
+      throw new Error('Socket client not initialized');
+    }
+    await queueCommandWrite({
+      socket: this.socket,
+      pending: this.pending,
+      command,
+      payload,
+      authToken: this.authToken,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      normalizeConnectionError: (error) => this.normalizeConnectionError(error),
     });
   }
 

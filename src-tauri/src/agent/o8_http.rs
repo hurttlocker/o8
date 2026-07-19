@@ -63,11 +63,20 @@ fn with_auth(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 
 /// GET a loopback path, parsing the JSON body.
 pub async fn get_json(path: &str) -> Result<Value, String> {
+    get_json_timeout(path, TIMEOUT_SECS).await
+}
+
+/// GET with a custom timeout for bounded verification probes.
+pub async fn get_json_timeout(path: &str, timeout_secs: u64) -> Result<Value, String> {
     let url = format!("{}{}", base(), path);
-    let resp = with_auth(client()?.get(&url))
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("reqwest build failed: {e}"))?;
+    let resp = with_auth(client.get(&url))
         .send()
         .await
-        .map_err(|e| format!("o8 GET {path} failed: {e}"))?;
+        .map_err(|e| transport_error("GET", path, timeout_secs, &e))?;
     read_json(path, resp).await
 }
 
@@ -89,8 +98,20 @@ pub async fn post_json_timeout(path: &str, body: Value, timeout_secs: u64) -> Re
     let resp = with_auth(client.post(&url).json(&body))
         .send()
         .await
-        .map_err(|e| format!("o8 POST {path} failed: {e}"))?;
+        .map_err(|e| transport_error("POST", path, timeout_secs, &e))?;
     read_json(path, resp).await
+}
+
+fn transport_error(method: &str, path: &str, timeout_secs: u64, error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        format!("o8 {method} {path} timed out after {timeout_secs}s")
+    } else {
+        format!("o8 {method} {path} failed: {error}")
+    }
+}
+
+pub fn is_timeout_error(message: &str) -> bool {
+    message.contains(" timed out after ")
 }
 
 /// PATCH a JSON body to a loopback path, parsing the JSON response.
@@ -114,4 +135,19 @@ async fn read_json(path: &str, resp: reqwest::Response) -> Result<Value, String>
         return Err(format!("o8 {path} error ({status}): {snippet}"));
     }
     serde_json::from_str(&text).map_err(|e| format!("o8 {path} returned bad JSON: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_timeout_error;
+
+    #[test]
+    fn timeout_classifier_only_accepts_the_transport_timeout_marker() {
+        assert!(is_timeout_error(
+            "o8 POST /api/canvas/intent timed out after 15s"
+        ));
+        assert!(!is_timeout_error(
+            "o8 POST /api/canvas/intent failed: connection refused"
+        ));
+    }
 }

@@ -2,14 +2,16 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { getApiBase } from '@/lib/panel/api-port';
 
 /**
  * Canvas intent bus (#1232 phase 2) — gated in middleware (loopback + token).
  * Symon (and any local agent surface) drives the canvas through one POST:
  * the verb rides into the webview as an `o8:canvas-intent` CustomEvent, whose
- * listener executes the SAME handlers the canvas rail buttons call. Dispatch
- * is synchronous in the page, so the ack stamped on window.__o8CanvasIntentLast
- * is read back in the same eval.
+ * listener executes the SAME handlers the canvas rail buttons call. Read verbs
+ * retain the synchronous page ack; non-idempotent `spawn-agents` is queued in a
+ * separate eval and acknowledged immediately so a busy webview cannot turn a
+ * landed spawn into an HTTP timeout.
  *
  * `ensure` (default true) navigates the webview to the canvas route first when
  * it's somewhere else, then waits for the intent listener to mount.
@@ -41,20 +43,24 @@ function webviewClient(): O8WebviewClient {
   return store.__o8BrowserAgentClient;
 }
 
-function dispatchEval(verb: string, args: Record<string, unknown>, origin: string | null): string {
+function readinessEval(): string {
+  return `(() => JSON.stringify({ ready: window.__o8CanvasIntentReady === true, route: location.pathname }))()`;
+}
+
+function dispatchEval(verb: string, args: Record<string, unknown>, origin: string | null, readAck: boolean): string {
   return `(() => {
     const w = window;
     if (w.__o8CanvasIntentReady !== true) {
       return JSON.stringify({ ready: false, route: location.pathname });
     }
     w.dispatchEvent(new CustomEvent('o8:canvas-intent', { detail: { verb: ${JSON.stringify(verb)}, args: ${JSON.stringify(args)}, origin: ${JSON.stringify(origin)} } }));
-    return JSON.stringify({ ready: true, route: location.pathname, ack: w.__o8CanvasIntentLast || null });
+    return JSON.stringify({ ready: true, route: location.pathname${readAck ? ', ack: w.__o8CanvasIntentLast || null' : ''} });
   })()`;
 }
 
-async function probeDispatch(client: O8WebviewClient, verb: string, args: Record<string, unknown>, origin: string | null): Promise<DispatchProbe> {
+async function probeCanvas(client: O8WebviewClient): Promise<DispatchProbe> {
   try {
-    const result = await client.evalJs(dispatchEval(verb, args, origin));
+    const result = await client.evalJs(readinessEval());
     return JSON.parse(result.result) as DispatchProbe;
   } catch {
     // evalJs can throw transiently while the webview is mid-navigation (the
@@ -62,6 +68,15 @@ async function probeDispatch(client: O8WebviewClient, verb: string, args: Record
     // route is deliberately "retry probe", never evidence to navigate.
     return { ready: false };
   }
+}
+
+async function dispatchWithAck(client: O8WebviewClient, verb: string, args: Record<string, unknown>, origin: string | null): Promise<DispatchProbe> {
+  const result = await client.evalJs(dispatchEval(verb, args, origin, true));
+  return JSON.parse(result.result) as DispatchProbe;
+}
+
+async function queueSpawnDispatch(client: O8WebviewClient, args: Record<string, unknown>, origin: string | null): Promise<void> {
+  await client.queueEvalJs(dispatchEval('spawn-agents', args, origin, false));
 }
 
 export async function POST(request: NextRequest) {
@@ -73,10 +88,13 @@ export async function POST(request: NextRequest) {
   const args = (body?.args && typeof body.args === 'object' ? body.args : {}) as Record<string, unknown>;
   const ensure = body?.ensure !== false;
   const origin = body?.origin === 'symon' ? 'symon' : null;
+  if (verb === 'spawn-agents' && (typeof args.task !== 'string' || !args.task.trim())) {
+    return NextResponse.json({ ok: false, error: 'spawn-agents needs args.task' }, { status: 400 });
+  }
 
   try {
     const client = webviewClient();
-    let probe = await probeDispatch(client, verb, args, origin);
+    let probe = await probeCanvas(client);
     let navigated = false;
 
     if (!probe.ready && ensure) {
@@ -93,7 +111,7 @@ export async function POST(request: NextRequest) {
         const task = typeof args.task === 'string' ? args.task.trim() : '';
         if (repoPath && task) {
           const { POST: spawnPrompt } = await import('@/app/api/orchestrator/spawn-prompt/route');
-          const forwarded = new NextRequest(new Request('http://127.0.0.1/api/orchestrator/spawn-prompt', {
+          const forwarded = new NextRequest(new Request(new URL('/api/orchestrator/spawn-prompt', getApiBase()), {
             method: 'POST',
             headers: request.headers,
             body: JSON.stringify({
@@ -115,7 +133,7 @@ export async function POST(request: NextRequest) {
       }
       if (probe.route && probe.route !== CANVAS_ROUTE) {
         await new Promise((resolve) => setTimeout(resolve, NAV_CONFIRM_MS));
-        const confirm = await probeDispatch(client, verb, args, origin);
+        const confirm = await probeCanvas(client);
         // FULL navigation, not client.navigate() — that drives the SPA router
         // (__o8Navigate__), which does not reliably cross from /dashboard to
         // the /preview/canvas-glass route segment, so the canvas never loads
@@ -138,7 +156,7 @@ export async function POST(request: NextRequest) {
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (!probe.ready && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
-        probe = await probeDispatch(client, verb, args, origin);
+        probe = await probeCanvas(client);
       }
     }
 
@@ -153,7 +171,26 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const ack = probe.ack && probe.ack.verb === verb ? probe.ack : null;
+    if (verb === 'spawn-agents') {
+      await queueSpawnDispatch(client, args, origin);
+      return NextResponse.json({
+        ok: true,
+        accepted: true,
+        verb,
+        note: 'spawn-agents dispatch queued',
+        ...(navigated ? { navigated: true } : {}),
+      }, { status: 202 });
+    }
+
+    const dispatched = await dispatchWithAck(client, verb, args, origin);
+    if (!dispatched.ready) {
+      return NextResponse.json({
+        ok: false,
+        error: 'canvas intent listener disappeared before dispatch',
+        route: dispatched.route ?? null,
+      });
+    }
+    const ack = dispatched.ack && dispatched.ack.verb === verb ? dispatched.ack : null;
     return NextResponse.json({
       ok: ack ? ack.ok : true,
       verb,

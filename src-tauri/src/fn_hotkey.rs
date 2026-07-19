@@ -242,6 +242,12 @@ static LAST_OPTION_BRUSH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 #[cfg(target_os = "macos")]
 static AGENT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
+/// The agent session whose STT events still belong to the Right-Option lane.
+/// Unlike `AGENT_SESSION_ID`, this survives key-up so the recognizer's trailing
+/// final/status/complete events retain `lane: "agent"` through teardown.
+#[cfg(target_os = "macos")]
+static AGENT_EVENT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+
 /// NSEventModifierFlagCommand = 1 << 20.
 #[cfg(target_os = "macos")]
 const COMMAND_FLAG: u64 = 0x100000;
@@ -299,6 +305,35 @@ pub fn take_agent_mode() -> bool {
 pub fn take_agent_mode() -> bool {
     false
 }
+
+#[cfg(target_os = "macos")]
+pub fn is_agent_event_session(session_id: Option<u64>) -> bool {
+    let tracked = AGENT_EVENT_SESSION_ID.load(Ordering::SeqCst);
+    (tracked != 0 && session_id.is_none_or(|session_id| session_id == tracked))
+        || (tracked == 0 && AGENT_MODE.load(Ordering::SeqCst))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn is_agent_event_session(_session_id: Option<u64>) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+pub fn clear_agent_event_session(session_id: Option<u64>) {
+    if let Some(session_id) = session_id {
+        let _ = AGENT_EVENT_SESSION_ID.compare_exchange(
+            session_id,
+            0,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+    } else {
+        AGENT_EVENT_SESSION_ID.store(0, Ordering::SeqCst);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn clear_agent_event_session(_session_id: Option<u64>) {}
 
 /// True while a DOUBLE-TAP-Fn long-form dictation is active. Unlike push-to-talk
 /// (which ends on Fn release), long-form stays on until a single Fn tap finishes
@@ -630,6 +665,16 @@ fn surface_dictation_start_error(raw: &str) {
 /// stored yet.
 #[cfg(target_os = "macos")]
 fn morph_dock_idle() {
+    morph_dock_idle_for_lane(false);
+}
+
+#[cfg(target_os = "macos")]
+fn morph_agent_dock_idle() {
+    morph_dock_idle_for_lane(true);
+}
+
+#[cfg(target_os = "macos")]
+fn morph_dock_idle_for_lane(agent_lane: bool) {
     // Dictation ended (discard / cancel / error) — restore any ducked system
     // volume. Idempotent: a no-op when nothing was ducked (#1207).
     crate::audio_ducker::restore();
@@ -642,12 +687,16 @@ fn morph_dock_idle() {
                     serde_json::json!({ "type": "system-idle", "origin": "system" });
                 // Direct-to-dock so the morph back to the idle capsule always lands.
                 log::info!("[fn-hotkey] morph dock → idle (system-idle → dock)");
-                let _ = app.emit_to(
-                    crate::dock_window::DOCK_LABEL,
-                    "o8:stt-event",
-                    payload.clone(),
-                );
-                let _ = app.emit("o8:stt-event", payload);
+                if agent_lane {
+                    crate::stt_engine::emit_agent_stt(&app, payload);
+                } else {
+                    let _ = app.emit_to(
+                        crate::dock_window::DOCK_LABEL,
+                        "o8:stt-event",
+                        payload.clone(),
+                    );
+                    let _ = app.emit("o8:stt-event", payload);
+                }
             }
         });
     }
@@ -1016,14 +1065,7 @@ fn begin_agent_dictation() {
                     "surface": partials_surface.as_str(),
                 });
                 log::info!("[fn-hotkey] morph dock → recording (agent start)");
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
-                // Direct delivery to the partials HUD too — its latch keys off
-                // this exact event, and the broadcast can miss secondary webviews.
-                let _ = app.emit_to(crate::agent_partials_window::PARTIALS_LABEL, "o8:stt-event", payload.clone());
-                // Same direct delivery to the spatial-ink page so it latches on
-                // the agent-lane start and enables drawing for this hold.
-                let _ = app.emit_to(crate::spatial_ink_window::SPATIAL_INK_LABEL, "o8:stt-event", payload.clone());
-                let _ = app.emit("o8:stt-event", payload);
+                crate::stt_engine::emit_agent_stt(&app, payload);
             }
         });
     }
@@ -1033,10 +1075,11 @@ fn begin_agent_dictation() {
             // A sub-120ms brush may have cleared AGENT_MODE while we were starting.
             if !AGENT_MODE.load(Ordering::SeqCst) {
                 let _ = crate::stt_engine::stop_session(sid);
-                morph_dock_idle();
+                morph_agent_dock_idle();
                 return;
             }
             AGENT_SESSION_ID.store(sid, Ordering::SeqCst);
+            AGENT_EVENT_SESSION_ID.store(sid, Ordering::SeqCst);
             tracing::info!("[fn-hotkey] agent dictation started (session={sid})");
         }
         Err(e) => {
@@ -1044,7 +1087,8 @@ fn begin_agent_dictation() {
             AGENT_MODE.store(false, Ordering::SeqCst);
             AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
             AGENT_SESSION_ID.store(0, Ordering::SeqCst);
-            morph_dock_idle();
+            AGENT_EVENT_SESSION_ID.store(0, Ordering::SeqCst);
+            morph_agent_dock_idle();
         }
     }
 }
@@ -1069,6 +1113,7 @@ fn discard_agent_dictation() {
     let sid = AGENT_SESSION_ID.swap(0, Ordering::SeqCst);
     AGENT_MODE.store(false, Ordering::SeqCst);
     AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+    clear_agent_event_session(Some(sid));
     request_discard_finalize(sid);
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] agent cancel stop failed: {e}");
@@ -1078,7 +1123,7 @@ fn discard_agent_dictation() {
     if let Some(app) = APP_HANDLE.get() {
         crate::spatial_ink_window::disarm(app);
     }
-    morph_dock_idle();
+    morph_agent_dock_idle();
 }
 
 /// Spawn the global Fn hotkey monitor. Call ONCE from `setup()` alongside
