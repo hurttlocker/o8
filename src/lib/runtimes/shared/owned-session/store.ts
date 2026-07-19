@@ -1094,7 +1094,16 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     if (!activeRun) return false;
     const costLine = await readCostLine(activeRun);
     const orphanedAt = nowIso();
-    if (await isOwnedRunAlive(activeRun)) {
+    // #1585 durable guard: NEVER signal a foreign process from an isolated test
+    // context. `O8_TEST_DATA_DIR_PINNED` is set only by the vitest setup, which
+    // redirects the lane DB (and, since #1585, the owned roots) to a temp dir —
+    // so this process's notion of "orphaned" is measured against an EMPTY
+    // isolated ledger and says nothing about the operator's real fleet. A test
+    // running `npm test` inside a packet worktree that reaches this path would
+    // otherwise SIGINT every live production worker (the fleet-wipe root cause).
+    // Skip the interrupt entirely; the in-memory/temp archive below is harmless.
+    const inIsolatedTestContext = Boolean(process.env.O8_TEST_DATA_DIR_PINNED);
+    if (!inIsolatedTestContext && await isOwnedRunAlive(activeRun)) {
       try {
         if (activeRun.tmuxSession) {
           await signalBridgeTerminalSession(activeRun.tmuxSession, 'SIGINT');

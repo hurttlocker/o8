@@ -98,7 +98,7 @@ export async function ownedTranscriptMtimeMs(sessionKey: string): Promise<number
 export interface StaleLaneLivenessDecision {
   /** true → KEEP (not a zombie); false → proceed to reap. */
   keep: boolean;
-  source: 'transcript-activity' | 'live-process-guard' | 'stale-liveness';
+  source: 'transcript-activity' | 'live-process-guard' | 'stale-liveness' | 'unknown-fail-closed';
   note: string;
   activityAgeMs?: number;
 }
@@ -127,6 +127,14 @@ export async function assessStaleLaneLiveness(
 
   // 1. Transcript activity — the real streaming pulse. Transcript activity IS a
   //    heartbeat: a lane streaming tokens inside the stale window is not a zombie.
+  // `hadDeathEvidence` gates the final reap: we only conclude a lane is dead
+  // when a probe AFFIRMATIVELY said so (transcript resolved AND stale, or the
+  // worktree was probed AND clean). Pure unknown — transcript unresolvable and
+  // no worktree to probe — must KEEP (fail closed), never reap (#1585, ginsu
+  // review): the upstream owner probe that got us here is exactly the signal
+  // proven unreliable for detached workers.
+  let hadDeathEvidence = false;
+
   const sessionKey = lane.sessionKey?.trim();
   if (sessionKey) {
     let mtime: number | null = null;
@@ -145,6 +153,8 @@ export async function assessStaleLaneLiveness(
           activityAgeMs,
         };
       }
+      // Transcript resolved but is older than the window — real death evidence.
+      hadDeathEvidence = true;
     }
   }
 
@@ -159,6 +169,8 @@ export async function assessStaleLaneLiveness(
           note: 'live process cwd inside worktree (or probe uncertain — fail closed)',
         };
       }
+      // Worktree probed and no live process — corroborating death evidence.
+      hadDeathEvidence = true;
     } catch (error) {
       // Fail closed: an unexpected probe throw is uncertainty, not death.
       return {
@@ -169,6 +181,16 @@ export async function assessStaleLaneLiveness(
         }`,
       };
     }
+  }
+
+  if (!hadDeathEvidence) {
+    // No affirmative liveness AND no affirmative death evidence — genuine
+    // unknown (unresolvable transcript + no worktree path). Keep fail-closed.
+    return {
+      keep: true,
+      source: 'unknown-fail-closed',
+      note: 'no liveness evidence and no death evidence — keeping (unknown, fail closed)',
+    };
   }
 
   return {
