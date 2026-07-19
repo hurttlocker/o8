@@ -3,6 +3,7 @@ export type O8Tab =
   | 'browser'
   | 'prs'
   | 'activity'
+  | 'resources'
   | 'inbox'
   | 'spec'
   | 'launcher'
