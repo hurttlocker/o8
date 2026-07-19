@@ -1,6 +1,6 @@
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
-import type { OrchestratorRuntime, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, PacketDispatcherAttribution, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export interface LoadedIssue {
@@ -47,6 +47,8 @@ export interface CreateMissionInput {
    * dispatches (no session-rule inheritance).
    */
   orchestratorThreadId?: string | null;
+  /** Durable origin for routing review-worthy terminal work back to its caller. */
+  dispatcher?: PacketDispatcherAttribution | null;
   /**
    * Huddle mode (#1282) — stamps every packet's `huddle`. When true, each
    * worker aligns with the orchestrator (posts plan + pushback, then STOPS)

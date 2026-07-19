@@ -33,6 +33,8 @@ import { isProtectedBranch } from '@/lib/lane/policy';
 import { evaluatePolicy } from '@/lib/approvals/policies';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/dispatch';
 import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
+import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
+import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
@@ -565,26 +567,45 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
       // Durable approved-review precondition. Computed after the merge gate so
       // block-level gate findings still force an operator card regardless of review.
-      const hasApprovedReview = actor === 'user' ? true : await hasDurableApprovedReview(lane);
+      let hasApprovedReview = actor === 'user' ? true : await hasDurableApprovedReview(lane);
+      let surfaceReasons: string[] = [];
+      if (actor !== 'user' && resolveRequireApprovalSync() === 'surface') {
+        const surfaceDecision = await decideSurfaceMerge(lane, {
+          passed: gateResult.passed,
+          violations: gateResult.violations,
+          diffBase: gateResult.diffBase,
+        });
+        hasApprovedReview = surfaceDecision.hasApprovedReview;
+        surfaceReasons = surfaceDecision.reasons;
+      }
 
       // Policy gate — require approval for merge
       const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
         orchestratorReviewed: command.orchestratorReviewed,
         gatePassed: gateResult.passed,
         hasApprovedReview,
+        surfaceReviewRequired: surfaceReasons.length > 0,
       }));
       if (mergePolicy.requiresApproval && actor !== 'user') {
+        const routesToDispatcher = mergePolicy.ruleId === 'surface-dispatcher-review';
         return createLaneActionApproval(lane, actor, {
           verb: 'merge',
           commitMessage: command.commitMessage,
           expectedHeadSha: command.expectedHeadSha,
           reviewSummary: command.reviewSummary,
-          title: 'Merge lane',
-          description: command.reviewSummary || `Merge lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
-          summary: `Merge: ${lane.branch} → ${lane.baseBranch}`,
+          title: routesToDispatcher ? 'Dispatcher review requested' : 'Merge lane',
+          description: routesToDispatcher
+            ? `This packet needs review before merge: ${surfaceReasons.join(' ')}`
+            : command.reviewSummary || `Merge lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
+          summary: routesToDispatcher
+            ? `Review requested: ${lane.branch} → ${lane.baseBranch}`
+            : `Merge: ${lane.branch} → ${lane.baseBranch}`,
           risk: mergePolicy.risk,
           policyRuleId: mergePolicy.ruleId,
-          note: `Approval required: ${mergePolicy.reason}`,
+          metadata: routesToDispatcher ? { 'Surface reasons': surfaceReasons.join(' | ') } : undefined,
+          note: routesToDispatcher
+            ? 'Review-worthy merge routed to the packet dispatcher.'
+            : `Approval required: ${mergePolicy.reason}`,
         });
       }
 

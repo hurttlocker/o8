@@ -220,8 +220,8 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         requireApproval: {
           type: 'string',
-          enum: ['high-risk', 'always', 'never'],
-          description: 'Human approval posture for lane merges. "high-risk" preserves the default behavior; "always" gates every merge; "never" enables normal full autonomy.',
+          enum: ['high-risk', 'surface', 'always', 'never'],
+          description: 'Human approval posture for lane merges. "surface" keeps easy reviewed merges moving and routes review-worthy work to its dispatcher; "high-risk" preserves the default behavior; "always" gates every merge; "never" enables normal full autonomy.',
         },
       },
     },

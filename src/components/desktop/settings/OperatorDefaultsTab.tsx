@@ -37,6 +37,7 @@ import {
   CODEX_WORKER_EFFORT_OPTIONS,
   CLAUDE_WORKER_EFFORT_OPTIONS,
   ENV_LOCKED_REASON,
+  REQUIRE_APPROVAL_OPTIONS,
   resolvePickerGroupOpen,
   type AutoApplyUpdates,
   type DispatchRuntime,
@@ -44,6 +45,7 @@ import {
   type OperatorDefaultsResponse,
   type OrchestratorBackendSetting,
   type ReviewerBackendSetting,
+  type RequireApproval,
   type OverlapGateMode,
   type SubscriptionProfile,
 } from './dispatch-shared';
@@ -386,6 +388,20 @@ export function OperatorDefaultsTab() {
             checked={values.reviewContinuation}
             disabled={envLocked('reviewContinuation') || busyField === 'reviewContinuation'}
             onToggle={(next) => { updateField('reviewContinuation', next); }}
+            divider
+          />
+          <SettingsRow
+            icon={<MergeIcon />}
+            label="Merge approval"
+            subtitle={lockedSub('requireApproval', 'Surface routes review-worthy work back to its dispatcher; easy reviewed packets keep moving')}
+            accessory={
+              <SettingsSegmented
+                value={values.requireApproval}
+                onChange={(next) => { updateField('requireApproval', next as RequireApproval); }}
+                options={REQUIRE_APPROVAL_OPTIONS}
+              />
+            }
+            disabled={envLocked('requireApproval') || busyField === 'requireApproval'}
             divider
           />
           <SettingsRow

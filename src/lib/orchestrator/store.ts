@@ -1,5 +1,5 @@
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
-import { normalizeDecompositionMetadata, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
@@ -25,7 +25,6 @@ import type {
 } from '@/lib/orchestrator/types';
 
 const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi']);
-
 /** Deserializer — validates and coerces an unknown value to OrchestratorRuntime. */
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
   if (typeof value === 'string' && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
@@ -434,6 +433,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     orchestratorThreadId: typeof packet.orchestratorThreadId === 'string' && packet.orchestratorThreadId.trim()
       ? packet.orchestratorThreadId.trim()
       : undefined,
+    dispatcher: normalizePacketDispatcher(packet.dispatcher),
     prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
     allowedFiles: Array.isArray(packet.allowedFiles)
       ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)

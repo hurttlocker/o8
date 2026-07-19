@@ -1233,7 +1233,7 @@ function findTerminalPacket(
   return null;
 }
 
-export async function handleWaitForMissionReady(args: Record<string, unknown>): Promise<McpToolResult> {
+export async function handleWaitForMissionReady(args: Record<string, unknown>, readStatus: typeof getMissionStatus = getMissionStatus): Promise<McpToolResult> {
   const TIMEOUT_DEFAULT_MS = 10 * 60 * 1000;
   const TIMEOUT_MAX_MS = 30 * 60 * 1000;
   const POLL_DEFAULT_MS = 3000;
@@ -1247,7 +1247,7 @@ export async function handleWaitForMissionReady(args: Record<string, unknown>): 
   const pollIntervalMs = Math.max(POLL_MIN_MS, pollInput);
 
   try {
-    const baseline = (await getMissionStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
+    const baseline = (await readStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
 
     // If a terminal state already exists at baseline, return immediately so
     // the caller never blocks unnecessarily.
@@ -1268,7 +1268,7 @@ export async function handleWaitForMissionReady(args: Record<string, unknown>): 
       }
       if (Date.now() >= deadline) break;
 
-      const next = (await getMissionStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
+      const next = (await readStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
       const terminal = findTerminalPacket(next, packetIdFilter);
       if (terminal) {
         return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: terminal.id ?? null });
@@ -1278,7 +1278,7 @@ export async function handleWaitForMissionReady(args: Record<string, unknown>): 
       }
     }
 
-    const finalSnapshot = (await getMissionStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
+    const finalSnapshot = (await readStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
     return jsonResult({ ...finalSnapshot, wakeReason: 'timeout', terminalPacketId: null });
   } catch (error) {
     console.error(`${'[mcp-operator]'} wait_for_mission_ready failed: ${errorText(error)}`);

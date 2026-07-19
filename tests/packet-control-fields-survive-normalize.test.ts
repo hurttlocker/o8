@@ -106,6 +106,7 @@ function fullPacketFixture() {
     }),
     dispatchRuntimePin: 'codex',
     orchestratorThreadId: 'thoughts-123',
+    dispatcher: { surface: 'orchestrator', id: 'thoughts-123' },
     prompt: 'Implement the thing',
     allowedFiles: ['src/a.ts'],
     learnedRules: ['Preserve fields'],
