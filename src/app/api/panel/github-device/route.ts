@@ -10,7 +10,7 @@ import { resolveRequestPrincipal } from '@/lib/auth/principal';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type DeviceAction = 'start' | 'poll' | 'cancel';
+type DeviceAction = 'start' | 'poll' | 'cancel' | 'login_token' | 'logout';
 
 type DeviceFlowRecord = {
   flowId: string;
@@ -89,6 +89,76 @@ function execGhWithToken(token: string) {
   );
 }
 
+function execGhLogout(user: string) {
+  execFileSync(
+    'gh',
+    ['auth', 'logout', '--hostname', DEFAULT_HOSTNAME, '--user', user],
+    {
+      encoding: 'utf-8',
+      timeout: 15000,
+      env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
+    },
+  );
+}
+
+async function completeGitHubConnection(accessToken: string) {
+  execGhWithToken(accessToken);
+
+  const ghUser = await fetchGitHubUser(accessToken);
+  if (!ghUser) {
+    throw new Error('GitHub connected to gh, but its user profile could not be loaded.');
+  }
+
+  let email = ghUser.email;
+  if (!email) email = await fetchGitHubEmail(accessToken);
+
+  const user = findOrCreateByGithub(ghUser.id, {
+    email: email ?? undefined,
+    name: ghUser.name ?? ghUser.login,
+    avatarUrl: ghUser.avatar_url,
+  });
+  const jwt = await signToken({
+    uid: user.id,
+    ghUser: ghUser.login,
+    plan: user.plan,
+  });
+
+  createSession({
+    userId: user.id,
+    token: jwt,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+  });
+
+  return {
+    jwt,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      plan: user.plan,
+      githubUsername: ghUser.login,
+    },
+  };
+}
+
+function connectedResponse(result: Awaited<ReturnType<typeof completeGitHubConnection>>, note: string) {
+  const response = NextResponse.json({
+    ok: true,
+    status: 'complete',
+    note,
+    user: result.user,
+  });
+  response.cookies.set('o8-token', result.jwt, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 30 * 24 * 60 * 60,
+    path: '/',
+  });
+  return response;
+}
+
 function routeError(error: unknown) {
   if (typeof error === 'object' && error && 'stderr' in error) {
     const stderr = error.stderr;
@@ -116,18 +186,42 @@ function pendingResponse(flow: DeviceFlowRecord, note: string) {
 
 export async function POST(request: Request) {
   if (resolveRequestPrincipal(request) !== 'operator') {
-    return NextResponse.json({ error: 'GitHub device login is operator-only.' }, { status: 403 });
+    return NextResponse.json({ error: 'GitHub connection changes are operator-only.' }, { status: 403 });
   }
   try {
     const payload = await request.json().catch(() => null) as {
       action?: DeviceAction;
       flowId?: string;
       csrfToken?: string;
+      token?: string;
+      user?: string;
     } | null;
 
     const action = payload?.action;
-    if (!action || (action !== 'start' && action !== 'poll' && action !== 'cancel')) {
-      return NextResponse.json({ error: 'Unsupported GitHub device action.' }, { status: 400 });
+    if (!action || !['start', 'poll', 'cancel', 'login_token', 'logout'].includes(action)) {
+      return NextResponse.json({ error: 'Unsupported GitHub connection action.' }, { status: 400 });
+    }
+
+    if (action === 'login_token') {
+      const token = payload?.token?.trim();
+      if (!token) {
+        return NextResponse.json({ error: 'token is required.' }, { status: 400 });
+      }
+      const result = await completeGitHubConnection(token);
+      return connectedResponse(result, 'GitHub connected with an access token.');
+    }
+
+    if (action === 'logout') {
+      const user = payload?.user?.trim();
+      if (!user) {
+        return NextResponse.json({ error: 'user is required.' }, { status: 400 });
+      }
+      execGhLogout(user);
+      return NextResponse.json({
+        ok: true,
+        status: 'disconnected',
+        note: `Disconnected GitHub account ${user} from this machine's gh CLI config.`,
+      });
     }
 
     const clientId = githubClientId();
@@ -230,70 +324,9 @@ export async function POST(request: Request) {
     );
 
     if (pollPayload?.access_token) {
-      // 1. Login gh CLI (existing behavior)
-      execGhWithToken(pollPayload.access_token);
-
-      // 2. Create/update user in our database + sign JWT (new: #216)
-      let authUser: Record<string, unknown> | undefined;
-      let jwt: string | undefined;
-      try {
-        const ghUser = await fetchGitHubUser(pollPayload.access_token);
-        if (ghUser) {
-          let email = ghUser.email;
-          if (!email) email = await fetchGitHubEmail(pollPayload.access_token);
-
-          const user = findOrCreateByGithub(ghUser.id, {
-            email: email ?? undefined,
-            name: ghUser.name ?? ghUser.login,
-            avatarUrl: ghUser.avatar_url,
-          });
-
-          jwt = await signToken({
-            uid: user.id,
-            ghUser: ghUser.login,
-            plan: user.plan,
-          });
-
-          // Track session for revocation
-          createSession({
-            userId: user.id,
-            token: jwt,
-            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          });
-
-          authUser = {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            avatarUrl: user.avatarUrl,
-            plan: user.plan,
-            githubUsername: ghUser.login,
-          };
-        }
-      } catch (authErr) {
-        console.error('[github-device] User creation failed (gh CLI auth still succeeded):', authErr);
-      }
-
+      const result = await completeGitHubConnection(pollPayload.access_token);
       flows.delete(flowId);
-      const response = NextResponse.json({
-        ok: true,
-        status: 'complete',
-        note: 'GitHub connected locally through device flow. Refreshing account state now.',
-        user: authUser,
-      });
-
-      // Set auth cookie (token never exposed in response body)
-      if (jwt) {
-        response.cookies.set('o8-token', jwt, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          maxAge: 30 * 24 * 60 * 60,
-          path: '/',
-        });
-      }
-
-      return response;
+      return connectedResponse(result, 'GitHub connected through device flow.');
     }
 
     switch (pollPayload?.error) {

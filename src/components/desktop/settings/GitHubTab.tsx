@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import type { O8AuthState } from '@/components/auth/O8AuthProvider';
 import {
   type GitHubAccount,
-  type GitHubRepo,
   type GitHubBrokerStatus,
   type GitHubDeviceFlowState,
   type GitHubActionKind,
@@ -20,19 +20,16 @@ import {
   GitHubIcon,
   GitHubAvatar,
   RamsButton,
-  TabHeading,
-  SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill, GroupFootnote } from './grouped';
 
 /**
- * The props needed to render the GitHub CONNECTION surface — the identity
- * card / sign-in flow / GitHub App block. Shared verbatim between the standalone
- * GitHubTab wrapper and the merged Git & PRs tab so SettingsPage wires the same
- * bundle to either. The repositories list is intentionally NOT here — it moved
- * to the Projects surface — but `repoCount` stays for the App footnote.
+ * The props needed by the single GitHub connection surface in Git & PRs.
+ * Identity, local gh access, and GitHub App automation stay separate
+ * capabilities, but they are presented and managed in one place.
  */
 export type GitHubConnectionProps = {
+  auth: O8AuthState;
   accounts: GitHubAccount[];
   repoCount: number;
   broker: GitHubBrokerStatus | null;
@@ -44,17 +41,17 @@ export type GitHubConnectionProps = {
   onLoginWithToken?: (token: string) => void;
   deviceFlowEnabled?: boolean;
   deviceFlow?: GitHubDeviceFlowState | null;
-  onStartDeviceFlow?: () => void;
+  onConnect?: () => void;
   onPollDeviceFlow?: (flowId: string) => void;
   onCancelDeviceFlow?: (flowId: string) => void;
 };
 
 /**
- * The GitHub connection surface, standalone from any page chrome — identity /
- * sign-in / GitHub App. Renders its own loading + action-feedback lines so it
- * can drop into either the legacy GitHubTab or the merged Git & PRs tab.
+ * The GitHub connection surface: one connected identity and three explicit
+ * capability rows, with device flow and PAT fallback inline.
  */
 export function GitHubConnectionSections({
+  auth,
   accounts,
   repoCount,
   broker,
@@ -66,7 +63,7 @@ export function GitHubConnectionSections({
   onLoginWithToken,
   deviceFlowEnabled,
   deviceFlow,
-  onStartDeviceFlow,
+  onConnect,
   onPollDeviceFlow,
   onCancelDeviceFlow,
 }: GitHubConnectionProps) {
@@ -76,6 +73,18 @@ export function GitHubConnectionSections({
 
   const activeAccount = accounts.find((a) => a.active) ?? null;
   const connected = !!activeAccount;
+  const identityConnected = auth.signedIn || (!auth.clerkEnabled && connected);
+  const identityName = auth.user?.name?.trim()
+    || auth.user?.email?.trim()
+    || activeAccount?.name
+    || activeAccount?.login
+    || 'GitHub';
+  const identityAvatar = auth.user?.avatarUrl || activeAccount?.avatarUrl || null;
+  const needsConnect = !connected || (auth.clerkEnabled && auth.isLoaded && !auth.signedIn);
+  const connectDisabled = actionBusy === 'login_device'
+    || (auth.clerkEnabled && !auth.isLoaded)
+    || (auth.signedIn && !connected && !deviceFlowEnabled)
+    || (!auth.clerkEnabled && !deviceFlowEnabled);
 
   const appConfigured = !!(broker && broker.configured);
   const appConnected = !!(broker
@@ -137,216 +146,246 @@ export function GitHubConnectionSections({
           {actionNote}
         </div>
       ) : null}
+      <section>
+        <SettingsGroup header="GitHub">
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            paddingTop: 14,
+            paddingBottom: 14,
+            paddingLeft: 14,
+            paddingRight: 14,
+            flexWrap: 'wrap',
+          }}>
+            {identityAvatar ? (
+              <GitHubAvatar avatarUrl={identityAvatar} login={identityName} size={44} />
+            ) : (
+              <span style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'var(--t-bg-card)',
+                color: 'var(--t-text-muted)',
+              }}>
+                <GitHubIcon size={20} />
+              </span>
+            )}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-0.01em', color: 'var(--t-text)' }}>
+                  {identityConnected || connected ? identityName : 'Connect GitHub'}
+                </span>
+                <ValuePill tone={identityConnected && connected ? 'success' : 'default'}>
+                  {identityConnected && connected ? 'Connected' : 'Setup incomplete'}
+                </ValuePill>
+              </div>
+              <span style={{ fontSize: 12.5, fontWeight: 300, color: 'var(--t-text-faint)' }}>
+                One place for your identity, local repo access, and GitHub automation.
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {needsConnect ? (
+                <RamsButton
+                  variant="primary"
+                  onClick={onConnect}
+                  disabled={connectDisabled}
+                  busy={actionBusy === 'login_device'}
+                >
+                  Connect GitHub
+                </RamsButton>
+              ) : null}
+              <RamsButton
+                variant="ghost"
+                onClick={onRefresh}
+                disabled={actionBusy === 'refresh'}
+                busy={actionBusy === 'refresh'}
+              >
+                Refresh
+              </RamsButton>
+            </div>
+          </div>
 
-      {/* ── Identity (connected) ── */}
-      {connected ? (
-        <section>
-          <SettingsGroup header="GitHub">
+          <SettingsRow
+            icon={<GitHubIcon size={16} />}
+            label="Identity"
+            subtitle={identityConnected
+              ? (auth.user?.email || `Signed in as ${identityName}`)
+              : auth.clerkEnabled
+                ? 'Sign in once to use the same identity across desktop and web'
+                : connected
+                  ? `Local identity from @${activeAccount!.login}`
+                  : 'Identity sign-in is unavailable in this build'}
+            accessory={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <ValuePill tone={identityConnected ? 'success' : 'default'}>
+                  {identityConnected ? 'Connected' : 'Not connected'}
+                </ValuePill>
+                {auth.signedIn ? (
+                  <>
+                    <RamsButton variant="ghost" onClick={auth.openManageAccount}>Manage</RamsButton>
+                    <RamsButton variant="ghost" onClick={() => { void auth.signOut(); }}>Sign out</RamsButton>
+                  </>
+                ) : null}
+              </div>
+            }
+            divider
+          />
+
+          <SettingsRow
+            icon={<GitHubIcon size={16} />}
+            label="Repository & CLI access"
+            subtitle={connected
+              ? `gh, terminal git, and dispatched agents use @${activeAccount!.login}`
+              : 'Authorize this machine to clone, push, and manage repositories'}
+            accessory={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <ValuePill tone={connected ? 'success' : 'default'}>
+                  {connected ? 'Connected' : 'Not connected'}
+                </ValuePill>
+                {connected ? (
+                  <RamsButton
+                    variant="ghost"
+                    onClick={() => onDisconnect?.(activeAccount!.login)}
+                    disabled={actionBusy === 'logout'}
+                    busy={actionBusy === 'logout'}
+                  >
+                    Disconnect
+                  </RamsButton>
+                ) : null}
+              </div>
+            }
+            divider
+          />
+
+          {deviceFlow ? (
             <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 14,
               paddingTop: 14,
               paddingBottom: 14,
               paddingLeft: 14,
               paddingRight: 14,
-              flexWrap: 'wrap',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
             }}>
-              <GitHubAvatar avatarUrl={activeAccount!.avatarUrl} login={activeAccount!.login} size={44} />
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{
-                    fontSize: 16,
-                    fontWeight: 500,
-                    letterSpacing: '-0.01em',
-                    color: 'var(--t-text)',
-                  }}>
-                    {activeAccount!.login}
-                  </span>
-                  <ValuePill tone="success">Connected</ValuePill>
+              <div>
+                <FieldLabel>enter this code on github</FieldLabel>
+                <div style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 22,
+                  fontWeight: 300,
+                  color: 'var(--t-text)',
+                  letterSpacing: '0.18em',
+                  marginTop: 8,
+                }}>
+                  {deviceFlow.userCode}
                 </div>
-                {activeAccount!.name ? (
-                  <span style={{ fontSize: 12.5, fontWeight: 300, color: 'var(--t-text-faint)' }}>
-                    {activeAccount!.name}
-                  </span>
-                ) : null}
+                <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55, maxWidth: 560 }}>
+                  {deviceFlow.note || 'Waiting for you to approve o8 on GitHub.'} Expires in about {deviceFlow.expiresInMinutes} minute{deviceFlow.expiresInMinutes === 1 ? '' : 's'}.
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <RamsButton
-                  variant="ghost"
-                  onClick={onRefresh}
-                  disabled={actionBusy === 'refresh'}
-                  busy={actionBusy === 'refresh'}
-                >
-                  Refresh
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <RamsButton variant="ghost" onClick={() => openExternalUrl(deviceFlow.verificationUriComplete || deviceFlow.verificationUri)}>
+                  Open GitHub
+                </RamsButton>
+                <RamsButton variant="ghost" onClick={() => { void copyDeviceCode(); }}>
+                  {deviceCodeCopied ? 'Copied' : 'Copy code'}
+                </RamsButton>
+                <RamsButton variant="ghost" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)}>
+                  Check now
                 </RamsButton>
                 <RamsButton
                   variant="ghost"
-                  onClick={() => onDisconnect?.(activeAccount!.login)}
-                  disabled={actionBusy === 'logout'}
-                  busy={actionBusy === 'logout'}
+                  onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
+                  disabled={actionBusy === 'cancel_device'}
+                  busy={actionBusy === 'cancel_device'}
                 >
-                  Disconnect
+                  {actionBusy === 'cancel_device' ? 'Cancelling…' : 'Cancel'}
                 </RamsButton>
               </div>
             </div>
-          </SettingsGroup>
-          <GroupFootnote>Repo access for this machine — terminal git, gh, and dispatched agents push with this credential. It is separate from your o8 account (General), which identifies you but can never touch your repos.</GroupFootnote>
-        </section>
-      ) : (
-        /* ── Sign in (disconnected) ── */
-        <section>
-          <SettingsGroup header="Sign in">
-            {!deviceFlow ? (
+          ) : null}
+
+          {!connected && !deviceFlow ? (
+            <>
               <SettingsRow
-                icon={<GitHubIcon size={16} />}
-                label="Sign in with GitHub"
-                subtitle={deviceFlowEnabled ? 'Open GitHub and approve o8' : 'Not available on this build'}
-                onPress={onStartDeviceFlow}
-                disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
-                chevron
+                label="Use an access token instead"
+                onPress={() => setTokenOpen((value) => !value)}
+                value={tokenOpen ? 'Hide' : 'Show'}
                 divider
               />
-            ) : (
-              <div style={{
-                paddingTop: 14,
-                paddingBottom: 14,
-                paddingLeft: 14,
-                paddingRight: 14,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 14,
-              }}>
-                <div>
-                  <FieldLabel>enter this code on github</FieldLabel>
-                  <div style={{
-                    fontFamily: MONO_FONT_STACK,
-                    fontSize: 22,
-                    fontWeight: 300,
-                    color: 'var(--t-text)',
-                    letterSpacing: '0.18em',
-                    marginTop: 8,
-                  }}>
-                    {deviceFlow.userCode}
-                  </div>
-                  <div style={{
-                    marginTop: 6,
-                    fontSize: 12,
-                    color: 'var(--t-text-secondary)',
-                    lineHeight: 1.55,
-                    maxWidth: 560,
-                  }}>
-                    {deviceFlow.note || 'Waiting for you to approve o8 on GitHub.'} Expires in about {deviceFlow.expiresInMinutes} minute{deviceFlow.expiresInMinutes === 1 ? '' : 's'}.
+              {tokenOpen ? (
+                <div style={{
+                  paddingTop: 12,
+                  paddingBottom: 14,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}>
+                  <input
+                    type="password"
+                    value={tokenValue}
+                    onChange={(event) => setTokenValue(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') submitToken(); }}
+                    placeholder="ghp_…"
+                    autoComplete="off"
+                    spellCheck={false}
+                    style={{
+                      width: '100%',
+                      maxWidth: 420,
+                      height: 34,
+                      paddingLeft: 12,
+                      paddingRight: 12,
+                      borderRadius: 9,
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: RAMS_CONTROL_BORDER,
+                      background: 'var(--t-input-bg, var(--t-bg-card))',
+                      color: 'var(--t-text)',
+                      fontFamily: MONO_FONT_STACK,
+                      fontSize: 13,
+                      outline: 'none',
+                    }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <RamsButton
+                      onClick={submitToken}
+                      disabled={!tokenValue.trim() || actionBusy === 'login_token'}
+                      busy={actionBusy === 'login_token'}
+                    >
+                      Connect
+                    </RamsButton>
+                    <span style={{ fontSize: 12, fontWeight: 300, color: 'var(--t-text-faint)', lineHeight: 1.5 }}>
+                      A personal access token with repo access.
+                    </span>
                   </div>
                 </div>
+              ) : null}
+            </>
+          ) : null}
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <RamsButton
-                    variant="ghost"
-                    onClick={() => openExternalUrl(deviceFlow.verificationUriComplete || deviceFlow.verificationUri)}
-                  >
-                    Open GitHub
-                  </RamsButton>
-                  <RamsButton variant="ghost" onClick={() => { void copyDeviceCode(); }}>
-                    {deviceCodeCopied ? 'Copied' : 'Copy code'}
-                  </RamsButton>
-                  <RamsButton variant="ghost" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)}>
-                    Check now
-                  </RamsButton>
-                  <RamsButton
-                    variant="ghost"
-                    onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
-                    disabled={actionBusy === 'cancel_device'}
-                    busy={actionBusy === 'cancel_device'}
-                  >
-                    {actionBusy === 'cancel_device' ? 'Cancelling…' : 'Cancel'}
-                  </RamsButton>
-                </div>
-              </div>
-            )}
-
-            {/* Quiet fallback: access token */}
-            {!deviceFlow ? (
-              <>
-                <SettingsRow
-                  label="Use an access token instead"
-                  onPress={() => setTokenOpen((v) => !v)}
-                  value={tokenOpen ? 'Hide' : 'Show'}
-                  divider={tokenOpen}
-                />
-                {tokenOpen ? (
-                  <div style={{
-                    paddingTop: 12,
-                    paddingBottom: 14,
-                    paddingLeft: 14,
-                    paddingRight: 14,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
-                  }}>
-                    <input
-                      type="password"
-                      value={tokenValue}
-                      onChange={(e) => setTokenValue(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') submitToken(); }}
-                      placeholder="ghp_…"
-                      autoComplete="off"
-                      spellCheck={false}
-                      style={{
-                        width: '100%',
-                        maxWidth: 420,
-                        height: 34,
-                        paddingLeft: 12,
-                        paddingRight: 12,
-                        borderRadius: 9,
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: RAMS_CONTROL_BORDER,
-                        background: 'var(--t-input-bg, var(--t-bg-card))',
-                        color: 'var(--t-text)',
-                        fontFamily: MONO_FONT_STACK,
-                        fontSize: 13,
-                        outline: 'none',
-                      }}
-                    />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                      <RamsButton
-                        onClick={submitToken}
-                        disabled={!tokenValue.trim() || actionBusy === 'login_token'}
-                        busy={actionBusy === 'login_token'}
-                      >
-                        Connect
-                      </RamsButton>
-                      <span style={{ fontSize: 12, fontWeight: 300, color: 'var(--t-text-faint)', lineHeight: 1.5 }}>
-                        A personal access token with repo access.
-                      </span>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-          </SettingsGroup>
-          <GroupFootnote>
-            {deviceFlowEnabled
-              ? 'Signing in lets o8 read your repositories and act on your behalf.'
-              : 'Device sign-in isn’t set up on this build — paste an access token to connect.'}
-          </GroupFootnote>
-        </section>
-      )}
-
-      {/* ── GitHub App ── */}
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup header="GitHub App">
           <SettingsRow
             icon={<GitHubIcon size={16} />}
-            label="GitHub App"
-            subtitle="Higher rate limits, issue and PR sync"
+            label="Automation app"
+            subtitle={appConnected
+              ? `Installed on @${broker?.installationAccount} for ${repoCount} ${repoCount === 1 ? 'repository' : 'repositories'}`
+              : 'Higher rate limits plus issue and pull-request sync'}
             accessory={
-              <ValuePill tone={appConnected ? 'success' : 'default'}>
-                {appConnected ? 'Installed' : appConfigured ? 'Needs setup' : 'Not installed'}
-              </ValuePill>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <ValuePill tone={appConnected ? 'success' : 'default'}>
+                  {appConnected ? 'Installed' : appConfigured ? 'Needs setup' : 'Not installed'}
+                </ValuePill>
+                <a href={installUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
+                  {appConnected ? 'Manage' : managedInstall ? 'Install' : 'Set up'}
+                </a>
+              </div>
             }
-            divider
+            divider={appConfigured && !appConnected}
           />
 
           {appConfigured && !appConnected ? (
@@ -385,66 +424,12 @@ export function GitHubConnectionSections({
               ) : null}
             </div>
           ) : null}
-
-          <div style={{
-            paddingTop: 12,
-            paddingBottom: 14,
-            paddingLeft: 14,
-            paddingRight: 14,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            flexWrap: 'wrap',
-          }}>
-            <a
-              href={installUrl}
-              target="_blank"
-              rel="noreferrer"
-              style={primaryLinkStyle(false)}
-            >
-              {appConnected ? 'Manage on GitHub' : managedInstall ? 'Install the o8 GitHub App' : 'Set up on GitHub'}
-            </a>
-          </div>
         </SettingsGroup>
         <GroupFootnote>
-          {appConnected && broker
-            ? `Installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repository' : 'repositories'}.`
-            : appConfigured
-              ? 'Finish the checks above to bring the App online.'
-              : managedInstall
-                ? 'One click on GitHub: pick your repos and o8 gets higher rate limits plus issue and PR sync. You can change repos any time.'
-                : 'Optional: create your own GitHub App for higher rate limits, then point o8 at it with GITHUB_APP_ID and ~/.o8/github-app.pem. Signing in above is all most setups need.'}
+          Connect GitHub once, then use the status rows above to see exactly which capabilities are ready on this machine. The automation app is optional.
         </GroupFootnote>
       </section>
     </>
-  );
-}
-
-/**
- * Legacy standalone GitHub settings tab — a thin page-chrome wrapper around
- * GitHubConnectionSections. Kept assignable from SettingsPage's current call
- * (repos / onSwitchAccount are accepted and ignored) until the merged Git & PRs
- * tab fully supersedes it and the nav entry is removed.
- */
-export function GitHubTab(props: GitHubConnectionProps & {
-  repos?: GitHubRepo[];
-  onSwitchAccount?: (user: string) => void;
-}) {
-  return (
-    <div style={{
-      paddingTop: 8,
-      paddingLeft: 8,
-      paddingRight: 32,
-      paddingBottom: 40,
-      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
-      fontFamily: APP_FONT_STACK,
-    }}>
-      <TabHeading
-        title="connectors"
-        subtitle="Connect GitHub so o8 can track your repositories, issues, and pull requests."
-      />
-      <GitHubConnectionSections {...props} />
-    </div>
   );
 }
 

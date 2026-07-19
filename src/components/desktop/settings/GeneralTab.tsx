@@ -27,7 +27,6 @@ import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { autostartIsEnabled, autostartSet, isTauri } from '@/lib/tauri/bridge';
 import { isTelemetryOptedOut, setTelemetryOptOut } from '@/lib/analytics/track';
-import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -58,15 +57,6 @@ function ShieldIcon() {
   );
 }
 
-function UserIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
 function StarIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -88,15 +78,11 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
   void onNavigateTab;
   const tauri = isTauri();
 
-  // ── Account (identity + plan) ──
-  // Identity is read from the same Clerk-backed hook the Account tab uses, and
-  // the plan/founder derivation mirrors AccountBlock so the number and label
-  // read identically wherever the account surfaces. o8 is free — the founders
-  // ladder is a supporter path, never a locked door.
-  const auth = useO8Auth();
+  // ── Plan ──
+  // GitHub identity now lives with repo/CLI and automation capabilities in
+  // Git & PRs. This derivation still mirrors AccountBlock so the plan reads
+  // identically wherever it appears.
   const { plan, founder, actualPlan, actualFounder } = useEntitlement();
-  const hasUser = auth.signedIn && Boolean(auth.user);
-  const displayName = auth.user?.name?.trim() || auth.user?.email?.trim() || 'Signed in';
   const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
   const founderNumber = (founder ?? actualFounder)?.operatorNumber;
@@ -221,50 +207,9 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
 
       <section style={{ marginBottom: 28 }}>
         <SettingsGroup
-          header="Account"
-          footnote="Your o8 account — identity, plan, and founder status. It never touches your code: repo access for agents and terminal git lives in Git & PRs. Optional — o8 runs fully account-less; signing in syncs your identity and unlocks managed tokens. License keys activate in Plan & Billing."
+          header="Plan"
+          footnote="Your plan and founder status. GitHub identity, repo access, and automation now live together in Git & PRs. License keys activate in Plan & Billing."
         >
-          <SettingsRow
-            icon={
-              hasUser && auth.user?.avatarUrl ? (
-                <span
-                  aria-hidden="true"
-                  style={{
-                    display: 'block',
-                    width: 28,
-                    height: 28,
-                    borderRadius: 999,
-                    backgroundImage: `url("${auth.user.avatarUrl}")`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                  }}
-                />
-              ) : (
-                <UserIcon />
-              )
-            }
-            label={hasUser ? displayName : 'Sign in'}
-            subtitle={
-              !auth.clerkEnabled
-                ? 'Sign-in isn’t configured in this build — everything works with your own keys'
-                : !auth.isLoaded
-                  ? 'Checking session…'
-                  : hasUser
-                    ? (auth.user?.email || 'Signed in with GitHub')
-                    : 'Sign in with GitHub to sync your identity across desktop and web'
-            }
-            accessory={
-              !auth.clerkEnabled || !auth.isLoaded ? undefined : hasUser ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <RamsButton variant="ghost" onClick={auth.openManageAccount}>Manage</RamsButton>
-                  <RamsButton variant="ghost" onClick={() => { void auth.signOut(); }}>Sign out</RamsButton>
-                </span>
-              ) : (
-                <RamsButton variant="primary" onClick={auth.signIn}>Sign in with GitHub</RamsButton>
-              )
-            }
-            divider
-          />
           <SettingsRow
             icon={<StarIcon />}
             label="Plan"
