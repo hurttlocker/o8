@@ -130,7 +130,8 @@ export interface MergeResult {
 }
 
 /**
- * Metadata stored in .cortex-worktrees/.meta.json
+ * Metadata stored under the resolved per-repo worktree root. Legacy
+ * `<repo>/.cortex-worktrees/.meta.json` stores remain readable.
  */
 export interface WorktreeMetaStore {
   version: 1;

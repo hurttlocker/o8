@@ -10,6 +10,7 @@ import {
   O8_WEBVIEW_COMPOSITE_TOOLS,
 } from '@/lib/mcp/o8-webview-composites';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { buildPrepareComposerTargetScript } from '@/lib/mcp/o8-webview-composer-target';
 
 type TextContent = { type: 'text'; text: string };
 type ImageContent = { type: 'image'; data: string; mimeType: string };
@@ -699,7 +700,10 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
 
     o8_view_type: async (args) => withStructuredErrors(async () => {
       const text = requiredString(args, 'text');
-      const result = await getClient().type(text);
+      const client = getClient();
+      const prepared = JSON.parse((await client.evalJs(buildPrepareComposerTargetScript())).result) as { ok?: boolean; error?: string };
+      if (prepared.ok !== true) throw new Error(prepared.error ?? 'No visible editable target is available.');
+      const result = await client.type(text);
       return jsonResult(result);
     }),
 

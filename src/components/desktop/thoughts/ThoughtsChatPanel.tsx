@@ -2464,7 +2464,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         }}
       >
       <ComposerArea
-        ref={inputRef}
+        ref={inputRef} activeComposer={open}
         input={input}
         onInputChange={setInput}
         isOrchestratorMode={isOrchestratorMode}

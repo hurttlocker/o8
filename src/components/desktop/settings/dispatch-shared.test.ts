@@ -7,8 +7,8 @@ import {
 
 describe('settings dispatch picker menu surface', () => {
   it('uses an opaque themed content surface instead of transparent chrome tokens', () => {
-    expect(PICKER_MENU_POPOVER_BG).toContain('--t-chat-surface-bg');
-    expect(PICKER_MENU_POPOVER_BG).not.toContain('--t-panel-solid');
+    expect(PICKER_MENU_POPOVER_BG).toBe('var(--t-panel-solid)');
+    expect(PICKER_MENU_POPOVER_BG).not.toContain('--t-chat-surface-bg');
     expect(PICKER_MENU_POPOVER_BG).not.toContain('transparent');
     expect(PICKER_MENU_POPOVER_BG).not.toContain('rgba(0,0,0,0)');
     expect(PICKER_MENU_POPOVER_BG).not.toContain('rgba(0, 0, 0, 0)');

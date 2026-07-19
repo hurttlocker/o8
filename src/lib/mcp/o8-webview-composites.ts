@@ -165,7 +165,7 @@ function buildSurfaceStateScript({ focusComposer }: { focusComposer: boolean }):
     const route = window.location.pathname + window.location.search + window.location.hash;
     const active = document.activeElement;
     const composerCandidates = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]')).filter(isVisible);
-    const composer = composerCandidates.find((el) => {
+    const composer = composerCandidates.find((el) => el.getAttribute('data-o8-active-composer') === 'true') || composerCandidates.find((el) => {
       const label = lower(labelFor(el));
       return label.includes('message') || label.includes('ask') || label.includes('queue') || label.includes('reply') || label.includes('orchestrator');
     }) || composerCandidates[0] || null;

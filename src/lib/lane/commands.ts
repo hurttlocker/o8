@@ -1279,7 +1279,7 @@ async function performRemoteCustomerMerge(
     }
 
     try {
-      await cleanupRemoteMergeWorktree(fetched.tempWorktreePath);
+      await cleanupRemoteMergeWorktree(lane.repoPath, fetched.tempWorktreePath);
     } catch (cleanupError) {
       console.warn(
         `[remote-merge] Failed to clean up temp worktree ${fetched.tempWorktreePath}: ${formatLaneCommandError(cleanupError)}`,
