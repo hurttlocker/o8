@@ -1,11 +1,10 @@
 /**
- * Minimal MCP-stdio JSON-RPC client for one-shot tool calls.
+ * Minimal MCP-stdio JSON-RPC client for codebase-memory tool calls.
  *
- * Spawns a fresh codebase-memory-mcp child process, runs initialize +
- * tools/call, then closes stdin so the child exits. We don't keep the
- * child alive across calls — the boot indexer runs each repo serially
- * (modulo the concurrency cap) and the binary's index step is the
- * expensive part, not the spawn.
+ * `callCodebaseMemoryTool` preserves the one-shot API used by indexing.
+ * Recall paths can use `withCodebaseMemoryToolSession` to initialize one
+ * child and issue several related calls without paying process startup for
+ * every symbol and fallback lookup.
  *
  * Wire format mirrors src/lib/mcp/test-connection.ts. Both build on the
  * MCP 2024-11-05 protocol with newline-delimited JSON-RPC frames.
@@ -20,7 +19,7 @@ const DEFAULT_CALL_TIMEOUT_MS = 5 * 60_000; // 5 min — large repos take time t
 
 interface JsonRpcRequest {
   jsonrpc: '2.0';
-  id: number;
+  id?: number;
   method: string;
   params?: Record<string, unknown>;
 }
@@ -56,277 +55,244 @@ export interface McpToolCallFailure {
 
 export type McpToolCallResult = McpToolCallSuccess | McpToolCallFailure;
 
+export type CodebaseMemoryToolCaller = (
+  input: Omit<McpToolCallInput, 'binPath' | 'cwd'>,
+) => Promise<McpToolCallResult>;
+
+export type McpToolSessionResult<T> =
+  | { ok: true; value: T; durationMs: number }
+  | McpToolCallFailure;
+
+interface PendingResponse {
+  resolve: (response: JsonRpcResponse) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Initialize one stdio child, run a bounded group of tool calls, then close it.
+ * Tool-level failures are returned by `callTool` without ending the session so
+ * callers can attempt a fallback against the same initialized process.
+ */
+export async function withCodebaseMemoryToolSession<T>(
+  input: Pick<McpToolCallInput, 'binPath' | 'cwd' | 'timeoutMs'>,
+  run: (callTool: CodebaseMemoryToolCaller) => Promise<T>,
+): Promise<McpToolSessionResult<T>> {
+  const started = Date.now();
+  let stderrBuf = '';
+  let stdoutBuf = '';
+  let nextId = 1;
+  let closing = false;
+  let fatalError: Error | null = null;
+  const pending = new Map<number, PendingResponse>();
+
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(input.binPath, [], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: input.cwd,
+      env: { ...process.env },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: `Spawn failed — ${message}`,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  const failSession = (error: Error) => {
+    if (!fatalError) fatalError = error;
+    for (const response of pending.values()) {
+      clearTimeout(response.timeout);
+      response.reject(fatalError);
+    }
+    pending.clear();
+  };
+
+  const stopChild = () => {
+    if (closing) return;
+    closing = true;
+    for (const response of pending.values()) {
+      clearTimeout(response.timeout);
+      response.reject(new Error('MCP session closed'));
+    }
+    pending.clear();
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      return;
+    }
+    const forceKill = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Process already exited.
+        }
+      }
+    }, 500);
+    forceKill.unref();
+  };
+
+  child.on('error', (error) => {
+    if (!closing) failSession(new Error(`Process error — ${error.message}`));
+  });
+  child.on('exit', (code, signal) => {
+    if (closing) return;
+    const hint = signal ? `signal ${signal}` : `exit code ${code ?? '?'}`;
+    failSession(new Error(`Process exited before tool call completed (${hint})`));
+  });
+  child.stdin?.on('error', (error: Error) => {
+    if (!closing) failSession(new Error(`Child stdin error — ${error.message}`));
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderrBuf += chunk.toString('utf-8');
+    if (stderrBuf.length > 8000) stderrBuf = stderrBuf.slice(-8000);
+  });
+  child.stdout?.on('data', (chunk: Buffer) => {
+    stdoutBuf += chunk.toString('utf-8');
+    let newline = stdoutBuf.indexOf('\n');
+    while (newline !== -1) {
+      const line = stdoutBuf.slice(0, newline).trim();
+      stdoutBuf = stdoutBuf.slice(newline + 1);
+      newline = stdoutBuf.indexOf('\n');
+      if (!line) continue;
+      try {
+        const message = JSON.parse(line) as JsonRpcResponse;
+        if (typeof message.id !== 'number') continue;
+        const response = pending.get(message.id);
+        if (!response) continue;
+        pending.delete(message.id);
+        clearTimeout(response.timeout);
+        response.resolve(message);
+      } catch {
+        // Notification or malformed output — ignore.
+      }
+    }
+  });
+
+  const writeRequest = (request: JsonRpcRequest) => {
+    if (fatalError) throw fatalError;
+    if (!child.stdin || child.stdin.destroyed) {
+      throw new Error('Child stdin closed before request was sent');
+    }
+    child.stdin.write(`${JSON.stringify(request)}\n`);
+  };
+
+  const request = (
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<JsonRpcResponse> => {
+    const id = nextId;
+    nextId += 1;
+    return new Promise<JsonRpcResponse>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pending.delete(id);
+        const error = new Error(`Request id ${id} timed out after ${timeoutMs}ms`);
+        failSession(error);
+        reject(error);
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timeout });
+      try {
+        writeRequest({ jsonrpc: '2.0', id, method, params });
+      } catch (error) {
+        clearTimeout(timeout);
+        pending.delete(id);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  };
+
+  const callTool: CodebaseMemoryToolCaller = async (callInput) => {
+    const callStarted = Date.now();
+    const timeoutMs = callInput.timeoutMs ?? input.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+    try {
+      const response = await request('tools/call', {
+        name: callInput.toolName,
+        arguments: callInput.args ?? {},
+      }, timeoutMs);
+      if (response.error) {
+        return {
+          ok: false,
+          error: `${callInput.toolName} failed — ${response.error.message}`,
+          stderr: stderrBuf || undefined,
+          durationMs: Date.now() - callStarted,
+        };
+      }
+      const toolResult = response.result as
+        | { isError?: boolean; content?: Array<{ type?: string; text?: string }> }
+        | undefined;
+      if (toolResult?.isError === true) {
+        const text = toolResult.content
+          ?.map((content) => content?.text ?? '')
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        return {
+          ok: false,
+          error: `${callInput.toolName} reported isError${text ? ` — ${text}` : ''}`,
+          stderr: stderrBuf || undefined,
+          durationMs: Date.now() - callStarted,
+        };
+      }
+      return {
+        ok: true,
+        result: response.result,
+        durationMs: Date.now() - callStarted,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        stderr: stderrBuf || undefined,
+        durationMs: Date.now() - callStarted,
+      };
+    }
+  };
+
+  try {
+    const initializeTimeoutMs = input.timeoutMs == null
+      ? INIT_TIMEOUT_MS
+      : Math.min(INIT_TIMEOUT_MS, input.timeoutMs);
+    const initialize = await request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'o8-codebase-memory-indexer', version: '1.0.0' },
+    }, initializeTimeoutMs);
+    if (initialize.error) {
+      return {
+        ok: false,
+        error: `initialize failed — ${initialize.error.message}`,
+        stderr: stderrBuf || undefined,
+        durationMs: Date.now() - started,
+      };
+    }
+    writeRequest({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    const value = await run(callTool);
+    return { ok: true, value, durationMs: Date.now() - started };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      stderr: stderrBuf || undefined,
+      durationMs: Date.now() - started,
+    };
+  } finally {
+    stopChild();
+  }
+}
+
 export async function callCodebaseMemoryTool(
   input: McpToolCallInput,
 ): Promise<McpToolCallResult> {
-  const started = Date.now();
-  const callTimeoutMs = input.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
-  let stderrBuf = '';
-
-  return new Promise<McpToolCallResult>((resolve) => {
-    let resolved = false;
-    let killed = false;
-    let child: ReturnType<typeof spawn> | null = null;
-
-    try {
-      child = spawn(input.binPath, [], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: input.cwd,
-        env: { ...process.env },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      resolve({
-        ok: false,
-        error: `Spawn failed — ${message}`,
-        durationMs: Date.now() - started,
-      });
-      return;
-    }
-
-    const finish = (result: McpToolCallResult) => {
-      if (resolved) return;
-      resolved = true;
-      if (child && !killed) {
-        killed = true;
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          /* ignore */
-        }
-        setTimeout(() => {
-          if (child && !child.killed) {
-            try {
-              child.kill('SIGKILL');
-            } catch {
-              /* ignore */
-            }
-          }
-        }, 500);
-      }
-      resolve(result);
-    };
-
-    const timeout = setTimeout(() => {
-      finish({
-        ok: false,
-        error: `Timed out after ${callTimeoutMs}ms`,
-        stderr: stderrBuf || undefined,
-        durationMs: Date.now() - started,
-      });
-    }, callTimeoutMs);
-
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      finish({
-        ok: false,
-        error: `Process error — ${err.message}`,
-        stderr: stderrBuf || undefined,
-        durationMs: Date.now() - started,
-      });
-    });
-
-    child.on('exit', (code, signal) => {
-      if (resolved) return;
-      clearTimeout(timeout);
-      const hint = signal ? `signal ${signal}` : `exit code ${code ?? '?'}`;
-      finish({
-        ok: false,
-        error: `Process exited before tool call completed (${hint})`,
-        stderr: stderrBuf || undefined,
-        durationMs: Date.now() - started,
-      });
-    });
-
-    // EPIPE from a dying child arrives ASYNCHRONOUSLY on the stdin stream —
-    // the try/catch around stdin.write() below cannot catch it, and without
-    // this listener Node escalates it to an uncaughtException that took down
-    // dispatch ticks (seen live 2026-07-12: buildPacketPrompt → traceSymbols
-    // → write EPIPE → ⨯ uncaughtException).
-    child.stdin?.on('error', (err: Error) => {
-      if (resolved) return;
-      clearTimeout(timeout);
-      finish({
-        ok: false,
-        error: `Child stdin error — ${err.message}`,
-        stderr: stderrBuf || undefined,
-        durationMs: Date.now() - started,
-      });
-    });
-
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderrBuf += chunk.toString('utf-8');
-      // Cap stderr buffer to avoid runaway memory.
-      if (stderrBuf.length > 8000) {
-        stderrBuf = stderrBuf.slice(-8000);
-      }
-    });
-
-    let stdoutBuf = '';
-    const pending = new Map<number, (resp: JsonRpcResponse) => void>();
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdoutBuf += chunk.toString('utf-8');
-      let nl = stdoutBuf.indexOf('\n');
-      while (nl !== -1) {
-        const line = stdoutBuf.slice(0, nl).trim();
-        stdoutBuf = stdoutBuf.slice(nl + 1);
-        nl = stdoutBuf.indexOf('\n');
-        if (!line) continue;
-        try {
-          const msg = JSON.parse(line) as JsonRpcResponse;
-          if (typeof msg.id === 'number' && pending.has(msg.id)) {
-            const handler = pending.get(msg.id)!;
-            pending.delete(msg.id);
-            handler(msg);
-          }
-        } catch {
-          // Notification or malformed — ignore.
-        }
-      }
-    });
-
-    const writeRequest = (req: JsonRpcRequest): boolean => {
-      if (!child?.stdin || child.stdin.destroyed) {
-        finish({
-          ok: false,
-          error: 'Child stdin closed before request was sent',
-          stderr: stderrBuf || undefined,
-          durationMs: Date.now() - started,
-        });
-        return false;
-      }
-      try {
-        child.stdin.write(`${JSON.stringify(req)}\n`);
-        return true;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        finish({
-          ok: false,
-          error: `Failed to write request — ${message}`,
-          stderr: stderrBuf || undefined,
-          durationMs: Date.now() - started,
-        });
-        return false;
-      }
-    };
-
-    const awaitResponse = (id: number, perRequestTimeoutMs?: number): Promise<JsonRpcResponse> =>
-      new Promise<JsonRpcResponse>((respResolve, respReject) => {
-        if (perRequestTimeoutMs) {
-          const t = setTimeout(() => {
-            pending.delete(id);
-            respReject(new Error(`Request id ${id} timed out`));
-          }, perRequestTimeoutMs);
-          pending.set(id, (resp) => {
-            clearTimeout(t);
-            respResolve(resp);
-          });
-        } else {
-          pending.set(id, respResolve);
-        }
-      });
-
-    // 1) initialize
-    if (
-      !writeRequest({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'o8-codebase-memory-indexer', version: '1.0.0' },
-        },
-      })
-    )
-      return;
-
-    void awaitResponse(1, INIT_TIMEOUT_MS)
-      .then((initResp) => {
-        if (initResp.error) {
-          finish({
-            ok: false,
-            error: `initialize failed — ${initResp.error.message}`,
-            stderr: stderrBuf || undefined,
-            durationMs: Date.now() - started,
-          });
-          return;
-        }
-
-        // Per spec: notify initialized.
-        writeRequest({ jsonrpc: '2.0', id: 2, method: 'notifications/initialized' });
-
-        // 2) tools/call
-        if (
-          !writeRequest({
-            jsonrpc: '2.0',
-            id: 3,
-            method: 'tools/call',
-            params: {
-              name: input.toolName,
-              arguments: input.args ?? {},
-            },
-          })
-        )
-          return;
-
-        void awaitResponse(3)
-          .then((callResp) => {
-            if (callResp.error) {
-              finish({
-                ok: false,
-                error: `${input.toolName} failed — ${callResp.error.message}`,
-                stderr: stderrBuf || undefined,
-                durationMs: Date.now() - started,
-              });
-              return;
-            }
-            // #852: MCP tools/call can return a JSON-RPC success whose result
-            // payload has `isError: true`. Without this check we treated tool-
-            // level failures (e.g. "repo_path is required") as success and
-            // marked repos indexed when nothing was written.
-            const toolResult = callResp.result as
-              | { isError?: boolean; content?: Array<{ type?: string; text?: string }> }
-              | undefined;
-            if (toolResult && toolResult.isError === true) {
-              const text = toolResult.content
-                ?.map((c) => c?.text ?? '')
-                .filter(Boolean)
-                .join(' ')
-                .trim();
-              clearTimeout(timeout);
-              finish({
-                ok: false,
-                error: `${input.toolName} reported isError${text ? ` — ${text}` : ''}`,
-                stderr: stderrBuf || undefined,
-                durationMs: Date.now() - started,
-              });
-              return;
-            }
-            clearTimeout(timeout);
-            finish({
-              ok: true,
-              result: callResp.result,
-              durationMs: Date.now() - started,
-            });
-          })
-          .catch((err: Error) => {
-            finish({
-              ok: false,
-              error: err.message,
-              stderr: stderrBuf || undefined,
-              durationMs: Date.now() - started,
-            });
-          });
-      })
-      .catch((err: Error) => {
-        finish({
-          ok: false,
-          error: err.message,
-          stderr: stderrBuf || undefined,
-          durationMs: Date.now() - started,
-        });
-      });
-  });
+  const session = await withCodebaseMemoryToolSession(input, (callTool) => callTool({
+    toolName: input.toolName,
+    args: input.args,
+    timeoutMs: input.timeoutMs,
+  }));
+  if (!session.ok) return session;
+  return { ...session.value, durationMs: session.durationMs };
 }
