@@ -188,6 +188,49 @@ pub(crate) fn request_mic_access_once() {
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn request_mic_access_once() {}
 
+fn is_packaged_o8_executable(path: &std::path::Path) -> bool {
+    path.to_string_lossy().contains(".app/Contents/MacOS/")
+}
+
+/// Pre-flight the exact AppleEvents self-target used by the osascript fallback
+/// paths before a voice task needs it (#1514). The subprocess inherits o8's TCC
+/// responsibility, so macOS attributes the one-time Automation prompt to o8.
+/// Dev binaries are deliberately excluded: running `cargo tauri dev` must not
+/// prompt against a separately-installed o8.app.
+#[cfg(target_os = "macos")]
+pub(crate) fn request_apple_events_self_access_once() {
+    use std::sync::Once;
+    static REQUESTED: Once = Once::new();
+    REQUESTED.call_once(|| {
+        let Ok(executable) = std::env::current_exe() else {
+            return;
+        };
+        if !is_packaged_o8_executable(&executable) {
+            return;
+        }
+        std::thread::spawn(|| {
+            let script = r#"tell application id "ai.o8.desktop" to get name"#;
+            match std::process::Command::new("osascript").args(["-e", script]).output() {
+                Ok(output) if output.status.success() => {
+                    log::info!("[voice] AppleEvents self-authorization warmup completed");
+                }
+                Ok(output) => {
+                    log::warn!(
+                        "[voice] AppleEvents self-authorization warmup was denied or failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    );
+                }
+                Err(error) => {
+                    log::warn!("[voice] AppleEvents self-authorization warmup failed to launch: {error}");
+                }
+            }
+        });
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn request_apple_events_self_access_once() {}
+
 /// Fire the macOS Microphone TCC prompt via
 /// `AVCaptureDevice requestAccessForMediaType:completionHandler:`. The
 /// completion handler fires on an arbitrary queue after the user answers; the
@@ -288,4 +331,23 @@ pub fn request_mic_access_cmd() -> Option<bool> {
         }
     }
     status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_packaged_o8_executable;
+    use std::path::Path;
+
+    #[test]
+    fn apple_events_warmup_runs_only_from_an_app_bundle() {
+        assert!(is_packaged_o8_executable(Path::new(
+            "/Applications/o8.app/Contents/MacOS/o8",
+        )));
+        assert!(is_packaged_o8_executable(Path::new(
+            "/private/var/folders/x/AppTranslocation/o8.app/Contents/MacOS/o8",
+        )));
+        assert!(!is_packaged_o8_executable(Path::new(
+            "/repo/src-tauri/target/debug/o8",
+        )));
+    }
 }

@@ -6752,6 +6752,22 @@ async function bootstrapWsServer() {
     );
   }
 
+  const checkLaunchAgentHealth = async () => {
+    try {
+      const { surfaceLaunchAgentCrashLoop } = await import('@/lib/supervisor/launch-agent-health');
+      const failures = surfaceLaunchAgentCrashLoop();
+      if (failures > 0) {
+        console.error(`[supervisor-inbox] ${failures} recent com.rainwater.mcp-o8 LaunchAgent failures surfaced to the Incident Queue`);
+      }
+    } catch (error) {
+      console.warn(
+        `[supervisor-inbox] LaunchAgent health check failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+  await checkLaunchAgentHealth();
+  setInterval(() => { void checkLaunchAgentHealth(); }, 60_000).unref();
+
   try {
     const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
     const result = await sweepPacketsMergedByAncestry();

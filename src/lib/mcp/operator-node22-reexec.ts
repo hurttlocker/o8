@@ -1,8 +1,14 @@
 import { spawnSync } from 'node:child_process';
 
 import { buildNode22ReexecPlan, NODE22_REEXEC_GUARD } from './operator-node22-locator';
+import { recordLaunchAgentStart } from './launch-agent-crash-counter';
 
 const NODE22_CHECKED = 'O8_MCP_NODE22_CHECKED';
+
+// This is the earliest dependency-light seam in both source and bundled
+// entrypoints. Launchd children have ppid 1; ordinary MCP client children are
+// ignored, so only KeepAlive churn contributes to the counter.
+recordLaunchAgentStart();
 
 /**
  * Synchronous on purpose — no top-level await. This module is imported by

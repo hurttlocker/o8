@@ -32,6 +32,11 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 
+fn process_command_runs_helper(command: &str, helper: &std::path::Path) -> bool {
+    let helper = helper.to_string_lossy();
+    !helper.is_empty() && command.contains(helper.as_ref())
+}
+
 /// Phrase-replacement vocabulary + post-pass applier.
 ///
 /// `PolishContext` carries a `Vec<ReplacementRule>` so the polished output can
@@ -399,7 +404,7 @@ impl LiveRecognizer {
         // capture the new helper makes (live incident 2026-07-10: one zombie
         // survived two app swaps and poisoned 5h of testing). We have no child
         // yet (guarded above), so any live speech_recognizer is a stray.
-        Self::kill_stale_helpers();
+        Self::kill_stale_helpers(&helper);
 
         let (child, stdin, stdout, stderr) = Self::spawn_helper(&helper, fifo_arg.as_deref())?;
 
@@ -557,14 +562,13 @@ impl LiveRecognizer {
         }
     }
 
-    /// SIGKILL ORPHANED `speech_recognizer` processes (#1539). Orphaned means
-    /// reparented to launchd (ppid == 1) — the parent app is gone, so the
-    /// helper is a true zombie holding the microphone open. The ppid check is
-    /// load-bearing: killing every helper by name is FRATRICIDE when two app
-    /// instances overlap (live incident 2026-07-10: a dev build and the
-    /// installed build each executed the other's healthy helper on boot).
+    /// SIGKILL any pre-existing instance of THIS exact helper binary (#1539).
+    /// The path check is load-bearing: an installed app and a dev checkout can
+    /// coexist without killing each other's different helper binaries, while
+    /// overlapping instances of the same app still converge on the required
+    /// one-helper-per-machine invariant before the new child is spawned.
     /// Best-effort: a failure here must never block the spawn.
-    fn kill_stale_helpers() {
+    fn kill_stale_helpers(helper: &std::path::Path) {
         #[cfg(unix)]
         {
             // -f with an end-anchored regex, NOT -x with the bare name: the
@@ -582,17 +586,18 @@ impl LiveRecognizer {
                 let Ok(pid) = line.trim().parse::<i32>() else {
                     continue;
                 };
-                let orphaned = Command::new("ps")
-                    .args(["-o", "ppid=", "-p", &pid.to_string()])
+                let command = Command::new("ps")
+                    .args(["-o", "command=", "-p", &pid.to_string()])
                     .output()
                     .ok()
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
-                    .unwrap_or(false);
-                if !orphaned {
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                    .unwrap_or_default();
+                if !process_command_runs_helper(&command, helper) {
                     continue;
                 }
                 log::warn!(
-                    "[stt] killing orphaned speech_recognizer helper (pid={pid}, ppid=1) before spawn (#1539)"
+                    "[stt] killing pre-existing speech_recognizer helper from {} (pid={pid}) before spawn (#1539)",
+                    helper.display()
                 );
                 unsafe {
                     libc::kill(pid, libc::SIGKILL);
@@ -982,8 +987,9 @@ impl LiveRecognizer {
     /// Best-effort: if the daemon has died or stdin is gone, logs and moves on.
     /// Signature matches the pre-refactor version (`pub fn stop(&mut self)`).
     pub fn stop(&mut self, session_id: u64) {
-        // Release the mic promptly (indicator off at key-up); the helper's
-        // FIFO reader sees EOF and reopens for the next session.
+        // Stop forwarding audio immediately. The main-process pump keeps the
+        // device open for a bounded 15s linger so a follow-up avoids Intel's
+        // cold-open gap; its Drop path still closes synchronously on app exit.
         if let Some(pump) = self.pump.as_mut() {
             pump.stop();
         }
@@ -1073,6 +1079,27 @@ impl LiveRecognizer {
         self.locale = None;
         self.on_device = None;
         self.input_device_uid = None;
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::process_command_runs_helper;
+    use std::path::Path;
+
+    #[test]
+    fn stale_helper_match_is_scoped_to_the_exact_bundle_path() {
+        let installed = Path::new(
+            "/Applications/o8.app/Contents/MacOS/speech_recognizer-aarch64-apple-darwin",
+        );
+        assert!(process_command_runs_helper(
+            "/usr/bin/arch -arm64 /Applications/o8.app/Contents/MacOS/speech_recognizer-aarch64-apple-darwin --audio-fifo /tmp/o8.fifo",
+            installed,
+        ));
+        assert!(!process_command_runs_helper(
+            "/repo/src-tauri/helpers/speech_recognizer --audio-fifo /tmp/o8.fifo",
+            installed,
+        ));
     }
 }
 

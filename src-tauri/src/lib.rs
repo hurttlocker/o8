@@ -5926,6 +5926,7 @@ pub fn run() {
                 // setup (once per run, only when notDetermined) rather than
                 // hoping the first mic capture triggers it (#1537-adjacent).
                 mac_perms::request_mic_access_once();
+                mac_perms::request_apple_events_self_access_once();
                 log::info!("[boot] mac_perms (TCC) at {}ms", boot_ms());
 
                 // ── Voice P3 global shortcuts ──
