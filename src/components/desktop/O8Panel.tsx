@@ -12,6 +12,7 @@ import type React from 'react';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
 import { O8ActivityPane } from './O8ActivityPane';
+import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
@@ -735,7 +736,7 @@ export function O8Panel({
           (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
       {/* No Brain chat on the browser — it's a real browser now (Q ruling
           2026-07-12); its header/toolbar carry browser tools instead. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' ? (
+      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' ? (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
           <O8ScratchChat
             repoPath={repoPath}
@@ -821,6 +822,9 @@ export function O8Panel({
           selectedPrNumber={prNumber ?? null}
           selectedPrRepo={prRepo ?? null}
         />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'resources' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8ResourcesPane active={activeTab === 'resources'} />
       </div>
       {/* Inbox (Incident Queue) now renders through the closeable utility strip
           above — see renderUtilitySurface('inbox'). No standalone main-tab mount

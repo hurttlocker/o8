@@ -589,6 +589,7 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     raw === 'workspace'
     || raw === 'browser'
     || raw === 'activity'
+    || raw === 'resources'
     || raw === 'inbox'
     || raw === 'spec'
     || raw === 'launcher'
