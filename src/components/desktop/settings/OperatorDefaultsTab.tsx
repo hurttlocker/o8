@@ -37,6 +37,7 @@ import {
   CODEX_WORKER_EFFORT_OPTIONS,
   CLAUDE_WORKER_EFFORT_OPTIONS,
   ENV_LOCKED_REASON,
+  resolvePickerGroupOpen,
   type AutoApplyUpdates,
   type DispatchRuntime,
   type OperatorDefaults,
@@ -166,6 +167,7 @@ export function OperatorDefaultsTab() {
   }, []);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
+  const [openDispatchPicker, setOpenDispatchPicker] = useState<string | null>(null);
 
   const loadDefaults = useCallback(async () => {
     try {
@@ -517,6 +519,8 @@ export function OperatorDefaultsTab() {
                 onChange={(next) => { updateField('subscriptionProfile', next); }}
                 disabled={envLocked('subscriptionProfile') || busyField === 'subscriptionProfile'}
                 minWidth={190}
+                open={openDispatchPicker === 'subscription-profile'}
+                onOpenChange={(open) => setOpenDispatchPicker((current) => resolvePickerGroupOpen(current, 'subscription-profile', open))}
               />
             }
             disabled={envLocked('subscriptionProfile') || busyField === 'subscriptionProfile'}
@@ -533,6 +537,8 @@ export function OperatorDefaultsTab() {
                 onChange={(next) => { updateField('defaultDispatchRuntime', next); }}
                 disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
                 minWidth={150}
+                open={openDispatchPicker === 'default-worker'}
+                onOpenChange={(open) => setOpenDispatchPicker((current) => resolvePickerGroupOpen(current, 'default-worker', open))}
               />
             }
             disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
@@ -549,6 +555,8 @@ export function OperatorDefaultsTab() {
                 onChange={(next) => { updateField('codexWorkerEffort', next); }}
                 disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
                 minWidth={150}
+                open={openDispatchPicker === 'codex-effort'}
+                onOpenChange={(open) => setOpenDispatchPicker((current) => resolvePickerGroupOpen(current, 'codex-effort', open))}
               />
             }
             disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
@@ -565,6 +573,8 @@ export function OperatorDefaultsTab() {
                 onChange={(next) => { updateField('claudeWorkerEffort', next); }}
                 disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
                 minWidth={150}
+                open={openDispatchPicker === 'claude-effort'}
+                onOpenChange={(open) => setOpenDispatchPicker((current) => resolvePickerGroupOpen(current, 'claude-effort', open))}
               />
             }
             disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}

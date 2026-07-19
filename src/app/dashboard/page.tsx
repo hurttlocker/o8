@@ -49,8 +49,10 @@ import { SentryBrowserInit } from '@/components/desktop/SentryBrowserInit';
 import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
 import { ReportIssueHost } from '@/components/desktop/ReportIssueHost';
 import {
+  FOCUS_REPO_WORKSPACE_TAB_EVENT,
   OPEN_MOBILE_PAIRING_EVENT,
   OPEN_SETTINGS_TAB_EVENT,
+  type FocusRepoWorkspaceTabDetail,
   type OpenSettingsTabDetail,
 } from '@/lib/desktop/events';
 // ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
@@ -132,6 +134,7 @@ import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { resolveFocusableLaneBinding } from './hooks/focusOrchestrationPacketLane';
+import { focusRepoWorkspace } from './hooks/focusRepoWorkspace';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import type { GrabbedElement } from '@/lib/browser/grab';
 import { cropRegionBase64 } from '@/lib/browser/region-crop';
@@ -2563,6 +2566,42 @@ function DashboardInner() {
     recordSpawnEvent(`${kind}:error ${detail}`);
     setSpawnErrorMessage(`New ${kind} session failed: ${detail}`);
   }, []);
+
+  useEffect(() => {
+    const handleFocusRepoWorkspace = (event: Event) => {
+      const detail = (event as CustomEvent<FocusRepoWorkspaceTabDetail>).detail;
+      const repoId = detail?.repoId?.trim() ?? '';
+      const repoPath = detail?.repoPath?.trim().replace(/\/+$/, '') ?? '';
+      const repo = globalRepoEntries.find((entry) => (
+        (repoId && entry.id === repoId)
+        || (repoPath && entry.localPath.replace(/\/+$/, '') === repoPath)
+      ));
+      if (!repo) return;
+
+      handleAlignToRepo(repo.id);
+      handleOpenO8Panel({ repoPath: repo.localPath, tab: 'workspace' });
+      void focusRepoWorkspace({
+        repo: {
+          name: repo.name,
+          localPath: repo.localPath,
+          remoteUrl: repo.remoteUrl ?? undefined,
+          branch: repo.readiness?.currentBranch ?? repo.defaultBranch,
+          readiness: repo.readiness ?? null,
+          registryRepoId: repo.id,
+        },
+        setActiveTileId,
+        waitForWorkspaceTerminalTarget,
+        workspaceTerminalHandlesRef,
+      }).then(({ tabId }) => {
+        flashWorkspaceTab(tabId);
+      }).catch((error) => {
+        reportSpawnFailure('repo workspace', error);
+      });
+    };
+
+    window.addEventListener(FOCUS_REPO_WORKSPACE_TAB_EVENT, handleFocusRepoWorkspace);
+    return () => window.removeEventListener(FOCUS_REPO_WORKSPACE_TAB_EVENT, handleFocusRepoWorkspace);
+  }, [flashWorkspaceTab, globalRepoEntries, handleAlignToRepo, handleOpenO8Panel, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalHandlesRef]);
 
   const handleCreateWorkspaceOrchestrator = useCallback((repo?: { name: string; localPath: string; remoteUrl?: string; branch?: string | null } | null) => {
     void (async () => {
