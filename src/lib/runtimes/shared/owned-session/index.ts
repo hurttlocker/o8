@@ -27,6 +27,20 @@ export type {
 } from './types';
 
 export { createOwnedSessionStore } from './store';
+export {
+  createDeclarativeOwnedRuntimeAdapter,
+  getDeclarativeOwnedRuntime,
+  registerDeclarativeOwnedRuntime,
+  renderDeclarativeArgs,
+} from './declarative-adapter';
+export type {
+  DeclarativeArgGroup,
+  DeclarativeArgTemplate,
+  DeclarativeOwnedRuntimeConfig,
+  DeclarativeOwnedRuntimeRegistration,
+  DeclarativeRunLogPattern,
+  DeclarativeRunLogPatterns,
+} from './declarative-adapter';
 
 // Re-exported helpers for adapters that need to share the text-compaction /
 // clock-formatting conventions with the store.

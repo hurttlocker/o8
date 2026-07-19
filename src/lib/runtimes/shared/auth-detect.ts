@@ -174,8 +174,8 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
     authenticated,
     detail: authenticated
       ? 'opencode CLI is installed and has local auth.json evidence.'
-      : 'opencode CLI is installed but no auth.json was found.',
-    fix: 'Run `opencode auth login`.',
+      : `opencode needs auth.json at ${authFile}.`,
+    fix: 'Run `opencode auth login` to create auth.json.',
     binaryPath,
   });
 }
