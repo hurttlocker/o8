@@ -19,9 +19,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { listRepos } from '@/lib/repos/registry';
+import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
 const execFileAsync = promisify(execFile);
-const WORKTREE_DIR_NAME = '.cortex-worktrees';
 
 interface RepoUsage {
   name: string;
@@ -61,13 +61,15 @@ export async function GET(req: NextRequest) {
       repos.map(async (repo): Promise<RepoUsage | null> => {
         const localPath = repo.localPath;
         if (!localPath) return null;
-        const worktreeDir = path.join(localPath, WORKTREE_DIR_NAME);
-        const [count, bytes] = await Promise.all([
-          countWorktrees(worktreeDir),
-          measureBytes(worktreeDir),
-        ]);
+        const layout = resolveWorktreeRootLayout(localPath);
+        const usage = await Promise.all(layout.bases.map(async (base) => ({
+          count: await countWorktrees(base),
+          bytes: await measureBytes(base),
+        })));
+        const count = usage.reduce((sum, item) => sum + item.count, 0);
+        const bytes = usage.reduce((sum, item) => sum + item.bytes, 0);
         if (count === 0 && bytes === 0) return null; // nothing on disk — omit
-        return { name: repo.name ?? path.basename(localPath), path: worktreeDir, count, bytes };
+        return { name: repo.name ?? path.basename(localPath), path: layout.primaryBase, count, bytes };
       }),
     );
 

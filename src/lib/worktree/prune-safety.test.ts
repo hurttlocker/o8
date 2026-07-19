@@ -61,7 +61,14 @@ async function addWorktree(id: string, ageMs = STALE_AGE_MS): Promise<string> {
   const wtPath = path.join(base, id);
   await git(['worktree', 'add', wtPath, '-b', `worktree/codex/${id}`], repoRoot);
   const when = new Date(Date.now() - ageMs);
-  await utimes(wtPath, when, when);
+  const gitAdminPaths = await Promise.all(['HEAD', 'index'].map(async (name) => {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', name], { cwd: wtPath });
+    return path.resolve(wtPath, stdout.trim());
+  }));
+  await Promise.all([
+    utimes(wtPath, when, when),
+    ...gitAdminPaths.map((gitPath) => utimes(gitPath, when, when).catch(() => {})),
+  ]);
   return wtPath;
 }
 
@@ -189,6 +196,24 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
 
     expect(pruned).not.toContain('packet-live-worker');
     expect(await exists(livePath), 'worktree with a live process survives').toBe(true);
+  }, 60_000);
+
+  it('prunes a stale worktree merely watched by a backend whose cwd is outside it', async () => {
+    const { WorktreeManager } = await import('./manager');
+    const watchedPath = await addWorktree('packet-backend-watch-only');
+    const watchedFile = path.join(watchedPath, 'seed.txt');
+    const child = spawn(process.execPath, [
+      '-e',
+      `const fs=require('node:fs');fs.openSync(${JSON.stringify(watchedFile)},'r');setInterval(()=>{},1000);`,
+    ], { cwd: repoRoot, stdio: 'ignore', detached: false });
+    bornProcs.push(child);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const mgr = new WorktreeManager(repoRoot);
+    const pruned = await mgr.prune();
+
+    expect(pruned).toContain('packet-backend-watch-only');
+    expect(await exists(watchedPath), 'watch-only worktree is prunable').toBe(false);
   }, 60_000);
 
   it('manager cleanup refuses a live worktree at the deletion seam unless confirmed-kill override is explicit', async () => {

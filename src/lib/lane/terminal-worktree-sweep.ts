@@ -5,8 +5,8 @@ import { listLanes } from './registry';
 import type { Lane } from './types';
 import { cleanupLaneWorktree } from './worktree-cleanup';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
+import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
-const WORKTREE_DIR_NAME = '.cortex-worktrees';
 const CONTEXT_WORKTREE_DIR_NAME = 'context';
 const PACKET_WORKTREE_PREFIX = 'packet-';
 
@@ -47,11 +47,13 @@ function laneForWorktreeDir(
 
 export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<TerminalWorktreeSweepResult> {
   const repoRoot = path.resolve(repoPath);
-  const worktreeRoot = path.join(repoRoot, WORKTREE_DIR_NAME);
-  const normalizedWorktreeRoot = normalizePath(worktreeRoot);
+  const worktreeRoots = resolveWorktreeRootLayout(repoRoot).bases;
+  const normalizedWorktreeRoots = worktreeRoots.map(normalizePath);
   const lanes = listLanes().filter((lane) => (
     normalizePath(lane.repoPath) === repoRoot
-    || (lane.worktreePath ? normalizePath(lane.worktreePath).startsWith(`${normalizedWorktreeRoot}/`) : false)
+    || (lane.worktreePath
+      ? normalizedWorktreeRoots.some((root) => normalizePath(lane.worktreePath!).startsWith(`${root}/`))
+      : false)
   ));
   const lanesByPath = new Map<string, Lane>();
   const lanesByPacketDir = new Map<string, Lane>();
@@ -66,7 +68,6 @@ export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<Te
     }
   }
 
-  const entries = await readdir(worktreeRoot, { withFileTypes: true }).catch(() => []);
   const result: TerminalWorktreeSweepResult = {
     scanned: 0,
     removed: 0,
@@ -74,32 +75,35 @@ export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<Te
     failed: 0,
   };
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name === CONTEXT_WORKTREE_DIR_NAME) continue;
-    if (entry.name.startsWith('.')) continue;
-    if (!entry.name.startsWith(PACKET_WORKTREE_PREFIX)) continue;
-    result.scanned += 1;
+  for (const worktreeRoot of worktreeRoots) {
+    const entries = await readdir(worktreeRoot, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === CONTEXT_WORKTREE_DIR_NAME) continue;
+      if (entry.name.startsWith('.')) continue;
+      if (!entry.name.startsWith(PACKET_WORKTREE_PREFIX)) continue;
+      result.scanned += 1;
 
-    const dirPath = path.join(worktreeRoot, entry.name);
-    const lane = laneForWorktreeDir(dirPath, entry.name, lanesByPath, lanesByPacketDir);
-    if (lane && !isCleanupTerminalStatus(lane.status)) {
-      result.skippedActive += 1;
-      continue;
-    }
+      const dirPath = path.join(worktreeRoot, entry.name);
+      const lane = laneForWorktreeDir(dirPath, entry.name, lanesByPath, lanesByPacketDir);
+      if (lane && !isCleanupTerminalStatus(lane.status)) {
+        result.skippedActive += 1;
+        continue;
+      }
 
-    const removed = lane
-      ? await cleanupLaneWorktree({ ...lane, worktreePath: dirPath }, { terminal: true })
-      : await removeCortexWorktreePath({
-        repoRoot,
-        worktreePath: dirPath,
-        logPrefix: 'terminal-worktree-sweep',
-      });
+      const removed = lane
+        ? await cleanupLaneWorktree({ ...lane, worktreePath: dirPath }, { terminal: true })
+        : await removeCortexWorktreePath({
+          repoRoot,
+          worktreePath: dirPath,
+          logPrefix: 'terminal-worktree-sweep',
+        });
 
-    if (removed) {
-      result.removed += 1;
-    } else {
-      result.failed += 1;
+      if (removed) {
+        result.removed += 1;
+      } else {
+        result.failed += 1;
+      }
     }
   }
 

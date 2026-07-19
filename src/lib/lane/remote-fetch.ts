@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
 const execFileAsync = promisify(execFile);
 
@@ -24,7 +25,7 @@ export async function fetchWorkerBranch(
   | { ok: true; tempWorktreePath: string; baseRef: string }
   | { ok: false; note: string }
 > {
-  const tempWorktreePath = join(repoPath, '.cortex-worktrees', `remote-merge-${runId}`);
+  const tempWorktreePath = join(resolveWorktreeRootLayout(repoPath).primaryBase, `remote-merge-${runId}`);
   const baseRef = `origin/${remoteBranch}`;
 
   try {
@@ -65,9 +66,7 @@ export async function fetchWorkerBranch(
   }
 }
 
-export async function cleanupRemoteMergeWorktree(tempWorktreePath: string): Promise<void> {
-  const repoPath = dirname(dirname(tempWorktreePath));
-
+export async function cleanupRemoteMergeWorktree(repoPath: string, tempWorktreePath: string): Promise<void> {
   try {
     await execFileAsync('git', ['worktree', 'remove', '--force', tempWorktreePath], {
       cwd: repoPath,

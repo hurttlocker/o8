@@ -8,11 +8,11 @@
  * because their cwd was deleted out from under them. Nothing checked whether a
  * process was still living in the directory before the destructive step.
  *
- * `hasLiveProcessInside(dir)` answers "does any live process have an open file
- * (including its cwd) under `dir`?" via `lsof +D`, which detects a process
- * whose *cwd* is inside the tree even when the path never appears in its argv
- * (a `codex exec` worker spawned with cwd=<worktree> is exactly this case, so
- * a `pgrep -f <path>` argv match would miss it).
+ * `hasLiveProcessInside(dir)` answers "does any live process have its cwd under
+ * `dir`?" via an ANDed `lsof -d cwd +D` query. Descriptor selection matters:
+ * the Next backend watches files in every worktree, so an any-open-fd scan
+ * makes every tree look live while o8 is running. A real worker is spawned with
+ * cwd=<worktree>, which this detects even when the path is absent from argv.
  *
  * Fail CLOSED: any probe error — timeout, missing `lsof`, permission, a
  * nonsense path — is treated as "live" so the caller KEEPS the worktree. We
@@ -39,7 +39,7 @@ interface LiveProcessCommandResult {
 
 export interface LiveProcessProbeOptions {
   /** Test seam for deterministic lsof exit/error shapes. */
-  runLsof?: (target: string) => Promise<LiveProcessCommandResult>;
+  runLsof?: (target: string, args: string[]) => Promise<LiveProcessCommandResult>;
 }
 
 function outputText(value: unknown): string {
@@ -75,12 +75,13 @@ export async function probeLiveProcessInside(
   }
 
   try {
-    // `lsof +D <dir> -t` lists PIDs of processes with any open file (incl. cwd)
-    // under <dir>. Exit 0 + PIDs → live. When nothing is open lsof exits 1 with
-    // empty output (that is the ONLY "not live" signal we trust).
+    // `-a` ANDs the cwd-descriptor and recursive-directory selectors. This
+    // excludes backend watcher FDs while retaining a worker cwd'd anywhere in
+    // the tree. Exit 1 with empty stdout+stderr is the only clear signal.
+    const args = ['-a', '-d', 'cwd', '+D', target, '-t'];
     const { stdout } = options.runLsof
-      ? await options.runLsof(target)
-      : await execFileAsync('lsof', ['+D', target, '-t'], { timeout: PROBE_TIMEOUT_MS });
+      ? await options.runLsof(target, args)
+      : await execFileAsync('lsof', args, { timeout: PROBE_TIMEOUT_MS });
     return liveResult(stdout)
       ?? { status: 'inconclusive', reason: 'lsof exited 0 without reporting a PID' };
   } catch (err) {

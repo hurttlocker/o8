@@ -15,6 +15,7 @@ import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useT
 import { registerComposerCenter } from '../../composer-center-registry';
 
 interface ComposerAreaProps {
+  activeComposer?: boolean;
   input: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
@@ -85,6 +86,7 @@ interface ComposerAreaProps {
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
+  activeComposer = false,
   input,
   onInputChange,
   isOrchestratorMode,
@@ -565,6 +567,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
           <textarea
             ref={inputRef}
+            data-o8-active-composer={activeComposer ? 'true' : undefined}
             value={input}
             onChange={(event) => {
               updateInput(event.target.value);

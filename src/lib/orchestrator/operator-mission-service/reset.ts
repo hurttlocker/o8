@@ -6,6 +6,7 @@ import { removeCortexWorktreePath } from '@/lib/lane/worktree-clone-removal';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
 function withinScope(input: ResetPacketInput, laneId: string): boolean {
   return !input.scope || input.scope.laneIds.includes(laneId);
@@ -130,21 +131,22 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
       // swept.
       const repoPaths = new Set(allBound.map((lane) => lane.repoPath));
       for (const repoPath of repoPaths) {
-        const baseDir = path.join(repoPath, '.cortex-worktrees');
-        const dirs = await readdir(baseDir).catch(() => [] as string[]);
-        const prefix = `packet-${input.packetId}`;
-        const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
-        for (const name of orphans) {
-          const full = path.join(baseDir, name);
-          const removed = await removeCortexWorktreePath({
-            repoRoot: repoPath,
-            worktreePath: full,
-            logPrefix: 'lane-reset-orphan',
-            operatorForce: true,
-          });
-          if (removed) {
-            worktreePruned = true;
-            log(`[lane-reset] Removed orphan worktree dir ${full} for evicted packet ${input.packetId}`);
+        for (const baseDir of resolveWorktreeRootLayout(repoPath).bases) {
+          const dirs = await readdir(baseDir).catch(() => [] as string[]);
+          const prefix = `packet-${input.packetId}`;
+          const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
+          for (const name of orphans) {
+            const full = path.join(baseDir, name);
+            const removed = await removeCortexWorktreePath({
+              repoRoot: repoPath,
+              worktreePath: full,
+              logPrefix: 'lane-reset-orphan',
+              operatorForce: true,
+            });
+            if (removed) {
+              worktreePruned = true;
+              log(`[lane-reset] Removed orphan worktree dir ${full} for evicted packet ${input.packetId}`);
+            }
           }
         }
       }
@@ -362,21 +364,22 @@ export async function resetPacket(input: ResetPacketInput) {
     if (!input.scope) try {
       const { readdir } = await import('node:fs/promises');
       const path = await import('node:path');
-      const baseDir = path.join(state.repoPath, '.cortex-worktrees');
-      const dirs = await readdir(baseDir).catch(() => [] as string[]);
-      const prefix = `packet-${packet.id}`;
-      const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
-      for (const name of orphans) {
-        const full = path.join(baseDir, name);
-        const removed = await removeCortexWorktreePath({
-          repoRoot: state.repoPath,
-          worktreePath: full,
-          logPrefix: 'lane-reset-orphan',
-          operatorForce: true,
-        });
-        if (removed) {
-          worktreePruned = true;
-          log(`[lane-reset] Removed orphan worktree dir ${full} for packet ${packet.referenceLabel}`);
+      for (const baseDir of resolveWorktreeRootLayout(state.repoPath).bases) {
+        const dirs = await readdir(baseDir).catch(() => [] as string[]);
+        const prefix = `packet-${packet.id}`;
+        const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
+        for (const name of orphans) {
+          const full = path.join(baseDir, name);
+          const removed = await removeCortexWorktreePath({
+            repoRoot: state.repoPath,
+            worktreePath: full,
+            logPrefix: 'lane-reset-orphan',
+            operatorForce: true,
+          });
+          if (removed) {
+            worktreePruned = true;
+            log(`[lane-reset] Removed orphan worktree dir ${full} for packet ${packet.referenceLabel}`);
+          }
         }
       }
     } catch (error) {

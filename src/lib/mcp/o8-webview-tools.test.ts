@@ -6,6 +6,7 @@ import {
   SURFACE_STATE_SCRIPT,
 } from './o8-webview-composites';
 import { buildSemanticClickExpr, createO8WebviewToolHandlers, O8_WEBVIEW_TOOLS } from './o8-webview-tools';
+import type { O8WebviewClient } from './o8-webview-client';
 
 // #agent-surface-ergonomics — the semantic-locator click is generated as in-page
 // code, so the risk is malformed/escaped output (the live DOM behavior is
@@ -83,5 +84,44 @@ describe('o8 browser geometry tool', () => {
       throw new Error('HTTP-backed handler does not use the webview client directly');
     });
     expect(typeof handlers.o8_browser_rect).toBe('function');
+  });
+});
+
+describe('o8 active composer typing', () => {
+  it('focuses the resolved active composer before invoking native typing', async () => {
+    const calls: string[] = [];
+    const client = {
+      evalJs: async (code: string) => {
+        calls.push(code.includes('data-o8-active-composer') ? 'prepare' : 'eval');
+        return { result: JSON.stringify({ ok: true, target: 'active-composer' }) };
+      },
+      type: async (text: string) => {
+        calls.push(`type:${text}`);
+        return { ok: true };
+      },
+    } as unknown as O8WebviewClient;
+    const handler = createO8WebviewToolHandlers(() => client).o8_view_type;
+
+    const result = await handler({ text: 'visible tab message' });
+
+    expect(result.isError).not.toBe(true);
+    expect(calls).toEqual(['prepare', 'type:visible tab message']);
+  });
+
+  it('returns an immediate error when no focused editable or active composer exists', async () => {
+    const client = {
+      evalJs: async () => ({
+        result: JSON.stringify({ ok: false, error: 'No visible active composer.' }),
+      }),
+      type: async () => {
+        throw new Error('native typing must not run');
+      },
+    } as unknown as O8WebviewClient;
+    const handler = createO8WebviewToolHandlers(() => client).o8_view_type;
+
+    const result = await handler({ text: 'message' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('No visible active composer.') });
   });
 });

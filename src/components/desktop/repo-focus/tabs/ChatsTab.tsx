@@ -16,12 +16,14 @@ import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
   CONVERSATIONS_GROUP_KEY,
+  deriveNestedPacketIds,
   historyBelongsToRepo,
   historyRepoContext,
   historyRepoGroupLabel,
   historySection,
   isAutomationSession,
   packetSortTime,
+  packetCanNestUnderHistory,
   packetStateTone,
   pickHistoryPacket,
   sessionBelongsToRepo,
@@ -563,15 +565,8 @@ export function ChatsTab({
   // Workers whose thread isn't in the rail (archived thread, other repo,
   // external CLI spawn with no thread) keep their bottom-section home.
   const nestedPacketIds = useMemo<ReadonlySet<string>>(() => {
-    const ids = new Set<string>();
-    if (!showRepoDrawers) return ids;
-    for (const item of flatHistoryItems) {
-      const owned = ownedPacketsByThread.get(item.tabId);
-      if (!owned) continue;
-      for (const packet of owned) ids.add(packet.id);
-    }
-    return ids;
-  }, [flatHistoryItems, ownedPacketsByThread, showRepoDrawers]);
+    return deriveNestedPacketIds(flatHistoryItems, ownedPacketsByThread, targetRepos, showRepoDrawers);
+  }, [flatHistoryItems, ownedPacketsByThread, showRepoDrawers, targetRepos]);
   const resolvedSlotBeforeArchived = typeof slotBeforeArchived === 'function'
     ? slotBeforeArchived({ nestedPacketIds })
     : slotBeforeArchived;
@@ -682,7 +677,8 @@ export function ChatsTab({
                       {groupCollapsed ? null : (
                         <>
                           {group.items.map((item) => {
-                            const ownedPackets = ownedPacketsByThread.get(item.tabId) ?? [];
+                            const ownedPackets = (ownedPacketsByThread.get(item.tabId) ?? [])
+                              .filter((packet) => packetCanNestUnderHistory(item, packet, targetRepos));
                             const ownedExpanded = !ownedCollapsedThreads.has(item.tabId);
                             return (
                               <div key={item.tabId}>
