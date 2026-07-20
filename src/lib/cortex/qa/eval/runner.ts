@@ -19,6 +19,7 @@ import process from 'node:process';
 
 import { askCortex } from '@/lib/cortex/qa/ask';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
 import { renderJudgePrompt } from '../../../../../tests/qa-eval/judge';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -114,7 +115,7 @@ async function realJudge(input: {
 
   try {
     const result = await callSonnet({
-      system: 'You are a strict evaluator. Return only valid JSON matching the requested schema.',
+      system: STRICT_JSON_SYSTEM_PROMPTS_V1.evaluator,
       messages: [{ role: 'user', content: prompt }],
       stream: false,
     });

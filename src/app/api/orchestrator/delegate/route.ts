@@ -13,6 +13,7 @@ import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -143,12 +144,7 @@ export async function POST(request: NextRequest) {
       taskTitle: taskName,
       taskBody: prompt,
     });
-    const launchPrompt = [
-      '## Project Brief',
-      projectBrief,
-      '## Task',
-      prompt,
-    ].join('\n\n');
+    const launchPrompt = buildProjectBriefPromptV1(projectBrief, prompt);
 
     const packet: OrchestratorPacket = {
       id: packetId,
