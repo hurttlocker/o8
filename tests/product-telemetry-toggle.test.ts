@@ -27,7 +27,8 @@ function restoreEnv() {
 
 async function resetProductTelemetry() {
   if (operatorDefaultsRoute) {
-    await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: false }));
+    const response = await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: false }));
+    expect(response.status).toBe(200);
   }
 }
 
