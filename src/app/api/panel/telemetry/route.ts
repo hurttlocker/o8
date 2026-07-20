@@ -1,33 +1,34 @@
 import { NextResponse } from 'next/server';
 
-import { emitProductEvent } from '@/lib/analytics/server';
+import { sanitizeProductEvent } from '@/lib/analytics/events';
+import { emitProductEvent, isProductTelemetryEnabled } from '@/lib/analytics/server';
 
 export const dynamic = 'force-dynamic';
 
+/** Browser consent probe. Missing/corrupt state resolves false in defaults.ts. */
+export async function GET() {
+  return NextResponse.json({ enabled: isProductTelemetryEnabled() });
+}
+
 /**
- * POST /api/panel/telemetry — coarse product-event emit (analytics epic #1249).
- *
- * The client fires `{ event, props }`; this validates the untrusted shape and
- * hands it to emitProductEvent(), which attaches THIS install's account token
- * and forwards to the license server (the token never reaches the browser). No
- * token → no-op. COARSE ONLY: event name capped, props must be a small plain
- * object — never code or content. Loopback+token gated via the '/api/panel/'
- * prefix. Telemetry must never break the app, so every failure is swallowed.
+ * Browser product-event forwarder. Consent is checked before parsing the body,
+ * then checked again by emitProductEvent() immediately before network egress.
  */
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { event?: unknown; props?: unknown };
-    const event = typeof body.event === 'string' ? body.event.trim().slice(0, 80) : '';
-    if (!event) return NextResponse.json({ ok: false, reason: 'no event' });
+    if (!isProductTelemetryEnabled()) {
+      return NextResponse.json({ ok: true, emitted: false });
+    }
 
-    const props =
-      body.props && typeof body.props === 'object' && !Array.isArray(body.props)
-        ? (body.props as Record<string, unknown>)
-        : undefined;
+    const body = (await request.json().catch(() => null)) as { event?: unknown; props?: unknown } | null;
+    const payload = sanitizeProductEvent(body?.event, body?.props);
+    if (!payload) {
+      return NextResponse.json({ ok: false, emitted: false, reason: 'event not allowed' }, { status: 400 });
+    }
 
-    await emitProductEvent(event, props);
-    return NextResponse.json({ ok: true });
+    const emitted = await emitProductEvent(payload.event, 'props' in payload ? payload.props : undefined);
+    return NextResponse.json({ ok: true, emitted });
   } catch {
-    return NextResponse.json({ ok: false });
+    return NextResponse.json({ ok: false, emitted: false });
   }
 }

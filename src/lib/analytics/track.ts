@@ -1,45 +1,43 @@
 'use client';
 
 /**
- * track() — coarse client-side product telemetry (analytics epic #1249).
- *
- * Fires a named event (plus a small props bag) to the desktop forwarder
- * /api/panel/telemetry, which attaches this install's account token and relays
- * it to the license server. Fire-and-forget — NEVER blocks, NEVER throws, and
- * NEVER carries content (event names + coarse counts/flags/ids only).
- *
- * Opt-out: set localStorage 'o8:telemetry-opt-out' = '1' and nothing is sent.
+ * Browser product telemetry. Consent is read from the server-owned operator
+ * defaults before every event, and the POST is gated again on the server.
+ * The legacy localStorage opt-out key is intentionally ignored: neither its
+ * absence nor any other browser-only state can create consent.
  */
 
-const OPT_OUT_KEY = 'o8:telemetry-opt-out';
+import {
+  sanitizeProductEvent,
+  type ProductEventName,
+  type ProductEventProps,
+  type ProductEventPayload,
+} from './events';
 
-export function isTelemetryOptedOut(): boolean {
-  try {
-    return localStorage.getItem(OPT_OUT_KEY) === '1';
-  } catch {
-    return false;
-  }
+async function sendIfOptedIn(payload: ProductEventPayload): Promise<void> {
+  const consentResponse = await fetch('/api/panel/telemetry', {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  if (!consentResponse.ok) return;
+
+  const consent = (await consentResponse.json().catch(() => null)) as { enabled?: unknown } | null;
+  if (consent?.enabled !== true) return;
+
+  await fetch('/api/panel/telemetry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  });
 }
 
-export function setTelemetryOptOut(optedOut: boolean): void {
-  try {
-    if (optedOut) localStorage.setItem(OPT_OUT_KEY, '1');
-    else localStorage.removeItem(OPT_OUT_KEY);
-  } catch {
-    // ignore — non-critical preference
-  }
-}
-
-export function track(event: string, props?: Record<string, unknown>): void {
+export function track(event: ProductEventName, props?: ProductEventProps): void {
   try {
     if (typeof window === 'undefined') return;
-    if (isTelemetryOptedOut()) return;
-    void fetch('/api/panel/telemetry', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event, ...(props ? { props } : {}) }),
-      keepalive: true,
-    }).catch(() => {});
+    const payload = sanitizeProductEvent(event, props);
+    if (!payload) return;
+    void sendIfOptedIn(payload).catch(() => {});
   } catch {
     // Telemetry must never affect the app.
   }

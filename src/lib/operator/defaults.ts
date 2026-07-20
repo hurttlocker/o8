@@ -255,29 +255,13 @@ export interface OperatorDefaults {
   autoApplyUpdates: AutoApplyUpdates;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
-  /**
-   * Crash-telemetry opt-in (Rock 2). **Off by default.** When on AND an ingest
-   * endpoint is configured (`O8_TELEMETRY_INGEST_URL` env or
-   * {@link telemetryIngestUrl}), the uploader batch-POSTs captured crash lines
-   * (stack traces + app version — no user content). Off = crashes are still
-   * captured locally to `~/.o8/telemetry/crashes.jsonl` but never leave the
-   * machine. Env: `O8_TELEMETRY_OPT_IN` (1/0).
-   */
+  /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */
+  productTelemetryEnabled: boolean;
+  /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */
   telemetryOptIn: boolean;
-  /**
-   * Crash-telemetry ingest endpoint. Empty = no upload (local capture only).
-   * `O8_TELEMETRY_INGEST_URL` env overrides this. Only consulted when
-   * {@link telemetryOptIn} is on.
-   */
+  /** Crash-log endpoint, consulted only when telemetryOptIn is on. */
   telemetryIngestUrl: string;
-  /**
-   * Sentry crash/error reporting — "Crash & error reports" toggle. **Off by
-   * default.** Only ever active in a PACKAGED build that had a DSN baked in
-   * (dev stays silent regardless). Scrubs home paths, query strings, and
-   * identity before send; carries the app version + plan + a founder boolean,
-   * never a user id/email/machine name. Off → the Sentry clients drop every
-   * event (no wire) within ~30s. Env: `O8_CRASH_REPORTS` (1/0).
-   */
+  /** Scrubbed Sentry crash/error sharing, packaged builds only and default off. */
   crashReportsEnabled: boolean;
   /**
    * Prefix for branches o8 opens from GitHub issues (`<prefix>/<n>-<slug>`).
@@ -378,6 +362,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   autoApplyUpdates: 'off',
   collideAggregator: 'auto',
+  productTelemetryEnabled: false,
   // Crash telemetry OFF by default — local capture only, nothing uploaded.
   telemetryOptIn: false,
   telemetryIngestUrl: '',
@@ -488,6 +473,7 @@ interface StoredOperatorDefaults {
   targetingAction?: TargetingTier;
   autoApplyUpdates?: AutoApplyUpdates;
   collideAggregator?: CollideAggregator;
+  productTelemetryEnabled?: boolean;
   telemetryOptIn?: boolean;
   telemetryIngestUrl?: string;
   crashReportsEnabled?: boolean;
@@ -628,6 +614,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
+  if (typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
   if (typeof stored.telemetryOptIn === 'boolean') {
     result.telemetryOptIn = stored.telemetryOptIn;
   }
@@ -769,6 +756,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
     collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
+    productTelemetryEnabled: fileValues.productTelemetryEnabled ?? OPERATOR_DEFAULTS_FALLBACK.productTelemetryEnabled,
     telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
     telemetryIngestUrl: envTelemetryUrl ?? fileValues.telemetryIngestUrl ?? OPERATOR_DEFAULTS_FALLBACK.telemetryIngestUrl,
     crashReportsEnabled: envCrash ?? fileValues.crashReportsEnabled ?? OPERATOR_DEFAULTS_FALLBACK.crashReportsEnabled,
@@ -823,6 +811,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
     collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
+    productTelemetryEnabled: fileValues.productTelemetryEnabled !== undefined ? 'file' : 'default',
     telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
     telemetryIngestUrl: envTelemetryUrl !== null ? 'env' : fileValues.telemetryIngestUrl !== undefined ? 'file' : 'default',
     crashReportsEnabled: envCrash !== null ? 'env' : fileValues.crashReportsEnabled !== undefined ? 'file' : 'default',
@@ -1041,6 +1030,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.collideAggregator = update.collideAggregator;
   }
+  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = Boolean(update.productTelemetryEnabled);
   if (update.telemetryOptIn !== undefined) {
     stored.telemetryOptIn = Boolean(update.telemetryOptIn);
   }
@@ -1230,6 +1220,11 @@ export function resolveBuyinDocEnabledSync(): boolean {
 
 export function resolveCollideAggregatorSync(): CollideAggregator {
   return getOperatorDefaultsSync().values.collideAggregator;
+}
+
+/** Whether coarse product telemetry is explicitly opted in (default off). */
+export function resolveProductTelemetryEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.productTelemetryEnabled;
 }
 
 /** Whether crash-telemetry upload is opted in (Rock 2, default off). */

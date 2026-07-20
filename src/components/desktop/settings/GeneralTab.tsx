@@ -26,7 +26,6 @@ import {
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { autostartIsEnabled, autostartSet, isTauri } from '@/lib/tauri/bridge';
-import { isTelemetryOptedOut, setTelemetryOptOut } from '@/lib/analytics/track';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -91,12 +90,6 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
     : isPaid
       ? (plan === 'team' || actualPlan === 'team' ? 'Team' : 'Pro')
       : 'Free Plan';
-
-  // ── Usage-data sharing (telemetry opt-out, moved from the old Account tab) ──
-  const [shareUsage, setShareUsage] = useState(true);
-  useEffect(() => {
-    setShareUsage(!isTelemetryOptedOut());
-  }, []);
 
   // ── Launch at login (native autostart via the Tauri bridge) ──
   const [autostart, setAutostart] = useState(false);
@@ -163,6 +156,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
 
   const values = data?.values;
   const sources = data?.sources;
+  const shareUsage = values?.productTelemetryEnabled === true;
   const envLocked = (field: keyof OperatorDefaults) => sources?.[field] === 'env';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(field) ? ENV_LOCKED_REASON : normal;
@@ -252,14 +246,15 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       <section style={{ marginTop: tauri ? 28 : 0 }}>
         <SettingsGroup
           header="Privacy"
-          footnote="Usage data is coarse counts only. Crash reports can contain error messages, stack frames, repo-relative paths, and nearby runtime context; direct identity, home-directory usernames, credentials, and URL query strings are scrubbed before transmission. Both controls are optional."
+          footnote="Product usage sends only the allowlisted event name and coarse booleans or runtime enum shown in the privacy documentation. Crash reports are a separate control and can contain scrubbed error context. All sharing is optional and off by default."
         >
           <SettingsRow
             icon={<ShieldIcon />}
             label="Share usage data"
-            subtitle="Helps us improve o8"
+            subtitle="Send allowlisted product events to help improve o8"
             checked={shareUsage}
-            onToggle={(next) => { setShareUsage(next); setTelemetryOptOut(!next); }}
+            disabled={!values || busyField === 'productTelemetryEnabled'}
+            onToggle={(next) => { void updateField('productTelemetryEnabled', next); }}
             divider={Boolean(values && sources)}
           />
           {values && sources ? (
