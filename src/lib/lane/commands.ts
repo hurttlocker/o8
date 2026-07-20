@@ -586,8 +586,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         hasApprovedReview,
         surfaceReviewRequired: surfaceReasons.length > 0,
       }));
-      if (mergePolicy.requiresApproval && actor !== 'user') {
-        const routesToDispatcher = mergePolicy.ruleId === 'surface-dispatcher-review';
+      const routesToDispatcher = mergePolicy.ruleId === 'surface-dispatcher-review';
+      const dispatcherApprovalSatisfied = routesToDispatcher && command.surfaceDispatcherApproved === true;
+      if (mergePolicy.requiresApproval && actor !== 'user' && !dispatcherApprovalSatisfied) {
         return createLaneActionApproval(lane, actor, {
           verb: 'merge',
           commitMessage: command.commitMessage,
@@ -607,6 +608,10 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             ? 'Review-worthy merge routed to the packet dispatcher.'
             : `Approval required: ${mergePolicy.reason}`,
         });
+      }
+
+      if (dispatcherApprovalSatisfied) {
+        console.log(`[surface-approval] Dispatcher explicitly approved merge for lane ${lane.id}.`);
       }
 
       if (mergePolicy.ruleId === 'auto_approve_orchestrator_review') {

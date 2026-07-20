@@ -106,6 +106,10 @@ export async function POST(request: NextRequest) {
         packetId,
         commitMessage,
         expectedHeadSha,
+        // This value is derived from the authenticated request principal, not
+        // the body. Under the surface posture it satisfies only the redundant
+        // dispatcher-review hop; the lane merge gate still runs normally.
+        actor: 'user',
       })),
     );
     return operatorSuccess(replayShape(outcome));

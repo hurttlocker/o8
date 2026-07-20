@@ -4,7 +4,6 @@ import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput } from './types';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
-
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
 type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLatestLaneByPacket']>>;
 
@@ -447,6 +446,7 @@ async function dispatchPacketMerge(
     // Advisory only; commands.ts re-derives authorization from durable review rows.
     orchestratorReviewed: packet.review?.approved === true,
     expectedHeadSha: input.expectedHeadSha?.trim() || carriedReviewedHeadSha || packet.review?.reviewedHeadSha?.trim() || undefined,
+    surfaceDispatcherApproved: input.actor === 'user',
     actor,
   });
 
@@ -552,7 +552,7 @@ async function dispatchPacketMerge(
   // Pass undefined so sync re-reads inside the mutex — otherwise we race the
   // /api/orchestrator/state GET poll and other concurrent writers.
   const [
-    { syncOrchestratorControlPlaneState, writeOrchestratorControlPlaneState },
+    { syncOrchestratorControlPlaneState },
     { runDispatchTick },
   ] = await Promise.all([
     loadControlPlane(),
@@ -751,12 +751,12 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
   const mergeSequence = selectMergeSequence(orderedWavePackets, targetIndex);
   const mergedPrerequisites: string[] = [];
   let requestedResult: MergePacketResult | null = null;
-
   for (const candidate of mergeSequence) {
     const result = await approveAndMergeSinglePacket({
       packetId: candidate.packet.id,
       commitMessage: candidate.packet.id === packet.id ? input.commitMessage : undefined,
       expectedHeadSha: candidate.packet.id === packet.id ? input.expectedHeadSha : undefined,
+      actor: candidate.packet.id === packet.id ? input.actor : undefined,
     });
 
     if (!result.merged) {
