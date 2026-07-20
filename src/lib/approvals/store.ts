@@ -571,6 +571,40 @@ export function recordApprovalAudit(
   return next;
 }
 
+export function supersedeOrchestratorReviewApprovals(packetId: string, reason: string): number {
+  const normalizedPacketId = packetId.trim();
+  if (!normalizedPacketId) return 0;
+  const approvals = queryApprovals(and(
+    eq(approvalsTable.packetId, normalizedPacketId),
+    eq(approvalsTable.toolName, 'orchestrator_review'),
+    eq(approvalsTable.status, 'approved'),
+  )!)
+    .filter((approval): approval is ApprovalRecord => approval?.args?.reviewSuperseded !== true);
+  const supersededAt = Date.now();
+  const note = reason.trim() || 'Superseded by a new packet attempt.';
+  for (const approval of approvals) {
+    const event = auditEvent('updated', 'system', note);
+    updateApprovalRecord({
+      ...approval,
+      args: {
+        ...approval.args,
+        reviewSuperseded: true,
+        reviewSupersededAt: supersededAt,
+        reviewSupersededReason: note,
+      },
+      metadata: {
+        ...approval.metadata,
+        'Review State': 'superseded',
+        'Superseded Reason': note,
+      },
+      updatedAt: supersededAt,
+      audit: [...approval.audit, event],
+    });
+    insertApprovalEvent(approval.id, event);
+  }
+  return approvals.length;
+}
+
 export function resolveApproval(id: string, action: 'approve' | 'reject', actor: ApprovalActor, note?: string) {
   const existing = getApproval(id);
   if (!existing) {

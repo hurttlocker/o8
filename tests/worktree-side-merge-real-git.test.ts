@@ -20,6 +20,7 @@ const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const { steerPacket } = await import('@/lib/orchestrator/operator-mission-service/steer');
 const typecheckAvailability = await import('@/lib/lane/typecheck-availability');
 const runtimeActions = await import('@/lib/runtime/actions');
+const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
 
 const tempDirs: string[] = [dataDir];
 
@@ -277,8 +278,13 @@ describe('typecheck escalation counters through real merge attempts', () => {
     return { repo, lane };
   }
 
-  it('spends exactly one packet-scoped layer-1 retry and bails when reset_packet has held the packet', async () => {
+  it('supersedes the durable review on layer-1 retry and bails when reset_packet has held the packet', async () => {
     const { lane } = await makeTypecheckFailureLane('pkt-typecheck-held', 0);
+    recordOrchestratorReview('pkt-typecheck-held', {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: git(lane.worktreePath!, ['rev-parse', 'HEAD']),
+    });
     const { result } = await mergeLane(lane);
     await new Promise((resolve) => setTimeout(resolve, 25));
 
@@ -290,6 +296,12 @@ describe('typecheck escalation counters through real merge attempts', () => {
     expect(packet?.typecheckAutoRetries).toBe(1);
     expect(events.filter((event) => event.verb === 'typecheck_auto_retry')).toHaveLength(1);
     expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(listApprovalsForContext({ packetId: 'pkt-typecheck-held', laneId: lane.id })
+      .find((approval) => approval.toolName === 'orchestrator_review')?.args)
+      .toMatchObject({
+        reviewSuperseded: true,
+        reviewSupersededReason: 'Superseded by typecheck auto-rerun.',
+      });
   }, 20_000);
 
   it('caps layer-1 at one retry and escalates the next failing merge to awaiting_orchestrator', async () => {

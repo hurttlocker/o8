@@ -7,6 +7,7 @@ import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
+import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 
 function withinScope(input: ResetPacketInput, laneId: string): boolean {
   return !input.scope || input.scope.laneIds.includes(laneId);
@@ -28,6 +29,7 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   if (allBound.length === 0) {
     throw new Error(`Packet ${input.packetId} not found — no mission packet and no lane.`);
   }
+  await supersedeDurableApprovedReviews(input.packetId, 'Superseded by reset_packet.');
 
   // #1215 — same sweep as archiveLanesForPacket (#1214): terminal lanes must
   // be UNBOUND, not skipped, or a dead archived lane keeps its packetId
@@ -212,6 +214,7 @@ async function resetRegistryPacket(input: ResetPacketInput, missionId: string) {
       return { state, result: undefined };
     });
   }
+  await supersedeDurableApprovedReviews(input.packetId, 'Superseded by reset_packet.');
   let worktreePruned = false;
   let branchDeleted = false;
   try {
@@ -260,6 +263,7 @@ export async function resetPacket(input: ResetPacketInput) {
     }
     return resetPacketViaLaneFallback(input);
   }
+  await supersedeDurableApprovedReviews(input.packetId, 'Superseded by reset_packet.');
 
   // Hold first, before session teardown and worktree cleanup open an async
   // window. Otherwise the headless dispatcher can relaunch this packet while
