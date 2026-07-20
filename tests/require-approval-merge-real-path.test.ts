@@ -19,6 +19,7 @@ const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.j
 
 const { listApprovals, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
 const { recordMission } = await import('@/lib/db/missions-store');
@@ -28,8 +29,9 @@ const { archiveLane, createLane, getLane } = await import('@/lib/lane/registry')
 const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/mission');
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { withControlPlaneLock, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { scanRepo } = await import('@/lib/skeleton');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 
@@ -120,6 +122,58 @@ async function createStandardLane(label: string, recordReview = true, highRisk =
   };
 }
 
+async function createBudgetBlockedLane(label: string) {
+  const root = mkdtempSync(join(os.tmpdir(), `o8-require-approval-${label}-`));
+  const origin = join(root, 'origin.git');
+  const repo = join(root, 'operator');
+  const packetId = `pkt-require-approval-${label}-${Date.now()}`;
+  const branch = `inline/require-approval-${label}-${Date.now()}`;
+  tempDirs.push(root);
+
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' });
+  git(repo, ['checkout', '-b', 'main']);
+  git(repo, ['config', 'user.name', 'o8-test']);
+  git(repo, ['config', 'user.email', 'o8@example.test']);
+  writeFileSync(join(repo, 'safe.ts'), [
+    ...Array.from({ length: 10 }, (_, index) => `export const base${index} = ${index};`),
+    '',
+  ].join('\n'));
+  commitAll(repo, 'base');
+  git(repo, ['push', '-u', 'origin', 'main']);
+  await scanRepo({ repoPath: repo, chunks: false });
+
+  const worktree = await getWorktreeManager(repo).create({
+    agentType: 'codex',
+    taskName: packetId,
+    branchName: branch,
+    baseBranch: 'main',
+    packetId,
+    skipSetup: true,
+    isolationPreference: 'git-worktree',
+  });
+  git(worktree.path, ['config', 'user.name', 'o8-test']);
+  git(worktree.path, ['config', 'user.email', 'o8@example.test']);
+  writeFileSync(join(worktree.path, 'safe.ts'), [
+    ...Array.from({ length: 10 }, (_, index) => `export const base${index} = ${index};`),
+    ...Array.from({ length: 7 }, (_, index) => `export const expansion${index} = ${index};`),
+    '',
+  ].join('\n'));
+  commitAll(worktree.path, 'expand safe module');
+  const reviewedHeadSha = git(worktree.path, ['rev-parse', 'HEAD']);
+  const lane = createLane({
+    repoPath: repo,
+    worktreePath: worktree.path,
+    branch,
+    baseBranch: 'main',
+    runtime: 'codex',
+    packetId,
+    sessionKey: `codex:${packetId}`,
+    label: `Budget diff ${label}`,
+  });
+  return { lane, repo, reviewedHeadSha };
+}
+
 function persistDispatcherMission(packetId: string, repoPath: string, orchestratorThreadId: string) {
   const missionId = `mission-surface-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const missionState = normalizeOrchestratorMissionState({
@@ -185,6 +239,28 @@ function mergeRequest(token: string, packetId: string): NextRequest {
   });
 }
 
+function reviewRequest(token: string, packetId: string, reviewedHeadSha: string): NextRequest {
+  return new NextRequest('http://localhost:3001/api/orchestrator/review', {
+    method: 'POST',
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      packetId,
+      approved: true,
+      reviewedHeadSha,
+      findings: [{
+        file: 'safe.ts',
+        severity: 'note',
+        description: 'The expansion is intentional and reviewed.',
+        status: 'accepted',
+      }],
+    }),
+  });
+}
+
 beforeEach(() => {
   rmSync(defaultsPath, { force: true });
   publishRealtimeMutation.mockClear();
@@ -210,7 +286,7 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({ ok: true, result: { merged: false } });
     expect(parked).toMatchObject({
-      status: 'awaiting_orchestrator',
+      status: 'reviewing',
       worktreePath: gated.lane.worktreePath,
     });
     expect(payload.result.note).toContain('Reviewed work preserved at preserved/');
@@ -218,14 +294,14 @@ describe('requireApproval merge governance through the real command path', () =>
     const status = await getMissionStatus({ includeCost: false });
     const statusPacket = status.packets.find((candidate) => candidate.id === gated.lane.packetId);
     expect(statusPacket).toMatchObject({
-      status: 'blocked',
+      status: 'awaiting_review',
       recovery: {
         outcome: 'archived_recoverable',
         preservedHeadSha: gated.reviewedHeadSha,
         recommendedAction: 'retry_packet',
       },
     });
-    expect(statusPacket?.blockedReason).toContain('retry or redispatch to resume');
+    expect(statusPacket?.blockedReason).toBeNull();
     const preservedRef = statusPacket!.recovery!.preservedRef;
     expect(git(gated.repo, ['rev-parse', preservedRef])).toBe(gated.reviewedHeadSha);
 
@@ -250,6 +326,50 @@ describe('requireApproval merge governance through the real command path', () =>
       status: 'archived',
       recovery: { preservedRef, preservedHeadSha: gated.reviewedHeadSha },
     });
+  }, 60_000);
+
+  it('applies an accepted diff-budget finding before the real submit_review auto-merge can read stale mission state', async () => {
+    await updateOperatorDefaults({ requireApproval: 'surface' });
+    const fixture = await createBudgetBlockedLane('accepted-budget-race');
+    persistDispatcherMission(fixture.lane.packetId!, fixture.repo, `thoughts-budget-${Date.now()}`);
+    const token = getOrCreateWsToken();
+
+    let releaseControlPlane!: () => void;
+    let lockHeld!: () => void;
+    const held = new Promise<void>((resolve) => { lockHeld = resolve; });
+    const release = new Promise<void>((resolve) => { releaseControlPlane = resolve; });
+    const lock = withControlPlaneLock(async () => {
+      lockHeld();
+      await release;
+    });
+    await held;
+
+    const reviewPromise = reviewRoute.POST(reviewRequest(
+      token,
+      fixture.lane.packetId!,
+      fixture.reviewedHeadSha,
+    ));
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const auditLanded = listApprovalsForContext({ laneId: fixture.lane.id }).some((approval) => (
+        approval.toolName === 'orchestrator_review'
+        && approval.status === 'approved'
+        && Array.isArray(approval.args?.findings)
+      ));
+      if (auditLanded) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const mergePromise = mergeRoute.POST(mergeRequest(token, fixture.lane.packetId!));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    releaseControlPlane();
+    await lock;
+    const [reviewResponse, mergeResponse] = await Promise.all([reviewPromise, mergePromise]);
+    const mergePayload = await mergeResponse.json();
+
+    expect(reviewResponse.status).toBe(200);
+    expect(mergePayload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+    expect(getLane(fixture.lane.id)?.status).not.toBe('archived');
   }, 60_000);
 
   it('treats an operator approve_and_merge as the surface approval without weakening worker or merge-gate enforcement', async () => {

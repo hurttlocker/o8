@@ -16,7 +16,7 @@ vi.mock('@/lib/runtime/actions', () => ({
   }),
 }));
 
-const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { getDispatchBlocker, runDispatchTick } = await import('@/lib/orchestrator/scheduling');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { salvagedWorkBlockReason } = await import('@/lib/supervisor/heal-guard');
@@ -94,4 +94,41 @@ describe('salvaged-work heal guard (#1391) — reviewing lanes are never redispa
     expect(salvagedWorkBlockReason(packet)).toBeNull();
     expect(getDispatchBlocker(packet, [packet])).toBeNull();
   });
+
+  it('does not auto-redispatch an approved archived_recoverable packet through the real dispatch tick', async () => {
+    const repoPath = makeRepo();
+    const packetId = 'pkt-heal-guard-recoverable';
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/heal-guard-recoverable',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    updateLane(lane.id, {
+      status: 'archived',
+      outcome: 'archived_recoverable',
+      outcomeNote: 'Reviewed work preserved at preserved/packet-test.',
+    });
+    const packet = packetFixture(repoPath, {
+      id: packetId,
+      status: 'recovering',
+      review: {
+        approved: true,
+        findings: [],
+        summary: 'Approved.',
+        recordedAt: new Date().toISOString(),
+      },
+    });
+    const state = {
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-heal-guard-recoverable',
+      repoPath,
+      packets: [packet],
+    };
+
+    expect(getDispatchBlocker(packet, [packet])).toMatch(/reviewed recoverable work/);
+    await runDispatchTick(state);
+    expect(launchMock.calls).toHaveLength(0);
+  }, 20_000);
 });

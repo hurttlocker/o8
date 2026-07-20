@@ -775,6 +775,8 @@ export const idempotencyKeys = sqliteTable('idempotency_keys', {
   resultJson: text('result_json'),
   /** OS pid that reserved the row. NULL for finalized rows / legacy inserts. */
   pid: integer('pid'),
+  /** Per-execution owner token; prevents a terminated call finalizing over its retry. */
+  reservationId: text('reservation_id'),
   /** ms-epoch stamps (integers, not ISO — this table is machine-only). */
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at').notNull(),

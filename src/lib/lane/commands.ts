@@ -32,7 +32,7 @@ import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import { isProtectedBranch } from '@/lib/lane/policy';
 import { evaluatePolicy } from '@/lib/approvals/policies';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/dispatch';
-import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
+import { assessDurableApprovedReview, hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
 import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
@@ -506,11 +506,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
       }
 
+      // submit_review persists its ApprovalRecord before updating mission state.
+      // Read that durable row before every budget check so an accepted finding
+      // waives the same HEAD atomically from the merge gate's perspective.
+      const durableReview = await assessDurableApprovedReview(lane);
+      const orchestratorReviewedForBudget = command.orchestratorReviewed === true
+        || durableReview.diffBudgetWaived;
       const oversizedFiles = await getOversizedChangedFilesForLane(lane);
       if (oversizedFiles.length > 0) {
         const largestFile = oversizedFiles[0];
         const fileSizePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
-          orchestratorReviewed: command.orchestratorReviewed,
+          orchestratorReviewed: orchestratorReviewedForBudget,
           fileSizeLimitExceeded: true,
         }));
 
@@ -547,7 +553,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // through — the gate downgrades budget violations to warn so a
       // human-in-the-loop refactor with intentional large deletions can
       // land. Security + integrity always stay block-level. See F25 / #1001.
-      const gateResult = await runMergeGate(lane, undefined, command.orchestratorReviewed === true);
+      const gateResult = await runMergeGate(lane, undefined, orchestratorReviewedForBudget);
       if (!gateResult.passed && actor !== 'user') {
         const blockCount = gateResult.violations.filter((v) => v.severity === 'block').length;
         return createLaneActionApproval(lane, actor, {
@@ -567,7 +573,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
       // Durable approved-review precondition. Computed after the merge gate so
       // block-level gate findings still force an operator card regardless of review.
-      let hasApprovedReview = actor === 'user' ? true : await hasDurableApprovedReview(lane);
+      let hasApprovedReview = actor === 'user' ? true : durableReview.approved;
       let surfaceReasons: string[] = [];
       if (actor !== 'user' && resolveRequireApprovalSync() === 'surface') {
         const surfaceDecision = await decideSurfaceMerge(lane, {
@@ -581,7 +587,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
       // Policy gate — require approval for merge
       const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
-        orchestratorReviewed: command.orchestratorReviewed,
+        orchestratorReviewed: orchestratorReviewedForBudget,
         gatePassed: gateResult.passed,
         hasApprovedReview,
         surfaceReviewRequired: surfaceReasons.length > 0,

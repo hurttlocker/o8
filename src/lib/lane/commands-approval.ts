@@ -207,9 +207,13 @@ export async function createLaneActionApproval(
   await recordReviewLessonsForApproval(approval.id, lane, input.reviewSummary, files);
   setLaneStatus(
     lane.id,
-    approvedMergeFailure ? 'awaiting_orchestrator' : 'awaiting_input',
+    approvedMergeFailure && input.policyRuleId === 'merge-gate-violation'
+      ? 'reviewing'
+      : approvedMergeFailure ? 'awaiting_orchestrator' : 'awaiting_input',
     actor,
-    approvedMergeFailure ? 'merge_blocked_recoverable' : surfaceRoute ? 'dispatcher_review_required' : 'approval_required',
+    approvedMergeFailure && input.policyRuleId === 'merge-gate-violation'
+      ? 'merge_gate_blocked_after_approval'
+      : approvedMergeFailure ? 'merge_blocked_recoverable' : surfaceRoute ? 'dispatcher_review_required' : 'approval_required',
   );
   void publishRealtimeMutation({
     mutation: {
