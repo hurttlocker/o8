@@ -8,7 +8,7 @@ import {
   markRoughdraftResolved,
 } from '@/lib/o8md/rfm';
 import { cleanupOrphanedRoughdraftAnnotations } from '@/lib/o8md/cleanup';
-import { appendComment, insertSuggestion, type SuggestionKind } from '@/lib/o8md/mutate';
+import { appendComment, applySuggestion, insertSuggestion, type SuggestionKind } from '@/lib/o8md/mutate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -114,7 +114,14 @@ export async function POST(request: NextRequest) {
   }
   const action = request.nextUrl.searchParams.get('action');
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  const current = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE;
+  const suppliedContent = typeof body?.content === 'string' ? body.content : null;
+  if (suppliedContent !== null && Buffer.byteLength(suppliedContent, 'utf-8') > MAX_BYTES) {
+    return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+  }
+  // The editor supplies its current buffer so a note action can't race the
+  // autosave debounce and overwrite fresh operator prose. MCP callers omit it
+  // and continue operating against the persisted file exactly as before.
+  const current = suppliedContent ?? (existsSync(specPath) ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE);
 
   try {
     if (action === 'reply') {
@@ -135,7 +142,7 @@ export async function POST(request: NextRequest) {
       }
       writeFileSync(specPath, updated, 'utf-8');
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
-      return NextResponse.json({ ok: true, id: newId, path: specPath });
+      return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
     }
 
     if (action === 'comment') {
@@ -156,7 +163,7 @@ export async function POST(request: NextRequest) {
       }
       writeFileSync(specPath, updated, 'utf-8');
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
-      return NextResponse.json({ ok: true, id: newId, path: specPath });
+      return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
     }
 
     if (action === 'suggest') {
@@ -182,7 +189,7 @@ export async function POST(request: NextRequest) {
       }
       writeFileSync(specPath, updated, 'utf-8');
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
-      return NextResponse.json({ ok: true, id: newId, path: specPath });
+      return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
     }
 
     if (action === 'resolve') {
@@ -196,7 +203,35 @@ export async function POST(request: NextRequest) {
         ...(summary !== undefined ? { summary } : {}),
       });
       writeFileSync(specPath, updated, 'utf-8');
-      return NextResponse.json({ ok: true, path: specPath });
+      return NextResponse.json({ ok: true, path: specPath, content: updated });
+    }
+
+    if (action === 'scoped-reply') {
+      const parentId = typeof body?.parentId === 'string' ? body.parentId : null;
+      const message = typeof body?.message === 'string' ? body.message : null;
+      if (!parentId || !message) {
+        return NextResponse.json({ ok: false, error: 'parentId and message are required' }, { status: 400 });
+      }
+      const { runSingleNoteReply } = await import('@/lib/o8md/spec-review');
+      const { updated, result } = await runSingleNoteReply(current, parentId, message);
+      if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
+        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+      }
+      writeFileSync(specPath, updated, 'utf-8');
+      return NextResponse.json({ ok: true, ...result, path: specPath, content: updated });
+    }
+
+    if (action === 'apply-suggestion') {
+      const targetId = typeof body?.targetId === 'string' ? body.targetId : null;
+      if (!targetId) {
+        return NextResponse.json({ ok: false, error: 'targetId is required' }, { status: 400 });
+      }
+      const updated = applySuggestion(current, {
+        targetId,
+        accept: body?.accept !== false,
+      });
+      writeFileSync(specPath, updated, 'utf-8');
+      return NextResponse.json({ ok: true, path: specPath, content: updated });
     }
 
     if (action === 'prewarm-review') {

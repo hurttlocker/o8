@@ -117,6 +117,13 @@ export interface InsertSuggestionOptions {
   author?: string;
 }
 
+export interface ApplySuggestionOptions {
+  targetId: string;
+  /** Accept applies the proposed edit; false dismisses it and restores the
+   * original prose. Defaults to true. */
+  accept?: boolean;
+}
+
 /**
  * Splice a CriticMarkup SUGGESTION (proposed edit) into o8.md — a non-destructive
  * proposal the operator accepts or rejects; the original text is preserved inside
@@ -174,4 +181,32 @@ export function insertSuggestion(markdown: string, options: InsertSuggestionOpti
   }
   const separator = markdown.length === 0 || markdown.endsWith('\n') ? '' : '\n';
   return `${markdown}${separator}${marker}\n`;
+}
+
+/**
+ * Resolve one existing suggestion marker into prose. This is the persisted
+ * counterpart of the editor's old offset-local Accept/Dismiss splice, using
+ * the real review index so callers address a stable note id instead of trusting
+ * a potentially stale browser offset.
+ */
+export function applySuggestion(markdown: string, options: ApplySuggestionOptions): string {
+  const item = extractRoughdraftReviewIndex(markdown).items.find((candidate) => candidate.id === options.targetId);
+  if (!item) throw new Error(`Review item not found: ${options.targetId}`);
+  if (item.kind !== 'suggestion' || !item.suggestionKind) {
+    throw new Error(`Review item is not a suggestion: ${options.targetId}`);
+  }
+
+  const accept = options.accept !== false;
+  let replacement: string;
+  if (item.suggestionKind === 'addition') {
+    replacement = accept ? item.text : '';
+  } else if (item.suggestionKind === 'deletion') {
+    replacement = accept ? '' : (item.originalText ?? item.text);
+  } else {
+    replacement = accept
+      ? (item.replacementText ?? item.text)
+      : (item.originalText ?? '');
+  }
+
+  return `${markdown.slice(0, item.offset)}${replacement}${markdown.slice(item.endOffset)}`;
 }
