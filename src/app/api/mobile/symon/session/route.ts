@@ -3,16 +3,26 @@ export const runtime = 'nodejs';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
+import {
+  persistSymonScopeGrant,
+  SYMON_SCOPE_VERSION,
+  type SymonClientSubject,
+  type SymonWorkspaceMode,
+} from '@/lib/mobile/symon-agent-registry';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 import {
-  REALTIME_MODEL,
   DEFAULT_VOICE,
   DEFAULT_INSTRUCTIONS,
   PHONE_SURFACE_INSTRUCTIONS,
   PHONE_CODE_SURFACE_INSTRUCTIONS,
+  selectPhoneCodeTools,
+  selectPhoneRealtimeModel,
   RENDER_SURFACE_TOOL,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
   REALTIME_BASE_URL,
@@ -26,7 +36,7 @@ import {
  *
  * docs/symon-agent-mode.md §POST /api/mobile/symon/session. Mints an OpenAI
  * Realtime client token carrying the SAME session config the desk-mic session
- * uses — model + voice + instructions + the full tool-schema set — so the phone
+ * uses — model + voice + instructions + a workspace-appropriate tool set — so the phone
  * (a dumb pipe) opens WebRTC straight to OpenAI with Symon's whole brain baked
  * in. Every tool call still executes on the Mac over the `symon` WS channel.
  *
@@ -71,6 +81,28 @@ interface PhoneWorkspaceContext {
   controlTab?: 'fleet' | 'review' | 'changes' | 'activity';
   runStatus?: 'idle' | 'running' | 'review' | 'blocked' | 'failed' | 'done';
   activeSurface?: string;
+}
+
+interface ResolvedPhoneScope {
+  context: PhoneWorkspaceContext;
+  workspaceMode: SymonWorkspaceMode;
+  repoId: string | null;
+  repoPath: string | null;
+}
+
+function requestBearer(request: NextRequest): string {
+  const auth = request.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+}
+
+function authenticatedSubject(
+  request: NextRequest,
+  principal: ReturnType<typeof resolveRequestPrincipal>,
+): SymonClientSubject | null {
+  if (principal === 'operator') return { subject: 'operator', deviceId: null };
+  if (principal !== 'device') return null;
+  const device = resolveDeviceByToken(requestBearer(request));
+  return device ? { subject: 'device', deviceId: device.id } : null;
 }
 
 function safeRoute(value: unknown): string | undefined {
@@ -187,6 +219,28 @@ async function readPhoneWorkspaceContext(request: NextRequest): Promise<PhoneWor
     // caller lose voice access, and no raw body text is ever echoed to the model.
     return {};
   }
+}
+
+async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<ResolvedPhoneScope | null> {
+  const workspaceMode: SymonWorkspaceMode = context.workspaceMode === 'code' ? 'code' : 'o8';
+  if (workspaceMode !== 'code') {
+    return { context, workspaceMode, repoId: null, repoPath: null };
+  }
+  if (!context.repoPath) return null;
+
+  const repo = await findRepoByLocalPath(context.repoPath);
+  if (!repo) return null;
+  const repoPath = resolve(repo.localPath);
+  return {
+    context: {
+      ...context,
+      repoPath,
+      repoName: safeDisplayLabel(repo.name, 96),
+    },
+    workspaceMode,
+    repoId: repo.id,
+    repoPath,
+  };
 }
 
 function workspaceContextInstructions(context: PhoneWorkspaceContext): string {
@@ -306,8 +360,23 @@ export async function POST(request: NextRequest) {
       { status: 401 },
     );
   }
+  const subject = authenticatedSubject(request, principal);
+  if (!subject) {
+    return NextResponse.json(
+      { ok: false, error: 'unauthorized', detail: 'The enrolled phone identity could not be resolved.' },
+      { status: 401 },
+    );
+  }
 
-  const workspaceContext = await readPhoneWorkspaceContext(request);
+  const requestedContext = await readPhoneWorkspaceContext(request);
+  const resolvedScope = await resolvePhoneScope(requestedContext);
+  if (!resolvedScope) {
+    return NextResponse.json(
+      { ok: false, error: 'invalid_repo', detail: 'Code mode requires an exact registered repository.' },
+      { status: 400 },
+    );
+  }
+  const workspaceContext = resolvedScope.context;
 
   // Access gating — mirrors the desk mint exactly (realtime-access.ts).
   const byokKey = await resolveOpenAIKey();
@@ -341,10 +410,33 @@ export async function POST(request: NextRequest) {
   }
 
   const sessionId = `sym-${randomUUID()}`;
-  const model = REALTIME_MODEL;
+  const requestedModelVariant = principal === 'operator'
+    ? request.headers.get('x-o8-symon-code-model')
+    : null;
+  const modelSelection = selectPhoneRealtimeModel({
+    workspaceMode: resolvedScope.workspaceMode,
+    experiment: process.env.O8_SYMON_CODE_REALTIME_EXPERIMENT,
+    bucketKey: `${subject.subject}:${subject.deviceId ?? 'operator'}:${resolvedScope.repoId ?? 'life'}`,
+    operatorOverride: requestedModelVariant,
+  });
+  const model = modelSelection.model;
   const voice = bridge.voice;
+  let phoneBridgeTools = bridge.tools;
+  if (workspaceContext.workspaceMode === 'code') {
+    const selection = selectPhoneCodeTools(bridge.tools);
+    if (selection.missing.length > 0) {
+      const detail = `Code tool catalog incomplete; missing: ${selection.missing.join(', ')}`;
+      console.error(`${LOG} code_tools_incomplete: ${detail}`);
+      return NextResponse.json(
+        { ok: false, error: 'desktop_unavailable', detail },
+        { status: 503 },
+      );
+    }
+    phoneBridgeTools = selection.tools;
+  }
 
-  // Mint the ephemeral token carrying the FULL config (parity with desk). Plain
+  // Mint the ephemeral token carrying the shared brain/config. Code gets its
+  // bounded phone pack; Life keeps the complete live bridge catalog. Plain
   // fetch on the operator's BYOK key — the raw key never leaves the Mac.
   try {
     const mint = await fetch(CLIENT_SECRETS_URL, {
@@ -355,8 +447,8 @@ export async function POST(request: NextRequest) {
           {
             model,
             voice,
-            // Phone-only superset: the desk-mic tool set + the client-rendered
-            // surface tool, and the persona + its surface-authoring guidance.
+            // Phone-only surface tool plus the workspace-selected Mac tool set,
+            // and the persona + its surface-authoring guidance.
             // Only the phone has a surface renderer, so the desk mint is untouched.
             instructions:
               DEFAULT_INSTRUCTIONS +
@@ -365,7 +457,7 @@ export async function POST(request: NextRequest) {
                 ? PHONE_CODE_SURFACE_INSTRUCTIONS
                 : '') +
               workspaceContextInstructions(workspaceContext),
-            tools: [...bridge.tools, RENDER_SURFACE_TOOL],
+            tools: [...phoneBridgeTools, RENDER_SURFACE_TOOL],
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
             micProfile: 'near_field',
           },
@@ -389,20 +481,54 @@ export async function POST(request: NextRequest) {
       ? data.expires_at * 1000
       : Date.now() + REALTIME_TOKEN_TTL_SECONDS * 1000;
 
+    const issuedAt = Date.now();
+    const allowedTools = Array.from(new Set(phoneBridgeTools.flatMap((tool) => {
+      const name = tool.name;
+      return typeof name === 'string' && /^[A-Za-z0-9_:-]{1,96}$/.test(name) ? [name] : [];
+    })));
+    try {
+      persistSymonScopeGrant({
+        sessionId,
+        ...subject,
+        workspaceMode: resolvedScope.workspaceMode,
+        repoId: resolvedScope.repoId,
+        repoPath: resolvedScope.repoPath,
+        allowedTools,
+        issuedAt,
+        scopeVersion: SYMON_SCOPE_VERSION,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'scope grant persistence failed';
+      console.error(`${LOG} scope_grant_failed: ${detail}`);
+      return NextResponse.json(
+        { ok: false, error: 'desktop_unavailable', detail: 'Unable to bind the Symon session scope.' },
+        { status: 503 },
+      );
+    }
+
     console.log(
-      `${LOG} minted ${sessionId} (model=${model} voice=${voice} tools=${bridge.tools.length}` +
+      `${LOG} minted ${sessionId} (model=${model} voice=${voice} tools=${phoneBridgeTools.length}` +
         `${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 
     return NextResponse.json({
       ok: true,
+      scopeVersion: SYMON_SCOPE_VERSION,
       session: {
         sessionId,
         clientSecret: data.value,
         expiresAt,
         model,
+        modelVariant: modelSelection.variant,
         voice,
         baseUrl: REALTIME_BASE_URL,
+        scopeVersion: SYMON_SCOPE_VERSION,
+      },
+      scope: {
+        version: SYMON_SCOPE_VERSION,
+        repoId: resolvedScope.repoId,
+        repoPath: resolvedScope.repoPath,
+        workspaceMode: resolvedScope.workspaceMode,
       },
       preempted: bridge.deskWasLive ? 'desk' : null,
     });

@@ -13,6 +13,145 @@
 use crate::agent::o8_http;
 use serde_json::{json, Value};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RepoIdentity {
+    id: String,
+    name: String,
+    path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LaneTarget {
+    lane_id: String,
+    packet_id: String,
+    session_key: Option<String>,
+    label: String,
+    repo_path: String,
+}
+
+fn trimmed_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+async fn registered_repos() -> Result<Vec<Value>, String> {
+    Ok(o8_http::get_json("/api/panel/repos")
+        .await?
+        .get("repos")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn repo_identity_from_value(repo: &Value) -> Option<RepoIdentity> {
+    let id = repo.get("id").and_then(Value::as_str)?.trim();
+    let path = repo.get("localPath").and_then(Value::as_str)?.trim();
+    if id.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(RepoIdentity {
+        id: id.to_string(),
+        name: repo.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+        path: path.to_string(),
+    })
+}
+
+/// Resolve the canonical Code scope. A Code relay call always supplies the
+/// immutable registry id plus its server-injected absolute path; we verify the
+/// pair before the path is ever used. The legacy `repo` fallback remains only
+/// for the desktop/Life catalog, whose existing tools still speak repo names.
+async fn canonical_repo_identity(args: &Value) -> Result<RepoIdentity, String> {
+    let repo_id = trimmed_arg(args, "repoId");
+    let repo_path = trimmed_arg(args, "repoPath");
+    let repos = registered_repos().await?;
+
+    if repo_id.is_some() || repo_path.is_some() {
+        let repo_id = repo_id.ok_or_else(|| "repoId is required with repoPath".to_string())?;
+        let repo_path = repo_path.ok_or_else(|| "repoPath is required with repoId".to_string())?;
+        let identity = repos
+            .iter()
+            .filter_map(repo_identity_from_value)
+            .find(|repo| repo.id == repo_id)
+            .ok_or_else(|| format!("Repo id '{repo_id}' is not registered in o8."))?;
+        if identity.path != repo_path {
+            return Err("repoId and repoPath do not identify the same registered repo".into());
+        }
+        return Ok(identity);
+    }
+
+    let legacy = trimmed_arg(args, "repo")
+        .ok_or_else(|| "repoId and repoPath are required".to_string())?;
+    let path = resolve_repo_path(legacy).await?;
+    repos
+        .iter()
+        .filter_map(repo_identity_from_value)
+        .find(|repo| repo.path == path)
+        .ok_or_else(|| format!("Repo path '{path}' is not registered in o8."))
+}
+
+async fn optional_repo_scope(args: &Value) -> Result<Option<RepoIdentity>, String> {
+    if trimmed_arg(args, "repoId").is_some()
+        || trimmed_arg(args, "repoPath").is_some()
+        || trimmed_arg(args, "repo").is_some()
+    {
+        canonical_repo_identity(args).await.map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn lane_target(lane: &Value) -> Option<LaneTarget> {
+    let lane_id = lane.get("id").and_then(Value::as_str)?.trim();
+    let packet_id = lane.get("packetId").and_then(Value::as_str)?.trim();
+    if lane_id.is_empty() || packet_id.is_empty() {
+        return None;
+    }
+    Some(LaneTarget {
+        lane_id: lane_id.to_string(),
+        packet_id: packet_id.to_string(),
+        session_key: lane
+            .get("sessionKey")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        label: lane.get("label").and_then(Value::as_str).unwrap_or("Untitled").to_string(),
+        repo_path: lane.get("repoPath").and_then(Value::as_str).unwrap_or("").to_string(),
+    })
+}
+
+async fn all_lane_values() -> Result<Vec<Value>, String> {
+    Ok(o8_http::get_json("/api/lanes?active=false")
+        .await?
+        .get("lanes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+async fn exact_lane_target(args: &Value, key: &str) -> Result<LaneTarget, String> {
+    let target_id = trimmed_arg(args, key)
+        .ok_or_else(|| format!("{key} is required; copy the exact id from o8_status or o8_needs_me"))?;
+    let scope = optional_repo_scope(args).await?;
+    let target = all_lane_values()
+        .await?
+        .iter()
+        .filter_map(lane_target)
+        .find(|lane| match key {
+            "laneId" => lane.lane_id == target_id,
+            _ => lane.packet_id == target_id,
+        })
+        .ok_or_else(|| format!("No lane has exact {key} '{target_id}'. Refresh o8_status and try again."))?;
+    if let Some(repo) = scope {
+        if target.repo_path != repo.path {
+            return Err(format!("{key} '{target_id}' is outside the active repo scope"));
+        }
+    }
+    Ok(target)
+}
+
 async fn terminal_host_request(path: &str, body: Option<Value>) -> Result<Value, String> {
     let port = std::env::var("O8_WS_PORT")
         .ok()
@@ -63,13 +202,12 @@ pub async fn terminal_send(args: Value) -> Result<Value, String> {
 /// `o8_status` — what's shipping / in progress across the fleet right now.
 ///
 /// Reads the active lanes (the same data the tray + AgentPanel use) and projects
-/// a compact list the model can speak. Optional `repo` filter (substring match
-/// on the repo folder name) scopes it to one project.
+/// a compact list the model can speak. Code calls are scoped by the exact
+/// `(repoId, repoPath)` pair injected by the relay; desktop/Life may omit it for
+/// a fleet-wide read.
 pub async fn status(args: Value) -> Result<Value, String> {
-    let repo_filter = args
-        .get("repo")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_lowercase());
+    let repo_scope = optional_repo_scope(&args).await?;
+    let repos = registered_repos().await?;
 
     let resp = o8_http::get_json("/api/lanes?active=true").await?;
     let lanes = resp
@@ -87,14 +225,21 @@ pub async fn status(args: Value) -> Result<Value, String> {
             .next()
             .unwrap_or("")
             .to_string();
-        if let Some(ref f) = repo_filter {
-            if !repo.to_lowercase().contains(f) {
+        if let Some(scope) = &repo_scope {
+            if repo_path != scope.path {
                 continue;
             }
         }
+        let identity = repos
+            .iter()
+            .filter_map(repo_identity_from_value)
+            .find(|entry| entry.path == repo_path);
         items.push(json!({
-            // The agent's memorable canvas name — say it back ("Atlas is on the
-            // auth refactor") and use it to address the agent via o8_agent_task.
+            "laneId": lane.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+            "packetId": lane.get("packetId").and_then(|v| v.as_str()).unwrap_or(""),
+            "sessionKey": lane.get("sessionKey").and_then(|v| v.as_str()),
+            "repoId": identity.as_ref().map(|entry| entry.id.as_str()),
+            "repoPath": repo_path,
             "name": lane.get("codename").and_then(|v| v.as_str()).unwrap_or(""),
             "label": lane.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled"),
             "status": lane.get("status").and_then(|v| v.as_str()).unwrap_or("unknown"),
@@ -114,11 +259,12 @@ pub async fn status(args: Value) -> Result<Value, String> {
         .and_then(|p| p.get("peers").and_then(|v| v.as_array()).cloned())
         .unwrap_or_default()
         .into_iter()
-        .filter(|p| match &repo_filter {
-            Some(f) => p
-                .get("repo")
-                .and_then(|v| v.as_str())
-                .map(|r| r.to_lowercase().contains(f))
+        .filter(|p| match &repo_scope {
+            Some(scope) => p
+                .get("repoPath")
+                .or_else(|| p.get("repo"))
+                .and_then(Value::as_str)
+                .map(|path| path == scope.path || path == scope.name)
                 .unwrap_or(false),
             None => true,
         })
@@ -126,6 +272,8 @@ pub async fn status(args: Value) -> Result<Value, String> {
 
     Ok(json!({
         "active_count": items.len(),
+        "repoId": repo_scope.as_ref().map(|repo| repo.id.as_str()),
+        "repoPath": repo_scope.as_ref().map(|repo| repo.path.as_str()),
         "lanes": items,
         "peers": peers,
     }))
@@ -182,17 +330,60 @@ const ATTENTION_STATUSES: &[&str] = &[
     "failed",
 ];
 
+fn nested_string<'a>(value: &'a Value, parent: &str, key: &str) -> Option<&'a str> {
+    value
+        .get(parent)
+        .and_then(|nested| nested.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn approval_lane_target(approval: &Value, lanes: &[Value]) -> Option<LaneTarget> {
+    let packet_id = nested_string(approval, "metadata", "Packet")
+        .or_else(|| nested_string(approval, "continuation", "packetId"))
+        .or_else(|| nested_string(approval, "args", "packetId"));
+    let lane_id = nested_string(approval, "metadata", "Lane")
+        .or_else(|| nested_string(approval, "continuation", "laneId"))
+        .or_else(|| nested_string(approval, "args", "laneId"));
+    let session_key = approval.get("sessionKey").and_then(Value::as_str).map(str::trim);
+
+    lanes.iter().filter_map(lane_target).find(|lane| {
+        lane_id.is_some_and(|id| lane.lane_id == id)
+            || packet_id.is_some_and(|id| lane.packet_id == id)
+            || session_key.is_some_and(|key| lane.session_key.as_deref() == Some(key))
+    })
+}
+
+fn approval_repo_path(approval: &Value, target: Option<&LaneTarget>) -> Option<String> {
+    target
+        .map(|lane| lane.repo_path.clone())
+        .or_else(|| nested_string(approval, "continuation", "repoPath").map(str::to_string))
+        .or_else(|| nested_string(approval, "continuation", "cwd").map(str::to_string))
+        .or_else(|| nested_string(approval, "metadata", "Repo").map(str::to_string))
+        .or_else(|| nested_string(approval, "args", "repoPath").map(str::to_string))
+}
+
 /// `o8_needs_me` — everything waiting on the OPERATOR right now (magic
 /// roadmap #2: voice approval triage). Two signals, both read-through:
 /// pending approval cards (`/api/panel/approvals`) and lanes stuck in an
 /// attention state (`/api/lanes?active=true`). Projects a compact,
 /// spoken-friendly list; the model reads exact titles from here before any
 /// `o8_approve_item` / `o8_reject_item` call.
-pub async fn needs_me(_args: Value) -> Result<Value, String> {
+pub async fn needs_me(args: Value) -> Result<Value, String> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
+
+    let repo_scope = optional_repo_scope(&args).await?;
+    let repos = registered_repos().await?;
+    let lanes_resp = o8_http::get_json("/api/lanes?active=true").await?;
+    let lanes = lanes_resp
+        .get("lanes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     let resp = o8_http::get_json("/api/panel/approvals").await?;
     let approvals = resp
@@ -203,9 +394,26 @@ pub async fn needs_me(_args: Value) -> Result<Value, String> {
 
     let mut cards: Vec<Value> = Vec::new();
     for a in &approvals {
+        let target = approval_lane_target(a, &lanes);
+        let approval_path = approval_repo_path(a, target.as_ref());
+        if let Some(scope) = &repo_scope {
+            if approval_path.as_deref() != Some(scope.path.as_str()) {
+                continue;
+            }
+        }
         let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
         let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let mut card = json!({
+            "approvalId": a.get("id").and_then(Value::as_str).unwrap_or(""),
+            "packetId": target.as_ref().map(|lane| lane.packet_id.as_str()),
+            "laneId": target.as_ref().map(|lane| lane.lane_id.as_str()),
+            "sessionKey": target.as_ref().and_then(|lane| lane.session_key.as_deref())
+                .or_else(|| a.get("sessionKey").and_then(Value::as_str)),
+            "repoPath": approval_path,
+            "repoId": approval_path.as_deref().and_then(|path| repos.iter()
+                .filter_map(repo_identity_from_value)
+                .find(|repo| repo.path == path)
+                .map(|repo| repo.id)),
             "title": title,
             "agent": a.get("agent").and_then(|v| v.as_str()).unwrap_or(""),
             "risk": a.get("risk").and_then(|v| v.as_str()).unwrap_or("low"),
@@ -222,13 +430,6 @@ pub async fn needs_me(_args: Value) -> Result<Value, String> {
         cards.push(card);
     }
 
-    let lanes_resp = o8_http::get_json("/api/lanes?active=true").await?;
-    let lanes = lanes_resp
-        .get("lanes")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
     let mut stuck: Vec<Value> = Vec::new();
     for lane in &lanes {
         let status = lane.get("status").and_then(|v| v.as_str()).unwrap_or("");
@@ -236,8 +437,22 @@ pub async fn needs_me(_args: Value) -> Result<Value, String> {
             continue;
         }
         let repo_path = lane.get("repoPath").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(scope) = &repo_scope {
+            if repo_path != scope.path {
+                continue;
+            }
+        }
         let repo = repo_path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+        let identity = repos
+            .iter()
+            .filter_map(repo_identity_from_value)
+            .find(|entry| entry.path == repo_path);
         stuck.push(json!({
+            "laneId": lane.get("id").and_then(Value::as_str).unwrap_or(""),
+            "packetId": lane.get("packetId").and_then(Value::as_str).unwrap_or(""),
+            "sessionKey": lane.get("sessionKey").and_then(Value::as_str),
+            "repoId": identity.as_ref().map(|entry| entry.id.as_str()),
+            "repoPath": repo_path,
             "label": lane.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled"),
             "status": status,
             "repo": repo,
@@ -257,15 +472,12 @@ pub async fn needs_me(_args: Value) -> Result<Value, String> {
     Ok(out)
 }
 
-/// Resolve a spoken/near title to exactly one PENDING approval `(id, title)`.
-///
-/// The agent loop is stateless between asks, so the id can't be remembered —
-/// it has to re-resolve against the live queue at decision time (which also
-/// means an approval resolved elsewhere in the meantime is a safe miss, not a
-/// double-fire). Ladder: exact case-insensitive title → title substring →
-/// summary/agent substring. Anything other than exactly one match errors with
-/// a spoken-friendly message the model relays.
-async fn resolve_pending_approval(which: &str) -> Result<(String, String), String> {
+/// Resolve exactly one pending approval by its stable id and, for Code calls,
+/// prove that the approval belongs to the relay-injected repo scope.
+async fn exact_pending_approval(args: &Value) -> Result<(String, String), String> {
+    let approval_id = trimmed_arg(args, "approvalId")
+        .ok_or_else(|| "approvalId is required; copy it exactly from o8_needs_me".to_string())?;
+    let repo_scope = optional_repo_scope(args).await?;
     let resp = o8_http::get_json("/api/panel/approvals").await?;
     let approvals = resp
         .get("approvals")
@@ -273,80 +485,34 @@ async fn resolve_pending_approval(which: &str) -> Result<(String, String), Strin
         .cloned()
         .unwrap_or_default();
 
-    let pending: Vec<(String, String, String, String)> = approvals
+    let approval = approvals
         .iter()
-        .filter_map(|a| {
-            let id = a.get("id").and_then(|v| v.as_str())?.to_string();
-            let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
-            let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-            let agent = a.get("agent").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-            Some((id, title, summary, agent))
-        })
-        .collect();
+        .find(|approval| approval.get("id").and_then(Value::as_str) == Some(approval_id))
+        .ok_or_else(|| format!("No pending approval has exact approvalId '{approval_id}'. Refresh o8_needs_me and try again."))?;
 
-    if pending.is_empty() {
-        return Err("There are no pending approvals in o8 right now.".into());
-    }
-
-    let needle = which.trim().to_lowercase();
-    if needle.is_empty() {
-        if pending.len() == 1 {
-            let (id, title, _, _) = pending.into_iter().next().unwrap();
-            return Ok((id, title));
-        }
-        let titles: Vec<&str> = pending.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
-        return Err(format!(
-            "There are {} pending approvals — say which one: {}.",
-            pending.len(),
-            titles.join("; ")
-        ));
-    }
-
-    if let Some((id, title, _, _)) = pending.iter().find(|(_, t, _, _)| t.to_lowercase() == needle) {
-        return Ok((id.clone(), title.clone()));
-    }
-
-    let mut matches: Vec<&(String, String, String, String)> = pending
-        .iter()
-        .filter(|(_, t, _, _)| t.to_lowercase().contains(&needle))
-        .collect();
-    if matches.is_empty() {
-        matches = pending
-            .iter()
-            .filter(|(_, _, s, a)| s.contains(&needle) || a.contains(&needle))
-            .collect();
-    }
-
-    match matches.len() {
-        1 => {
-            let (id, title, _, _) = matches[0];
-            Ok((id.clone(), title.clone()))
-        }
-        0 => {
-            let titles: Vec<&str> = pending.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
-            Err(format!(
-                "Nothing pending matches '{which}'. The queue has: {}.",
-                titles.join("; ")
-            ))
-        }
-        _ => {
-            let titles: Vec<&str> = matches.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
-            Err(format!(
-                "'{which}' matches more than one pending approval — say which: {}.",
-                titles.join("; ")
-            ))
+    if let Some(scope) = repo_scope {
+        let lanes = all_lane_values().await?;
+        let target = approval_lane_target(approval, &lanes);
+        let path = approval_repo_path(approval, target.as_ref())
+            .ok_or_else(|| "That approval has no verifiable repository in the active Code scope.".to_string())?;
+        if path != scope.path {
+            return Err(format!("approvalId '{approval_id}' is outside the active repo scope"));
         }
     }
+
+    Ok((
+        approval_id.to_string(),
+        approval.get("title").and_then(Value::as_str).unwrap_or("Untitled").to_string(),
+    ))
 }
 
-/// `o8_approve_item` — approve one pending o8 approval card by (near-)title.
+/// `o8_approve_item` — approve one pending o8 approval card by stable id.
 /// Reversible in `super::super::safety`, so the loop speaks the proposal and
 /// shows the dock confirm card BEFORE this runs — the card is the binding
 /// gate; this just executes the operator's decision against the same endpoint
 /// the desktop Approve button uses.
 pub async fn approve_item(args: Value) -> Result<Value, String> {
-    let which = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let (id, title) = resolve_pending_approval(which).await?;
+    let (id, title) = exact_pending_approval(&args).await?;
 
     let resp = o8_http::post_json(
         "/api/panel/approvals",
@@ -360,17 +526,17 @@ pub async fn approve_item(args: Value) -> Result<Value, String> {
 
     Ok(json!({
         "approved": true,
+        "approvalId": id,
         "title": title,
         "note": resp.get("note").and_then(|v| v.as_str()).unwrap_or(""),
     }))
 }
 
-/// `o8_reject_item` — reject one pending o8 approval card by (near-)title.
+/// `o8_reject_item` — reject one pending o8 approval card by stable id.
 /// Same resolve + gate story as `o8_approve_item`. The optional spoken reason
 /// rides the request body for the audit trail.
 pub async fn reject_item(args: Value) -> Result<Value, String> {
-    let which = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let (id, title) = resolve_pending_approval(which).await?;
+    let (id, title) = exact_pending_approval(&args).await?;
 
     let mut body = json!({ "action": "reject", "id": id });
     if let Some(reason) = args
@@ -389,6 +555,7 @@ pub async fn reject_item(args: Value) -> Result<Value, String> {
 
     Ok(json!({
         "rejected": true,
+        "approvalId": id,
         "title": title,
         "note": resp.get("note").and_then(|v| v.as_str()).unwrap_or(""),
     }))
@@ -481,17 +648,15 @@ pub async fn ask(args: Value) -> Result<Value, String> {
 /// worker pre-approval. A misheard / unknown repo is a safe no-op error: nothing
 /// is dispatched until the repo resolves to a registered path.
 pub async fn dispatch(args: Value) -> Result<Value, String> {
-    let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    if repo.is_empty() || task.is_empty() {
-        return Err("o8_dispatch needs a 'repo' and a 'task'".into());
+    if task.is_empty() {
+        return Err("o8_dispatch needs a 'task'".into());
     }
-
-    let repo_path = resolve_repo_path(&repo).await?;
+    let repo = canonical_repo_identity(&args).await?;
 
     let mut body = json!({
         "prompt": task,
-        "repoPath": repo_path,
+        "repoPath": repo.path,
         "taskName": task.chars().take(60).collect::<String>(),
     });
     if let Some(base) = args
@@ -517,9 +682,11 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
         let approval = resp.get("approvalId").and_then(|v| v.as_str()).unwrap_or("");
         return Ok(json!({
             "dispatched": false,
-            "packet_id": packet_id,
+            "repoId": repo.id,
+            "repoPath": repo.path,
+            "packetId": packet_id,
             "codename": card_name,
-            "approval_id": approval,
+            "approvalId": approval,
             "note": if note.is_empty() { "The orchestrator queued the task pending approval." } else { note },
         }));
     }
@@ -530,10 +697,12 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
 
     Ok(json!({
         "dispatched": true,
-        "packet_id": packet_id,
-        "lane_id": lane_id,
+        "repoId": repo.id,
+        "repoPath": repo.path,
+        "packetId": packet_id,
+        "laneId": lane_id,
         "codename": card_name,
-        "repo": repo,
+        "repo": repo.name,
     }))
 }
 
@@ -767,193 +936,117 @@ pub async fn panel_read(args: Value) -> Result<Value, String> {
     }
 }
 
-/// Resolve a spoken packet/lane descriptor to exactly one lane
-/// `(packet_id, session_key, label)` — same stateless re-resolve story as the
-/// approval resolver: label substring against all lanes, most recently
-/// updated match wins ties ONLY when one candidate is clearly current;
-/// otherwise a spoken ambiguity error.
-async fn resolve_lane(which: &str) -> Result<(String, Option<String>, String), String> {
-    let resp = o8_http::get_json("/api/lanes?active=false").await?;
-    let lanes = resp
-        .get("lanes")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let needle = which.trim().to_lowercase();
-    if needle.is_empty() {
-        return Err("Say which packet — give me part of its name.".into());
-    }
-    let mut matches: Vec<&Value> = lanes
-        .iter()
-        .filter(|l| {
-            l.get("packetId").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
-                && l.get("status").and_then(|v| v.as_str()) != Some("archived")
-                && l.get("label")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_lowercase().contains(&needle))
-                    .unwrap_or(false)
-        })
-        .collect();
-    // Newest first — a packet redispatched twice shares its label.
-    matches.sort_by_key(|l| {
-        std::cmp::Reverse(
-            l.get("updatedAt")
-                .and_then(|v| {
-                    v.as_str()
-                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                        .map(|d| d.timestamp_millis())
-                        .or_else(|| v.as_i64())
-                })
-                .unwrap_or(0),
-        )
-    });
-
-    match matches.len() {
-        0 => Err(format!("No packet matches '{which}'. Ask me what's shipping to hear the names.")),
-        1 => {
-            let l = matches[0];
-            Ok((
-                l.get("packetId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                l.get("sessionKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                l.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string(),
-            ))
-        }
-        _ => {
-            // Distinct labels → ambiguous; same label → take the newest.
-            let first_label = matches[0].get("label").and_then(|v| v.as_str()).unwrap_or("");
-            if matches.iter().all(|l| l.get("label").and_then(|v| v.as_str()) == Some(first_label)) {
-                let l = matches[0];
-                return Ok((
-                    l.get("packetId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    l.get("sessionKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    first_label.to_string(),
-                ));
-            }
-            let names: Vec<&str> = matches
-                .iter()
-                .take(3)
-                .filter_map(|l| l.get("label").and_then(|v| v.as_str()))
-                .collect();
-            Err(format!("'{which}' matches more than one packet — say which: {}.", names.join("; ")))
-        }
-    }
-}
-
-/// `o8_packet_steer` — get a spoken message to a packet's worker: steer the
-/// warm session when one exists, else redispatch fresh with the message as
-/// feedback. One verb for "tell the tooltip packet to also fix X".
+/// `o8_packet_steer` — steer the exact packet selected from status.
 pub async fn packet_steer(args: Value) -> Result<Value, String> {
-    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
     let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("").trim();
     if message.is_empty() {
         return Err("o8_packet_steer needs a 'message'".into());
     }
-    let (packet_id, session_key, label) = resolve_lane(which).await?;
-
-    if let Some(session_key) = session_key.filter(|s| !s.is_empty()) {
-        // Steer the warm session. Do NOT `?` here: a failed steer (session
-        // gone → non-2xx → Err, OR a 2xx with ok:false) must fall through to
-        // the reliable rerun path, not abort the tool. Only an explicit
-        // ok:true counts as a warm-session success.
-        let steer = o8_http::post_json(
-            "/api/runtime/action",
-            json!({ "action": "steer", "surfaceId": session_key, "message": message }),
-        )
-        .await;
-        if let Ok(resp) = &steer {
-            if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                return Ok(json!({ "steered": true, "packet": label, "how": "warm session" }));
-            }
-        }
-        // Steer refused or errored — fall through to a fresh rerun.
-    }
+    let target = exact_lane_target(&args, "packetId").await?;
     let resp = o8_http::post_json(
-        "/api/orchestrator/rerun-with-feedback",
-        json!({ "packetId": packet_id, "feedback": message }),
+        "/api/orchestrator/steer-packet",
+        json!({ "packetId": target.packet_id, "message": message, "source": "symon" }),
     )
     .await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
-        return Err(format!("Couldn't reach the \u{201c}{label}\u{201d} worker: {err}"));
+        return Err(format!("Couldn't reach packet '{}': {err}", target.packet_id));
     }
-    Ok(json!({ "steered": true, "packet": label, "how": "fresh worker with the message as feedback" }))
+    Ok(json!({
+        "steered": true,
+        "packetId": target.packet_id,
+        "laneId": target.lane_id,
+        "label": target.label,
+        "result": resp.get("result").cloned().unwrap_or(resp),
+    }))
 }
 
-/// `o8_agent_task` — address a WORKING agent by the memorable codename on its
-/// canvas card (Atlas, Nova…) and steer it: "Atlas, also run the tests". The
-/// name is resolved SERVER-side against the live lanes (codename.ts is the single
-/// source of truth — the name on the card is the name you say), so there is no
-/// codename table to keep in lockstep here. The route returns 200 for every
-/// spoken outcome (steered / no-such-agent / ambiguous), so a clean message
-/// rides back for Symon to read instead of a raw HTTP error string.
+/// `o8_agent_task` — steer one exact working lane or packet selected from status.
 pub async fn agent_task(args: Value) -> Result<Value, String> {
-    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
     let task = args
         .get("task")
         .and_then(|v| v.as_str())
         .or_else(|| args.get("message").and_then(|v| v.as_str()))
         .unwrap_or("")
         .trim();
-    if name.is_empty() {
-        return Err("o8_agent_task needs the agent's canvas name (e.g. 'Atlas')".into());
-    }
     if task.is_empty() {
         return Err("o8_agent_task needs a 'task' — what to tell the agent".into());
     }
-    let resp = o8_http::post_json(
-        "/api/orchestrator/agent-task",
-        json!({ "name": name, "task": task }),
-    )
-    .await?;
-    // Spoken-ready failure (no match / ambiguous / no session) → surface the
-    // message as the tool error so Symon reads it back verbatim.
-    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-        let msg = resp
-            .get("error")
-            .and_then(|e| e.get("message").and_then(|v| v.as_str()))
-            .unwrap_or("o8 could not steer that agent");
-        return Err(msg.to_string());
+    let has_lane = trimmed_arg(&args, "laneId").is_some();
+    let has_packet = trimmed_arg(&args, "packetId").is_some();
+    if has_lane == has_packet {
+        return Err("o8_agent_task requires exactly one of laneId or packetId".into());
     }
-    Ok(resp.get("result").cloned().unwrap_or(resp))
+    let (target, resp) = if has_lane {
+        let target = exact_lane_target(&args, "laneId").await?;
+        let resp = o8_http::post_json(
+            "/api/lanes",
+            json!({ "verb": "send_turn", "laneId": target.lane_id, "message": task }),
+        )
+        .await?;
+        (target, resp)
+    } else {
+        let target = exact_lane_target(&args, "packetId").await?;
+        let resp = o8_http::post_json(
+            "/api/orchestrator/steer-packet",
+            json!({ "packetId": target.packet_id, "message": task, "source": "symon-agent-task" }),
+        )
+        .await?;
+        (target, resp)
+    };
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let message = resp
+            .get("note")
+            .and_then(Value::as_str)
+            .or_else(|| resp.get("error").and_then(Value::as_str))
+            .unwrap_or("o8 could not steer that agent");
+        return Err(message.to_string());
+    }
+    Ok(json!({
+        "steered": true,
+        "laneId": target.lane_id,
+        "packetId": target.packet_id,
+        "label": target.label,
+        "result": resp.get("result").cloned().unwrap_or(resp),
+    }))
 }
 
 /// `o8_packet_rerun` — restart a packet fresh ("retry the failed packet"),
 /// optionally with spoken feedback about what went wrong.
 pub async fn packet_rerun(args: Value) -> Result<Value, String> {
-    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
     let feedback = args
         .get("feedback")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("Retry: the previous attempt did not land. Re-read the task and try again carefully.");
-    let (packet_id, _, label) = resolve_lane(which).await?;
+    let target = exact_lane_target(&args, "packetId").await?;
 
     let resp = o8_http::post_json(
         "/api/orchestrator/rerun-with-feedback",
-        json!({ "packetId": packet_id, "feedback": feedback }),
+        json!({ "packetId": target.packet_id, "feedback": feedback }),
     )
     .await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
-        return Err(format!("Couldn't restart \u{201c}{label}\u{201d}: {err}"));
+        return Err(format!("Couldn't restart packet '{}': {err}", target.packet_id));
     }
     crate::agent::worker_pulse::nudge();
-    Ok(json!({ "restarted": true, "packet": label }))
+    Ok(json!({ "restarted": true, "packetId": target.packet_id, "laneId": target.lane_id, "label": target.label }))
 }
 
-/// `o8_packet_reset` — recover a STUCK packet by wiping its worktree + archiving
-/// the lane, then relaunching ("reset the stuck packet and try again"). Distinct
-/// from o8_packet_rerun, which KEEPS the worktree — reset is for when the
-/// worktree itself is wedged. `keep_worktree:true` = "retry" (preserve + resume).
-/// Reuses the operator's reset-packet → dispatch flow.
+/// `o8_packet_reset` — recover one exact stuck packet by archiving its lane and
+/// optionally wiping the worktree. It deliberately does not call mission-wide
+/// dispatch because that can relaunch unrelated held packets.
 pub async fn packet_reset(args: Value) -> Result<Value, String> {
-    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
-    let keep_worktree = args.get("keep_worktree").and_then(|v| v.as_bool()).unwrap_or(false);
-    let (packet_id, _session, label) = resolve_lane(which).await?;
+    let keep_worktree = args
+        .get("keepWorktree")
+        .and_then(Value::as_bool)
+        .or_else(|| args.get("keep_worktree").and_then(Value::as_bool))
+        .unwrap_or(false);
+    let target = exact_lane_target(&args, "packetId").await?;
 
-    let mut body = json!({ "packetId": packet_id, "clearWorktree": !keep_worktree });
+    let mut body = json!({ "packetId": target.packet_id, "clearWorktree": !keep_worktree });
     if let Some(r) = args.get("reason").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
         body["reason"] = json!(r);
     }
@@ -961,80 +1054,42 @@ pub async fn packet_reset(args: Value) -> Result<Value, String> {
     // archived (+ worktree wiped unless kept).
     o8_http::post_json("/api/orchestrator/reset-packet", body)
         .await
-        .map_err(|e| format!("Couldn't reset \u{201c}{label}\u{201d}: {e}"))?;
-
-    // Relaunch via the standard reset → dispatch flow (mission-level dispatch
-    // re-runs the now-pending packet). Best-effort — the archive already
-    // succeeded, so report partial success if the relaunch hiccups.
-    let redispatched = o8_http::post_json("/api/orchestrator/dispatch", json!({})).await.is_ok();
+        .map_err(|e| format!("Couldn't reset packet '{}': {e}", target.packet_id))?;
     crate::agent::worker_pulse::nudge();
 
     Ok(json!({
         "ok": true,
-        "packet": label,
+        "packetId": target.packet_id,
+        "laneId": target.lane_id,
+        "label": target.label,
         "worktree": if keep_worktree { "kept" } else { "wiped" },
-        "redispatched": redispatched,
-        "note": if redispatched {
-            "reset and relaunched it"
-        } else {
-            "reset it — say 'dispatch' or tell the orchestrator to relaunch"
-        },
+        "redispatched": false,
+        "note": "reset exactly this packet; it was not relaunched because o8 has no packet-scoped relaunch endpoint",
     }))
 }
 
-/// `o8_stop_agent` — KILL/STOP an agent (the symmetric counterpart to spawn).
+/// `o8_stop_agent` — KILL/STOP one exact lane.
 /// Reaps the live runtime PROCESS and archives the lane + prunes the worktree,
-/// with NO relaunch — distinct from o8_packet_reset, which relaunches and can
-/// leave an orphaned `codex exec` churning against a pruned worktree (#1286).
-/// `all:true` stops every active agent (clean slate), optionally scoped to a repo.
+/// with NO relaunch. The public contract accepts the stable lane id; the bridge
+/// resolves its packet id only for the existing packet-oriented backend endpoint.
 pub async fn stop_agent(args: Value) -> Result<Value, String> {
-    let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
-
-    if all {
-        let mut body = json!({ "all": true });
-        if let Some(repo) = args
-            .get("repo")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            let repo_path = resolve_repo_path(repo).await?;
-            body["repoPath"] = json!(repo_path);
-        }
-        let resp = o8_http::post_json("/api/orchestrator/stop-packet", body)
-            .await
-            .map_err(|e| format!("Couldn't stop the agents: {e}"))?;
-        crate::agent::worker_pulse::nudge();
-        let result = resp.get("result").cloned().unwrap_or_else(|| json!({}));
-        let reaped = result.get("interruptedSessions").and_then(|v| v.as_i64()).unwrap_or(0);
-        let archived = result.get("archivedLanes").and_then(|v| v.as_i64()).unwrap_or(0);
-        let packets = result.get("stoppedPackets").and_then(|v| v.as_i64()).unwrap_or(0);
-        return Ok(json!({
-            "ok": true,
-            "scope": "all",
-            "reaped": reaped,
-            "archived": archived,
-            "packets": packets,
-            "note": format!("stopped everything — killed {reaped} live session(s) and archived {archived} agent(s); nothing relaunched"),
-        }));
-    }
-
-    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
-    let (packet_id, _session, label) = resolve_lane(which).await?;
+    let target = exact_lane_target(&args, "laneId").await?;
     let resp = o8_http::post_json(
         "/api/orchestrator/stop-packet",
-        json!({ "packetId": packet_id }),
+        json!({ "packetId": target.packet_id }),
     )
     .await
-    .map_err(|e| format!("Couldn't stop \u{201c}{label}\u{201d}: {e}"))?;
+    .map_err(|e| format!("Couldn't stop packet '{}': {e}", target.packet_id))?;
     crate::agent::worker_pulse::nudge();
     let result = resp.get("result").cloned().unwrap_or_else(|| json!({}));
     let reaped = result.get("interruptedSessions").and_then(|v| v.as_i64()).unwrap_or(0);
     Ok(json!({
         "ok": true,
-        "packet": label,
+        "packetId": target.packet_id,
+        "laneId": target.lane_id,
+        "label": target.label,
         "reaped": reaped,
-        "note": format!("stopped \u{201c}{label}\u{201d} — killed the process and archived it; not relaunched"),
+        "note": "stopped the exact lane — killed the process and archived it; not relaunched",
     }))
 }
 
@@ -1043,20 +1098,21 @@ pub async fn stop_agent(args: Value) -> Result<Value, String> {
 /// bounded poll (~12s) so a live voice turn doesn't hang; if it's still working,
 /// say so and the model can ask again. ReadOnly.
 pub async fn packet_wait(args: Value) -> Result<Value, String> {
-    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
-    let (packet_id, _session, label) = resolve_lane(which).await?;
+    let target = exact_lane_target(&args, "packetId").await?;
 
     let mut last = String::from("working");
     for _ in 0..6u32 {
         if let Ok(resp) =
-            o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={packet_id}")).await
+            o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={}", target.packet_id)).await
         {
             if let Some(state) = resp.get("state").and_then(|v| v.as_str()) {
                 last = state.to_string();
                 if state != "working" {
                     return Ok(json!({
                         "ok": true,
-                        "packet": label,
+                        "packetId": target.packet_id,
+                        "laneId": target.lane_id,
+                        "label": target.label,
                         "state": state,
                         "ready": state == "ready-to-merge",
                     }));
@@ -1067,7 +1123,9 @@ pub async fn packet_wait(args: Value) -> Result<Value, String> {
     }
     Ok(json!({
         "ok": true,
-        "packet": label,
+        "packetId": target.packet_id,
+        "laneId": target.lane_id,
+        "label": target.label,
         "state": last,
         "ready": false,
         "note": "still working after ~12s — ask again to keep waiting",
@@ -1101,6 +1159,21 @@ pub async fn resolve_repo_path(repo: &str) -> Result<String, String> {
         }
     }
     fallback.ok_or_else(|| format!("I couldn't find a repo named '{repo}' in o8."))
+}
+
+/// Stable-ID entrypoints for the two Code-pack git reads. The existing git
+/// module deliberately keeps its desktop/Life `repo` compatibility; these
+/// wrappers validate the Code scope and pass only the canonical absolute path.
+pub async fn git_status(mut args: Value) -> Result<Value, String> {
+    let repo = canonical_repo_identity(&args).await?;
+    args["repo"] = json!(repo.path);
+    super::git_github::git_status(args).await
+}
+
+pub async fn git_log(mut args: Value) -> Result<Value, String> {
+    let repo = canonical_repo_identity(&args).await?;
+    args["repo"] = json!(repo.path);
+    super::git_github::git_log(args).await
 }
 
 /// `o8_add_repo` — register an existing local git repo in o8 (and optionally
@@ -1538,31 +1611,31 @@ pub async fn browser_act(args: Value) -> Result<Value, String> {
 /// the diffstat (files + insertions/deletions, speakable) plus the canonical
 /// review state (working / ready-to-merge / needs-revision / merged / failed).
 /// ReadOnly — the operator still releases the merge via o8_approve_item; this
-/// just lets voice SEE the diff instead of approving blind. `packet` matches a
-/// lane the same fuzzy way o8_packet_steer does (omit for the only active lane).
+/// just lets voice SEE the diff instead of approving blind.
 pub async fn review_diff(args: Value) -> Result<Value, String> {
-    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
-    let (packet_id, _session, label) = resolve_lane(which).await?;
+    let target = exact_lane_target(&args, "packetId").await?;
 
     // Diffstat only — small cap; we want the spoken summary, not the full patch.
     // packet_id is a url-safe slug (pkt-…), so direct interpolation is safe.
-    let diff = o8_http::get_json(&format!("/api/lanes/{packet_id}/diff?maxBytes=2000")).await?;
+    let diff = o8_http::get_json(&format!("/api/lanes/{}/diff?maxBytes=2000", target.packet_id)).await?;
     if diff.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         let note = diff.get("note").and_then(|v| v.as_str()).unwrap_or("no diff available");
-        return Err(format!("Couldn't read the diff for \u{201c}{label}\u{201d}: {note}"));
+        return Err(format!("Couldn't read the diff for packet '{}': {note}", target.packet_id));
     }
     let stat = diff.get("stat").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let branch = diff.get("branch").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     // Review state — best-effort; the diffstat is the primary payload.
-    let state = o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={packet_id}"))
+    let state = o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={}", target.packet_id))
         .await
         .ok()
         .and_then(|r| r.get("state").and_then(|v| v.as_str()).map(str::to_string));
 
     Ok(json!({
         "ok": true,
-        "packet": label,
+        "packetId": target.packet_id,
+        "laneId": target.lane_id,
+        "label": target.label,
         "branch": branch,
         "state": state,
         "stat": if stat.is_empty() { "no changes".to_string() } else { stat },
@@ -1571,33 +1644,66 @@ pub async fn review_diff(args: Value) -> Result<Value, String> {
 
 // ── Conductor delegation (hand a task to the live agent engine) ────────────────
 
-/// `o8_delegate` — hand an arbitrary, multi-step task to o8's LIVE in-app agent
-/// (the Claude REPL / orchestrator "agent mode") so it ACTS on it now — on the
-/// canvas / screen — while Symon keeps talking. This is the conductor move:
-/// gpt-realtime is a great voice but a weaker doer, so deep / multi-step /
-/// on-screen / "figure this out" work goes to the agent engine and Symon
-/// narrates. Distinct from o8_dispatch (which spawns a tracked Codex CODING
-/// worker in a worktree); delegate drives the LIVE session for immediate,
-/// arbitrary action. Reuses the canvas send-prompt path the operator's composer
-/// uses — so the canvas is the stage the operator watches, and the agent's own
-/// mutations stay gated downstream by o8's review/approval pipeline.
+/// `o8_delegate` — enqueue one task on the authenticated WS-host orchestrator
+/// bridge and report only the acceptance and identifiers returned by that host.
+fn delegate_body(repo: &RepoIdentity, task: &str, args: &Value) -> Value {
+    let mut body = json!({
+        "repoId": repo.id,
+        "repoPath": repo.path,
+        "task": task,
+        "source": "symon-code",
+    });
+    if let Some(session_id) = trimmed_arg(args, "__symonSessionId") {
+        body["sessionId"] = json!(session_id);
+    }
+    if let Some(call_id) = trimmed_arg(args, "__symonCallId") {
+        body["callId"] = json!(call_id);
+    }
+    body
+}
+
 pub async fn delegate(args: Value) -> Result<Value, String> {
     let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if task.is_empty() {
         return Err("o8_delegate needs a 'task' — what should the agent do?".into());
     }
-    // Bring the Canvas up and inject the task into the live orchestrator, which
-    // runs it as a real turn (tools + screen actions). canvas_intent surfaces a
-    // spoken-friendly error if the orchestrator isn't ready (no repo scoped /
-    // busy / not connected).
-    let resp = canvas_intent("send-prompt", json!({ "text": task })).await?;
-    let navigated = resp.get("navigated").and_then(|v| v.as_bool()).unwrap_or(false);
+    // Desktop/Life sessions do not carry the phone's immutable Code grant. Keep
+    // their established in-app canvas handoff, while every repo-scoped Code call
+    // takes the authenticated host endpoint below.
+    if trimmed_arg(&args, "repoId").is_none()
+        && trimmed_arg(&args, "repoPath").is_none()
+        && trimmed_arg(&args, "repo").is_none()
+    {
+        let resp = canvas_intent("send-prompt", json!({ "text": task })).await?;
+        return Ok(json!({
+            "ok": true,
+            "delegated": true,
+            "task": task,
+            "to": "the live in-app orchestrator",
+            "navigated": resp.get("navigated").and_then(Value::as_bool).unwrap_or(false),
+        }));
+    }
+    let repo = canonical_repo_identity(&args).await?;
+    let resp = terminal_host_request(
+        "/symon-orchestrator-turn",
+        Some(delegate_body(&repo, &task, &args)),
+    )
+    .await?;
+    let accepted = resp.get("accepted").and_then(Value::as_bool).unwrap_or(false);
+    let session_id = resp.get("sessionId").and_then(Value::as_str);
+    let turn_id = resp.get("turnId").and_then(Value::as_str);
+    let request_id = resp.get("requestId").and_then(Value::as_str);
+    let task_id = resp.get("taskId").and_then(Value::as_str);
     Ok(json!({
-        "ok": true,
-        "delegated": true,
+        "accepted": accepted,
+        "repoId": repo.id,
+        "repoPath": repo.path,
         "task": task,
-        "to": "the live agent (in-app orchestrator)",
-        "note": if navigated { "opened the canvas and handed it to the agent — it's working on it now" } else { "handed it to the agent on the canvas — it's working on it now" },
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "requestId": request_id,
+        "taskId": task_id,
+        "note": resp.get("note").or_else(|| resp.get("error")).cloned(),
     }))
 }
 
@@ -1802,5 +1908,72 @@ mod canvas_tests {
         // RFC 3986 unreserved chars pass through untouched.
         assert_eq!(qenc("/Users/q/My Repo"), "%2FUsers%2Fq%2FMy%20Repo");
         assert_eq!(qenc("a-b_c.d~e"), "a-b_c.d~e");
+    }
+
+    #[test]
+    fn repo_identity_requires_stable_id_and_path() {
+        let repo = repo_identity_from_value(&json!({
+            "id": "repo-123",
+            "name": "o8",
+            "localPath": "/Users/operator/o8",
+        }))
+        .expect("valid registry row");
+        assert_eq!(repo.id, "repo-123");
+        assert_eq!(repo.path, "/Users/operator/o8");
+        assert!(repo_identity_from_value(&json!({ "name": "o8", "localPath": "/tmp/o8" })).is_none());
+    }
+
+    #[test]
+    fn lane_target_preserves_all_stable_identifiers() {
+        let lane = lane_target(&json!({
+            "id": "lane-7",
+            "packetId": "pkt-9",
+            "sessionKey": "codex:pkt-9",
+            "repoPath": "/Users/operator/o8",
+            "label": "Fix auth",
+        }))
+        .expect("valid lane");
+        assert_eq!(lane.lane_id, "lane-7");
+        assert_eq!(lane.packet_id, "pkt-9");
+        assert_eq!(lane.session_key.as_deref(), Some("codex:pkt-9"));
+        assert_eq!(lane.repo_path, "/Users/operator/o8");
+    }
+
+    #[test]
+    fn approval_context_uses_exact_metadata_ids() {
+        let lanes = vec![json!({
+            "id": "lane-7",
+            "packetId": "pkt-9",
+            "sessionKey": "codex:pkt-9",
+            "repoPath": "/Users/operator/o8",
+            "label": "Fix auth",
+        })];
+        let approval = json!({
+            "id": "approval-1",
+            "metadata": { "Packet": "pkt-9", "Lane": "lane-7" },
+        });
+        let target = approval_lane_target(&approval, &lanes).expect("approval target");
+        assert_eq!(target.packet_id, "pkt-9");
+        assert_eq!(target.lane_id, "lane-7");
+    }
+
+    #[test]
+    fn delegate_body_carries_exact_repo_scope() {
+        let repo = RepoIdentity {
+            id: "repo-123".into(),
+            name: "o8".into(),
+            path: "/Users/operator/o8".into(),
+        };
+        assert_eq!(delegate_body(&repo, "Fix auth", &json!({
+            "__symonSessionId": "sym-1",
+            "__symonCallId": "call-1",
+        })), json!({
+            "repoId": "repo-123",
+            "repoPath": "/Users/operator/o8",
+            "task": "Fix auth",
+            "source": "symon-code",
+            "sessionId": "sym-1",
+            "callId": "call-1",
+        }));
     }
 }

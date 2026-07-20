@@ -66,10 +66,29 @@ import {
   sweepStaleAgentSession,
   getAgentSession,
   persistAgentSession,
+  loadSymonScopeGrant,
+  clearSymonScopeGrant,
+  scopeGrantMatchesClient,
+  scopeSymonToolArgs,
   type AgentSessionStatus,
+  type SymonScopeGrant,
 } from '@/lib/mobile/symon-agent-registry';
-import { ToolCallTracker, TOOL_TIMEOUT_MS } from '@/lib/mobile/symon-tool-relay';
+import {
+  SymonAsyncActionTracker,
+  SymonConfirmationTracker,
+  ToolCallTracker,
+  TOOL_TIMEOUT_MS,
+  confirmationOutcomeFromResolution,
+  type PendingToolCall,
+  type SymonActionComplete,
+  type SymonConfirmationOutcome,
+  type SymonConfirmationResolution,
+  type SymonPendingConfirmation,
+  type SymonProtocolVersion,
+  type SymonToolRelayResult,
+} from '@/lib/mobile/symon-tool-relay';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -840,6 +859,8 @@ interface ClientState {
   flushTimer: ReturnType<typeof setInterval> | null;
   /** Per-device id (#5) — set for per-device-token connections; drives revoke-disconnect. */
   deviceId?: string | null;
+  /** Credential class proven during the WS upgrade; Symon scope grants bind to it. */
+  authKind: 'operator' | 'device';
   /** Mobile E2EE channel state (#5) — undefined for loopback/legacy (plaintext). */
   e2ee?: E2eeConnectionState;
 }
@@ -1213,17 +1234,27 @@ interface OrchestratorAutoMessage {
   repoPath: string;
   message: string;
   createdAt: number;
+  symon?: {
+    sessionId: string;
+    callId: string;
+    taskId: string;
+  };
 }
 
 const orchestratorAutoQueue: OrchestratorAutoMessage[] = [];
 const MAX_AUTO_QUEUE = 20;
 
-function enqueueOrchestratorAutoMessage(repoPath: string, message: string, label: string): void {
+function enqueueOrchestratorAutoMessage(
+  repoPath: string,
+  message: string,
+  label: string,
+  symon?: OrchestratorAutoMessage['symon'],
+): void {
   if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) {
     orchestratorAutoQueue.shift(); // Drop oldest
     console.warn('[supervisor] Auto-message queue overflow — dropped oldest');
   }
-  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now() });
+  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now(), ...(symon ? { symon } : {}) });
   console.log(`[supervisor] Queued ${label} for ${repoPath} (${orchestratorAutoQueue.length} in queue)`);
   void drainOrchestratorAutoQueue();
 }
@@ -1293,6 +1324,22 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
   orchestratorAutoQueue.shift();
   console.log(`[supervisor] Draining auto-message for ${next.repoPath}`);
 
+  let symonTerminalSent = false;
+  const finishSymonDelegate = (status: 'done' | 'failed') => {
+    if (!next.symon || symonTerminalSent) return;
+    symonTerminalSent = true;
+    const owner = currentSymonOwner(next.symon.sessionId);
+    if (!owner) return;
+    pushSymonActionComplete(owner.route.clientId, {
+      sessionId: next.symon.sessionId,
+      callId: next.symon.callId,
+      tool: 'o8_delegate',
+      status,
+      taskId: next.symon.taskId,
+      ts: new Date().toISOString(),
+    });
+  };
+
   try {
     await backend.sendTurn(next.repoPath, next.message, (event) => {
       const sessionName = session!.sessionName;
@@ -1335,15 +1382,18 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
           break;
         case 'done':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'status', data: { status: 'ready', repoPath: next.repoPath, backend: backend.id } });
+          finishSymonDelegate('done');
           break;
         case 'error':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'error', data: { error: event.error, repoPath: next.repoPath, backend: backend.id } });
+          finishSymonDelegate('failed');
           break;
       }
       if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
     });
   } catch (err) {
     console.error('[supervisor] Auto-message failed:', err);
+    finishSymonDelegate('failed');
   }
 
   // Continue draining
@@ -3181,6 +3231,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'symon-tool-call':
       void handleSymonToolCall(client, msg);
       break;
+    case 'symon-confirm-decision':
+      void handleSymonConfirmDecision(client, msg);
+      break;
     case 'symon-agent-status':
       handleSymonAgentStatus(client, msg);
       break;
@@ -3198,10 +3251,24 @@ function handleClientMessage(client: ClientState, raw: string) {
 // DURABLE channel: `symon` messages fall through isLossyMessage() → queued under
 // backpressure (never dropped), like agent-lifecycle.
 
-/** sessionId → the client socket currently hosting it (for server→phone pushes). */
-const symonSessions = new Map<string, { clientId: string }>();
-/** In-flight tool calls, correlated strictly by the model's callId. */
+type SymonSessionRoute = {
+  clientId: string;
+  scope: SymonScopeGrant;
+  protocolVersion: SymonProtocolVersion;
+};
+
+/** sessionId → socket, immutable scope, and negotiated additive protocol. */
+const symonSessions = new Map<string, SymonSessionRoute>();
+/** In-flight + replayable tool calls, correlated by sessionId + callId. */
 const symonToolTracker = new ToolCallTracker();
+/** Confirmation decisions/tombstones, keyed by sessionId + callId + confirmationId. */
+const symonConfirmationTracker = new SymonConfirmationTracker();
+/** Accepted Code actions waiting for the correlated lane's terminal transition. */
+const symonAsyncActionTracker = new SymonAsyncActionTracker();
+
+function symonProtocolVersion(msg: Record<string, unknown>): SymonProtocolVersion {
+  return msg.protocolVersion === 2 ? 2 : 1;
+}
 
 const AGENT_STATUSES = new Set<AgentSessionStatus>(['connecting', 'live', 'acting', 'idle', 'error']);
 function isAgentSessionStatus(v: string): v is AgentSessionStatus {
@@ -3210,6 +3277,23 @@ function isAgentSessionStatus(v: string): v is AgentSessionStatus {
 
 function persistAgentRegistry(): void {
   persistAgentSession(getAgentSession());
+}
+
+function activeSymonGrant(client: ClientState, sessionId: string): SymonScopeGrant | null {
+  const grant = loadSymonScopeGrant();
+  if (!grant) return null;
+  return scopeGrantMatchesClient(grant, sessionId, {
+    subject: client.authKind,
+    deviceId: client.deviceId ?? null,
+  }) ? grant : null;
+}
+
+function isSameSymonGrant(left: SymonScopeGrant, right: SymonScopeGrant): boolean {
+  return left.sessionId === right.sessionId
+    && left.scopeVersion === right.scopeVersion
+    && left.issuedAt === right.issuedAt
+    && left.subject === right.subject
+    && left.deviceId === right.deviceId;
 }
 
 function pushSymonStatus(clientId: string, sessionId: string, status: AgentSessionStatus, detail?: string): void {
@@ -3228,6 +3312,55 @@ function pushSymonToolResult(
   const client = clients.get(clientId);
   if (!client) return;
   send(client, { channel: 'symon', type: 'symon-tool-result', sessionId, callId, ok, result });
+}
+
+function pushSymonConfirmRequired(clientId: string, confirmation: SymonPendingConfirmation): void {
+  const client = clients.get(clientId);
+  if (!client) return;
+  send(client, { channel: 'symon', type: 'symon-confirm-required', ...confirmation });
+}
+
+function pushSymonConfirmSettled(
+  clientId: string,
+  confirmation: SymonPendingConfirmation,
+  outcome: SymonConfirmationOutcome,
+  firstOutcome?: Exclude<SymonConfirmationOutcome, 'duplicate'>,
+): void {
+  const client = clients.get(clientId);
+  if (!client) return;
+  send(client, {
+    channel: 'symon',
+    type: 'symon-confirm-settled',
+    sessionId: confirmation.sessionId,
+    callId: confirmation.callId,
+    confirmationId: confirmation.confirmationId,
+    outcome,
+    ...(firstOutcome ? { firstOutcome } : {}),
+  });
+}
+
+function pushSymonActionComplete(clientId: string, action: SymonActionComplete): void {
+  const client = clients.get(clientId);
+  if (!client) return;
+  send(client, { channel: 'symon', type: 'symon-action-complete', ...action });
+}
+
+function abortSymonSessionCalls(
+  sessionId: string,
+  route: SymonSessionRoute,
+  error: 'session_stopped' | 'session_preempted',
+): void {
+  symonAsyncActionTracker.removeSession(sessionId);
+  for (const completed of symonToolTracker.abortSession(sessionId, error, Date.now())) {
+    pushSymonToolResult(
+      route.clientId,
+      sessionId,
+      completed.call.callId,
+      completed.outcome.ok,
+      completed.outcome.result,
+    );
+    if (route.protocolVersion === 2) pushSymonActionComplete(route.clientId, completed.action);
+  }
 }
 
 type SymonTaskCompletePayload = {
@@ -3251,9 +3384,11 @@ function pushSymonTaskComplete(payload: SymonTaskCompletePayload): number {
 function preemptOtherSymonSessions(keepSessionId: string, detail: string): void {
   for (const [sid, route] of Array.from(symonSessions.entries())) {
     if (sid === keepSessionId) continue;
+    void denySymonSessionConfirmations(sid, route, 'preempted');
+    abortSymonSessionCalls(sid, route, 'session_preempted');
     pushSymonStatus(route.clientId, sid, 'idle', detail);
     symonSessions.delete(sid);
-    symonToolTracker.removeSession(sid);
+    clearSymonScopeGrant(sid);
   }
 }
 
@@ -3261,22 +3396,41 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
   const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
   const status = typeof msg.status === 'string' ? msg.status : '';
   if (!sessionId || !isAgentSessionStatus(status)) return;
+  const grant = activeSymonGrant(client, sessionId);
+  if (!grant) {
+    console.warn(`[symon-agent] rejected ungranted status for ${sessionId}`);
+    return;
+  }
+  const existingOwner = symonSessions.get(sessionId);
+  if (existingOwner && existingOwner.clientId !== client.id && (status === 'idle' || status === 'error')) return;
 
   if (status === 'idle' || status === 'error') {
     // Phone tore the session down (user tap / background / WebRTC close).
-    if (symonSessions.get(sessionId)?.clientId === client.id || symonSessions.has(sessionId)) {
+    const owner = symonSessions.get(sessionId);
+    if (owner?.clientId === client.id) {
+      void denySymonSessionConfirmations(sessionId, owner, 'preempted');
+      abortSymonSessionCalls(sessionId, owner, 'session_stopped');
       symonSessions.delete(sessionId);
-      symonToolTracker.removeSession(sessionId);
     }
     stopAgentSession(sessionId);
+    clearSymonScopeGrant(sessionId);
     persistAgentRegistry();
     return;
   }
 
   // connecting / live / acting → register + preempt any OTHER live session
   // (last-start-wins; makes phone-app restarts self-healing).
+  if (existingOwner && (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant))) {
+    void denySymonSessionConfirmations(sessionId, existingOwner, 'preempted');
+    abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
+    pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
+  }
   startAgentSession(sessionId);
-  symonSessions.set(sessionId, { clientId: client.id });
+  symonSessions.set(sessionId, {
+    clientId: client.id,
+    scope: grant,
+    protocolVersion: existingOwner?.protocolVersion === 2 ? 2 : symonProtocolVersion(msg),
+  });
   preemptOtherSymonSessions(sessionId, 'preempted');
   updateAgentStatus(sessionId, status);
   persistAgentRegistry();
@@ -3285,11 +3439,211 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
 function handleSymonStop(client: ClientState, msg: Record<string, unknown>): void {
   const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
   if (!sessionId) return;
-  void client; // stop is authoritative regardless of which socket sent it
+  const grant = activeSymonGrant(client, sessionId);
+  if (!grant) {
+    console.warn(`[symon-agent] rejected ungranted stop for ${sessionId}`);
+    return;
+  }
+  const owner = symonSessions.get(sessionId);
+  if (owner && owner.clientId !== client.id) return;
+  if (owner) void denySymonSessionConfirmations(sessionId, owner, 'preempted');
   symonSessions.delete(sessionId);
-  symonToolTracker.removeSession(sessionId);
+  if (owner) abortSymonSessionCalls(sessionId, owner, 'session_stopped');
   stopAgentSession(sessionId);
+  clearSymonScopeGrant(sessionId);
   persistAgentRegistry();
+}
+
+function currentSymonOwner(sessionId: string): { route: SymonSessionRoute; client: ClientState } | null {
+  const route = symonSessions.get(sessionId);
+  if (!route) return null;
+  const client = clients.get(route.clientId);
+  if (!client) return null;
+  const grant = activeSymonGrant(client, sessionId);
+  return grant && isSameSymonGrant(route.scope, grant) ? { route, client } : null;
+}
+
+async function invokeSymonTool(call: PendingToolCall): Promise<SymonToolRelayResult> {
+  try {
+    return await fetchNextJson<SymonToolRelayResult>('/api/mobile/symon/tool', {
+      method: 'POST',
+      body: {
+        sessionId: call.sessionId,
+        callId: call.callId,
+        tool: call.tool,
+        // These are the original server-scoped arguments. A confirmation frame
+        // carries no args and therefore cannot widen or replace repo scope.
+        args: call.args ?? {},
+      },
+      timeoutMs: TOOL_TIMEOUT_MS + 5_000,
+    });
+  } catch {
+    return { ok: false, result: { error: 'tool_timeout' } };
+  }
+}
+
+async function resolveSymonConfirmation(
+  confirmation: SymonPendingConfirmation,
+  allow: boolean,
+): Promise<{ ok: boolean; resolution?: SymonConfirmationResolution }> {
+  try {
+    return await fetchNextJson('/api/mobile/symon/confirm', {
+      method: 'POST',
+      body: {
+        sessionId: confirmation.sessionId,
+        callId: confirmation.callId,
+        confirmationId: confirmation.confirmationId,
+        allow,
+      },
+      timeoutMs: 15_000,
+    });
+  } catch {
+    return { ok: false };
+  }
+}
+
+function finishSymonToolCall(call: PendingToolCall, outcome: SymonToolRelayResult): void {
+  const completed = symonToolTracker.complete(call.sessionId, call.callId, outcome, Date.now());
+  if (!completed) return;
+  if (completed.action.status === 'accepted') {
+    const repoPath = typeof call.args?.repoPath === 'string' ? call.args.repoPath : '';
+    symonAsyncActionTracker.register(completed.action, repoPath, completed.completedAt);
+  }
+  touchAgentSession(call.sessionId);
+  persistAgentRegistry();
+  const owner = currentSymonOwner(call.sessionId);
+  if (!owner) return;
+  pushSymonToolResult(owner.route.clientId, call.sessionId, call.callId, outcome.ok, outcome.result);
+  if (owner.route.protocolVersion === 2) {
+    pushSymonActionComplete(owner.route.clientId, completed.action);
+  }
+  if (symonToolTracker.inFlightForSession(call.sessionId) === 0) {
+    pushSymonStatus(owner.route.clientId, call.sessionId, 'live');
+    if (getAgentSession()?.sessionId === call.sessionId) {
+      updateAgentStatus(call.sessionId, 'live');
+      persistAgentRegistry();
+    }
+  }
+}
+
+async function resumeSymonToolAfterConfirmation(confirmation: SymonPendingConfirmation): Promise<void> {
+  const call = symonToolTracker.markExecuting(confirmation.sessionId, confirmation.callId, Date.now());
+  if (!call || !currentSymonOwner(call.sessionId)) return;
+  const outcome = await invokeSymonTool(call);
+  finishSymonToolCall(call, outcome);
+}
+
+async function settleSymonConfirmation(input: {
+  confirmation: SymonPendingConfirmation;
+  allow: boolean;
+  forcedOutcome?: 'expired' | 'preempted';
+  resume: boolean;
+  settleRoute?: SymonSessionRoute;
+}): Promise<boolean> {
+  const response = await resolveSymonConfirmation(input.confirmation, input.allow);
+  const resolvedOutcome = response.ok && response.resolution
+    ? confirmationOutcomeFromResolution(response.resolution)
+    : null;
+  const outcome = resolvedOutcome && input.forcedOutcome && resolvedOutcome !== 'approved'
+    ? input.forcedOutcome
+    : resolvedOutcome;
+  if (!outcome) {
+    symonConfirmationTracker.release(
+      input.confirmation.sessionId,
+      input.confirmation.callId,
+      input.confirmation.confirmationId,
+    );
+    return false;
+  }
+  symonConfirmationTracker.settle(
+    input.confirmation.sessionId,
+    input.confirmation.callId,
+    input.confirmation.confirmationId,
+    outcome,
+    Date.now(),
+  );
+  const route = input.settleRoute ?? currentSymonOwner(input.confirmation.sessionId)?.route;
+  if (route?.protocolVersion === 2) {
+    pushSymonConfirmSettled(route.clientId, input.confirmation, outcome);
+  }
+  if (input.resume) await resumeSymonToolAfterConfirmation(input.confirmation);
+  return true;
+}
+
+async function settleSymonConfirmationWithRetry(
+  input: Parameters<typeof settleSymonConfirmation>[0],
+  attempts = 3,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await settleSymonConfirmation(input)) return true;
+    if (attempt + 1 < attempts) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    }
+  }
+  return false;
+}
+
+async function denySymonSessionConfirmations(
+  sessionId: string,
+  route: SymonSessionRoute,
+  outcome: 'preempted',
+): Promise<void> {
+  const confirmations = symonConfirmationTracker.preemptSession(sessionId);
+  for (const confirmation of confirmations) {
+    // Best-effort immediate denial; the Rust TTL remains the final fail-closed
+    // backstop if the webview disappears during teardown.
+    await settleSymonConfirmationWithRetry({
+      confirmation,
+      allow: false,
+      forcedOutcome: outcome,
+      resume: false,
+      settleRoute: route,
+    });
+  }
+}
+
+async function handleSymonConfirmDecision(client: ClientState, msg: Record<string, unknown>): Promise<void> {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const callId = typeof msg.callId === 'string' ? msg.callId : '';
+  const confirmationId = typeof msg.confirmationId === 'string' ? msg.confirmationId : '';
+  const clientMutationId = typeof msg.clientMutationId === 'string' ? msg.clientMutationId : '';
+  const allow = typeof msg.allow === 'boolean' ? msg.allow : null;
+  if (!sessionId || !callId || !confirmationId || !clientMutationId || allow === null) return;
+
+  const route = symonSessions.get(sessionId);
+  const grant = activeSymonGrant(client, sessionId);
+  if (!route || route.protocolVersion !== 2 || route.clientId !== client.id
+    || !grant || !isSameSymonGrant(route.scope, grant)) return;
+
+  const claim = symonConfirmationTracker.claim({
+    sessionId,
+    callId,
+    confirmationId,
+    allow,
+    clientMutationId,
+    now: Date.now(),
+  });
+  if (claim.kind === 'missing') return;
+  if (claim.kind === 'in_flight') {
+    pushSymonConfirmSettled(route.clientId, claim.confirmation, 'duplicate');
+    return;
+  }
+  if (claim.kind === 'replay') {
+    pushSymonConfirmSettled(route.clientId, claim.confirmation, 'duplicate', claim.outcome);
+    const replay = symonToolTracker.replay(sessionId, callId, Date.now());
+    if (replay) {
+      pushSymonToolResult(route.clientId, sessionId, callId, replay.outcome.ok, replay.outcome.result);
+      pushSymonActionComplete(route.clientId, replay.action);
+    }
+    return;
+  }
+
+  await settleSymonConfirmationWithRetry({
+    confirmation: claim.confirmation,
+    allow: claim.allow,
+    forcedOutcome: claim.forcedOutcome,
+    resume: true,
+  });
 }
 
 async function handleSymonToolCall(client: ClientState, msg: Record<string, unknown>): Promise<void> {
@@ -3298,62 +3652,143 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
   const tool = typeof msg.tool === 'string' ? msg.tool : '';
   const args = msg.args && typeof msg.args === 'object' ? (msg.args as Record<string, unknown>) : {};
   if (!sessionId || !callId || !tool) return;
+  const grant = activeSymonGrant(client, sessionId);
+  if (!grant) {
+    pushSymonToolResult(client.id, sessionId, callId, false, {
+      error: 'session_scope_invalid',
+      detail: 'This Symon session does not have an active scope grant for this phone.',
+    });
+    return;
+  }
+  const scoped = scopeSymonToolArgs(grant, tool, args);
+  if (!scoped.ok) {
+    pushSymonToolResult(client.id, sessionId, callId, false, {
+      error: scoped.error,
+      detail: scoped.detail,
+    });
+    return;
+  }
 
-  // Status usually precedes the first tool call, but be defensive — a tool call
-  // is itself proof the session is live.
-  if (!symonSessions.has(sessionId)) {
-    symonSessions.set(sessionId, { clientId: client.id });
+  const requestedProtocol = symonProtocolVersion(msg);
+  const existingOwner = symonSessions.get(sessionId);
+  const protocolVersion = existingOwner?.protocolVersion === 2 ? 2 : requestedProtocol;
+  if (!existingOwner) {
+    symonSessions.set(sessionId, { clientId: client.id, scope: grant, protocolVersion });
     startAgentSession(sessionId);
     preemptOtherSymonSessions(sessionId, 'preempted');
+  } else if (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant)
+    || existingOwner.protocolVersion !== protocolVersion) {
+    if (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant)) {
+      void denySymonSessionConfirmations(sessionId, existingOwner, 'preempted');
+      abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
+      pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
+    }
+    symonSessions.set(sessionId, { clientId: client.id, scope: grant, protocolVersion });
   }
   touchAgentSession(sessionId);
   persistAgentRegistry();
 
-  // Strict callId correlation — tolerate parallel calls, ignore a duplicate.
-  if (!symonToolTracker.add({ sessionId, callId, tool, startedAt: Date.now() })) return;
-
-  // acting while the tool executes.
+  const replay = symonToolTracker.replay(sessionId, callId, Date.now());
+  if (replay) {
+    if (replay.call.tool !== tool) {
+      pushSymonToolResult(client.id, sessionId, callId, false, {
+        error: 'call_mismatch',
+        detail: 'This sessionId and callId are already bound to another tool.',
+      });
+      return;
+    }
+    pushSymonToolResult(client.id, sessionId, callId, replay.outcome.ok, replay.outcome.result);
+    if (protocolVersion === 2) pushSymonActionComplete(client.id, replay.action);
+    return;
+  }
+  const activeCall = symonToolTracker.get(sessionId, callId);
+  if (activeCall) {
+    if (activeCall.tool !== tool) {
+      pushSymonToolResult(client.id, sessionId, callId, false, {
+        error: 'call_mismatch',
+        detail: 'This sessionId and callId are already bound to another tool.',
+      });
+      return;
+    }
+    if (protocolVersion === 2 && activeCall.confirmationId) {
+      const pending = symonConfirmationTracker.get(sessionId, callId, activeCall.confirmationId);
+      if (pending) pushSymonConfirmRequired(client.id, pending);
+    }
+    return;
+  }
+  const call: PendingToolCall = {
+    sessionId,
+    callId,
+    tool,
+    // These correlation fields are server-owned and never accepted from the
+    // model. The delegate bridge returns them to this host so its queued turn
+    // can emit the eventual done/failed event to the exact phone call.
+    args: {
+      ...scoped.args,
+      __symonSessionId: sessionId,
+      __symonCallId: callId,
+    },
+    protocolVersion,
+    startedAt: Date.now(),
+  };
+  if (!symonToolTracker.add(call)) return;
   pushSymonStatus(client.id, sessionId, 'acting');
 
-  let outcome: { ok: boolean; result: unknown };
-  try {
-    outcome = await fetchNextJson<{ ok: boolean; result: unknown }>('/api/mobile/symon/tool', {
-      method: 'POST',
-      body: { sessionId, callId, tool, args },
-      // The Next route enforces the authoritative 60s cap; give the fetch a small
-      // margin so the route's structured tool_timeout wins over a transport abort.
-      timeoutMs: TOOL_TIMEOUT_MS + 5_000,
+  const outcome = await invokeSymonTool(call);
+  if (!outcome.confirmation) {
+    finishSymonToolCall(call, outcome);
+    return;
+  }
+  const confirmation = outcome.confirmation;
+  if (!symonToolTracker.markAwaitingConfirmation(sessionId, callId, confirmation.confirmationId)
+    || !symonConfirmationTracker.register(confirmation, Date.now())) {
+    finishSymonToolCall(call, {
+      ok: false,
+      result: { error: 'confirmation_mismatch', detail: 'Confirmation identity collision.' },
     });
-  } catch {
-    outcome = { ok: false, result: { error: 'tool_timeout' } };
+    return;
   }
 
-  symonToolTracker.resolve(callId);
-  touchAgentSession(sessionId);
-  persistAgentRegistry();
-
-  // The session may have been preempted/stopped while the tool ran — only push
-  // if it's still the live owner (a late result is otherwise dropped).
-  const owner = symonSessions.get(sessionId);
-  if (!owner) return;
-
-  const resultObj = outcome.result && typeof outcome.result === 'object'
-    ? (outcome.result as Record<string, unknown>)
-    : null;
-  if (resultObj && resultObj.error === 'needs_confirmation') {
-    // Honest v1: the dock card is up on the Mac; tell the tab so it can render it.
-    pushSymonStatus(owner.clientId, sessionId, 'acting', 'awaiting Mac approval');
+  pushSymonStatus(client.id, sessionId, 'acting', 'awaiting approval');
+  if (Date.now() >= confirmation.expiresAt) {
+    symonConfirmationTracker.claim({
+      sessionId,
+      callId,
+      confirmationId: confirmation.confirmationId,
+      allow: false,
+      clientMutationId: `expired-deny:${confirmation.confirmationId}`,
+      now: Date.now(),
+    });
+    await settleSymonConfirmationWithRetry({
+      confirmation,
+      allow: false,
+      forcedOutcome: 'expired',
+      resume: true,
+    });
+    return;
+  }
+  if (protocolVersion === 2) {
+    pushSymonConfirmRequired(client.id, confirmation);
+    return;
   }
 
-  pushSymonToolResult(owner.clientId, sessionId, callId, outcome.ok, outcome.result);
-
-  // Back to live once nothing remains in flight for this session.
-  if (symonToolTracker.inFlightForSession(sessionId) === 0) {
-    pushSymonStatus(owner.clientId, sessionId, 'live');
-    if (getAgentSession()?.sessionId === sessionId) {
-      updateAgentStatus(sessionId, 'live');
-      persistAgentRegistry();
-    }
+  // Legacy clients cannot approve on-phone. Deny the Rust gate immediately,
+  // then return only the invoke's final declined result: no side effect can run.
+  const claim = symonConfirmationTracker.claim({
+    sessionId,
+    callId,
+    confirmationId: confirmation.confirmationId,
+    allow: false,
+    clientMutationId: `legacy-deny:${confirmation.confirmationId}`,
+    now: Date.now(),
+  });
+  if (claim.kind === 'claimed') {
+    await settleSymonConfirmationWithRetry({
+      confirmation,
+      allow: false,
+      forcedOutcome: claim.forcedOutcome,
+      resume: true,
+    });
   }
 }
 
@@ -3362,9 +3797,11 @@ function cleanupSymonForClient(clientId: string): void {
   let changed = false;
   for (const [sid, route] of Array.from(symonSessions.entries())) {
     if (route.clientId !== clientId) continue;
+    void denySymonSessionConfirmations(sid, route, 'preempted');
     symonSessions.delete(sid);
-    symonToolTracker.removeSession(sid);
+    abortSymonSessionCalls(sid, route, 'session_stopped');
     stopAgentSession(sid);
+    clearSymonScopeGrant(sid);
     changed = true;
   }
   if (changed) persistAgentRegistry();
@@ -3376,17 +3813,29 @@ function cleanupSymonForClient(clientId: string): void {
  * that somehow outlived the route's 60s cap.
  */
 function sweepStaleSymon(): void {
+  symonAsyncActionTracker.prune(Date.now());
   const dropped = sweepStaleAgentSession();
   if (dropped) {
     const route = symonSessions.get(dropped.sessionId);
-    if (route) pushSymonStatus(route.clientId, dropped.sessionId, 'idle', 'stale');
+    if (route) {
+      void denySymonSessionConfirmations(dropped.sessionId, route, 'preempted');
+      abortSymonSessionCalls(dropped.sessionId, route, 'session_stopped');
+      pushSymonStatus(route.clientId, dropped.sessionId, 'idle', 'stale');
+    }
     symonSessions.delete(dropped.sessionId);
-    symonToolTracker.removeSession(dropped.sessionId);
+    clearSymonScopeGrant(dropped.sessionId);
     persistAgentRegistry();
   }
   for (const call of symonToolTracker.timedOut(Date.now())) {
-    const route = symonSessions.get(call.sessionId);
-    if (route) pushSymonToolResult(route.clientId, call.sessionId, call.callId, false, { error: 'tool_timeout' });
+    finishSymonToolCall(call, { ok: false, result: { error: 'tool_timeout' } });
+  }
+  for (const confirmation of symonConfirmationTracker.expire(Date.now())) {
+    void settleSymonConfirmationWithRetry({
+      confirmation,
+      allow: false,
+      forcedOutcome: 'expired',
+      resume: currentSymonOwner(confirmation.sessionId) !== null,
+    });
   }
 }
 
@@ -3408,9 +3857,11 @@ async function sweepDeskPreemption(): Promise<void> {
   const deskLive = deskStatus === 'live' || deskStatus === 'connecting' || deskStatus === 'requesting-mic';
   if (!deskLive) return;
   for (const [sid, route] of Array.from(symonSessions.entries())) {
+    void denySymonSessionConfirmations(sid, route, 'preempted');
+    abortSymonSessionCalls(sid, route, 'session_preempted');
     pushSymonStatus(route.clientId, sid, 'idle', 'preempted_by_desk');
     symonSessions.delete(sid);
-    symonToolTracker.removeSession(sid);
+    clearSymonScopeGrant(sid);
   }
   stopAgentSession();
   persistAgentRegistry();
@@ -5388,6 +5839,80 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  // Rust's repo-scoped `o8_delegate` tool calls this host instead of driving a
+  // canvas. Correlation and repo authority were injected by the Symon relay;
+  // the endpoint rechecks both before queuing the orchestrator turn.
+  if (req.url === '/symon-orchestrator-turn' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      void (async () => {
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as Record<string, unknown>;
+        } catch {
+          res.writeHead(400);
+          res.end('invalid json');
+          return;
+        }
+        const repoId = typeof payload.repoId === 'string' ? payload.repoId.trim() : '';
+        const repoPath = typeof payload.repoPath === 'string' ? payload.repoPath.trim() : '';
+        const task = typeof payload.task === 'string' ? payload.task.trim() : '';
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
+        const callId = typeof payload.callId === 'string' ? payload.callId.trim() : '';
+        if (!repoId || !repoPath || !task || task.length > 4_000 || !sessionId || !callId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ accepted: false, error: 'repoId, repoPath, task, sessionId, and callId are required' }));
+          return;
+        }
+
+        const owner = currentSymonOwner(sessionId);
+        const call = symonToolTracker.get(sessionId, callId);
+        const callRepoId = call?.args?.repoId;
+        const callRepoPath = call?.args?.repoPath;
+        if (!owner || !call || call.tool !== 'o8_delegate'
+          || callRepoId !== repoId || callRepoPath !== repoPath
+          || owner.route.scope.repoId !== repoId || owner.route.scope.repoPath !== repoPath) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ accepted: false, error: 'stale or mismatched Symon delegate scope' }));
+          return;
+        }
+
+        const repo = await findRepoByLocalPath(repoPath);
+        if (!repo || repo.id !== repoId || resolve(repo.localPath) !== resolve(repoPath)) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ accepted: false, error: 'repository registration changed' }));
+          return;
+        }
+
+        const taskId = `symon-delegate-${randomUUID()}`;
+        enqueueOrchestratorAutoMessage(repoPath, task, 'Symon delegate', {
+          sessionId,
+          callId,
+          taskId,
+        });
+        const orchestratorSession = getActiveOrchestratorBackend().peekSession(repoPath);
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          accepted: true,
+          taskId,
+          requestId: taskId,
+          sessionId: orchestratorSession?.sessionName ?? null,
+          note: orchestratorSession?.status === 'busy' ? 'queued behind the active repo turn' : 'queued',
+        }));
+      })().catch((error) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ accepted: false, error: error instanceof Error ? error.message : 'delegate enqueue failed' }));
+      });
+    });
+    return;
+  }
+
   // Background Claude tasks call this loopback-only bridge after their existing
   // dock event and task-ledger write. No active phone session means no-op fanout.
   if (req.url === '/symon-task-complete' && req.method === 'POST') {
@@ -5784,6 +6309,10 @@ const httpServer = createServer((req, res) => {
         const laneLifecyclePayload = mutationToLaneLifecyclePayload(payload.mutation);
         if (laneLifecyclePayload) {
           broadcast({ channel: 'lane-lifecycle', event: 'update', data: laneLifecyclePayload });
+          for (const action of symonAsyncActionTracker.settleLane(laneLifecyclePayload, Date.now())) {
+            const owner = currentSymonOwner(action.sessionId);
+            if (owner) pushSymonActionComplete(owner.route.clientId, action);
+          }
           console.log(`[lane-lifecycle] Broadcast ${laneLifecyclePayload.laneId} ${laneLifecyclePayload.previousStatus ?? 'new'} -> ${laneLifecyclePayload.status}`);
         }
 
@@ -6044,6 +6573,7 @@ const wss = new WebSocketServer({
     const token = url.searchParams.get('token') ?? '';
     const req = info.req as typeof info.req & {
       __o8Device?: MobileDevice | null;
+      __o8AuthKind?: 'operator' | 'device';
       __o8Remote?: boolean;
       __o8RevokedClose?: boolean;
     };
@@ -6051,6 +6581,7 @@ const wss = new WebSocketServer({
     req.__o8Remote = !isLoopbackAddress(req.socket?.remoteAddress ?? '127.0.0.1');
     req.__o8Device = null;
     if (wsTokenMatches(token)) {
+      req.__o8AuthKind = 'operator';
       done(true);
       return;
     }
@@ -6062,6 +6593,7 @@ const wss = new WebSocketServer({
       const device = token ? resolveDeviceByToken(token) : null;
       if (device) {
         req.__o8Device = device;
+        req.__o8AuthKind = 'device';
         done(true);
         return;
       }
@@ -6090,6 +6622,7 @@ wss.on('error', (err) => {
 wss.on('connection', (ws, req) => {
   const upgrade = req as typeof req & {
     __o8Device?: MobileDevice | null;
+    __o8AuthKind?: 'operator' | 'device';
     __o8Remote?: boolean;
     __o8RevokedClose?: boolean;
   };
@@ -6100,6 +6633,11 @@ wss.on('connection', (ws, req) => {
     return;
   }
   const device = upgrade.__o8Device ?? null;
+  const authKind = upgrade.__o8AuthKind;
+  if (!authKind) {
+    try { ws.close(4401, 'missing authenticated subject'); } catch { /* already gone */ }
+    return;
+  }
   const remote = upgrade.__o8Remote === true;
   const client: ClientState = {
     id: randomUUID(),
@@ -6115,6 +6653,7 @@ wss.on('connection', (ws, req) => {
     backpressureQueue: [],
     flushTimer: null,
     deviceId: device?.id ?? null,
+    authKind,
   };
 
   clients.set(client.id, client);

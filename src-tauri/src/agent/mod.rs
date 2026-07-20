@@ -443,9 +443,87 @@ fn next_task_id_with_prefix(prefix: &str) -> String {
 
 // ── confirm registry ─────────────────────────────────────────────────────────
 // `Vec::new()` is const so this initializes without a OnceLock. n is tiny
-// (≤ pending confirms across active tasks), so linear scan is fine.
+// (≤ pending confirms across active tasks), so linear scan is fine. Resolved
+// entries remain as five-minute tombstones so retries cannot execute twice.
 
-static CONFIRM_CHANNELS: Mutex<Vec<(String, oneshot::Sender<bool>)>> = Mutex::new(Vec::new());
+const CONFIRM_REPLAY_TTL_MS: u64 = 5 * 60 * 1_000;
+static CONFIRM_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Debug)]
+pub struct ConfirmCorrelation {
+    pub session_id: String,
+    pub call_id: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ConfirmResolution {
+    Resolved { allow: bool },
+    AlreadyResolved { allow: bool },
+    Expired,
+    Preempted,
+    NotFound,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfirmTerminal {
+    Expired,
+    Preempted,
+}
+
+struct ConfirmEntry {
+    confirmation_id: String,
+    task_id: String,
+    correlation: Option<ConfirmCorrelation>,
+    expires_at_ms: u64,
+    settled_at_ms: Option<u64>,
+    decision: Option<bool>,
+    terminal: Option<ConfirmTerminal>,
+    sender: Option<oneshot::Sender<bool>>,
+}
+
+static CONFIRM_CHANNELS: Mutex<Vec<ConfirmEntry>> = Mutex::new(Vec::new());
+
+fn epoch_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn prune_confirmations(entries: &mut Vec<ConfirmEntry>, now_ms: u64) {
+    entries.retain(|entry| {
+        entry.sender.is_some()
+            || now_ms.saturating_sub(entry.settled_at_ms.unwrap_or(entry.expires_at_ms))
+                <= CONFIRM_REPLAY_TTL_MS
+    });
+}
+
+fn resolve_confirm_entry(
+    entry: &mut ConfirmEntry,
+    allow: bool,
+    now_ms: u64,
+) -> (ConfirmResolution, Option<oneshot::Sender<bool>>, bool) {
+    if entry.terminal == Some(ConfirmTerminal::Preempted) {
+        return (ConfirmResolution::Preempted, None, false);
+    }
+    if entry.terminal == Some(ConfirmTerminal::Expired) || now_ms >= entry.expires_at_ms {
+        entry.terminal = Some(ConfirmTerminal::Expired);
+        entry.decision = Some(false);
+        entry.settled_at_ms.get_or_insert(now_ms);
+        return (ConfirmResolution::Expired, entry.sender.take(), false);
+    }
+    if let Some(first) = entry.decision {
+        return (ConfirmResolution::AlreadyResolved { allow: first }, None, first);
+    }
+    entry.decision = Some(allow);
+    entry.settled_at_ms = Some(now_ms);
+    (
+        ConfirmResolution::Resolved { allow },
+        entry.sender.take(),
+        allow,
+    )
+}
 
 /// Gate a tool call on its SafetyClass. ReadOnly (and consented Reversible) run
 /// immediately. Otherwise emit a confirm card to the dock and block on a oneshot
@@ -466,17 +544,55 @@ pub async fn confirm_if_needed_opts(
     args: &Value,
     speak: bool,
 ) -> bool {
+    confirm_if_needed_opts_correlated(ctx, tool_name, args, speak, None).await
+}
+
+/// Correlated confirmation path used by phone-hosted Realtime. The gate owns
+/// the confirmation id and expiry; session/call ids are metadata only and can
+/// never widen the tool arguments or repo grant.
+pub async fn confirm_if_needed_opts_correlated(
+    ctx: &TaskCtx,
+    tool_name: &str,
+    args: &Value,
+    speak: bool,
+    correlation: Option<ConfirmCorrelation>,
+) -> bool {
     let class = safety::tool_safety_class(tool_name);
     if !safety::requires_confirmation(class, safety::reversible_silent_consent()) {
         return true;
     }
 
     let (tx, rx) = oneshot::channel();
+    let now_ms = epoch_millis();
+    let expires_at_ms = now_ms + CONFIRM_TIMEOUT_SECS * 1_000;
+    let confirmation_id = format!(
+        "confirm-{}-{}",
+        now_ms,
+        CONFIRM_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
     {
         let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-        // Drop any stale entry for this task before registering the new one.
-        chans.retain(|(id, _)| id != &ctx.task_id);
-        chans.push((ctx.task_id.clone(), tx));
+        prune_confirmations(&mut chans, now_ms);
+        // A task can expose only one active gate at a time. Preserve completed
+        // tombstones, but preempt a stale active sender for the same task.
+        for entry in chans.iter_mut().filter(|entry| entry.task_id == ctx.task_id) {
+            if let Some(sender) = entry.sender.take() {
+                entry.decision = Some(false);
+                entry.terminal = Some(ConfirmTerminal::Preempted);
+                entry.settled_at_ms = Some(now_ms);
+                let _ = sender.send(false);
+            }
+        }
+        chans.push(ConfirmEntry {
+            confirmation_id: confirmation_id.clone(),
+            task_id: ctx.task_id.clone(),
+            correlation: correlation.clone(),
+            expires_at_ms,
+            settled_at_ms: None,
+            decision: None,
+            terminal: None,
+            sender: Some(tx),
+        });
     }
 
     // Speak the proposal aloud before showing the card (fire-and-forget). The
@@ -489,9 +605,14 @@ pub async fn confirm_if_needed_opts(
     emit_confirm(
         &ctx.app,
         json!({
+            "confirmationId": confirmation_id,
             "taskId": ctx.task_id,
             "tool": tool_name,
             "summary": confirm_summary(tool_name, args),
+            "expiresAt": expires_at_ms,
+            "target": confirm_target(args),
+            "sessionId": correlation.as_ref().map(|value| value.session_id.as_str()),
+            "callId": correlation.as_ref().map(|value| value.call_id.as_str()),
         }),
     );
 
@@ -500,10 +621,21 @@ pub async fn confirm_if_needed_opts(
         _ = tokio::time::sleep(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS)) => false,
     };
 
-    // Clean up if the timeout path left the sender registered.
-    {
+    if !approved {
+        let now_ms = epoch_millis();
         let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-        chans.retain(|(id, _)| id != &ctx.task_id);
+        if let Some(entry) = chans
+            .iter_mut()
+            .find(|entry| entry.confirmation_id == confirmation_id)
+        {
+            if entry.decision.is_none() {
+                entry.decision = Some(false);
+                entry.terminal = Some(ConfirmTerminal::Expired);
+                entry.settled_at_ms = Some(now_ms);
+                entry.sender.take();
+            }
+        }
+        prune_confirmations(&mut chans, now_ms);
     }
     approved
 }
@@ -511,16 +643,56 @@ pub async fn confirm_if_needed_opts(
 /// Resolve a pending confirm — called by the SYNC `agent_confirm` command.
 /// `oneshot::Sender::send` is synchronous, so this needs no async context.
 pub fn resolve_confirm(task_id: &str, allow: bool) {
-    let sender = {
+    let (sender, decision) = {
+        let now_ms = epoch_millis();
         let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-        chans
-            .iter()
-            .position(|(id, _)| id == task_id)
-            .map(|pos| chans.remove(pos).1)
+        prune_confirmations(&mut chans, now_ms);
+        match chans
+            .iter_mut()
+            .find(|entry| entry.task_id == task_id && entry.sender.is_some())
+        {
+            Some(entry) => {
+                let (_, sender, decision) = resolve_confirm_entry(entry, allow, now_ms);
+                (sender, decision)
+            }
+            None => (None, allow),
+        }
     };
     if let Some(tx) = sender {
-        let _ = tx.send(allow);
+        let _ = tx.send(decision);
     }
+}
+
+pub fn resolve_confirm_v2(
+    confirmation_id: &str,
+    session_id: &str,
+    call_id: &str,
+    allow: bool,
+) -> ConfirmResolution {
+    let now_ms = epoch_millis();
+    let (resolution, sender, decision) = {
+        let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        prune_confirmations(&mut chans, now_ms);
+        match chans
+            .iter_mut()
+            .find(|entry| entry.confirmation_id == confirmation_id)
+        {
+            Some(entry)
+                if entry.correlation.as_ref().is_some_and(|correlation| {
+                    correlation.session_id == session_id && correlation.call_id == call_id
+                }) => {
+                let (resolution, sender, decision) =
+                    resolve_confirm_entry(entry, allow, now_ms);
+                (resolution, sender, decision)
+            }
+            Some(_) => (ConfirmResolution::NotFound, None, false),
+            None => (ConfirmResolution::NotFound, None, false),
+        }
+    };
+    if let Some(tx) = sender {
+        let _ = tx.send(decision);
+    }
+    resolution
 }
 
 /// Decline EVERY pending confirm card — the confirm half of `agent_interrupt`.
@@ -530,9 +702,20 @@ pub fn resolve_confirm(task_id: &str, allow: bool) {
 /// between-turn cancel check and finalizes `cancelled` (which clears the dock
 /// card). Returns how many cards were declined.
 pub fn decline_all_confirms() -> usize {
+    let now_ms = epoch_millis();
     let senders: Vec<oneshot::Sender<bool>> = {
         let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::take(&mut *chans).into_iter().map(|(_, tx)| tx).collect()
+        prune_confirmations(&mut chans, now_ms);
+        let mut senders = Vec::new();
+        for entry in chans.iter_mut() {
+            if let Some(sender) = entry.sender.take() {
+                entry.decision = Some(false);
+                entry.terminal = Some(ConfirmTerminal::Preempted);
+                entry.settled_at_ms = Some(now_ms);
+                senders.push(sender);
+            }
+        }
+        senders
     };
     let n = senders.len();
     for tx in senders {
@@ -583,6 +766,21 @@ pub fn any_task_running() -> bool {
         .is_empty()
 }
 
+fn confirm_target(args: &Value) -> Value {
+    let mut target = serde_json::Map::new();
+    for key in ["approvalId", "packetId", "laneId", "sessionKey"] {
+        if let Some(value) = args
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            target.insert(key.to_string(), json!(value));
+        }
+    }
+    Value::Object(target)
+}
+
 /// Human phrasing for a confirm card.
 fn confirm_summary(tool_name: &str, args: &Value) -> String {
     let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -628,7 +826,8 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 format!("Update the event “{}”", s("title"))
             }
         }
-        "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
+        "o8_dispatch" => format!("Dispatch work in {}: {}", s("repoPath"), s("task")),
+        "o8_delegate" => format!("Start a live agent turn in {}: {}", s("repoPath"), s("task")),
         // The model passes the terminal's title from term_list so the card
         // names the real target window, not a bare id.
         "term_send" => format!("Send “{}” to {}", s("command"), short_term_title(&s("title"))),
@@ -644,26 +843,26 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 (true, true) => "Open a new terminal".to_string(),
             }
         }
-        "o8_packet_steer" => format!("Tell the “{}” worker: {}", s("packet"), s("message")),
+        "o8_packet_steer" => format!("Steer packet {}: {}", s("packetId"), s("message")),
+        "o8_agent_task" => {
+            let target = if s("laneId").is_empty() {
+                format!("packet {}", s("packetId"))
+            } else {
+                format!("lane {}", s("laneId"))
+            };
+            format!("Send {target} the task: {}", s("task"))
+        }
         "o8_packet_rerun" => {
             let feedback = s("feedback");
             if feedback.is_empty() {
-                format!("Restart the “{}” packet fresh", s("packet"))
+                format!("Restart packet {} fresh", s("packetId"))
             } else {
-                format!("Restart the “{}” packet with feedback: {feedback}", s("packet"))
+                format!("Restart packet {} with feedback: {feedback}", s("packetId"))
             }
         }
+        "o8_packet_reset" => format!("Reset packet {} without relaunching it", s("packetId")),
         "o8_stop_agent" => {
-            if args.get("all").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let repo = s("repo");
-                if repo.is_empty() {
-                    "Stop ALL running agents (kill them, no relaunch)".to_string()
-                } else {
-                    format!("Stop all agents in {repo} (kill them, no relaunch)")
-                }
-            } else {
-                format!("Stop the “{}” agent — kill it and archive it, no relaunch", s("packet"))
-            }
+            format!("Stop lane {} — kill it and archive it, no relaunch", s("laneId"))
         }
         "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),
         "o8_add_repo" => {
@@ -674,15 +873,13 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 format!("Add {} as a repo in o8, in the {project} project", s("path"))
             }
         }
-        // The model passes the exact title it just read from o8_needs_me, so
-        // the card (and the spoken proposal) names the real pending item.
-        "o8_approve_item" => format!("Approve “{}” in o8", s("title")),
+        "o8_approve_item" => format!("Approve {} in o8", s("approvalId")),
         "o8_reject_item" => {
             let reason = s("reason");
             if reason.is_empty() {
-                format!("Reject “{}” in o8", s("title"))
+                format!("Reject {} in o8", s("approvalId"))
             } else {
-                format!("Reject “{}” in o8 — {reason}", s("title"))
+                format!("Reject {} in o8 — {reason}", s("approvalId"))
             }
         }
         // Show the real target path — approving a write without seeing where
@@ -1360,45 +1557,122 @@ mod confirm_registry_tests {
     use super::*;
     use tokio::sync::oneshot;
 
-    /// Two concurrent tasks (e.g. a live foreground voice turn + a `claude-task-`
-    /// background run) each with a pending confirm card. Resolving one must NOT
-    /// disturb the other — the registry is keyed by task_id (#1d two-tier safety).
+    static TEST_CONFIRM_LOCK: Mutex<()> = Mutex::new(());
+
+    fn entry(
+        confirmation_id: &str,
+        task_id: &str,
+        session_id: &str,
+        call_id: &str,
+        expires_at_ms: u64,
+        sender: oneshot::Sender<bool>,
+    ) -> ConfirmEntry {
+        ConfirmEntry {
+            confirmation_id: confirmation_id.into(),
+            task_id: task_id.into(),
+            correlation: Some(ConfirmCorrelation {
+                session_id: session_id.into(),
+                call_id: call_id.into(),
+            }),
+            expires_at_ms,
+            settled_at_ms: None,
+            decision: None,
+            terminal: None,
+            sender: Some(sender),
+        }
+    }
+
     #[test]
-    fn resolving_one_task_leaves_a_concurrent_task_pending() {
+    fn exact_v2_triple_and_first_decision_win() {
+        let _serial = TEST_CONFIRM_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let (tx_a, mut rx_a) = oneshot::channel::<bool>();
         let (tx_b, mut rx_b) = oneshot::channel::<bool>();
+        let expires = epoch_millis() + 60_000;
         {
             let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-            chans.retain(|(id, _)| id != "test-task-a" && id != "test-task-b");
-            chans.push(("test-task-a".to_string(), tx_a));
-            chans.push(("test-task-b".to_string(), tx_b));
+            chans.clear();
+            chans.push(entry("confirm-a", "task-a", "sym-1", "call-a", expires, tx_a));
+            chans.push(entry("confirm-b", "task-b", "sym-1", "call-b", expires, tx_b));
         }
 
-        // Resolve only A.
-        resolve_confirm("test-task-a", true);
-
-        // A received its decision; B is still waiting.
+        assert_eq!(
+            resolve_confirm_v2("confirm-a", "sym-1", "wrong-call", true),
+            ConfirmResolution::NotFound
+        );
+        assert_eq!(
+            resolve_confirm_v2("confirm-a", "sym-1", "call-a", true),
+            ConfirmResolution::Resolved { allow: true }
+        );
         assert!(matches!(rx_a.try_recv(), Ok(true)));
         assert!(matches!(
             rx_b.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
         ));
-
-        // B's sender is still registered (A's resolution didn't drop it).
-        {
-            let chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-            assert!(chans.iter().any(|(id, _)| id == "test-task-b"));
-            assert!(!chans.iter().any(|(id, _)| id == "test-task-a"));
-        }
-
-        // Resolving B completes it and clears the registry entry (cleanup).
-        resolve_confirm("test-task-b", false);
+        assert_eq!(
+            resolve_confirm_v2("confirm-a", "sym-1", "call-a", false),
+            ConfirmResolution::AlreadyResolved { allow: true }
+        );
+        resolve_confirm("task-b", false);
         assert!(matches!(rx_b.try_recv(), Ok(false)));
+    }
+
+    #[test]
+    fn expiry_and_preemption_fail_closed() {
+        let _serial = TEST_CONFIRM_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let (tx_expired, mut rx_expired) = oneshot::channel::<bool>();
         {
-            let chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
-            assert!(!chans
-                .iter()
-                .any(|(id, _)| id == "test-task-a" || id == "test-task-b"));
+            let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            chans.clear();
+            chans.push(entry(
+                "confirm-expired",
+                "task-expired",
+                "sym-2",
+                "call-expired",
+                epoch_millis().saturating_sub(1),
+                tx_expired,
+            ));
         }
+        assert_eq!(
+            resolve_confirm_v2("confirm-expired", "sym-2", "call-expired", true),
+            ConfirmResolution::Expired
+        );
+        assert!(matches!(rx_expired.try_recv(), Ok(false)));
+
+        let (tx_preempted, mut rx_preempted) = oneshot::channel::<bool>();
+        {
+            let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            chans.clear();
+            chans.push(entry(
+                "confirm-preempted",
+                "task-preempted",
+                "sym-3",
+                "call-preempted",
+                epoch_millis() + 60_000,
+                tx_preempted,
+            ));
+        }
+        assert_eq!(decline_all_confirms(), 1);
+        assert!(matches!(rx_preempted.try_recv(), Ok(false)));
+        assert_eq!(
+            resolve_confirm_v2("confirm-preempted", "sym-3", "call-preempted", true),
+            ConfirmResolution::Preempted
+        );
+    }
+
+    #[test]
+    fn stable_target_projection_uses_ids_not_labels() {
+        assert_eq!(
+            confirm_target(&json!({
+                "approvalId": "approval-1",
+                "packetId": "packet-1",
+                "laneId": "lane-1",
+                "title": "fuzzy title",
+            })),
+            json!({
+                "approvalId": "approval-1",
+                "packetId": "packet-1",
+                "laneId": "lane-1",
+            })
+        );
     }
 }
