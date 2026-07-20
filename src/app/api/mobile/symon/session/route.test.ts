@@ -89,6 +89,9 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     // Phone-only superset: the desk tool set PLUS the client-rendered surface
     // tool, and the persona carries the surface-authoring guidance.
     expect(sentBody.session.instructions).toContain('render_surface');
+    expect(sentBody.session.instructions).toContain('Never send a root-only shell');
+    expect(sentBody.session.instructions).toContain('Named arguments such as `title:`');
+    expect(sentBody.session.instructions).toContain('dotState is exactly idle|running|review|rejected|failed|merged');
     expect(sentBody.session.tools).toHaveLength(2);
     expect(
       sentBody.session.tools.map((t: { name?: string }) => t.name),
@@ -139,6 +142,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(instructions).toContain('render_surface');
     expect(instructions).toContain('CODE WORKSPACE SURFACES');
     expect(instructions).toContain('RepoState(targetId, name, path|null, branch');
+    expect(instructions).toContain('that is the operator-selected repository');
     expect(instructions).toContain('ApprovalDecision(targetId, title, summary');
     expect(instructions).toContain('continue-run, steer-run, approve, and reject are consequential');
     expect(instructions).toContain('[[O8_PHONE_CONTEXT_V1_START]]');
