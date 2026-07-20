@@ -4,7 +4,8 @@ import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'openhands' | 'goose' | 'qwen' | 'kimi' | 'aider' | 'cursor' | 'grok' | 'pi';
-export type OrchestrationMode = 'fleet' | 'single' | 'chat';
+export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
+export type OrchestrationMode = OrchestratorExecutionMode | 'chat';
 export type OrchestratorPacketReviewSeverity = 'info' | 'warning' | 'high';
 export type WorkerIntent = 'light_worker' | 'heavy_worker' | 'reviewer' | 'diagnostic' | 'orchestrator';
 export type WorkerProvider = 'codex' | 'kimi' | 'minimax' | 'claude' | 'gemini' | 'antigravity' | 'opencode' | 'openhands' | 'goose' | 'qwen' | 'aider' | 'cursor' | 'grok' | 'pi';

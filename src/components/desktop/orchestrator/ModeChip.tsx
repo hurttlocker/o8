@@ -24,6 +24,7 @@ interface ModeChipProps {
   selectedSingleRuntime: OrchestratorRuntime;
   onSelectFleet: () => void;
   onSelectSingle: () => void;
+  onSelectFusion: () => void;
   /**
    * Kept for backwards-compatible call sites that still pass these
    * handlers in (legacy single-runtime spawn flows). The chip itself
@@ -39,6 +40,7 @@ const FONT_FAMILY = 'var(--font-sans-system)';
 function chipLabel(mode: OrchestrationMode, runtime: OrchestratorRuntime): string {
   if (mode === 'fleet') return 'Fleet orchestration';
   if (mode === 'single') return 'Solo';
+  if (mode === 'fusion') return 'Fusion';
   // Legacy 'chat' literal — should never render here under the new
   // gating, but if it does (stale tab record), fall back to the
   // runtime label so we never paint a bare 'Chat' inside an
@@ -52,6 +54,7 @@ export function ModeChip({
   selectedSingleRuntime,
   onSelectFleet,
   onSelectSingle,
+  onSelectFusion,
 }: ModeChipProps) {
   const [open, setOpen] = useState(false);
   // Collapses to icon-only when the composer button row is too narrow for
@@ -68,6 +71,11 @@ export function ModeChip({
 
   const handlePickSingle = () => {
     onSelectSingle();
+    setOpen(false);
+  };
+
+  const handlePickFusion = () => {
+    onSelectFusion();
     setOpen(false);
   };
 
@@ -166,6 +174,13 @@ export function ModeChip({
             detail="The orchestrator works alone · no dispatch."
             onClick={handlePickSingle}
             glyph={<SingleGlyph />}
+          />
+          <PopoverRow
+            active={selectedMode === 'fusion'}
+            title="Fusion"
+            detail="Deep multi-agent pass · parallel and cross-verified."
+            onClick={handlePickFusion}
+            glyph={<FusionGlyph />}
           />
         </div>
       </ComposerPopover>
@@ -292,6 +307,14 @@ function SingleGlyph() {
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="12" cy="12" r="3" />
       <circle cx="12" cy="12" r="8" />
+    </svg>
+  );
+}
+
+function FusionGlyph() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z" />
     </svg>
   );
 }

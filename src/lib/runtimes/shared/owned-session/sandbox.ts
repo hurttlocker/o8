@@ -64,6 +64,10 @@ function subpath(p: string): string {
   return `(subpath ${sbplString(p)})`;
 }
 
+function regexFragment(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&').replace(/"/g, '\\"');
+}
+
 /** best-effort realpath; falls back to the input when it doesn't resolve yet. */
 async function safeRealpath(p: string): Promise<string> {
   try {
@@ -76,6 +80,18 @@ async function safeRealpath(p: string): Promise<string> {
 /** unique, order-preserving. */
 function uniq(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+/** Package root for an npm-installed binary target, including scoped packages. */
+function nodePackageRoot(binaryPath: string): string | null {
+  const parsed = path.parse(binaryPath);
+  const segments = binaryPath.slice(parsed.root.length).split(path.sep);
+  const nodeModulesIndex = segments.lastIndexOf('node_modules');
+  if (nodeModulesIndex < 0 || !segments[nodeModulesIndex + 1]) return null;
+  const packageSegments = segments[nodeModulesIndex + 1].startsWith('@') ? 2 : 1;
+  const end = nodeModulesIndex + 1 + packageSegments;
+  if (segments.length < end) return null;
+  return path.join(parsed.root, ...segments.slice(0, end));
 }
 
 export interface SeatbeltProfileInput {
@@ -91,6 +107,28 @@ export interface SeatbeltProfileInput {
   extraReadWritePaths?: string[];
   /** Extra read-only roots (toolchain dirs resolved by the caller). */
   extraReadPaths?: string[];
+  /** Additional credential/control-plane roots that must stay unreachable. */
+  extraDenyPaths?: string[];
+  /** Narrow state roots re-opened after broad secret-tree denials. */
+  trustedReadWritePaths?: string[];
+  /** Files or subtrees denied after trusted state is re-opened. */
+  finalDenyPaths?: string[];
+  /** Narrow state roots re-opened after a final parent-subtree denial. */
+  finalAllowReadWritePaths?: string[];
+  /** Executables denied after the broad process-exec allow. */
+  finalDenyExecPaths?: string[];
+  /** Executable basename prefixes denied regardless of installation path. */
+  finalDenyExecNamePrefixes?: string[];
+  /** Exact basenames denied read access regardless of installation path. */
+  finalDenyReadBasenames?: string[];
+  /** Files or subtrees that remain readable but cannot be modified. */
+  finalDenyWritePaths?: string[];
+  /** Files kept immutable after a narrow mutable state root is re-opened. */
+  finalImmutableWritePaths?: string[];
+  /** Exact files re-opened for reads after a parent subtree is denied. */
+  finalAllowReadPaths?: string[];
+  /** Exact executables re-opened after a parent subtree is exec-denied. */
+  finalAllowExecPaths?: string[];
 }
 
 /**
@@ -146,12 +184,25 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   // Secret trees that must be unreachable regardless of anything above.
   const secretRoots = uniq([
     path.join(home, '.o8'),
+    path.join(home, '.cortex-ide'),
     path.join(home, '.tauri'),
     // gh CLI credential store (~/.config/gh/hosts.yml holds the operator's
     // GitHub OAuth token). `.config` is read-allowed above for git's sake;
     // workers report through the `o8` CLI and never need gh, so cut this off.
     path.join(home, '.config', 'gh'),
+    ...(input.extraDenyPaths ?? []),
   ]);
+
+  const trustedReadWritePaths = uniq(input.trustedReadWritePaths ?? []);
+  const finalDenyPaths = uniq(input.finalDenyPaths ?? []);
+  const finalAllowReadWritePaths = uniq(input.finalAllowReadWritePaths ?? []);
+  const finalDenyExecPaths = uniq(input.finalDenyExecPaths ?? []);
+  const finalDenyExecNamePrefixes = uniq(input.finalDenyExecNamePrefixes ?? []);
+  const finalDenyReadBasenames = uniq(input.finalDenyReadBasenames ?? []);
+  const finalDenyWritePaths = uniq(input.finalDenyWritePaths ?? []);
+  const finalImmutableWritePaths = uniq(input.finalImmutableWritePaths ?? []);
+  const finalAllowReadPaths = uniq(input.finalAllowReadPaths ?? []);
+  const finalAllowExecPaths = uniq(input.finalAllowExecPaths ?? []);
 
   const lines: string[] = [
     '(version 1)',
@@ -207,6 +258,88 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     '  (regex #"^/private/tmp/tauri-mcp-o8-")',
     '  (regex #"^/tmp/tauri-mcp-o8-")',
     ')',
+    ';; existing tmux servers can otherwise spawn an unsandboxed child',
+    '(deny file-read* file-write*',
+    '  (regex #"^/private/tmp/tmux-")',
+    '  (regex #"^/tmp/tmux-")',
+    ')',
+    '(deny network-outbound',
+    '  (remote unix-socket (regex #"^/private/tmp/tmux-"))',
+    '  (remote unix-socket (regex #"^/tmp/tmux-"))',
+    ')',
+    ...(trustedReadWritePaths.length ? [
+      ';; explicitly re-open narrow runtime state inside a denied parent',
+      '(allow file-read* file-write*',
+      ...trustedReadWritePaths.map((p) => `  ${subpath(p)}`),
+      ')',
+    ] : []),
+    ...(finalDenyPaths.length ? [
+      ';; keep credential-bearing files closed inside trusted runtime state',
+      '(deny file-read* file-write*',
+      ...finalDenyPaths.flatMap((p) => [
+        `  (literal ${sbplString(p)})`,
+        `  ${subpath(p)}`,
+      ]),
+      ')',
+    ] : []),
+    ...(finalDenyExecPaths.length ? [
+      ';; prevent a sandboxed process from re-launching protected runtimes',
+      '(deny process-exec',
+      ...finalDenyExecPaths.flatMap((p) => [
+        `  (literal ${sbplString(p)})`,
+        `  ${subpath(p)}`,
+      ]),
+      ')',
+    ] : []),
+    ...(finalDenyExecNamePrefixes.length ? [
+      '(deny process-exec',
+      ...finalDenyExecNamePrefixes.map((name) => (
+        `  (regex #"(^|/)${regexFragment(name)}(?:$|[-.])")`
+      )),
+      ')',
+    ] : []),
+    ...(finalDenyWritePaths.length ? [
+      ';; immutable launch policy and guards',
+      '(deny file-write* file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone',
+      ...finalDenyWritePaths.flatMap((p) => [
+        `  (literal ${sbplString(p)})`,
+        `  ${subpath(p)}`,
+      ]),
+      ')',
+    ] : []),
+    ...(finalAllowReadWritePaths.length ? [
+      ';; re-open only this launch\'s isolated mutable runtime state',
+      '(allow file-read* file-write*',
+      ...finalAllowReadWritePaths.map((p) => `  ${subpath(p)}`),
+      ')',
+    ] : []),
+    ...(finalImmutableWritePaths.length ? [
+      ';; keep policy files immutable inside the active state root',
+      '(deny file-write* file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone',
+      ...finalImmutableWritePaths.flatMap((p) => [
+        `  (literal ${sbplString(p)})`,
+        `  ${subpath(p)}`,
+      ]),
+      ')',
+    ] : []),
+    ...(finalDenyReadBasenames.length ? [
+      '(deny file-read*',
+      ...finalDenyReadBasenames.map((name) => (
+        `  (regex #"(^|/)${regexFragment(name)}$")`
+      )),
+      ')',
+    ] : []),
+    ...(finalAllowReadPaths.length ? [
+      ';; re-open only the active private runtime image for initial launch',
+      '(allow file-read*',
+      ...finalAllowReadPaths.map((p) => `  (literal ${sbplString(p)})`),
+      ')',
+    ] : []),
+    ...(finalAllowExecPaths.length ? [
+      '(allow process-exec',
+      ...finalAllowExecPaths.map((p) => `  (literal ${sbplString(p)})`),
+      ')',
+    ] : []),
     '',
   ];
 
@@ -242,6 +375,17 @@ export interface PrepareWorkerSandboxInput {
   extraReadWritePaths?: string[];
   /** Extra read-only roots (e.g. node runtime dir, CLI binary dir). */
   extraReadPaths?: string[];
+  extraDenyPaths?: string[];
+  trustedReadWritePaths?: string[];
+  finalDenyPaths?: string[];
+  finalAllowReadWritePaths?: string[];
+  finalDenyExecPaths?: string[];
+  finalDenyExecNamePrefixes?: string[];
+  finalDenyReadBasenames?: string[];
+  finalDenyWritePaths?: string[];
+  finalImmutableWritePaths?: string[];
+  finalAllowReadPaths?: string[];
+  finalAllowExecPaths?: string[];
 }
 
 /**
@@ -275,6 +419,8 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const homeReal = await safeRealpath(home);
   const binaryDir = path.dirname(input.binary);
   const binaryDirReal = await safeRealpath(binaryDir);
+  const binaryReal = await safeRealpath(input.binary);
+  const binaryPackageRoot = nodePackageRoot(binaryReal);
   const nodeDir = path.dirname(process.execPath);
   const nodeDirReal = await safeRealpath(nodeDir);
 
@@ -285,10 +431,26 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     ...(input.extraReadWritePaths ?? []),
   ]);
   const extraRead = uniq([
-    binaryDir, binaryDirReal,
+    binaryDir, binaryDirReal, path.dirname(binaryReal),
+    ...(binaryPackageRoot ? [binaryPackageRoot] : []),
     nodeDir, nodeDirReal,
     ...(input.extraReadPaths ?? []),
   ]);
+  const resolveAll = async (paths: string[]): Promise<string[]> => {
+    const resolved = await Promise.all(paths.map((value) => safeRealpath(value)));
+    return uniq(paths.flatMap((value, index) => [value, resolved[index]]));
+  };
+  const extraDeny = await resolveAll(input.extraDenyPaths ?? []);
+  const trustedReadWrite = await resolveAll(input.trustedReadWritePaths ?? []);
+  const finalDeny = await resolveAll(input.finalDenyPaths ?? []);
+  const finalAllowReadWrite = await resolveAll(input.finalAllowReadWritePaths ?? []);
+  const finalDenyExec = await resolveAll(input.finalDenyExecPaths ?? []);
+  const finalDenyExecNamePrefixes = uniq(input.finalDenyExecNamePrefixes ?? []);
+  const finalDenyReadBasenames = uniq(input.finalDenyReadBasenames ?? []);
+  const finalDenyWrite = await resolveAll(input.finalDenyWritePaths ?? []);
+  const finalImmutableWrite = await resolveAll(input.finalImmutableWritePaths ?? []);
+  const finalAllowRead = await resolveAll(input.finalAllowReadPaths ?? []);
+  const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
 
   const profileText = buildSeatbeltProfile({
     worktreePath: worktreeReal,
@@ -297,6 +459,17 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     tmpDir: tmpReal,
     extraReadWritePaths: extraRW,
     extraReadPaths: extraRead,
+    extraDenyPaths: extraDeny,
+    trustedReadWritePaths: trustedReadWrite,
+    finalDenyPaths: finalDeny,
+    finalAllowReadWritePaths: finalAllowReadWrite,
+    finalDenyExecPaths: finalDenyExec,
+    finalDenyExecNamePrefixes,
+    finalDenyReadBasenames,
+    finalDenyWritePaths: finalDenyWrite,
+    finalImmutableWritePaths: finalImmutableWrite,
+    finalAllowReadPaths: finalAllowRead,
+    finalAllowExecPaths: finalAllowExec,
   });
 
   const profilePath = path.join(input.profileDir, `${input.runId}.sb`);

@@ -146,3 +146,33 @@
 - Scoped ESLint passed for `tests/product-telemetry-toggle.test.ts`.
 - `npm run rule-check -- --base=main` passed with zero violations; the test-only TypeScript patch intentionally produced 0 scanned production files.
 - `git diff --check` passed.
+
+## Composer orchestration modes (#1242)
+
+### Approach
+
+- Carry one `fleet | single | fusion` field from both the canvas and default composers through the WebSocket entry point and backend registry.
+- Route every Single turn to one Codex orchestrator process before OpenClaw, ACP, Claude, o8, or Collide can start, then disable user MCP configuration and native multi-agent features for that process.
+- Make Single fail closed behind a mandatory macOS Seatbelt boundary that removes inherited control-plane credentials, blocks o8 and Tauri token paths plus tmux/webview sockets, and reopens only the Codex state required to resume the current thread.
+- Give each Single launch an isolated Codex home with forbidden recursive-launch rules and a PATH guard, while sharing only session/SQLite continuity; a trusted supervisor seals the one private native image before relaying `thread.started`, and sibling launch roots remain unreadable, immutable, and non-executable.
+- Put each supervisor and sandboxed Codex tree in a dedicated process group so Stop and watchdog escalation reach every descendant, including a child that ignores `SIGTERM`.
+- Promote every same-thread subscriber to Single's actual Codex route before streaming, and retain that actual backend in the desktop and canvas clients so reconnects and interrupts cannot fall back to the originally selected backend.
+- Keep Fusion on the selected backend and add the shared deep-parallel, cross-verification directive.
+
+### Verification
+
+- The focused mode, WebSocket entry, backend, lifecycle, and sandbox suite passed: 11 files and 76 tests.
+- The live boundary tests passed against two concurrent launch roots, the installed Codex native, the ChatGPT-bundled alternate Codex native, and an ignore-`SIGTERM` child process group.
+- The full suite passed: 387 files and 2,446 tests; 1 file and 1 test skipped.
+- A real sandboxed `codex exec` launch passed; the installed CLI parsed Single's exact resume-safe workspace sandbox flags and reached the expected missing-session error rather than rejecting an argument.
+- The installed Codex exec-policy checker resolved `codex exec` to `forbidden`; live Seatbelt coverage proved PATH-level recursion, direct alternate-binary execution, copied alternate binaries, hard links, and post-launch unsealing all fail while repo writes still succeed.
+- Stop escalation targets the dedicated process group even after the supervisor leader exits, so a surviving grandchild cannot escape the delayed `SIGKILL` cleanup.
+- Against the running control plane, a sandboxed `o8 task list` was rejected with exit 3 and HTTP 401 both with Single's pinned invalid bearer and after explicitly unsetting that bearer; the denied token files could not restore operator authority.
+- `npx tsc --noEmit` passed.
+- Scoped ESLint passed with no errors; only existing hook/server warnings remain.
+- `npm run rule-check -- --base=main` scanned 19 files and passed with zero violations.
+- `git diff --check main` passed.
+
+### Deviations
+
+- Single uses hardened Codex as the canonical per-turn fallback for every selected backend because warm OpenClaw and ACP processes cannot be confined after launch. This preserves one resumable orchestrator while preventing their pre-existing tool surfaces from bypassing the selected mode.

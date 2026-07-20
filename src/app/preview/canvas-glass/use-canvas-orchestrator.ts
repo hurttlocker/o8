@@ -16,7 +16,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getWsUrl } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
+import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
 export type CanvasOrcaStatus = 'idle' | 'connecting' | 'ready' | 'busy' | 'dead';
 
@@ -80,6 +82,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
   const threadIdsRef = useRef<Map<string, string> | null>(null);
   if (threadIdsRef.current === null) threadIdsRef.current = loadThreadMap();
   const threadIds = threadIdsRef.current;
+  const backendByThreadRef = useRef(new Map<string, OrchestratorBackendId>());
   const [status, setStatus] = useState<CanvasOrcaStatus>('idle');
 
   useEffect(() => {
@@ -105,10 +108,13 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
           return;
         }
         wsRef.current = ws;
+        const threadId = threadIds.get(repoPath) ?? null;
+        const backend = threadId ? backendByThreadRef.current.get(threadId) : undefined;
         ws.send(JSON.stringify({
           type: 'orchestrator-subscribe',
           repoPath,
-          threadId: threadIds.get(repoPath) ?? null,
+          threadId,
+          ...(backend ? { backend } : {}),
           // Replay anything missed since our cursor — recovers in-flight tokens
           // on a reconnect instead of stalling with no stream.
           since: lastSeqRef.current,
@@ -126,9 +132,17 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
           return;
         }
         if (msg.channel !== 'orchestrator' || !msg.data) return;
+        const data = msg.data;
+        const eventThreadId = typeof data.threadId === 'string'
+          ? data.threadId
+          : threadIds.get(repoPath);
+        if (eventThreadId && isOrchestratorBackendId(data.backend)) {
+          const previous = backendByThreadRef.current.get(eventThreadId);
+          if (previous && previous !== data.backend) lastSeqRef.current = 0;
+          backendByThreadRef.current.set(eventThreadId, data.backend);
+        }
         // Skip replayed events we've already applied (no double tokens).
         if (skipDuplicateBySeq(msg, lastSeqRef)) return;
-        const data = msg.data;
         if (msg.event === 'output' && typeof data.text === 'string') {
           cbRef.current.onOutput?.(repoPath, data.text, data.thinking === true);
         } else if (msg.event === 'tool-use' && typeof data.name === 'string') {
@@ -165,11 +179,13 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
 
   /** Send one user turn. Returns the threadId, or null if the socket
    *  isn't ready (caller surfaces "not connected"). */
-  const send = useCallback((message: string, opts?: { model?: string; thinkingEffort?: string; attachments?: Array<{ dataUri: string; name?: string }> }) => {
+  const send = useCallback((message: string, opts?: { model?: string; thinkingEffort?: string; orchestrationMode?: OrchestratorExecutionMode; attachments?: Array<{ dataUri: string; name?: string }> }) => {
     if (!repoPath) return null;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return null;
     let threadId = threadIds.get(repoPath);
+    const orchestrationMode = opts?.orchestrationMode ?? 'fleet';
+    const subscriptionBackend = orchestrationMode === 'single' ? 'codex' : undefined;
     if (!threadId) {
       threadId = `thoughts-${Date.now()}`;
       threadIds.set(repoPath, threadId);
@@ -179,14 +195,27 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       // BEFORE sending so the dock actually receives this turn's stream
       // (otherwise it streamed nothing until a reload re-loaded the threadId).
       lastSeqRef.current = 0;
-      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath, threadId, since: 0 }));
+      ws.send(JSON.stringify({
+        type: 'orchestrator-subscribe', repoPath, threadId, since: 0,
+        ...(subscriptionBackend ? { backend: subscriptionBackend } : {}),
+      }));
+    } else if (subscriptionBackend) {
+      // Single deterministically executes on Codex even when the operator's
+      // selected/default backend is Claude, OpenClaw, ACP, or Collide.
+      lastSeqRef.current = 0;
+      ws.send(JSON.stringify({
+        type: 'orchestrator-subscribe', repoPath, threadId, since: 0, backend: subscriptionBackend,
+      }));
     }
+    if (subscriptionBackend) backendByThreadRef.current.set(threadId, subscriptionBackend);
+    else backendByThreadRef.current.delete(threadId);
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
       repoPath,
       threadId,
       message,
       permissionMode: 'full',
+      orchestrationMode,
       ...(opts?.model ? { model: opts.model } : {}),
       ...(opts?.thinkingEffort && opts.thinkingEffort !== 'adaptive' ? { thinkingEffort: opts.thinkingEffort } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
@@ -198,10 +227,13 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     if (!repoPath) return;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const threadId = threadIds.get(repoPath) ?? null;
+    const backend = threadId ? backendByThreadRef.current.get(threadId) : undefined;
     ws.send(JSON.stringify({
       type: 'orchestrator-interrupt',
       repoPath,
-      threadId: threadIds.get(repoPath) ?? null,
+      threadId,
+      ...(backend ? { backend } : {}),
     }));
   }, [repoPath, threadIds]);
 
@@ -237,6 +269,7 @@ export function useThreadOrchestrator(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const lastSeqRef = useRef(0);
+  const activeBackendRef = useRef<OrchestratorBackendId | null>(null);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
   const [status, setStatus] = useState<CanvasOrcaStatus>('idle');
@@ -264,7 +297,10 @@ export function useThreadOrchestrator(
           return;
         }
         wsRef.current = ws;
-        ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath, threadId, since: lastSeqRef.current }));
+        ws.send(JSON.stringify({
+          type: 'orchestrator-subscribe', repoPath, threadId, since: lastSeqRef.current,
+          ...(activeBackendRef.current ? { backend: activeBackendRef.current } : {}),
+        }));
       };
       ws.onmessage = (event) => {
         let msg: { channel?: string; event?: string; data?: Record<string, unknown>; seq?: number };
@@ -274,9 +310,13 @@ export function useThreadOrchestrator(
           return;
         }
         if (msg.channel !== 'orchestrator' || !msg.data) return;
+        const data = msg.data;
+        if (isOrchestratorBackendId(data.backend)) {
+          if (activeBackendRef.current && activeBackendRef.current !== data.backend) lastSeqRef.current = 0;
+          activeBackendRef.current = data.backend;
+        }
         // Skip replayed events we've already applied (no double tokens).
         if (skipDuplicateBySeq(msg, lastSeqRef)) return;
-        const data = msg.data;
         if (msg.event === 'output' && typeof data.text === 'string') {
           onEventRef.current({ type: 'output', text: data.text, thinking: data.thinking === true });
         } else if (msg.event === 'tool-use' && typeof data.name === 'string') {
@@ -315,6 +355,7 @@ export function useThreadOrchestrator(
     if (!repoPath || !threadId) return false;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    activeBackendRef.current = null;
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
       repoPath,
