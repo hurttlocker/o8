@@ -1,6 +1,7 @@
 import type { EventSeverity } from '@/lib/fleet/types';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 export type ApprovalRisk = 'low' | 'medium' | 'high';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
@@ -130,7 +131,7 @@ export interface PlanApprovalContinuation {
   issueTitle: string;
   issueUrl: string;
   tasks: Array<{ title: string; body: string }>;
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
+  runtime: OrchestratorRuntime;
   constraints?: string;
 }
 

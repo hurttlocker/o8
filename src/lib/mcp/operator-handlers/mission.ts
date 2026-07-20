@@ -74,8 +74,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         runtime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi'],
-          description: 'Worker runtime for all mission packets. Codex (default), Claude Code, OpenCode, Cursor, Grok Build, and Pi are dispatchable; Claude workers launch as sub-billed interactive stream-json, never --print.',
+          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'],
+          description: 'Worker runtime for all mission packets. Codex remains the default; configured local CLI adapters are selected explicitly.',
         },
         workerIntent: {
           type: 'string',
@@ -84,7 +84,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedProvider: {
           type: 'string',
-          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode', 'cursor', 'grok', 'pi'],
+          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'aider', 'cursor', 'grok', 'pi'],
           description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
         },
         constraints: {
@@ -784,13 +784,13 @@ function parseWorkerProvider(value: unknown): WorkerProvider | null | undefined 
     || value === 'minimax'
     || value === 'claude'
     || value === 'gemini'
-    || value === 'opencode'
-    || value === 'cursor'
-    || value === 'grok' || value === 'pi'
+    || value === 'opencode' || value === 'openhands' || value === 'goose'
+    || value === 'cursor' || value === 'qwen'
+    || value === 'grok' || value === 'pi' || value === 'aider'
   ) {
     return value;
   }
-  throw new Error('requestedProvider must be one of: codex, kimi, minimax, claude, gemini, opencode, cursor, grok, pi.');
+  throw new Error('requestedProvider must be one of: codex, kimi, minimax, claude, gemini, opencode, openhands, goose, qwen, aider, cursor, grok, pi.');
 }
 
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
