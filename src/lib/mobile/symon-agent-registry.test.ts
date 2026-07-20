@@ -3,7 +3,7 @@
  * §"Mutual exclusion"). Covers last-start-wins, terminal-status clearing, the
  * 10-min stale sweep, and the cross-process disk mirror the Next GET reads.
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -22,6 +22,12 @@ const {
   isAgentSessionStale,
   persistAgentSession,
   loadPersistedAgentSession,
+  persistSymonScopeGrant,
+  loadSymonScopeGrant,
+  clearSymonScopeGrant,
+  scopeGrantMatchesClient,
+  scopeSymonToolArgs,
+  SYMON_SCOPE_VERSION,
   AGENT_SESSION_STALE_MS,
 } = await import('./symon-agent-registry');
 
@@ -125,5 +131,118 @@ describe('symon-agent-registry — disk mirror (cross-process)', () => {
     persistAgentSession(getAgentSession());
     persistAgentSession(null);
     expect(loadPersistedAgentSession(1_500)).toBeNull();
+  });
+});
+
+describe('symon-agent-registry — immutable scope grant', () => {
+  const deviceGrant = {
+    sessionId: 'sym-device',
+    subject: 'device' as const,
+    deviceId: 'device-7',
+    workspaceMode: 'code' as const,
+    repoId: 'repo-o8-mobile',
+    repoPath: '/Users/operator/o8-mobile',
+    allowedTools: ['o8_status', 'o8_dispatch', 'o8_delegate', 'o8_review_diff', 'git_status'],
+    issuedAt: 10_000,
+    scopeVersion: SYMON_SCOPE_VERSION,
+  };
+
+  it('atomically persists a mode-0600 grant and loads the exact value', () => {
+    persistSymonScopeGrant(deviceGrant);
+
+    expect(loadSymonScopeGrant()).toEqual(deviceGrant);
+    expect(statSync(path.join(dataDir, 'symon-scope-grant.json')).mode & 0o777).toBe(0o600);
+  });
+
+  it('fails closed for malformed or unsupported grant files', () => {
+    writeFileSync(path.join(dataDir, 'symon-scope-grant.json'), JSON.stringify({
+      ...deviceGrant,
+      scopeVersion: 2,
+    }));
+    expect(loadSymonScopeGrant()).toBeNull();
+
+    writeFileSync(path.join(dataDir, 'symon-scope-grant.json'), '{');
+    expect(loadSymonScopeGrant()).toBeNull();
+  });
+
+  it('revokes only the exact session grant and preserves a newer mint', () => {
+    persistSymonScopeGrant(deviceGrant);
+    expect(clearSymonScopeGrant('sym-other')).toBe(false);
+    expect(loadSymonScopeGrant()).toEqual(deviceGrant);
+    expect(clearSymonScopeGrant('sym-device')).toBe(true);
+    expect(loadSymonScopeGrant()).toBeNull();
+  });
+
+  it('matches an enrolled device by exact session and device id', () => {
+    expect(scopeGrantMatchesClient(deviceGrant, 'sym-device', { subject: 'device', deviceId: 'device-7' })).toBe(true);
+    expect(scopeGrantMatchesClient(deviceGrant, 'sym-device', { subject: 'device', deviceId: 'device-8' })).toBe(false);
+    expect(scopeGrantMatchesClient(deviceGrant, 'sym-other', { subject: 'device', deviceId: 'device-7' })).toBe(false);
+    expect(scopeGrantMatchesClient(deviceGrant, 'sym-device', { subject: 'operator', deviceId: null })).toBe(false);
+  });
+
+  it('keeps the shared operator principal explicit instead of token-derived', () => {
+    const operatorGrant = { ...deviceGrant, subject: 'operator' as const, deviceId: null };
+    expect(scopeGrantMatchesClient(operatorGrant, 'sym-device', { subject: 'operator', deviceId: null })).toBe(true);
+    expect(scopeGrantMatchesClient(operatorGrant, 'sym-device', { subject: 'device', deviceId: 'device-7' })).toBe(false);
+  });
+
+  it('allowlists tools and overwrites repo arguments for repo-aware Code tools', () => {
+    expect(scopeSymonToolArgs(deviceGrant, 'o8_dispatch', {
+      repo: '/Users/operator/other',
+      task: 'Fix the bug',
+    })).toEqual({
+      ok: true,
+      args: {
+        repo: '/Users/operator/o8-mobile',
+        repoId: 'repo-o8-mobile',
+        repoPath: '/Users/operator/o8-mobile',
+        task: 'Fix the bug',
+      },
+    });
+    expect(scopeSymonToolArgs(deviceGrant, 'git_status', {})).toEqual({
+      ok: true,
+      args: {
+        repo: '/Users/operator/o8-mobile',
+        repoId: 'repo-o8-mobile',
+        repoPath: '/Users/operator/o8-mobile',
+      },
+    });
+    expect(scopeSymonToolArgs(deviceGrant, 'o8_delegate', { task: 'Investigate the failure' })).toEqual({
+      ok: true,
+      args: {
+        repo: '/Users/operator/o8-mobile',
+        repoId: 'repo-o8-mobile',
+        repoPath: '/Users/operator/o8-mobile',
+        task: 'Investigate the failure',
+      },
+    });
+    expect(scopeSymonToolArgs(deviceGrant, 'send_email', {})).toMatchObject({
+      ok: false,
+      error: 'tool_not_allowed',
+    });
+  });
+
+  it('rejects an explicit repo mismatch on stable-target Code tools', () => {
+    expect(scopeSymonToolArgs(deviceGrant, 'o8_review_diff', {
+      packetId: 'pkt-auth',
+      repoPath: '/Users/operator/other',
+    })).toMatchObject({ ok: false, error: 'repo_scope_mismatch' });
+
+    expect(scopeSymonToolArgs(deviceGrant, 'o8_review_diff', {
+      packetId: 'pkt-auth',
+      repoPath: '/Users/operator/o8-mobile',
+    })).toEqual({
+      ok: true,
+      args: {
+        packetId: 'pkt-auth',
+        repoId: 'repo-o8-mobile',
+        repoPath: '/Users/operator/o8-mobile',
+      },
+    });
+
+    expect(scopeSymonToolArgs(deviceGrant, 'o8_review_diff', {
+      packetId: 'pkt-auth',
+      repoId: 'repo-other',
+    })).toMatchObject({ ok: false, error: 'repo_scope_mismatch' });
   });
 });

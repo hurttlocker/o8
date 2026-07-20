@@ -9,10 +9,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   REALTIME_MODEL,
+  REALTIME_FLAGSHIP_MODEL,
   DEFAULT_VOICE,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
   REALTIME_TOKEN_TTL_SECONDS,
   DEFAULT_INSTRUCTIONS,
+  PHONE_CODE_TOOL_NAMES,
+  selectPhoneCodeTools,
+  selectPhoneRealtimeModel,
   buildRealtimeMintSession,
   buildClientSecretsBody,
   MIC_PROFILE_AUDIO_INPUT,
@@ -106,9 +110,65 @@ describe('realtime-session-config — shared assembler', () => {
 
   it('exposes the expected shared constants', () => {
     expect(REALTIME_MODEL).toBe('gpt-realtime-2.1-mini');
+    expect(REALTIME_FLAGSHIP_MODEL).toBe('gpt-realtime-2.1');
     expect(DEFAULT_VOICE).toBe('marin');
     expect(REALTIME_INPUT_TRANSCRIPTION_MODEL).toBe('whisper-1');
     expect(REALTIME_TOKEN_TTL_SECONDS).toBe(600);
     expect(DEFAULT_INSTRUCTIONS).toContain('You are Symon');
+  });
+
+  it('keeps Life on mini even when the Code experiment requests flagship', () => {
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'o8',
+      experiment: 'flagship',
+      operatorOverride: 'flagship',
+      bucketKey: 'device-1',
+    })).toEqual({ model: REALTIME_MODEL, variant: 'mini' });
+  });
+
+  it('supports explicit Code variants and a stable A/B bucket', () => {
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      bucketKey: 'device-1',
+      operatorOverride: 'flagship',
+    })).toEqual({ model: REALTIME_FLAGSHIP_MODEL, variant: 'flagship' });
+    const first = selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      experiment: 'ab',
+      bucketKey: 'device-1:repo-1',
+    });
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      experiment: 'ab',
+      bucketKey: 'device-1:repo-1',
+    })).toEqual(first);
+  });
+
+  it('selects exactly the canonical phone Code tool pack without Life/Mac catalog leakage', () => {
+    const catalog = [
+      { type: 'function', name: 'send_email' },
+      ...PHONE_CODE_TOOL_NAMES.toReversed().map((name) => ({ type: 'function', name })),
+      { type: 'function', name: 'spotify_play' },
+      { type: 'function', name: 'o8_status', duplicate: true },
+    ];
+
+    const selection = selectPhoneCodeTools(catalog);
+
+    expect(selection.missing).toEqual([]);
+    expect(selection.tools.map((tool) => tool.name)).toEqual(PHONE_CODE_TOOL_NAMES);
+    expect(selection.tools.map((tool) => tool.name)).not.toContain('send_email');
+    expect(selection.tools.map((tool) => tool.name)).not.toContain('spotify_play');
+  });
+
+  it('reports every absent or non-function Code tool instead of minting a partial pack', () => {
+    const selection = selectPhoneCodeTools([
+      { type: 'function', name: 'o8_status' },
+      { type: 'not-a-function', name: 'git_status' },
+    ]);
+
+    expect(selection.tools.map((tool) => tool.name)).toEqual(['o8_status']);
+    expect(selection.missing).toContain('git_status');
+    expect(selection.missing).toContain('o8_dispatch');
+    expect(selection.missing).toHaveLength(PHONE_CODE_TOOL_NAMES.length - 1);
   });
 });

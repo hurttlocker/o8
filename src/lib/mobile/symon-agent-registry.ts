@@ -17,7 +17,16 @@
  * mutual-exclusion + stale-sweep logic is unit-testable without touching disk.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +39,60 @@ export interface AgentSessionRecord {
   lastActivityAt: number;
   source: 'phone';
 }
+
+export const SYMON_SCOPE_VERSION = 1 as const;
+
+export type SymonScopeSubject = 'operator' | 'device';
+export type SymonWorkspaceMode = 'o8' | 'code';
+
+/**
+ * Server-issued authority for one phone-hosted Symon session. This is persisted
+ * separately from the derived status mirror: the Next mint owns the grant,
+ * while the WS process owns the frequently-changing status record.
+ */
+export interface SymonScopeGrant {
+  sessionId: string;
+  subject: SymonScopeSubject;
+  deviceId: string | null;
+  workspaceMode: SymonWorkspaceMode;
+  repoId: string | null;
+  repoPath: string | null;
+  allowedTools: string[];
+  issuedAt: number;
+  scopeVersion: typeof SYMON_SCOPE_VERSION;
+}
+
+export interface SymonClientSubject {
+  subject: SymonScopeSubject;
+  deviceId: string | null;
+}
+
+export type ScopedSymonToolArgsResult =
+  | { ok: true; args: Record<string, unknown> }
+  | { ok: false; error: 'tool_not_allowed' | 'repo_scope_mismatch'; detail: string };
+
+const REPO_ARGUMENT_TOOLS = new Set([
+  'o8_status',
+  'o8_dispatch',
+  'o8_delegate',
+  'o8_stop_agent',
+  'git_status',
+  'git_log',
+]);
+
+const STABLE_TARGET_TOOLS = new Set([
+  'o8_needs_me',
+  'o8_review_diff',
+  'o8_packet_wait',
+  'o8_packet_steer',
+  'o8_agent_task',
+  'o8_packet_rerun',
+  'o8_packet_reset',
+  'o8_approve_item',
+  'o8_reject_item',
+]);
+
+const EXPLICIT_REPO_PATH_ARGUMENTS = ['repo', 'repoPath', 'repo_path'] as const;
 
 /** No status event or tool call for this long → the session is swept to idle. */
 export const AGENT_SESSION_STALE_MS = 10 * 60 * 1000;
@@ -152,6 +215,159 @@ function dataDir(): string {
 
 function sessionFilePath(): string {
   return join(dataDir(), 'symon-agent-session.json');
+}
+
+function scopeGrantFilePath(): string {
+  return join(dataDir(), 'symon-scope-grant.json');
+}
+
+function isValidScopeGrant(value: unknown): value is SymonScopeGrant {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const grant = value as Partial<SymonScopeGrant>;
+  if (grant.scopeVersion !== SYMON_SCOPE_VERSION) return false;
+  if (typeof grant.sessionId !== 'string' || !grant.sessionId.trim() || grant.sessionId.length > 160) return false;
+  if (grant.subject !== 'operator' && grant.subject !== 'device') return false;
+  if (grant.subject === 'device' && (typeof grant.deviceId !== 'string' || !grant.deviceId.trim())) return false;
+  if (grant.subject === 'operator' && grant.deviceId !== null) return false;
+  if (grant.workspaceMode !== 'o8' && grant.workspaceMode !== 'code') return false;
+  if (grant.repoId !== null && (typeof grant.repoId !== 'string' || !grant.repoId.trim())) return false;
+  if (grant.repoPath !== null && (typeof grant.repoPath !== 'string' || !grant.repoPath.startsWith('/'))) return false;
+  if (grant.workspaceMode === 'code' && (grant.repoId === null || grant.repoPath === null)) return false;
+  if (!Array.isArray(grant.allowedTools) || grant.allowedTools.length === 0) return false;
+  if (!grant.allowedTools.every((tool) => typeof tool === 'string' && /^[A-Za-z0-9_:-]{1,96}$/.test(tool))) return false;
+  return typeof grant.issuedAt === 'number' && Number.isFinite(grant.issuedAt) && grant.issuedAt > 0;
+}
+
+/** Atomically replace the one active grant. A failure is security-critical and throws. */
+export function persistSymonScopeGrant(grant: SymonScopeGrant): void {
+  if (!isValidScopeGrant(grant)) throw new Error('invalid Symon scope grant');
+  const dir = dataDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const target = scopeGrantFilePath();
+  const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(grant), { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+    chmodSync(temp, 0o600);
+    renameSync(temp, target);
+    chmodSync(target, 0o600);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
+}
+
+/** Read the active cross-process grant. Invalid/truncated files fail closed. */
+export function loadSymonScopeGrant(): SymonScopeGrant | null {
+  try {
+    const path = scopeGrantFilePath();
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, 'utf-8').trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isValidScopeGrant(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Revoke one exact session grant without risking deletion of a newer mint.
+ * Moving the current file aside is atomic; if it belongs to another session we
+ * restore it only when no newer writer has already installed a replacement.
+ */
+export function clearSymonScopeGrant(sessionId: string): boolean {
+  const target = scopeGrantFilePath();
+  if (!sessionId || !existsSync(target)) return false;
+  const quarantine = `${target}.${process.pid}.${randomUUID()}.revoke`;
+  try {
+    renameSync(target, quarantine);
+  } catch {
+    return false;
+  }
+
+  let revoked = false;
+  try {
+    const parsed = JSON.parse(readFileSync(quarantine, 'utf-8')) as unknown;
+    revoked = isValidScopeGrant(parsed) && parsed.sessionId === sessionId;
+  } catch {
+    // Invalid grants already fail closed; remove the quarantined copy.
+    revoked = true;
+  }
+
+  if (!revoked && !existsSync(target)) {
+    try {
+      renameSync(quarantine, target);
+      return false;
+    } catch {
+      // A concurrent mint may have installed a new target. Its file wins.
+    }
+  }
+  try {
+    if (existsSync(quarantine)) unlinkSync(quarantine);
+  } catch {
+    // Revocation already removed the active path; a quarantine cleanup failure
+    // cannot restore authority and may be cleaned on the next maintenance pass.
+  }
+  return revoked;
+}
+
+/** Exact subject match for the status/tool/stop WS boundary. */
+export function scopeGrantMatchesClient(
+  grant: SymonScopeGrant,
+  sessionId: string,
+  client: SymonClientSubject,
+): boolean {
+  if (grant.sessionId !== sessionId || grant.subject !== client.subject) return false;
+  return grant.subject === 'device'
+    ? Boolean(grant.deviceId && grant.deviceId === client.deviceId)
+    : client.deviceId === null;
+}
+
+/**
+ * Apply the immutable Code repo scope at the last server-controlled boundary
+ * before native tool execution. Life sessions retain their existing arguments.
+ */
+export function scopeSymonToolArgs(
+  grant: SymonScopeGrant,
+  tool: string,
+  args: Record<string, unknown>,
+): ScopedSymonToolArgsResult {
+  if (!grant.allowedTools.includes(tool)) {
+    return { ok: false, error: 'tool_not_allowed', detail: `${tool} is not allowed for this Symon session` };
+  }
+  if (grant.workspaceMode !== 'code' || !grant.repoId || !grant.repoPath) return { ok: true, args: { ...args } };
+
+  const scopedArgs = {
+    ...args,
+    repoId: grant.repoId,
+    repoPath: grant.repoPath,
+  };
+
+  if (REPO_ARGUMENT_TOOLS.has(tool)) {
+    return { ok: true, args: { ...scopedArgs, repo: grant.repoPath } };
+  }
+
+  if (STABLE_TARGET_TOOLS.has(tool)) {
+    const suppliedRepoId = args.repoId;
+    if (typeof suppliedRepoId === 'string' && suppliedRepoId.trim() && suppliedRepoId.trim() !== grant.repoId) {
+      return {
+        ok: false,
+        error: 'repo_scope_mismatch',
+        detail: `${tool} cannot target a repository outside the active Symon scope`,
+      };
+    }
+    for (const key of EXPLICIT_REPO_PATH_ARGUMENTS) {
+      const supplied = args[key];
+      if (typeof supplied === 'string' && supplied.trim() && supplied.trim() !== grant.repoPath) {
+        return {
+          ok: false,
+          error: 'repo_scope_mismatch',
+          detail: `${tool} cannot target a repository outside the active Symon scope`,
+        };
+      }
+    }
+  }
+
+  return { ok: true, args: scopedArgs };
 }
 
 /** Mirror the current record (or its absence) to disk. Best-effort. */

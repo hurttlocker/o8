@@ -353,11 +353,12 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 bridge (Tier-2) — read what the coding agents are doing ─────────
         json!({
             "name": "o8_status",
-            "description": "Report what's currently shipping or in progress across o8's autonomous agent fleet — the active packets/lanes, each with its memorable agent NAME (Atlas, Nova…), task, status (running, reviewing, etc.). Use for 'what's shipping?', 'what's in progress?', 'what are my agents doing?', 'who's working?', 'what's Atlas doing?'. Read the names back when the operator asks who's working, and use them to address an agent via o8_agent_task. Optionally filter to one repo.",
+            "description": "Report active o8 coding work with the exact repoId, packetId, laneId, and sessionKey needed by follow-up Code tools. In Code mode the relay supplies the immutable repo scope; omit both repo fields only for a desktop/Life fleet-wide read.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Filter to one repo by folder name, e.g. 'o8'. Omit for the whole fleet." }
+                    "repoId": { "type": "string", "description": "Exact registered repository id. Optional because the Code relay injects it." },
+                    "repoPath": { "type": "string", "description": "Exact registered path paired with repoId. Optional because the Code relay injects it." }
                 },
                 "required": []
             }
@@ -397,47 +398,51 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_needs_me",
-            "description": "List everything waiting on the USER across o8 — pending approval cards (merges, plans, gated commands) and agent lanes stuck needing attention. Use for 'what needs me?', 'anything waiting on me?', 'do I have approvals?'. ALWAYS call this before o8_approve_item or o8_reject_item to learn the exact pending titles.",
+            "description": "List pending approvals and attention lanes with exact approvalId, packetId, laneId, sessionKey, repoId, and repoPath values. ALWAYS call this before approving or rejecting and copy approvalId exactly.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "repoId": { "type": "string", "description": "Exact registered repository id; injected in Code mode." },
+                    "repoPath": { "type": "string", "description": "Exact registered path paired with repoId; injected in Code mode." }
+                },
                 "required": []
             }
         }),
         json!({
             "name": "o8_approve_item",
-            "description": "Approve ONE pending o8 approval card by its title. Call o8_needs_me first and pass the exact title you read there — never guess. The user confirms on a card before this executes.",
+            "description": "Approve ONE pending o8 approval by exact approvalId from o8_needs_me. Never identify approvals by title. The user confirms before this executes.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": { "type": "string", "description": "The exact title of the pending approval, as returned by o8_needs_me." }
+                    "approvalId": { "type": "string", "description": "Exact approvalId returned by o8_needs_me." }
                 },
-                "required": ["title"]
+                "required": ["approvalId"]
             }
         }),
         json!({
             "name": "o8_reject_item",
-            "description": "Reject ONE pending o8 approval card by its title. Call o8_needs_me first and pass the exact title you read there — never guess. The user confirms on a card before this executes.",
+            "description": "Reject ONE pending o8 approval by exact approvalId from o8_needs_me. Never identify approvals by title. The user confirms before this executes.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": { "type": "string", "description": "The exact title of the pending approval, as returned by o8_needs_me." },
+                    "approvalId": { "type": "string", "description": "Exact approvalId returned by o8_needs_me." },
                     "reason": { "type": "string", "description": "Optional short reason the user gave for rejecting." }
                 },
-                "required": ["title"]
+                "required": ["approvalId"]
             }
         }),
         json!({
             "name": "o8_dispatch",
-            "description": "Hand a CODING task to o8's orchestrator — it dispatches an autonomous worker in an isolated worktree, reviews the diff, and surfaces a packet for the user's approval. Use when the user wants code written, changed, fixed, or investigated in a repo ('have the orchestrator fix the auth bug', 'kick off the tooltip work in o8'). You do NOT write code yourself — this delegates it. Always include the repo so the user can confirm by ear. The result includes `codename` — the agent's name on its canvas card (Atlas, Nova…). Announce THAT name when you report the dispatch ('Pike is on it'); NEVER invent a name yourself — agents cannot be custom-named, the card name is assigned by o8.",
+            "description": "Dispatch a coding task in the exact registered repository scope. The Code relay injects repoId and the canonical repoPath. Returns stable packetId, laneId, and approvalId when gated.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Repo folder name to work in, e.g. 'o8'." },
+                    "repoId": { "type": "string", "description": "Exact registered repository id; optional because the Code relay injects it." },
+                    "repoPath": { "type": "string", "description": "Exact registered path paired with repoId; optional because the Code relay injects it." },
                     "task": { "type": "string", "description": "A clear one-or-two-sentence description of what the orchestrator should do." },
                     "base_branch": { "type": "string", "description": "Optional branch to fork from. Default 'main'." }
                 },
-                "required": ["repo", "task"]
+                "required": ["task"]
             }
         }),
         // ── Escalation handoff (two-tier brain) ───────────────────────────────
@@ -527,22 +532,24 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 Review (inspect a packet's diff before approving) ───────────────
         json!({
             "name": "o8_review_diff",
-            "description": "Inspect what a coding agent (packet) changed before approving — 'what did the auth packet change?', 'show me the diff before I approve'. Returns the diffstat (files + lines changed) and the review state (working / ready-to-merge / needs-revision / merged). ReadOnly — to actually release the merge use o8_approve_item. Name the packet, or omit for the only active one.",
+            "description": "Inspect the diff and review state for one exact packetId returned by o8_status or o8_needs_me. ReadOnly; use o8_approve_item with approvalId to release governed work.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packet": { "type": "string", "description": "Which packet/lane to inspect (fuzzy match on its label). Omit for the only active lane." }
+                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." }
                 },
-                "required": []
+                "required": ["packetId"]
             }
         }),
         // ── Conductor delegation (hand a task to the live agent engine) ────────
         json!({
             "name": "o8_delegate",
-            "description": "Hand an arbitrary, multi-step task to o8's LIVE agent engine (the in-app Claude REPL orchestrator / 'agent mode') so it works on it RIGHT NOW — acting on the canvas/screen — while you keep talking and narrate what's happening. This is your conductor move: you're a great voice but a weaker doer, so send deep / multi-step / 'figure this out' / show-on-screen / coding-in-the-open work to the agent engine and narrate the result instead of trying to do it yourself. Use for 'have the agent add a dark mode toggle', 'get the agent to explain the Pythagorean theorem on my screen', 'tell the agent to investigate why the build is failing'. Differs from o8_dispatch (which spawns a SEPARATE tracked coding worker in a worktree for a reviewable coding packet) — o8_delegate drives the live session for immediate, arbitrary action. The agent's own changes stay gated by o8's approval pipeline.",
+            "description": "Hand a multi-step task to the authenticated live orchestrator for the Code repo scope. The relay injects repoId and the canonical repoPath. Returns whether the turn was accepted and the real session/turn identifiers.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "repoId": { "type": "string", "description": "Exact registered repository id; optional because the Code relay injects it." },
+                    "repoPath": { "type": "string", "description": "Exact registered path paired with repoId; optional because the Code relay injects it." },
                     "task": { "type": "string", "description": "The task to hand to the live agent, in plain language — exactly what you'd tell a teammate to go do." }
                 },
                 "required": ["task"]
@@ -570,39 +577,37 @@ pub fn all_tools() -> Vec<Value> {
         // ── Mission control recovery (reset / wait for a packet) ──────────────
         json!({
             "name": "o8_packet_reset",
-            "description": "Recover a STUCK coding packet — 'reset the stuck packet and try again'. Wipes the packet's worktree, archives its lane, and relaunches it. Use when a packet is wedged (stuck launching, session lost, the worktree itself is broken) and a plain rerun won't help. Set keep_worktree:true to RETRY instead (preserve the worktree and resume). For a normal 'try again with feedback', prefer o8_packet_rerun. Name the packet, or omit for the only active one.",
+            "description": "Reset one exact stuck packetId. It wipes the worktree by default and archives the lane; keepWorktree preserves it. This does not mission-wide redispatch because o8 has no safe packet-scoped relaunch endpoint.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packet": { "type": "string", "description": "Which packet/lane to reset (fuzzy match on its label). Omit for the only active lane." },
-                    "keep_worktree": { "type": "boolean", "description": "true = retry (keep the worktree and resume); false or omitted = reset (wipe the worktree)." },
+                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." },
+                    "keepWorktree": { "type": "boolean", "description": "True preserves the worktree; false or omitted wipes it." },
                     "reason": { "type": "string", "description": "Optional short reason for the reset (for the audit trail)." }
                 },
-                "required": []
+                "required": ["packetId"]
             }
         }),
         json!({
             "name": "o8_stop_agent",
-            "description": "KILL / STOP a running agent — the opposite of spawning one. 'kill that agent', 'stop the agent on o8-mobile', 'stop everything', 'kill all the agents'. Reaps the live runtime PROCESS and archives the lane + prunes the worktree, with NO relaunch — use this to clean up a stuck, unwanted, or test agent. (A plain o8_packet_reset RELAUNCHES and can leave a zombie process; this does not.) Name the agent/packet to stop ONE, or set all:true (optionally scoped to a repo) for a clean slate.",
+            "description": "Stop one exact laneId within the relay-injected repo scope. Reaps its live process and archives the lane without relaunching.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packet": { "type": "string", "description": "Which agent/packet to stop (fuzzy match on its label/codename). Omit only when all:true." },
-                    "all": { "type": "boolean", "description": "true = stop EVERY active agent (clean slate). Optionally scope with `repo`." },
-                    "repo": { "type": "string", "description": "With all:true, limit the clean slate to this repo (folder name or path). Omit to stop agents everywhere." }
+                    "laneId": { "type": "string", "description": "Exact laneId returned by o8_status or o8_needs_me." }
                 },
-                "required": []
+                "required": ["laneId"]
             }
         }),
         json!({
             "name": "o8_packet_wait",
-            "description": "Wait for a coding packet to finish and report where it landed — 'tell me when the auth packet is ready'. Polls briefly (~12s) and reports its review state (working / ready-to-merge / needs-revision / merged / failed). If it's still working, say so — ask again to keep waiting. Name the packet, or omit for the only active one.",
+            "description": "Wait briefly for one exact packetId to leave working state and report its review state. Copy packetId from o8_status or o8_needs_me.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packet": { "type": "string", "description": "Which packet/lane to wait on (fuzzy match on its label). Omit for the only active lane." }
+                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." }
                 },
-                "required": []
+                "required": ["packetId"]
             }
         }),
         // ── Screen reading (give the brain sight) ─────────────────────────────
@@ -844,38 +849,39 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_packet_steer",
-            "description": "Get a spoken message to a running packet's worker — 'tell the tooltip packet to also fix the colors'. Steers the warm session when one exists, else restarts the worker with the message as feedback. Identify the packet by part of its name (from o8_status / o8_needs_me). The user confirms first.",
+            "description": "Steer one running worker by exact packetId from o8_status or o8_needs_me. The user confirms first.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packet": { "type": "string", "description": "Part of the packet's name, enough to identify it." },
+                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." },
                     "message": { "type": "string", "description": "What to tell the worker." }
                 },
-                "required": ["packet", "message"]
+                "required": ["packetId", "message"]
             }
         }),
         json!({
             "name": "o8_agent_task",
-            "description": "Address a WORKING agent by the memorable name on its Canvas card — 'Atlas, also run the tests', 'tell Nova to focus on the migration', 'Comet, check the types'. Agents spawned onto the Canvas (via o8_canvas spawn-agents) each get a short name like Atlas / Nova / Comet / Sage shown on their card; this steers the one you name with a follow-up instruction (reuses its warm session). Use this when the user calls an agent by a NAME like that. Use o8_packet_steer instead when they identify the work by its TASK ('the tooltip packet'). If no agent has that name, o8 tells you who IS working so you can read the roster back.",
+            "description": "Send a follow-up task to exactly one working agent. Provide exactly one stable target: laneId or packetId from o8_status. Never target by codename or fuzzy task label.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": { "type": "string", "description": "The agent's Canvas name, e.g. 'Atlas'." },
+                    "laneId": { "type": "string", "description": "Exact laneId from o8_status. Mutually exclusive with packetId." },
+                    "packetId": { "type": "string", "description": "Exact packetId from o8_status. Mutually exclusive with laneId." },
                     "task": { "type": "string", "description": "What to tell that agent to do." }
                 },
-                "required": ["name", "task"]
+                "required": ["task"]
             }
         }),
         json!({
             "name": "o8_packet_rerun",
-            "description": "Restart a packet fresh — 'retry the failed packet', 'run the tooltip work again'. Optionally include spoken feedback about what went wrong last time. Identify the packet by part of its name. The user confirms first.",
+            "description": "Restart one exact packetId, optionally with feedback about the previous attempt. The user confirms first.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packet": { "type": "string", "description": "Part of the packet's name, enough to identify it." },
+                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." },
                     "feedback": { "type": "string", "description": "Optional: what went wrong / what to do differently." }
                 },
-                "required": ["packet"]
+                "required": ["packetId"]
             }
         }),
         json!({
@@ -905,25 +911,27 @@ pub fn all_tools() -> Vec<Value> {
         // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
         json!({
             "name": "git_status",
-            "description": "Show the local git status (branch + changed files) of a repo. Use for 'what's the git status of o8?', 'is my working tree clean?'.",
+            "description": "Show local git status for the exact Code repo scope. The relay injects repoId and repoPath.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Repo folder name, e.g. 'o8'." }
+                    "repoId": { "type": "string", "description": "Exact repo id; optional because the Code relay injects it." },
+                    "repoPath": { "type": "string", "description": "Exact repo path; optional because the Code relay injects it." }
                 },
-                "required": ["repo"]
+                "required": []
             }
         }),
         json!({
             "name": "git_log",
-            "description": "Show recent commits (one line each) for a repo. Use for 'what are the recent commits on o8?'.",
+            "description": "Show recent commits for the exact Code repo scope. The relay injects repoId and repoPath.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Repo folder name." },
+                    "repoId": { "type": "string", "description": "Exact repo id; optional because the Code relay injects it." },
+                    "repoPath": { "type": "string", "description": "Exact repo path; optional because the Code relay injects it." },
                     "count": { "type": "integer", "description": "How many commits. Default 10, max 30." }
                 },
-                "required": ["repo"]
+                "required": []
             }
         }),
         json!({
@@ -1144,8 +1152,8 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "mac_music_next" => mac_music::next(args).await,
         "mac_music_previous" => mac_music::previous(args).await,
         "mac_music_now_playing" => mac_music::now_playing(args).await,
-        "git_status" => git_github::git_status(args).await,
-        "git_log" => git_github::git_log(args).await,
+        "git_status" => o8_bridge::git_status(args).await,
+        "git_log" => o8_bridge::git_log(args).await,
         "gh_pr_list" => git_github::pr_list(args).await,
         "gh_issue_list" => git_github::issue_list(args).await,
         "symon_skills_list" => Ok(crate::agent::skills::list_json()),
@@ -1293,5 +1301,77 @@ mod escalation_tests {
         // escalate is ReadOnly, so enabled_tools() (which only drops Destructive)
         // must include it — the off-filter is the ONLY thing that removes it.
         assert!(has_escalate(&enabled_tools()));
+    }
+
+    fn schema(name: &str) -> Value {
+        all_tools()
+            .into_iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+            .unwrap_or_else(|| panic!("missing tool schema: {name}"))
+    }
+
+    fn properties(name: &str) -> serde_json::Map<String, Value> {
+        schema(name)["parameters"]["properties"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn code_packet_tools_expose_only_stable_target_ids() {
+        for name in [
+            "o8_review_diff",
+            "o8_packet_wait",
+            "o8_packet_steer",
+            "o8_packet_rerun",
+            "o8_packet_reset",
+        ] {
+            let props = properties(name);
+            assert!(props.contains_key("packetId"), "{name} must expose packetId");
+            assert!(!props.contains_key("packet"), "{name} must not expose fuzzy packet");
+        }
+    }
+
+    #[test]
+    fn code_stop_tool_targets_one_exact_lane() {
+        let tool = schema("o8_stop_agent");
+        let props = tool["parameters"]["properties"]
+            .as_object()
+            .expect("properties");
+        assert_eq!(props.len(), 1);
+        assert!(props.contains_key("laneId"));
+        assert!(!props.contains_key("packetId"));
+        assert!(!props.contains_key("all"));
+        assert_eq!(tool["parameters"]["required"], json!(["laneId"]));
+    }
+
+    #[test]
+    fn code_approval_tools_expose_approval_id_not_title() {
+        for name in ["o8_approve_item", "o8_reject_item"] {
+            let props = properties(name);
+            assert!(props.contains_key("approvalId"));
+            assert!(!props.contains_key("title"));
+        }
+    }
+
+    #[test]
+    fn code_repo_tools_expose_exact_repo_pair_without_requiring_model_uuid() {
+        for name in ["o8_dispatch", "o8_delegate", "git_status", "git_log"] {
+            let tool = schema(name);
+            let props = tool["parameters"]["properties"].as_object().expect("properties");
+            assert!(props.contains_key("repoId"), "{name} must expose repoId");
+            assert!(props.contains_key("repoPath"), "{name} must expose repoPath");
+            assert!(!props.contains_key("repo"), "{name} must not expose fuzzy repo");
+            let required = tool["parameters"]["required"].as_array().expect("required");
+            assert!(!required.iter().any(|value| value.as_str() == Some("repoId")));
+        }
+    }
+
+    #[test]
+    fn agent_task_targets_lane_or_packet_not_codename() {
+        let props = properties("o8_agent_task");
+        assert!(props.contains_key("laneId"));
+        assert!(props.contains_key("packetId"));
+        assert!(!props.contains_key("name"));
     }
 }
