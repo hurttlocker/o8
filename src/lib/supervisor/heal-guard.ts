@@ -26,6 +26,9 @@ export function salvagedWorkBlockReason(packet: OrchestratorPacket): string | nu
     const detail = lane.lastEventLabel ? ` (${lane.lastEventLabel})` : '';
     return `Latest lane ${lane.id} is ${lane.status}${detail} — salvaged work awaits review; not healable`;
   }
+  if (packet.review?.approved === true && lane.outcome === 'archived_recoverable') {
+    return `Packet has reviewed recoverable work on lane ${lane.id} — retry or merge it; not healable`;
+  }
   if (packet.review?.approved === true && lane.status !== 'archived' && lane.status !== 'completed') {
     return `Packet has an approved review on lane ${lane.id} — not healable`;
   }

@@ -33,7 +33,7 @@
  * one becomes immediately retryable.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getDb, getSqlite } from '@/lib/db';
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
@@ -101,29 +101,53 @@ function selectFresh(key: string, now: number): KeyRow | undefined {
 }
 
 /** RESERVE: returns true iff this call won the insert (owns the execution). */
-function reserve(key: string, verb: string, packetId: string, now: number, expiresAt: number): boolean {
+function reserve(
+  key: string,
+  verb: string,
+  packetId: string,
+  reservationId: string,
+  now: number,
+  expiresAt: number,
+): boolean {
   const info = getSqlite()
     .prepare(
-      `INSERT OR IGNORE INTO idempotency_keys (key, verb, packet_id, result_json, pid, created_at, expires_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO idempotency_keys (key, verb, packet_id, result_json, pid, reservation_id, created_at, expires_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`,
     )
-    .run(key, verb, packetId, process.pid, now, expiresAt);
+    .run(key, verb, packetId, process.pid, reservationId, now, expiresAt);
   return info.changes > 0;
 }
 
-function finalize(key: string, resultJson: string, expiresAt: number): void {
+function finalize(key: string, reservationId: string, resultJson: string, expiresAt: number): void {
   // Clear pid on finalize — a finalized row is a replay cache with no live
   // owner, so it must never look like a reapable in-flight reservation.
   getSqlite()
-    .prepare('UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ? WHERE key = ?')
-    .run(resultJson, expiresAt, key);
+    .prepare('UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ? WHERE key = ? AND reservation_id = ? AND result_json IS NULL')
+    .run(resultJson, expiresAt, key, reservationId);
 }
 
-function release(key: string): void {
+function release(key: string, reservationId: string): void {
   try {
-    getSqlite().prepare('DELETE FROM idempotency_keys WHERE key = ?').run(key);
+    getSqlite().prepare('DELETE FROM idempotency_keys WHERE key = ? AND reservation_id = ? AND result_json IS NULL')
+      .run(key, reservationId);
   } catch (error) {
     console.warn('[idempotency] release failed:', error instanceof Error ? error.message : error);
+  }
+}
+
+/** Clear live reservations when a packet operation is terminated externally. */
+export function releaseInProgressIdempotencyForScope(scopeId: string): number {
+  try {
+    const result = getSqlite()
+      .prepare('DELETE FROM idempotency_keys WHERE packet_id = ? AND result_json IS NULL')
+      .run(scopeId);
+    if (result.changes > 0) {
+      console.warn(`[idempotency] Released ${result.changes} terminated in-progress operation(s) for ${scopeId}.`);
+    }
+    return result.changes;
+  } catch (error) {
+    console.warn('[idempotency] scope release failed:', error instanceof Error ? error.message : error);
+    return 0;
   }
 }
 
@@ -175,7 +199,8 @@ export async function withIdempotency<T>(
     return { replayed: true, inProgress: true, result: inProgressMarker<T>(verb) };
   }
 
-  const won = reserve(key, verb, scopeId, now, expiresAt);
+  const reservationId = randomUUID();
+  const won = reserve(key, verb, scopeId, reservationId, now, expiresAt);
   if (!won) {
     // Lost the reserve race between select and insert — re-read the winner's row.
     const raced = selectFresh(key, now);
@@ -187,11 +212,11 @@ export async function withIdempotency<T>(
 
   try {
     const result = await run();
-    finalize(key, JSON.stringify(result ?? null), expiresAt);
+    finalize(key, reservationId, JSON.stringify(result ?? null), expiresAt);
     return { replayed: false, inProgress: false, result };
   } catch (error) {
     // Failures are retryable — drop the reservation so a real retry can run.
-    release(key);
+    release(key, reservationId);
     throw error;
   }
 }

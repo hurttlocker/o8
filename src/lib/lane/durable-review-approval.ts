@@ -3,9 +3,19 @@ import type { Lane } from '@/lib/lane/types';
 
 export interface DurableReviewAssessment {
   approved: boolean;
+  diffBudgetWaived: boolean;
   highConfidence: boolean;
   approvalId: string | null;
   reason: string;
+}
+
+function carriesAcceptedFinding(approval: ApprovalRecord): boolean {
+  const findings = approval.args?.findings;
+  return Array.isArray(findings) && findings.some((finding) => (
+    finding !== null
+    && typeof finding === 'object'
+    && (finding as { resolution?: unknown }).resolution === 'accepted'
+  ));
 }
 
 function reviewedHeadForApproval(approval: ApprovalRecord): string | undefined {
@@ -37,34 +47,37 @@ export async function assessDurableApprovedReview(
       (approval) => approval.toolName === 'orchestrator_review' && approval.status === 'approved',
     );
     if (approved.length === 0) {
-      return { approved: false, highConfidence: false, approvalId: null, reason: 'No durable approved AI review exists.' };
+      return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'No durable approved AI review exists.' };
     }
 
     const cwd = lane.worktreePath || lane.repoPath;
-    if (!cwd) return { approved: false, highConfidence: false, approvalId: null, reason: 'Lane has no reviewable repository path.' };
+    if (!cwd) return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Lane has no reviewable repository path.' };
 
     let currentHead: string | undefined;
     try {
       currentHead = normalizeHeadSha(await readHeadSha(cwd));
     } catch {
-      return { approved: false, highConfidence: false, approvalId: null, reason: 'Current HEAD could not be verified against the AI review.' };
+      return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Current HEAD could not be verified against the AI review.' };
     }
-    if (!currentHead) return { approved: false, highConfidence: false, approvalId: null, reason: 'Current HEAD is unavailable.' };
+    if (!currentHead) return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Current HEAD is unavailable.' };
 
-    const matching = approved.find((approval) => {
+    const matchingHead = approved.filter((approval) => {
       const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
-      return reviewed !== undefined
-        && reviewed === currentHead
-        && !(approval.args?.requiresSecondPass === true && approval.args?.secondPassAgreed !== true);
+      return reviewed !== undefined && reviewed === currentHead;
     });
+    const diffBudgetWaived = matchingHead.some(carriesAcceptedFinding);
+    const matching = matchingHead.find((approval) => (
+      !(approval.args?.requiresSecondPass === true && approval.args?.secondPassAgreed !== true)
+    ));
     if (!matching) {
-      return { approved: false, highConfidence: false, approvalId: null, reason: 'The approved AI review does not authorize the current HEAD.' };
+      return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, reason: 'The approved AI review does not authorize the current HEAD.' };
     }
 
     const highConfidence = matching.risk === 'low'
       && typeof matching.args?.parseWarning !== 'string';
     return {
       approved: true,
+      diffBudgetWaived,
       highConfidence,
       approvalId: matching.id,
       reason: highConfidence
@@ -72,7 +85,7 @@ export async function assessDurableApprovedReview(
         : 'The AI review has findings or parser uncertainty.',
     };
   } catch {
-    return { approved: false, highConfidence: false, approvalId: null, reason: 'Durable AI review lookup failed.' };
+    return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Durable AI review lookup failed.' };
   }
 }
 

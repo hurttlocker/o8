@@ -204,6 +204,14 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
 }
 
 async function resetRegistryPacket(input: ResetPacketInput, missionId: string) {
+  if (!input.scope?.skipHoldIfStateMoved) {
+    await withMissionRegistryState(missionId, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === input.packetId);
+      if (!packet) throw new Error(`Packet ${input.packetId} not found.`);
+      markPacketResetHeld(packet);
+      return { state, result: undefined };
+    });
+  }
   let worktreePruned = false;
   let branchDeleted = false;
   try {
@@ -251,6 +259,17 @@ export async function resetPacket(input: ResetPacketInput) {
       return resetRegistryPacket(input, registryEntry.id);
     }
     return resetPacketViaLaneFallback(input);
+  }
+
+  // Hold first, before session teardown and worktree cleanup open an async
+  // window. Otherwise the headless dispatcher can relaunch this packet while
+  // reset is still working, despite the final response promising a hold.
+  if (!input.scope?.skipHoldIfStateMoved) {
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    await withLockedState((fresh) => {
+      const target = fresh.packets.find((candidate) => candidate.id === input.packetId);
+      if (target) markPacketResetHeld(target);
+    });
   }
 
   // Archive ALL stale lanes bound to this packet and clear their packet

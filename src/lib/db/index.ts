@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 33;
+const DB_SCHEMA_VERSION = 34;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -209,6 +209,9 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
  * forgets in-flight merges so the operator can retry immediately" behavior now
  * that merge verbs share the persisted store — a LIVE in-flight duplicate is
  * still deduped, but a reservation whose owner died is released.
+ *
+ * Schema v34 (#1600) — adds an execution-owner token so clearing an externally
+ * terminated reservation cannot let its stale promise overwrite a later retry.
  */
 function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
   sqlite.exec(`
@@ -218,6 +221,7 @@ function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
       packet_id TEXT,
       result_json TEXT,
       pid INTEGER,
+      reservation_id TEXT,
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     );
@@ -227,6 +231,9 @@ function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
   // without `pid`). Tolerant of the duplicate-column race on a repeat boot.
   if (!tableColumnExists(sqlite, 'idempotency_keys', 'pid')) {
     addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN pid INTEGER');
+  }
+  if (!tableColumnExists(sqlite, 'idempotency_keys', 'reservation_id')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN reservation_id TEXT');
   }
   reapDeadIdempotencyReservations(sqlite);
 }
