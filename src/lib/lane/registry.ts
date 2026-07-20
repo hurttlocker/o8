@@ -8,6 +8,7 @@ import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
+import { releaseInProgressIdempotencyForScope } from '@/lib/orchestrator/idempotency-store';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { reportMissingArchiveEnding, resolveArchiveEnding } from './archive-ending';
 import { publishPacketTailEvent } from './packet-tail';
@@ -911,6 +912,10 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lan
     lastEventAt: nowIso(),
     lastEventLabel: 'archived',
   }, actor);
+
+  if (lane.packetId) {
+    releaseInProgressIdempotencyForScope(lane.packetId);
+  }
 
   return updated;
 }

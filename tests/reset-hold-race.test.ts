@@ -43,6 +43,7 @@ const {
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
 const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
+const { getDispatchBlocker } = await import('@/lib/orchestrator/scheduling');
 
 function packetFixture(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
   return {
@@ -57,7 +58,7 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
     dependencyPacketIds: [],
     queueState: 'queued',
     releaseState: 'pending',
-    status: 'awaiting_review',
+    status: 'queued',
     blockedReason: null,
     lastEventAt: null,
     lastEventLabel: null,
@@ -85,6 +86,11 @@ describe('#1527 — reset hold cannot be reverted by writes racing the cleanup w
     // then blocks inside the cleanup phase on the held session interrupt.
     const resetPromise = resetPacket({ packetId: 'pkt-hold-race-a', reason: 'archive analysis packet' });
     await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const duringCleanup = readOrchestratorControlPlaneState();
+    const heldDuringCleanup = duringCleanup.packets.find((candidate) => candidate.id === 'pkt-hold-race-a');
+    expect(heldDuringCleanup).toMatchObject({ queueState: 'held' });
+    expect(getDispatchBlocker(heldDuringCleanup!, duringCleanup.packets)).toBe('Not queued');
 
     // The overlapping second reset: packet B's hold lands through the locked
     // seam while packet A's reset is still mid-cleanup.

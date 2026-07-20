@@ -564,6 +564,18 @@ async function dispatchPacketMerge(
   if (!result.ok && releasedAfterDispatch) {
     return releasedAfterDispatch;
   }
+  // A reviewed failure is held by the lane command at an actionable state.
+  // Don't run a dispatch tick for that case: it can relaunch recoverable work
+  // while the operator is still resolving the gate.
+  const failedLane = !result.ok ? findLatestLaneByPacket(packet.id) : null;
+  if (!result.ok && (failedLane?.status === 'reviewing' || failedLane?.status === 'awaiting_orchestrator')) {
+    log(`Merge command held for packet ${packet.id}.`, { note: result.note, actor });
+    return withGateVerdict(packet.id, {
+      merged: false,
+      note: result.note,
+      approvalId: result.approvalId,
+    }, packet.review?.approved === true);
+  }
 
   // Adversarial F3 — the release mutation lands under the lock against a
   // FRESH read; the old code mutated the pre-release snapshot and whole-state
@@ -705,7 +717,22 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     // of bouncing the human to the inbox for a second click (Q ruling
     // 2026-07-18). Gate violations stay a hard stop even for the operator:
     // that card carries findings a human must actually read.
-    if (input.actor === 'user' && latestMergeApproval.policyRuleId !== 'merge-gate-violation') {
+    if (input.actor === 'user' && latestMergeApproval.policyRuleId === 'merge-gate-violation') {
+      const { buildPreviewForLane } = await loadPreviewMerge();
+      const preview = await buildPreviewForLane(lane, packet.id, {
+        orchestratorApproved: packet.review?.approved === true,
+      });
+      if (preview.wouldMerge) {
+        const { resolveApproval } = await import('@/lib/approvals/store');
+        resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator waiver now satisfies the merge gate.');
+      } else {
+        return withGateVerdict(packet.id, {
+          merged: false,
+          note: 'Merge gate enforcement: human review required.',
+          approvalId: latestMergeApproval.id,
+        }, packet.review?.approved === true);
+      }
+    } else if (input.actor === 'user') {
       const { resolveApproval } = await import('@/lib/approvals/store');
       resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator merged directly from the review surface.');
     } else {

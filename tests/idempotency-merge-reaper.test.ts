@@ -39,11 +39,11 @@ const h = vi.hoisted(() => {
       resolveNext(v: unknown) { resolve?.(v); resolve = null; },
     },
     impl: async (input: { packetId: string }) => {
-      calls += 1;
+      const run = ++calls;
       const blockOn = armedPromise;
       armedPromise = null; // claim — the next impl call won't block on it
       if (blockOn) await blockOn;
-      return { ok: true, merged: true, packetId: input.packetId, run: calls };
+      return { ok: true, merged: true, packetId: input.packetId, run };
     },
   };
 });
@@ -72,6 +72,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const merge = await import('@/app/api/orchestrator/merge/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
+const { archiveLane, createLane, updateLane } = await import('@/lib/lane/registry');
 
 const URL = 'http://localhost:3001/api/orchestrator/merge';
 
@@ -140,5 +141,33 @@ describe('merge idempotency + reservation-reaper — through the real merge rout
     // Drain the original (now-orphaned) call so no promise dangles.
     h.state.resolveNext(undefined);
     await firstPromise.catch(() => undefined);
+  });
+
+  it('archiving the packet clears its live reservation without letting the stale call overwrite the retry', async () => {
+    const packetId = 'pkt-merge-archived-terminal';
+    const body = { packetId, commitMessage: 'retry after terminal cleanup' };
+    const lane = createLane({
+      repoPath: dataDir,
+      branch: 'inline/idempotency-terminal',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    updateLane(lane.id, { outcome: 'discarded', outcomeNote: 'test terminal operation' });
+    h.state.arm();
+
+    const firstPromise = merge.POST(post(body));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(archiveLane(lane.id, 'system')?.status).toBe('archived');
+
+    const retry = await json(await merge.POST(post(body)));
+    expect((retry.result as Record<string, unknown>).inProgress).toBeUndefined();
+    expect((retry.result as Record<string, unknown>).run).toBe(2);
+
+    h.state.resolveNext(undefined);
+    await firstPromise;
+    const replay = await json(await merge.POST(post(body)));
+    expect((replay.result as Record<string, unknown>).run).toBe(2);
+    expect((replay.result as Record<string, unknown>).replayed).toBe(true);
   });
 });
