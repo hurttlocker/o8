@@ -2,6 +2,8 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { continueOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -458,14 +460,8 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   // attach the session itself. We only auto-wrap launches that got a worktree;
   // un-isolated scratch runs still fall through without a lane.
   let laneId: string | null = payload.existingLaneId ?? null;
-  const laneRuntime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi' | null =
-    runtimeId === 'codex' ? 'codex'
-    : runtimeId === 'claude-code' ? 'claude-code'
-    : runtimeId === 'gemini' ? 'gemini'
-    : runtimeId === 'opencode' ? 'opencode'
-    : runtimeId === 'cursor' ? 'cursor'
-    : runtimeId === 'grok' ? 'grok'
-    : runtimeId === 'pi' ? 'pi'
+  const laneRuntime: OrchestratorRuntime | null = ORCHESTRATOR_RUNTIMES[runtimeId as OrchestratorRuntime]
+    ? runtimeId as OrchestratorRuntime
     : null;
   if (!laneId && launchWorktree?.worktree && laneRuntime) {
     try {

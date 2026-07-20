@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
-export type RuntimeHouse = 'codex' | 'claude' | 'gemini' | 'opencode' | 'cursor' | 'grok' | 'pi';
+export type RuntimeHouse = 'codex' | 'claude' | 'gemini' | 'opencode' | 'openhands' | 'goose' | 'qwen' | 'kimi' | 'aider' | 'cursor' | 'grok' | 'pi';
 export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'adapter_unavailable';
 
 export interface RuntimeAuthStatus {
@@ -299,6 +299,111 @@ async function detectPi(): Promise<RuntimeAuthStatus> {
   });
 }
 
+interface PathRuntimeProbe {
+  house: RuntimeHouse;
+  runtime: OrchestratorRuntime;
+  binaryName: string;
+  binaryEnvOverride: string;
+  label: string;
+  authEnvVars: string[];
+  authPaths: string[];
+  fix: string;
+}
+
+async function detectPathRuntime(config: PathRuntimeProbe): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink(config.binaryName)
+    ?? process.env[config.binaryEnvOverride]?.trim()
+    ?? undefined;
+  if (!binaryPath) {
+    return nowStatus(config.house, config.runtime, {
+      installed: false,
+      authenticated: false,
+      detail: `${config.label} CLI is not installed.`,
+      fix: config.fix,
+    });
+  }
+
+  const authenticated = config.authEnvVars.some((name) => Boolean(process.env[name]?.trim()))
+    || (await Promise.all(config.authPaths.map(fileExists))).some(Boolean);
+  return nowStatus(config.house, config.runtime, {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? `${config.label} CLI is installed and has local credential evidence.`
+      : `${config.label} CLI is installed but no local credential evidence was found.`,
+    fix: config.fix,
+    binaryPath,
+  });
+}
+
+function detectOpenHands(): Promise<RuntimeAuthStatus> {
+  return detectPathRuntime({
+    house: 'openhands',
+    runtime: 'openhands',
+    binaryName: 'openhands',
+    binaryEnvOverride: 'O8_OPENHANDS_BIN',
+    label: 'OpenHands',
+    authEnvVars: ['OPENHANDS_API_KEY', 'LLM_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
+    authPaths: [path.join(os.homedir(), '.openhands', 'config.toml')],
+    fix: 'Install OpenHands, then run `openhands login` or configure a model provider.',
+  });
+}
+
+function detectGoose(): Promise<RuntimeAuthStatus> {
+  return detectPathRuntime({
+    house: 'goose',
+    runtime: 'goose',
+    binaryName: 'goose',
+    binaryEnvOverride: 'O8_GOOSE_BIN',
+    label: 'Goose',
+    authEnvVars: ['GOOSE_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY'],
+    authPaths: [path.join(os.homedir(), '.config', 'goose', 'config.yaml')],
+    fix: 'Install Goose, then configure a provider with `goose configure`.',
+  });
+}
+
+function detectQwen(): Promise<RuntimeAuthStatus> {
+  return detectPathRuntime({
+    house: 'qwen',
+    runtime: 'qwen',
+    binaryName: 'qwen',
+    binaryEnvOverride: 'O8_QWEN_BIN',
+    label: 'Qwen Code',
+    authEnvVars: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'OPENAI_API_KEY'],
+    authPaths: [
+      path.join(os.homedir(), '.qwen', 'oauth_creds.json'),
+      path.join(os.homedir(), '.qwen', 'settings.json'),
+    ],
+    fix: 'Install Qwen Code, then run `qwen` once to sign in or configure QWEN_API_KEY.',
+  });
+}
+
+function detectKimi(): Promise<RuntimeAuthStatus> {
+  return detectPathRuntime({
+    house: 'kimi',
+    runtime: 'kimi',
+    binaryName: 'kimi',
+    binaryEnvOverride: 'O8_KIMI_BIN',
+    label: 'Kimi Code',
+    authEnvVars: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
+    authPaths: [path.join(os.homedir(), '.kimi-code', 'config.toml')],
+    fix: 'Install Kimi Code, then run `kimi login` or configure KIMI_API_KEY.',
+  });
+}
+
+function detectAider(): Promise<RuntimeAuthStatus> {
+  return detectPathRuntime({
+    house: 'aider',
+    runtime: 'aider',
+    binaryName: 'aider',
+    binaryEnvOverride: 'O8_AIDER_BIN',
+    label: 'Aider',
+    authEnvVars: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY'],
+    authPaths: [path.join(os.homedir(), '.aider.conf.yml')],
+    fix: 'Install Aider, then configure a model provider API key.',
+  });
+}
+
 function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): MachineAuthProfileSuggestion {
   const codexReady = statuses.codex.installed && statuses.codex.authenticated;
   const claudeReady = statuses.claude.installed && statuses.claude.authenticated;
@@ -317,16 +422,21 @@ export function invalidateRuntimeAuthCache(): void {
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) return cache.snapshot;
-  const [codex, claude, gemini, opencode, cursor, grok, pi] = await Promise.all([
+  const [codex, claude, gemini, opencode, openhands, goose, qwen, kimi, aider, cursor, grok, pi] = await Promise.all([
     detectCodex(),
     detectClaude(),
     detectGemini(),
     detectOpencode(),
+    detectOpenHands(),
+    detectGoose(),
+    detectQwen(),
+    detectKimi(),
+    detectAider(),
     detectCursor(),
     detectGrok(),
     detectPi(),
   ]);
-  const statuses = { codex, claude, gemini, opencode, cursor, grok, pi };
+  const statuses = { codex, claude, gemini, opencode, openhands, goose, qwen, kimi, aider, cursor, grok, pi };
   const snapshot = {
     statuses,
     suggestedSubscriptionProfile: suggestProfile(statuses),
@@ -340,6 +450,11 @@ function houseForRuntime(runtime: OrchestratorRuntime): RuntimeHouse | null {
   if (runtime === 'claude-code') return 'claude';
   if (runtime === 'gemini') return 'gemini';
   if (runtime === 'opencode') return 'opencode';
+  if (runtime === 'openhands') return 'openhands';
+  if (runtime === 'goose') return 'goose';
+  if (runtime === 'qwen') return 'qwen';
+  if (runtime === 'kimi') return 'kimi';
+  if (runtime === 'aider') return 'aider';
   if (runtime === 'cursor') return 'cursor';
   if (runtime === 'grok') return 'grok';
   if (runtime === 'pi') return 'pi';

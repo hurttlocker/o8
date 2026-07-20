@@ -247,13 +247,18 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
     || value === 'claude-code'
     || value === 'gemini'
     || value === 'opencode'
+    || value === 'openhands'
+    || value === 'goose'
+    || value === 'qwen'
+    || value === 'kimi'
+    || value === 'aider'
     || value === 'cursor'
     || value === 'grok'
     || value === 'pi'
   ) {
     return value;
   }
-  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok", "pi"');
+  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode", "openhands", "goose", "qwen", "kimi", "aider", "cursor", "grok", "pi"');
 }
 
 export function parseIssueList(value: unknown) {

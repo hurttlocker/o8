@@ -157,7 +157,7 @@ export const TOOLS: ToolDef[] = [
         task: { type: 'string', description: 'The full task description for the agent. Be specific about files to create/edit, constraints, and success criteria.' },
         runtime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi'],
+          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'],
           description: 'Optional override. When omitted, uses the operator default dispatch runtime.',
         },
       },
