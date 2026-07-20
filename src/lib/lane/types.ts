@@ -207,6 +207,10 @@ export type LaneCommand =
       strategy?: 'ours' | 'theirs' | 'manual';
       /** Reviewed worktree HEAD expected by the operator at merge time */
       expectedHeadSha?: string;
+      /** An authenticated dispatcher explicitly invoked approve_and_merge.
+       * Satisfies only the surface dispatcher-review policy; merge gates and
+       * all other approval postures remain authoritative. */
+      surfaceDispatcherApproved?: boolean;
       actor?: LaneEventActor;
     }
   | {
