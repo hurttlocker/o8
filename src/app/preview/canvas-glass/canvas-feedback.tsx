@@ -38,6 +38,8 @@ export function CanvasFeedbackButton() {
   const [category, setCategory] = useState<ReportCategory>('bug');
   const [message, setMessage] = useState('');
   const [image, setImage] = useState<ReportImage | null>(null);
+  const [includeScreenshot, setIncludeScreenshot] = useState(true);
+  const [screenshotExpanded, setScreenshotExpanded] = useState(false);
   const [state, setState] = useState<SendState>('idle');
   const [error, setError] = useState<string | null>(null);
   const {
@@ -53,6 +55,8 @@ export function CanvasFeedbackButton() {
   const reset = useCallback(() => {
     setMessage('');
     setImage(null);
+    setIncludeScreenshot(true);
+    setScreenshotExpanded(false);
     setState('idle');
     setError(null);
   }, []);
@@ -63,6 +67,8 @@ export function CanvasFeedbackButton() {
   const openWithCapture = useCallback(async () => {
     setState('idle');
     setError(null);
+    setIncludeScreenshot(true);
+    setScreenshotExpanded(false);
     const enabled = await checkDataSharing();
     if (!enabled) {
       setImage(null);
@@ -70,12 +76,14 @@ export function CanvasFeedbackButton() {
       return;
     }
     const shot = await captureAppWindow();
-    if (shot) setImage(shot);
+    setImage(shot);
     setOpen(true);
   }, [checkDataSharing]);
 
   const openWithoutCapture = useCallback(async () => {
     setImage(null);
+    setIncludeScreenshot(true);
+    setScreenshotExpanded(false);
     setOpen(true);
     await checkDataSharing();
   }, [checkDataSharing]);
@@ -95,6 +103,8 @@ export function CanvasFeedbackButton() {
     const result = await fileToReportImage(file);
     if (result.ok) {
       setImage(result.image);
+      setIncludeScreenshot(true);
+      setScreenshotExpanded(false);
       setState((p) => (p === 'sent' || p === 'error' ? 'idle' : p));
       setError(null);
     } else {
@@ -125,17 +135,24 @@ export function CanvasFeedbackButton() {
     if (!await checkDataSharing(false)) return;
     setState('sending');
     setError(null);
-    const result = await submitReport({ category, message: trimmed, route: 'canvas', image });
+    const result = await submitReport({
+      category,
+      message: trimmed,
+      route: 'canvas',
+      image: includeScreenshot ? image : null,
+    });
     if (result.ok) {
       setState('sent');
       setMessage('');
       setImage(null);
+      setIncludeScreenshot(true);
+      setScreenshotExpanded(false);
     } else {
       if (result.code === REPORT_DATA_SHARING_OFF_ERROR) markDataSharingDisabled();
       setState('error');
       setError(result.error);
     }
-  }, [category, checkDataSharing, image, markDataSharingDisabled, message]);
+  }, [category, checkDataSharing, image, includeScreenshot, markDataSharingDisabled, message]);
 
   const canSend = dataSharingEnabled && message.trim().length > 0 && state !== 'sending';
 
@@ -296,19 +313,40 @@ export function CanvasFeedbackButton() {
             />
 
             {image ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 9, background: 'var(--cnv-tint)' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image.dataUrl} alt="attachment" style={{ width: 40, height: 30, objectFit: 'cover', borderRadius: 5, flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {image.name}
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, paddingTop: 7, paddingRight: 7, paddingBottom: 7, paddingLeft: 7, borderRadius: 9, background: 'var(--cnv-tint)' }}>
                 <button
                   type="button"
-                  onClick={() => setImage(null)}
-                  style={{ borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', padding: 4, flexShrink: 0 }}
+                  aria-label="Expand screenshot preview"
+                  onClick={() => setScreenshotExpanded(true)}
+                  style={{ width: '100%', height: 118, padding: 0, borderRadius: 7, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--cnv-edge)', background: 'transparent', cursor: 'zoom-in', overflow: 'hidden' }}
                 >
-                  Remove
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={image.dataUrl} alt="Screenshot to review" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: includeScreenshot ? 1 : 0.48 }} />
                 </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {image.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setImage(null); setScreenshotExpanded(false); setIncludeScreenshot(true); }}
+                    style={{ minHeight: 44, borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 4, flexShrink: 0 }}
+                  >
+                    Remove
+                  </button>
+                </div>
+                <label style={{ minHeight: 44, display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer', fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)' }}>
+                  <input
+                    type="checkbox"
+                    checked={includeScreenshot}
+                    onChange={(event) => setIncludeScreenshot(event.target.checked)}
+                    style={{ width: 18, height: 18, margin: 0, accentColor: ACCENT, flexShrink: 0 }}
+                  />
+                  <span>Include screenshot with report</span>
+                </label>
+                <span style={{ fontSize: 10.5, fontWeight: 300, lineHeight: 1.4, color: 'var(--cnv-ink-muted)' }}>
+                  Check for anything private — keys, tokens, personal info.
+                </span>
               </div>
             ) : null}
 
@@ -321,7 +359,7 @@ export function CanvasFeedbackButton() {
                 onClick={() => { void send(); }}
                 disabled={!canSend}
                 style={{
-                  minHeight: 30,
+                  minHeight: 44,
                   paddingLeft: 16,
                   paddingRight: 16,
                   borderRadius: 8,
@@ -352,6 +390,21 @@ export function CanvasFeedbackButton() {
               </>
             )}
           </div>
+          {screenshotExpanded && image ? (
+            <button
+              type="button"
+              aria-label="Close full-size screenshot preview"
+              onClick={() => setScreenshotExpanded(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: 47, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, background: 'var(--t-overlay-scrim)', cursor: 'zoom-out', paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24 }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={image.dataUrl}
+                alt="Full-size screenshot review"
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 10 }}
+              />
+            </button>
+          ) : null}
         </>
       ), document.body) : null}
     </>

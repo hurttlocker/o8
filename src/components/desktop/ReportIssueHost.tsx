@@ -34,6 +34,8 @@ export function ReportIssueHost() {
   const [category, setCategory] = useState<ReportCategory>('bug');
   const [message, setMessage] = useState('');
   const [image, setImage] = useState<ReportImage | null>(null);
+  const [includeScreenshot, setIncludeScreenshot] = useState(true);
+  const [screenshotExpanded, setScreenshotExpanded] = useState(false);
   const [state, setState] = useState<SendState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
@@ -51,6 +53,8 @@ export function ReportIssueHost() {
   const reset = useCallback(() => {
     setMessage('');
     setImage(null);
+    setIncludeScreenshot(true);
+    setScreenshotExpanded(false);
     setState('idle');
     setError(null);
     setReportId(null);
@@ -62,6 +66,8 @@ export function ReportIssueHost() {
   const openWithCapture = useCallback(async () => {
     setState('idle');
     setError(null);
+    setIncludeScreenshot(true);
+    setScreenshotExpanded(false);
     const enabled = await checkDataSharing();
     if (!enabled) {
       setImage(null);
@@ -104,6 +110,8 @@ export function ReportIssueHost() {
     const result = await fileToReportImage(file);
     if (result.ok) {
       setImage(result.image);
+      setIncludeScreenshot(true);
+      setScreenshotExpanded(false);
       setState((previous) => (previous === 'sent' || previous === 'error' ? 'idle' : previous));
       setError(null);
     } else {
@@ -135,18 +143,25 @@ export function ReportIssueHost() {
     setState('sending');
     setError(null);
     const route = typeof window !== 'undefined' ? `${window.location.pathname}${window.location.hash}` : 'dashboard';
-    const result = await submitReport({ category, message: trimmed, route, image });
+    const result = await submitReport({
+      category,
+      message: trimmed,
+      route,
+      image: includeScreenshot ? image : null,
+    });
     if (result.ok) {
       setState('sent');
       setReportId(result.reportId);
       setMessage('');
       setImage(null);
+      setIncludeScreenshot(true);
+      setScreenshotExpanded(false);
     } else {
       if (result.code === REPORT_DATA_SHARING_OFF_ERROR) markDataSharingDisabled();
       setState('error');
       setError(result.error);
     }
-  }, [category, checkDataSharing, image, markDataSharingDisabled, message]);
+  }, [category, checkDataSharing, image, includeScreenshot, markDataSharingDisabled, message]);
 
   const canSend = dataSharingEnabled && message.trim().length > 0 && state !== 'sending';
 
@@ -203,7 +218,7 @@ export function ReportIssueHost() {
               type="button"
               aria-label="Close"
               onClick={() => setOpen(false)}
-              style={{ borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 2 }}
+              style={{ width: 44, height: 44, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}
             >
               ✕
             </button>
@@ -258,7 +273,7 @@ export function ReportIssueHost() {
               aria-pressed={category === value}
               onClick={() => { setCategory(value); if (state === 'sent') setState('idle'); }}
               style={{
-                minHeight: 30,
+                minHeight: 44,
                 borderRadius: 7,
                 borderWidth: 0,
                 background: category === value ? 'var(--t-accent-soft)' : 'transparent',
@@ -306,21 +321,45 @@ export function ReportIssueHost() {
           }}
         />
 
-        {/* Screenshot — preview when present, drop hint when not. */}
+        {/* Screenshot review — visible preview + explicit upload consent. */}
         {image ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderRadius: 10, background: 'var(--t-input-bg)' }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={image.dataUrl} alt="attachment" style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 6, flexShrink: 0, border: '1px solid var(--t-divider)' }} />
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 300, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {image.name}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10, paddingRight: 10, paddingBottom: 10, paddingLeft: 10, borderRadius: 10, background: 'var(--t-input-bg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                aria-label="Expand screenshot preview"
+                onClick={() => setScreenshotExpanded(true)}
+                style={{ width: 132, height: 84, padding: 0, borderRadius: 8, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', background: 'transparent', cursor: 'zoom-in', overflow: 'hidden', flexShrink: 0 }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={image.dataUrl} alt="Screenshot to review" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: includeScreenshot ? 1 : 0.48 }} />
+              </button>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                <span style={{ width: '100%', fontSize: 12, fontWeight: 300, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {image.name}
+                </span>
+                <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--t-text-faint)' }}>Click preview to inspect full-size</span>
+                <button
+                  type="button"
+                  onClick={() => { setImage(null); setScreenshotExpanded(false); setIncludeScreenshot(true); }}
+                  style={{ minHeight: 44, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, letterSpacing: '0.06em', textTransform: 'uppercase', paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 4 }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+            <label style={{ minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 12.5, fontWeight: 300, color: 'var(--t-text)' }}>
+              <input
+                type="checkbox"
+                checked={includeScreenshot}
+                onChange={(event) => setIncludeScreenshot(event.target.checked)}
+                style={{ width: 18, height: 18, margin: 0, accentColor: 'var(--t-accent)', flexShrink: 0 }}
+              />
+              <span>Include screenshot with report</span>
+            </label>
+            <span style={{ fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>
+              Check for anything private — keys, tokens, personal info.
             </span>
-            <button
-              type="button"
-              onClick={() => setImage(null)}
-              style={{ borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, letterSpacing: '0.06em', textTransform: 'uppercase', padding: 4, flexShrink: 0 }}
-            >
-              Remove
-            </button>
           </div>
         ) : (
           <div style={{ padding: 10, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: 'var(--t-divider)', background: 'transparent', textAlign: 'center', fontSize: 11.5, fontWeight: 300, color: 'var(--t-text-muted)' }}>
@@ -340,7 +379,7 @@ export function ReportIssueHost() {
             <button
               type="button"
               onClick={reset}
-              style={{ borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, padding: '8px 4px' }}
+              style={{ minHeight: 44, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 4 }}
             >
               Send another
             </button>
@@ -350,7 +389,7 @@ export function ReportIssueHost() {
               onClick={() => { void send(); }}
               disabled={!canSend}
               style={{
-                minHeight: 34,
+                minHeight: 44,
                 paddingLeft: 20,
                 paddingRight: 20,
                 borderRadius: 9,
@@ -373,6 +412,21 @@ export function ReportIssueHost() {
           </>
         )}
       </div>
+      {screenshotExpanded && image ? (
+        <button
+          type="button"
+          aria-label="Close full-size screenshot preview"
+          onClick={(event) => { event.stopPropagation(); setScreenshotExpanded(false); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483601, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderWidth: 0, background: 'var(--t-overlay-scrim)', cursor: 'zoom-out', paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24 }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={image.dataUrl}
+            alt="Full-size screenshot review"
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 10 }}
+          />
+        </button>
+      ) : null}
     </div>
   ), document.body);
 }
