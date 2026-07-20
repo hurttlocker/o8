@@ -69,37 +69,15 @@ says so.";
 
 /// Resolve the `claude` binary — mirrors `one-shot-repl.ts::defaultClaudeBin`.
 pub(crate) fn claude_bin() -> String {
-    if let Ok(b) = std::env::var("O8_CLAUDE_CODE_BIN") {
-        if !b.is_empty() {
-            return b;
-        }
+    if let Some(binary) = crate::cli_locate::resolve_binary(
+        "claude",
+        &["O8_CLAUDE_CODE_BIN", "CLAUDE_BIN"],
+    ) {
+        return binary;
     }
-    if let Ok(b) = std::env::var("CLAUDE_BIN") {
-        if !b.is_empty() {
-            return b;
-        }
-    }
-    // Scan the well-known install dirs instead of assuming the native
-    // installer's ~/.local/bin — that hardcoded fallback was iMac-only and
-    // Symon died "spawn failed" on every npm/brew install (#1551 walkdown,
-    // round 5, 2026-07-12). ~/.o8/bin first: o8 symlinks detected CLIs there
-    // itself, so it is the freshest pointer when present. Mirrors the TS
-    // scanForBinary order; last resort keeps the legacy default so the error
-    // message still names a concrete path.
+    // Keep the legacy concrete fallback for Smart Compose and background
+    // Claude tasks, which still report their own provider-specific error.
     let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        format!("{home}/.o8/bin/claude"),
-        format!("{home}/.local/bin/claude"),
-        format!("{home}/.npm-global/bin/claude"),
-        "/usr/local/bin/claude".to_string(),
-        "/opt/homebrew/bin/claude".to_string(),
-        format!("{home}/.claude/local/claude"),
-    ];
-    for c in candidates {
-        if std::path::Path::new(&c).exists() {
-            return c;
-        }
-    }
     format!("{home}/.local/bin/claude")
 }
 
@@ -471,6 +449,15 @@ fn say_is_question_or_refusal(say: &str) -> bool {
 /// `gemini::run_loop` / `openrouter::run_loop`.
 pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopResult, String> {
     let bin = claude_bin();
+    run_loop_with_binary(&bin, model, intent, ctx).await
+}
+
+pub async fn run_loop_with_binary(
+    bin: &str,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+) -> Result<LoopResult, String> {
     let mcp_cfg = ensure_empty_mcp_config()?;
 
     // ONE live session for the whole task (#1252 speed pass): turn 1 sends the
@@ -478,24 +465,52 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     // the tool result — the model keeps its context, so no per-turn re-boot and
     // no growing-transcript re-prefill. The pool hands back a warm proc that was
     // pre-booted on the Option keydown, so even turn 1 skips the CLI bootstrap.
-    let mut session = super::claude_pool::acquire(&bin, model, &mcp_cfg)
+    let session = super::claude_pool::acquire(bin, model, &mcp_cfg)
         .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
 
+    run_text_planner_loop(session, model, intent, ctx, "claude").await
+}
+
+pub(crate) trait TextPlannerSession: Send + 'static {
+    fn send_planner_turn(
+        &mut self,
+        prompt: &str,
+        image_b64: Option<&str>,
+    ) -> Result<String, String>;
+}
+
+impl TextPlannerSession for ClaudeSession {
+    fn send_planner_turn(
+        &mut self,
+        prompt: &str,
+        image_b64: Option<&str>,
+    ) -> Result<String, String> {
+        ClaudeSession::send_turn(self, prompt, image_b64)
+    }
+}
+
+pub(crate) async fn run_text_planner_loop<S: TextPlannerSession>(
+    mut session: S,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    provider: &'static str,
+) -> Result<LoopResult, String> {
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut brain_sources: Vec<Value> = Vec::new();
     let mut result_text = String::new();
     // Spoken-filler latch — a quick "one sec" so the slow tool/turn isn't dead air.
     let mut spoke_filler = false;
-    // Opus is slower than Gemini, so the all-Claude FRONT voice path opens with
-    // an immediate filler (the live mic shouldn't sit silent while Opus thinks).
+    // Subscription planner turns can take a beat, so the front voice path opens
+    // with an immediate filler rather than leaving the live mic silent.
     // Background escalation tasks (`claude-task-*`) already had a front ack, so
     // they stay quiet here. #1252.
     if !ctx.task_id.starts_with("claude-task") {
         super::speak_filler_now();
         spoke_filler = true;
     }
-    // Turn 1 carries the full planner prompt; the screenshot rides it ONCE (Opus
-    // sees it then keeps it in context). Each follow-up replaces `next_message`
+    // Turn 1 carries the full planner prompt; the screenshot rides it once and
+    // remains in session context. Each follow-up replaces `next_message`
     // with just the tool-result block built at the loop foot.
     let mut next_message = build_first_prompt(intent, ctx);
     let mut next_image: Option<String> = ctx.screen.as_ref().map(|s| s.png_base64.clone());
@@ -523,13 +538,13 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         let joined = tokio::time::timeout(
             Duration::from_secs(TURN_TIMEOUT_SECS),
             tokio::task::spawn_blocking(move || {
-                let r = sess.send_turn(&msg, img.as_deref());
+                let r = sess.send_planner_turn(&msg, img.as_deref());
                 (sess, r)
             }),
         )
         .await
-        .map_err(|_| "claude turn timed out".to_string())?
-        .map_err(|e| format!("claude turn join error: {e}"))?;
+        .map_err(|_| format!("{provider} turn timed out"))?
+        .map_err(|e| format!("{provider} turn join error: {e}"))?;
         session = joined.0;
         let raw = joined.1?;
 

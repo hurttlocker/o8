@@ -1,12 +1,8 @@
 //! Symon voice-agent model routing.
 //!
-//! The tool-calling loop's model is config-driven so the brain is a one-flip
-//! change: edit `~/.o8/agent_models.json` and set `mac_native_action`. The
-//! default ships on `claude-sonnet-5` for the low-context Control+Fn lane, and
-//! it sees screenshots directly via the CLI stream-json image block (#1252),
-//! sub-billed on the user's Claude subscription. Set `gemini-3-flash-preview`
-//! for the fast-path. A model id containing `/`
-//! routes to OpenRouter — the one-flip A/B.
+//! Normal voice turns select an installed subscription CLI through
+//! `planner_route`. This legacy model config remains for explicit evaluation,
+//! background tasks, escalation policy, and screen-extraction fallbacks.
 
 use serde::{Deserialize, Serialize};
 use crate::models::{
@@ -18,8 +14,8 @@ use crate::models::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentModelConfig {
-    /// The tool-calling loop brain. `/`-in-id → OpenRouter, `claude…` → Claude
-    /// text-planner brain, else Gemini.
+    /// Explicit/evaluation tool-loop model. `/`-in-id → OpenRouter,
+    /// `claude…` → Claude text planner, else Gemini.
     pub mac_native_action: String,
     /// Two-tier escalation policy: "off" (front brain handles everything inline,
     /// the `escalate` handoff is withheld), "auto" (escalate heavy multi-step
