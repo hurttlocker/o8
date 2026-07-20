@@ -1,20 +1,60 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-product-telemetry-toggle-'));
-process.env.CORTEX_IDE_DATA_DIR = dataDir;
-process.env.O8_DATA_DIR = dataDir;
-process.env.O8_PROXY_URL = 'https://telemetry.example.test';
+const originalEnv = {
+  HOME: process.env.HOME,
+  CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
+  O8_DATA_DIR: process.env.O8_DATA_DIR,
+  O8_PROXY_URL: process.env.O8_PROXY_URL,
+};
 
-mkdirSync(dataDir, { recursive: true });
-writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
+let home = '';
+let dataDir = '';
+let operatorDefaultsRoute: typeof import('@/app/api/panel/operator-defaults/route') | undefined;
+let telemetryRoute: typeof import('@/app/api/panel/telemetry/route');
+let operatorDefaults: typeof import('@/lib/operator/defaults') | undefined;
 
-const operatorDefaultsRoute = await import('@/app/api/panel/operator-defaults/route');
-const telemetryRoute = await import('@/app/api/panel/telemetry/route');
-const { resolveCrashReportsEnabledSync, resolveProductTelemetryEnabledSync } = await import('@/lib/operator/defaults');
+function restoreEnv() {
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
+async function resetProductTelemetry() {
+  if (operatorDefaultsRoute) {
+    await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: false }));
+  }
+}
+
+function readProductTelemetryInColdProcess(): string {
+  return execFileSync(process.execPath, [
+    '--import=./scripts/register-server-only-stub.mjs',
+    '--import=tsx',
+    '--input-type=module',
+    '--eval',
+    [
+      "const imported = await import('./src/lib/operator/defaults.ts');",
+      'const defaults = imported.default ?? imported;',
+      'process.stdout.write(String(defaults.resolveProductTelemetryEnabledSync()));',
+    ].join(' '),
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: home,
+      CORTEX_IDE_DATA_DIR: dataDir,
+      O8_DATA_DIR: dataDir,
+      O8_PROXY_URL: 'https://telemetry.example.test',
+    },
+    timeout: 5_000,
+  }).trim();
+}
 
 function defaultsRequest(body: unknown): Request {
   return new Request('http://127.0.0.1/api/panel/operator-defaults', {
@@ -32,37 +72,66 @@ function telemetryRequest(body: unknown): Request {
   });
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
+beforeAll(async () => {
+  home = mkdtempSync(join(os.tmpdir(), 'o8-product-telemetry-toggle-'));
+  dataDir = join(home, '.o8');
+  mkdirSync(dataDir, { recursive: true });
+  process.env.HOME = home;
+  process.env.CORTEX_IDE_DATA_DIR = dataDir;
+  process.env.O8_DATA_DIR = dataDir;
+  process.env.O8_PROXY_URL = 'https://telemetry.example.test';
+  writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
+
+  operatorDefaultsRoute = await import('@/app/api/panel/operator-defaults/route');
+  telemetryRoute = await import('@/app/api/panel/telemetry/route');
+  operatorDefaults = await import('@/lib/operator/defaults');
+});
+
+afterEach(async () => {
+  try {
+    await resetProductTelemetry();
+  } finally {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  }
+});
+
+afterAll(async () => {
+  try {
+    await resetProductTelemetry();
+  } finally {
+    restoreEnv();
+    if (home) rmSync(home, { recursive: true, force: true });
+  }
 });
 
 describe.sequential('product telemetry persisted consent — real routes', () => {
   it('defaults off for missing or corrupt state and round-trips one server-readable choice', async () => {
     rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
-    expect(resolveProductTelemetryEnabledSync()).toBe(false);
+    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(false);
 
     writeFileSync(join(dataDir, 'operator-defaults.json'), '{corrupt');
-    expect(resolveProductTelemetryEnabledSync()).toBe(false);
+    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(false);
 
-    const enabledResponse = await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: true }));
+    const enabledResponse = await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: true }));
     const enabledBody = await enabledResponse.json();
     expect(enabledResponse.status).toBe(200);
     expect(enabledBody.values.productTelemetryEnabled).toBe(true);
     expect(enabledBody.sources.productTelemetryEnabled).toBe('file');
-    expect(resolveProductTelemetryEnabledSync()).toBe(true);
+    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(true);
 
     const persisted = JSON.parse(readFileSync(join(dataDir, 'operator-defaults.json'), 'utf8')) as Record<string, unknown>;
     expect(persisted.productTelemetryEnabled).toBe(true);
-    expect(resolveCrashReportsEnabledSync()).toBe(false);
+    expect(readProductTelemetryInColdProcess()).toBe('true');
+    expect(operatorDefaults!.resolveCrashReportsEnabledSync()).toBe(false);
 
-    const disabledResponse = await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: false }));
+    const disabledResponse = await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: false }));
     expect((await disabledResponse.json()).values.productTelemetryEnabled).toBe(false);
-    expect(resolveProductTelemetryEnabledSync()).toBe(false);
+    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(false);
   });
 
   it('blocks the panel route while off and emits only the allowlisted payload while on', async () => {
-    await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: false }));
+    await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: false }));
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       void input;
       void init;
@@ -74,7 +143,7 @@ describe.sequential('product telemetry persisted consent — real routes', () =>
     expect(await offResponse.json()).toEqual({ ok: true, emitted: false });
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await operatorDefaultsRoute.POST(defaultsRequest({ productTelemetryEnabled: true }));
+    await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: true }));
     const onResponse = await telemetryRoute.POST(telemetryRequest({
       event: 'repo.added',
       props: {
