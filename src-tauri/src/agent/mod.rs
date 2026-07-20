@@ -14,12 +14,14 @@
 
 pub mod claude;
 pub mod claude_pool;
+pub mod codex;
 pub mod edit_ctx;
 pub mod eval;
 pub mod event_kit;
 pub mod gemini;
 pub mod o8_http;
 pub mod openrouter;
+pub mod planner_route;
 pub mod realtime_bridge;
 pub mod router;
 pub mod safety;
@@ -1023,6 +1025,31 @@ async fn run_agent_inner(
     );
     crate::sound::play_sound("Pop");
 
+    // Normal voice turns choose from the same native CLI inventory used at
+    // bootstrap. Resolve before screen/edit capture so a machine with no agent
+    // CLI gets one explicit dock state instead of paying capture latency and
+    // falling through to a provider-specific "spawn failed".
+    let planner_selection = if model_override.is_none() {
+        match planner_route::resolve() {
+            planner_route::PlannerRouting::Selected(selection) => Some(selection),
+            planner_route::PlannerRouting::Unavailable { message } => {
+                store::finish_task(&task_id, "failed", message, "", "[]");
+                emit_agent_event(
+                    &app,
+                    json!({
+                        "taskId": task_id,
+                        "kind": "status",
+                        "status": "failed",
+                        "result": message,
+                    }),
+                );
+                return Err(message.to_string());
+            }
+        }
+    } else {
+        None
+    };
+
     // Register the interrupt flag the INSTANT the task is live — before the
     // (~0.5s) screen/edit capture below, not after. Otherwise an interrupt
     // fired inside the capture window raises no flag for this task (it isn't
@@ -1118,11 +1145,14 @@ async fn run_agent_inner(
         return Ok(String::new());
     }
 
-    // Route by model id: `claude…` → Claude text-planner brain (subscription
-    // CLI), `/` → OpenRouter (e.g. openai/gpt-4o-mini), else direct Gemini
-    // (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
-    // `model_override` (Some for background Claude tasks) wins over the config.
-    let model = model_override.unwrap_or_else(|| router::load_config().mac_native_action);
+    // Normal voice turns use the installed subscription CLI selected above.
+    // Explicit overrides remain for the background-Claude and evaluation paths.
+    let model = planner_selection
+        .as_ref()
+        .map(|selection| selection.model.to_string())
+        .unwrap_or_else(|| {
+            model_override.unwrap_or_else(|| router::load_config().mac_native_action)
+        });
     if ctx.screen.is_some() && !model_can_see_images(&model) {
         let note = if spatial_active {
             "\n\n(NOTE: the operator marked a screen region, but this model cannot \
@@ -1135,7 +1165,29 @@ async fn run_agent_inner(
         };
         llm_prompt.push_str(note);
     }
-    let loop_result = if model.starts_with("claude") {
+    let loop_result = if let Some(selection) = planner_selection {
+        match selection.provider {
+            planner_route::PlannerProvider::Claude => {
+                claude::run_loop_with_binary(
+                    &selection.binary,
+                    selection.model,
+                    &llm_prompt,
+                    &ctx,
+                )
+                .await
+            }
+            planner_route::PlannerProvider::Codex => {
+                codex::run_loop(
+                    &selection.binary,
+                    selection.model,
+                    selection.effort,
+                    &llm_prompt,
+                    &ctx,
+                )
+                .await
+            }
+        }
+    } else if model.starts_with("claude") {
         claude::run_loop(&model, &llm_prompt, &ctx).await
     } else if model.contains('/') {
         openrouter::run_loop(&model, &llm_prompt, &ctx).await

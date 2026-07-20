@@ -104,18 +104,21 @@ pub fn acquire(bin: &str, model: &str, mcp_cfg: &str) -> Option<ClaudeSession> {
     session
 }
 
-/// Keydown convenience: resolve the agent's bin/model/mcp and warm a session.
-/// Only warms the CLAUDE brain — when the configured front brain is Gemini or an
-/// OpenRouter id, no `claude` proc is used, so warming would just leak one.
+/// Keydown convenience: resolve the normal voice planner and warm it when the
+/// shared CLI inventory selects Claude. Codex starts on demand because its
+/// current subscription CLI protocol has no equivalent idle REPL to prewarm.
 /// Called from the Right-Option down edge (`fn_hotkey::begin_agent_dictation`).
 pub fn prewarm_agent() {
-    let model = super::router::load_config().mac_native_action;
-    if model.contains('/') || !model.starts_with("claude") {
+    let super::planner_route::PlannerRouting::Selected(selection) =
+        super::planner_route::resolve()
+    else {
+        return;
+    };
+    if selection.provider != super::planner_route::PlannerProvider::Claude {
         return;
     }
-    let bin = super::claude::claude_bin();
     match super::claude::ensure_empty_mcp_config() {
-        Ok(mcp) => prewarm(&bin, &model, &mcp),
+        Ok(mcp) => prewarm(&selection.binary, selection.model, &mcp),
         Err(e) => log::warn!("[symon-agent] prewarm_agent: mcp config failed: {e}"),
     }
 }
