@@ -1,0 +1,39 @@
+import type { OrchestratorPacketRecovery } from '@/lib/orchestrator/types';
+import { appendEvent, getLane, updateLane } from './registry';
+import { RECOVERABLE_WORK_EVENT, recoverableWorkMessage } from './recovery-info';
+import type { Lane, LaneEventActor } from './types';
+import { preserveLaneWorktreeHead } from './worktree-preservation';
+
+export async function preserveAndRecordLaneRecovery(
+  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
+  reason: string,
+  options: { actor?: LaneEventActor; reviewed?: boolean } = {},
+): Promise<OrchestratorPacketRecovery | null> {
+  const actor = options.actor ?? 'system';
+  const preservation = await preserveLaneWorktreeHead(lane);
+  if (!preservation.preserved || !preservation.branchName) return null;
+  const recovery: OrchestratorPacketRecovery = {
+    outcome: 'archived_recoverable',
+    preservedRef: preservation.branchName,
+    preservedHeadSha: preservation.headSha ?? null,
+    message: recoverableWorkMessage(preservation.branchName, preservation.headSha ?? null, options.reviewed),
+    recommendedAction: 'retry_packet',
+  };
+  appendEvent(lane.id, 'update', actor, {
+    event: RECOVERABLE_WORK_EVENT,
+    reason,
+    preservedRef: recovery.preservedRef,
+    preservedHeadSha: recovery.preservedHeadSha,
+    reviewed: options.reviewed === true,
+    recommendedAction: recovery.recommendedAction,
+  });
+
+  const current = getLane(lane.id);
+  if (current?.status === 'archived' && (!current.outcome || current.outcome === 'no_changes')) {
+    updateLane(lane.id, {
+      outcome: recovery.outcome,
+      outcomeNote: recovery.message,
+    }, actor);
+  }
+  return recovery;
+}

@@ -52,6 +52,14 @@ export interface OrchestratorReleaseStatePayload {
   source?: string | null;
 }
 
+export interface OrchestratorPacketRecovery {
+  outcome: 'archived_recoverable';
+  preservedRef: string;
+  preservedHeadSha: string | null;
+  message: string;
+  recommendedAction: 'retry_packet';
+}
+
 export interface OrchestratorWorkspaceTarget {
   id: string;
   label: string;
@@ -203,6 +211,9 @@ export interface OrchestratorPacket {
    */
   operatorStopped?: boolean;
   blockedReason?: string | null;
+  /** Recoverable reviewed work banked before a merge-failure escalation or
+   * terminal cleanup. This remains visible even when the lane is archived. */
+  recovery?: OrchestratorPacketRecovery | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
   archivedAt?: string | null;

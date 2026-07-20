@@ -16,6 +16,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import { findLatestLaneByPacket, findLaneBySession, getLaneEvents } from '@/lib/lane/registry';
+import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import type { Lane } from '@/lib/lane/types';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import {
@@ -171,6 +172,8 @@ export async function GET(request: NextRequest) {
       ?? toDurableOrchestratorReview(packetId, lane)
       ?? toLaneEventOrchestratorReview(lane);
     const mergeGate = toMergeGate(mergePreview, lane?.lastEventAt ?? packet.lastEventAt ?? null);
+    const recovery = packet.recovery
+      ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
 
     const { state, stateChangedAt } = derivePacketReviewState({
       packet,
@@ -192,6 +195,7 @@ export async function GET(request: NextRequest) {
       title: packet.title ?? lane?.label ?? null,
       outcome: lane?.outcome ?? null,
       outcomeNote: lane?.outcomeNote ?? null,
+      recovery,
     }, { headers: JSON_HEADERS });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to read review state.';

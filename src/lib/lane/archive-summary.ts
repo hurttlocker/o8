@@ -1,4 +1,5 @@
 import type { Lane, LaneEvent } from './types';
+import { recoveryInfoFromLaneEvents } from './recovery-info';
 
 export interface LaneArchiveSummary {
   source: 'zombie_reaper' | 'user' | 'orchestrator' | 'system';
@@ -6,7 +7,8 @@ export interface LaneArchiveSummary {
   preservedBranch?: string | null;
   /** Durable lane outcome, when stamped — lets banners label the recorded
    *  ending instead of falling back to a generic Archived. */
-  outcome?: 'merged' | 'discarded' | 'closed_unmerged' | 'no_changes' | 'pr_opened' | 'asked' | null;
+  outcome?: 'merged' | 'discarded' | 'closed_unmerged' | 'no_changes' | 'pr_opened' | 'asked' | 'archived_recoverable' | null;
+  preservedHeadSha?: string | null;
 }
 
 function stringField(value: unknown): string | null {
@@ -49,6 +51,16 @@ export function summarizeLaneArchive(
   if (lane.outcome === 'asked') {
     return { source: 'system', outcome: 'asked', message: lane.outcomeNote ?? 'Agent ended with an unanswered question.' };
   }
+  if (lane.outcome === 'archived_recoverable') {
+    const recovery = recoveryInfoFromLaneEvents(events);
+    return {
+      source: 'system',
+      outcome: 'archived_recoverable',
+      preservedBranch: recovery?.preservedRef ?? null,
+      preservedHeadSha: recovery?.preservedHeadSha ?? null,
+      message: recovery?.message ?? lane.outcomeNote ?? 'Archived work remains recoverable.',
+    };
+  }
 
   const zombie = latestEvent(events, (event) => event.verb === 'zombie_reap');
   if (zombie) {
@@ -56,6 +68,7 @@ export function summarizeLaneArchive(
     return {
       source: 'zombie_reaper',
       preservedBranch,
+      preservedHeadSha: stringField(zombie.payload.preservedHead),
       message: preservedBranch
         ? `Archived by the zombie reaper after the session went silent - work preserved on ${preservedBranch}.`
         : 'Archived by the zombie reaper after the session went silent.',

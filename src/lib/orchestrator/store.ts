@@ -2,6 +2,7 @@ import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
+import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import {
   normalizeRequestedRuntime,
@@ -23,7 +24,6 @@ import type {
   OrchestratorStateApiResponse,
   WorkerRouting,
 } from '@/lib/orchestrator/types';
-
 const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
 /** Deserializer — validates and coerces an unknown value to OrchestratorRuntime. */
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
@@ -45,7 +45,6 @@ const ORCHESTRATOR_MODEL_STORAGE_PREFIX = 'o8:orchestrator:model:';
 const ORCHESTRATOR_PRELUDE_STORAGE_PREFIX = 'o8:orchestrator:resume-prelude:';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
 const MAX_RECOVERY_ATTEMPTS = 2;
-
 // #1469 — human sentences for the lane-event labels that park a lane
 // awaiting_input. The real failure reason must reach the packet card, not
 // just next-server.log.
@@ -399,6 +398,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // it here and a rerun/re-read would silently disarm the huddle.
     huddle: packet.huddle === true ? true : undefined,
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
+    recovery: normalizePacketRecovery(packet.recovery),
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,
     archivedAt: typeof packet.archivedAt === 'string' ? packet.archivedAt : null,
@@ -934,6 +934,7 @@ export interface DomainLaneSummary {
   status: string;
   sessionKey: string | null;
   lastEventLabel: string | null;
+  recovery?: OrchestratorPacket['recovery'];
   // Carried through for the footer merge beacon (parked-lane popover rows +
   // click-to-repoint). Optional — older callers don't set them.
   branch?: string;
@@ -961,13 +962,11 @@ export function reconcileOrchestratorMissionState(
   const laneBySession = new Map(inputs.laneSnapshots.flatMap((snapshot) => snapshot.sessionKey ? [[snapshot.sessionKey, snapshot] as const] : []));
   const laneByPacketId = new Map(inputs.laneSnapshots.flatMap((snapshot) => snapshot.packetId ? [[snapshot.packetId, snapshot] as const] : []));
   const runtimeTruthBySession = new Map(inputs.runtimeTruth.map((truth) => [truth.sessionKey, truth] as const));
-
   // ── Lane domain model (passed from server-side caller) ──
-  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string; lastEventLabel: string | null; mergeMode?: LaneMergeMode; mergeModeNote?: string | null }> | null =
+  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string; lastEventLabel: string | null; recovery?: OrchestratorPacket['recovery']; mergeMode?: LaneMergeMode; mergeModeNote?: string | null }> | null =
     inputs.domainLanes && inputs.domainLanes.length > 0
-      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId, lastEventLabel: dl.lastEventLabel, mergeMode: dl.mergeMode, mergeModeNote: dl.mergeModeNote }]))
+      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId, lastEventLabel: dl.lastEventLabel, recovery: dl.recovery, mergeMode: dl.mergeMode, mergeModeNote: dl.mergeModeNote }]))
       : null;
-
   const reconciledPackets = packets.map((packet) => {
     const dependency = packetReleaseBlockedBy(packet, packets);
     const laneMatch = packet.lane
@@ -981,6 +980,7 @@ export function reconcileOrchestratorMissionState(
     const laneId = domainLane?.laneId ?? packet.lane?.laneId ?? null;
     const next: OrchestratorPacket = {
       ...packet,
+      recovery: domainLane?.recovery ?? packet.recovery ?? null,
       lane: laneMatch
         ? {
             tileId: laneMatch.tileId,
@@ -1072,7 +1072,7 @@ export function reconcileOrchestratorMissionState(
           ?? 'Awaiting operator input';
         return next;
       }
-      if (ds === 'awaiting_orchestrator') { next.status = 'blocked'; next.blockedReason = domainLane.lastEventLabel ?? 'Awaiting orchestrator'; return next; }
+      if (ds === 'awaiting_orchestrator') { next.status = 'blocked'; next.blockedReason = next.recovery?.message ?? domainLane.lastEventLabel ?? 'Awaiting orchestrator'; return next; }
       if (ds === 'paused' && domainLane.sessionKey) { next.status = 'idle'; return next; }
       if (ds === 'paused' && !domainLane.sessionKey) {
         if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {
