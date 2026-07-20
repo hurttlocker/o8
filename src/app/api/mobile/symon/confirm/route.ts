@@ -19,7 +19,7 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-export function buildConfirmEval(input: {
+function buildConfirmEval(input: {
   sessionId: string;
   callId: string;
   confirmationId: string;

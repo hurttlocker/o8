@@ -19,7 +19,7 @@ vi.mock('@/lib/mobile/symon-agent-registry', async () => {
   return { ...actual, loadSymonScopeGrant: h.loadSymonScopeGrant };
 });
 
-const { POST, buildToolEval } = await import('./route');
+const { POST } = await import('./route');
 
 function request(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/mobile/symon/tool', {
@@ -46,9 +46,18 @@ beforeEach(() => {
 });
 
 describe('POST /api/mobile/symon/tool', () => {
-  it('passes exact correlation to invokeTool and keys its persistent slot by session + call', () => {
-    const code = buildToolEval('session-1', 'call-1', 'o8_dispatch', { repo: '/repo' });
-    expect(code).toContain('A.invokeTool("o8_dispatch", {"repo":"/repo"}, { sessionId, callId })');
+  it('passes exact correlation to invokeTool and keys its persistent slot by session + call', async () => {
+    h.evalJs.mockResolvedValue({
+      result: JSON.stringify({ state: 'done', ok: true, result: { accepted: true } }),
+    });
+    await POST(request({
+      sessionId: 'session-1',
+      callId: 'call-1',
+      tool: 'o8_dispatch',
+      args: { task: 'Fix it' },
+    }));
+    const code = h.evalJs.mock.calls[0]?.[0] ?? '';
+    expect(code).toContain('A.invokeTool("o8_dispatch", {"task":"Fix it","repoId":"repo-1","repoPath":"/repo","repo":"/repo"}, { sessionId, callId })');
     expect(code).toContain('JSON.stringify([sessionId, callId])');
     expect(code).toContain('c.sessionId === sessionId && c.callId === callId');
   });
