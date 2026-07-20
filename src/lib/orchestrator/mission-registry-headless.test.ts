@@ -169,7 +169,7 @@ describe('headless mission registry dispatch', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
   }, 20_000);
 
-  it('retry_packet mutates a non-current registry packet through the real MCP handler', async () => {
+  it('retry_packet supersedes the durable review while resetting a non-current registry packet', async () => {
     const repoPath = createTempRepo();
     stubMissionApiFetch();
     const first = await createInlineMission('registry mcp retry A', repoPath);
@@ -177,6 +177,12 @@ describe('headless mission registry dispatch', () => {
 
     const packetId = first.packets[0]?.id;
     expect(packetId).toBeTruthy();
+    const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+    recordOrchestratorReview(packetId!, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf8' }).trim(),
+    });
     const { handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
     const retryResult = parseJsonResult<{ reset?: boolean; referenceLabel?: string }>(await handleRetryPacket({
       packetId: packetId!,
@@ -193,6 +199,12 @@ describe('headless mission registry dispatch', () => {
     expect(packet?.status).toBe('draft');
     expect(packet?.queueState).toBe('held');
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+    expect(listApprovalsForContext({ packetId }).find((approval) => (
+      approval.toolName === 'orchestrator_review'
+    ))?.args).toMatchObject({
+      reviewSuperseded: true,
+      reviewSupersededReason: 'Superseded by reset_packet.',
+    });
   });
 
   it('retry_packet re-arms an archived registry packet and dispatch_mission relaunches it', async () => {
@@ -293,7 +305,7 @@ describe('headless mission registry dispatch', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
   }, 20_000);
 
-  it('rerun_with_feedback relaunches a non-current registry packet through the real MCP handler', async () => {
+  it('rerun_with_feedback supersedes the durable review before relaunching a non-current registry packet', async () => {
     const repoPath = createTempRepo();
     stubMissionApiFetch();
     const first = await createInlineMission('registry mcp rerun A', repoPath);
@@ -301,6 +313,12 @@ describe('headless mission registry dispatch', () => {
 
     const packetId = first.packets[0]?.id;
     expect(packetId).toBeTruthy();
+    const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+    recordOrchestratorReview(packetId!, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf8' }).trim(),
+    });
     const { handleRerunWithFeedback } = await import('@/lib/mcp/operator-handlers/mission');
     const result = parseJsonResult<{ dispatched?: boolean; referenceLabel?: string }>(await handleRerunWithFeedback({
       packetId: packetId!,
@@ -313,6 +331,12 @@ describe('headless mission registry dispatch', () => {
     expect(result.referenceLabel).toBe('inline-1');
     expect(findLaneByPacket(packetId!)?.id).toMatch(/^lane-/);
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+    expect(listApprovalsForContext({ packetId }).find((approval) => (
+      approval.toolName === 'orchestrator_review'
+    ))?.args).toMatchObject({
+      reviewSuperseded: true,
+      reviewSupersededReason: 'Superseded by rerun_with_feedback.',
+    });
   }, 20_000);
 
   it('rerun_with_feedback clears released truth before relaunching a registry packet', async () => {

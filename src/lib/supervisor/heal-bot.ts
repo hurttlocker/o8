@@ -4,10 +4,12 @@ import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
-import { probeBranchMerged } from '@/lib/orchestrator/branch-merge-probe';
 import { markRepoOriginConfigured } from '@/lib/repos/origin-readiness';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
+import { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
 import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
+
+export { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,8 +17,6 @@ const HEAL_BOT_TICK_MS = 60_000;
 const HEAL_BOT_TIMEOUT_MS = 5 * 60_000;
 const FETCH_UNREACHABLE_MIN_AGE_MS = 60_000;
 const FETCH_UNREACHABLE_RETRY_MS = 5 * 60_000;
-const AUTO_RELEASE_PROBE_RETRY_MS = 60_000;
-const AUTO_RELEASE_MIN_EVENT_AGE_MS = 30_000;
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 const OUTPUT_SNIPPET_LIMIT = 4_000;
 const HEAL_BOT_SYSTEM_PROMPT = 'You are a heal-bot. The packet failed verification with the attached error. You have 5 minutes. Either: (a) make the minimal fix, commit it, run `npx tsc --noEmit`, and exit successfully, OR (b) write `GIVE_UP: <one-line reason>` to stdout and exit. Do not invent scope — only fix the specific failure.';
@@ -100,7 +100,6 @@ export interface EnqueueSupervisorInboxItemInput {
 let healBotTimer: ReturnType<typeof setInterval> | null = null;
 let drainInFlight = false;
 const fetchTestLastByRepo = new Map<string, number>();
-const autoReleaseProbeLastByRepoPacket = new Map<string, number>();
 
 function getDb() {
   const sqlite = getSqlite();
@@ -715,86 +714,6 @@ async function runFetchUnreachableSweep(): Promise<void> {
       }
     } catch (error) {
       console.warn(`[heal-bot] Fetch test still failing for ${item.repo_path}: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-}
-
-function recentEventWithinWindow(values: Array<string | null | undefined>, now: number): boolean {
-  const latest = values.reduce((current, value) => {
-    if (!value) return current;
-    return Math.max(current, timestampMs(value));
-  }, 0);
-  return latest > 0 && now - latest < AUTO_RELEASE_MIN_EVENT_AGE_MS;
-}
-
-async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
-  const { readOrchestratorControlPlaneState, withLockedState } = await import('@/lib/orchestrator/control-plane');
-  const { findLaneByPacket, getLane, setLaneStatus } = await import('@/lib/lane/registry');
-  const state = readOrchestratorControlPlaneState();
-  const now = Date.now();
-
-  for (const packet of state.packets) {
-    if (packet.status !== 'awaiting_review' || packet.releaseState === 'released') continue;
-    const lane = (packet.lane?.laneId ? getLane(packet.lane.laneId) : null) ?? findLaneByPacket(packet.id);
-    if (!lane?.repoPath || lane.status === 'archived') continue;
-    // Never auto-release while a real merge is in flight — forcing the lane
-    // terminal here would make the in-flight merge's status writes get
-    // rejected by the terminal-state guard, losing its actual outcome.
-    if (lane.status === 'merging') continue;
-    if (recentEventWithinWindow([packet.lastEventAt, lane.lastEventAt], now)) continue;
-
-    const throttleKey = `${lane.repoPath}\0${packet.id}`;
-    const lastProbeMs = autoReleaseProbeLastByRepoPacket.get(throttleKey) ?? 0;
-    if (now - lastProbeMs < AUTO_RELEASE_PROBE_RETRY_MS) continue;
-    autoReleaseProbeLastByRepoPacket.set(throttleKey, now);
-
-    const worktreePath = lane.worktreePath?.trim();
-    const probeRepoPath = worktreePath || lane.repoPath;
-    const branch = worktreePath ? 'HEAD' : lane.branch || 'HEAD';
-    const displayBranch = lane.branch || branch;
-    const base = lane.baseBranch || 'main';
-
-    try {
-      const probe = await probeBranchMerged({ repoPath: probeRepoPath, branch, base });
-      if (!probe.merged) continue;
-
-      const releasedAt = nowIso();
-      if (lane.status !== 'completed') {
-        setLaneStatus(lane.id, 'completed', 'system', 'merged');
-      }
-
-      const { result: released } = await withLockedState((current) => {
-        const packetState = current.packets.find((candidate) => candidate.id === packet.id);
-        if (!packetState || packetState.releaseState === 'released') return false;
-        if (packetState.status !== 'awaiting_review') return false;
-
-        packetState.status = 'released';
-        packetState.queueState = 'held';
-        packetState.releaseState = 'released';
-        packetState.releaseStatePayload = {
-          ...(packetState.releaseStatePayload ?? {}),
-          mergeCommit: probe.mergeCommit,
-          releasedAt,
-          source: 'heal_bot_auto_release',
-        };
-        packetState.blockedReason = null;
-        packetState.lastEventAt = releasedAt;
-        packetState.lastEventLabel = 'auto_released';
-        if (packetState.lane) {
-          packetState.lane.lastEventAt = releasedAt;
-          packetState.lane.lastEventLabel = 'merged';
-        }
-        current.updatedAt = releasedAt;
-        return true;
-      });
-
-      if (released) {
-        console.log(`[heal-bot] auto-released packet ${packet.referenceLabel} on ${displayBranch} at ${probe.mergeCommit ?? 'unknown'}`);
-      }
-    } catch (error) {
-      console.warn(
-        `[heal-bot] Auto-release probe failed for packet ${packet.referenceLabel} on ${displayBranch}: ${error instanceof Error ? error.message : error}`,
-      );
     }
   }
 }

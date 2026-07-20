@@ -518,14 +518,17 @@ describe('requireApproval merge governance through the real command path', () =>
     ))).toBe(false);
   }, 30_000);
 
-  it('lets never mode run a standard merge without a durable review card', async () => {
+  it('refuses an unreviewed orchestrator merge even when policy would auto-approve it', async () => {
     await updateOperatorDefaults({ requireApproval: 'never' });
-    const { lane, repo } = await createStandardLane('never', false);
+    const { lane, repo, baseHeadSha } = await createStandardLane('never', false);
 
     const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
 
-    expect(result.ok).toBe(true);
-    expect(git(repo, ['show', 'HEAD:file.txt'])).toContain('standard change');
+    expect(result).toMatchObject({
+      ok: false,
+      note: 'Merge refused: No durable approved AI review exists.',
+    });
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
     expect(listApprovalsForContext({ laneId: lane.id })).toHaveLength(0);
   }, 30_000);
 });

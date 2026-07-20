@@ -6,6 +6,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { frontierEscalationModelForCheapTier } from '@/lib/operator/subscription-profile';
+import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import { currentMissionState, log } from './shared';
 
 /**
@@ -183,6 +184,7 @@ async function rerunRegistryPacketWithFeedback(
     if (!packet) {
       throw new Error(`Packet ${packetId} not found.`);
     }
+    await supersedeDurableApprovedReviews(packetId, 'Superseded by rerun_with_feedback.');
     referenceLabel = packet.referenceLabel;
 
     const originalSummary = packet.summary;
@@ -254,6 +256,7 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput): Promise<
     if (!packet) {
       throw new Error(`Packet ${packetId} not found.`);
     }
+    await supersedeDurableApprovedReviews(packetId, 'Superseded by rerun_with_feedback.');
     referenceLabel = packet.referenceLabel;
 
     // Snapshot originals BEFORE reset clears them.

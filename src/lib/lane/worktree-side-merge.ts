@@ -10,6 +10,7 @@ import type {
 } from '@/lib/approvals/types';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
+import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import {
@@ -332,22 +333,6 @@ function formatTypecheckFeedback(lane: Lane, output: string): string {
 }
 
 /**
- * Post-rebase typecheck escalation (#1108) — layered handler.
- *
- * Layer 1 (this function, first call): capture tsc output, fire a programmatic
- *   rerun_with_feedback so Codex gets another shot without operator round-trip.
- *   Lane stays in `reviewing` while the redispatch spins up a new lane.
- *
- * Layer 2 (this function, second call on same lane lifecycle): promote the lane
- *   to `awaiting_orchestrator` with the tsc output captured in blockedReason.
- *   o8_status surfaces awaiting_orchestrator lanes via the existing inventory
- *   path; the orchestrator decides whether to steer the warm session, do a
- *   fresh redispatch, or abandon (layers 3-5, owned upstream).
- *
- * Retry attempts are counted per-lane-since-last-launch so a lane that gets
- * reset_packet'd into a fresh dispatch starts the counter from zero.
- */
-/**
  * Read the packet's spent auto-rerun budget from control-plane state.
  * Returns null when the packet can't be found (caller falls back to the
  * per-lane event count, which is the legacy behavior).
@@ -421,6 +406,8 @@ async function handlePostRebaseVerifyFailure(
     output: truncatedOutput,
   });
   setLaneStatus(command.laneId, 'reviewing', actor, 'typecheck_auto_retry');
+
+  await supersedeDurableApprovedReviews(lane.packetId, 'Superseded by typecheck auto-rerun.');
 
   // Persist the spent retry on the packet BEFORE dispatching — crash-safe in
   // the same spirit as the event append above: better to escalate next time

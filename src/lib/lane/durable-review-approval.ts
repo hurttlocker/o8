@@ -44,7 +44,11 @@ export async function assessDurableApprovedReview(
       projectId: null,
     });
     const approved = approvals.filter(
-      (approval) => approval.toolName === 'orchestrator_review' && approval.status === 'approved',
+      (approval) => (
+        approval.toolName === 'orchestrator_review'
+        && approval.status === 'approved'
+        && approval.args?.reviewSuperseded !== true
+      ),
     );
     if (approved.length === 0) {
       return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'No durable approved AI review exists.' };
@@ -86,6 +90,18 @@ export async function assessDurableApprovedReview(
     };
   } catch {
     return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Durable AI review lookup failed.' };
+  }
+}
+
+export async function supersedeDurableApprovedReviews(packetId: string, reason: string): Promise<number> {
+  try {
+    const { supersedeOrchestratorReviewApprovals } = await import('@/lib/approvals/store');
+    return supersedeOrchestratorReviewApprovals(packetId, reason);
+  } catch (error) {
+    console.error(
+      `[durable-review] Could not supersede approved reviews for packet ${packetId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    throw error;
   }
 }
 
