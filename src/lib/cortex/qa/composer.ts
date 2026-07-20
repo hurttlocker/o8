@@ -22,5 +22,5 @@ import 'server-only';
 
 export { composeClassA, type SseEmit } from '@/lib/cortex/qa/compose-class-a';
 export { composeClassB } from '@/lib/cortex/qa/compose-class-b';
-export type { ComposeOptions } from '@/lib/cortex/qa/compose-prompts';
+export type { ComposeOptions } from '@/lib/prompts/v1';
 export { rowDisplayTitle } from '@/lib/cortex/qa/citations';

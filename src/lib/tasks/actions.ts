@@ -29,6 +29,7 @@ import type {
   WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
+import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
@@ -372,12 +373,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
         body: input.sourceIssue.body ?? summary,
         url: input.sourceIssue.url ?? undefined,
       } : null,
-      prompt: [
-        '## Project Brief',
-        taskBrief,
-        '## Task',
-        summary,
-      ].join('\n\n'),
+      prompt: buildProjectBriefPromptV1(taskBrief, summary),
       ...(allowedFiles.length > 0 ? { allowedFiles, predictedFiles: allowedFiles } : {}),
     };
 

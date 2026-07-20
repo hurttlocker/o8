@@ -15,6 +15,7 @@ import {
   getProjectContext,
   type ProjectContext,
 } from '@/lib/projects/context';
+import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
 import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 import {
   linkSessionToWorktree,
@@ -208,12 +209,7 @@ async function buildLaunchPromptWithProjectBrief(
 
   return {
     projectContext,
-    prompt: [
-      '## Project Brief',
-      projectBrief,
-      '## Task',
-      prompt,
-    ].join('\n\n'),
+    prompt: buildProjectBriefPromptV1(projectBrief, prompt),
   };
 }
 

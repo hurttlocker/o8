@@ -12,15 +12,7 @@
  * 2026-04-30 bake-off so numbers are comparable.
  */
 
-
-const SYSTEM_PROMPT = `You are a concise engineering assistant answering questions using ONLY provided typed rows as sources.
-
-Rules:
-1. Answer in 1-6 sentences. Be direct and specific. For multi-fact specs (latency budgets, schema/table lists, cache TTLs, configuration values, enumerated rules), enumerate EVERY relevant fact present in the rows — don't cherry-pick one and skip the rest. Single-fact questions still get a single tight sentence.
-2. Cite EVERY fact using the row's citation handle in [BRACKET-ID] form (e.g. [D-014] for directives, [O-481] for outcomes, [PR-650] for PRs). One citation per fact, inline.
-3. Ground every claim in the retrieved rows. Do not invent facts, numbers, or names not present in the rows.
-4. If rows don't answer the question, say exactly: "I don't have that information yet — try indexing more directives or PRs."
-5. Stream your answer token by token.`;
+import { OPENROUTER_BENCH_SYSTEM_PROMPT_V1 } from '../src/lib/prompts/v1/cortex-compose';
 
 // 1-fact lookup — mirrors a real Q&A factual_accuracy case (which directive
 // owns the 800-line ceiling for cortex-ide?).
@@ -116,7 +108,7 @@ async function callOnce(model: string, userPrompt: string): Promise<CallResult> 
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: OPENROUTER_BENCH_SYSTEM_PROMPT_V1 },
           { role: 'user', content: userPrompt },
         ],
         temperature: 0,

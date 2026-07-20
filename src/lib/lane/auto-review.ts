@@ -15,6 +15,7 @@ import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/packet-deviations';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
+import { buildAutoReviewPromptV1 } from '@/lib/prompts/v1';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
 import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-facts';
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
@@ -412,100 +413,27 @@ function buildReviewPrompt(
   reviewWorktreePath?: string,
   deviations?: PacketDeviations | null,
 ): string {
-  const depthGuidance = depth === 'deep-dive'
-    ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
-    : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
-
   const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
-  // #1490 — surface the worker's self-reported deviations to the reviewer.
-  const deviationsSection = deviations && deviations.entries.length > 0
-    ? [
-        '## Worker deviations from brief',
-        '',
-        'The worker logged these departures from the plan (implementation-notes.md → ## Deviations). Verify each is the conservative call the brief asked for, and factor them into your verdict:',
-        ...deviations.entries.map((entry) => `- ${entry}`),
-      ].join('\n')
-    : '## Worker deviations from brief\n\nNo deviations reported by the worker.';
   const reviewRisk = classifyReviewRisk(changedFiles, addedLines);
   const adversarialReviewProtocol = buildAdversarialReviewProtocol(reviewRisk.tier);
   const worktreePath = reviewWorktreePath || lane.worktreePath || lane.repoPath;
-  const reviewScreenshotMetadata = reviewScreenshot
-    ? [
-        typeof reviewScreenshot.width === 'number' && reviewScreenshot.width > 0
-          && typeof reviewScreenshot.height === 'number' && reviewScreenshot.height > 0
-          ? `${reviewScreenshot.width}x${reviewScreenshot.height}`
-          : null,
-        reviewScreenshot.mimeType ?? null,
-        reviewScreenshot.capturedAt ? `captured ${reviewScreenshot.capturedAt}` : null,
-      ].filter((value): value is string => Boolean(value)).join(' • ')
-    : '';
-  const requiredTraceFormat = [
-    '## Required verification traces',
-    '',
-    'Before any verdict, recommendation, or submit_review call, emit a completed trace block in this exact format:',
-    `Worktree: ${worktreePath}`,
-    lane.packetId ? `Packet: ${lane.packetId}` : null,
-    '',
-    'SCOPE traces - required for every changed file that writes or mutates state:',
-    '`SCOPE: <file:line> partition=<repo|tenant|user|project|lane|packet|scope|slug|id|NONE>`',
-    'Then state the SINGLE intended destination and confirm the diff writes there and ONLY there. Flag output written to the wrong location or duplicated across locations.',
-    '',
-    'GUARD traces - required for every new guard, condition, or early return:',
-    '`GUARD: <file:line> fires-from=<file:line|INERT>`',
-    '',
-    'COVERAGE checklist - enumerate EACH sub-requirement from the packet scope:',
-    '`COVERAGE:`',
-    '`[x] <sub-requirement> - evidence <file:line|command output>`',
-    '`[ ] <sub-requirement> - gap <reason>`',
-    '',
-    'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, or any COVERAGE box is unchecked. Request changes instead.',
-    'To clear an intentional global write, cite the file:line that proves the global destination is correct.',
-    'Where the change has observable output (a file written, a command stdout, a function return), PREFER to run it in the worktree and inspect the ACTUAL output over reasoning about the diff.',
-  ].filter((value): value is string => value !== null).join('\n');
-
-  return [
-    `An agent has completed work on lane "${lane.label}" (branch: ${lane.branch}).`,
-    ``,
-    depthGuidance,
-    ``,
-    `Review the changes and provide your verdict. Your review summary will be shown`,
-    `to the operator on their approval card — they don't read code, so your summary`,
-    `IS their understanding of what happened.`,
-    ``,
-    mergeGateSection,
-    mergeGateSection ? `` : null,
-    mechanicalChecksSummary ? mechanicalChecksSummary : null,
-    mechanicalChecksSummary ? `` : null,
-    formatSelfReview(selfReview, depth),
-    ``,
-    deviationsSection,
-    ``,
-    reviewScreenshot ? '## Attached review screenshot' : null,
-    reviewScreenshot ? 'A screenshot was auto-captured when this lane entered review. Inspect the image file directly at native resolution instead of asking for a reduced copy.' : null,
-    reviewScreenshot ? `Image path: ${reviewScreenshot.path}` : null,
-    reviewScreenshotMetadata ? `Image metadata: ${reviewScreenshotMetadata}` : null,
-    reviewScreenshot ? `` : null,
+  return buildAutoReviewPromptV1({
+    lane: {
+      id: lane.id,
+      label: lane.label,
+      branch: lane.branch,
+      packetId: lane.packetId,
+    },
+    depth,
+    worktreePath,
     diffSummary,
-    ``,
-    requiredTraceFormat,
-    ``,
-    adversarialReviewProtocol || null,
-    adversarialReviewProtocol ? `` : null,
-    `## Your review should include:`,
-    `1. What was changed (1-2 sentences)`,
-    `2. The Required verification traces above, completed before the verdict`,
-    `3. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the one its name implies.`,
-    mergeGateSection ? `4. Address each merge gate violation — these are enforcement-level findings` : null,
-    mechanicalChecksSummary ? `${mergeGateSection ? '5' : '4'}. Address each mechanical check finding — confirm or dismiss` : null,
-    `${mergeGateSection && mechanicalChecksSummary ? '6' : mergeGateSection || mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
-    ``,
-    `After reviewing, FIRST record your verdict by calling submit_review with`,
-    `approved=true only if all required traces clear; otherwise call it with approved=false and findings. This writes the durable`,
-    `review record that authorizes merge/PR for the current HEAD. THEN call`,
-    `lane_command with verb "merge" (or "create_pr") for lane "${lane.id}".`,
-    `A merge or PR with no recorded approved review will surface an operator`,
-    `approval card instead of auto-continuing.`,
-  ].filter((value): value is string => value !== null).join('\n');
+    selfReviewSection: formatSelfReview(selfReview, depth),
+    deviationsEntries: deviations?.entries ?? [],
+    mergeGateSection,
+    mechanicalChecksSummary,
+    reviewScreenshot,
+    adversarialReviewProtocol,
+  });
 }
 
 async function performAutoReview(review: QueuedReview): Promise<void> {

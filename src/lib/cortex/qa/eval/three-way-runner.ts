@@ -36,6 +36,7 @@ import { askCortex } from '@/lib/cortex/qa/ask';
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, type SseEmit } from '@/lib/cortex/qa/composer';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 
@@ -124,7 +125,7 @@ async function realJudge(input: {
   const prompt = renderJudgePrompt(input as any);
   try {
     const result = await callSonnet({
-      system: 'You are a strict evaluator. Return only valid JSON matching the requested schema.',
+      system: STRICT_JSON_SYSTEM_PROMPTS_V1.evaluator,
       messages: [{ role: 'user', content: prompt }],
       stream: false,
     });
