@@ -57,7 +57,7 @@ function sleep(ms: number) {
  * cache. `deriveOk` runs in-page (mirrors realtime-client.ts). Slots older than
  * 5 min are reaped so a dropped/late result can't leak memory.
  */
-export function buildToolEval(sessionId: string, callId: string, tool: string, args: unknown): string {
+function buildToolEval(sessionId: string, callId: string, tool: string, args: unknown): string {
   const session = JSON.stringify(sessionId);
   const id = JSON.stringify(callId);
   const name = JSON.stringify(tool);
