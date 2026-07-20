@@ -9,9 +9,9 @@ export type DispatchDefaultOrchestratorBackend =
   | 'collide'
   | 'fable'
   | 'acp'
-  // The free conversational backend never dispatches, but it's a valid
-  // orchestratorBackend setting, so the pairing fn must accept it (falls through
-  // to the codex default like any non-claude backend).
+  // The free conversational backend never dispatches, but it remains a valid
+  // orchestratorBackend setting while the worker default independently falls
+  // through to Codex.
   | 'o8';
 
 export interface ResolveDefaultDispatchRuntimeInput {
@@ -20,25 +20,9 @@ export interface ResolveDefaultDispatchRuntimeInput {
   inAppOrchestratorEnabled?: boolean;
 }
 
-export function resolveEffectiveDefaultOrchestratorBackend(input: {
-  orchestratorBackend: DispatchDefaultOrchestratorBackend;
-  inAppOrchestratorEnabled?: boolean;
-}): DispatchDefaultOrchestratorBackend {
-  if (input.orchestratorBackend !== 'auto') return input.orchestratorBackend;
-  return input.inAppOrchestratorEnabled ? 'claude' : 'codex';
-}
-
-export function oppositeFrontierDispatchRuntime(
-  orchestratorBackend: DispatchDefaultOrchestratorBackend,
-): OrchestratorRuntime {
-  if (orchestratorBackend === 'codex') return 'claude-code';
-  if (orchestratorBackend === 'claude') return 'codex';
-  return 'codex';
-}
-
 export function resolveDefaultDispatchRuntime(
   input: ResolveDefaultDispatchRuntimeInput,
 ): OrchestratorRuntime {
   if (input.explicitRuntime) return input.explicitRuntime;
-  return oppositeFrontierDispatchRuntime(resolveEffectiveDefaultOrchestratorBackend(input));
+  return 'codex';
 }

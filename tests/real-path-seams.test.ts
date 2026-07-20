@@ -386,12 +386,12 @@ describe('seam E — create-mission fails loudly when dispatch holds the mission
   });
 });
 
-// ── Seam F — omitted mission runtime uses the effective paired default ──────
+// ── Seam F — omitted mission runtime keeps the explicit production default ─
 
-describe('seam F — create-mission without a runtime uses the paired operator default', () => {
+describe('seam F — create-mission runtime policy reaches persisted packets', () => {
   const url = 'http://localhost:3001/api/orchestrator/create-mission';
 
-  it('orchestratorBackend=codex + no explicit dispatch choice creates Claude Code packets', async () => {
+  it('no explicit worker choice keeps Codex as the production default', async () => {
     writeFileSync(
       join(dataDir, 'operator-defaults.json'),
       `${JSON.stringify({ orchestratorBackend: 'codex', inAppOrchestratorEnabled: false }, null, 2)}\n`,
@@ -403,7 +403,7 @@ describe('seam F — create-mission without a runtime uses the paired operator d
       requestedEffort: 'high',
       issues: [{
         number: 90_000_123,
-        title: 'dispatch paired default seam',
+        title: 'dispatch default seam',
         body: 'No runtime is specified by the caller.',
         url: '',
       }],
@@ -413,8 +413,9 @@ describe('seam F — create-mission without a runtime uses the paired operator d
     expect(json.ok).toBe(true);
     const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
     const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
-    expect(packet.runtime).toBe('claude-code');
-    expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
+    expect(packet.runtime).toBe('codex');
+    expect(packet.workerRouting.selectedRuntime).toBe('codex');
+    expect(packet.workerRouting.enforcement).toBe('dispatchable_runtimes');
     expect(packet.workerRouting.requestedEffort).toBe('high');
     expect(packet.workerRouting.selectedEffort).toBe('high');
   });
@@ -456,7 +457,7 @@ describe('seam F — create-mission without a runtime uses the paired operator d
     expect(prompt).toContain('Engineering Brain available');
   });
 
-  it('subscriptionProfile=both preserves today routing exactly', async () => {
+  it('subscriptionProfile=both does not replace the Codex fallback', async () => {
     writeFileSync(
       join(dataDir, 'operator-defaults.json'),
       `${JSON.stringify({ subscriptionProfile: 'both', orchestratorBackend: 'codex', inAppOrchestratorEnabled: false }, null, 2)}\n`,
@@ -476,7 +477,7 @@ describe('seam F — create-mission without a runtime uses the paired operator d
     const json = await res.json();
     const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
     const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
-    expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
+    expect(packet.workerRouting.selectedRuntime).toBe('codex');
     expect(packet.workerRouting.selectedModel).toBeNull();
     expect(packet.huddle).toBeUndefined();
   });

@@ -19,7 +19,7 @@ import {
 } from '@/lib/lane/agent-report';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
-import { PRODUCTION_AGENT_RUNTIME, resolveWorkerRouting } from '@/lib/agents/routing';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
 import type {
@@ -29,6 +29,7 @@ import type {
   WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
+import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
 export type TaskMutationAction = 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune' | 'remove';
@@ -213,14 +214,31 @@ async function syncPacketForLane(
 async function ensureLaneForTask(
   task: TaskPoolTask,
   actor: LaneEventActor,
+  requestedRuntime?: OrchestratorPacket['runtime'],
 ): Promise<Lane> {
   if (task.laneId) {
     const lane = getLane(task.laneId);
-    if (lane) return lane;
+    if (lane) {
+      if (requestedRuntime && lane.runtime !== requestedRuntime) {
+        throw new TaskMutationError(
+          409,
+          `Task is claimed by a ${lane.runtime} lane; reset or reclaim it before dispatching with ${requestedRuntime}.`,
+        );
+      }
+      return lane;
+    }
   }
   if (task.packetId) {
     const lane = findLaneByPacket(task.packetId);
-    if (lane) return lane;
+    if (lane) {
+      if (requestedRuntime && lane.runtime !== requestedRuntime) {
+        throw new TaskMutationError(
+          409,
+          `Task is claimed by a ${lane.runtime} lane; reset or reclaim it before dispatching with ${requestedRuntime}.`,
+        );
+      }
+      return lane;
+    }
   }
   if (!task.packetId) {
     throw new TaskMutationError(404, `Lane not found for task ${task.id}`);
@@ -242,7 +260,7 @@ async function ensureLaneForTask(
     projectId: context.id,
     branch: task.branch,
     baseBranch: context.currentRepo?.defaultBranch ?? context.primaryRepo?.defaultBranch ?? 'main',
-    runtime: PRODUCTION_AGENT_RUNTIME,
+    runtime: requestedRuntime ?? task.runtime,
     label: task.title,
     packetId: task.packetId,
     actor,
@@ -393,7 +411,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
 export async function claimTask(taskId: string, input: TaskClaimInput = {}): Promise<TaskMutationResult> {
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
-  const lane = await ensureLaneForTask(task, actor);
+  const lane = await ensureLaneForTask(task, actor, task.runtime);
   const report = reportAgentEvent({
     laneId: lane.id,
     actor,
@@ -422,13 +440,15 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     requestedModel: input.model ?? task.workerRouting?.requestedModel ?? undefined,
     source: 'task-dispatch',
   });
-  const lane = await ensureLaneForTask(task, actor);
-  if (lane.runtime !== PRODUCTION_AGENT_RUNTIME) {
-    throw new TaskMutationError(
-      409,
-      `Production agent spawning is restricted to Codex. Existing lane ${lane.id} is ${lane.runtime}; claim a Codex lane before dispatching.`,
-    );
+  try {
+    await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+  } catch (error) {
+    if (error instanceof DispatchPreflightError) {
+      throw new TaskMutationError(409, `${error.status.detail} ${error.status.fix}`);
+    }
+    throw error;
   }
+  const lane = await ensureLaneForTask(task, actor, workerRouting.selectedRuntime);
   await syncPacketForLane(task, lane, {
     lastEventLabel: 'dispatch_requested',
     workerRouting,

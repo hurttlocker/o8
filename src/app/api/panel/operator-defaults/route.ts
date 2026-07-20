@@ -14,7 +14,10 @@ import {
 } from '@/lib/operator/defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
+import {
+  getDispatchableRuntimeAvailability,
+  getRuntimeAuthSnapshot,
+} from '@/lib/runtimes/shared/auth-detect';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -116,7 +119,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     // hand-rolled list here silently rejected cursor/grok/pi even though the
     // dispatch layer + tier validator accept them (2026-07-09).
     if (!isDispatchRuntime(body.defaultDispatchRuntime)) {
-      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "opencode", "cursor", "grok", "pi".');
+      throw new Error('defaultDispatchRuntime must name a dispatchable runtime.');
     }
     update.defaultDispatchRuntime = body.defaultDispatchRuntime;
   }
@@ -342,15 +345,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
     if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
     const o = raw as Record<string, unknown>;
-    if (
-      o.runtime !== 'codex'
-      && o.runtime !== 'claude-code'
-      && o.runtime !== 'gemini'
-      && o.runtime !== 'opencode'
-      && o.runtime !== 'cursor'
-      && o.runtime !== 'grok'
-    ) {
-      throw new Error(`${name}.runtime must be one of "codex", "claude-code", "gemini", "opencode", "cursor", "grok", "pi".`);
+    if (!isDispatchRuntime(o.runtime)) {
+      throw new Error(`${name}.runtime must name a dispatchable runtime.`);
     }
     if (typeof o.model !== 'string') throw new Error(`${name}.model must be a string ('' = runtime default).`);
     if (!isThinkingEffort(o.effort)) throw new Error(`${name}.effort must be a valid thinking effort.`);
@@ -368,7 +364,8 @@ export async function GET() {
       getOperatorDefaults(),
       getRuntimeAuthSnapshot(),
     ]);
-    return response({ ...data, cliAuth });
+    const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
+    return response({ ...data, cliAuth, dispatchableRuntimes });
   } catch (error) {
     console.error('[panel-operator-defaults] Failed to load operator defaults:', error);
     return response({ error: 'Failed to load operator defaults.' }, 500);
@@ -391,7 +388,8 @@ export async function POST(request: Request) {
       updateOperatorDefaults(update),
       getRuntimeAuthSnapshot(),
     ]);
-    return response({ ...updated, cliAuth });
+    const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
+    return response({ ...updated, cliAuth, dispatchableRuntimes });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update operator defaults.';
     console.error('[panel-operator-defaults] Failed to update operator defaults:', message);

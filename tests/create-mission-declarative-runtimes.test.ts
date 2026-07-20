@@ -88,8 +88,12 @@ afterAll(() => {
 
 describe('create_mission runtime reachability', () => {
   it.each([
-    ['opencode', 91_598_001],
-    ['pi', 91_598_002],
+    ['claude-code', 91_598_001],
+    ['gemini', 91_598_002],
+    ['opencode', 91_598_003],
+    ['cursor', 91_598_004],
+    ['grok', 91_598_005],
+    ['pi', 91_598_006],
   ] as const)('%s remains selected through the real route and persisted mission', async (runtime, issueNumber) => {
     const response = await createMissionRoute.POST(request(runtime, issueNumber));
     expect(response.status).toBe(201);
@@ -99,7 +103,8 @@ describe('create_mission runtime reachability', () => {
     expect(packet?.runtime).toBe(runtime);
     expect(packet?.workerRouting?.requestedRuntime).toBe(runtime);
     expect(packet?.workerRouting?.selectedRuntime).toBe(runtime);
-    expect(packet?.workerRouting?.selectedProvider).toBe(runtime);
+    expect(packet?.workerRouting?.selectedProvider).toBe(runtime === 'claude-code' ? 'claude' : runtime);
+    expect(packet?.workerRouting?.enforcement).toBe('dispatchable_runtimes');
   });
 
   it('publishes OpenCode and Pi in the create_mission runtime enum', () => {
@@ -112,7 +117,7 @@ describe('create_mission runtime reachability', () => {
     authMock.unauthRuntime = 'opencode';
     const beforeMissionId = readOrchestratorControlPlaneState().missionId;
 
-    const response = await createMissionRoute.POST(request('opencode', 91_598_003));
+    const response = await createMissionRoute.POST(request('opencode', 91_598_007));
     expect(response.status).toBe(400);
     const payload = await response.json();
     expect(payload).toMatchObject({
