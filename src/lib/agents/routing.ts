@@ -27,6 +27,11 @@ function providerForRuntime(runtime: OrchestratorRuntime): WorkerProvider {
     case 'antigravity': return 'antigravity';
     case 'claude-code': return 'claude';
     case 'opencode': return 'opencode';
+    case 'openhands': return 'openhands';
+    case 'goose': return 'goose';
+    case 'qwen': return 'qwen';
+    case 'kimi': return 'kimi';
+    case 'aider': return 'aider';
     case 'cursor': return 'cursor';
     case 'grok': return 'grok';
     case 'pi': return 'pi';
@@ -51,6 +56,10 @@ const WORKER_PROVIDERS: readonly WorkerProvider[] = [
   'gemini',
   'antigravity',
   'opencode',
+  'openhands',
+  'goose',
+  'qwen',
+  'aider',
   'cursor',
   'grok',
   'pi',
@@ -62,6 +71,11 @@ const ORCHESTRATOR_RUNTIMES: readonly OrchestratorRuntime[] = [
   'gemini',
   'antigravity',
   'opencode',
+  'openhands',
+  'goose',
+  'qwen',
+  'kimi',
+  'aider',
   'cursor',
   'grok',
   'pi',

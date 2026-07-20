@@ -5,6 +5,7 @@ import {
   orchestratorStatusTone,
 } from '@/lib/orchestrator/display';
 import type {
+  OrchestratorRuntime,
   WorkspaceLaneState,
   WorkspaceOrchestrationPacketBadge,
 } from '@/lib/orchestrator/types';
@@ -411,7 +412,7 @@ export function generateLlmChatTabId() {
 }
 
 export function fallbackWorkspaceChatSessionKey(
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi',
+  runtime: OrchestratorRuntime,
   tabId: string,
   scope: string,
 ) {

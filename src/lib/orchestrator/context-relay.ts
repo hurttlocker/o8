@@ -479,8 +479,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
 // Runtimes the session_outcomes table tracks (subset of the broader RuntimeId
 // union — RuntimeId also includes things like 'remote-customer' that the
 // dispatch routing recommender doesn't score).
-type LedgerRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
-const LEDGER_RUNTIMES: ReadonlySet<string> = new Set(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi']);
+type LedgerRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'openhands' | 'goose' | 'qwen' | 'kimi' | 'aider' | 'cursor' | 'grok' | 'pi';
+const LEDGER_RUNTIMES: ReadonlySet<string> = new Set(['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
 const LANE_START_STATUSES: ReadonlySet<string> = new Set(['launching', 'running']);
 
 function isLedgerRuntime(r: string | null): r is LedgerRuntime {

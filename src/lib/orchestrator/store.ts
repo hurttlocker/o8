@@ -24,7 +24,7 @@ import type {
   WorkerRouting,
 } from '@/lib/orchestrator/types';
 
-const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi']);
+const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
 /** Deserializer — validates and coerces an unknown value to OrchestratorRuntime. */
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
   if (typeof value === 'string' && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
