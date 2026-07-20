@@ -117,3 +117,23 @@
 ### Deviations
 
 - None.
+
+## Product telemetry test isolation follow-up (#1601)
+
+### Approach
+
+- Snapshot and restore each telemetry test's `HOME`, `CORTEX_IDE_DATA_DIR`, `O8_DATA_DIR`, and `O8_PROXY_URL` values, reset persisted product telemetry to off after each test, and remove temporary roots in teardown hooks.
+- Read the route-written operator defaults from a fresh, timeout-bounded Node process so restart persistence is exercised through a new module instance.
+- Keep production telemetry behavior unchanged; this follow-up only hardens test lifecycle and acceptance coverage.
+
+### Verification
+
+- `npx tsc --noEmit` passed after one test-spy typing fix.
+- Seven focused telemetry files passed: 7 files and 19 tests.
+- Scoped ESLint passed for all three changed TypeScript test files.
+- `npm run rule-check -- --base=main` passed with zero violations; all changed TypeScript files are tests, so the rule checker intentionally scanned 0 production files.
+- `git diff --check` passed.
+
+### Deviations
+
+- None.

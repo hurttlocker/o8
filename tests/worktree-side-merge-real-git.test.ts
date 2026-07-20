@@ -3,9 +3,17 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, wr
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+
+const originalEnv = {
+  HOME: process.env.HOME,
+  CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
+  O8_DATA_DIR: process.env.O8_DATA_DIR,
+  O8_PROXY_URL: process.env.O8_PROXY_URL,
+  O8_SKIP_PRELAUNCH_TYPECHECK: process.env.O8_SKIP_PRELAUNCH_TYPECHECK,
+};
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-merge-real-data-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -24,6 +32,13 @@ const { listApprovalsForContext, recordOrchestratorReview } = await import('@/li
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 const tempDirs: string[] = [dataDir];
+
+function restoreEnv() {
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
@@ -124,11 +139,26 @@ function packetFixture(id: string, repoPath: string, retries = 0): OrchestratorP
   } as OrchestratorPacket;
 }
 
-afterEach(() => {
-  for (const dir of tempDirs.splice(1)) {
-    rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  try {
+    await updateOperatorDefaults({ productTelemetryEnabled: false });
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+  } finally {
+    for (const dir of tempDirs.splice(1)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
-  writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+});
+
+afterAll(async () => {
+  try {
+    await updateOperatorDefaults({ productTelemetryEnabled: false });
+  } finally {
+    restoreEnv();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 describe('worktree-side merge with real git repos', () => {
@@ -234,9 +264,8 @@ describe('worktree-side merge with real git repos', () => {
   }, 20_000);
 
   it('merge approval emits nothing while product telemetry is off and once while on', async () => {
-    writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
-    process.env.O8_PROXY_URL = 'https://telemetry.example.test';
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+    const previousProxyUrl = process.env.O8_PROXY_URL;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     const mergeOnce = async (suffix: string) => {
       const { repo } = makeRepo(`o8-merge-telemetry-${suffix}`);
@@ -255,6 +284,9 @@ describe('worktree-side merge with real git repos', () => {
     };
 
     try {
+      writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
+      process.env.O8_PROXY_URL = 'https://telemetry.example.test';
+      fetchSpy.mockResolvedValue(Response.json({ ok: true }));
       await updateOperatorDefaults({ productTelemetryEnabled: false });
       await mergeOnce('off');
       expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'))).toHaveLength(0);
@@ -267,8 +299,13 @@ describe('worktree-side merge with real git repos', () => {
         body: JSON.stringify({ event: 'merge.approved', props: { runtime: 'codex', pushed: true } }),
       });
     } finally {
-      await updateOperatorDefaults({ productTelemetryEnabled: false });
-      fetchSpy.mockRestore();
+      try {
+        await updateOperatorDefaults({ productTelemetryEnabled: false });
+      } finally {
+        if (previousProxyUrl === undefined) delete process.env.O8_PROXY_URL;
+        else process.env.O8_PROXY_URL = previousProxyUrl;
+        fetchSpy.mockRestore();
+      }
     }
   }, 30_000);
 });

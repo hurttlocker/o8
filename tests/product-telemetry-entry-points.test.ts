@@ -3,23 +3,29 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const originalHome = process.env.HOME;
-const home = mkdtempSync(join(os.tmpdir(), 'o8-product-telemetry-entry-'));
-const dataDir = join(home, '.o8');
-mkdirSync(dataDir, { recursive: true });
-process.env.HOME = home;
-process.env.CORTEX_IDE_DATA_DIR = dataDir;
-process.env.O8_DATA_DIR = dataDir;
-process.env.O8_PROXY_URL = 'https://telemetry.example.test';
-writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
+const originalEnv = {
+  HOME: process.env.HOME,
+  CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
+  O8_DATA_DIR: process.env.O8_DATA_DIR,
+  O8_PROXY_URL: process.env.O8_PROXY_URL,
+};
 
-const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-const { addRepo } = await import('@/lib/repos/registry');
-const { createLane } = await import('@/lib/lane/registry');
-const { launchSession } = await import('@/lib/lane/commands-launch');
-const runtimeActions = await import('@/lib/runtime/actions');
+let home = '';
+let dataDir = '';
+let operatorDefaults: typeof import('@/lib/operator/defaults') | undefined;
+let repoRegistry: typeof import('@/lib/repos/registry');
+let laneRegistry: typeof import('@/lib/lane/registry');
+let laneLaunch: typeof import('@/lib/lane/commands-launch');
+let runtimeActions: typeof import('@/lib/runtime/actions');
+
+function restoreEnv() {
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 
 function makeRepo(name: string): string {
   const repoPath = mkdtempSync(join(home, `${name}-`));
@@ -31,16 +37,43 @@ function telemetryCalls(fetchMock: ReturnType<typeof vi.fn>) {
   return fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'));
 }
 
-afterEach(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
+beforeAll(async () => {
+  home = mkdtempSync(join(os.tmpdir(), 'o8-product-telemetry-entry-'));
+  dataDir = join(home, '.o8');
+  mkdirSync(dataDir, { recursive: true });
+  process.env.HOME = home;
+  process.env.CORTEX_IDE_DATA_DIR = dataDir;
+  process.env.O8_DATA_DIR = dataDir;
+  process.env.O8_PROXY_URL = 'https://telemetry.example.test';
+  writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
+
+  operatorDefaults = await import('@/lib/operator/defaults');
+  repoRegistry = await import('@/lib/repos/registry');
+  laneRegistry = await import('@/lib/lane/registry');
+  laneLaunch = await import('@/lib/lane/commands-launch');
+  runtimeActions = await import('@/lib/runtime/actions');
 });
 
-afterAll(() => {
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  rmSync(home, { recursive: true, force: true });
+afterEach(async () => {
+  try {
+    if (operatorDefaults) {
+      await operatorDefaults.updateOperatorDefaults({ productTelemetryEnabled: false });
+    }
+  } finally {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  }
+});
+
+afterAll(async () => {
+  try {
+    if (operatorDefaults) {
+      await operatorDefaults.updateOperatorDefaults({ productTelemetryEnabled: false });
+    }
+  } finally {
+    restoreEnv();
+    if (home) rmSync(home, { recursive: true, force: true });
+  }
 });
 
 describe.sequential('product telemetry gates real entry points', () => {
@@ -48,12 +81,12 @@ describe.sequential('product telemetry gates real entry points', () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await updateOperatorDefaults({ productTelemetryEnabled: false });
-    await addRepo(makeRepo('repo-off'));
+    await operatorDefaults!.updateOperatorDefaults({ productTelemetryEnabled: false });
+    await repoRegistry.addRepo(makeRepo('repo-off'));
     expect(telemetryCalls(fetchMock)).toHaveLength(0);
 
-    await updateOperatorDefaults({ productTelemetryEnabled: true });
-    await addRepo(makeRepo('repo-on'));
+    await operatorDefaults!.updateOperatorDefaults({ productTelemetryEnabled: true });
+    await repoRegistry.addRepo(makeRepo('repo-on'));
     expect(telemetryCalls(fetchMock)).toHaveLength(1);
     expect(telemetryCalls(fetchMock)[0]?.[1]).toMatchObject({
       body: JSON.stringify({ event: 'repo.added', props: { hasRemote: false, isGitRepo: true } }),
@@ -76,13 +109,13 @@ describe.sequential('product telemetry gates real entry points', () => {
 
     const launch = async (suffix: string) => {
       const repoPath = makeRepo(`dispatch-${suffix}`);
-      const lane = createLane({
+      const lane = laneRegistry.createLane({
         repoPath,
         branch: `inline/telemetry-${suffix}`,
         baseBranch: 'main',
         runtime: 'codex',
       });
-      const result = await launchSession({
+      const result = await laneLaunch.launchSession({
         verb: 'launch_session',
         laneId: lane.id,
         prompt: 'bounded test prompt',
@@ -90,11 +123,11 @@ describe.sequential('product telemetry gates real entry points', () => {
       expect(result.ok).toBe(true);
     };
 
-    await updateOperatorDefaults({ productTelemetryEnabled: false });
+    await operatorDefaults!.updateOperatorDefaults({ productTelemetryEnabled: false });
     await launch('off');
     expect(telemetryCalls(fetchMock)).toHaveLength(0);
 
-    await updateOperatorDefaults({ productTelemetryEnabled: true });
+    await operatorDefaults!.updateOperatorDefaults({ productTelemetryEnabled: true });
     await launch('on');
     expect(telemetryCalls(fetchMock)).toHaveLength(1);
     expect(telemetryCalls(fetchMock)[0]?.[1]).toMatchObject({
