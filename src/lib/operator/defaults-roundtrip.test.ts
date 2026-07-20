@@ -14,7 +14,7 @@ const { updateOperatorDefaults } = await import('./defaults');
  * the API route but missing its copy block here silently round-trips to the
  * old value (bit reviewerBackend on 2026-07-07: the settings UI accepted the
  * click, the POST returned 200, and nothing persisted). Every UI-settable
- * scalar knob gets a non-default value below; add new knobs here when adding
+ * knob gets a non-default value below; add new knobs here when adding
  * them to the writer.
  */
 const NON_DEFAULT_UPDATE = {
@@ -26,6 +26,7 @@ const NON_DEFAULT_UPDATE = {
   promptCachingEnabled: false,
   orchestratorModel: 'claude-opus-4-8',
   defaultDispatchRuntime: 'claude-code',
+  workerRuntimes: ['claude-code', 'codex'] as Array<'claude-code' | 'codex'>,
   codexWorkerEffort: 'xhigh',
   claudeWorkerEffort: 'max',
   defaultDispatchModel: 'some-model',
@@ -58,7 +59,7 @@ describe('updateOperatorDefaults round-trip', () => {
   it('persists every settable field (no silent evaporation)', async () => {
     const result = await updateOperatorDefaults({ ...NON_DEFAULT_UPDATE });
     for (const [field, expected] of Object.entries(NON_DEFAULT_UPDATE)) {
-      expect(result.values[field as keyof typeof result.values], `field ${field} evaporated in updateOperatorDefaults`).toBe(expected);
+      expect(result.values[field as keyof typeof result.values], `field ${field} evaporated in updateOperatorDefaults`).toEqual(expected);
     }
   });
 

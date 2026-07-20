@@ -1,447 +1,291 @@
 'use client';
 
-/**
- * OnboardingDispatchStep — first-run wizard step that lets the user pick
- * the default dispatch runtime (Codex / Claude Code / Gemini) for every
- * mission packet they ship.
- *
- * Writes to operator-defaults.json via POST /api/panel/operator-defaults
- * (same-origin loopback passes the middleware gate automatically).
- *
- * Smart default:
- *   1. If exactly one of codex/claude-code/gemini is detected, preselect it.
- *   2. If multiple are detected, default to 'codex' (system default).
- *   3. If none are detected, default to 'codex' and let the user override.
- *
- * Extracted from Onboarding.tsx to keep that file under the 800-line ceiling.
- */
-
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import {
-  ORCHESTRATOR_RUNTIMES,
-  V1_DISPATCH_RUNTIMES,
-} from '@/lib/orchestrator/runtime-capabilities';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { getRuntimeInstallInfo } from '@/lib/setup/runtime-install';
+  PickerMenu,
+  type DispatchRuntime,
+} from '@/components/desktop/settings/dispatch-shared';
+import {
+  canSelectOnboardingRuntime,
+  loadOnboardingRuntimeSelection,
+  persistOnboardingRuntimeSelection,
+  toggleOnboardingWorkerRuntime,
+  type DispatchableRuntimeInventoryItem,
+  type OnboardingOrchestratorRuntime,
+} from './onboarding-runtime-selection';
 
 const FONT = 'var(--font-sans-system)';
-const MONO = '"SF Mono", ui-monospace, monospace';
 
-export interface OnboardingRuntimeDetection {
-  id: string;
-  detected: boolean;
-  version?: string;
-}
+const ORCHESTRATOR_LABELS: Record<OnboardingOrchestratorRuntime, string> = {
+  codex: 'Codex',
+  'claude-code': 'Claude Code',
+};
 
-function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
-  return value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode' || value === 'pi';
-}
-
-function pickSmartDefault(runtimes: OnboardingRuntimeDetection[]): OrchestratorRuntime {
-  const detected = new Set(
-    runtimes.filter((r) => r.detected).map((r) => r.id),
-  );
-  const dispatchable = V1_DISPATCH_RUNTIMES.filter((id) => detected.has(id));
-  if (dispatchable.length === 1) return dispatchable[0];
-  // Multiple or none → stick with the system default so nothing behaves
-  // unexpectedly if the user skips the step without touching the picker.
-  return 'codex';
-}
-
-// Inline SVG glyphs — match the Onboarding.tsx convention (raw SVG, no
-// React icon components, keeps Tauri webview rendering reliable).
-
-function CodexGlyph({ size = 22, color = 'currentColor' }: { size?: number; color?: string }) {
+function CheckGlyph() {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6L9 17l-5-5" />
     </svg>
   );
 }
 
-function ClaudeGlyph({ size = 22, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3l1.9 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.1-1.8L12 3z" />
-      <path d="M19 14l.9 2 2.1.8-2.1.9L19 20l-.9-2.3-2.1-.9 2.1-.8z" />
-    </svg>
-  );
-}
-
-function GeminiGlyph({ size = 22, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18" />
-      <path d="M12 3c3 3 3 15 0 18" />
-      <path d="M12 3c-3 3-3 15 0 18" />
-    </svg>
-  );
-}
-
-function runtimeGlyph(runtime: OrchestratorRuntime, color: string): ReactNode {
-  if (runtime === 'codex') return <CodexGlyph color={color} />;
-  if (runtime === 'claude-code') return <ClaudeGlyph color={color} />;
-  if (runtime === 'gemini') return <GeminiGlyph color={color} />;
-  return null;
-}
-
-function RuntimeTile({
+function RuntimeInventoryRow({
   runtime,
   selected,
-  detected,
-  version,
-  onSelect,
+  isDefault,
+  onToggle,
 }: {
-  runtime: OrchestratorRuntime;
+  runtime: DispatchableRuntimeInventoryItem;
   selected: boolean;
-  detected: boolean;
-  version?: string;
-  onSelect: () => void;
+  isDefault: boolean;
+  onToggle: () => void;
 }) {
-  const capability = ORCHESTRATOR_RUNTIMES[runtime];
-  const accent = capability.accentColor;
-
-  const base: CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: 10,
-    padding: '16px 18px',
-    minHeight: 136,
-    borderRadius: 14,
-    border: selected
-      ? `1.5px solid ${accent}`
-      : '1px solid var(--t-glass-border-strong)',
-    background: selected
-      ? 'var(--t-glass-muted-strong)'
-      : 'var(--t-glass-muted)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: 'var(--t-text)',
-    cursor: 'pointer',
-    textAlign: 'left',
-    fontFamily: FONT,
-    boxShadow: selected
-      ? `0 14px 32px ${accent}33, inset 0 1px 0 rgba(255,255,255,0.08)`
-      : '0 8px 20px rgba(0,0,0,0.05)',
-    transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-    position: 'relative',
-    overflow: 'hidden',
-  };
-
+  const selectable = runtime.available;
   return (
-    <button type="button" onClick={onSelect} style={base}>
-      <div style={{
+    <button
+      type="button"
+      disabled={!selectable}
+      aria-pressed={selected}
+      onClick={onToggle}
+      style={{
+        width: '100%',
+        minHeight: 58,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        width: '100%',
-        gap: 10,
-      }}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 40,
-          height: 40,
-          borderRadius: 10,
-          background: `${accent}1f`,
-          color: accent,
-          flexShrink: 0,
-        }}>
-          {runtimeGlyph(runtime, accent)}
-        </div>
-        {detected && (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            color: '#22c55e',
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: 'rgba(34,197,94,0.12)',
-            border: '1px solid rgba(34,197,94,0.24)',
-          }}>
-            <span style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: '#22c55e',
-              boxShadow: '0 0 6px rgba(34,197,94,0.5)',
-            }} />
-            Installed
+        gap: 12,
+        paddingTop: 9,
+        paddingBottom: 9,
+        paddingLeft: 12,
+        paddingRight: 12,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: selected ? 'var(--t-accent)' : 'var(--t-glass-border-strong)',
+        borderRadius: 10,
+        background: selected ? 'var(--t-input-bg)' : 'var(--t-bg-card)',
+        color: 'var(--t-text)',
+        fontFamily: FONT,
+        textAlign: 'left',
+        cursor: selectable ? 'pointer' : 'not-allowed',
+        opacity: selectable ? 1 : 0.52,
+        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+    >
+      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
+            {runtime.label}
           </span>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: 8,
-          flexWrap: 'wrap',
-        }}>
-          <span style={{
-            fontSize: 15,
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-            color: 'var(--t-text-strong)',
-          }}>
-            {capability.label}
-          </span>
-          {version && (
-            <span style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: 'var(--t-text-muted)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}>
-              v{version}
+          {isDefault ? (
+            <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-accent)' }}>
+              Default worker
             </span>
-          )}
-        </div>
-        <div style={{
-          fontSize: 12,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.5,
-        }}>
-          {capability.description}
-        </div>
-      </div>
-
-      {selected && (
-        <div style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          width: 22,
-          height: 22,
-          borderRadius: '50%',
-          background: accent,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: `0 6px 14px ${accent}66`,
-        }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-        </div>
-      )}
+          ) : null}
+        </span>
+        <span style={{ fontSize: 10.5, fontWeight: 300, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>
+          {selectable ? runtime.detail : runtime.fix || runtime.detail}
+        </span>
+      </span>
+      <span style={{
+        width: 24,
+        height: 24,
+        flexShrink: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 7,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: selected ? 'var(--t-accent)' : 'var(--t-glass-border-strong)',
+        background: selected ? 'var(--t-accent)' : 'transparent',
+        color: selected ? 'var(--t-success-contrast)' : 'var(--t-text-faint)',
+      }}>
+        {selected ? <CheckGlyph /> : null}
+      </span>
     </button>
   );
 }
 
 export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
-  runtimes,
   onContinue,
   onSkip,
   renderButton,
 }: {
-  runtimes: OnboardingRuntimeDetection[];
   onContinue: () => void;
   onSkip: () => void;
-  /** Render-prop for the wizard's shared primary-button styling. */
   renderButton: (props: {
     label: string;
     onClick: () => void;
     disabled?: boolean;
   }) => ReactNode;
 }) {
-  const initialDefault = useMemo(() => pickSmartDefault(runtimes), [runtimes]);
-  const [selected, setSelected] = useState<OrchestratorRuntime>(initialDefault);
-  const [userSelected, setUserSelected] = useState(false);
+  const [inventory, setInventory] = useState<DispatchableRuntimeInventoryItem[]>([]);
+  const [orchestratorRuntime, setOrchestratorRuntime] = useState<OnboardingOrchestratorRuntime>('codex');
+  const [workerRuntimes, setWorkerRuntimes] = useState<DispatchRuntime[]>([]);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const runtimeById = useMemo(() => {
-    const map = new Map<string, OnboardingRuntimeDetection>();
-    for (const rt of runtimes) map.set(rt.id, rt);
-    return map;
-  }, [runtimes]);
-
   useEffect(() => {
-    let alive = true;
-    fetch('/api/panel/operator-defaults', { cache: 'no-store' })
-      .then((res) => res.ok ? res.json() : null)
-      .then((payload: { values?: { defaultDispatchRuntime?: unknown } } | null) => {
-        const runtime = payload?.values?.defaultDispatchRuntime;
-        if (alive && !userSelected && isDispatchRuntime(runtime) && V1_DISPATCH_RUNTIMES.includes(runtime)) {
-          setSelected(runtime);
-        }
+    let active = true;
+    loadOnboardingRuntimeSelection()
+      .then((selection) => {
+        if (!active) return;
+        setInventory(selection.inventory);
+        setOrchestratorRuntime(selection.orchestratorRuntime);
+        setWorkerRuntimes(selection.workerRuntimes);
       })
-      .catch(() => { /* Keep the local smart default if settings are unavailable. */ });
-    return () => { alive = false; };
-  }, [userSelected]);
+      .catch((loadError: unknown) => {
+        if (!active) return;
+        setError(loadError instanceof Error ? loadError.message : 'Runtime inventory is unavailable.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const orchestratorOptions = useMemo(() => (
+    (['codex', 'claude-code'] as const)
+      .filter((runtime) => canSelectOnboardingRuntime(inventory, runtime))
+      .map((runtime) => ({
+        value: runtime,
+        label: ORCHESTRATOR_LABELS[runtime],
+        detail: inventory.find((item) => item.id === runtime)?.detail,
+      }))
+  ), [inventory]);
+
+  const orchestratorAvailable = canSelectOnboardingRuntime(inventory, orchestratorRuntime);
+  const readyToSave = orchestratorAvailable && workerRuntimes.length > 0;
 
   const handleContinue = useCallback(async () => {
+    if (!readyToSave) return;
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/panel/operator-defaults', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ defaultDispatchRuntime: selected }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(typeof data?.error === 'string' ? data.error : `Save failed (${res.status})`);
-        setSaving(false);
-        return;
-      }
-      setSaving(false);
+      await persistOnboardingRuntimeSelection({ orchestratorRuntime, workerRuntimes });
       onContinue();
-    } catch {
-      setError('Network error. You can set this later in Settings.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save runtime choices.');
+    } finally {
       setSaving(false);
     }
-  }, [selected, onContinue]);
+  }, [onContinue, orchestratorRuntime, readyToSave, workerRuntimes]);
 
   return (
     <div style={{
-      maxWidth: 720,
+      maxWidth: 620,
       width: '100%',
       display: 'flex',
       flexDirection: 'column',
       gap: 16,
+      fontFamily: FONT,
     }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, textAlign: 'center' }}>
-        <div style={{
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.5,
-        }}>
-          Every packet you ship goes to one runtime by default. You can override per packet or change this later in Settings.
+        <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+          Choose the CLI that drives o8, then choose the runtimes that can receive packet work.
         </div>
         <div style={{ fontSize: 12, color: 'var(--t-text-faint)', lineHeight: 1.5 }}>
-          A <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>packet</span> is one task you hand to an agent; <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>dispatch</span> is sending it off.
+          Only installed and signed-in runtimes can be selected. Codex stays the default if you skip.
         </div>
       </div>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${V1_DISPATCH_RUNTIMES.length}, minmax(0, 1fr))`,
-        gap: 10,
-      }}>
-        {V1_DISPATCH_RUNTIMES.map((runtime) => {
-          const det = runtimeById.get(runtime);
-          return (
-            <RuntimeTile
-              key={runtime}
-              runtime={runtime}
-              selected={selected === runtime}
-              detected={det?.detected ?? false}
-              version={det?.version}
-              onSelect={() => {
-                setUserSelected(true);
-                setSelected(runtime);
-              }}
-            />
-          );
-        })}
-      </div>
-
-      {/* #633 — when the selected runtime isn't installed, surface the install
-          command inline so the user knows what they're committing to instead
-          of discovering the gap at dispatch time. */}
-      {(() => {
-        const detected = runtimeById.get(selected)?.detected ?? false;
-        if (detected) return null;
-        const info = getRuntimeInstallInfo(selected);
-        if (!info) return null;
-        return (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            padding: '12px 14px',
-            borderRadius: 12,
-            border: '1px solid rgba(245, 158, 11, 0.24)',
-            background: 'rgba(245, 158, 11, 0.08)',
-            color: 'var(--t-text-secondary)',
-            fontSize: 12,
-            lineHeight: 1.5,
-          }}>
-            <div style={{ fontWeight: 600, color: 'var(--t-text-strong)', fontFamily: FONT }}>
-              {info.label} isn&apos;t installed yet.
-            </div>
-            <div style={{ fontFamily: FONT }}>
-              {info.hint} You can still continue — dispatch will be disabled until it&apos;s on your PATH.
-            </div>
-            {info.command ? (
-              <code style={{
-                display: 'block',
-                padding: '6px 10px',
-                borderRadius: 8,
-                background: 'var(--t-glass-muted)',
-                border: '1px solid var(--t-glass-border-strong)',
-                fontFamily: MONO,
-                fontSize: 11.5,
-                color: 'var(--t-text)',
-                userSelect: 'all',
-              }}>{info.command}</code>
-            ) : null}
-            {info.link ? (
-              <a
-                href={info.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  color: 'var(--t-accent)',
-                  textDecoration: 'none',
-                  fontFamily: FONT,
-                }}
-              >
-                {info.link.replace(/^https?:\/\//, '')} →
-              </a>
-            ) : null}
-          </div>
-        );
-      })()}
-
-      {error && (
-        <div style={{
-          fontSize: 12,
-          color: '#ef4444',
-          textAlign: 'center',
-        }}>
-          {error}
-        </div>
-      )}
 
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 8,
+        gap: 14,
+        minHeight: 54,
+        paddingTop: 6,
+        paddingBottom: 6,
+        paddingLeft: 12,
+        paddingRight: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-glass-border-strong)',
+        background: 'var(--t-bg-card)',
       }}>
+        <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
+            Orchestrator
+          </span>
+          <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--t-text-muted)' }}>
+            Runs the planning and review loop.
+          </span>
+        </span>
+        <PickerMenu<OnboardingOrchestratorRuntime>
+          value={orchestratorRuntime}
+          options={orchestratorOptions}
+          onChange={setOrchestratorRuntime}
+          disabled={loading || orchestratorOptions.length === 0}
+          minWidth={190}
+        />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
+            Worker runtimes
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)' }}>
+            Select one or more
+          </span>
+        </div>
+        {loading ? (
+          <div style={{ minHeight: 58, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 12 }}>
+            Reading installed runtimes…
+          </div>
+        ) : inventory.length > 0 ? inventory.map((runtime) => (
+          <RuntimeInventoryRow
+            key={runtime.id}
+            runtime={runtime}
+            selected={workerRuntimes.includes(runtime.id)}
+            isDefault={workerRuntimes[0] === runtime.id}
+            onToggle={() => {
+              setWorkerRuntimes((current) => toggleOnboardingWorkerRuntime(current, runtime.id, inventory));
+            }}
+          />
+        )) : (
+          <div style={{ minHeight: 58, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 12, textAlign: 'center' }}>
+            No dispatchable runtimes were reported. Install or sign in to a supported CLI, then reopen setup.
+          </div>
+        )}
+      </div>
+
+      {error ? (
+        <div role="alert" style={{ fontSize: 12, lineHeight: 1.4, color: 'var(--t-brand-red)', textAlign: 'center' }}>
+          {error}
+        </div>
+      ) : null}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
         <button
           type="button"
           onClick={onSkip}
           style={{
+            minHeight: 44,
             border: 'none',
             background: 'transparent',
             color: 'var(--t-text-faint)',
             fontSize: 12,
+            fontWeight: 300,
             cursor: 'pointer',
             fontFamily: FONT,
-            padding: 0,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 4,
+            paddingRight: 4,
           }}
         >
-          Skip
+          Skip for now
         </button>
         {renderButton({
-          label: saving ? 'Saving…' : 'Continue',
+          label: saving ? 'Saving…' : 'Save runtime choices',
           onClick: handleContinue,
-          disabled: saving,
+          disabled: loading || saving || !readyToSave,
         })}
       </div>
     </div>
