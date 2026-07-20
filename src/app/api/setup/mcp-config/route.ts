@@ -5,11 +5,12 @@
  * o8 install. Lets a real user install the packaged Tauri app, hit this
  * endpoint, and get a copy-paste-ready config without hardcoded dev paths.
  *
- * Two install modes for the operator MCP server:
- *   1. Dev checkout — use `tsx` against the source file in-tree.
- *   2. Packaged Tauri app — use `node` against the bundled .mjs in the
- *      resource dir. Signalled by process.env.O8_BUNDLED_MCP_PATH, which
- *      the Rust sidecar sets before spawning the Next server.
+ * Two install modes for the operator MCP compatibility proxy:
+ *   1. Dev checkout — use `tsx` against the thin proxy source in-tree.
+ *   2. Packaged Tauri app — use `node` against the bundled proxy .mjs in the
+ *      resource dir. The proxy forwards stdio JSON-RPC to the single in-app
+ *      /api/mcp host; the standalone full server remains available for
+ *      headless flows when the app isn't running.
  *
  * Plus codebase-memory (Context Engine v2, epic #738): a static binary the
  * Tauri sidecar downloads on first launch (#739). Resolved via

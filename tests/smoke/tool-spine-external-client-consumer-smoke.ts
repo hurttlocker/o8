@@ -32,7 +32,9 @@ function main(): void {
   // external-client still forwards o8 ONLY (it never forwarded codebase-memory).
   const bundleDir = mkdtempSync(join(tmpdir(), 'ec-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
+  const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
   writeFileSync(bundlePath, '');
+  writeFileSync(proxyPath, '');
   process.env.O8_BUNDLED_MCP_PATH = bundlePath;
   process.env.O8_BUNDLED_MCP_DIR = bundleDir;
   process.env.O8_NODE_BIN = '/usr/local/bin/node';
@@ -49,13 +51,13 @@ function main(): void {
   const server: ForwardedServer = { command: o8.command, args: o8.args, env: o8.env ?? {} };
 
   // Forwarded object = the operator entry, no type.
-  assert.deepStrictEqual(server, { command: '/usr/local/bin/node', args: [bundlePath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'forwarded object = operator stdio entry');
+  assert.deepStrictEqual(server, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'forwarded object = operator stdio entry');
 
   // Shape 1 — hermes argv.
   const hermes = hermesAddArgs(server);
   assert.deepStrictEqual(
     hermes,
-    ['mcp', 'add', 'o8', '--command', '/usr/local/bin/node', '--args', bundlePath, '--env', 'O8_API_BASE=http://127.0.0.1:3001'],
+    ['mcp', 'add', 'o8', '--command', '/usr/local/bin/node', '--args', proxyPath, '--env', 'O8_API_BASE=http://127.0.0.1:3001'],
     'hermes argv shape',
   );
 
@@ -63,7 +65,7 @@ function main(): void {
   const openclaw = openclawSetPayload(server);
   assert.strictEqual(
     openclaw,
-    JSON.stringify({ command: '/usr/local/bin/node', args: [bundlePath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }),
+    JSON.stringify({ command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }),
     'openclaw JSON shape',
   );
 

@@ -26,7 +26,9 @@ function main(): void {
   // Force PACKAGED resolution.
   const bundleDir = mkdtempSync(join(tmpdir(), 'mc-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
+  const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
   writeFileSync(bundlePath, '');
+  writeFileSync(proxyPath, '');
   process.env.O8_BUNDLED_MCP_PATH = bundlePath;
   process.env.O8_BUNDLED_MCP_DIR = bundleDir;
   process.env.O8_NODE_BIN = '/usr/local/bin/node';
@@ -47,7 +49,7 @@ function main(): void {
   // Set-B shape: o8 + codebase-memory, NO externals leak, NO type field.
   assert.deepStrictEqual(Object.keys(mcpServers), ['o8', 'codebase-memory'], 'only o8 + codebase-memory (externals filtered out)');
   assert(!('type' in server), 'server (o8) has no type field');
-  assert.deepStrictEqual(server, { command: '/usr/local/bin/node', args: [bundlePath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape');
+  assert.deepStrictEqual(server, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape');
   assert(codebaseMemory && !('type' in codebaseMemory), 'codebaseMemory present, no type');
   assert.deepStrictEqual(codebaseMemory, { command: cmBin, args: [], env: {} }, 'codebase-memory stdio shape');
 

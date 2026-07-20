@@ -36,7 +36,9 @@ function main(): void {
   // Force PACKAGED resolution + make codebase-memory available.
   const bundleDir = mkdtempSync(join(tmpdir(), 'gm-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
+  const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
   writeFileSync(bundlePath, '');
+  writeFileSync(proxyPath, '');
   process.env.O8_BUNDLED_MCP_PATH = bundlePath;
   process.env.O8_BUNDLED_MCP_DIR = bundleDir;
   process.env.O8_NODE_BIN = '/usr/local/bin/node';
@@ -58,7 +60,7 @@ function main(): void {
     assert.deepStrictEqual(servers[name], projection[name], `${name} matches toGeminiSettings projection`);
   }
   // stdio shape: no `type`; env intact on o8; empty env omitted on codebase-memory.
-  assert.deepStrictEqual(servers.o8, { command: '/usr/local/bin/node', args: [bundlePath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape (env intact)');
+  assert.deepStrictEqual(servers.o8, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape (env intact)');
   assert(!('type' in servers.o8), 'o8 has no type field');
   assert.deepStrictEqual(servers['codebase-memory'], { command: cmBin, args: [] }, 'codebase-memory stdio shape (empty env omitted)');
   assert(!('type' in servers['codebase-memory']), 'codebase-memory has no type field');

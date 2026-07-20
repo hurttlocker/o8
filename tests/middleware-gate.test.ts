@@ -126,6 +126,62 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('requires the operator ws-token for /api/mcp even on loopback', () => {
+    const denied = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:3001/api/mcp', {
+        method: 'POST',
+        headers: { host: '127.0.0.1:3001', 'x-o8-client-addr': '127.0.0.1' },
+      }),
+    );
+    const allowed = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:3001/api/mcp', {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:3001',
+          'x-o8-client-addr': '127.0.0.1',
+          authorization: `Bearer ${TEST_TOKEN}`,
+        },
+      }),
+    );
+    expect(denied.status).toBe(401);
+    expect(allowed.status).toBe(200);
+  });
+
+  it('requires the ws-token for a non-loopback /api/mcp caller', () => {
+    const denied = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mcp', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001', 'x-o8-client-addr': '192.168.1.50' },
+      }),
+    );
+    const allowed = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mcp', {
+        method: 'POST',
+        headers: {
+          host: '192.168.1.50:3001',
+          'x-o8-client-addr': '192.168.1.50',
+          authorization: `Bearer ${TEST_TOKEN}`,
+        },
+      }),
+    );
+    expect(denied.status).toBe(401);
+    expect(allowed.status).toBe(200);
+  });
+
+  it('rejects a hostile browser origin without an operator credential', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:3001/api/mcp', {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:3001',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'https://evil.example',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('gates /api/orchestrator/steer-packet (extracted layer-3 steer mutation) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/orchestrator/steer-packet', {

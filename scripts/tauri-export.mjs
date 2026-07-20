@@ -591,6 +591,28 @@ function compileServerBundle(label, entry, extraArgs = '') {
   }
 }
 
+// The operator stdio proxy has no tool registry or native state. Keep its
+// launcher free of the native-addon bootstrap so per-client compatibility
+// processes stay small and only relay JSON-RPC to the in-app /api/mcp host.
+function compilePureNodeBundle(label, entry) {
+  try {
+    const implementation = `${label}-impl.mjs`;
+    execSync(
+      `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${implementation}`,
+      { cwd: root, stdio: 'inherit' },
+    );
+    writeFileSync(
+      join(server, `${label}.mjs`),
+      `// Generated lightweight entry for ${label}.\nawait import('./${implementation}');\n`,
+    );
+    console.log(`📦 Compiled lightweight ${label}.mjs + ${implementation}`);
+  } catch (e) {
+    console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);
+    console.error(`   ${e.message}`);
+    process.exit(1);
+  }
+}
+
 // Native modules must be external — esbuild can't bundle .node addons.
 // better-sqlite3 is used by the db layer (imported transitively through
 // repo registry + lane tables) and node-pty is used by the terminal bridge.
@@ -619,6 +641,7 @@ compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts',
 // a source checkout. See docs/cortex-v2-dogfood-report-2026-04-09.md.
 compileServerBundle('operator-mcp-server-main', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
 compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts', NATIVE_EXTERNALS);
+compilePureNodeBundle('operator-mcp-proxy', 'src/lib/mcp/operator-mcp-proxy.ts');
 compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
 
 // ── Copy runtime-read prompt templates next to the bundles ──
@@ -705,7 +728,7 @@ exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
 
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
-const REQUIRED_BUNDLES = ['ws-server.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'cortex-mcp-server.mjs'];
+const REQUIRED_BUNDLES = ['ws-server.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'operator-mcp-proxy.mjs', 'cortex-mcp-server.mjs'];
 for (const bundle of REQUIRED_BUNDLES) {
   for (const required of [bundle, bundle.replace(/\.mjs$/, '-impl.mjs')]) {
     const bundlePath = join(server, required);
