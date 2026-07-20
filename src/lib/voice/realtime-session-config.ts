@@ -138,6 +138,38 @@ export interface PhoneCodeToolSelection {
   missing: string[];
 }
 
+const PHONE_INJECTED_REPO_FIELDS = new Set(['repo', 'repoId', 'repoPath']);
+
+/**
+ * The phone model never chooses repository identity. Hide those parameters from
+ * the minted schema, then let the Mac relay overwrite/inject its immutable grant.
+ */
+function phoneScopedTool(tool: Record<string, unknown>): Record<string, unknown> {
+  const parameters = tool.parameters;
+  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return tool;
+  const parameterRecord = parameters as Record<string, unknown>;
+  const properties = parameterRecord.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return tool;
+  const visibleProperties = Object.fromEntries(
+    Object.entries(properties as Record<string, unknown>)
+      .filter(([name]) => !PHONE_INJECTED_REPO_FIELDS.has(name)),
+  );
+  const required = Array.isArray(parameterRecord.required)
+    ? parameterRecord.required.filter(
+      (name): name is string => typeof name === 'string' && !PHONE_INJECTED_REPO_FIELDS.has(name),
+    )
+    : [];
+  return {
+    ...tool,
+    parameters: {
+      ...parameterRecord,
+      properties: visibleProperties,
+      required,
+      additionalProperties: false,
+    },
+  };
+}
+
 /** Select exactly the frozen Code pack, in canonical order, from the live Mac catalog. */
 export function selectPhoneCodeTools(
   tools: Array<Record<string, unknown>>,
@@ -151,7 +183,7 @@ export function selectPhoneCodeTools(
   return {
     tools: PHONE_CODE_TOOL_NAMES.flatMap((name) => {
       const tool = available.get(name);
-      return tool ? [tool] : [];
+      return tool ? [phoneScopedTool(tool)] : [];
     }),
     missing: PHONE_CODE_TOOL_NAMES.filter((name) => !available.has(name)),
   };
@@ -251,6 +283,24 @@ export const PHONE_CODE_SURFACE_INSTRUCTIONS =
   'steer-run, approve, and reject are consequential and must flow through the existing native ' +
   'confirmation step; never claim they happened because a button was rendered. Pair every ' +
   'ApprovalDecision with explicit approve and reject actions for the same targetId.';
+
+/** Phone-Code-only routing rules, kept separate from the shared Life persona. */
+export const PHONE_CODE_TOOL_INSTRUCTIONS =
+  '\n\nCODE TOOL ROUTING. The Mac has already locked this session to the repository shown in PHONE ' +
+  'WORKSPACE CONTEXT. Never supply repo, repoId, or repoPath yourself; the Mac injects and verifies ' +
+  'them for every Code tool. When the operator says an exact packetId, laneId, approvalId, or ' +
+  'sessionKey, trust that explicit stable ID and call the matching tool directly. Do not preflight ' +
+  'with o8_status or o8_needs_me unless the operator did not supply the ID or explicitly asked you ' +
+  'to inspect first. Preserve every supplied stable ID exactly. ' +
+  'Route by target and verb: status/running → o8_status; needs attention → o8_needs_me; review a ' +
+  'packet diff → o8_review_diff; wait for a packet → o8_packet_wait; tell or steer a packet → ' +
+  'o8_packet_steer; tell or steer a lane → o8_agent_task with laneId; rerun a packet → ' +
+  'o8_packet_rerun; reset a packet → o8_packet_reset; stop a lane → o8_stop_agent; approve or ' +
+  'reject an explicit approvalId → o8_approve_item or o8_reject_item; separate tracked coding work ' +
+  '→ o8_dispatch; live-agent work now → o8_delegate. ' +
+  'For a consequential tool, say one short heads-up and immediately call it. Never ask for spoken ' +
+  'confirmation and never wait for a yes: the phone displays the native confirmation card from the ' +
+  'tool call. After the tool returns, state the returned result and do not invent completion.';
 
 export interface RealtimeMintInputs {
   /** Realtime model id. */

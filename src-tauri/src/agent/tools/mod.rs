@@ -398,7 +398,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_needs_me",
-            "description": "List pending approvals and attention lanes with exact approvalId, packetId, laneId, sessionKey, repoId, and repoPath values. ALWAYS call this before approving or rejecting and copy approvalId exactly.",
+            "description": "List pending approvals and attention lanes with exact approvalId, packetId, laneId, sessionKey, repoId, and repoPath values. Use this to discover an approvalId when the operator did not already say one; an explicit approvalId can go directly to approve or reject.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -410,7 +410,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_approve_item",
-            "description": "Approve ONE pending o8 approval by exact approvalId from o8_needs_me. Never identify approvals by title. The user confirms before this executes.",
+            "description": "Approve ONE pending o8 approval by exact approvalId supplied by the operator or returned by o8_needs_me. Never identify approvals by title. Call directly when the operator already gave approvalId; the native confirmation gate runs after the call.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -421,7 +421,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_reject_item",
-            "description": "Reject ONE pending o8 approval by exact approvalId from o8_needs_me. Never identify approvals by title. The user confirms before this executes.",
+            "description": "Reject ONE pending o8 approval by exact approvalId supplied by the operator or returned by o8_needs_me. Never identify approvals by title. Call directly when the operator already gave approvalId; the native confirmation gate runs after the call.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -532,7 +532,7 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 Review (inspect a packet's diff before approving) ───────────────
         json!({
             "name": "o8_review_diff",
-            "description": "Inspect the diff and review state for one exact packetId returned by o8_status or o8_needs_me. ReadOnly; use o8_approve_item with approvalId to release governed work.",
+            "description": "Inspect the diff and review state for one exact packetId supplied by the operator or returned by o8_status or o8_needs_me. ReadOnly; use o8_approve_item with approvalId to release governed work.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -601,7 +601,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_packet_wait",
-            "description": "Wait briefly for one exact packetId to leave working state and report its review state. Copy packetId from o8_status or o8_needs_me.",
+            "description": "Wait briefly for one exact packetId supplied by the operator or returned by o8_status or o8_needs_me to leave working state and report its review state.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -849,7 +849,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_packet_steer",
-            "description": "Steer one running worker by exact packetId from o8_status or o8_needs_me. The user confirms first.",
+            "description": "Tell or steer one running packet by exact packetId supplied by the operator or returned by o8_status or o8_needs_me. Use o8_agent_task instead when the target is a laneId. Call immediately; the native confirmation gate runs after the call.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -861,7 +861,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_agent_task",
-            "description": "Send a follow-up task to exactly one working agent. Provide exactly one stable target: laneId or packetId from o8_status. Never target by codename or fuzzy task label.",
+            "description": "Tell or steer exactly one working lane by laneId, or send a follow-up task to one packet by packetId. Use o8_packet_steer for wording like tell/steer packet. Accept an exact ID supplied by the operator; never target by codename or fuzzy task label. Call immediately; the native confirmation gate runs after the call.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -874,7 +874,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_packet_rerun",
-            "description": "Restart one exact packetId, optionally with feedback about the previous attempt. The user confirms first.",
+            "description": "Rerun or restart one exact packetId, optionally with feedback about the previous attempt. Accept an exact packetId supplied by the operator. Call immediately; the native confirmation gate runs after the call.",
             "parameters": {
                 "type": "object",
                 "properties": {
