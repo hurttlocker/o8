@@ -89,7 +89,7 @@ export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
   sources: Record<keyof OperatorDefaults, SettingSource>;
   cliAuth?: {
-    statuses: Record<'codex' | 'claude', {
+    statuses: Record<'codex' | 'claude' | 'gemini' | 'opencode' | 'cursor' | 'grok' | 'pi', {
       installed: boolean;
       authenticated: boolean;
       detail: string;
@@ -100,6 +100,14 @@ export interface OperatorDefaultsResponse {
       detail: string | null;
     };
   };
+  dispatchableRuntimes?: Array<{
+    id: DispatchRuntime;
+    label: string;
+    available: boolean;
+    unavailableReason: 'not_installed' | 'needs_auth' | 'adapter_unavailable' | null;
+    detail: string;
+    fix: string;
+  }>;
 }
 
 export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it to manage from Settings.';
@@ -112,7 +120,7 @@ export const REQUIRE_APPROVAL_OPTIONS: Array<{ value: RequireApproval; label: st
 ];
 
 export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
-  { value: 'both', label: 'Both houses', detail: 'Use Claude and Codex together with the existing paired defaults.' },
+  { value: 'both', label: 'All available', detail: 'Use any installed dispatchable runtime; Codex remains the fallback until you choose one.' },
   { value: 'claude-only', label: 'Claude only', detail: 'Everything runs on your Claude subscription — Opus orchestrates, Sonnet works, escalates only when needed.' },
   { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-5.6 Sol orchestrates, Terra works, escalates to Sol when needed.' },
 ];
@@ -154,7 +162,7 @@ export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }>
 
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> = [
   { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse (GPT-5.6 Terra workers).' },
-  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — pairs opposite Codex orchestration.' },
+  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — available whenever its local CLI is signed in.' },
   { value: 'grok', label: 'Grok Build', detail: 'xAI Grok Build CLI — Grok 4.5 (Opus-class), sub-billed via SuperGrok.' },
   { value: 'cursor', label: 'Cursor', detail: 'Cursor CLI — subscription or CURSOR_API_KEY authenticated.' },
   { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3 Pro CLI — fastest for parallel fan-out.' },

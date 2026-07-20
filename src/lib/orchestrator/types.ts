@@ -24,7 +24,7 @@ export interface WorkerRouting {
    *  reasoning-effort surface (codex / claude-code), else null (gemini/opencode
    *  don't, so it's a clean no-op). */
   selectedEffort: ThinkingEffort | null;
-  enforcement: 'codex_only_production' | 'dispatchable_runtimes';
+  enforcement: 'dispatchable_runtimes';
   confidence: WorkerRoutingConfidence;
   reason: string;
   decidedAt: string;

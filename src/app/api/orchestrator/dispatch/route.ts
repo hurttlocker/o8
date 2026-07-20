@@ -77,6 +77,9 @@ export async function POST(request: NextRequest) {
       return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
         runtime: error.status.runtime,
         house: error.status.house,
+        installed: error.status.installed,
+        authenticated: error.status.authenticated,
+        unavailableReason: error.status.unavailableReason,
       });
     }
     const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';

@@ -26,7 +26,6 @@ import {
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { useEntitlement } from '@/lib/entitlement/context';
-import { resolveEffectiveDefaultOrchestratorBackend } from '@/lib/operator/dispatch-runtime-default';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { WorktreeRetentionSection } from './WorktreeRetentionSection';
 import {
@@ -267,12 +266,7 @@ export function OperatorDefaultsTab() {
     if (sources.defaultDispatchRuntime !== 'default') {
       return 'Used when you say "dispatch" without naming a runtime';
     }
-    const backend = resolveEffectiveDefaultOrchestratorBackend({
-      orchestratorBackend: values.orchestratorBackend,
-      inAppOrchestratorEnabled: values.inAppOrchestratorEnabled,
-    });
-    const backendLabel = backend === 'claude' ? 'Claude' : backend === 'codex' ? 'Codex' : backend;
-    return `Paired opposite your orchestrator (${backendLabel}) — pick one to override`;
+    return 'Codex is the default worker — pick any available runtime to override';
   })();
   const profileHint = cliAuth?.suggestedSubscriptionProfile.profile
     && cliAuth.suggestedSubscriptionProfile.profile !== activeProfile

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
 import { isSubscriptionProfile, type SubscriptionProfile } from './subscription-profile';
@@ -11,7 +12,7 @@ import { isSubscriptionProfile, type SubscriptionProfile } from './subscription-
  * holds the leaf types, their validators, and the `envXxx()` readers;
  * defaults.ts re-exports the public names so import sites are unchanged).
  */
-export const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'opencode', 'cursor', 'grok', 'pi'];
+export const DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();
 export function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
   return typeof value === 'string' && (DISPATCH_RUNTIMES as string[]).includes(value);
 }

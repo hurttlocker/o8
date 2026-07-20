@@ -134,12 +134,11 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const requestedEffort = normalizeEffort(input.requestedEffort);
 
   // Honor a requested runtime when the capability map marks it dispatchable.
-  // Anything else falls back to Codex. The paired operator default (opposite-
-  // frontier rule) is resolved by the SERVER entry points (create-mission /
-  // spawn-prompt routes, parseMissionRuntime) and arrives here as
-  // requestedRuntime — this module is client-bundled via the dashboard, so it
-  // must never require the server-only operator defaults itself (broke the
-  // 0.1.553 next build).
+  // Anything else falls back to Codex. An explicit operator default is resolved
+  // by the SERVER entry points (create-mission / spawn-prompt routes,
+  // parseMissionRuntime) and arrives here as requestedRuntime — this module is
+  // client-bundled via the dashboard, so it must never require the server-only
+  // operator defaults itself (broke the 0.1.553 next build).
   const dispatchable = listDispatchableRuntimes({ includeExperimental: true });
   const selectedRuntime = requestedRuntime && dispatchable.includes(requestedRuntime)
     ? requestedRuntime
@@ -178,12 +177,4 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     }),
     decidedAt: new Date().toISOString(),
   };
-}
-
-export function assertProductionAgentRuntime(runtime: OrchestratorRuntime | string): asserts runtime is 'codex' {
-  if (runtime !== PRODUCTION_AGENT_RUNTIME) {
-    throw new Error(
-      `Production agent spawning is restricted to Codex. Requested runtime "${runtime}" is scaffolded for later but cannot launch yet.`,
-    );
-  }
 }

@@ -7,19 +7,22 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { ORCHESTRATOR_RUNTIMES, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { scanAndLink } from './cli-locate';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
-export type RuntimeHouse = 'codex' | 'claude' | 'opencode' | 'cursor' | 'grok';
+export type RuntimeHouse = 'codex' | 'claude' | 'gemini' | 'opencode' | 'cursor' | 'grok' | 'pi';
+export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'adapter_unavailable';
 
 export interface RuntimeAuthStatus {
-  house: RuntimeHouse;
+  house: RuntimeHouse | null;
   runtime: OrchestratorRuntime;
   installed: boolean;
   authenticated: boolean;
+  unavailableReason: RuntimeUnavailableReason | null;
   detail: string;
   fix: string;
   checkedAt: number;
@@ -34,6 +37,15 @@ export interface MachineAuthProfileSuggestion {
 export interface RuntimeAuthSnapshot {
   statuses: Record<RuntimeHouse, RuntimeAuthStatus>;
   suggestedSubscriptionProfile: MachineAuthProfileSuggestion;
+}
+
+export interface DispatchableRuntimeAvailability {
+  id: OrchestratorRuntime;
+  label: string;
+  available: boolean;
+  unavailableReason: RuntimeUnavailableReason | null;
+  detail: string;
+  fix: string;
 }
 
 class DispatchPreflightError extends Error {
@@ -54,13 +66,18 @@ let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
 function nowStatus(
   house: RuntimeHouse,
   runtime: OrchestratorRuntime,
-  update: Omit<RuntimeAuthStatus, 'house' | 'runtime' | 'checkedAt' | 'fix'> & { fix?: string },
+  update: Omit<RuntimeAuthStatus, 'house' | 'runtime' | 'checkedAt' | 'fix' | 'unavailableReason'> & {
+    fix?: string;
+    unavailableReason?: RuntimeUnavailableReason | null;
+  },
 ): RuntimeAuthStatus {
   return {
     house,
     runtime,
     checkedAt: Date.now(),
     fix: update.fix ?? (house === 'codex' ? 'Run `codex login`.' : 'Run `claude` once to sign in.'),
+    unavailableReason: update.unavailableReason
+      ?? (!update.installed ? 'not_installed' : !update.authenticated ? 'needs_auth' : null),
     ...update,
   };
 }
@@ -156,6 +173,34 @@ async function detectClaude(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectGemini(): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink('gemini') ?? process.env.O8_GEMINI_BIN?.trim() ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('gemini', 'gemini', {
+      installed: false,
+      authenticated: false,
+      detail: 'Gemini CLI is not installed.',
+      fix: 'Install Gemini CLI, then sign in or set GEMINI_API_KEY.',
+    });
+  }
+
+  const home = os.homedir();
+  const authenticated = Boolean(
+    process.env.GEMINI_API_KEY
+    || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    || process.env.GOOGLE_AI_API_KEY,
+  ) || await fileExists(path.join(home, '.gemini', 'oauth_creds.json'));
+  return nowStatus('gemini', 'gemini', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? 'Gemini CLI is installed and has local sign-in or API-key evidence.'
+      : 'Gemini CLI is installed but no local sign-in or API-key evidence was found.',
+    fix: 'Run `gemini` once to sign in or set GEMINI_API_KEY.',
+    binaryPath,
+  });
+}
+
 async function detectOpencode(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('opencode') ?? undefined;
   if (!binaryPath) {
@@ -226,6 +271,34 @@ async function detectGrok(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectPi(): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink('pi') ?? process.env.O8_PI_BIN?.trim() ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('pi', 'pi', {
+      installed: false,
+      authenticated: false,
+      detail: 'Pi CLI is not installed.',
+      fix: 'Install Pi, then configure a provider with `pi`.',
+    });
+  }
+
+  const authenticated = Boolean(
+    process.env.ANTHROPIC_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.GEMINI_API_KEY
+    || process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+  ) || await fileExists(path.join(os.homedir(), '.pi', 'agent', 'auth.json'));
+  return nowStatus('pi', 'pi', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? 'Pi CLI is installed and has provider credentials.'
+      : 'Pi CLI is installed but no provider credentials were found.',
+    fix: 'Run `pi` and configure a provider before dispatching.',
+    binaryPath,
+  });
+}
+
 function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): MachineAuthProfileSuggestion {
   const codexReady = statuses.codex.installed && statuses.codex.authenticated;
   const claudeReady = statuses.claude.installed && statuses.claude.authenticated;
@@ -244,14 +317,16 @@ export function invalidateRuntimeAuthCache(): void {
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) return cache.snapshot;
-  const [codex, claude, opencode, cursor, grok] = await Promise.all([
+  const [codex, claude, gemini, opencode, cursor, grok, pi] = await Promise.all([
     detectCodex(),
     detectClaude(),
+    detectGemini(),
     detectOpencode(),
     detectCursor(),
     detectGrok(),
+    detectPi(),
   ]);
-  const statuses = { codex, claude, opencode, cursor, grok };
+  const statuses = { codex, claude, gemini, opencode, cursor, grok, pi };
   const snapshot = {
     statuses,
     suggestedSubscriptionProfile: suggestProfile(statuses),
@@ -263,18 +338,64 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
 function houseForRuntime(runtime: OrchestratorRuntime): RuntimeHouse | null {
   if (runtime === 'codex') return 'codex';
   if (runtime === 'claude-code') return 'claude';
+  if (runtime === 'gemini') return 'gemini';
   if (runtime === 'opencode') return 'opencode';
   if (runtime === 'cursor') return 'cursor';
   if (runtime === 'grok') return 'grok';
+  if (runtime === 'pi') return 'pi';
   return null;
 }
 
+export async function getDispatchableRuntimeAvailability(
+  authSnapshot?: RuntimeAuthSnapshot,
+): Promise<DispatchableRuntimeAvailability[]> {
+  const [snapshot, runtimeRegistry] = await Promise.all([
+    authSnapshot ?? getRuntimeAuthSnapshot(),
+    import('@/lib/runtimes'),
+  ]);
+
+  return listDispatchableRuntimes().map((id) => {
+    const adapter = runtimeRegistry.getRuntime(id);
+    if (!adapter?.capabilities.launch) {
+      return {
+        id,
+        label: ORCHESTRATOR_RUNTIMES[id].label,
+        available: false,
+        unavailableReason: 'adapter_unavailable' as const,
+        detail: `${ORCHESTRATOR_RUNTIMES[id].label} does not have a launch-capable runtime adapter.`,
+        fix: 'Install a build of o8 that includes this runtime adapter.',
+      };
+    }
+
+    const house = houseForRuntime(id);
+    const status = house ? snapshot.statuses[house] : null;
+    const available = Boolean(status?.installed && status.authenticated);
+    return {
+      id,
+      label: ORCHESTRATOR_RUNTIMES[id].label,
+      available,
+      unavailableReason: available ? null : status?.unavailableReason ?? 'adapter_unavailable',
+      detail: status?.detail ?? `${ORCHESTRATOR_RUNTIMES[id].label} readiness could not be determined.`,
+      fix: status?.fix ?? 'Check the runtime installation and credentials.',
+    };
+  });
+}
+
 export async function assertRuntimeDispatchable(runtime: OrchestratorRuntime): Promise<void> {
+  const availability = (await getDispatchableRuntimeAvailability()).find((entry) => entry.id === runtime);
+  if (availability?.available) return;
+
   const house = houseForRuntime(runtime);
-  if (!house) return;
   const snapshot = await getRuntimeAuthSnapshot();
-  const status = snapshot.statuses[house];
-  if (!status.installed || !status.authenticated) {
-    throw new DispatchPreflightError(status);
-  }
+  const status = house ? snapshot.statuses[house] : null;
+  throw new DispatchPreflightError(status ?? {
+    house,
+    runtime,
+    installed: false,
+    authenticated: false,
+    unavailableReason: availability?.unavailableReason ?? 'adapter_unavailable',
+    detail: availability?.detail ?? `Runtime "${runtime}" is not dispatchable.`,
+    fix: availability?.fix ?? 'Choose an available runtime.',
+    checkedAt: Date.now(),
+  });
 }

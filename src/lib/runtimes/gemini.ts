@@ -2,8 +2,7 @@
  * Gemini Runtime Adapter
  *
  * Wraps `src/lib/gemini/owned.ts` behind the universal AgentRuntime contract,
- * peer to Codex and Claude Code. Gemini CLI is now retired; this adapter stays
- * read-only so persisted gemini-owned sessions remain inspectable.
+ * peer to Codex and Claude Code.
  *
  * Discovery covers only IDE-owned sessions for now. Unlike Codex, we don't
  * scan the user's terminal history because the Gemini CLI doesn't emit a
@@ -40,12 +39,12 @@ import {
 const capabilities: RuntimeCapabilities = {
   discover: true,
   readTranscript: true,
-  launch: false,
-  resume: false,
-  interrupt: false,
+  launch: true,
+  resume: true,
+  interrupt: true,
   reviewDiffs: true,
   costTelemetry: true,
-  streaming: false,
+  streaming: true,
 };
 
 // ── Session mapping helpers ──────────────────────────────────────────────────
@@ -222,7 +221,7 @@ export const geminiRuntime: AgentRuntime = {
   id: 'gemini',
   displayName: 'Gemini',
   capabilities,
-  dispatchCapability: undefined,
+  dispatchCapability,
 
   async discoverSessions(): Promise<RuntimeSession[]> {
     const owned = await getOwnedGeminiFleetAdditions({ fresh: true }).catch((err) => {
@@ -253,12 +252,6 @@ export const geminiRuntime: AgentRuntime = {
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
-    void opts;
-    return {
-      ok: false,
-      note: 'Gemini CLI is retired and cannot launch new sessions. Use Antigravity once its dispatch contract is proven.',
-    };
-    /*
     const startedAtMs = Date.now();
     const result = await launchOwnedGeminiSession({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model });
     if (result.ok && result.surfaceId) {
@@ -276,17 +269,9 @@ export const geminiRuntime: AgentRuntime = {
       note: result.note,
       sessionKey: result.surfaceId,
     };
-    */
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
-    void message;
-    return {
-      ok: false,
-      note: 'Gemini CLI is retired and read-only; existing sessions can be inspected but not resumed.',
-      sessionKey,
-    };
-    /*
     if (!sessionKey.startsWith('gemini-owned:')) {
       return {
         ok: false,
@@ -310,16 +295,9 @@ export const geminiRuntime: AgentRuntime = {
       scheduleGeminiUsageDispatch(sessionKey, startedAtMs, baseline);
       return { ok: false, note: err instanceof Error ? err.message : String(err) };
     }
-    */
   },
 
   async interrupt(sessionKey: string): Promise<RuntimeActionResult> {
-    return {
-      ok: false,
-      note: 'Gemini CLI is retired and read-only; existing sessions cannot be interrupted from o8.',
-      sessionKey,
-    };
-    /*
     if (!sessionKey.startsWith('gemini-owned:')) {
       return {
         ok: false,
@@ -333,7 +311,6 @@ export const geminiRuntime: AgentRuntime = {
       note: result.note,
       sessionKey,
     };
-    */
   },
 
   async getChangedFiles(sessionKey: string): Promise<RuntimeChangedFile[]> {
