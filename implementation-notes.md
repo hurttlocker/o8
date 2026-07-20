@@ -72,3 +72,29 @@
 ## Deviations
 
 - The existing declarative owned-session registration did not create the universal `AgentRuntime` required by mission dispatch, so one shared bridge was added rather than five hand-written adapters.
+
+# Implementation Notes — #1538 LaunchAgent crash loops
+
+## Plan
+
+- Trace every launchd registration that wraps an o8-owned process.
+- Reuse the existing supervisor incident persistence and Incident Queue presentation path.
+- Add a bounded rolling-window failure detector, real-entry-point coverage, and focused verification.
+
+## Decisions
+
+- Reused the supervisor inbox's existing `launch_agent_crash_loop` kind and label-based incident deduplication.
+- Discover counter files instead of hardcoding one service, with the launchd-provided `XPC_SERVICE_NAME` as the label.
+- Reset a service's sequence after five minutes of continuous uptime so the alert measures consecutive respawns rather than unrelated restarts in one hour.
+
+## Verification
+
+- `npx vitest run src/lib/mcp/launch-agent-crash-counter.test.ts src/lib/supervisor/launch-agent-health.test.ts src/lib/inbox/card-copy.test.ts`
+- `npx vitest run tests/mcp-source-boot.test.ts`
+- `npx tsc --noEmit`
+- `npm run rule-check -- --base=main`
+- Changed-file ESLint completed with one unrelated existing warning in `src/ws-server.ts` at line 2611.
+
+## Deviations
+
+- The packet base already contained a service-specific #1538 implementation from `ad3a85e5`, so this patch closes its generic-service and consecutive-respawn gaps instead of duplicating the existing Incident Queue path.
