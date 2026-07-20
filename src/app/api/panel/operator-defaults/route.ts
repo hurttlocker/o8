@@ -35,6 +35,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isWorkerRuntimeList(value: unknown): value is OperatorDefaults['workerRuntimes'] {
+  return Array.isArray(value) && value.length > 0 && value.every(isDispatchRuntime);
+}
+
 function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefaults> {
   const update: Partial<OperatorDefaults> = {};
 
@@ -122,6 +126,10 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('defaultDispatchRuntime must name a dispatchable runtime.');
     }
     update.defaultDispatchRuntime = body.defaultDispatchRuntime;
+  }
+
+  if (isWorkerRuntimeList(body.workerRuntimes)) {
+    update.workerRuntimes = [...new Set(body.workerRuntimes)];
   }
 
   if (body.codexWorkerEffort !== undefined) {
@@ -377,6 +385,9 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
     if (!isRecord(body)) {
       return response({ error: 'Invalid request body.' }, 400);
+    }
+    if (body.workerRuntimes !== undefined && !isWorkerRuntimeList(body.workerRuntimes)) {
+      return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
     }
 
     const update = normalizeUpdate(body);

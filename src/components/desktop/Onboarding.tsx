@@ -7,7 +7,7 @@
  *   1. Welcome + GitHub sign-in (feature carousel)
  *   2. Repo picker (select which repos to manage)
  *   3. Runtime detection (auto-scan installed tools)
- *   4. Default dispatch runtime (Codex / Claude Code / Gemini)
+ *   4. Orchestrator and worker runtime selection
  *   5. Bring Your Brain (ChatGPT/Claude import)
  *   6. Ready (summary + enter dashboard)
  *
@@ -281,7 +281,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
           <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--t-text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>
             {step === 'repos' ? 'Choose your repositories'
               : step === 'runtimes' ? 'Your assistant engine'
-              : step === 'dispatch' ? 'Default dispatch runtime'
+              : step === 'dispatch' ? 'Choose your runtimes'
               : step === 'import' ? 'Make o8 yours'
               : 'You\'re all set'}
           </div>
@@ -319,10 +319,9 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
           />
         )}
 
-        {/* ── Step 4: Default dispatch runtime ── */}
+        {/* ── Step 4: Orchestrator + worker runtime selection ── */}
         {step === 'dispatch' && (
           <OnboardingDispatchStep
-            runtimes={runtimes}
             onContinue={goNext}
             onSkip={goNext}
             renderButton={({ label, onClick, disabled }) => (

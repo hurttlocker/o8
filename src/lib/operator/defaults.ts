@@ -89,8 +89,6 @@ export type {
 } from './defaults-env';
 export { coerceStoredTier, isTargetingTier, mergeTier } from './targeting-tier';
 export type { TargetingTier } from './targeting-tier';
-
-
 /**
  * Operator defaults — the dispatch/supervision knobs exposed in Settings
  * (one field per knob in {@link OperatorDefaults}; the count grows, don't
@@ -135,6 +133,7 @@ export interface OperatorDefaults {
   requireApproval: RequireApproval;
   orchestratorModel: string;
   defaultDispatchRuntime: OrchestratorRuntime;
+  workerRuntimes: OrchestratorRuntime[];
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
   codexWorkerEffort: ThinkingEffort;
   /** Default Claude Code worker effort. 'adaptive' preserves runtime default behavior. */
@@ -162,20 +161,7 @@ export interface OperatorDefaults {
   /** Chat model on the local endpoint for Brain compose/classify + dictation polish.
    *  Empty = cloud/managed path. Env: `O8_LOCAL_CHAT_MODEL`. */
   localChatModel: string;
-  /**
-   * Off by default for v1. When true, opencode shows up in the dispatch
-   * runtime picker + packet runtime dropdown + command palette. Kept as an
-   * opt-in while we dogfood the adapter with early users; the owned-session
-   * store stays wired either way so existing opencode lanes keep working
-   * even after the flag flips off.
-   */
   experimentalOpencode: boolean;
-  /**
-   * Off by default — Gemini is hidden from the dispatch + CLI pickers for v1
-   * (we ship Claude + Codex). Mirrors `experimentalOpencode`: flip on to
-   * surface Gemini again. The adapter stays wired either way so existing
-   * Gemini lanes keep working even with the flag off.
-   */
   experimentalGemini: boolean;
   /**
    * Off by default for alpha. The casual `llm-chat` ("o8 Default" assistant)
@@ -355,6 +341,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
   defaultDispatchRuntime: 'codex',
+  workerRuntimes: ['codex'],
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
   defaultDispatchModel: '',
@@ -476,6 +463,7 @@ interface StoredOperatorDefaults {
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchRuntimeExplicit?: boolean;
+  workerRuntimes?: OrchestratorRuntime[];
   codexWorkerEffort?: ThinkingEffort;
   claudeWorkerEffort?: ThinkingEffort;
   defaultDispatchModel?: string;
@@ -568,6 +556,10 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
     result.defaultDispatchRuntimeExplicit = stored.defaultDispatchRuntimeExplicit !== false;
+  }
+  if (Array.isArray(stored.workerRuntimes)) {
+    const workerRuntimes = [...new Set(stored.workerRuntimes.filter(isDispatchRuntime))];
+    if (workerRuntimes.length > 0) result.workerRuntimes = workerRuntimes;
   }
   if (stored.codexWorkerEffort && isThinkingEffort(stored.codexWorkerEffort)) {
     result.codexWorkerEffort = stored.codexWorkerEffort;
@@ -746,6 +738,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime,
+    workerRuntimes: fileValues.workerRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.workerRuntimes,
     codexWorkerEffort:
       envCodexEffort ?? fileValues.codexWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.codexWorkerEffort,
     claudeWorkerEffort:
@@ -801,6 +794,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
+    workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
       envCodexEffort !== null ? 'env' : fileValues.codexWorkerEffort !== undefined ? 'file' : 'default',
     claudeWorkerEffort:
@@ -939,6 +933,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
     stored.defaultDispatchRuntimeExplicit = true;
+  }
+  if (update.workerRuntimes !== undefined) {
+    if (!Array.isArray(update.workerRuntimes) || update.workerRuntimes.length === 0 || !update.workerRuntimes.every(isDispatchRuntime)) {
+      throw new Error('workerRuntimes must contain at least one dispatchable runtime.');
+    }
+    stored.workerRuntimes = [...new Set(update.workerRuntimes)];
   }
   if (update.codexWorkerEffort !== undefined) {
     if (!isThinkingEffort(update.codexWorkerEffort)) {

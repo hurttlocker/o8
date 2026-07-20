@@ -53,6 +53,7 @@ export interface OperatorDefaults {
   promptCachingEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: DispatchRuntime;
+  workerRuntimes: DispatchRuntime[];
   codexWorkerEffort: ThinkingEffort;
   claudeWorkerEffort: ThinkingEffort;
   defaultDispatchModel: string;
