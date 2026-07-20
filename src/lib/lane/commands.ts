@@ -573,6 +573,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
       // Durable approved-review precondition. Computed after the merge gate so
       // block-level gate findings still force an operator card regardless of review.
+      // This invariant is intentionally independent of the policy table: a
+      // workspace override may make a reviewed merge stricter, but it cannot
+      // authorize an unreviewed orchestrator/agent merge. The explicit user
+      // actor path remains governed by the separate operator-trust contract.
+      if (actor !== 'user' && !durableReview.approved) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Merge refused: ${durableReview.reason}`,
+        };
+      }
       let hasApprovedReview = actor === 'user' ? true : durableReview.approved;
       let surfaceReasons: string[] = [];
       if (actor !== 'user' && resolveRequireApprovalSync() === 'surface') {
