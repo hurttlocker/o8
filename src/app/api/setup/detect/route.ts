@@ -239,13 +239,13 @@ function detectGemini(deadlineAt?: number): DetectedTool {
   );
   return {
     id: 'gemini',
-    name: 'Gemini CLI (retired)',
+    name: 'Gemini CLI',
     detected,
-    ready: false,
-    authHint: detected ? 'Gemini CLI is retired; install Antigravity CLI for Google runtime coverage.' : undefined,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'run: gemini (or set GEMINI_API_KEY)' : undefined,
     version,
     path,
-    details: { authPresent, retired: true },
+    details: { authPresent },
   };
 }
 

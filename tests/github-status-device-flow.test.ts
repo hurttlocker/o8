@@ -1,4 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/github-broker/status', () => ({
+  getGitHubBrokerStatus: vi.fn(async () => ({ configured: false })),
+}));
+
+vi.mock('@/lib/repos/registry', () => ({
+  listRepos: vi.fn(async () => []),
+}));
 
 /**
  * Real-path test for the config seam behind issue #1334.

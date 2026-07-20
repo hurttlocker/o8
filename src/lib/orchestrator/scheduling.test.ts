@@ -139,7 +139,7 @@ describe('dispatch scheduling caps and waves', () => {
     expect(next.packets.filter((packet) => packet.status === 'queued')).toHaveLength(3 - Math.min(2, MAX_PARALLEL_DISPATCHES));
   }, 20_000);
 
-  it('honors an explicit per-runtime launch budget (retired gemini reroutes to codex)', async () => {
+  it('honors an explicit per-runtime launch budget for Gemini', async () => {
     const repoPath = makeRepo();
     const cap = 3;
     const packets = [1, 2, 3, 4].map((index) => packetFixture(repoPath, `gemini-${index}`, {
@@ -148,13 +148,11 @@ describe('dispatch scheduling caps and waves', () => {
     }));
 
     const next = await runDispatchTick(missionFixture(repoPath, packets), {
-      launchBudget: { maxLaunches: 10, perRuntime: { codex: cap } },
+      launchBudget: { maxLaunches: 10, perRuntime: { gemini: cap } },
     });
 
-    // Gemini is retired: legacy gemini packets reroute to codex at dispatch,
-    // so the codex per-runtime budget is what binds.
     expect(launchMock.calls.map((call) => call.packetId)).toHaveLength(cap);
-    expect(launchMock.calls.every((call) => call.runtime === 'codex')).toBe(true);
+    expect(launchMock.calls.every((call) => call.runtime === 'gemini')).toBe(true);
     expect(next.packets.filter((packet) => packet.status === 'launching')).toHaveLength(cap);
     expect(next.packets.find((packet) => packet.id === 'gemini-4')?.status).toBe('queued');
   }, 20_000);

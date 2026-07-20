@@ -26,7 +26,7 @@ describe('targeting tier defaults', () => {
 describe('isTargetingTier', () => {
   it('accepts a well-formed tier', () => {
     expect(isTargetingTier({ runtime: 'opencode', model: 'google/gemini-2.5-flash', effort: 'low' })).toBe(true);
-    expect(isTargetingTier({ runtime: 'gemini', model: 'flash', effort: 'low' })).toBe(false); // retired 2026-07
+    expect(isTargetingTier({ runtime: 'gemini', model: 'flash', effort: 'low' })).toBe(true);
     expect(isTargetingTier({ runtime: 'codex', model: '', effort: 'max' })).toBe(true);
   });
   it('rejects bad runtime / missing model / bad effort / non-object', () => {

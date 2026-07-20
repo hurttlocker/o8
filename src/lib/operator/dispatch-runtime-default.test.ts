@@ -10,13 +10,13 @@ describe('resolveDefaultDispatchRuntime', () => {
     })).toBe('codex');
   });
 
-  it('pairs Codex orchestrators with Claude Code workers', () => {
+  it('keeps Codex as the fallback when the operator has not chosen a worker', () => {
     expect(resolveDefaultDispatchRuntime({
       orchestratorBackend: 'codex',
-    })).toBe('claude-code');
+    })).toBe('codex');
   });
 
-  it('pairs Claude orchestrators with Codex workers', () => {
+  it('does not infer a worker choice from the orchestrator backend', () => {
     expect(resolveDefaultDispatchRuntime({
       orchestratorBackend: 'claude',
     })).toBe('codex');
@@ -28,11 +28,11 @@ describe('resolveDefaultDispatchRuntime', () => {
     })).toBe('codex');
   });
 
-  it('keeps untouched auto defaults live when the orchestrator flips', () => {
+  it('keeps untouched auto defaults on Codex when the orchestrator flips', () => {
     expect(resolveDefaultDispatchRuntime({
       orchestratorBackend: 'auto',
       inAppOrchestratorEnabled: false,
-    })).toBe('claude-code');
+    })).toBe('codex');
     expect(resolveDefaultDispatchRuntime({
       orchestratorBackend: 'auto',
       inAppOrchestratorEnabled: true,

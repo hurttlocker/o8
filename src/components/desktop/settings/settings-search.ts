@@ -131,7 +131,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Workers use the Brain", description: "Teach dispatched workers o8 ask for cited repo answers", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Claude worker effort", description: "Fallback effort for spawned Claude Code workers" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Codex worker effort", description: "Fallback effort for spawned Codex workers" },
-  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Default worker", description: "Paired opposite your orchestrator \u2014 pick one to override (may be profile-pinned)" },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Default worker", description: "Codex by default \u2014 pick any installed dispatchable runtime to override (may be profile-pinned)" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Subscription profile", description: "Use both houses by default \u00b7 Codex/Claude auth status \u00b7 optional profile hint" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Canvas mode", description: "The glass canvas \u2014 voice-first fleet surface. Sole gate.", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Gemini runtime", description: "Show Gemini in dispatch + CLI pickers", founders: true },

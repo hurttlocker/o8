@@ -62,11 +62,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     description: 'Anthropic Claude Code CLI worker via interactive stream-json. Full-access permission mode, sub-billed; never --print.',
   },
   gemini: {
-    label: 'Gemini (retired)',
+    label: 'Gemini',
     shortLabel: 'Gemini',
-    // Google retired Gemini CLI consumer access on 2026-06-18. Keep the
-    // runtime literal for persisted lanes, but never accept new dispatch.
-    dispatchable: false,
+    dispatchable: true,
     requiresModel: false,
     // 2026-04-28: reverted from gemini-3.1-pro to gemini-3-pro-preview after
     // the 3.1-pro fan-out test (mission-958a824e-b0a) showed 5/5 hallucinated
@@ -77,7 +75,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     accentColor: '#4285f4', // Google blue
     binaryName: 'gemini',
     tier: 'standard',
-    description: 'Retired Gemini CLI adapter. Existing sessions stay readable; new dispatch uses Antigravity once its contract is proven.',
+    description: 'Google Gemini CLI worker via headless stream-json with owned-session resume and review support.',
   },
   antigravity: {
     label: 'Antigravity',
@@ -160,5 +158,5 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): Orchestrator
   return ORCHESTRATOR_RUNTIMES[runtime];
 }
 
-/** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
+/** Runtimes that ship in the dispatch picker. Mirrors the canonical capability set. */
 export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();

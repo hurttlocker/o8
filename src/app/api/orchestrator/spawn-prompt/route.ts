@@ -94,9 +94,13 @@ export async function POST(request: NextRequest) {
       return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
         runtime: error.status.runtime,
         house: error.status.house,
+        installed: error.status.installed,
+        authenticated: error.status.authenticated,
+        unavailableReason: error.status.unavailableReason,
       });
     }
-    throw error;
+    const message = error instanceof Error ? error.message : 'Runtime readiness check failed.';
+    return operatorError('runtime_preflight_failed', message, 500);
   }
 
   let issues;
