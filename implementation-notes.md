@@ -137,3 +137,12 @@
 ### Deviations
 
 - None.
+
+### Operator feedback closure
+
+- `resetProductTelemetry` now asserts that the route reset returns HTTP 200, so teardown fails visibly instead of silently leaving telemetry consent enabled.
+- `npx tsc --noEmit` passed.
+- The seven focused telemetry files passed: 7 files and 19 tests.
+- Scoped ESLint passed for `tests/product-telemetry-toggle.test.ts`.
+- `npm run rule-check -- --base=main` passed with zero violations; the test-only TypeScript patch intentionally produced 0 scanned production files.
+- `git diff --check` passed.
