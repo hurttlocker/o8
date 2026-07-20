@@ -250,6 +250,22 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O
     }, SAVE_DEBOUNCE_MS) as unknown as number;
   }, [persist]);
 
+  // Per-note server actions write immediately. Adopt their authoritative
+  // content without scheduling a second autosave or leaving the poller's
+  // last-known server snapshot behind.
+  const handleServerMutation = useCallback((next: string) => {
+    if (debounceRef.current) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    serverContentRef.current = next;
+    setContent(next);
+    setLoadedContent(next);
+    setSavePending(false);
+    setSavedAt(Date.now());
+    setError(null);
+  }, []);
+
   // Adopt external writes to o8.md (the orchestrator's annotations) without a
   // manual reload. Read-only against the server — never writes back — and only
   // swaps in new content when local === last-saved (no unsaved edits), so it
@@ -550,7 +566,12 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O
                 ['--o8ed-note-scale' as string]: embedded ? 0.89 : 1,
               } as CSSProperties}
             >
-              <O8SpecEditor value={content} onChange={handleChange} repoPath={repoPath} />
+              <O8SpecEditor
+                value={content}
+                onChange={handleChange}
+                onServerMutation={handleServerMutation}
+                repoPath={repoPath}
+              />
             </div>
           )}
         </div>

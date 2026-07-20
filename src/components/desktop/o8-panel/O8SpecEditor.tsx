@@ -61,6 +61,9 @@ const spacerField = StateField.define<DecorationSet>({
 interface O8SpecEditorProps {
   value: string;
   onChange: (value: string) => void;
+  /** Adopt content written synchronously by a per-note server action without
+   * scheduling a duplicate debounced PUT. */
+  onServerMutation?: (value: string) => void;
   // Repo root for inline image upload (drop/paste → <repo>/o8-assets/). When
   // absent (e.g. the standalone editor lab) image drop/paste is disabled and the
   // editor stays a pure markdown surface.
@@ -207,6 +210,7 @@ interface NoteLayout {
   suggestionKind?: string;
   originalText?: string;
   replacementText?: string;
+  anchorText?: string;
   status: string | null;
   offset: number;
   endOffset: number;
@@ -214,7 +218,7 @@ interface NoteLayout {
   top: number;
 }
 
-export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
+export function O8SpecEditor({ value, onChange, onServerMutation, repoPath }: O8SpecEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -285,7 +289,7 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
         try { const c = view.coordsAtPos(i.offset); if (c) top = Math.max(0, c.top - wrapTop - spacerAbove(i.offset)); } catch { /* off-screen */ }
         return {
           id: i.id, kind: i.kind, author: i.author, text: i.text, suggestionKind: i.suggestionKind,
-          originalText: i.originalText, replacementText: i.replacementText, status: i.status,
+          originalText: i.originalText, replacementText: i.replacementText, anchorText: i.anchorText, status: i.status,
           offset: i.offset, endOffset: i.endOffset, replies: repliesByParent[i.id] ?? [], top,
         };
       });
@@ -426,49 +430,84 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
     viewRef.current?.dispatch({ effects: specRepoPathCompartment.reconfigure(specRepoPathFacet.of(repoPath ?? null)) });
   }, [repoPath]);
 
-  // Accept / Dismiss a suggestion = a real doc mutation on its marker span.
-  const resolveSuggestion = useCallback((note: NoteLayout, accept: boolean) => {
+  const postNoteAction = useCallback(async (
+    action: 'scoped-reply' | 'apply-suggestion' | 'resolve',
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
     const view = viewRef.current;
-    if (!view) return;
-    const marker = view.state.doc.sliceString(note.offset, note.endOffset);
-    let insert = '';
-    let mm: RegExpMatchArray | null;
-    if ((mm = marker.match(/^\{~~([\s\S]*?)~>([\s\S]*?)~~\}/))) insert = accept ? mm[2] : mm[1]; // sub: new | old
-    else if ((mm = marker.match(/^\{\+\+([\s\S]*?)\+\+\}/))) insert = accept ? mm[1] : ''; // add: keep | drop
-    else if ((mm = marker.match(/^\{--([\s\S]*?)--\}/))) insert = accept ? '' : mm[1]; // del: drop | keep
-    view.dispatch({ changes: { from: note.offset, to: note.endOffset, insert } });
-  }, []);
+    if (!view || !repoPath) throw new Error('Select a repo before acting on a note.');
+    const response = await fetch(`/api/repo-spec?action=${action}&repoPath=${encodeURIComponent(repoPath)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, content: view.state.doc.toString() }),
+    });
+    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (!response.ok || data?.ok !== true) {
+      throw new Error(typeof data?.error === 'string' ? data.error : 'Note action failed.');
+    }
+    if (typeof data.content === 'string') onServerMutation?.(data.content);
+    return data;
+  }, [onServerMutation, repoPath]);
 
-  // Resolve a comment thread = add status="resolved" to its metadata (fades it).
-  const resolveComment = useCallback((note: NoteLayout) => {
-    const view = viewRef.current;
-    if (!view) return;
-    const marker = view.state.doc.sliceString(note.offset, note.endOffset);
-    const lastBrace = marker.lastIndexOf('}');
-    if (lastBrace < 0) return;
-    const pos = note.offset + lastBrace;
-    view.dispatch({ changes: { from: pos, to: pos, insert: ' status="resolved"' } });
-  }, []);
+  const resolveSuggestion = useCallback(async (note: NoteLayout, accept: boolean) => {
+    await postNoteAction('apply-suggestion', { targetId: note.id, accept });
+    return accept ? 'Applied to o8.md.' : 'Suggestion dismissed.';
+  }, [postNoteAction]);
 
-  // Reply to a comment = splice an operator reply marker after it (re=parentId).
-  const replyToComment = useCallback((note: NoteLayout, message: string) => {
-    const view = viewRef.current;
+  const resolveComment = useCallback(async (note: NoteLayout) => {
+    await postNoteAction('resolve', { targetId: note.id });
+    return 'Thread resolved.';
+  }, [postNoteAction]);
+
+  const replyToNote = useCallback(async (note: NoteLayout, message: string) => {
     const text = message.trim();
-    if (!view || !text || /<<\}|\+\+\}|--\}|~~\}|==\}/.test(text)) return;
-    let max = 0;
-    for (const it of extractRoughdraftReviewIndex(view.state.doc.toString()).items) {
-      const m = /^c(\d+)$/.exec(it.id);
-      if (m) max = Math.max(max, Number.parseInt(m[1], 10));
+    if (!text) throw new Error('Write a reply first.');
+    await postNoteAction('scoped-reply', { parentId: note.id, message: text });
+    return 'o8 replied to this note.';
+  }, [postNoteAction]);
+
+  const actOnNote = useCallback(async (note: NoteLayout) => {
+    if (!repoPath) throw new Error('Select a repo before acting on a note.');
+    const anchor = note.anchorText ?? note.originalText ?? '(no literal anchor)';
+    const prompt = [
+      'Carry out this accepted o8.md annotation as one scoped action. Do not rerun the full o8.md review or regenerate other annotations.',
+      '',
+      `Annotation: ${note.text || 'Suggested edit'}`,
+      `Anchor: ${anchor}`,
+      '',
+      'Use the repository state to decide the concrete action. If the note recommends tracking work, file the appropriate ticket. If it recommends a code or documentation change, implement and verify that change. Keep the work limited to this annotation.',
+    ].join('\n');
+    const response = await fetch('/api/orchestrator/delegate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        repoPath,
+        prompt,
+        taskName: `Act on o8.md note ${note.id}`,
+      }),
+    });
+    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const awaitingApproval = response.status === 202 && typeof data?.approvalId === 'string';
+    if ((!response.ok || data?.ok !== true) && !awaitingApproval) {
+      throw new Error(
+        typeof data?.error === 'string'
+          ? data.error
+          : typeof data?.note === 'string'
+            ? data.note
+            : 'Unable to dispatch this note.',
+      );
     }
-    // Insert at the END of the thread (after the last existing reply) so a new
-    // reply lands at the bottom chronologically — not right under the parent.
-    let insertPos = note.endOffset;
-    for (const it of extractRoughdraftReviewIndex(view.state.doc.toString()).items) {
-      if (it.parentId === note.id) insertPos = Math.max(insertPos, it.endOffset);
-    }
-    const reply = `{>>${text}<<}{id="c${max + 1}" by="user" at="${new Date().toISOString()}" re="${note.id}"}`;
-    view.dispatch({ changes: { from: insertPos, to: insertPos, insert: reply } });
-  }, []);
+    const actionId = awaitingApproval && typeof data?.approvalId === 'string'
+      ? data.approvalId
+      : typeof data?.packetId === 'string'
+        ? data.packetId
+        : 'scoped action';
+    await postNoteAction('resolve', {
+      targetId: note.id,
+      summary: awaitingApproval ? `Accepted; awaiting approval ${actionId}` : `Accepted; dispatched ${actionId}`,
+    });
+    return awaitingApproval ? 'Action is awaiting approval.' : `Action dispatched as ${actionId}.`;
+  }, [postNoteAction, repoPath]);
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -505,7 +544,13 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             style={{ paddingTop: 3, paddingBottom: 4, paddingLeft: 14, paddingRight: 6, borderRadius: 9, backgroundColor: 'transparent', transition: 'background-color 140ms ease' }}
           >
-            <MarginNote note={n} onResolve={resolveSuggestion} onResolveComment={resolveComment} onReply={replyToComment} />
+            <MarginNote
+              note={n}
+              onResolve={resolveSuggestion}
+              onResolveComment={resolveComment}
+              onReply={replyToNote}
+              onAct={actOnNote}
+            />
           </div>
         </motion.div>
       ))}
@@ -513,20 +558,46 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
   );
 }
 
-function MarginNote({ note, onResolve, onResolveComment, onReply }: {
+type NoteAction = 'reply' | 'apply' | 'dismiss' | 'resolve' | 'act';
+
+function MarginNote({ note, onResolve, onResolveComment, onReply, onAct }: {
   note: NoteLayout;
-  onResolve: (n: NoteLayout, accept: boolean) => void;
-  onResolveComment: (n: NoteLayout) => void;
-  onReply: (n: NoteLayout, message: string) => void;
+  onResolve: (n: NoteLayout, accept: boolean) => Promise<string>;
+  onResolveComment: (n: NoteLayout) => Promise<string>;
+  onReply: (n: NoteLayout, message: string) => Promise<string>;
+  onAct: (n: NoteLayout) => Promise<string>;
 }) {
   const [replying, setReplying] = useState(false);
   const [draft, setDraft] = useState('');
+  const [pending, setPending] = useState<NoteAction | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const isAI = note.author === 'AI';
   const ink = isAI ? 'var(--o8ed-orange)' : 'var(--o8ed-ink-soft)';
   const resolved = note.status === 'resolved';
   const isSuggestion = note.kind === 'suggestion';
   const isComment = note.kind === 'comment';
-  const submitReply = () => { onReply(note, draft); setDraft(''); setReplying(false); };
+  const runAction = async (action: NoteAction, operation: () => Promise<string>): Promise<boolean> => {
+    if (pending) return false;
+    setPending(action);
+    setFeedback(null);
+    try {
+      const message = await operation();
+      setFeedback({ tone: 'ok', text: message });
+      return true;
+    } catch (error) {
+      setFeedback({ tone: 'error', text: error instanceof Error ? error.message : 'Note action failed.' });
+      return false;
+    } finally {
+      setPending(null);
+    }
+  };
+  const submitReply = async () => {
+    const sent = await runAction('reply', () => onReply(note, draft));
+    if (sent) {
+      setDraft('');
+      setReplying(false);
+    }
+  };
   return (
     <div style={{ opacity: resolved ? 0.4 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -545,15 +616,23 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
         </div>
       ))}
       {isSuggestion && !resolved ? (
-        <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
-          <NoteChip label="Accept" tone="add" onClick={() => onResolve(note, true)} />
-          <NoteChip label="Dismiss" tone="muted" onClick={() => onResolve(note, false)} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
+          <NoteChip label="Accept & apply" tone="add" disabled={pending !== null} busy={pending === 'apply'} onClick={() => { void runAction('apply', () => onResolve(note, true)); }} />
+          <NoteChip label="Accept & act" tone="add" disabled={pending !== null} busy={pending === 'act'} onClick={() => { void runAction('act', () => onAct(note)); }} />
+          <NoteChip label="Reply" tone="muted" disabled={pending !== null} onClick={() => setReplying((v) => !v)} />
+          <NoteChip label="Dismiss" tone="muted" disabled={pending !== null} busy={pending === 'dismiss'} onClick={() => { void runAction('dismiss', () => onResolve(note, false)); }} />
         </div>
       ) : null}
       {isComment && !resolved ? (
-        <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
-          <NoteChip label="Resolve" tone="add" onClick={() => onResolveComment(note)} />
-          <NoteChip label="Reply" tone="muted" onClick={() => setReplying((v) => !v)} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
+          <NoteChip label="Reply" tone="muted" disabled={pending !== null} onClick={() => setReplying((v) => !v)} />
+          <NoteChip label="Accept & act" tone="add" disabled={pending !== null} busy={pending === 'act'} onClick={() => { void runAction('act', () => onAct(note)); }} />
+          <NoteChip label="Resolve" tone="muted" disabled={pending !== null} busy={pending === 'resolve'} onClick={() => { void runAction('resolve', () => onResolveComment(note)); }} />
+        </div>
+      ) : null}
+      {feedback ? (
+        <div style={{ marginTop: 5, fontFamily: PROSE, fontSize: 9.5, fontWeight: 300, lineHeight: 1.3, color: feedback.tone === 'error' ? 'var(--o8ed-del)' : 'var(--o8ed-add)' }}>
+          {feedback.text}
         </div>
       ) : null}
       {replying ? (
@@ -562,10 +641,11 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); submitReply(); }
+            if (e.key === 'Enter') { e.preventDefault(); void submitReply(); }
             if (e.key === 'Escape') { setReplying(false); setDraft(''); }
           }}
           placeholder="Reply…"
+          disabled={pending !== null}
           style={{ marginTop: 5, width: '100%', fontFamily: HAND, fontSize: 'calc(16px * var(--o8ed-note-scale, 1))', lineHeight: 1.2, color: 'var(--o8ed-ink)', background: 'transparent', border: 'none', borderBottom: '1px solid var(--o8ed-ink-faint)', outline: 'none', paddingTop: 2, paddingBottom: 2 }}
         />
       ) : null}
@@ -573,11 +653,22 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
   );
 }
 
-function NoteChip({ label, tone, onClick }: { label: string; tone: 'add' | 'muted'; onClick: () => void }) {
+function NoteChip({ label, tone, onClick, disabled, busy }: {
+  label: string;
+  tone: 'add' | 'muted';
+  onClick: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
   const color = tone === 'add' ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)';
   return (
-    <button type="button" onClick={onClick} style={{ cursor: 'pointer', fontFamily: PROSE, fontSize: 10.5, fontWeight: 350, letterSpacing: '-0.1px', color, background: 'transparent', border: `1px solid ${color}`, borderRadius: 6, paddingTop: 2, paddingBottom: 2, paddingLeft: 8, paddingRight: 8, filter: 'saturate(0.55)' }}>
-      {label}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{ cursor: disabled ? 'default' : 'pointer', minHeight: 44, minWidth: 44, fontFamily: PROSE, fontSize: 10.5, fontWeight: 350, letterSpacing: '-0.1px', color, opacity: disabled && !busy ? 0.5 : 1, backgroundColor: 'transparent', borderWidth: 1, borderStyle: 'solid', borderColor: color, borderRadius: 6, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, filter: 'saturate(0.55)' }}
+    >
+      {busy ? `${label}…` : label}
     </button>
   );
 }
