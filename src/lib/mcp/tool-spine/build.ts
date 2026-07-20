@@ -95,15 +95,15 @@ function resolveCortexMcpServerPath(): { command: string; path: string } {
   return { command: 'npx', path: devSource };
 }
 
-function resolveOperatorMcpServerPath(): { command: string; path: string } {
-  const bundled = findBundledMcpServer('operator-mcp-server.mjs');
+function resolveOperatorMcpProxyPath(): { command: string; path: string } {
+  const bundled = findBundledMcpServer('operator-mcp-proxy.mjs');
   if (bundled) {
     const nodeBin = process.env.O8_NODE_BIN || 'node';
     return { command: nodeBin, path: bundled };
   }
 
-  // From src/lib/mcp/tool-spine/ → src/lib/mcp/operator-mcp-server.ts
-  const devSource = resolve(dirname(fileURLToPath(import.meta.url)), '../operator-mcp-server.ts');
+  // From src/lib/mcp/tool-spine/ → src/lib/mcp/operator-mcp-proxy.ts
+  const devSource = resolve(dirname(fileURLToPath(import.meta.url)), '../operator-mcp-proxy.ts');
   return { command: 'npx', path: devSource };
 }
 
@@ -199,7 +199,7 @@ export function buildToolRegistry(
   const apiBase = resolveToolSpineApiBase();
 
   const cortexServer = resolveCortexMcpServerPath();
-  const operatorServer = resolveOperatorMcpServerPath();
+  const operatorProxy = resolveOperatorMcpProxyPath();
 
   const entries: ServerEntry[] = [];
 
@@ -231,8 +231,8 @@ export function buildToolRegistry(
     surfaceNames: { 'claude-desktop': 'o8', openclaw: 'o8', gemini: 'o8', opencode: 'o8' },
     config: {
       type: 'stdio',
-      command: operatorServer.command,
-      args: argsForMcpServer(operatorServer),
+      command: operatorProxy.command,
+      args: argsForMcpServer(operatorProxy),
       env: {
         O8_API_BASE: apiBase,
       },

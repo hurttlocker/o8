@@ -47,13 +47,16 @@ describe('findBundledMcpServer — packaged orchestrator MCP resolution', () => 
     // bundled server sitting beside the module, not fall to a nonexistent .ts.
     clearMcpEnv();
     process.env.O8_PACKAGED_APP = '1';
-    const bundleDir = tempBundleDir(['operator-mcp-server.mjs', 'cortex-mcp-server.mjs']);
+    const bundleDir = tempBundleDir(['operator-mcp-server.mjs', 'operator-mcp-proxy.mjs', 'cortex-mcp-server.mjs']);
 
     expect(findBundledMcpServer('operator-mcp-server.mjs', bundleDir)).toBe(
       join(bundleDir, 'operator-mcp-server.mjs'),
     );
     expect(findBundledMcpServer('cortex-mcp-server.mjs', bundleDir)).toBe(
       join(bundleDir, 'cortex-mcp-server.mjs'),
+    );
+    expect(findBundledMcpServer('operator-mcp-proxy.mjs', bundleDir)).toBe(
+      join(bundleDir, 'operator-mcp-proxy.mjs'),
     );
   });
 
@@ -66,9 +69,10 @@ describe('findBundledMcpServer — packaged orchestrator MCP resolution', () => 
 
   it('still honors O8_BUNDLED_MCP_DIR (control-flow change did not drop the env path)', () => {
     clearMcpEnv();
-    const bundleDir = tempBundleDir(['operator-mcp-server.mjs', 'cortex-mcp-server.mjs']);
+    const bundleDir = tempBundleDir(['operator-mcp-server.mjs', 'operator-mcp-proxy.mjs', 'cortex-mcp-server.mjs']);
     process.env.O8_BUNDLED_MCP_DIR = bundleDir;
     expect(findBundledMcpServer('operator-mcp-server.mjs')).toBe(join(bundleDir, 'operator-mcp-server.mjs'));
+    expect(findBundledMcpServer('operator-mcp-proxy.mjs')).toBe(join(bundleDir, 'operator-mcp-proxy.mjs'));
     expect(findBundledMcpServer('cortex-mcp-server.mjs')).toBe(join(bundleDir, 'cortex-mcp-server.mjs'));
   });
 

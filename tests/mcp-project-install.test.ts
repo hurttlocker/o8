@@ -8,11 +8,13 @@ const root = mkdtempSync(join(tmpdir(), 'o8-mcp-project-install-'));
 const home = join(root, 'home');
 const projectPath = join(root, 'project');
 const bundlePath = join(root, 'operator-mcp-server.mjs');
+const proxyPath = join(root, 'operator-mcp-proxy.mjs');
 mkdirSync(home, { recursive: true });
 mkdirSync(projectPath, { recursive: true });
 execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: projectPath });
 execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/test/project.git'], { cwd: projectPath });
 writeFileSync(bundlePath, '');
+writeFileSync(proxyPath, '');
 process.env.HOME = home;
 process.env.O8_BUNDLED_MCP_PATH = bundlePath;
 process.env.O8_BUNDLED_MCP_DIR = root;
@@ -30,7 +32,7 @@ describe('Claude Code MCP install', () => {
     writeFileSync(projectConfigPath, JSON.stringify({
       mcpServers: {
         other: { command: 'other-mcp' },
-        o8: { url: 'http://127.0.0.1:18795/mcp' },
+        o8: { command: process.execPath, args: [bundlePath], env: { O8_API_BASE: 'http://127.0.0.1:47120' } },
       },
     }, null, 2));
 
@@ -46,7 +48,7 @@ describe('Claude Code MCP install', () => {
     expect(response.status).toBe(200);
     expect(payload.projectConfigPath).toBe(projectConfigPath);
     expect(written.mcpServers.other).toEqual({ command: 'other-mcp' });
-    expect(written.mcpServers.o8).toMatchObject({ command: process.execPath, args: [bundlePath] });
+    expect(written.mcpServers.o8).toMatchObject({ command: process.execPath, args: [proxyPath] });
     expect(written.mcpServers.o8).not.toHaveProperty('url');
   });
 });

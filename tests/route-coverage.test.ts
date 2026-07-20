@@ -98,6 +98,7 @@ const LOOPBACK_READ = [
   // cannot attach a bearer (v0.1.600 stuck-boot incident).
   /^\/api\/setup\/identity\/?$/,
 ];
+const EXPLICIT_GATED = [/^\/api\/mcp\/?$/];
 
 type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'gated';
 
@@ -106,6 +107,7 @@ function expectedPolicy(pathname: string): Policy {
   if (PUBLIC_ANY.some((p) => p.test(pathname))) return 'public-any';
   if (PUBLIC_READ.some((p) => p.test(pathname))) return 'public-read';
   if (LOOPBACK_READ.some((p) => p.test(pathname))) return 'loopback-read';
+  if (EXPLICIT_GATED.some((p) => p.test(pathname))) return 'gated';
   return 'gated';
 }
 
@@ -167,11 +169,11 @@ describe('route-coverage — every /api route resolves to an explicit middleware
     },
   );
 
-  it('every public/self-auth manifest entry maps to a real route on disk (no stale allowlist)', () => {
+  it('every explicit policy entry maps to a real route on disk (no stale manifest)', () => {
     // A manifest pattern that matches NO real route is dead config that hides
     // intent — force it to be pruned.
-    const allPublic = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ, ...LOOPBACK_READ];
-    for (const pattern of allPublic) {
+    const allClassified = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ, ...LOOPBACK_READ, ...EXPLICIT_GATED];
+    for (const pattern of allClassified) {
       const matched = routes.some((r) => pattern.test(r.pathname));
       expect(matched, `manifest pattern ${pattern} matches no route file`).toBe(true);
     }
