@@ -131,6 +131,17 @@ import { isOrchestratorBackendId, type OrchestratorBackend, type OrchestratorBac
 import type { OrchestratorTurnRecord } from './lib/lane/orchestrator-crash-survival';
 import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
 import {
+  ActiveOrchestratorRouteRegistry,
+  promoteOrchestratorSubscribers,
+  type ActiveOrchestratorRouteHandle,
+  type OrchestratorSubscriptionRoute,
+} from './lib/lane/orchestrator-subscription-promotion';
+import {
+  orchestratorModeAllowsBackendFallback,
+  resolveOrchestratorExecutionBackendId,
+  sendOrchestratorBackendTurn,
+} from './lib/lane/orchestrator-send-entry';
+import {
   startSupervisorLoop,
   stopSupervisorLoop,
   registerWatchedAgent,
@@ -935,24 +946,13 @@ const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: 
 
 // ── Orchestrator channel state ──
 
-interface OrchestratorSubscription {
-  clientId: string;
-  repoPath: string;
-  sessionName: string;
-  /** Optional UI/history thread id (thoughts-*). Keeps same-repo chats isolated. */
-  threadId: string | null;
-  /** Which orchestrator backend this subscription is for. */
-  backend: OrchestratorBackendId;
-  /** openclaw agent id (openclaw backend only; '' for codex/claude). */
-  agent: string;
-}
-
 // Keyed by `${clientId}::${backend}::${agent}` — one client can hold a
 // subscription per backend AND per openclaw agent at once (the default
 // Orchestrator tab on codex AND multiple openclaw agent groups, live together).
 // `agent` is '' for codex/claude. `sessionName` is itself backend+agent-distinct,
 // so event broadcast matches on it.
-const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>();
+const orchestratorSubscriptions = new Map<string, OrchestratorSubscriptionRoute>();
+const activeOrchestratorRoutes = new ActiveOrchestratorRouteRegistry();
 
 // #624 — In-flight AbortControllers keyed by `${repoPath}::${backend}::${agent}::${threadId}`.
 // Attached when an orchestrator-send turn starts; orchestrator-interrupt calls
@@ -1090,21 +1090,7 @@ function promoteOrchestratorFallbackSubscribers(input: {
   toBackend: OrchestratorBackendId;
   toSessionName: string;
 }): void {
-  const toPromote = Array.from(orchestratorSubscriptions.values()).filter((sub) =>
-    sub.repoPath === input.repoPath
-    && sub.threadId === input.threadId
-    && sub.backend === input.fromBackend);
-
-  for (const sub of toPromote) {
-    orchestratorSubscriptions.set(orchestratorSubKey(sub.clientId, input.toBackend, ''), {
-      clientId: sub.clientId,
-      repoPath: sub.repoPath,
-      sessionName: input.toSessionName,
-      threadId: sub.threadId,
-      backend: input.toBackend,
-      agent: '',
-    });
-  }
+  promoteOrchestratorSubscribers(orchestratorSubscriptions, input);
 }
 
 const reboundOrchestratorRecords = new Set<string>();
@@ -3899,10 +3885,12 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
-  const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
-  const agentId = resolveMsgAgentId(msg, backend.id);
-  const agentTag = agentId || undefined;
+  const requestedBackendId = resolveMsgBackendId(msg);
   const threadId = resolveMsgThreadId(msg);
+  const activeRoute = activeOrchestratorRoutes.resolve({ repoPath, threadId, requestedBackend: requestedBackendId });
+  const backend = getOrchestratorBackend(activeRoute?.toBackend ?? requestedBackendId);
+  const agentId = activeRoute ? '' : resolveMsgAgentId(msg, backend.id);
+  const agentTag = agentId || undefined;
   // Replay cursor: the highest event seq this client has already seen for the
   // session. Replay is OPT-IN — only clients that send `since` (and de-dup by
   // seq, like the desktop orchestrator) get a backfill; canvas/mobile omit it
@@ -3913,7 +3901,8 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
 
   try {
     const session = backend.ensureSession(repoPath, agentTag, threadId);
-    const routeSessionName = orchestratorRouteSessionName(session.sessionName, threadId);
+    const routeSessionName = activeRoute?.toSessionName
+      ?? orchestratorRouteSessionName(session.sessionName, threadId);
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
       clientId: client.id,
       repoPath,
@@ -4090,8 +4079,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     return;
   }
 
-  const backendId = resolveMsgBackendId(msg);
-  const agentId = resolveMsgAgentId(msg, backendId);
+  const requestedBackendId = resolveMsgBackendId(msg);
+  const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  const agentId = backendId === requestedBackendId ? resolveMsgAgentId(msg, backendId) : '';
   const threadId = resolveMsgThreadId(msg);
   const scopeId = orchestratorSendIdempotencyScope({
     repoPath,
@@ -4158,8 +4148,8 @@ async function handleOrchestratorSendMsgOnce(
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
   // The transcript persists the operator's OWN words. `message` may carry
-  // model-facing scaffolding the client prepends (solo/swarm hints, compaction
-  // resume prelude) — persisting it verbatim rendered "[Solo mode active] …"
+  // model-facing scaffolding the client prepends (mode directives, compaction
+  // resume prelude) — persisting it verbatim rendered those directives
   // as a user bubble after reload (Chris's screenshot, 2026-07-16). Older
   // clients omit the field and fall back to the wire message, same as before.
   const transcriptMessage = typeof msg.displayMessage === 'string' && msg.displayMessage.trim()
@@ -4188,13 +4178,17 @@ async function handleOrchestratorSendMsgOnce(
         .map((att) => ({ dataUri: att.dataUri, ...(typeof att.name === 'string' ? { name: att.name } : {}) }))
     : undefined;
 
-  const requestedBackend = getOrchestratorBackend(resolveMsgBackendId(msg));
-  let activeBackend = requestedBackend;
+  const requestedBackendId = resolveMsgBackendId(msg);
+  const requestedBackend = getOrchestratorBackend(requestedBackendId);
+  const executionBackendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  let activeBackend = getOrchestratorBackend(executionBackendId);
   const subscriptionProfile = getOperatorDefaultsSync().values.subscriptionProfile;
   const collideBaseBackend = requestedBackend.id === 'collide' && isOrchestratorBackendId(msg.collideBaseBackend)
     ? msg.collideBaseBackend
     : undefined;
-  const requestedAgentId = resolveMsgAgentId(msg, requestedBackend.id);
+  const requestedAgentId = executionBackendId === requestedBackendId
+    ? resolveMsgAgentId(msg, requestedBackend.id)
+    : '';
   let activeAgentId = requestedAgentId;
   let activeAgentTag = activeAgentId || undefined;
   const threadId = resolveMsgThreadId(msg);
@@ -4203,6 +4197,7 @@ async function handleOrchestratorSendMsgOnce(
 
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
+  let activeRouteHandle: ActiveOrchestratorRouteHandle | null = null;
   let commandAccepted = false;
   // Declared outside try so the catch can broadcast the terminal error to EVERY
   // subscriber on this thread (phone + desktop), not just the origin client. A
@@ -4265,6 +4260,20 @@ async function handleOrchestratorSendMsgOnce(
       activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
       threadId,
     );
+    if (requestedBackend.id !== activeBackend.id) {
+      // Single remaps non-Codex selections before their backend starts. Move
+      // every view already watching this thread onto the actual Codex route,
+      // not only the socket that originated the turn.
+      const route = {
+        repoPath,
+        threadId,
+        fromBackend: requestedBackend.id,
+        toBackend: activeBackend.id,
+        toSessionName: sessionName,
+      };
+      activeRouteHandle = activeOrchestratorRoutes.register(route);
+      promoteOrchestratorFallbackSubscribers(route);
+    }
     // RC2 (69RMXR) — auto-carry prior transcript when the operator switched to a
     // backend that has no CLI session on this thread yet. Computed BEFORE the
     // current user message is persisted so it reflects PRIOR history only; folded
@@ -4332,7 +4341,7 @@ async function handleOrchestratorSendMsgOnce(
       overrideModel?: string,
     ): Promise<void> => {
       const effectiveModel = overrideModel ?? (turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model);
-      return turnBackend.sendTurn(repoPath, turnMessage, onEvent, {
+      return sendOrchestratorBackendTurn(turnBackend, repoPath, turnMessage, onEvent, {
         permissionMode,
         thinkingEffort,
         model: effectiveModel,
@@ -4350,7 +4359,7 @@ async function handleOrchestratorSendMsgOnce(
           },
         } : {}),
         ...(attachments?.length ? { attachments } : {}),
-      });
+      }, msg.orchestrationMode);
     };
 
     // Ensure a subscription exists for the selected backend + agent.
@@ -4576,10 +4585,14 @@ async function handleOrchestratorSendMsgOnce(
     // Spawn the selected orchestrator and stream structured JSON events to
     // subscribers. Every event is tagged with its actual backend (and `agent`,
     // for openclaw) so fallback handoffs do not cross-contaminate transcripts.
-    const resolveQuotaFallback = (currentModel: string | null = model ?? null) => resolveCrossHouseOrchestratorFallback(activeBackend.id, {
-      subscriptionProfile,
-      currentModel,
-    });
+    const resolveQuotaFallback = (currentModel: string | null = model ?? null) => (
+      orchestratorModeAllowsBackendFallback(msg.orchestrationMode)
+        ? resolveCrossHouseOrchestratorFallback(activeBackend.id, {
+            subscriptionProfile,
+            currentModel,
+          })
+        : null
+    );
     try {
       await runBackendTurn(activeBackend, activeAgentTag, !!resolveQuotaFallback());
     } catch (err) {
@@ -4713,10 +4726,12 @@ async function handleOrchestratorSendMsgOnce(
         orchestratorInflightAborts.delete(key);
       }
     }
+    activeOrchestratorRoutes.release(activeRouteHandle);
 
     // After the user message completes, drain any queued supervisor escalations.
     void drainOrchestratorAutoQueue();
   } catch (err) {
+    activeOrchestratorRoutes.release(activeRouteHandle);
     if (turnController) {
       for (const key of turnAbortKeys) {
         if (orchestratorInflightAborts.get(key) === turnController) {
@@ -4784,9 +4799,11 @@ async function handleOrchestratorSendMsgOnce(
 function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, unknown>) {
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
-  const backendId = resolveMsgBackendId(msg);
-  const agentId = resolveMsgAgentId(msg, backendId);
   const threadId = resolveMsgThreadId(msg);
+  const requestedBackendId = resolveMsgBackendId(msg);
+  const activeRoute = activeOrchestratorRoutes.resolve({ repoPath, threadId, requestedBackend: requestedBackendId });
+  const backendId = activeRoute?.toBackend ?? requestedBackendId;
+  const agentId = activeRoute ? '' : resolveMsgAgentId(msg, backendId);
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const label = `${backendId}${agentId ? `/${agentId}` : ''}`;
   const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId, agentId, threadId));

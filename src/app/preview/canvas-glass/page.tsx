@@ -93,6 +93,7 @@ import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, 
 import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
 import { SymonVoicePresencePill } from './symon-voice-presence';
 import { useCanvasQuickActions } from './use-canvas-quick-actions';
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
   id: string;
@@ -251,10 +252,8 @@ const CANVAS_TOUR_KEY = 'o8:canvas-tour-seen';
  *  MODE chip so the operator can keep it from spawning Codex workers at all.
  *   - fleet   — orchestrator dispatches sub-agents in worktrees (default).
  *   - single  — talk to the orchestrator solo, no dispatch.
- *   - fusion  — the deep multi-agent pass we call "ultracode (with Codex)" in
- *               the default composer, renamed here. Backend honoring for fusion
- *               lands later for BOTH surfaces; for now this picks + persists. */
-type CanvasMode = 'fleet' | 'single' | 'fusion';
+ *   - fusion  — the deep parallel, cross-verified multi-agent pass. */
+type CanvasMode = OrchestratorExecutionMode;
 const CANVAS_MODES: Array<{ id: CanvasMode; title: string; detail: string }> = [
   { id: 'fleet', title: 'Fleet orchestration', detail: 'Orchestrator dispatches sub-agents in worktrees.' },
   { id: 'single', title: 'Single agent', detail: 'Talk to the orchestrator solo · no dispatch.' },
@@ -1110,6 +1109,7 @@ export default function CanvasGlassPreviewPage() {
     const threadId = orca.send(text, {
       model: orcaModel,
       thinkingEffort: orcaEffort,
+      orchestrationMode: orchMode,
       ...(images.length ? { attachments: images } : {}),
     });
     const fromEntryId = entryIdRef.current;
@@ -1135,7 +1135,7 @@ export default function CanvasGlassPreviewPage() {
     appendEntries(lane, [userEntry, { role: 'status', text: 'Thinking', pending: true }]);
     setDockOpen(true);
     return { lane, fromEntryId };
-  }, [activeRepoPath, appendEntries, orca, orcaEffort, orcaModel]);
+  }, [activeRepoPath, appendEntries, orca, orcaEffort, orcaModel, orchMode]);
 
   // Mistake-proofing for the main conversation (bottom pill + dock): undo-send
   // grace buffer + queue-when-busy. Both composers route through `mainSend`.

@@ -15,6 +15,8 @@
  * sends until switched.
  */
 
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+
 export type ComposerMode = 'solo' | 'multitask' | 'moa';
 
 export interface ComposerModeSpec {
@@ -57,6 +59,16 @@ export const COMPOSER_MODES: readonly ComposerModeSpec[] = [
 
 export function composerModeSpec(mode: ComposerMode): ComposerModeSpec {
   return COMPOSER_MODES.find((m) => m.id === mode) ?? COMPOSER_MODES[0];
+}
+
+export function resolveComposerExecutionMode(
+  mode: ComposerMode,
+  fusionEnabled: boolean,
+  forceSingle: boolean,
+): OrchestratorExecutionMode {
+  if (forceSingle) return 'single';
+  if (fusionEnabled) return 'fusion';
+  return mode === 'solo' ? 'single' : 'fleet';
 }
 
 /**

@@ -22,6 +22,7 @@ import { collideBackend } from './moa';
 import { fableBackend } from './fable';
 import { o8Backend } from './o8';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
+import { applyOrchestrationMode } from './orchestration-mode';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -29,19 +30,38 @@ import type { OrchestratorBackend, OrchestratorBackendId } from './types';
  * Registered backends. `openclaw` is added when its backend module ships;
  * `getOrchestratorBackend` falls back to Codex for an unregistered id.
  */
+export function withOrchestrationMode(
+  backend: OrchestratorBackend,
+  resolveBackend: (id: OrchestratorBackendId) => OrchestratorBackend = getOrchestratorBackend,
+): OrchestratorBackend {
+  return {
+    ...backend,
+    sendTurn(repoPath, message, onEvent, options) {
+      // OpenClaw/ACP/Claude tools execute in warm processes that cannot be
+      // confined per turn. Single always falls back before those processes or
+      // Collide proposers start, so one hardened Codex child is the only actor.
+      if (options?.orchestrationMode === 'single' && backend.id !== 'codex') {
+        return resolveBackend('codex').sendTurn(repoPath, message, onEvent, options);
+      }
+      const resolved = applyOrchestrationMode(message, options);
+      return backend.sendTurn(repoPath, resolved.message, onEvent, resolved.options);
+    },
+  };
+}
+
 const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
-  claude: claudeBackend,
-  codex: codexBackend,
-  openclaw: openclawBackend,
-  hermes: hermesBackend,
-  acp: acpBackend,
-  collide: collideBackend,
-  fable: fableBackend,
-  o8: o8Backend,
+  claude: withOrchestrationMode(claudeBackend),
+  codex: withOrchestrationMode(codexBackend),
+  openclaw: withOrchestrationMode(openclawBackend),
+  hermes: withOrchestrationMode(hermesBackend),
+  acp: withOrchestrationMode(acpBackend),
+  collide: withOrchestrationMode(collideBackend),
+  fable: withOrchestrationMode(fableBackend),
+  o8: withOrchestrationMode(o8Backend),
 };
 
 /** The default backend — also the fallback for any unregistered id. */
-const DEFAULT_BACKEND = codexBackend;
+const DEFAULT_BACKEND = BACKENDS.codex!;
 
 export function getOrchestratorBackend(id: OrchestratorBackendId): OrchestratorBackend {
   return BACKENDS[id] ?? DEFAULT_BACKEND;

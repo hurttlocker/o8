@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 
 import {
   workerSandboxEnabled,
@@ -53,6 +54,14 @@ describe('buildSeatbeltProfile — policy shape', () => {
     repoPath: '/tmp/repo',
     homeDir: '/Users/op',
     tmpDir: '/tmp/T',
+    finalDenyExecPaths: ['/opt/codex/bin/codex'],
+    finalDenyExecNamePrefixes: ['codex'],
+    finalDenyReadBasenames: ['codex', 'codex.js'],
+    finalDenyWritePaths: ['/tmp/immutable.rules'],
+    finalImmutableWritePaths: ['/tmp/active-state/policy.rules'],
+    finalAllowReadWritePaths: ['/tmp/active-state'],
+    finalAllowReadPaths: ['/tmp/private-codex'],
+    finalAllowExecPaths: ['/tmp/private-codex'],
   });
 
   it('is deny-by-default', () => {
@@ -93,6 +102,19 @@ describe('buildSeatbeltProfile — policy shape', () => {
     // toolchain subdirs are allowed, but never .o8 as a READ root
     expect(profile).toContain('(subpath "/Users/op/.codex")');
   });
+
+  it('can deny protected executable paths and keep launch policy immutable', () => {
+    expect(profile).toContain('(deny process-exec\n  (literal "/opt/codex/bin/codex")');
+    expect(profile).toContain('(regex #"(^|/)codex(?:$|[-.])")');
+    expect(profile).toContain('(regex #"(^|/)codex\\.js$")');
+    expect(profile).toContain('file-link file-clone\n  (literal "/tmp/immutable.rules")');
+    expect(profile).toContain('(allow file-read* file-write*\n  (subpath "/tmp/active-state")');
+    expect(profile).toContain('file-link file-clone\n  (literal "/tmp/active-state/policy.rules")');
+    const execDeny = profile.indexOf('(deny process-exec');
+    const execAllow = profile.indexOf('(allow process-exec\n  (literal "/tmp/private-codex")');
+    expect(execAllow).toBeGreaterThan(execDeny);
+    expect(profile).toContain('(allow file-read*\n  (literal "/tmp/private-codex")');
+  });
 });
 
 describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
@@ -118,6 +140,7 @@ describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
 
     // (b) generated profile denies ~/.o8 and allows the worktree.
     expect(prepared.profileText).toContain(`(subpath "${path.join(os.homedir(), '.o8')}")`);
+    expect(prepared.profileText).not.toContain('(subpath "/")');
   });
 
   it('is FAIL-CLOSED — throws SandboxUnavailableError when the profile cannot be written', async () => {
@@ -182,5 +205,48 @@ describe('sandbox policy is live-enforced (real sandbox-exec)', () => {
       denied = true;
     }
     expect(denied).toBe(true);
+  });
+
+  it.skipIf(!isDarwin)('denies outbound access to pre-existing tmux-shaped sockets', async () => {
+    const socketDir = `/tmp/tmux-o8-sandbox-${process.pid}`;
+    const socketPath = path.join(socketDir, 'default');
+    mkdirSync(socketDir, { recursive: true });
+    tmpRoots.push(socketDir);
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    try {
+      const worktree = tmpRoot('o8-sbx-wt-');
+      const profileDir = tmpRoot('o8-sbx-prof-');
+      const prepared = await prepareWorkerSandbox({
+        runId: 'tmux-socket',
+        profileDir,
+        cwd: worktree,
+        repoPath: worktree,
+        binary: process.execPath,
+        args: [],
+      });
+      const client = [
+        "const net=require('node:net')",
+        `const s=net.createConnection(${JSON.stringify(socketPath)})`,
+        "s.on('connect',()=>process.exit(0))",
+        "s.on('error',()=>process.exit(7))",
+        'setTimeout(()=>process.exit(8),1000)',
+      ].join(';');
+
+      let denied = false;
+      try {
+        execFileSync(SANDBOX_EXEC_PATH,
+          ['-f', prepared.profilePath, process.execPath, '-e', client],
+          { stdio: ['ignore', 'pipe', 'ignore'] });
+      } catch {
+        denied = true;
+      }
+      expect(denied).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
