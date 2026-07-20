@@ -36,7 +36,9 @@ function main(): void {
   // Force PACKAGED resolution + make codebase-memory available.
   const bundleDir = mkdtempSync(join(tmpdir(), 'oc-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
+  const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
   writeFileSync(bundlePath, '');
+  writeFileSync(proxyPath, '');
   process.env.O8_BUNDLED_MCP_PATH = bundlePath;
   process.env.O8_BUNDLED_MCP_DIR = bundleDir;
   process.env.O8_NODE_BIN = '/usr/local/bin/node';
@@ -58,7 +60,7 @@ function main(): void {
     assert.deepStrictEqual(mcp[name], projection[name], `${name} matches toOpencodeJson projection`);
   }
   // local shape: type:'local', folded command array, environment intact on o8.
-  assert.deepStrictEqual(mcp.o8, { type: 'local', command: ['/usr/local/bin/node', bundlePath], environment: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 local shape (folded command + environment)');
+  assert.deepStrictEqual(mcp.o8, { type: 'local', command: ['/usr/local/bin/node', proxyPath], environment: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 local shape (folded command + environment)');
   assert.deepStrictEqual(mcp['codebase-memory'], { type: 'local', command: [cmBin] }, 'codebase-memory local shape (empty environment omitted)');
 
   // ── Preservation: other servers + top-level keys byte-identical ──

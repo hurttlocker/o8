@@ -51,7 +51,9 @@ function main(): void {
   // Force PACKAGED resolution for the registry o8 entry.
   const bundleDir = mkdtempSync(join(tmpdir(), 'oc-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
+  const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
   writeFileSync(bundlePath, '');
+  writeFileSync(proxyPath, '');
   process.env.O8_BUNDLED_MCP_PATH = bundlePath;
   process.env.O8_BUNDLED_MCP_DIR = bundleDir;
   process.env.O8_NODE_BIN = '/usr/local/bin/node';
@@ -82,7 +84,7 @@ function main(): void {
   // Old used the passthrough; new uses the registry projection (the intended delta).
   assert.deepStrictEqual(beforeO8, passthroughO8, 'before: o8 = the source passthrough');
   assert.deepStrictEqual(afterO8, registryO8, 'after: o8 = the registry openclaw projection');
-  assert.deepStrictEqual(afterO8, { command: '/usr/local/bin/node', args: [bundlePath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'registry o8 = operator stdio entry (packaged)');
+  assert.deepStrictEqual(afterO8, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'registry o8 = operator stdio entry (packaged)');
   assert(!('type' in (afterO8 as Record<string, unknown>)), 'registry o8 entry has no type field');
   assert.notStrictEqual(JSON.stringify(beforeO8), JSON.stringify(afterO8), 'the o8 entry IS the one intended change');
 
