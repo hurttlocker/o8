@@ -147,7 +147,20 @@ describe('realtime-session-config — shared assembler', () => {
   it('selects exactly the canonical phone Code tool pack without Life/Mac catalog leakage', () => {
     const catalog = [
       { type: 'function', name: 'send_email' },
-      ...PHONE_CODE_TOOL_NAMES.toReversed().map((name) => ({ type: 'function', name })),
+      ...PHONE_CODE_TOOL_NAMES.toReversed().map((name) => ({
+        type: 'function',
+        name,
+        parameters: {
+          type: 'object',
+          properties: {
+            repo: { type: 'string' },
+            repoId: { type: 'string' },
+            repoPath: { type: 'string' },
+            packetId: { type: 'string' },
+          },
+          required: ['repoId', 'packetId'],
+        },
+      })),
       { type: 'function', name: 'spotify_play' },
       { type: 'function', name: 'o8_status', duplicate: true },
     ];
@@ -158,6 +171,19 @@ describe('realtime-session-config — shared assembler', () => {
     expect(selection.tools.map((tool) => tool.name)).toEqual(PHONE_CODE_TOOL_NAMES);
     expect(selection.tools.map((tool) => tool.name)).not.toContain('send_email');
     expect(selection.tools.map((tool) => tool.name)).not.toContain('spotify_play');
+    for (const tool of selection.tools) {
+      const parameters = tool.parameters as {
+        properties: Record<string, unknown>;
+        required: string[];
+        additionalProperties: boolean;
+      };
+      expect(parameters.properties).not.toHaveProperty('repo');
+      expect(parameters.properties).not.toHaveProperty('repoId');
+      expect(parameters.properties).not.toHaveProperty('repoPath');
+      expect(parameters.properties).toHaveProperty('packetId');
+      expect(parameters.required).toEqual(['packetId']);
+      expect(parameters.additionalProperties).toBe(false);
+    }
   });
 
   it('reports every absent or non-function Code tool instead of minting a partial pack', () => {

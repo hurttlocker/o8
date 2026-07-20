@@ -53,7 +53,11 @@ function req(body = '{}', bearer?: string, extraHeaders: Record<string, string> 
 }
 
 function toolSchemas(names: readonly string[]) {
-  return names.map((name) => ({ type: 'function', name }));
+  return names.map((name) => ({
+    type: 'function',
+    name,
+    parameters: { type: 'object', properties: {}, required: [] },
+  }));
 }
 
 /** Default bridge: desk NOT live, one tool published, voice=marin. */
@@ -223,6 +227,8 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     const instructions = sentBody.session.instructions as string;
     expect(instructions).toContain('You are Symon');
     expect(instructions).toContain('render_surface');
+    expect(instructions).toContain('CODE TOOL ROUTING');
+    expect(instructions).toContain('Never ask for spoken confirmation');
     expect(instructions).toContain('CODE WORKSPACE SURFACES');
     expect(instructions).toContain('RepoState(targetId, name, path|null, branch');
     expect(instructions).toContain('that is the operator-selected repository');
@@ -255,6 +261,12 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     ]);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('send_email');
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('spotify_play');
+    for (const tool of sentBody.session.tools.filter((tool: { name?: string }) => tool.name !== 'render_surface')) {
+      expect(tool.parameters.properties).not.toHaveProperty('repo');
+      expect(tool.parameters.properties).not.toHaveProperty('repoId');
+      expect(tool.parameters.properties).not.toHaveProperty('repoPath');
+      expect(tool.parameters.additionalProperties).toBe(false);
+    }
     const json = await res.json();
     expect(json.scope).toEqual({
       version: 1,

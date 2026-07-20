@@ -98,6 +98,9 @@ Only `workspaceMode: "code"` filters Mac-executed tools. Its exact catalog is:
 The phone-local `render_surface` tool is appended after that pack and never
 relayed to the Mac. Mail, media, browser, shell, file, and every other desktop or
 Life tool are excluded from Code even when the live Mac catalog contains them.
+The phone-minted schemas omit `repo`, `repoId`, and `repoPath` and reject unknown
+arguments. Repository identity belongs exclusively to the immutable Mac grant;
+the relay injects the canonical values after the model chooses a tool.
 The filter preserves the live schemas and emits them in the canonical order
 above. If any required Code tool is absent or is not a function schema, the mint
 fails as `503 desktop_unavailable` with the missing names instead of silently
@@ -285,7 +288,10 @@ last-start-wins mint.
 The mobile repo owns `scripts/symon-code-intents.json` and
 `scripts/symon-code-intent-eval.mjs`. Its 15 fixtures cover the entire Code pack
 as spoken request → expected tool sequence → exact raw stable-ID args → expected
-confirmation → exact server-scoped repo args → deterministic final state.
+native confirmation → exact server-scoped repo args → deterministic final state.
+Instruction prose such as `task`, `message`, `feedback`, and `reason` may be
+faithfully paraphrased; the evaluator holds tool routing, stable IDs, and repo
+containment exact so it does not mislabel a wording change as a relay failure.
 
 Run `bun run eval:symon-code:validate` for a mutation-free fixture contract
 check. Run `bun run eval:symon-code -- --repo /absolute/path --models mini,flagship`

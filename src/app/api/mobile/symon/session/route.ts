@@ -21,6 +21,7 @@ import {
   DEFAULT_INSTRUCTIONS,
   PHONE_SURFACE_INSTRUCTIONS,
   PHONE_CODE_SURFACE_INSTRUCTIONS,
+  PHONE_CODE_TOOL_INSTRUCTIONS,
   selectPhoneCodeTools,
   selectPhoneRealtimeModel,
   RENDER_SURFACE_TOOL,
@@ -454,7 +455,7 @@ export async function POST(request: NextRequest) {
               DEFAULT_INSTRUCTIONS +
               PHONE_SURFACE_INSTRUCTIONS +
               (workspaceContext.workspaceMode === 'code'
-                ? PHONE_CODE_SURFACE_INSTRUCTIONS
+                ? PHONE_CODE_TOOL_INSTRUCTIONS + PHONE_CODE_SURFACE_INSTRUCTIONS
                 : '') +
               workspaceContextInstructions(workspaceContext),
             tools: [...phoneBridgeTools, RENDER_SURFACE_TOOL],
