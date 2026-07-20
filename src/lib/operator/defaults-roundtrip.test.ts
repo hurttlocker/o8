@@ -45,6 +45,7 @@ const NON_DEFAULT_UPDATE = {
   buyinDocEnabled: true,
   autoApplyUpdates: 'off',
   collideAggregator: 'claude',
+  productTelemetryEnabled: true,
   telemetryOptIn: true,
   telemetryIngestUrl: 'https://telemetry.example/ingest',
   crashReportsEnabled: false,

@@ -288,6 +288,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.collideAggregator = raw;
   }
 
+  if (body.productTelemetryEnabled !== undefined) {
+    if (typeof body.productTelemetryEnabled !== 'boolean') {
+      throw new Error('productTelemetryEnabled must be boolean.');
+    }
+    update.productTelemetryEnabled = body.productTelemetryEnabled;
+  }
+
   if (body.telemetryOptIn !== undefined) {
     if (typeof body.telemetryOptIn !== 'boolean') {
       throw new Error('telemetryOptIn must be boolean.');

@@ -21,6 +21,7 @@ const { steerPacket } = await import('@/lib/orchestrator/operator-mission-servic
 const typecheckAvailability = await import('@/lib/lane/typecheck-availability');
 const runtimeActions = await import('@/lib/runtime/actions');
 const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 const tempDirs: string[] = [dataDir];
 
@@ -231,6 +232,45 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(repo, ['show', 'HEAD:upstream.txt'])).toBe('upstream');
     expect(git(repo, ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'])).toBe('');
   }, 20_000);
+
+  it('merge approval emits nothing while product telemetry is off and once while on', async () => {
+    writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
+    process.env.O8_PROXY_URL = 'https://telemetry.example.test';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+
+    const mergeOnce = async (suffix: string) => {
+      const { repo } = makeRepo(`o8-merge-telemetry-${suffix}`);
+      const worktree = await makeWorktree(repo, `pkt-telemetry-${suffix}`, `inline/telemetry-${suffix}`);
+      writeFileSync(join(worktree.path, `${suffix}.txt`), `${suffix}\n`);
+      commitAll(worktree.path, `${suffix} change`);
+      const lane = createLane({
+        repoPath: repo,
+        worktreePath: worktree.path,
+        branch: `inline/telemetry-${suffix}`,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId: `pkt-telemetry-${suffix}`,
+      });
+      expect((await mergeLane(lane)).result.ok).toBe(true);
+    };
+
+    try {
+      await updateOperatorDefaults({ productTelemetryEnabled: false });
+      await mergeOnce('off');
+      expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'))).toHaveLength(0);
+
+      await updateOperatorDefaults({ productTelemetryEnabled: true });
+      await mergeOnce('on');
+      const telemetry = fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'));
+      expect(telemetry).toHaveLength(1);
+      expect(telemetry[0]?.[1]).toMatchObject({
+        body: JSON.stringify({ event: 'merge.approved', props: { runtime: 'codex', pushed: true } }),
+      });
+    } finally {
+      await updateOperatorDefaults({ productTelemetryEnabled: false });
+      fetchSpy.mockRestore();
+    }
+  }, 30_000);
 });
 
 describe('typecheck escalation counters through real merge attempts', () => {
