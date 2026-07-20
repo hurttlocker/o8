@@ -4,6 +4,7 @@ import os from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 const { publishRealtimeMutation } = vi.hoisted(() => ({
   publishRealtimeMutation: vi.fn(async () => {}),
@@ -17,6 +18,8 @@ const tempDirs: string[] = [];
 const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.json');
 
 const { listApprovals, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { dispatch } = await import('@/lib/lane/commands');
 const { decideSurfaceMerge } = await import('@/lib/lane/surface-merge-decision');
@@ -24,8 +27,10 @@ const { createLane, getLane } = await import('@/lib/lane/registry');
 const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/mission');
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
+const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
@@ -40,7 +45,7 @@ function commitAll(cwd: string, message: string): void {
   git(cwd, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-m', message]);
 }
 
-async function createStandardLane(label: string, recordReview = true, highRisk = false) {
+async function createStandardLane(label: string, recordReview = true, highRisk = false, gateBlocked = false) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-require-approval-${label}-`));
   const origin = join(root, 'origin.git');
   const repo = join(root, 'operator');
@@ -69,11 +74,20 @@ async function createStandardLane(label: string, recordReview = true, highRisk =
   });
   git(worktree.path, ['config', 'user.name', 'o8-test']);
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
-  const changedPath = highRisk ? join(worktree.path, 'src/lib/lane/commands.ts') : join(worktree.path, 'file.txt');
-  if (highRisk) {
+  const changedPath = highRisk || gateBlocked
+    ? join(worktree.path, 'src/lib/lane/commands.ts')
+    : join(worktree.path, 'file.txt');
+  if (highRisk || gateBlocked) {
     mkdirSync(join(worktree.path, 'src/lib/lane'), { recursive: true });
   }
-  writeFileSync(changedPath, highRisk ? 'export const controlPlaneChange = true;\n' : 'base\nstandard change\n');
+  writeFileSync(
+    changedPath,
+    gateBlocked
+      ? "export const unsafeControlPlaneChange = eval('2 + 2');\n"
+      : highRisk
+        ? 'export const controlPlaneChange = true;\n'
+        : 'base\nstandard change\n',
+  );
   commitAll(worktree.path, 'standard change');
 
   const reviewedHeadSha = git(worktree.path, ['rev-parse', 'HEAD']);
@@ -154,7 +168,20 @@ function persistDispatcherMission(packetId: string, repoPath: string, orchestrat
     missionState,
     totalWaves: 1,
   });
+  writeOrchestratorControlPlaneState(missionState);
   return missionId;
+}
+
+function mergeRequest(token: string, packetId: string): NextRequest {
+  return new NextRequest('http://localhost:3001/api/orchestrator/merge', {
+    method: 'POST',
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ packetId }),
+  });
 }
 
 beforeEach(() => {
@@ -170,6 +197,58 @@ afterEach(() => {
 });
 
 describe('requireApproval merge governance through the real command path', () => {
+  it('treats an operator approve_and_merge as the surface approval without weakening worker or merge-gate enforcement', async () => {
+    await updateOperatorDefaults({ requireApproval: 'surface' });
+
+    const operator = await createStandardLane('surface-operator-explicit', true, true);
+    persistDispatcherMission(operator.lane.packetId!, operator.repo, `thoughts-operator-${Date.now()}`);
+    const operatorResponse = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), operator.lane.packetId!));
+    const operatorPayload = await operatorResponse.json();
+
+    expect(operatorResponse.status).toBe(200);
+    expect(operatorPayload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(git(operator.repo, ['rev-parse', 'HEAD'])).toBe(operator.reviewedHeadSha);
+    expect(listApprovalsForContext({ laneId: operator.lane.id }).some((candidate) => (
+      candidate.status === 'pending' && candidate.policyRuleId === 'surface-dispatcher-review'
+    ))).toBe(false);
+
+    const worker = await createStandardLane('surface-worker-explicit', true, true);
+    const workerDispatcherId = `thoughts-worker-${Date.now()}`;
+    persistDispatcherMission(worker.lane.packetId!, worker.repo, workerDispatcherId);
+    const workerResponse = await mergeRoute.POST(mergeRequest(getOrCreateLocalWorkerToken(), worker.lane.packetId!));
+    const workerPayload = await workerResponse.json();
+
+    expect(workerResponse.status).toBe(200);
+    expect(workerPayload).toMatchObject({
+      ok: true,
+      result: { merged: false, status: 'pending_operator_approval' },
+    });
+    expect(git(worker.repo, ['rev-parse', 'HEAD'])).toBe(worker.baseHeadSha);
+    const workerApproval = listApprovalsForContext({ laneId: worker.lane.id })
+      .find((candidate) => candidate.id === workerPayload.result.approvalId);
+    expect(workerApproval).toMatchObject({
+      status: 'pending',
+      policyRuleId: 'worker-merge-governance',
+      args: {
+        approvalRoute: 'dispatcher',
+        dispatcherId: workerDispatcherId,
+      },
+    });
+
+    const gated = await createStandardLane('surface-gate-blocked', true, true, true);
+    persistDispatcherMission(gated.lane.packetId!, gated.repo, `thoughts-gated-${Date.now()}`);
+    const gatedResponse = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), gated.lane.packetId!));
+    const gatedPayload = await gatedResponse.json();
+
+    expect(gatedResponse.status).toBe(200);
+    expect(gatedPayload).toMatchObject({ ok: true, result: { merged: false } });
+    expect(gatedPayload.result.approvalId).toBeTruthy();
+    expect(git(gated.repo, ['rev-parse', 'HEAD'])).toBe(gated.baseHeadSha);
+    expect(listApprovalsForContext({ laneId: gated.lane.id })
+      .find((candidate) => candidate.id === gatedPayload.result.approvalId))
+      .toMatchObject({ status: 'pending', policyRuleId: 'merge-gate-violation' });
+  }, 60_000);
+
   it('routes a review-worthy surface approval to the recorded dispatcher and wakes the mission-ready rail', async () => {
     await updateOperatorDefaults({ requireApproval: 'surface' });
     const { lane, repo, baseHeadSha } = await createStandardLane('surface-risk', true, true);
