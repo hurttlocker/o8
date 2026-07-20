@@ -1,4 +1,5 @@
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
+import { recoveryInfoFromLaneEvents } from './recovery-info';
 import type { Lane, LaneEvent, LaneOutcome } from './types';
 
 export interface ArchiveEnding {
@@ -14,7 +15,22 @@ function recordedQuestion(events: LaneEvent[]): string | null {
 }
 
 export function resolveArchiveEnding(lane: Lane, events: LaneEvent[]): ArchiveEnding {
-  if (lane.outcome) {
+  if (lane.outcome && lane.outcome !== 'no_changes') {
+    return {
+      updates: { outcome: lane.outcome, outcomeNote: lane.outcomeNote ?? null },
+      contractViolation: false,
+    };
+  }
+
+  const recovery = recoveryInfoFromLaneEvents(events);
+  if (recovery) {
+    return {
+      updates: { outcome: recovery.outcome, outcomeNote: recovery.message },
+      contractViolation: false,
+    };
+  }
+
+  if (lane.outcome === 'no_changes') {
     return {
       updates: { outcome: lane.outcome, outcomeNote: lane.outcomeNote ?? null },
       contractViolation: false,

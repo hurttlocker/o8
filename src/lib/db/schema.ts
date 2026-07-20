@@ -402,7 +402,7 @@ export const lanes = sqliteTable('lanes', {
   status: text('status', {
     enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human', 'recovering', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
   }).notNull(),
-  outcome: text('outcome', { enum: ['no_changes', 'merged', 'discarded', 'closed_unmerged', 'pr_opened', 'asked'] }),
+  outcome: text('outcome', { enum: ['no_changes', 'merged', 'discarded', 'closed_unmerged', 'pr_opened', 'asked', 'archived_recoverable'] }),
   outcomeNote: text('outcome_note'),
   ownership: text('ownership', { enum: ['managed', 'attached'] }).notNull(),
   writerToken: text('writer_token'),

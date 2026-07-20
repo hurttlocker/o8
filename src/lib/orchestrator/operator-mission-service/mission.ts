@@ -3,7 +3,8 @@ import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
+import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
@@ -474,6 +475,7 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
 
   const packets = record.packetMeta.map((meta) => {
     const lane = lanesByPacket.get(meta.id) ?? null;
+    const recovery = lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null;
     return {
       id: meta.id,
       referenceLabel: meta.referenceLabel,
@@ -484,6 +486,7 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
       releaseState: inferReleaseState(lane),
       blockedBy: [] as string[],
       blockedReason: null,
+      recovery,
       lane: lane ? {
         laneId: lane.id,
         sessionKey: lane.sessionKey,
@@ -635,6 +638,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
     packets: graph.map((node) => {
       const packet = packetById.get(node.packetId)!;
       const lane = laneByPacketId.get(node.packetId);
+      const recovery = packet.recovery
+        ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
       const laneSessionKey = lane?.sessionKey ?? packet.lane?.sessionKey ?? null;
       const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
@@ -650,6 +655,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         releaseState: packet.releaseState,
         blockedBy: node.blockedBy,
         blockedReason: packet.blockedReason ?? null,
+        recovery,
         lane: lane ? {
           laneId: lane.id,
           sessionKey: lane.sessionKey,

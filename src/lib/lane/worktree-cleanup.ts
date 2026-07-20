@@ -1,5 +1,5 @@
 import { getWorktreeManager } from '@/lib/worktree/launch';
-import { preserveLaneWorktreeHead } from './worktree-preservation';
+import { preserveAndRecordLaneRecovery } from './merge-recovery';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
@@ -12,18 +12,21 @@ function formatError(error: unknown) {
 
 /**
  * Bank the worktree HEAD as a salvage branch ref before any destructive step,
- * so a terminal/forced removal never drops a recoverable branch. Best-effort.
+ * so a terminal/forced removal never drops a recoverable branch. Fail closed
+ * when preservation cannot be confirmed.
  */
-async function preserveHeadBeforeRemoval(lane: CleanupLane, worktreePath: string): Promise<void> {
+async function preserveHeadBeforeRemoval(lane: CleanupLane, worktreePath: string): Promise<boolean> {
   try {
-    await preserveLaneWorktreeHead({
+    await preserveAndRecordLaneRecovery({
       id: lane.id,
       repoPath: lane.repoPath,
       worktreePath,
       baseBranch: lane.baseBranch ?? 'main',
-    });
+    }, 'terminal_worktree_cleanup');
+    return true;
   } catch (error) {
     console.warn(`[lane-worktree] Failed to preserve head for ${lane.id} before removal (${formatError(error)}).`);
+    return false;
   }
 }
 
@@ -54,7 +57,7 @@ export async function cleanupLaneWorktree(
   // Bank the head branch ref before any destructive step. manager.cleanup also
   // preserves uncommitted work internally; this covers the commit history.
   if (terminal || force) {
-    await preserveHeadBeforeRemoval(lane, worktreePath);
+    if (!(await preserveHeadBeforeRemoval(lane, worktreePath))) return false;
   }
 
   // Single prune gate (Rock 1 item 3): a terminal owning lane passes cleanly; a

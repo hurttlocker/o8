@@ -78,7 +78,8 @@ export function PacketCard({
   const dependencyBlocker = packetReleaseBlockedBy(packet, allPackets);
   const hasBranchTarget = hasPacketBranchTarget(packet.branchTarget);
   const terminalPacket = packet.releaseState === 'released' || packet.status === 'released' || packet.status === 'archived' || packet.status === 'awaiting_review';
-  const visibleBlocker = terminalPacket ? null : (packet.blockedReason ?? (dependencyBlocker ? `Waiting on ${dependencyBlocker.referenceLabel}` : null));
+  const recoveryMessage = packet.recovery?.message ?? null;
+  const visibleBlocker = recoveryMessage ?? (terminalPacket ? null : (packet.blockedReason ?? (dependencyBlocker ? `Waiting on ${dependencyBlocker.referenceLabel}` : null)));
   const canShowLaunchAction = !terminalPacket && !packet.archivedAt && packet.queueState !== 'held' && !dependencyBlocker;
   const canLaunch = canShowLaunchAction && hasBranchTarget;
   const hasInteractiveLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey || (packet.lane?.tileId && packet.lane?.tabId));
@@ -430,11 +431,11 @@ export function PacketCard({
                 paddingLeft: 10,
                 fontSize: 10.5,
                 fontWeight: 400,
-                color: '#b91c1c',
-                background: 'rgba(239, 68, 68, 0.06)',
+                color: recoveryMessage ? 'var(--t-accent)' : 'var(--t-danger)',
+                backgroundColor: recoveryMessage ? 'var(--t-accent-soft)' : 'var(--t-danger-soft)',
                 borderTopWidth: 1,
                 borderTopStyle: 'solid',
-                borderTopColor: 'rgba(239, 68, 68, 0.14)',
+                borderTopColor: recoveryMessage ? 'var(--t-accent-border)' : 'var(--t-danger-border)',
               }}
             >
               {visibleBlocker}
