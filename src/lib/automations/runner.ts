@@ -20,6 +20,7 @@ import { prepareLaunchWorktree } from '@/lib/worktree/launch';
 import type { automations } from '@/lib/db/schema';
 import type { LaneRuntime } from '@/lib/lane/types';
 import type { AgentType } from '@/lib/worktree/types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 export interface RunAutomationResult {
   ok: boolean;
@@ -30,8 +31,8 @@ export interface RunAutomationResult {
 function asLaneRuntime(value: string): LaneRuntime {
   // Narrow runtime to the LaneRuntime union; default to 'codex' if unknown
   // so we never throw on a stale row.
-  if (value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode' || value === 'pi') {
-    return value;
+  if (ORCHESTRATOR_RUNTIMES[value as LaneRuntime]?.dispatchable) {
+    return value as LaneRuntime;
   }
   return 'codex';
 }

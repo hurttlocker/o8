@@ -24,7 +24,7 @@ export interface PersistedTab {
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
-  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi'; // for kind='chat' (CLI Session)
+  chatRuntime?: OrchestratorRuntime; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   /** Stable lane identity behind a dispatched chat tab (#1553) — survives the
    *  per-attempt sessionKey churn so relaunches retarget instead of minting. */
@@ -88,8 +88,14 @@ export type PersistedRuntimeSessionKey =
   | `claude-code:${string}`
   | `gemini-owned:${string}`
   | `opencode-owned:${string}`
+  | `openhands-owned:${string}`
+  | `goose-owned:${string}`
+  | `qwen-owned:${string}`
+  | `kimi-owned:${string}`
+  | `aider-owned:${string}`
   | `cursor-owned:${string}`
-  | `grok-owned:${string}`;
+  | `grok-owned:${string}`
+  | `pi-owned:${string}`;
 
 const API_PATH = '/api/panel/terminal-state';
 
