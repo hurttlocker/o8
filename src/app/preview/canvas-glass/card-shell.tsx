@@ -177,10 +177,11 @@ export function GlassCardShell({
       aria-label="Close"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => onClose(card.id)}
-      style={{ borderWidth: 0, background: 'transparent', padding: 3 * s, paddingLeft: 6 * s, paddingRight: 6 * s, fontSize: CHROME.closeSize * s, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 44, minHeight: 44, borderWidth: 0, background: 'transparent', padding: 0, fontSize: CHROME.closeSize * s, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
       onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
       onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
+      <span aria-hidden style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} />
       <span aria-hidden style={{ pointerEvents: 'none' }}>✕</span>
     </button>
   );
