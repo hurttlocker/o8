@@ -14,7 +14,7 @@ import {
   buildSonnetComposeSystem,
   buildSonnetComposeUser,
   type ComposeOptions,
-} from '@/lib/cortex/qa/compose-prompts';
+} from '@/lib/prompts/v1';
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { isByokRequired } from '@/lib/cortex/qa/llm/byok-keys';

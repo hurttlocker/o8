@@ -22,6 +22,11 @@ import 'server-only';
 
 import { callCodex, CODEX_DEFAULT_MODEL } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import {
+  buildCommentFactExtractionPromptV1,
+  COMMENT_FACT_EXTRACTION_PROMPT_TEMPLATE_V1,
+  STRICT_JSON_SYSTEM_PROMPTS_V1,
+} from '@/lib/prompts/v1';
 
 import type { IndexerCli } from './cli-probe';
 
@@ -56,49 +61,10 @@ export interface DistillInput {
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
-export const DISTILL_PROMPT_TEMPLATE = `You are extracting structured facts from a single GitHub comment in an engineering organization.
-
-Read the COMMENT BODY below and emit a JSON array of facts. Each fact is one self-contained piece of organizational knowledge — a decision, spec, process, incident, ownership claim, cross-repo invariant, or directive. If the comment is purely conversational ("ok", "thanks", "lgtm"), reactionary, or contains no extractable factual content, emit an empty array [].
-
-Output format — STRICT JSON, no prose, no code fences, no explanation:
-
-[
-  {
-    "kind": "decision" | "spec" | "process" | "incident" | "ownership" | "cross_repo" | "directive" | "other",
-    "content": "<1-2 sentences, self-contained, no pronouns referring to context, max 500 chars>",
-    "source_excerpt": "<verbatim substring of the COMMENT BODY, max 200 chars, case-sensitive char-for-char match>",
-    "confidence": <number 0.0-1.0; 1.0 = explicit statement, 0.7 = clear inference, 0.4 = ambiguous>
-  }
-]
-
-Hard rules — facts that violate these will be silently rejected, so don't emit them:
-- source_excerpt MUST be a verbatim, case-sensitive, character-for-character substring of the COMMENT BODY. No paraphrasing, no truncation markers, no quotation reformatting.
-- content must NOT invent information not present in the comment. If a name, number, repo, or file isn't in the body, don't put it in the fact.
-- content must be self-contained — readable without seeing the comment.
-- Confidence below 0.6 will be dropped, so don't emit facts you're not at least somewhat sure about.
-
-Kind selector:
-- decision   — "we decided X over Y", "locked on X", "rejected proposal Z"
-- spec       — schemas, table names, command syntax, type definitions, numeric thresholds
-- process    — workflow steps, commands run before commit, release cadence, review rules
-- incident   — "X broke when Y", failure modes, postmortem notes
-- ownership  — who owns what, who reviews what, what project contains what
-- cross_repo — invariants spanning multiple repos (design language, tokens, contracts)
-- directive  — "must always do X", "never Y", explicit organizational rules
-- other      — factual content that doesn't fit above but is still organizational knowledge
-
-COMMENT BODY:
-<<<
-{BODY}
->>>
-
-Output JSON array only:`;
+export const DISTILL_PROMPT_TEMPLATE = COMMENT_FACT_EXTRACTION_PROMPT_TEMPLATE_V1;
 
 function buildPrompt(body: string): string {
-  // Truncate very long bodies to keep CLI invocations bounded. 8KB covers
-  // the long tail of GitHub comments; longer ones get tail-truncated.
-  const safeBody = body.length > 8_000 ? body.slice(0, 8_000) : body;
-  return DISTILL_PROMPT_TEMPLATE.replace('{BODY}', safeBody);
+  return buildCommentFactExtractionPromptV1(body);
 }
 
 // ── JSON parsing (defensive against ```json fences + lead-in prose) ─────────
@@ -187,7 +153,7 @@ async function callCli(prompt: string, cli: IndexerCli): Promise<string> {
     // System prompt is empty — the full task is in the user message so the
     // model gets unambiguous instructions in one block.
     const result = await callSonnet({
-      system: 'You extract structured facts from text. Output strict JSON only.',
+      system: STRICT_JSON_SYSTEM_PROMPTS_V1.textFacts,
       messages: [{ role: 'user', content: prompt }],
       stream: false,
       timeoutMs: 180_000,

@@ -20,6 +20,10 @@
 import 'server-only';
 
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import {
+  buildDocumentationFactExtractionPromptV1,
+  STRICT_JSON_SYSTEM_PROMPTS_V1,
+} from '@/lib/prompts/v1';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,60 +65,6 @@ export interface DistillBatchResult {
   factsByChunkId: Map<string, DocFact[]>;
   /** Best-effort estimate (sum of input chars / 4). Useful for cost tracking. */
   estTokens: number;
-}
-
-// ── Prompt ───────────────────────────────────────────────────────────────────
-
-const SYSTEM_PROMPT =
-  'You extract structured facts from documentation. Output strict JSON only. No prose, no fences, no preamble.';
-
-function buildPrompt(chunks: DocChunkInput[]): string {
-  const formatted = chunks.map((c) => ({
-    id: c.id,
-    path: `${c.repoName}/${c.relPath}`,
-    heading: c.headingPath.join(' > '),
-    text: c.text,
-  }));
-
-  return `You are extracting structured facts from documentation chunks. Each chunk has an id; for each chunk return zero or more facts as JSON.
-
-Output format — STRICT JSON, one object, no prose, no fences:
-
-{
-  "<chunk_id>": [
-    {
-      "kind": "decision" | "spec" | "process" | "incident" | "ownership" | "cross_repo" | "directive" | "other",
-      "content": "<one declarative sentence quoting concrete values, max 500 chars>",
-      "source_excerpt": "<8-30 word verbatim substring of THAT chunk's text>",
-      "confidence": <number 0.0-1.0>
-    }
-  ],
-  "<chunk_id>": [],
-  ...
-}
-
-Rules:
-- Each fact is ONE declarative sentence quoting concrete values (file paths, table names, env vars, commands, numbers).
-- Skip a chunk (return []) if it is a table of contents, navigation, license boilerplate, or pure markdown structure.
-- source_excerpt MUST be a verbatim, case-sensitive, character-for-character substring of THAT chunk's text. No paraphrasing.
-- content must NOT invent information not present in the chunk.
-- content must be self-contained — readable without the chunk.
-- Confidence below 0.6 will be dropped, so don't emit facts you're not at least somewhat sure about.
-
-Kind selector:
-- decision   — "we decided X over Y", "locked on X", "rejected Z"
-- spec       — schemas, table names, command syntax, type definitions, numeric thresholds, config keys
-- process    — workflow steps, commands run before commit, release cadence, review rules
-- incident   — "X broke when Y", failure modes, postmortem notes
-- ownership  — who owns what, who reviews what, what project contains what
-- cross_repo — invariants spanning multiple repos (design language, tokens, contracts)
-- directive  — "must always do X", "never Y", explicit organizational rules
-- other      — factual content that doesn't fit above but is still organizational knowledge
-
-Chunks:
-${JSON.stringify(formatted, null, 2)}
-
-Output JSON object only:`;
 }
 
 // ── JSON parsing ────────────────────────────────────────────────────────────
@@ -200,11 +150,11 @@ export async function distillDocChunkBatch(
     return { factsByChunkId, estTokens: 0 };
   }
 
-  const prompt = buildPrompt(input.chunks);
+  const prompt = buildDocumentationFactExtractionPromptV1(input.chunks);
   const estTokens = Math.ceil(prompt.length / 4);
 
   const result = await callSonnet({
-    system: SYSTEM_PROMPT,
+    system: STRICT_JSON_SYSTEM_PROMPTS_V1.documentationFacts,
     messages: [{ role: 'user', content: prompt }],
     stream: false,
     timeoutMs: input.timeoutMs ?? 240_000,

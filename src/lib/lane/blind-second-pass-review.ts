@@ -1,4 +1,5 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import { buildBlindSecondPassPromptV1 } from '@/lib/prompts/v1';
 import type { Lane } from './types';
 
 export interface BlindSecondPassDiffSummary {
@@ -59,32 +60,14 @@ export function buildBlindSecondPassPrompt(
   diffSummary: BlindSecondPassDiffSummary,
   highRiskReasons: string[],
 ): string {
-  const reasons = highRiskReasons.length > 0
-    ? highRiskReasons.map((reason) => `- ${reason}`).join('\n')
-    : '- high-risk classification returned no structured reason';
-  return [
-    `You are the blind, independent second-pass reviewer for lane "${lane.label}" (branch: ${lane.branch}).`,
-    'Do not rely on any prior review, prior verdict, approval card, summary, or finding. Evaluate only the diff and protocol below.',
-    '',
-    `## High-risk reasons\n${reasons}`,
-    '',
-    diffSummary.summary,
-    '',
-    '## Required verification protocol',
-    `Worktree: ${diffSummary.cwd}`,
-    lane.packetId ? `Packet: ${lane.packetId}` : null,
-    'SCOPE traces: for every changed file that writes or mutates state, cite `SCOPE: <file:line> partition=<repo|tenant|user|project|lane|packet|scope|slug|id|NONE>` and confirm the single intended destination.',
-    'GUARD traces: for every new guard, condition, or early return, cite `GUARD: <file:line> fires-from=<file:line|INERT>`.',
-    'COVERAGE checklist: enumerate each packet sub-requirement as `[x] <sub-requirement> - evidence <file:line|command output>` or `[ ] <sub-requirement> - gap <reason>`.',
-    'EXECUTION-PATH TRACE: trace the actual call path the change runs under, not the one its name implies.',
-    'You may agree only if every guard is live, every write is partitioned correctly, every sub-requirement is covered, and the execution path reaches the changed code.',
-    '',
-    'Do NOT call submit_review. Do NOT call lane_command. Do not stamp or merge anything yourself.',
-    'End your output with EXACTLY one final line:',
-    'SECOND_PASS_VERDICT: agree',
-    'OR',
-    'SECOND_PASS_VERDICT: disagree - <file:line> <reason>',
-  ].filter((value): value is string => value !== null).join('\n');
+  return buildBlindSecondPassPromptV1({
+    laneLabel: lane.label,
+    branch: lane.branch,
+    packetId: lane.packetId,
+    diffSummary: diffSummary.summary,
+    cwd: diffSummary.cwd,
+    highRiskReasons,
+  });
 }
 
 export function parseSecondPassVerdict(rawText: string): SecondPassVerdict {

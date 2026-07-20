@@ -37,6 +37,7 @@ import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapte
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
 
 export type QuestionClass = 'A' | 'B';
 
@@ -243,7 +244,7 @@ async function tryHaiku(prompt: string, question: string): Promise<ClassifierRes
 async function trySonnetRepl(prompt: string, question: string): Promise<ClassifierResult | null> {
   try {
     const result = await callSonnet({
-      system: 'You are a strict classifier. Return only the JSON object specified.',
+      system: STRICT_JSON_SYSTEM_PROMPTS_V1.classifier,
       messages: [{ role: 'user', content: prompt }],
       stream: false,
       // Eval mode tolerates the longer Sonnet bootstrap; downstream timeout in

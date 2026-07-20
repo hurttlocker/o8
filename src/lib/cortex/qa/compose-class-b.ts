@@ -11,7 +11,7 @@ import {
   buildSonnetComposeSystem,
   buildSonnetComposeUser,
   type ComposeOptions,
-} from '@/lib/cortex/qa/compose-prompts';
+} from '@/lib/prompts/v1';
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';

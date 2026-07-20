@@ -28,6 +28,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { buildCommitFactExtractionPromptV1 } from '../src/lib/prompts/v1/fact-extraction';
 
 const execFileAsync = promisify(execFile);
 
@@ -181,61 +182,6 @@ async function callCodexCli(codexBin: string, prompt: string): Promise<string> {
   });
 }
 
-// ── Prompt ───────────────────────────────────────────────────────────────────
-
-const SYSTEM_PROMPT =
-  'You extract structured engineering facts from git commits. Output strict JSON only. No prose, no fences, no preamble.';
-
-function buildPrompt(sha: string, message: string, files: string[]): string {
-  const fileSummary =
-    files.length === 0
-      ? '(no changed files listed)'
-      : files.slice(0, 40).join('\n') + (files.length > 40 ? `\n…and ${files.length - 40} more` : '');
-
-  return `You are extracting structured facts from a single git commit.
-
-Read the COMMIT below and emit a JSON array of facts. Each fact is one self-contained piece of engineering knowledge: a decision, spec, process change, architecture note, or directive. If the commit message is purely mechanical ("fix typo", "bump version", "merge", "chore"), emit an empty array [].
-
-Output format — STRICT JSON, no prose, no code fences:
-
-[
-  {
-    "kind": "decision" | "spec" | "process" | "incident" | "ownership" | "cross_repo" | "directive" | "other",
-    "content": "<1-2 sentences, self-contained, concrete, max 400 chars>",
-    "source_excerpt": "<verbatim substring of the COMMIT MESSAGE below, max 150 chars>",
-    "confidence": <number 0.0-1.0; 1.0 = explicit statement, 0.7 = clear inference>
-  }
-]
-
-Hard rules — violating these will silently reject the fact:
-- source_excerpt MUST be a verbatim, case-sensitive, character-for-character substring of the COMMIT MESSAGE.
-- content must be self-contained — readable without seeing the commit.
-- content must NOT invent information not present in the commit message.
-- Confidence below 0.6 will be dropped, so don't emit facts you're not sure about.
-
-Kind selector:
-- decision   — "chose X over Y", "locked on X", "rejected Z"
-- spec       — schemas, file conventions, command syntax, numeric thresholds
-- process    — workflow steps, build/release steps, review rules
-- incident   — "broke when Y", failure modes, postmortem notes
-- ownership  — who owns what, what component contains what
-- cross_repo — invariants across multiple repos
-- directive  — "must always do X", "never Y", explicit project rules
-- other      — factual engineering content that doesn't fit above
-
-COMMIT SHA: ${sha}
-
-COMMIT MESSAGE:
-<<<
-${message.slice(0, 4000)}
->>>
-
-CHANGED FILES (context only — do not hallucinate facts from filenames alone):
-${fileSummary}
-
-Output JSON array only:`;
-}
-
 // ── Fact validation ──────────────────────────────────────────────────────────
 
 const ALLOWED_KINDS = [
@@ -370,7 +316,7 @@ async function main(): Promise<void> {
   }
 
   // ── 3. Call Codex CLI ────────────────────────────────────────────────────
-  const prompt = buildPrompt(sha, message, files);
+  const prompt = buildCommitFactExtractionPromptV1(sha, message, files);
   let rawOutput: string;
   try {
     rawOutput = await callCodexCli(codexBin, prompt);
