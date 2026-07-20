@@ -14,6 +14,7 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
 // ── Lane Status ──
@@ -80,7 +81,7 @@ export type LaneOwnership = 'managed' | 'attached';
 // LaneRuntime intentionally mirrors OrchestratorRuntime so packets with any
 // runtime can be routed through the lane system. The lane command bus
 // dispatches to the correct CLI adapter at launch time.
-export type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
+export type LaneRuntime = OrchestratorRuntime;
 
 // ── Lane ──
 
