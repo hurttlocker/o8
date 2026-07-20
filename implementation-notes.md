@@ -72,3 +72,28 @@
 ## Deviations
 
 - The existing declarative owned-session registration did not create the universal `AgentRuntime` required by mission dispatch, so one shared bridge was added rather than five hand-written adapters.
+
+## LaunchAgent crash-loop alerting (#1538)
+
+## Plan
+
+- Trace the existing launch-agent health detector into the supervisor inbox and Incident Queue. Complete.
+- Confirm the installed LaunchAgent reaches the dependency-light counter before shared/native module loading. Complete.
+- Verify per-service crash counting, healthy-uptime reset, Incident Queue persistence, and real source boot. Complete.
+- Run the mandatory TypeScript check and self-review before committing. Complete.
+
+## Findings
+
+- Local `main` and this packet both start at `9c8e451b`, `fix(supervisor): surface LaunchAgent crash-loops per service to the Incident Queue (#1538)`. The requested production implementation was already present when this packet began.
+- The installed `com.rainwater.mcp-o8` plist launches Node directly under launchd, and `operator-mcp-server.ts` imports `operator-node22-reexec.ts` first. That seam records launchd starts before native/shared imports and preserves the launchd label across the Node 22 re-exec.
+- The WebSocket bootstrap polls all persisted per-label counters once per minute and enqueues `launch_agent_crash_loop` incidents after three consecutive failed starts within one hour.
+
+## Verification
+
+- `npx vitest run src/lib/mcp/launch-agent-crash-counter.test.ts src/lib/supervisor/launch-agent-health.test.ts tests/mcp-source-boot.test.ts` — 3 files, 10 tests passed.
+- `npx tsc --noEmit` — passed.
+- Browser/UI smoke intentionally not run per packet sandbox guidance.
+
+## Deviations
+
+- No production source was changed because the exact #1538 fix was already the shared `main`/packet HEAD; adding a second implementation would create redundant behavior. This file records the audit and verification instead.
