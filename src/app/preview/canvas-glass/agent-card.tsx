@@ -241,6 +241,21 @@ export function AgentGlassCard({
     opacity: contentVisible ? 1 : 0,
     transition: `opacity ${AGENT_CONTENT_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
   };
+  const [transcriptContentVisible, setTranscriptContentVisible] = useState(false);
+
+  // The title is available at bloom, but transcript blocks hydrate later. Fade
+  // that first real transcript commit independently so it never replaces the
+  // loading copy with a snapped-in wall of text.
+  useEffect(() => {
+    if (blocks.length === 0 || transcriptContentVisible) return undefined;
+    const frame = window.requestAnimationFrame(() => setTranscriptContentVisible(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [blocks.length, transcriptContentVisible]);
+
+  const transcriptContentFadeStyle: CSSProperties = {
+    opacity: transcriptContentVisible ? 1 : 0,
+    transition: `opacity ${AGENT_CONTENT_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+  };
 
   // Honest settled duration — lane start → the lane's own last-event freeze
   // point. Only when NOT live and the lane still exposes an end timestamp; null
@@ -392,7 +407,11 @@ export function AgentGlassCard({
               </div>
             ) : (
               <>
-                <AgentTranscriptBlocks blocks={blocks} />
+                {blocks.length > 0 ? (
+                  <div style={{ ...transcriptContentFadeStyle, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <AgentTranscriptBlocks blocks={blocks} />
+                  </div>
+                ) : null}
                 {sent.map((message) => <SentLine key={`s-${message.id}`} message={message} />)}
                 {live ? <AgentThinkingRow /> : null}
               </>
