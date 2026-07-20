@@ -24,19 +24,63 @@ import { REALTIME_MODEL, DEFAULT_VOICE } from '@/lib/voice/realtime-session-conf
 
 const LOG = '[realtime-host]';
 
-/** A recent dock confirm card, for the Agent-mode tool relay's honest needs_confirmation. */
+interface SymonToolCorrelation {
+  sessionId: string;
+  callId: string;
+}
+
+interface SymonConfirmTarget {
+  approvalId?: string;
+  packetId?: string;
+  laneId?: string;
+  sessionKey?: string;
+}
+
+/** A gate-owned confirmation surfaced to the phone relay while its invoke waits. */
 interface SymonConfirmEntry {
+  confirmationId: string;
   tool: string;
-  taskId?: string;
+  taskId: string;
+  summary: string;
+  expiresAt: number;
+  target: SymonConfirmTarget;
+  sessionId?: string;
+  callId?: string;
   at: number;
   consumed?: boolean;
+  settled?: boolean;
+}
+
+type SymonConfirmResolution =
+  | { status: 'resolved'; allow: boolean }
+  | { status: 'already_resolved'; allow: boolean }
+  | { status: 'expired' | 'preempted' | 'not_found' };
+
+type SymonInvokeTool = (
+  name: string,
+  args: Record<string, unknown>,
+  correlation?: SymonToolCorrelation,
+) => Promise<unknown>;
+
+type SymonResolveConfirm = (
+  confirmationId: string,
+  allow: boolean,
+  correlation: SymonToolCorrelation,
+) => Promise<SymonConfirmResolution>;
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 /** window.__o8SymonAgent — the phone-hosted Agent Mode surface (see the bridge effect). */
 interface SymonAgentBridge {
-  invokeTool: ((name: string, args: Record<string, unknown>) => Promise<unknown>) | null;
+  invokeTool: SymonInvokeTool | null;
+  resolveConfirm: SymonResolveConfirm | null;
   config: { model: string; voice: string; tools: Array<Record<string, unknown>> } | null;
+  /** Legacy relay alias; entries are now fully correlated when callers pass metadata. */
   confirms: SymonConfirmEntry[];
+  /** Live, unexpired gates for v2 relays. */
+  readonly pendingConfirmations: SymonConfirmEntry[];
 }
 
 /**
@@ -233,12 +277,13 @@ export function RealtimeVoiceHost() {
   // Symon Agent Mode (phone-hosted) bridge. The phone hosts the WebRTC session,
   // but every tool STILL executes here on the Mac. This publishes the surface the
   // gated routes reach through the webview eval bridge:
-  //   • __o8SymonAgent.invokeTool(name, args) — the SAME realtime_invoke_tool the
-  //     desk session calls (identical dispatcher + SafetyClass gate);
+  //   • __o8SymonAgent.invokeTool(name, args, correlation?) — the SAME
+  //     realtime_invoke_tool the desk session calls, with additive phone IDs;
+  //   • __o8SymonAgent.resolveConfirm(id, allow) — resolves the Rust oneshot by
+  //     its gate-owned identity; the original invoke remains pending meanwhile;
   //   • __o8SymonAgent.config.tools — realtime_tools() schemas so /session bakes
   //     Symon's whole brain into the phone's ephemeral token (config parity);
-  //   • __o8SymonAgent.confirms — recent dock confirm cards so the tool relay can
-  //     honestly tell the phone "approve on the Mac" instead of hanging.
+  //   • __o8SymonAgent.confirms/pendingConfirmations — structured dock gates.
   // We publish here (not from a raw eval) because bare-specifier dynamic imports
   // don't resolve inside an eval string. See docs/symon-agent-mode.md.
   useEffect(() => {
@@ -246,15 +291,54 @@ export function RealtimeVoiceHost() {
     let alive = true;
     const w = window as unknown as { __o8SymonAgent?: SymonAgentBridge };
     const confirms: SymonConfirmEntry[] = [];
-    const bridge: SymonAgentBridge = { invokeTool: null, config: null, confirms };
+    const bridge: SymonAgentBridge = {
+      invokeTool: null,
+      resolveConfirm: null,
+      config: null,
+      confirms,
+      get pendingConfirmations() {
+        const now = Date.now();
+        return confirms.filter((entry) => !entry.settled && entry.expiresAt > now);
+      },
+    };
     w.__o8SymonAgent = bridge;
     let unlistenConfirm: (() => void) | null = null;
 
     void import('@tauri-apps/api/core')
       .then(({ invoke }) => {
         if (!alive) return;
-        bridge.invokeTool = (name: string, args: Record<string, unknown>) =>
-          invoke('realtime_invoke_tool', { name, args });
+        bridge.invokeTool = (name, args, correlation) => {
+          const startedAt = Date.now();
+          const pending = invoke('realtime_invoke_tool', {
+            name,
+            args,
+            sessionId: correlation?.sessionId,
+            callId: correlation?.callId,
+          });
+          const markSettled = () => {
+            for (const entry of confirms) {
+              const sameCall = correlation
+                ? entry.sessionId === correlation.sessionId && entry.callId === correlation.callId
+                : entry.tool === name && entry.at >= startedAt;
+              if (sameCall) entry.settled = true;
+            }
+          };
+          void pending.then(markSettled, markSettled);
+          return pending;
+        };
+        bridge.resolveConfirm = async (confirmationId, allow, correlation) => {
+          const result = await invoke<SymonConfirmResolution>('agent_confirm_v2', {
+            confirmationId,
+            allow,
+            sessionId: correlation.sessionId,
+            callId: correlation.callId,
+          });
+          if (result.status !== 'not_found') {
+            const entry = confirms.find((candidate) => candidate.confirmationId === confirmationId);
+            if (entry) entry.settled = true;
+          }
+          return result;
+        };
         return invoke('realtime_tools').then((raw) => {
           if (!alive) return;
           const tools = Array.isArray(raw)
@@ -270,9 +354,27 @@ export function RealtimeVoiceHost() {
 
     void import('@tauri-apps/api/event')
       .then(({ listen }) =>
-        listen<{ tool?: string; taskId?: string }>('o8:agent-confirm', (e) => {
+        listen<Record<string, unknown>>('o8:agent-confirm', (e) => {
           const p = e.payload || {};
-          confirms.push({ tool: typeof p.tool === 'string' ? p.tool : '', taskId: p.taskId, at: Date.now() });
+          const rawTarget = p.target && typeof p.target === 'object'
+            ? p.target as Record<string, unknown>
+            : {};
+          confirms.push({
+            confirmationId: stringField(p.confirmationId) || '',
+            taskId: stringField(p.taskId) || '',
+            tool: stringField(p.tool) || '',
+            summary: stringField(p.summary) || '',
+            expiresAt: typeof p.expiresAt === 'number' ? p.expiresAt : Date.now() + 120_000,
+            target: {
+              approvalId: stringField(rawTarget.approvalId),
+              packetId: stringField(rawTarget.packetId),
+              laneId: stringField(rawTarget.laneId),
+              sessionKey: stringField(rawTarget.sessionKey),
+            },
+            sessionId: stringField(p.sessionId),
+            callId: stringField(p.callId),
+            at: Date.now(),
+          });
           while (confirms.length > 20) confirms.shift();
         }),
       )

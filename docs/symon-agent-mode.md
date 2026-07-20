@@ -27,7 +27,14 @@ The phone is a **dumb pipe** for tools: it never executes anything.
 
 ### POST `/api/mobile/symon/session`  (Bearer ws-token; middleware-gated like all `/api/mobile/*`)
 
-Mints an ephemeral OpenAI Realtime client token carrying the **same session config the desk-mic session uses** — model, voice, instructions, and the full tool schema set. Config parity is a hard requirement: the implementation must assemble it from the same source the desktop realtime client uses (`src/lib/voice/realtime-client.ts` session config + the Rust-supplied tool schemas that reach the webview today), not a copy-paste snapshot.
+Mints an ephemeral OpenAI Realtime client token carrying the shared voice,
+persona, and live Mac tool schemas used by the desk-mic session. The workspace
+then selects both the phone catalog and model: Life and legacy `{}` receive the
+complete live bridge catalog on mini, while Code receives the explicit bounded
+pack below and can participate in the server-owned mini/flagship experiment.
+Desktop mints remain unchanged. All schemas still come from the Rust-supplied
+live catalog that reaches the webview; the server filters those schemas by name
+rather than maintaining copy-pasted tool definitions.
 
 Request body (all fields optional; legacy `{}` remains valid):
 ```json
@@ -79,21 +86,62 @@ and truncated results say so. The `continue-run`, `steer-run`, `approve`, and
 (`workspaceMode: "o8"`) keeps the generic phone vocabulary and never receives the
 Code authoring instructions.
 
+### Phone Code tool pack (v1)
+
+Only `workspaceMode: "code"` filters Mac-executed tools. Its exact catalog is:
+
+`o8_status`, `o8_needs_me`, `o8_review_diff`, `o8_dispatch`, `o8_delegate`,
+`o8_packet_wait`, `o8_packet_steer`, `o8_agent_task`, `o8_packet_rerun`,
+`o8_packet_reset`, `o8_stop_agent`, `o8_approve_item`, `o8_reject_item`,
+`git_status`, and `git_log`.
+
+The phone-local `render_surface` tool is appended after that pack and never
+relayed to the Mac. Mail, media, browser, shell, file, and every other desktop or
+Life tool are excluded from Code even when the live Mac catalog contains them.
+The filter preserves the live schemas and emits them in the canonical order
+above. If any required Code tool is absent or is not a function schema, the mint
+fails as `503 desktop_unavailable` with the missing names instead of silently
+creating a partial Code agent. This strict failure applies only to Code; Life,
+legacy `{}`, and desktop continue using their full catalogs.
+
 Success `200`:
 ```json
 {
   "ok": true,
+  "scopeVersion": 1,
   "session": {
     "sessionId": "sym-<uuid>",
-    "clientSecret": "<ephemeral token — expires in ~60s, connect promptly>",
+    "clientSecret": "<ephemeral token — expires in ~10 minutes, connect promptly>",
     "expiresAt": 1783490000000,
-    "model": "<same model id the desk session uses>",
+    "model": "gpt-realtime-2.1-mini",
+    "modelVariant": "mini",
     "voice": "<same voice>",
-    "baseUrl": "https://api.openai.com/v1/realtime"
+    "baseUrl": "https://api.openai.com/v1/realtime",
+    "scopeVersion": 1
+  },
+  "scope": {
+    "version": 1,
+    "repoId": "<registered repo id, or null in Life>",
+    "repoPath": "/canonical/registered/path",
+    "workspaceMode": "code"
   },
   "preempted": "desk" | null
 }
 ```
+
+Code requires an exact registered `repoPath`. The Mac resolves that path to its
+canonical registry pair and persists an immutable session grant containing the
+subject/device identity, workspace mode, `repoId`, `repoPath`, allowed tools,
+issue time, and scope version. The phone refuses to open WebRTC unless a Code
+mint returns version 1 and the exact requested path. Repo changes therefore
+tear down and remint the session instead of editing instructions in place.
+
+Life is always `gpt-realtime-2.1-mini`. Code reads
+`O8_SYMON_CODE_REALTIME_EXPERIMENT=mini|flagship|ab`; `ab` assigns a stable
+subject-and-repo bucket. An authenticated operator-only test may override one
+Code mint with `x-o8-symon-code-model: mini|flagship`. The flagship is
+`gpt-realtime-2.1`; the response exposes `modelVariant` so eval reports cannot
+confuse the two cohorts.
 
 Side effect: if a desk-mic session is live, it is **stopped cleanly before minting** (see mutual exclusion) and `preempted: "desk"` is set.
 
@@ -104,7 +152,7 @@ Errors (typed, structured, never thrown):
 | 403 | `locked` | entitlement does not include S2S (same rule as the desk mint) |
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
 | 502 | `mint_failed` | upstream OpenAI session-mint failure (body includes `detail`) |
-| 503 | `desktop_unavailable` | webview/eval bridge unreachable (app not running) |
+| 503 | `desktop_unavailable` | webview/eval bridge unreachable, or the live catalog is missing a required Code tool |
 
 ### GET/POST `/api/mobile/symon` — unchanged (Remote mode)
 
@@ -112,7 +160,24 @@ One **additive** field on GET responses: `"agentSession": { "sessionId", "starte
 
 ### POST `/api/mobile/symon/tool` — internal relay target (ws-server → Next; same gate)
 
-Not called by the phone. Body `{ sessionId, callId, tool, args }` → executes via the eval bridge (`invoke('realtime_invoke_tool', …)` — the exact same dispatcher + SafetyClass gate the desk session's tool calls run through) → returns `{ ok, result }`. Documented so the relay is auditable; the phone-facing surface is the WS channel below.
+Not called by the phone. Body `{ sessionId, callId, tool, args }` re-loads the
+active grant, rejects disallowed tools, overwrites repo arguments with the
+server-owned canonical pair, and then executes through the same Rust dispatcher
+and SafetyClass gate as desk mode. A normal completion returns `{ ok, result }`;
+a gated call returns `{ ok:false, result:
+{error:"needs_confirmation", detail}, confirmation }` while its original webview
+promise remains pending under the exact `(sessionId, callId)` key.
+
+`dryRun:true` is an authenticated operator/eval diagnostic: it performs the same
+grant validation and returns the exact scoped args without invoking Rust.
+
+### POST `/api/mobile/symon/confirm` — internal resolver (ws-server → Next)
+
+Body `{ sessionId, callId, confirmationId, allow }` resolves only the matching
+cached invoke through `window.__o8SymonAgent.resolveConfirm`. The response is
+`{ok:true,resolution:{status:"resolved"|"already_resolved",allow}}` or a terminal
+`expired`/`preempted` resolution. A mismatched triple fails closed. The route
+never accepts tool arguments or repo context.
 
 ## WS channel: `symon`  (multiplexed on the existing paired socket, port 3002 — `subscribe("symon", handler)`)
 
@@ -124,8 +189,9 @@ All messages are JSON with `channel: "symon"`. DURABLE semantics (queued under b
 
 | event | payload | semantics |
 |---|---|---|
-| `symon-tool-call` | `{ sessionId, callId, tool, args }` | forward of a model `function_call`; `args` = parsed JSON object (not the raw string); `callId` = the model's call id, opaque to us, echoed back verbatim |
-| `symon-agent-status` | `{ sessionId, status: "connecting" \| "live" \| "error" \| "idle", detail? }` | phone reports its WebRTC lifecycle so the Mac UI can show "Symon is live from the phone" |
+| `symon-tool-call` | `{ sessionId, callId, tool, args, protocolVersion?:2 }` | forward of a model `function_call`; v2 opts into phone confirmation; omitted means fail-closed v1 |
+| `symon-confirm-decision` | `{ sessionId, callId, confirmationId, allow, clientMutationId }` | v2 decision for one exact gate; no tool args or scope fields are accepted |
+| `symon-agent-status` | `{ sessionId, status: "connecting" \| "live" \| "error" \| "idle", detail?, protocolVersion?:2 }` | phone reports WebRTC lifecycle and may negotiate additive v2 |
 | `symon-stop` | `{ sessionId }` | phone ended the session (user tap, app background, WebRTC close) |
 
 ### Server → phone
@@ -133,6 +199,9 @@ All messages are JSON with `channel: "symon"`. DURABLE semantics (queued under b
 | event | payload | semantics |
 |---|---|---|
 | `symon-tool-result` | `{ sessionId, callId, ok, result }` | `result` = JSON value to hand back to the model as the function output; on failure `ok:false` and `result` = `{ "error": "<code>", "detail"?: "<human text>" }` |
+| `symon-confirm-required` | `{ sessionId, callId, confirmationId, taskId, tool, summary, expiresAt, target:{approvalId?,packetId?,laneId?,sessionKey?} }` | v2-only pending gate; render Allow/Cancel without completing the model function call |
+| `symon-confirm-settled` | `{ sessionId, callId, confirmationId, outcome:"approved"\|"declined"\|"expired"\|"preempted"\|"duplicate", firstOutcome? }` | decision acknowledgement; duplicate replay never re-executes the tool |
+| `symon-action-complete` | `{ sessionId, callId, tool, status:"accepted"\|"review"\|"done"\|"failed"\|"stopped", confirmationId?, taskId?, approvalId?, packetId?, laneId?, sessionKey?, ts }` | normalized action lifecycle emitted beside the single final tool result |
 | `symon-agent-status` | `{ sessionId, status: "idle" \| "connecting" \| "live" \| "acting" \| "error", detail? }` | authoritative session state; `acting` is emitted while a tool executes, then back to `live` |
 | `symon-task-complete` | `{ taskId, status: "done" \| "failed", intentText, resultText, truncated }` | additive background-Claude completion; emitted after the full result is persisted in `agent_tasks`, only to active Agent-mode sessions. `resultText` is capped at 600 Unicode characters plus `…`; `truncated:true` means the phone must treat it as a spoken summary, not the complete record. |
 
@@ -140,10 +209,30 @@ Mobile-lane contract-change note: forward `symon-task-complete` into the live We
 
 ### Tool relay semantics
 
-- One tool call at a time is the normal case, but the relay MUST tolerate concurrent `symon-tool-call`s (the model can parallel-call); correlate strictly by `callId`.
-- Execution timeout: **60s** per call → `{ ok:false, result: { error: "tool_timeout" } }`. The Mac-side execution is not cancelled (same behavior as desk mode); a late result is dropped.
-- Tools that hit Symon's confirmation gate behave exactly as on desk: the Allow/Cancel card renders on the Mac dock with the 2-minute auto-decline. In v1 the phone is told honestly: `{ ok:false, result: { error: "needs_confirmation", detail: "Approve on the Mac dock" } }`, and a `symon-agent-status` with `detail:"awaiting Mac approval"` fires so the tab can render it. Phone-side approval is the follow-up spec'd in `docs/phone-symon-contract.md` §confirm-bridge — NOT in v1.
-- Unknown/disallowed tools flow through the same dispatcher and return its error shape in `result` — the relay never invents tool semantics.
+- Parallel calls are keyed by `(sessionId, callId)`; confirmations add
+  `confirmationId`. Terminal results are cached for five minutes so duplicate
+  calls replay instead of executing twice.
+- Execution timeout is **60s**, paused while awaiting the Rust gate. The gate's
+  `expiresAt` is authoritative and auto-denies. Stop, disconnect, stale cleanup,
+  and session preemption also submit denial before dropping the call.
+- v2 receives `symon-confirm-required`, sends one decision, then receives a
+  settlement and exactly one final `symon-tool-result`. First decision wins;
+  retries replay the original settlement/result. v1 never receives new frames:
+  the server immediately denies the gate and returns only the final declined
+  tool result, so an old phone cannot accidentally authorize execution.
+- A Code call is authorized twice: at the authenticated WS boundary and again
+  inside `/api/mobile/symon/tool`. Both use the immutable session grant. The Mac
+  injects canonical `repoId` and `repoPath`; model-supplied repo names or paths
+  cannot widen scope. `o8_delegate` additionally requires the exact repo pair at
+  the internal orchestrator endpoint before its turn enters the repo-keyed queue.
+- Unknown or disallowed tools fail as structured results. They never reach the
+  dispatcher and the relay never invents tool semantics.
+- `dispatch`, `steer`, `agent-task`, and `rerun` emit `accepted` immediately,
+  then `review`, `done`, `failed`, or `stopped` when the matching repo/lane
+  lifecycle arrives. `delegate` emits `accepted` with a stable task id and later
+  `done`/`failed` from the queued orchestrator turn. `stop` emits `stopped` after
+  the exact lane has been reaped and archived. The phone forwards every terminal
+  update into the live Realtime conversation so Symon answers aloud.
 
 ## Mutual exclusion — LAST-START-WINS (symmetric)
 
@@ -156,13 +245,19 @@ One operator, one Symon voice at a time:
 
 ## Session registry
 
-The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedAt, lastStatus, source: "phone" }` (server-side, process-local is acceptable in v1 — it can be re-derived from status events after a restart). It powers the GET field, the mutual-exclusion rule, and stale-session cleanup: a session with no status event or tool call for **10 minutes** is marked `idle` and dropped.
+The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedAt, lastStatus, source: "phone" }` plus the separately persisted immutable scope grant described above. The status record powers the GET field, mutual exclusion, and stale-session cleanup: a session with no status event or tool call for **10 minutes** is marked `idle` and dropped. Every status, tool, decision, and stop frame must match both the active session and its authenticated operator/device subject.
+Stop, disconnect, stale cleanup, and desk preemption revoke the exact persisted
+grant; revocation uses an atomic move-and-compare so it cannot delete a newer
+last-start-wins mint.
 
 ## Security
 
 - Session mint requires the paired Bearer ws-token; the `symon` WS channel rides the already-authed socket. No new auth surface.
 - The ephemeral client token is short-lived (~60s window to connect) and single-session; it is returned once and never persisted server-side.
 - Tool execution runs the **same** SafetyClass gate + confirm registry as desk mode — Agent mode grants zero new capability, it only moves the microphone.
+- Confirmation never changes authorization scope. Tool arguments are scoped
+  once against the immutable session grant before invocation, stored server-side,
+  and reused after approval; decision frames carry no repo or argument fields.
 - The BYOK OpenAI key never leaves the Mac; only the ephemeral token does.
 - Phone workspace context is a small typed app-state envelope, never raw prompt
   text. The mint bounds and validates every accepted field and never copies unknown
@@ -172,8 +267,11 @@ The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedA
 
 1. `react-native-webrtc` native rebuild via EAS (SDK 55 / RN 0.83 — routine, per mobile team).
 2. `POST /api/mobile/symon/session` → open WebRTC to `baseUrl` with `clientSecret` within its expiry; renegotiate = new session mint. **SDP exchange = `POST {baseUrl}/calls?model={model}`** (OpenAI GA realtime) — NOT the bare `baseUrl` (retired beta; returns 400 "Realtime Beta API is no longer supported"). Verified live 2026-07-08 (o8-mobile e8ad9bc): bare→400, GA→201. The desk-voice proxy already uses GA.
-3. `subscribe("symon", …)`; forward every model `function_call` as `symon-tool-call` (parse arguments JSON before sending); hand every `symon-tool-result.result` back to the model verbatim; render `symon-agent-status`.
-4. Emit `symon-agent-status` on WebRTC lifecycle transitions and `symon-stop` on teardown (including app-background if the session should not survive it — mobile's call; document in the tab).
+3. `subscribe("symon", …)`; advertise `protocolVersion:2` on status/tool frames,
+   render `symon-confirm-required`, and send exact decisions with a stable
+   `clientMutationId`. Do not complete the model function call until the one
+   final `symon-tool-result` arrives.
+4. Emit `symon-agent-status` on WebRTC lifecycle transitions and `symon-stop` on teardown (including app-background if the session should not survive it — mobile's call; document in the tab). Render `symon-confirm-settled` and `symon-action-complete` as lifecycle feedback.
 5. Keep the existing toggle UI as secondary "Remote mode" (unchanged endpoints).
 6. On `status:"idle"` push (preemption), close WebRTC immediately.
 
@@ -181,3 +279,18 @@ The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedA
 
 - curl: mint a session (expect 200 + clientSecret with BYOK key present; 501 without; 403 when locked; second mint preempts the first).
 - Scripted WS client: subscribe `symon`, send `symon-agent-status connecting/live`, send a `symon-tool-call` for a real ReadOnly tool (e.g. `o8_status`) and assert a correlated `symon-tool-result` + the `acting`→`live` status pair. Evidence tail belongs in the implementation report.
+
+## Code intent and model eval
+
+The mobile repo owns `scripts/symon-code-intents.json` and
+`scripts/symon-code-intent-eval.mjs`. Its 15 fixtures cover the entire Code pack
+as spoken request → expected tool sequence → exact raw stable-ID args → expected
+confirmation → exact server-scoped repo args → deterministic final state.
+
+Run `bun run eval:symon-code:validate` for a mutation-free fixture contract
+check. Run `bun run eval:symon-code -- --repo /absolute/path --models mini,flagship`
+against a current desktop build for the model A/B. The evaluator never executes
+mutations: it calls the real relay with `dryRun:true`, then returns fixture-owned
+tool outcomes to Realtime. This isolates model/prompt selection from schema and
+scope-relay failures; real backend completion for mutating tools remains a
+physical-phone confirmation dogfood check.

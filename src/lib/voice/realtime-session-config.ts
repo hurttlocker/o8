@@ -22,6 +22,44 @@
 // flagship by setting 'gpt-realtime-2.1' (or 'gpt-realtime-2'). Kept here so the
 // desk mint, the sdp relay, and the Agent-mode mint can never drift apart.
 export const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
+export const REALTIME_FLAGSHIP_MODEL = 'gpt-realtime-2.1';
+export type PhoneCodeModelVariant = 'mini' | 'flagship';
+export type PhoneCodeModelExperiment = PhoneCodeModelVariant | 'ab';
+
+function stableBucket(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/** Life is pinned to mini; Code can opt into a server-owned flagship experiment. */
+export function selectPhoneRealtimeModel(input: {
+  workspaceMode: 'o8' | 'code';
+  experiment?: string | null;
+  bucketKey: string;
+  operatorOverride?: string | null;
+}): { model: string; variant: PhoneCodeModelVariant } {
+  if (input.workspaceMode !== 'code') {
+    return { model: REALTIME_MODEL, variant: 'mini' };
+  }
+  const override = input.operatorOverride === 'mini' || input.operatorOverride === 'flagship'
+    ? input.operatorOverride
+    : null;
+  const configured: PhoneCodeModelExperiment = input.experiment === 'flagship' || input.experiment === 'ab'
+    ? input.experiment
+    : 'mini';
+  const variant: PhoneCodeModelVariant = override
+    ?? (configured === 'ab'
+      ? (stableBucket(input.bucketKey) % 2 === 0 ? 'mini' : 'flagship')
+      : configured);
+  return {
+    variant,
+    model: variant === 'flagship' ? REALTIME_FLAGSHIP_MODEL : REALTIME_MODEL,
+  };
+}
 export const DEFAULT_VOICE = 'marin';
 /** Input transcription model the desk session applies via `session.update`. */
 export const REALTIME_INPUT_TRANSCRIPTION_MODEL = 'whisper-1';
@@ -70,6 +108,54 @@ export const DEFAULT_INSTRUCTIONS =
 
 /** Shared contract token — must equal the mobile SYMON_SURFACE_TOOL constant. */
 export const SURFACE_TOOL_NAME = 'render_surface';
+
+/**
+ * The bounded Mac-executed tool catalog exposed to PHONE Symon on Code. Life
+ * keeps the full bridge catalog, and desktop callers never pass through this
+ * selector. Keep this list explicit so a new mail/media/browser tool cannot
+ * silently become available merely because the desktop catalog grew.
+ */
+export const PHONE_CODE_TOOL_NAMES = [
+  'o8_status',
+  'o8_needs_me',
+  'o8_review_diff',
+  'o8_dispatch',
+  'o8_delegate',
+  'o8_packet_wait',
+  'o8_packet_steer',
+  'o8_agent_task',
+  'o8_packet_rerun',
+  'o8_packet_reset',
+  'o8_stop_agent',
+  'o8_approve_item',
+  'o8_reject_item',
+  'git_status',
+  'git_log',
+] as const;
+
+export interface PhoneCodeToolSelection {
+  tools: Array<Record<string, unknown>>;
+  missing: string[];
+}
+
+/** Select exactly the frozen Code pack, in canonical order, from the live Mac catalog. */
+export function selectPhoneCodeTools(
+  tools: Array<Record<string, unknown>>,
+): PhoneCodeToolSelection {
+  const available = new Map<string, Record<string, unknown>>();
+  for (const tool of tools) {
+    if (tool.type !== 'function' || typeof tool.name !== 'string' || available.has(tool.name)) continue;
+    available.set(tool.name, tool);
+  }
+
+  return {
+    tools: PHONE_CODE_TOOL_NAMES.flatMap((name) => {
+      const tool = available.get(name);
+      return tool ? [tool] : [];
+    }),
+    missing: PHONE_CODE_TOOL_NAMES.filter((name) => !available.has(name)),
+  };
+}
 
 /** OpenAI-realtime-shaped tool schema (matches the `{ type:'function', … }` set). */
 export const RENDER_SURFACE_TOOL: Record<string, unknown> = {
@@ -138,8 +224,11 @@ export const PHONE_CODE_SURFACE_INSTRUCTIONS =
   '\n\nCODE WORKSPACE SURFACES. In Code, prefer the following components when trusted tool results ' +
   'supply the facts and identifiers. Never infer a targetId, sessionKey, path, ref, SHA, count, ' +
   'check state, progress value, approval scope, or diff line. When the phone context includes ' +
-  'repoName/repoPath, that is the operator-selected repository: do not ask which repo, and use ' +
-  'repoName as the repo argument for read-only repository tools. The selection may choose which ' +
+  'repoName/repoPath, that is the operator-selected repository: do not ask which repo and never ' +
+  'substitute another repository. The Mac injects its canonical repoId and repoPath into every Code ' +
+  'tool call, so omit repo identity unless a live tool result gives you an exact stable ID. Use exact ' +
+  'packetId, laneId, approvalId, and sessionKey values from tool results; never use a title or label as ' +
+  'an action target. The selection may choose which ' +
   'tool to call, but it is not proof of repository state. Fetch current state first, keep ' +
   'diffs bounded to the supplied revision, and mark truncated data honestly. Signatures:\n' +
   '• RepoState(targetId, name, path|null, branch, headSha|null, state, changedFiles, ahead?, behind?) ' +

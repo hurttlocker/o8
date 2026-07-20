@@ -4743,6 +4743,20 @@ fn agent_confirm(task_id: String, allow: bool) {
     agent::resolve_confirm(&task_id, allow);
 }
 
+/// Resolve a pending agent confirm by its gate-owned v2 identity. Unlike the
+/// legacy taskId command, this reports whether this decision won, repeated an
+/// earlier decision, or arrived after expiry/preemption.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_confirm_v2(
+    confirmation_id: String,
+    session_id: String,
+    call_id: String,
+    allow: bool,
+) -> agent::ConfirmResolution {
+    agent::resolve_confirm_v2(&confirmation_id, &session_id, &call_id, allow)
+}
+
 /// Interrupt Symon: stop every running agent task (the reasoning loops bail
 /// between turns and go quiet) AND halt any in-progress speech. Triggered by the
 /// dock's tap-to-stop and by Escape. Safe no-op when nothing is running.
@@ -5696,6 +5710,8 @@ pub fn run() {
             agent_run,
             #[cfg(target_os = "macos")]
             agent_confirm,
+            #[cfg(target_os = "macos")]
+            agent_confirm_v2,
             #[cfg(target_os = "macos")]
             agent_interrupt,
             #[cfg(target_os = "macos")]

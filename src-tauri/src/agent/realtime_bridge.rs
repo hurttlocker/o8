@@ -21,7 +21,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tauri::Emitter;
 
-use super::{confirm_if_needed_opts, tools, TaskCtx};
+use super::{confirm_if_needed_opts_correlated, tools, ConfirmCorrelation, TaskCtx};
 
 /// Monotonic per-call id source — keeps each realtime tool call's confirm card
 /// addressable without pulling in `uuid` (not a dependency) or `Date`.
@@ -44,6 +44,8 @@ pub async fn realtime_invoke_tool(
     app: tauri::AppHandle,
     name: String,
     args: Value,
+    session_id: Option<String>,
+    call_id: Option<String>,
 ) -> Result<Value, String> {
     let seq = REALTIME_TASK_SEQ.fetch_add(1, Ordering::SeqCst);
     // Observability: every voice tool call + outcome lands in the app log
@@ -61,12 +63,23 @@ pub async fn realtime_invoke_tool(
     };
 
     // Same safety gate as the cascaded loop: ReadOnly passes straight through,
-    // Reversible honors the silent-consent toggle, Destructive always asks via
-    // the dock Allow/Cancel card. `speak=false` — the realtime model announces
+    // while every mutation asks through the dock/phone Allow/Cancel gate because
+    // reversible silent consent is disabled in v1. `speak=false` — the realtime model announces
     // its own intent in its own voice, so we don't read the proposal with a
     // second (ElevenLabs) voice over the conversation. Unknown tools default to
     // Destructive, so a typo can't silently act.
-    if !confirm_if_needed_opts(&ctx, &name, &args, false).await {
+    let correlation = match (session_id, call_id) {
+        (Some(session_id), Some(call_id))
+            if !session_id.trim().is_empty() && !call_id.trim().is_empty() =>
+        {
+            Some(ConfirmCorrelation {
+                session_id,
+                call_id,
+            })
+        }
+        _ => None,
+    };
+    if !confirm_if_needed_opts_correlated(&ctx, &name, &args, false, correlation).await {
         log::info!("[symon-rt] tool {name} = declined");
         return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
     }

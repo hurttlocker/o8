@@ -110,12 +110,11 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Reading a packet's diff + review state is read-through; releasing the
         // merge stays on o8_approve_item (carded there).
         "o8_review_diff" => SafetyClass::ReadOnly,
-        // Conductor delegation — hands a task to the EXISTING live orchestrator
-        // (same path as o8_canvas send-prompt / typing in the composer), it does
-        // not spawn a new worker like o8_dispatch. The agent's own mutations stay
-        // gated downstream by o8's review/approval pipeline, so handing off is
-        // ReadOnly — and that keeps the voice conductor flow fluid.
-        "o8_delegate" => SafetyClass::ReadOnly,
+        // Conductor delegation starts a repo-scoped orchestrator turn. Even
+        // though downstream code changes remain governed, starting the turn
+        // spends compute and can dispatch work, so the operator confirms the
+        // exact repo + task before it leaves Symon.
+        "o8_delegate" => SafetyClass::Reversible,
         // Annotating the operator's living spec (o8.md) is a write → cards.
         "o8_spec_annotate" => SafetyClass::Reversible,
         // Reading the screen is pure observation; capture is permission-gated by
@@ -154,7 +153,7 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Address a working agent by its canvas name and steer it → carded.
         "o8_agent_task" => SafetyClass::Reversible,
         "o8_packet_rerun" => SafetyClass::Reversible,
-        // Reset wipes the worktree + relaunches (compute) → carded. (Destructive
+        // Reset wipes the worktree and archives the lane → carded. (Destructive
         // in spirit, but Destructive tools are withheld from the model entirely,
         // so Reversible keeps it available + always cards in V1.) Wait just polls.
         "o8_packet_reset" => SafetyClass::Reversible,
