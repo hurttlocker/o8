@@ -4,9 +4,9 @@ import path from 'node:path';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-const authFixture = vi.hoisted(() => ({ home: '' }));
+const authFixture = vi.hoisted(() => ({ home: '', installed: new Set(['opencode']) }));
 const scanAndLinkMock = vi.hoisted(() => vi.fn((binaryName: string) => (
-  binaryName === 'opencode' ? '/test-bin/opencode' : null
+  authFixture.installed.has(binaryName) ? `/test-bin/${binaryName}` : null
 )));
 
 vi.mock('node:os', async (importOriginal) => {
@@ -35,6 +35,7 @@ const {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  authFixture.installed = new Set(['opencode']);
   invalidateRuntimeAuthCache();
 });
 
@@ -61,6 +62,41 @@ describe('OpenCode auth preflight', () => {
 });
 
 describe('dispatchable runtime readiness', () => {
+  it('marks the five declarative workers available when their PATH and credential probes pass', async () => {
+    authFixture.installed = new Set(['opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider']);
+    vi.stubEnv('OPENHANDS_API_KEY', 'test-openhands');
+    vi.stubEnv('GOOSE_API_KEY', 'test-goose');
+    vi.stubEnv('QWEN_API_KEY', 'test-qwen');
+    vi.stubEnv('KIMI_API_KEY', 'test-kimi');
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-aider');
+    invalidateRuntimeAuthCache();
+
+    const inventory = await getDispatchableRuntimeAvailability();
+    for (const runtime of ['openhands', 'goose', 'qwen', 'kimi', 'aider']) {
+      expect(inventory.find((entry) => entry.id === runtime)).toMatchObject({
+        available: true,
+        unavailableReason: null,
+      });
+    }
+  });
+
+  it.each(['openhands', 'goose', 'qwen', 'kimi', 'aider'] as const)(
+    'returns a structured not-installed reason for %s when its PATH probe misses',
+    async (runtime) => {
+      authFixture.installed.delete(runtime);
+      invalidateRuntimeAuthCache();
+
+      await expect(assertRuntimeDispatchable(runtime)).rejects.toMatchObject({
+        code: 'dispatch_cli_auth_unavailable',
+        status: {
+          runtime,
+          installed: false,
+          unavailableReason: 'not_installed',
+        },
+      });
+    },
+  );
+
   it('returns a structured not-installed reason for a registered Pi adapter', async () => {
     vi.stubEnv('O8_PI_BIN', '');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
@@ -86,6 +122,11 @@ describe('dispatchable runtime readiness', () => {
       'claude-code',
       'gemini',
       'opencode',
+      'openhands',
+      'goose',
+      'qwen',
+      'kimi',
+      'aider',
       'pi',
       'cursor',
       'grok',

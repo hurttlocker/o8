@@ -36,7 +36,8 @@ export interface OnboardingRuntimeDetection {
 }
 
 function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
-  return value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode' || value === 'pi';
+  return typeof value === 'string'
+    && ORCHESTRATOR_RUNTIMES[value as OrchestratorRuntime]?.dispatchable === true;
 }
 
 function pickSmartDefault(runtimes: OnboardingRuntimeDetection[]): OrchestratorRuntime {

@@ -48,6 +48,7 @@ import { opencodeRuntime } from './opencode';
 import { cursorRuntime } from './cursor';
 import { grokRuntime } from './grok';
 import { piRuntime } from './pi';
+import { declarativeWorkerRuntimes, invalidateDeclarativeWorkerFleets } from './declarative-workers';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
 import { invalidateOwnedGeminiFleetCache } from '@/lib/gemini/owned';
@@ -73,6 +74,7 @@ export function invalidateAllOwnedFleets(): void {
   invalidateOwnedCursorFleetCache();
   invalidateOwnedGrokFleetCache();
   invalidateOwnedPiFleetCache();
+  invalidateDeclarativeWorkerFleets();
 }
 
 registerRuntime(codexRuntime);
@@ -93,6 +95,7 @@ registerRuntime(grokRuntime);
 // Runtime expansion P3: Pi (earendil-works/pi) — `pi --mode rpc` bidirectional
 // JSONL with native steer. Sessions 'pi-owned:'. See src/lib/pi/owned.ts.
 registerRuntime(piRuntime);
+for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (Cursor-style self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires
 // a worker CLI to connect to /api/cloud/worker-poll with a provisioned key.

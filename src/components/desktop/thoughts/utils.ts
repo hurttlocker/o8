@@ -1,4 +1,5 @@
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
 import type {
   OrchestratorPacket,
@@ -6,7 +7,7 @@ import type {
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
 
-const VALID_ORCHESTRATOR_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi']);
+const VALID_ORCHESTRATOR_RUNTIMES = new Set<OrchestratorRuntime>(listDispatchableRuntimes());
 
 function coerceAgentRuntime(value?: string | null): OrchestratorRuntime {
   if (value && VALID_ORCHESTRATOR_RUNTIMES.has(value as OrchestratorRuntime)) {

@@ -62,3 +62,13 @@
 ## Deviations
 
 - The branch already used `dispatchable_runtimes` enforcement rather than `codex_only_production`; it was left unchanged because enforcement changes are explicitly outside this packet.
+
+## Declarative worker expansion notes
+
+- Added OpenHands, Goose, Qwen Code, Kimi Code, and Aider as configuration-only entries over one shared `AgentRuntime` bridge.
+- Kept all five adapters one-shot because the verified launch contracts do not expose a stable thread id in the selected output modes; their owned stores still support launch, discovery, transcript, interrupt, review, and coarse telemetry.
+- Kimi uses official `kimi -p` mode because that mode is already automatic and rejects `--auto` or `--yolo` when combined with `--prompt`.
+
+## Deviations
+
+- The existing declarative owned-session registration did not create the universal `AgentRuntime` required by mission dispatch, so one shared bridge was added rather than five hand-written adapters.

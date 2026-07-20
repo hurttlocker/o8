@@ -69,7 +69,7 @@ export interface TerminalTab {
   repo?: RegisteredRepo;
   createdAt: number;
   lastActivity: number;
-  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
+  chatRuntime?: OrchestratorRuntime;
   chatSessionKey?: string;
   /**
    * #1553 — the STABLE lane identity behind a dispatched chat tab. A lane
@@ -139,7 +139,7 @@ export interface TerminalTab {
 
 export type LocalhostPreview = DetectedLocalhostPreview;
 export type { PreviewSelectionPayload };
-export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi' | 'chat';
+export type WorkspaceChatRuntime = OrchestratorRuntime | 'chat';
 
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;

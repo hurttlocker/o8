@@ -23,6 +23,9 @@ export function resolveDisplayRuntime(
 ): OrchestratorRuntime {
   const sessionKey = packet?.lane?.sessionKey?.trim() ?? '';
   if (sessionKey) {
+    const ownedRuntime = (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
+      .find((runtime) => sessionKey.startsWith(`${runtime}-owned:`));
+    if (ownedRuntime) return ownedRuntime;
     if (sessionKey.startsWith('gemini-owned:') || sessionKey.startsWith('gemini:')) {
       return 'gemini';
     }
@@ -42,8 +45,8 @@ export function resolveDisplayRuntime(
     }
   }
   const runtime = packet?.runtime;
-  if (runtime === 'codex' || runtime === 'claude-code' || runtime === 'gemini' || runtime === 'opencode' || runtime === 'pi') {
-    return runtime;
+  if (runtime && ORCHESTRATOR_RUNTIMES[runtime as OrchestratorRuntime]) {
+    return runtime as OrchestratorRuntime;
   }
   return 'codex';
 }
