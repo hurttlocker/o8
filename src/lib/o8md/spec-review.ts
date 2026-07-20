@@ -22,6 +22,7 @@ import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-po
 import { defaultClaudeBin } from '@/lib/claude-code/one-shot-repl';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { MODEL_IDS } from '@/lib/models';
+import { appendRoughdraftReply, extractRoughdraftReviewIndex, type RfmReviewItem } from './rfm';
 import { appendComment, insertSuggestion, type SuggestionKind } from './mutate';
 
 /** One annotation the LLM proposes. Mirrors the comment/suggest write surface. */
@@ -41,6 +42,12 @@ export interface SpecReviewResult {
   backend: 'claude' | 'codex';
 }
 
+export interface SingleNoteReplyResult {
+  backend: 'claude' | 'codex';
+  parentId: string;
+  reply: string;
+}
+
 /** Generous cap on the doc slice we hand the model — the o8.md byte cap is
  *  256KB but a notes file is normally tiny; this just bounds a runaway. */
 const MAX_CONTENT_CHARS = 24_000;
@@ -56,6 +63,7 @@ const REVIEW_EFFORT = 'xhigh';
 /** System framing prepended to the user prompt for the warm one-shot frame
  *  (mirrors callSonnetCli's `<system>…</system>` shape, sonnet-adapter.ts). */
 const REVIEW_SYSTEM = 'You review o8.md working notes and leave terse margin annotations. You never rewrite the prose. You output ONLY a JSON array of annotation objects and nothing else.';
+const SINGLE_NOTE_SYSTEM = 'You are continuing exactly one o8.md margin-note conversation. Reply only to that note and its anchor. Output only the concise reply text, with no JSON, annotation markers, markdown fence, or preamble.';
 
 function recentCommits(repoPath: string): string {
   try {
@@ -110,14 +118,17 @@ function parseAnnotations(raw: string): ReviewAnnotation[] {
  * review always gets that path — and only falls back to Codex when no `claude`
  * binary resolves or the warm call throws. Reports the backend it actually used.
  */
-async function runLLM(prompt: string): Promise<{ text: string; backend: 'claude' | 'codex' }> {
+async function runLLM(
+  prompt: string,
+  system: string = REVIEW_SYSTEM,
+): Promise<{ text: string; backend: 'claude' | 'codex' }> {
   const binary = defaultClaudeBin();
   // TODO(prewarm): fire prewarmClaudeRepl(binary, REVIEW_MODEL, REVIEW_EFFORT) on pane focus so the first click is warm.
   if (binary) {
     try {
       // Prepend the system block the way callSonnetCli does — the one-shot
       // frame only carries a `user` message (sonnet-adapter.ts:188-191).
-      const framed = `<system>\n${REVIEW_SYSTEM}\n</system>\n\n${prompt}`;
+      const framed = `<system>\n${system}\n</system>\n\n${prompt}`;
       const text = await askClaudeWarm(framed, {
         binary,
         model: REVIEW_MODEL,
@@ -129,8 +140,68 @@ async function runLLM(prompt: string): Promise<{ text: string; backend: 'claude'
       // Warm-Claude path unavailable (bad binary / spawn error) — fall to Codex.
     }
   }
-  const text = await callCodex(prompt, { timeoutMs: 120_000 });
+  const text = await callCodex(`<system>\n${system}\n</system>\n\n${prompt}`, { timeoutMs: 120_000 });
   return { text, backend: 'codex' };
+}
+
+function noteAnchor(content: string, note: RfmReviewItem): string {
+  const exact = note.anchorText ?? note.originalText;
+  if (exact?.trim()) return exact.trim();
+
+  // Addition suggestions don't encode their insertion anchor in RFM. Give the
+  // reviewer only the adjacent line fragment, never the whole document.
+  const lineStart = content.lastIndexOf('\n', Math.max(0, note.offset - 1)) + 1;
+  const lineEndRaw = content.indexOf('\n', note.endOffset);
+  const lineEnd = lineEndRaw === -1 ? content.length : lineEndRaw;
+  const before = content.slice(lineStart, note.offset).trim();
+  if (before) return before.slice(-500);
+  const after = content.slice(note.endOffset, lineEnd).trim();
+  return after ? after.slice(0, 500) : '(standalone note)';
+}
+
+function buildSingleNotePrompt(note: RfmReviewItem, anchor: string, message: string): string {
+  return `Continue one o8.md margin-note thread. Do not review the rest of the document and do not create or regenerate annotations.
+
+Anchor text:
+"""
+${anchor}
+"""
+
+Existing note:
+"""
+${note.text}
+"""
+
+Operator reply:
+"""
+${message}
+"""
+
+Answer the operator's reply in 1-3 short sentences. Return only the reply text.`;
+}
+
+function appendThreadReply(
+  content: string,
+  options: { parentId: string; message: string; author: string },
+): string {
+  const before = extractRoughdraftReviewIndex(content);
+  const existingIds = new Set(before.items.map((item) => item.id));
+  const parent = before.items.find((item) => item.id === options.parentId);
+  if (!parent) throw new Error(`Review item not found: ${options.parentId}`);
+  const threadEnd = before.items.reduce(
+    (end, item) => item.parentId === options.parentId ? Math.max(end, item.endOffset) : end,
+    parent.endOffset,
+  );
+  const inserted = appendRoughdraftReply(content, options);
+  const added = extractRoughdraftReviewIndex(inserted).items.find((item) => !existingIds.has(item.id));
+  if (!added || threadEnd === parent.endOffset) return inserted;
+
+  // The shared helper correctly creates the canonical reply marker but places
+  // it immediately after the parent. Move only that new marker to the prior
+  // end of the thread so repeated scoped turns remain chronological.
+  const marker = inserted.slice(added.offset, added.endOffset);
+  const withoutMarker = `${inserted.slice(0, added.offset)}${inserted.slice(added.endOffset)}`;
+  return `${withoutMarker.slice(0, threadEnd)}${marker}${withoutMarker.slice(threadEnd)}`;
 }
 
 /**
@@ -143,6 +214,46 @@ export function prewarmReview(): void {
   const binary = defaultClaudeBin();
   if (!binary) return;
   try { prewarmClaudeRepl(binary, REVIEW_MODEL, REVIEW_EFFORT); } catch { /* best effort */ }
+}
+
+/**
+ * Continue exactly one annotation thread through the same warm reviewer used
+ * by the full review. The prompt contains only the addressed note, its anchor,
+ * and the operator's message; it never exposes the full o8.md or parses a new
+ * annotation array. Both sides of the exchange are appended under the parent.
+ */
+export async function runSingleNoteReply(
+  content: string,
+  parentId: string,
+  message: string,
+): Promise<{ updated: string; result: SingleNoteReplyResult }> {
+  const note = extractRoughdraftReviewIndex(content).items.find((item) => item.id === parentId);
+  if (!note || (note.kind !== 'comment' && note.kind !== 'suggestion')) {
+    throw new Error(`Review item not found: ${parentId}`);
+  }
+  const operatorMessage = message.trim();
+  if (!operatorMessage) throw new Error('message is required');
+
+  const prompt = buildSingleNotePrompt(note, noteAnchor(content, note), operatorMessage);
+  const { text, backend } = await runLLM(prompt, SINGLE_NOTE_SYSTEM);
+  const reply = text.trim();
+  if (!reply) throw new Error('Reviewer returned an empty reply');
+
+  const withOperatorReply = appendThreadReply(content, {
+    parentId,
+    message: operatorMessage,
+    author: 'user',
+  });
+  const updated = appendThreadReply(withOperatorReply, {
+    parentId,
+    message: reply,
+    author: 'AI',
+  });
+
+  return {
+    updated,
+    result: { backend, parentId, reply },
+  };
 }
 
 /**
