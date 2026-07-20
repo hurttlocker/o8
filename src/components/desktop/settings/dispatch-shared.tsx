@@ -78,6 +78,7 @@ export interface OperatorDefaults {
   targetingAction: TargetingTierUI;
   autoApplyUpdates: AutoApplyUpdates;
   collideAggregator: CollideAggregator;
+  productTelemetryEnabled: boolean;
   telemetryOptIn: boolean;
   telemetryIngestUrl: string;
   crashReportsEnabled: boolean;

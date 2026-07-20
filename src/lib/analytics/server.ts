@@ -1,34 +1,39 @@
 /**
- * emitProductEvent — server-side coarse telemetry (analytics epic #1249).
- *
- * The server twin of the client-side track() in ./track.ts. Reads THIS install's
- * account token from entitlement.json and forwards a coarse {event, props} to the
- * license server's /v1/telemetry. Used at server chokepoints the UI can't see —
- * the orchestrator dispatches packets and approves merges through MCP, never a
- * button — so this is the only place those product signals are observable at all.
- *
- * Fire-and-forget: never throws, never blocks. Callers on a hot path should NOT
- * await — use `void emitProductEvent(...)`. COARSE ONLY: an event name plus a
- * small props bag of counts / flags / enums — NEVER code, prompts, repo names,
- * paths, or file contents.
- *
- * No account token (fresh install pre-bootstrap, or analytics never provisioned)
- * → silent no-op, exactly like the client path. The client opt-out lives in the
- * browser (localStorage) and gates track(); server events are coarse system
- * signals (dispatch / merge / repo-add) with no content, so they ride the same
- * account-token presence check rather than a per-event opt-out.
+ * Server-side coarse product telemetry. Every event is gated by the persisted
+ * product consent and reduced to the explicit wire allowlist before egress.
+ * This is separate from crash telemetry and user-initiated issue reports.
  */
 
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
+import { resolveProductTelemetryEnabledSync } from '@/lib/operator/defaults';
 
-export async function emitProductEvent(event: string, props?: Record<string, unknown>): Promise<void> {
+import { sanitizeProductEvent, type ProductEventName, type ProductEventProps } from './events';
+import { isProductTelemetryAllowed } from './policy';
+
+/**
+ * #1451 local-only integration seam. That setting does not exist yet, so the
+ * current runtime supplies false; once it ships its resolver belongs here.
+ */
+export function isProductTelemetryEnabled(): boolean {
+  return isProductTelemetryAllowed({
+    productTelemetryEnabled: resolveProductTelemetryEnabledSync(),
+    localOnlyMode: false,
+  });
+}
+
+export async function emitProductEvent(
+  event: ProductEventName,
+  props?: ProductEventProps,
+): Promise<boolean> {
   try {
-    const token = readCachedEntitlement()?.licenseKey?.trim();
-    if (!token) return;
+    if (!isProductTelemetryEnabled()) return false;
 
-    const name = event.trim().slice(0, 80);
-    if (!name) return;
+    const payload = sanitizeProductEvent(event, props);
+    if (!payload) return false;
+
+    const token = readCachedEntitlement()?.licenseKey?.trim();
+    if (!token) return false;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2500);
@@ -36,13 +41,15 @@ export async function emitProductEvent(event: string, props?: Record<string, unk
       await fetch(`${proxyBaseUrl()}/v1/telemetry`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ event: name, ...(props ? { props } : {}) }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
+      return true;
     } finally {
       clearTimeout(timer);
     }
   } catch {
     // Telemetry must never affect the app.
+    return false;
   }
 }

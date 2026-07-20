@@ -63,7 +63,7 @@ export function searchSettings(
 /** Registry population is generated from the tab inventory — see module doc. */
 export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Identity", description: "Connect GitHub, manage the account, or sign out", keywords: ['sign in', 'sign out', 'login', 'identity', 'profile', 'github'] },
-  { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share usage data", description: "Coarse feature counts that help improve o8", keywords: ['telemetry', 'usage', 'analytics', 'privacy'] },
+  { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share usage data", description: "Allowlisted product events; optional and off by default", keywords: ['telemetry', 'usage', 'analytics', 'privacy'] },
   { tab: 'general', tabLabel: 'General', group: "Plan", label: "Plan", description: "Your current plan and founder status", keywords: ['founder', 'free', 'subscription'] },
   { tab: 'general', tabLabel: 'General', group: "Plan", label: "Upgrade to Founders", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
   { tab: 'general', tabLabel: 'General', group: "Startup", label: "Launch at login", description: "Start o8 automatically when you sign in to your Mac", keywords: ['autostart', 'boot', 'startup'] },
