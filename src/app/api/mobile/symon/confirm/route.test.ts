@@ -12,7 +12,7 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
   },
 }));
 
-const { POST, buildConfirmEval } = await import('./route');
+const { POST } = await import('./route');
 
 function request(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/mobile/symon/confirm', {
@@ -28,10 +28,14 @@ beforeEach(() => {
 });
 
 describe('POST /api/mobile/symon/confirm', () => {
-  it('addresses the exact tool slot and calls resolveConfirm once through a decision cache', () => {
-    const code = buildConfirmEval({
-      sessionId: 'session-1', callId: 'call-1', confirmationId: 'confirm-1', allow: true,
+  it('addresses the exact tool slot and calls resolveConfirm once through a decision cache', async () => {
+    h.evalJs.mockResolvedValue({
+      result: JSON.stringify({ state: 'done', resolution: { status: 'resolved', allow: true } }),
     });
+    await POST(request({
+      sessionId: 'session-1', callId: 'call-1', confirmationId: 'confirm-1', allow: true,
+    }));
+    const code = h.evalJs.mock.calls[0]?.[0] ?? '';
     expect(code).toContain('JSON.stringify([sessionId, callId])');
     expect(code).toContain('slot.confirmationId !== confirmationId');
     expect(code).toContain('A.resolveConfirm(confirmationId, allow, { sessionId, callId })');
