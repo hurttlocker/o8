@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
-import { composeComposerModeMessage, type ComposerMode } from './composer-mode';
+import { composeComposerModeMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
@@ -1730,8 +1730,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       model: orchestratorModel,
       displayMessage: request.displayMessage,
       localEntriesAfterUser,
-      swarm: swarmEnabled && !soloOrchestrator,
-      solo: soloOrchestrator,
+      orchestrationMode: resolveComposerExecutionMode('multitask', swarmEnabled, soloOrchestrator),
       collide: collideEnabled,
     });
   }, [orchStream, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled]);
@@ -1810,7 +1809,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!rawMsg) return;
     // The mode directive goes to the model, while bubbles and auto-titles keep
     // the operator's exact words. Slash commands pass through untouched.
-    const { displayMessage, wireMessage } = composeComposerModeMessage(rawMsg, composerModeRef.current);
+    const turnOrchestrationMode = resolveComposerExecutionMode(composerModeRef.current, swarmEnabled, soloOrchestrator);
+    const promptMode = turnOrchestrationMode === 'fusion' && composerModeRef.current === 'solo'
+      ? 'multitask'
+      : composerModeRef.current;
+    const { displayMessage, wireMessage } = composeComposerModeMessage(rawMsg, promptMode);
 
     track('orchestrator.message'); // coarse usage signal (analytics epic #1249) — no content
 
@@ -1855,8 +1858,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             backend: composerBackendTurnOverride(orchestratorBackend),
             thinkingEffort,
             model: orchestratorModel,
-            swarm: swarmEnabled && !soloOrchestrator,
-      solo: soloOrchestrator,
+            orchestrationMode: resolveComposerExecutionMode('multitask', swarmEnabled, soloOrchestrator),
             collide: collideEnabled,
             ...(attachments ? { attachments } : {}),
           });
@@ -1995,8 +1997,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         backend: composerBackendTurnOverride(orchestratorBackend),
         thinkingEffort,
         model: orchestratorModel,
-        swarm: swarmEnabled && !soloOrchestrator,
-      solo: soloOrchestrator,
+        orchestrationMode: turnOrchestrationMode,
         collide: collideEnabled,
         ...(attachments ? { attachments } : {}),
       };
@@ -2091,8 +2092,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           backend: composerBackendTurnOverride(orchestratorBackend),
           thinkingEffort,
           model: orchestratorModel,
-          swarm: swarmEnabled && !soloOrchestrator,
-      solo: soloOrchestrator,
+          orchestrationMode: resolveComposerExecutionMode(composerModeRef.current, swarmEnabled, soloOrchestrator),
           collide: collideEnabled,
           ...(attachments ? { attachments } : {}),
         });

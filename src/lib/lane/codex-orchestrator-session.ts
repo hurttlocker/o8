@@ -41,6 +41,9 @@ import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-pr
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { handleCodexJsonLine } from './codex-orchestrator-events';
+import { codexOrchestrationModeFlags } from './orchestrator-backends/orchestration-mode';
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -70,7 +73,6 @@ import {
 } from './orchestrator-crash-survival';
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
 export interface CodexOrchestratorSession {
   sessionName: string;
   repoPath: string;
@@ -82,12 +84,12 @@ export interface CodexOrchestratorSession {
   proc: ChildProcess | null;
   createdAt: number;
 }
-
 // Mirror of OrchestratorPermissionMode from orchestrator-session.ts.
 export type CodexOrchestratorPermissionMode = 'full' | 'plan';
 
 export interface SendToCodexOrchestratorOptions {
   permissionMode?: CodexOrchestratorPermissionMode;
+  orchestrationMode?: OrchestratorExecutionMode;
   /**
    * MCP tool profile. `'propose'` (Collide proposer) strips the operator
    * (dispatch) server from this turn's Codex config.toml — the run can read +
@@ -101,15 +103,12 @@ export interface SendToCodexOrchestratorOptions {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-
 const DEFAULT_CODEX_MODEL = MODEL_IDS.codexDefault;
 const USER_CODEX_HOME = join(homedir(), '.codex');
 const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
 const CODEX_ORCHESTRATOR_HOME_DIR = orchestratorDataDir('codex-orchestrator');
 export const CODEX_FIRST_EVENT_TIMEOUT_MS = 45_000;
-
 // ── Registry ─────────────────────────────────────────────────────────────────
-
 const sessions = new Map<string, CodexOrchestratorSession>();
 
 // tomlKey is retained here because the managed-section STRIP logic
@@ -119,7 +118,6 @@ const sessions = new Map<string, CodexOrchestratorSession>();
 function tomlKey(key: string): string {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
 }
-
 // TODO(tool-spine-convergence): orphaned-managed-section leak. This only strips
 // sections whose name is in the CURRENT server set. A section o8 wrote on a
 // previous run for a server since removed/disabled (e.g. a deleted external)
@@ -531,7 +529,8 @@ export async function sendToCodexOrchestrator(
         'resume',
         session.threadId!,
         '--json',
-        ...sandboxFlagsForMode(permissionMode),
+        ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
+        ...codexOrchestrationModeFlags(options.orchestrationMode),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
         // Disable the hosted image_generation tool (defaults to nonexistent
         // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
@@ -543,7 +542,8 @@ export async function sendToCodexOrchestrator(
     : [
         'exec',
         '--json',
-        ...sandboxFlagsForMode(permissionMode),
+        ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
+        ...codexOrchestrationModeFlags(options.orchestrationMode),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
         '-c',
         'tools.image_generation=false',
@@ -552,6 +552,35 @@ export async function sendToCodexOrchestrator(
         '--',
         message,
       ];
+
+  const baseEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: pathWithNodeRuntime(),
+    FORCE_COLOR: '0',
+    NO_COLOR: '1',
+    O8_MANAGED_SESSION: '1',
+    CODEX_HOME: codexHome,
+  };
+  let spawnBinary = codexBin;
+  let spawnArgs = args;
+  let spawnEnv = baseEnv;
+  let cleanupSingleLaunch = () => {};
+  if (options.orchestrationMode === 'single') {
+    try {
+      const prepared = await prepareSingleOrchestratorLaunch({
+        repoPath: session.repoPath, codexHome, binary: codexBin, args, env: baseEnv,
+      });
+      spawnBinary = prepared.binary;
+      spawnArgs = prepared.args;
+      spawnEnv = prepared.env;
+      cleanupSingleLaunch = prepared.cleanup;
+    } catch (err) {
+      session.status = 'dead';
+      onEvent({ type: 'error', error: `Single mode unavailable: ${err instanceof Error ? err.message : String(err)}` });
+      onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+      return;
+    }
+  }
 
   return new Promise<void>((promiseResolve) => {
     let crashRecord: OrchestratorTurnRecord | null = null;
@@ -572,21 +601,13 @@ export async function sendToCodexOrchestrator(
       stdoutFd = openAppendFile(crashRecord.stdoutPath);
       stderrFd = openAppendFile(crashRecord.stderrPath);
     }
-
     let proc: ChildProcess;
+    const singleProcessGroup = options.orchestrationMode === 'single';
     try {
-      proc = spawn(codexBin, args, {
+      proc = spawn(spawnBinary, spawnArgs, {
         cwd: session.repoPath,
-        env: {
-          ...process.env,
-          // codex is a node shim — the server's own runtime must be on PATH (#1551).
-          PATH: pathWithNodeRuntime(),
-          FORCE_COLOR: '0',
-          NO_COLOR: '1',
-          O8_MANAGED_SESSION: '1',
-          CODEX_HOME: codexHome,
-        },
-        detached: crashEnabled,
+        env: spawnEnv,
+        detached: crashEnabled || singleProcessGroup,
         stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
           ? ['ignore', stdoutFd, stderrFd]
           : ['ignore', 'pipe', 'pipe'],
@@ -595,6 +616,7 @@ export async function sendToCodexOrchestrator(
       if (stdoutFd !== null) closeSync(stdoutFd);
       if (stderrFd !== null) closeSync(stderrFd);
       finishOrchestratorTurn(crashRecord, 'failed');
+      cleanupSingleLaunch();
       session.status = 'dead';
       const note = err instanceof Error ? err.message : String(err);
       onEvent({ type: 'error', error: note });
@@ -655,6 +677,8 @@ export async function sendToCodexOrchestrator(
       if (drain) drainCrashOutput();
       else stopCrashTail?.();
       finishOrchestratorTurn(crashRecord, error ? 'failed' : 'completed');
+      if (proc.exitCode == null && proc.signalCode == null) proc.once('close', cleanupSingleLaunch);
+      else cleanupSingleLaunch();
       detachUserAbortListener();
       session.proc = null;
       if (lineState.threadId) session.threadId = lineState.threadId;
@@ -665,9 +689,18 @@ export async function sendToCodexOrchestrator(
     };
 
     const terminate = (escalateAfterMs: number) => {
-      if (proc.exitCode == null && proc.signalCode == null) proc.kill('SIGTERM');
+      const kill = (signal: NodeJS.Signals) => {
+        if (singleProcessGroup && proc.pid) {
+          try { process.kill(-proc.pid, signal); return; } catch {
+            if (proc.exitCode != null || proc.signalCode != null) return;
+          }
+        }
+        if (proc.exitCode != null || proc.signalCode != null) return;
+        proc.kill(signal);
+      };
+      kill('SIGTERM');
       const escalation = setTimeout(() => {
-        if (proc.exitCode == null && proc.signalCode == null) proc.kill('SIGKILL');
+        kill('SIGKILL');
       }, escalateAfterMs);
       escalation.unref?.();
     };

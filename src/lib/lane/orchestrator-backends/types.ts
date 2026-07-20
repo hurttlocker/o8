@@ -18,6 +18,7 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import type { OrchestratorCrashSurvivalMeta } from '@/lib/lane/orchestrator-crash-survival';
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
 /**
  * The set of orchestrator backends. `hermes` drives Hermes via the generic ACP
@@ -49,6 +50,8 @@ export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 export interface OrchestratorTurnOptions {
   /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
   permissionMode?: 'full' | 'plan';
+  /** Per-turn fan-out policy shared by every composer surface. */
+  orchestrationMode?: OrchestratorExecutionMode;
   /**
    * MCP tool profile for the turn. `'full'` (default) gives the backend its full
    * server surface; `'propose'` strips the operator (dispatch) server so the run

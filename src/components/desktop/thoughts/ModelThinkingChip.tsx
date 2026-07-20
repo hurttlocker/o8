@@ -141,11 +141,11 @@ type EffortStop =
 /**
  * Effort slider (Claude Code reference, Q ruling 2026-07-11). A horizontal
  * track of discrete stops — one per selectable effort — with a final purple
- * "Ultracode" notch that arms Swarm mode. The live title above updates as the
+ * "Fusion" notch that arms the deep multi-agent pass. The live title above updates as the
  * handle moves; click a stop or drag the handle to pick.
  *
  * (The animated glitch-fill inside the track that the reference shows at the
- * Ultracode tier is a deliberate follow-up pass — slider first.)
+ * Fusion tier is a deliberate follow-up pass — slider first.)
  */
 function EffortSlider({
   stops,
@@ -332,7 +332,7 @@ export function ModelThinkingChip({
   // 2026-07-11) — the label follows it, not a hardcoded house.
   const shortModelLabel = (activeModelOption?.triggerLabel ?? modelLabel).replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
   const decideLabel = `${shortModelLabel} decides`;
-  const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Ultracode' : 'Solo';
+  const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Fusion' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8'>(
@@ -361,7 +361,7 @@ export function ModelThinkingChip({
   const useSplit = split && !compact;
 
   // Effort slider stops (Q ruling 2026-07-11): one per selectable effort, then
-  // a final "Ultracode" notch that arms Swarm mode. Swarm is no longer a
+  // a final "Fusion" notch that arms the deep multi-agent pass. Swarm is no longer a
   // separate Mode row — it's the top of the slider.
   const effortStops: EffortStop[] = isO8Backend
     ? [
@@ -377,7 +377,7 @@ export function ModelThinkingChip({
         label: EFFORT_LABELS[option].charAt(0).toUpperCase() + EFFORT_LABELS[option].slice(1),
         sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
       })),
-      ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Ultracode', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),
+      ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Fusion', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),
     ];
   const currentEffortIndex = isO8Backend
     ? (effort === 'high' && !isFreePlan ? 1 : 0)
@@ -441,10 +441,10 @@ export function ModelThinkingChip({
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{triggerModelLabel}</span>
           </button>
           {thinkingKnown && onEffortChange ? (() => {
-            // When swarm is armed the effort tier reads "Ultracode" (the
+            // When the deep pass is armed the effort tier reads "Fusion" (the
             // slider's top notch), not the raw base effort underneath it.
             const tierLabel = ultraActive
-              ? 'Ultracode'
+              ? 'Fusion'
               : selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1);
             return (
               <button

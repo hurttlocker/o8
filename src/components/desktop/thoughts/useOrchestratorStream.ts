@@ -16,6 +16,7 @@ import {
   type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import {
   createOrchestratorClientMessageId,
@@ -111,28 +112,13 @@ interface OrchestratorSendOptions {
   displayMessage?: string;
   /** Local system/command entries inserted immediately after the user bubble. */
   localEntriesAfterUser?: MobileTranscriptEntry[];
-  /**
-   * UltraCode / swarm mode. When true, a swarm hint is prepended to the
-   * OUTBOUND message (the visible transcript bubble stays the user's raw
-   * text) nudging the orchestrator to fan work out in parallel — native
-   * Claude sub-agents via a workflow, plus Codex workers via the o8 mission
-   * tools — and synthesize both, instead of doing everything single-threaded.
-   */
-  swarm?: boolean;
-  /**
-   * Solo mode (operator, 2026-07-06): the orchestrator works the repo ITSELF —
-   * same brain, zero dispatch. A hint prepended to the outbound turn forbids
-   * mission/dispatch tools for the turn. Mutually exclusive with swarm and
-   * collide (both imply fan-out; solo wins by suppressing neither — callers
-   * should not send solo together with them).
-   */
-  solo?: boolean;
+  /** Canonical per-turn dispatch policy shared with the canvas composer. */
+  orchestrationMode?: OrchestratorExecutionMode;
   /**
    * Collide / MoA mode. When true, the turn routes to the `collide` backend:
    * Claude + Codex propose independently (read-only), Claude synthesizes + does
    * the work. Forces `backend: 'collide'` on the outbound payload; the swarm
-   * hint is NOT applied (Collide is its own fusion). Mutually exclusive with
-   * swarm.
+   * directive is NOT applied (Collide is its own fusion).
    */
   collide?: boolean;
   /**
@@ -142,25 +128,6 @@ interface OrchestratorSendOptions {
    */
   attachments?: Array<{ dataUri: string; name?: string }>;
 }
-
-// Prepended to the outbound orchestrator turn when swarm/UltraCode is on. Kept
-// out of the transcript via `displayMessage`. The hint names "workflow" to
-// invoke Claude Code's Workflow orchestration when the spawned orchestrator
-// has it (Opus 4.8 + UltraCode), but it ALSO explicitly says "native Claude
-// sub-agents in parallel" — so the orchestrator fans out via its Task/Agent
-// tool regardless, then synthesizes alongside the o8 Codex dispatch. (On a
-// Codex orchestrator backend only the Codex-dispatch track runs.)
-// Prepended when Solo mode is on: the orchestrator does the work itself and
-// must not dispatch. Kept out of the transcript via `displayMessage`.
-const SOLO_TURN_HINT = [
-  '[Solo mode active]',
-  'Work this turn yourself, directly in the repo — do NOT dispatch workers or fan out. No create_mission, dispatch_mission, o8 task dispatch, or spawning parallel worker agents. Use your own tools (read, edit, bash, tests) to do the work end-to-end and report back. If the task genuinely needs a dispatched fleet, say so and ask before dispatching.',
-].join('\n');
-
-const SWARM_TURN_HINT = [
-  '[Ultracode / parallel swarm mode active]',
-  'Don\'t run this turn single-threaded — orchestrate a parallel swarm across two tracks at the same time, then synthesize. (1) For implementation/coding that should land as a reviewable diff, dispatch Codex workers through the o8 mission tools (create_mission with runtime "codex", then dispatch_mission) — fire them in parallel, one per scoped task, and review each diff before merging. (2) For analysis, multi-file reading, research, or cross-checking, run a workflow that fans the work out across native Claude sub-agents in parallel and returns a synthesized result. Run both tracks concurrently, then combine the native sub-agent findings with the Codex diffs into one answer for me. If the task is genuinely single-threaded, say so briefly and just do it.',
-].join('\n');
 
 interface ActiveTurnState {
   startedAt: number;
@@ -984,14 +951,20 @@ export function useOrchestratorStream(
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
     const displayMessage = options?.displayMessage?.trim() || message;
     const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
-    const collide = options?.collide === true;
+    const requestedOrchestrationMode = options?.orchestrationMode ?? 'fleet';
+    // Single is the hard boundary: even a stale UI state that still has MoA
+    // armed must not route into Collide's proposer fan-out.
+    const collide = options?.collide === true && requestedOrchestrationMode !== 'single';
     const collideBaseBackend = collide ? options?.backend : undefined;
     const backend = collide ? 'collide' : options?.backend;
-    activeTurnBackendRef.current = backend ?? null;
-    // Collide is its own fusion — the swarm hint does not apply on a Collide turn.
-    const swarm = options?.swarm === true && !collide;
-    // Solo forbids fan-out entirely — it never combines with swarm or collide.
-    const solo = options?.solo === true && !swarm && !collide;
+    activeTurnBackendRef.current = requestedOrchestrationMode === 'single'
+      ? 'codex'
+      : backend ?? null;
+    // Collide owns its proposal/aggregation pass; the separate Fusion directive
+    // would nest a second fan-out inside it.
+    const orchestrationMode: OrchestratorExecutionMode = collide
+      ? 'fleet'
+      : requestedOrchestrationMode;
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
@@ -1089,14 +1062,6 @@ export function useOrchestratorStream(
       if (resumePrelude) {
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
       }
-      // Swarm/UltraCode: prepend the crew hint to the outbound turn only — the
-      // user's transcript bubble already rendered with the raw `displayMessage`.
-      if (swarm) {
-        outboundMessage = `${SWARM_TURN_HINT}\n\n${outboundMessage}`;
-      }
-      if (solo) {
-        outboundMessage = `${SOLO_TURN_HINT}\n\n${outboundMessage}`;
-      }
       turnTranscriptEventCountRef.current = 0;
       const payload = JSON.stringify({
         type: 'orchestrator-send',
@@ -1105,12 +1070,10 @@ export function useOrchestratorStream(
         clientMessageId,
         message: outboundMessage,
         // What the TRANSCRIPT stores/shows — the user's own words, never the
-        // solo/swarm hints or resume prelude baked into `message` for the
-        // model. Without this, ws-server persisted the scaffolded wire text
-        // and reloads showed "[Solo mode active] …" as if the user typed it
-        // (Chris's screenshot, 2026-07-16).
+        // mode directives or resume prelude baked into `message` for the model.
         displayMessage,
         permissionMode,
+        orchestrationMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
         // Per-turn backend override keeps the composer chip truthful even while

@@ -315,7 +315,7 @@ function OrchestratorTabInner({
       return next;
     });
   }, []);
-  // UltraCode / swarm tier (per-tab). Picking "UltraCode" in the composer's
+  // Fusion / swarm tier (per-tab). Picking "Fusion" in the composer's
   // thinking dropdown flips this on; the orchestrator then fans work out to a
   // parallel crew — native Claude sub-agents + Codex workers via o8.
   const [swarmEnabled, setSwarmEnabled] = useState<boolean>(
