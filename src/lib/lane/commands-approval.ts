@@ -8,6 +8,14 @@ import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { resolvePacketDispatcher } from '@/lib/orchestrator/dispatcher-attribution';
+import { assessDurableApprovedReview } from './durable-review-approval';
+import { preserveAndRecordLaneRecovery } from './merge-recovery';
+
+const RECOVERABLE_MERGE_FAILURE_POLICIES = new Set([
+  'merge-gate-violation',
+  'rebase_conflict_escalation',
+  'fast_forward_failure_escalation',
+]);
 
 async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
   const cwd = lane.worktreePath || lane.repoPath;
@@ -114,6 +122,22 @@ export async function createLaneActionApproval(
     strategy?: import('@/lib/approvals/types').MergeStrategy;
   },
 ): Promise<LaneCommandResult> {
+  let approvedMergeFailure = false;
+  let recovery: Awaited<ReturnType<typeof preserveAndRecordLaneRecovery>> = null;
+  if (input.verb === 'merge' && RECOVERABLE_MERGE_FAILURE_POLICIES.has(input.policyRuleId)) {
+    const review = await assessDurableApprovedReview(lane);
+    approvedMergeFailure = review.approved;
+    if (approvedMergeFailure) {
+      try {
+        recovery = await preserveAndRecordLaneRecovery(lane, input.policyRuleId, { reviewed: true });
+      } catch (error) {
+        console.error(
+          `[merge-recovery] Failed to bank reviewed work for lane ${lane.id}; keeping the lane operator-actionable:`,
+          error,
+        );
+      }
+    }
+  }
   const rawDiff = await getDiffForLane(lane);
   const files = parseGitDiff(rawDiff);
   const surfaceRoute = resolveRequireApprovalSync() === 'surface' && lane.packetId
@@ -128,7 +152,7 @@ export async function createLaneActionApproval(
     agent: lane.label || lane.branch,
     sessionKey: lane.sessionKey || `lane:${lane.id}`,
     title: input.title,
-    description: input.description,
+    description: recovery ? `${input.description}\n\n${recovery.message}` : input.description,
     summary: input.summary,
     diff: {
       path: 'multi-file',
@@ -139,11 +163,17 @@ export async function createLaneActionApproval(
     conflictReport: input.conflictReport,
     risk: input.risk,
     policyRuleId: input.policyRuleId,
-    args: surfaceRoute ? {
-      approvalRoute: 'dispatcher',
-      dispatcherSurface: surfaceRoute.dispatcher.surface,
-      dispatcherId: surfaceRoute.dispatcher.id,
-      ...(surfaceRoute.missionId ? { dispatcherMissionId: surfaceRoute.missionId } : {}),
+    args: surfaceRoute || recovery ? {
+      ...(surfaceRoute ? {
+        approvalRoute: 'dispatcher',
+        dispatcherSurface: surfaceRoute.dispatcher.surface,
+        dispatcherId: surfaceRoute.dispatcher.id,
+        ...(surfaceRoute.missionId ? { dispatcherMissionId: surfaceRoute.missionId } : {}),
+      } : {}),
+      ...(recovery ? {
+        preservedRef: recovery.preservedRef,
+        preservedHeadSha: recovery.preservedHeadSha,
+      } : {}),
     } : undefined,
     metadata: {
       Lane: lane.id,
@@ -152,6 +182,11 @@ export async function createLaneActionApproval(
       Runtime: lane.runtime,
       ...(lane.packetId ? { Packet: lane.packetId } : {}),
       ...(input.expectedHeadSha ? { 'Expected HEAD': input.expectedHeadSha } : {}),
+      ...(recovery ? {
+        'Recovery Ref': recovery.preservedRef,
+        'Recovery HEAD': recovery.preservedHeadSha ?? 'unknown',
+        'Recovery Action': recovery.recommendedAction,
+      } : {}),
       ...(surfaceRoute ? {
         'Approval Route': 'dispatcher',
         'Dispatcher Surface': surfaceRoute.dispatcher.surface,
@@ -170,7 +205,12 @@ export async function createLaneActionApproval(
     },
   });
   await recordReviewLessonsForApproval(approval.id, lane, input.reviewSummary, files);
-  setLaneStatus(lane.id, 'awaiting_input', actor, surfaceRoute ? 'dispatcher_review_required' : 'approval_required');
+  setLaneStatus(
+    lane.id,
+    approvedMergeFailure ? 'awaiting_orchestrator' : 'awaiting_input',
+    actor,
+    approvedMergeFailure ? 'merge_blocked_recoverable' : surfaceRoute ? 'dispatcher_review_required' : 'approval_required',
+  );
   void publishRealtimeMutation({
     mutation: {
       mutationId: `approval-create-${approval.id}`,
@@ -198,5 +238,10 @@ export async function createLaneActionApproval(
         console.error(`[surface-approval] Failed to ping agent dispatcher ${dispatcherPacketId}:`, error);
       });
   }
-  return { ok: false, laneId: lane.id, note: input.note, approvalId: approval.id };
+  return {
+    ok: false,
+    laneId: lane.id,
+    note: recovery ? `${input.note} ${recovery.message}` : input.note,
+    approvalId: approval.id,
+  };
 }

@@ -19,11 +19,12 @@ const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.j
 
 const { listApprovals, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { dispatch } = await import('@/lib/lane/commands');
 const { decideSurfaceMerge } = await import('@/lib/lane/surface-merge-decision');
-const { createLane, getLane } = await import('@/lib/lane/registry');
+const { archiveLane, createLane, getLane } = await import('@/lib/lane/registry');
 const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/mission');
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
@@ -197,6 +198,60 @@ afterEach(() => {
 });
 
 describe('requireApproval merge governance through the real command path', () => {
+  it('keeps approved gate-blocked work operator-actionable and surfaces its preserved ref through status reads', async () => {
+    await updateOperatorDefaults({ requireApproval: 'surface' });
+    const gated = await createStandardLane('recoverable-gate-block', true, true, true);
+    persistDispatcherMission(gated.lane.packetId!, gated.repo, `thoughts-recovery-${Date.now()}`);
+
+    const response = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), gated.lane.packetId!));
+    const payload = await response.json();
+    const parked = getLane(gated.lane.id);
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ ok: true, result: { merged: false } });
+    expect(parked).toMatchObject({
+      status: 'awaiting_orchestrator',
+      worktreePath: gated.lane.worktreePath,
+    });
+    expect(payload.result.note).toContain('Reviewed work preserved at preserved/');
+
+    const status = await getMissionStatus({ includeCost: false });
+    const statusPacket = status.packets.find((candidate) => candidate.id === gated.lane.packetId);
+    expect(statusPacket).toMatchObject({
+      status: 'blocked',
+      recovery: {
+        outcome: 'archived_recoverable',
+        preservedHeadSha: gated.reviewedHeadSha,
+        recommendedAction: 'retry_packet',
+      },
+    });
+    expect(statusPacket?.blockedReason).toContain('retry or redispatch to resume');
+    const preservedRef = statusPacket!.recovery!.preservedRef;
+    expect(git(gated.repo, ['rev-parse', preservedRef])).toBe(gated.reviewedHeadSha);
+
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(gated.lane.packetId!)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const reviewPayload = await reviewResponse.json();
+    expect(reviewPayload.recovery).toMatchObject({
+      preservedRef,
+      preservedHeadSha: gated.reviewedHeadSha,
+    });
+
+    const archived = archiveLane(gated.lane.id, 'system');
+    expect(archived).toMatchObject({
+      status: 'archived',
+      outcome: 'archived_recoverable',
+    });
+    expect(archived?.outcomeNote).toContain(`Reviewed work preserved at ${preservedRef}`);
+    const archivedStatus = await getMissionStatus({ includeCost: false });
+    expect(archivedStatus.packets.find((candidate) => candidate.id === gated.lane.packetId)).toMatchObject({
+      status: 'archived',
+      recovery: { preservedRef, preservedHeadSha: gated.reviewedHeadSha },
+    });
+  }, 60_000);
+
   it('treats an operator approve_and_merge as the surface approval without weakening worker or merge-gate enforcement', async () => {
     await updateOperatorDefaults({ requireApproval: 'surface' });
 

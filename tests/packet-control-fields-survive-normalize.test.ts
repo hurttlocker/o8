@@ -144,6 +144,7 @@ function fullPacketFixture() {
       generatedAt: '2026-01-01T00:10:00.000Z',
       error: null,
     },
+    recovery: null,
   } satisfies Required<OrchestratorPacket>;
 
   return packet;

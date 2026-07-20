@@ -2,7 +2,8 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
-import { listLanes } from '@/lib/lane/registry';
+import { getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import {
@@ -173,15 +174,19 @@ export function buildDomainLaneSummaries(): DomainLaneSummary[] {
   const mergePolicy = currentLaneMergePolicy();
   return listLanes()
     .filter((lane) => lane.packetId)
-    .map((lane) => ({
-      laneId: lane.id,
-      packetId: lane.packetId!,
-      status: lane.status,
-      sessionKey: lane.sessionKey,
-      lastEventLabel: lane.lastEventLabel,
-      mergeMode: mergePolicy.mode,
-      mergeModeNote: mergePolicy.note,
-    }));
+    .map((lane) => {
+      const recovery = recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100));
+      return {
+        laneId: lane.id,
+        packetId: lane.packetId!,
+        status: lane.status,
+        sessionKey: lane.sessionKey,
+        lastEventLabel: lane.lastEventLabel,
+        recovery,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
+      };
+    });
 }
 
 function needsRuntimeTruth(domainLanes: DomainLaneSummary[]): boolean {
