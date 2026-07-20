@@ -187,7 +187,7 @@ export const CARD_ENTRANCE = {
   keyframes: `
 @keyframes cnv-card-enter {
   0% { opacity: 0; transform: scale(0.96); }
-  72% { opacity: 1; transform: scale(1.006); }
+  72% { opacity: 1; transform: scale(1.012); }
   100% { opacity: 1; transform: none; }
 }
 @keyframes cnv-card-border-draw {
