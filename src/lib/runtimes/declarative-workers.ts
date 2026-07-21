@@ -1,6 +1,12 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import {
+  getRuntimeCapability,
+  listDeclarativeRuntimes,
+  type DeclarativeParserProfile,
+  type OrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import type { AgentRuntime } from './types';
 import { createDeclarativeAgentRuntime } from './shared/declarative-agent-runtime';
 import {
@@ -13,7 +19,8 @@ import {
   type DeclarativeRunLogPatterns,
 } from './shared/owned-session';
 
-interface DeclarativeWorkerConfig extends DeclarativeOwnedRuntimeConfig {
+export interface DeclarativeWorkerConfig extends DeclarativeOwnedRuntimeConfig {
+  runtimeId: OrchestratorRuntime;
   displayName: string;
   costFormat: DeclarativeCostFormat;
 }
@@ -118,89 +125,44 @@ function openHandsNdjson(): DeclarativeRunLogPatterns {
   };
 }
 
-export const DECLARATIVE_WORKER_CONFIGS: readonly DeclarativeWorkerConfig[] = [
-  {
-    runtimeId: 'openhands',
-    displayName: 'OpenHands',
-    surfaceIdPrefix: 'openhands-owned:',
-    rootEnvVar: 'O8_OWNED_OPENHANDS_ROOT',
-    rootDefault: path.join(os.homedir(), '.o8', 'owned-openhands'),
-    binaryName: 'openhands',
-    binaryEnvOverride: 'O8_OPENHANDS_BIN',
-    humanLabel: 'Owned OpenHands',
-    squadShortName: 'OpenHands',
-    sessionIdPrefix: 'openhands-owned-',
-    launchArgs: ['--headless', '--json', '-t', '{{prompt}}'],
-    resumeArgs: null,
-    parseRunLog: openHandsNdjson(),
-    costFormat: 'structured',
-  },
-  {
-    runtimeId: 'goose',
-    displayName: 'Goose',
-    surfaceIdPrefix: 'goose-owned:',
-    rootEnvVar: 'O8_OWNED_GOOSE_ROOT',
-    rootDefault: path.join(os.homedir(), '.o8', 'owned-goose'),
-    binaryName: 'goose',
-    binaryEnvOverride: 'O8_GOOSE_BIN',
-    humanLabel: 'Owned Goose',
-    squadShortName: 'Goose',
-    sessionIdPrefix: 'goose-owned-',
-    launchArgs: ['run', '-t', '{{prompt}}', '--max-turns', '100'],
-    resumeArgs: null,
-    parseRunLog: textOutput('Goose'),
-    extraSpawnEnv: () => ({ GOOSE_MODE: 'auto', GOOSE_MAX_TURNS: '100' }),
-    costFormat: 'text',
-  },
-  {
-    runtimeId: 'qwen',
-    displayName: 'Qwen Code',
-    surfaceIdPrefix: 'qwen-owned:',
-    rootEnvVar: 'O8_OWNED_QWEN_ROOT',
-    rootDefault: path.join(os.homedir(), '.o8', 'owned-qwen'),
-    binaryName: 'qwen',
-    binaryEnvOverride: 'O8_QWEN_BIN',
-    humanLabel: 'Owned Qwen',
-    squadShortName: 'Qwen',
-    sessionIdPrefix: 'qwen-owned-',
-    launchArgs: ['-p', '{{prompt}}', '--yolo', '--output-format', 'stream-json'],
-    resumeArgs: null,
-    parseRunLog: qwenStreamJson(),
-    costFormat: 'structured',
-  },
-  {
-    runtimeId: 'kimi',
-    displayName: 'Kimi Code',
-    surfaceIdPrefix: 'kimi-owned:',
-    rootEnvVar: 'O8_OWNED_KIMI_ROOT',
-    rootDefault: path.join(os.homedir(), '.o8', 'owned-kimi'),
-    binaryName: 'kimi',
-    binaryEnvOverride: 'O8_KIMI_BIN',
-    humanLabel: 'Owned Kimi',
-    squadShortName: 'Kimi',
-    sessionIdPrefix: 'kimi-owned-',
-    launchArgs: ['-p', '{{prompt}}'],
-    resumeArgs: null,
-    parseRunLog: textOutput('Kimi'),
-    costFormat: 'text',
-  },
-  {
-    runtimeId: 'aider',
-    displayName: 'Aider',
-    surfaceIdPrefix: 'aider-owned:',
-    rootEnvVar: 'O8_OWNED_AIDER_ROOT',
-    rootDefault: path.join(os.homedir(), '.o8', 'owned-aider'),
-    binaryName: 'aider',
-    binaryEnvOverride: 'O8_AIDER_BIN',
-    humanLabel: 'Owned Aider',
-    squadShortName: 'Aider',
-    sessionIdPrefix: 'aider-owned-',
-    launchArgs: ['--message', '{{prompt}}', '--yes-always', '--auto-test'],
-    resumeArgs: null,
-    parseRunLog: textOutput('Aider'),
-    costFormat: 'text',
-  },
-];
+function parserForProfile(profile: DeclarativeParserProfile, label: string): DeclarativeRunLogPatterns {
+  if (profile === 'openhands-ndjson') return openHandsNdjson();
+  if (profile === 'qwen-stream-json') return qwenStreamJson();
+  return textOutput(label);
+}
+
+function envToken(runtimeId: OrchestratorRuntime): string {
+  return runtimeId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+}
+
+function materializeDeclarativeWorkerConfig(runtimeId: OrchestratorRuntime): DeclarativeWorkerConfig {
+  const capability = getRuntimeCapability(runtimeId);
+  const manifest = capability.declarative;
+  if (!manifest) throw new Error(`Runtime ${runtimeId} has no declarative adapter manifest.`);
+  const token = envToken(runtimeId);
+  return {
+    runtimeId,
+    displayName: capability.label,
+    surfaceIdPrefix: `${runtimeId}-owned:`,
+    rootEnvVar: `O8_OWNED_${token}_ROOT`,
+    rootDefault: path.join(os.homedir(), '.o8', `owned-${runtimeId}`),
+    binaryName: capability.binaryName,
+    binaryEnvOverride: `O8_${token}_BIN`,
+    humanLabel: `Owned ${capability.shortLabel}`,
+    squadShortName: capability.shortLabel,
+    sessionIdPrefix: `${runtimeId}-owned-`,
+    launchArgs: manifest.launchArgs,
+    resumeArgs: manifest.resumeArgs,
+    parseRunLog: parserForProfile(manifest.parserProfile, capability.label),
+    ...(manifest.extraSpawnEnv
+      ? { extraSpawnEnv: () => ({ ...manifest.extraSpawnEnv }) }
+      : {}),
+    costFormat: manifest.costFormat,
+  };
+}
+
+export const DECLARATIVE_WORKER_CONFIGS: readonly DeclarativeWorkerConfig[] =
+  listDeclarativeRuntimes().map(materializeDeclarativeWorkerConfig);
 
 const registrations = DECLARATIVE_WORKER_CONFIGS.map((config) => {
   const { displayName, costFormat, ...ownedConfig } = config;

@@ -1,204 +1,109 @@
-*An AgentRuntime is o8's universal interface for talking to any CLI-based AI coding agent (Codex, Claude Code, Gemini, opencode, Cursor, Grok Build) — the control plane never speaks to a specific runtime directly, always through this contract.*
+*An AgentRuntime is o8's universal interface for a CLI-based coding agent. The control plane talks to this contract instead of branching on a vendor.*
 
 # Runtime Adapter Contract
 
-This doc started with issue **#11** and now reflects the shipped
-**RuntimeSurface / TerminalSession** layer from issue **#25**, with the
-multi-runtime capability map introduced in Wave 2a-e (2026-04-20).
+The adapter contract feeds the product-facing `RuntimeSurface` / `TerminalSession`
+model used for launch, discovery, transcript reads, resume, interrupt, review, and
+telemetry. Capabilities must stay truthful: a one-shot CLI advertises no resume,
+while an interactive protocol that needs permission responses belongs on the
+specialized path.
 
-## Goal
+## Straightforward CLIs: one catalog entry
 
-o8 should not be trapped inside a single runtime.
-The control plane needs one stable contract for:
-- spawn
-- attach
-- steer
-- stop
-- telemetry
-- approvals
-- artifacts
-
-That runtime contract feeds a higher-level product object:
-- **RuntimeSurface / TerminalSession**
-
-Why:
-- adapters are backend integration details
-- RuntimeSurface is what the UI should actually reason about when opening terminal depth, runtime watch, interrupt controls, and linked review context
-
----
-
-## Adding a new runtime to o8
-
-For a one-shot or resumable CLI with line/JSONL output, the owned-session adapter
-is now one declarative registry entry. `registerDeclarativeOwnedRuntime` turns
-that entry into both an `OwnedRuntimeAdapter` and a `createOwnedSessionStore`
-instance:
+For a CLI with argument-based launch or resume and line, JSONL, or NDJSON output,
+add one entry to `ORCHESTRATOR_RUNTIMES` in
+`src/lib/orchestrator/runtime-capabilities.ts`. The runtime ID is inferred from
+that object, so do not add a second union or validator list.
 
 ```ts
-const registration = registerDeclarativeOwnedRuntime({
-  runtimeId: 'example',
-  binaryName: 'example',
-  launchArgs: ['run', '--json', '{{prompt}}'],
-  resumeArgs: ['resume', '{{threadId}}', '{{prompt}}'],
-  parseRunLog: {
-    patterns: [
-      { eventType: 'init', threadIdPaths: ['sessionId'] },
-      { eventType: 'message', kind: 'message', textPaths: ['content'] },
-      { eventType: 'done', completedTurn: true },
-    ],
-  },
-  stderrNoise: [/harmless warning/i],
-  // surface/root/label fields from OwnedRuntimeAdapter
-});
-```
-
-Templates support `{{cwd}}`, `{{prompt}}`, `{{model}}`, `{{effort}}`, and
-`{{threadId}}`; conditional argument groups omit optional values. Pattern rows
-map JSON event types or plain-line regexes to normalized entries, thread IDs,
-and completion. OpenCode is the shipped example in `src/lib/opencode/owned.ts`.
-
-Use the specialized path below when the CLI is interactive or stateful enough
-to need custom process control. Pi stays specialized because its RPC stream has
-bidirectional permission responses; Codex and Claude Code also stay hand-written.
-When adding a new runtime ID to the dispatch surface, keep steps 4 and 5 so the
-compiler still identifies genuine runtime-specific switches.
-
-### 1. `src/lib/<runtime>/owned.ts`
-
-Runtime adapter defining `launchArgs`, `resumeArgs`, `parseRunLog`, `stderrNoise`.
-Implements the `OwnedRuntimeAdapter` interface from
-`src/lib/runtimes/shared/owned-session/types.ts`.
-Creates the owned session store via `createOwnedSessionStore(adapter)` and exports
-public wrappers like `launchOwned<Runtime>Session`, etc.
-
-### 2. `src/lib/runtimes/<runtime>.ts`
-
-Universal `AgentRuntime` implementation. Delegates to the `owned.ts` wrappers.
-Declares `capabilities` + `dispatchCapability`. Size target: 300–400 LoC.
-
-### 3. `src/lib/runtimes/<runtime>-cost-parser.ts`
-
-`CostParser` that parses the runtime's telemetry output and maps to
-`SessionCostData`. Registers itself via `registerCostParser({ runtimeId, parseFiles })`
-at module load.
-
-### 4. `src/lib/orchestrator/types.ts` — line 3
-
-Add the literal to the union:
-
-```ts
-export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | '<new>';
-```
-
-Never duplicate this union elsewhere. The compile-time enumeration is the safety net.
-
-### 5. `src/lib/orchestrator/runtime-capabilities.ts`
-
-Add a row to `ORCHESTRATOR_RUNTIMES`:
-
-```ts
-'<new>': {
-  label: 'Display Name',
-  shortLabel: 'DN',
+example: {
+  label: 'Example',
+  shortLabel: 'Example',
   dispatchable: true,
   requiresModel: false,
-  defaultModel: '<default-model-id>',
-  accentColor: '#hexcolor',
-  binaryName: '<cli-binary>',
-  description: 'One-line description for the launch picker tooltip.',
+  accentColor: '#2563eb',
+  binaryName: 'example',
+  workerProvider: 'example',
+  authHouse: 'example',
+  reasoningEffort: false,
+  tier: 'standard',
+  description: 'Example CLI worker via JSONL output.',
+  declarative: {
+    launchArgs: ['run', '--json', '{{prompt}}'],
+    resumeArgs: ['resume', '{{threadId}}', '{{prompt}}'],
+    parserProfile: 'text',
+    costFormat: 'text',
+    authEnvVars: ['EXAMPLE_API_KEY'],
+    authPaths: ['.config/example/auth.json'],
+    authFix: 'Install Example, then run `example login`.',
+  },
 },
 ```
 
-After this step, all UI code that reads label/color via the capability map picks up
-the new runtime automatically — no other UI changes required.
+Templates support `{{cwd}}`, `{{prompt}}`, `{{model}}`, `{{effort}}`, and
+`{{threadId}}`. A null `resumeArgs` value deliberately makes the runtime
+one-shot. The current parser profiles are `text`, `openhands-ndjson`, and
+`qwen-stream-json`; add a reusable parser profile when a new event dialect is
+needed rather than writing a vendor-specific store.
 
-### 6. `src/lib/runtimes/index.ts`
+That one entry generates or feeds:
 
-Three lines: import the adapter, import the cost parser for side-effect registration,
-call `registerRuntime(<runtime>Runtime)`.
+- the `OrchestratorRuntime` type and runtime-ID guards;
+- dispatch validation in API, MCP, preferences, persistence, and routing;
+- desktop runtime options and operator defaults;
+- database enum typing;
+- auth inventory and setup guidance;
+- the owned-session adapter, universal `AgentRuntime`, and cost parser.
 
----
+The real-process smoke matrix in
+`src/lib/runtimes/declarative-workers-smoke.test.ts` must cover every declarative
+entry. A resumable representative must prove launch, discovered thread ID,
+resume, clean child exit, and transcript normalization through the shared
+adapter.
 
-## Why 6 files and not more
+## Specialized runtimes
 
-- **Duplicate union literals were eliminated in Wave 2a-e (2026-04-20).** Any file
-  that hard-codes `runtime === 'codex' ? 'Codex' : 'Claude Code'` is a bug — label and
-  color come from `ORCHESTRATOR_RUNTIMES[r]`.
-- **Hardcoded UI branches go through the map.** Add one map entry; every label, chip,
-  tint, and description updates automatically.
-- **Dispatch-logic switches stay exhaustive.** `npx tsc --noEmit` after step 4 flags
-  every genuine switch that needs a new case — those are real behavioral differences
-  (e.g., resume semantics, model-flag requirements), not display data.
+Use a hand-written adapter when a CLI has stateful process control that cannot be
+expressed by argv and output patterns. Pi stays specialized because its RPC
+stream has bidirectional permission responses; Codex, Claude Code, Gemini,
+OpenCode, Cursor, and Grok also keep protocol-specific implementations.
 
----
+A specialized runtime normally needs:
 
-## Distinguishing Problem B (map it) vs Problem C (switch it)
+1. An owned-session adapter under `src/lib/<runtime>/owned.ts` that implements
+   `OwnedRuntimeAdapter` and creates a store with `createOwnedSessionStore`.
+2. An `AgentRuntime` under `src/lib/runtimes/<runtime>.ts` that declares truthful
+   capabilities and delegates to the owned store.
+3. A cost parser when the runtime emits usable telemetry.
+4. One `ORCHESTRATOR_RUNTIMES` catalog entry without a `declarative` manifest.
+5. Registration in `src/lib/runtimes/index.ts`.
 
-| Pattern | Classification | Action |
-|---|---|---|
-| `if (r === 'codex') return 'Codex'` | **B — label lookup** | Replace with `ORCHESTRATOR_RUNTIMES[r].label` |
-| `if (r === 'codex') return '#2563eb'` | **B — color lookup** | Replace with `ORCHESTRATOR_RUNTIMES[r].accentColor` |
-| `if (r === 'codex') return 'openai'` | **C — billing provider** | Keep switch; it maps runtimes to payment providers, which is real divergent logic |
-| `if (r === 'codex') resumeViaThread(...)` | **C — dispatch logic** | Keep switch; each runtime has a different resume protocol |
-| `if (r === 'codex' && !model) return 'strong'` | **C — tier classification** | Keep switch; default model strength differs per runtime |
+Runtime-specific switches are acceptable only when behavior actually diverges,
+such as a resume protocol or session-key format. Labels, colors, picker options,
+auth houses, validation, and runtime membership come from the catalog.
 
----
+## Current runtime set
 
-## Current shipped status (Wave 2f)
+The catalog contains thirteen runtimes. Twelve are dispatchable; `antigravity`
+remains discovery-only.
 
-Eight runtimes in the union (antigravity = discovery-only):
-- `codex` — GPT-5.4 xhigh, `codex exec --json`, thread resume
-- `claude-code` — Claude Code CLI, session resume, full tool surface
-- `gemini` — Gemini CLI, `--yolo` dispatch, JSONL streaming
-- `opencode` — multi-provider coding CLI, `opencode run`, requires `--model` flag
-- `cursor` — Cursor CLI, `cursor-agent -p --output-format stream-json`
-- `grok` — Grok Build CLI, headless JSON-schema constrained output
-- `pi` — earendil-works/pi, `pi --mode rpc` bidirectional JSONL, NATIVE steer + permission-gate seam
+- Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `cursor`, and `grok`.
+- Declarative: `openhands`, `goose`, `qwen`, `kimi`, and `aider`.
+- Discovery-only: `antigravity`.
 
-All label, accentColor, shortLabel, description, and dispatchable data lives in
-`src/lib/orchestrator/runtime-capabilities.ts`. UI must read from the map, not
-inline the values.
+## Contract locations
 
-Remaining Problem C switches (intentional, exhaustive dispatch logic):
-- `src/lib/dispatch/read-budget.ts` — tier classification by runtime default model
-- `src/lib/orchestrator/cost-persistence.ts:providerForRuntime` — billing provider routing
-- `src/components/desktop/workspace-terminal/utils.ts` — session-key canonicalization per runtime
-- `src/lib/runtime/ide-session-registry.ts` — session-key prefix logic
-- `src/lib/terminal/tab-state.ts` — tab canonicalization logic
-- `src/lib/lane/auto-review.ts` — review dispatch differs per runtime
-- `src/lib/chat/sidebar-events.ts` — capability inference (runtime-gated feature set)
-
----
-
-## Architecture context
-
-The adapter-facing contract lives in:
-- `src/lib/runtimes/types.ts` — `AgentRuntime` interface
-
-The product-facing RuntimeSurface contract lives in:
-- `src/lib/fleet/types.ts`
-
-Capability map (add new runtimes here):
-- `src/lib/orchestrator/runtime-capabilities.ts`
-
-Runtime union (one source of truth):
-- `src/lib/orchestrator/types.ts` — `OrchestratorRuntime`
-
-Runtime registry (wires adapters to the dispatch layer):
-- `src/lib/runtimes/index.ts`
+- `src/lib/runtimes/types.ts` — universal `AgentRuntime` interface.
+- `src/lib/fleet/types.ts` — product-facing runtime surface.
+- `src/lib/orchestrator/runtime-capabilities.ts` — canonical runtime catalog and inferred runtime type.
+- `src/lib/runtimes/declarative-workers.ts` — generated declarative registrations.
+- `src/lib/runtimes/shared/owned-session` — shared owned-process lifecycle.
+- `src/lib/runtimes/index.ts` — specialized runtime registration.
 
 ## Design rules
 
-### 1. Runtimes are adapters, not the UI model
-The UI should not know runtime-vendor-specific semantics everywhere.
-It should talk to a normalized contract.
-
-### 2. Capabilities are explicit
-Not every runtime supports every operation cleanly.
-The adapter exposes capability flags so the UI can present only truthful controls.
-
-### 3. Telemetry is first-class
-Cost, context pressure, and state have to survive normalization.
-
-### 4. Pause is not assumed
-Different runtimes mean different semantics. If pause is not real yet, the adapter should say so instead of lying.
+1. The UI consumes normalized runtime surfaces, not vendor protocols.
+2. Capability flags describe behavior that works today.
+3. Cost and lifecycle telemetry survive normalization.
+4. Missing resume support is reported honestly instead of simulated.
+5. A new straightforward CLI must not require scattered runtime-ID edits.

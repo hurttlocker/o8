@@ -14,6 +14,12 @@ import {
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { orchestratorRuntimeTone, agentDisplayLabel } from '@/lib/orchestrator/display';
+import {
+  ORCHESTRATOR_RUNTIME_IDS,
+  getRuntimeCapability,
+  isOrchestratorRuntime,
+  type OrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
@@ -43,13 +49,18 @@ function classifyStatus(rawStatus?: string): VisualStatus {
   return 'idle';
 }
 
-function inferRuntime(sessionKey: string, rawRuntime?: string): 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi' {
+function inferRuntime(sessionKey: string, rawRuntime?: string): OrchestratorRuntime {
   const normalized = (rawRuntime ?? '').toLowerCase();
-  if (normalized.includes('claude') || sessionKey.startsWith('claude-code:')) return 'claude-code';
-  if (normalized.includes('gemini') || sessionKey.startsWith('gemini-owned:')) return 'gemini';
-  if (normalized.includes('opencode') || sessionKey.startsWith('opencode-owned:')) return 'opencode';
-  if (normalized.includes('cursor') || sessionKey.startsWith('cursor-owned:')) return 'cursor';
-  if (normalized.includes('grok') || sessionKey.startsWith('grok-owned:')) return 'grok';
+  if (isOrchestratorRuntime(normalized)) return normalized;
+  for (const runtime of ORCHESTRATOR_RUNTIME_IDS) {
+    const capability = getRuntimeCapability(runtime);
+    if (normalized === capability.label.toLowerCase()
+      || sessionKey.startsWith(`${runtime}-owned:`)
+      || sessionKey.startsWith(`${runtime}:`)) {
+      return runtime;
+    }
+  }
+  if (normalized.includes('claude')) return 'claude-code';
   return 'codex';
 }
 

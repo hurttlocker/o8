@@ -45,10 +45,10 @@ import {
 } from './AgentPanelExtraAgentRow';
 import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Types ──
 
-type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
 type LaneOwnership = 'managed' | 'attached';
 
 export interface LaneSummary {
@@ -56,7 +56,7 @@ export interface LaneSummary {
   label: string;
   repoPath: string;
   branch: string;
-  runtime: LaneRuntime;
+  runtime: OrchestratorRuntime;
   sessionKey: string | null;
   packetId: string | null;
   status: LaneStatus;

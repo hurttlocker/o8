@@ -6,7 +6,11 @@ import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/li
 import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  formatDispatchableRuntimeChoices,
+  getRuntimeCapability,
+  isOrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
@@ -16,14 +20,10 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_uti
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'antigravity', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
 const VALID_EXISTING_BRANCH_POLICIES = new Set<ExistingBranchPolicy>(['auto', 'reset', 'continue', 'error']);
 
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  if (typeof value === 'string' && VALID_REQUESTED_RUNTIMES.has(value as OrchestratorRuntime)) {
-    return value as OrchestratorRuntime;
-  }
-  return null;
+  return isOrchestratorRuntime(value) ? value : null;
 }
 
 function normalizeIssues(value: unknown): LoadedIssue[] | null {
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(requestedRuntimeRaw);
   if (!requestedRuntime) {
-    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "antigravity", "opencode", "cursor", "grok", "pi".', 400);
+    return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
   }
   if (explicitRuntimeRequested) {
     const dispatchError = runtimeDispatchError(requestedRuntime);

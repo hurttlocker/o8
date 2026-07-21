@@ -12,7 +12,8 @@ import {
   parsePacketSelfReview,
   stripPacketSelfReview,
 } from '@/lib/orchestrator/self-review';
-import type { PacketContext } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, PacketContext } from '@/lib/orchestrator/types';
+import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
@@ -479,12 +480,11 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
 // Runtimes the session_outcomes table tracks (subset of the broader RuntimeId
 // union — RuntimeId also includes things like 'remote-customer' that the
 // dispatch routing recommender doesn't score).
-type LedgerRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'openhands' | 'goose' | 'qwen' | 'kimi' | 'aider' | 'cursor' | 'grok' | 'pi';
-const LEDGER_RUNTIMES: ReadonlySet<string> = new Set(['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
+type LedgerRuntime = OrchestratorRuntime;
 const LANE_START_STATUSES: ReadonlySet<string> = new Set(['launching', 'running']);
 
 function isLedgerRuntime(r: string | null): r is LedgerRuntime {
-  return r !== null && LEDGER_RUNTIMES.has(r);
+  return isDispatchableRuntime(r);
 }
 
 type OutcomeStartDerivation = {

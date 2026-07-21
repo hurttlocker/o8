@@ -15,6 +15,7 @@ import type {
   OrchestratorLaneBinding,
   OrchestratorMissionState,
   OrchestratorPacket,
+  OrchestratorRuntime,
   OrchestratorWorkspaceTarget,
   WorkspaceLaneState,
 } from '@/lib/orchestrator/types';
@@ -45,7 +46,7 @@ const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 
 interface WorkspaceAgentLaunchRequest {
   repoPath: string;
-  runtime?: 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'pi';
+  runtime?: OrchestratorRuntime;
   modelId?: string;
   initialText?: string;
   autoSend?: boolean;

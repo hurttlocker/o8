@@ -1,6 +1,10 @@
 export { parseReviewFindings, parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import {
+  formatDispatchableRuntimeChoices,
+  isDispatchableRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 
 // ── Types ──
 
@@ -242,23 +246,8 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
       return 'codex';
     }
   }
-  if (
-    value === 'codex'
-    || value === 'claude-code'
-    || value === 'gemini'
-    || value === 'opencode'
-    || value === 'openhands'
-    || value === 'goose'
-    || value === 'qwen'
-    || value === 'kimi'
-    || value === 'aider'
-    || value === 'cursor'
-    || value === 'grok'
-    || value === 'pi'
-  ) {
-    return value;
-  }
-  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode", "openhands", "goose", "qwen", "kimi", "aider", "cursor", "grok", "pi"');
+  if (isDispatchableRuntime(value)) return value;
+  throw new Error(`runtime must be one of ${formatDispatchableRuntimeChoices()}`);
 }
 
 export function parseIssueList(value: unknown) {

@@ -9,6 +9,15 @@
 
 import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
 import { desc, sql } from 'drizzle-orm';
+import {
+  ORCHESTRATOR_RUNTIME_IDS,
+  type OrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
+
+const ORCHESTRATOR_RUNTIME_ENUM = [...ORCHESTRATOR_RUNTIME_IDS] as [
+  OrchestratorRuntime,
+  ...OrchestratorRuntime[],
+];
 
 // ══════════════════════════════════════════════════════════════════
 //  Users — core identity
@@ -146,7 +155,7 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
   projectId: text('project_id'),
   repoPath: text('repo_path').notNull(),
   branch: text('branch'),
-  runtime: text('runtime', { enum: ['codex', 'claude-code', 'gemini', 'antigravity', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'] }).notNull(),
+  runtime: text('runtime', { enum: ORCHESTRATOR_RUNTIME_ENUM }).notNull(),
   sessionKey: text('session_key'),
   laneId: text('lane_id'),
   packetId: text('packet_id'),
@@ -395,7 +404,7 @@ export const lanes = sqliteTable('lanes', {
   worktreePath: text('worktree_path'),
   branch: text('branch').notNull(),
   baseBranch: text('base_branch').notNull(),
-  runtime: text('runtime', { enum: ['codex', 'claude-code', 'gemini', 'antigravity', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'] }).notNull(),
+  runtime: text('runtime', { enum: ORCHESTRATOR_RUNTIME_ENUM }).notNull(),
   sessionKey: text('session_key'),
   packetId: text('packet_id'),
   prNumber: integer('pr_number'),

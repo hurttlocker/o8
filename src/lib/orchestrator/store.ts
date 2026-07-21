@@ -24,15 +24,12 @@ import type {
   OrchestratorStateApiResponse,
   WorkerRouting,
 } from '@/lib/orchestrator/types';
-const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
+import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 /** Deserializer — validates and coerces an unknown value to OrchestratorRuntime. */
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
-  if (typeof value === 'string' && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
-    return value as OrchestratorRuntime;
-  }
-  return 'codex';
+  return isDispatchableRuntime(value) ? value : 'codex';
 }
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 if (typeof window !== 'undefined') installOrchestratorTurnPinFetchPatch();
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
 export const ORCHESTRATOR_MISSION_COMPLETED_EVENT = 'cortex:orchestrator-mission-completed';
@@ -424,9 +421,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // Nullable on purpose: an absent pin must stay null — normalizeRuntime()'s
     // 'codex' default would re-manufacture the #1460 always-truthy boot pin.
     dispatchRuntimePin:
-      typeof packet.dispatchRuntimePin === 'string'
-        && VALID_RUNTIMES.has(packet.dispatchRuntimePin as OrchestratorRuntime)
-        ? (packet.dispatchRuntimePin as OrchestratorRuntime)
+      isDispatchableRuntime(packet.dispatchRuntimePin)
+        ? packet.dispatchRuntimePin
         : null,
     // #1329 — originating orchestrator thread id lives only on the packet; drop
     // it here and a rerun/re-read would silently sever session-rule inheritance.

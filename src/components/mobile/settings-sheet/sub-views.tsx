@@ -12,7 +12,11 @@ import {
 } from '@/app/mobile/mobile-approvals-shared';
 import { mobileSafeBottom } from '@/app/mobile/mobile-shell-primitives';
 import { isHapticEnabled, setHapticEnabled, triggerHaptic } from '@/lib/mobile/haptic';
-import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  getRuntimeCapability,
+  listDispatchableRuntimes,
+  type OrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import {
   ICON_GITHUB,
   ICON_INFO,
@@ -28,17 +32,15 @@ import { Row, SectionCard, SectionLabel, ToggleRow } from './primitives';
 interface OperatorDefaultsState {
   parallelCap: number;
   thinkingEffort: string;
-  defaultDispatchRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode';
+  defaultDispatchRuntime: OrchestratorRuntime;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
 }
 
-const DISPATCH_RUNTIME_LABELS: Record<OperatorDefaultsState['defaultDispatchRuntime'], string> = {
-  codex: 'Codex',
-  'claude-code': 'Claude Code',
-  gemini: 'Gemini',
-  opencode: 'opencode',
-};
+const DISPATCH_RUNTIME_OPTIONS = listDispatchableRuntimes().map((value) => ({
+  value,
+  label: getRuntimeCapability(value).label,
+}));
 
 const THINKING_EFFORTS: Array<{ value: string; label: string }> = [
   { value: 'adaptive', label: 'Adaptive' },
@@ -251,25 +253,18 @@ export function CapabilitiesSubView({ palette }: { palette: MobilePalette }) {
 
       <SectionLabel palette={palette}>Default dispatch runtime</SectionLabel>
       <SectionCard palette={palette}>
-        {(Object.keys(DISPATCH_RUNTIME_LABELS) as Array<OperatorDefaultsState['defaultDispatchRuntime']>)
-          // v1 ships Codex only; Gemini / opencode / claude-code stay hidden
-          // here (parity with desktop). Keep whatever the operator already
-          // selected visible so we never strip an active choice.
-          .filter((runtime) =>
-            listDispatchableRuntimes().includes(runtime) || defaults.defaultDispatchRuntime === runtime,
-          )
-          .map((runtime, index, arr) => {
-          const active = defaults.defaultDispatchRuntime === runtime;
+        {DISPATCH_RUNTIME_OPTIONS.map(({ value, label }, index, options) => {
+          const active = defaults.defaultDispatchRuntime === value;
           return (
             <Row
-              key={runtime}
+              key={value}
               iconPath={ICON_SLIDERS}
-              label={DISPATCH_RUNTIME_LABELS[runtime]}
+              label={label}
               rightValue={active ? 'Active' : ''}
-              onClick={() => void update({ defaultDispatchRuntime: runtime })}
+              onClick={() => void update({ defaultDispatchRuntime: value })}
               palette={palette}
               showChevron={false}
-              showDivider={index < arr.length - 1}
+              showDivider={index < options.length - 1}
             />
           );
         })}
