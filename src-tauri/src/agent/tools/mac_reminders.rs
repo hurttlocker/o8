@@ -90,21 +90,96 @@ pub async fn create(args: Value) -> Result<Value, String> {
     let title_esc = as_escape(&title);
     let script = format!(
         "\ntell application \"Reminders\"\n\
+         \tset sep to character id 30\n\
+         \tset recordSep to character id 29\n\
+         \tset createdList to false\n\
          \tif not (exists list \"{list_esc}\") then\n\
          \t\tmake new list with properties {{name:\"{list_esc}\"}}\n\
+         \t\tset createdList to true\n\
          \tend if\n\
          \tset targetList to list \"{list_esc}\"\n\
          \tset newReminder to make new reminder at end of reminders of targetList with properties {{name:\"{title_esc}\"}}\n\
          \t{due_date_line}\
          \t{notes_line}\
+         \tset dueText to \"missing\"\n\
+         \tif due date of newReminder is not missing value then set dueText to (due date of newReminder as string)\n\
+         \tset reminderFingerprint to (name of newReminder as string) & sep & (completed of newReminder as string) & sep & (body of newReminder as string) & sep & dueText & sep & (name of container of newReminder as string)\n\
+         \t(id of newReminder as string) & recordSep & reminderFingerprint & recordSep & (createdList as string)\n\
          end tell"
     );
 
-    tokio::task::spawn_blocking(move || run_applescript(&script))
+    let created = tokio::task::spawn_blocking(move || run_applescript(&script))
         .await
         .map_err(|e| format!("spawn_blocking error: {e}"))??;
+    let mut created_parts = created.splitn(3, '\u{1d}');
+    let reminder_id = created_parts.next().unwrap_or("");
+    let fingerprint = created_parts.next().unwrap_or("");
+    let created_list = created_parts.next().unwrap_or("") == "true";
+    if reminder_id.is_empty() || fingerprint.is_empty() {
+        return Err("Reminders did not return a stable post-create fingerprint".to_string());
+    }
 
-    Ok(json!({ "success": true, "title": title, "list": list_name, "due_date": due_date }))
+    Ok(json!({
+        "success": true,
+        "title": title,
+        "list": list_name,
+        "due_date": due_date,
+        "reminder_id": reminder_id,
+        "_ledger_fingerprint": fingerprint,
+        "_ledger_created_list": if created_list { Some(list_name.as_str()) } else { None },
+    }))
+}
+
+/// Exact inverse for a ledger token produced by `create`. It is not exposed as
+/// a model tool; only the separately confirmed ledger undo can reach it.
+pub async fn delete_created(
+    reminder_id: &str,
+    expected_sha256: &str,
+    created_list: Option<&str>,
+) -> Result<Value, String> {
+    let id = as_escape(reminder_id);
+    let expected = as_escape(expected_sha256);
+    let created_list = as_escape(created_list.unwrap_or(""));
+    let script = format!(
+        "\ntell application \"Reminders\"\n\
+         \tset sep to character id 30\n\
+         \tset deletedCount to 0\n\
+         \trepeat with reminderList in lists\n\
+         \t\tset matches to reminders of reminderList whose id is \"{id}\"\n\
+         \t\trepeat with r in matches\n\
+         \t\t\tset dueText to \"missing\"\n\
+         \t\t\tif due date of r is not missing value then set dueText to (due date of r as string)\n\
+         \t\t\tset currentFingerprint to (name of r as string) & sep & (completed of r as string) & sep & (body of r as string) & sep & dueText & sep & (name of container of r as string)\n\
+         \t\t\tset digestOutput to do shell script \"/usr/bin/printf %s \" & quoted form of currentFingerprint & \" | /usr/bin/shasum -a 256\"\n\
+         \t\t\tset currentHash to text 1 thru 64 of digestOutput\n\
+         \t\t\tif currentHash is not \"{expected}\" then return \"changed\"\n\
+         \t\t\tdelete r\n\
+         \t\t\tset deletedCount to deletedCount + 1\n\
+         \t\t\tif \"{created_list}\" is not \"\" and (name of reminderList as string) is \"{created_list}\" then\n\
+         \t\t\t\tif (count of reminders of reminderList) is 0 then\n\
+         \t\t\t\t\tdelete reminderList\n\
+         \t\t\t\t\treturn \"1\" & sep & \"true\"\n\
+         \t\t\t\tend if\n\
+         \t\t\tend if\n\
+         \t\t\treturn \"1\" & sep & \"false\"\n\
+         \t\tend repeat\n\
+         \tend repeat\n\
+         \t(deletedCount as string) & sep & \"false\"\n\
+         end tell"
+    );
+    let deleted = tokio::task::spawn_blocking(move || run_applescript(&script))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))??;
+    let mut deleted_parts = deleted.trim().splitn(2, '\u{1e}');
+    match deleted_parts.next().unwrap_or("") {
+        "1" => Ok(json!({
+            "undone": true,
+            "reminder_id": reminder_id,
+            "created_list_removed": deleted_parts.next() == Some("true"),
+        })),
+        "changed" => Err("Cannot undo because the reminder changed after Symon created it".into()),
+        _ => Err("The created reminder no longer exists exactly as recorded".into()),
+    }
 }
 
 /// Update an existing (incomplete) reminder in place — rename, move the due

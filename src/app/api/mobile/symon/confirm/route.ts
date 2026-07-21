@@ -24,11 +24,13 @@ function buildConfirmEval(input: {
   callId: string;
   confirmationId: string;
   allow: boolean;
+  terminal?: 'expired' | 'preempted';
 }): string {
   const sessionId = JSON.stringify(input.sessionId);
   const callId = JSON.stringify(input.callId);
   const confirmationId = JSON.stringify(input.confirmationId);
   const allow = JSON.stringify(input.allow);
+  const terminal = JSON.stringify(input.terminal ?? null);
   return `(() => {
     const w = window;
     const A = w.__o8SymonAgent;
@@ -37,6 +39,7 @@ function buildConfirmEval(input: {
     const callId = ${callId};
     const confirmationId = ${confirmationId};
     const allow = ${allow};
+    const terminal = ${terminal};
     const calls = (w.__o8SymonToolCalls = w.__o8SymonToolCalls || {});
     const pairKey = JSON.stringify([sessionId, callId]);
     const slot = calls[pairKey];
@@ -49,8 +52,13 @@ function buildConfirmEval(input: {
     }
     let decision = decisions[decisionKey];
     if (!decision) {
-      decision = decisions[decisionKey] = { startedAt: NOW, allow, done: false };
-      Promise.resolve().then(() => A.resolveConfirm(confirmationId, allow, { sessionId, callId })).then((resolution) => {
+      decision = decisions[decisionKey] = { startedAt: NOW, allow, terminal, done: false };
+      Promise.resolve().then(() => A.resolveConfirm(
+        confirmationId,
+        allow,
+        { sessionId, callId },
+        terminal || undefined,
+      )).then((resolution) => {
         decision = decisions[decisionKey] = Object.assign(decisions[decisionKey] || {}, { done: true, resolution });
         if (resolution && resolution.status !== 'not_found') {
           slot.decisionSubmitted = true;
@@ -86,6 +94,7 @@ async function resolveViaBridge(input: {
   callId: string;
   confirmationId: string;
   allow: boolean;
+  terminal?: 'expired' | 'preempted';
 }): Promise<{ ok: true; resolution: SymonConfirmationResolution } | { ok: false; error: string; detail?: string }> {
   const client = webviewClient();
   const code = buildConfirmEval(input);
@@ -127,9 +136,19 @@ export async function POST(request: NextRequest) {
   const callId = typeof body?.callId === 'string' ? body.callId : '';
   const confirmationId = typeof body?.confirmationId === 'string' ? body.confirmationId : '';
   const allow = typeof body?.allow === 'boolean' ? body.allow : null;
-  if (!sessionId || !callId || !confirmationId || allow === null) {
+  const terminal = body?.terminal === 'expired' || body?.terminal === 'preempted'
+    ? body.terminal
+    : undefined;
+  const invalidTerminal = body?.terminal !== undefined && terminal === undefined;
+  if (!sessionId || !callId || !confirmationId || allow === null || invalidTerminal || (allow && terminal)) {
     return NextResponse.json({ ok: false, error: 'bad_request' });
   }
 
-  return NextResponse.json(await resolveViaBridge({ sessionId, callId, confirmationId, allow }));
+  return NextResponse.json(await resolveViaBridge({
+    sessionId,
+    callId,
+    confirmationId,
+    allow,
+    ...(terminal ? { terminal } : {}),
+  }));
 }

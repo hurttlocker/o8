@@ -70,9 +70,9 @@ pub async fn write(args: Value) -> Result<Value, String> {
         .to_string();
 
     let output_dir = agent_output_dir();
-    tokio::fs::create_dir_all(&output_dir)
+    super::ensure_directory_tree_no_symlinks(&output_dir)
         .await
-        .map_err(|e| format!("Failed to create agent output dir: {e}"))?;
+        .map_err(|e| format!("Agent output sandbox is not trusted: {e}"))?;
     let path = output_dir.join(&safe_filename);
     let path_str = path.to_string_lossy().to_string();
     let rows_len = rows.len();
@@ -88,7 +88,7 @@ pub async fn write(args: Value) -> Result<Value, String> {
     .await
     .map_err(|e| format!("spawn_blocking error: {e}"))??;
 
-    tokio::fs::write(&path, content.as_bytes())
+    super::write_file_no_follow(&path, content.as_bytes())
         .await
         .map_err(|e| format!("Failed to write CSV: {e}"))?;
 

@@ -7,13 +7,32 @@
 
 use rusqlite::{params, Connection};
 
-fn open_db() -> Result<Connection, String> {
-    let path = super::agent_data_dir().join("agent.db");
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+#[cfg(test)]
+thread_local! {
+    static TEST_DATA_DIR: std::cell::RefCell<Option<std::path::PathBuf>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_data_dir<T>(path: std::path::PathBuf, run: impl FnOnce() -> T) -> T {
+    TEST_DATA_DIR.with(|slot| {
+        let previous = slot.replace(Some(path));
+        let result = run();
+        slot.replace(previous);
+        result
+    })
+}
+
+fn data_dir() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_DATA_DIR.with(|slot| slot.borrow().clone()) {
+        return path;
     }
-    let conn = Connection::open(&path).map_err(|e| format!("agent.db open failed: {e}"))?;
-    conn.pragma_update(None, "journal_mode", "WAL").ok();
+    super::agent_data_dir()
+}
+
+pub(crate) fn migrate_connection(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS agent_tasks (
             id TEXT PRIMARY KEY,
@@ -26,9 +45,64 @@ fn open_db() -> Result<Connection, String> {
             result_text TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_agent_tasks_created_at
-            ON agent_tasks (created_at DESC);",
+            ON agent_tasks (created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS agent_action_events (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            utterance TEXT,
+            tool TEXT NOT NULL,
+            args_summary TEXT NOT NULL,
+            confirmation_id TEXT,
+            confirmation_outcome TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            result_summary TEXT NOT NULL,
+            undo_token TEXT,
+            session_id TEXT,
+            call_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_action_events_created_at
+            ON agent_action_events (created_at DESC, seq DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_action_events_action_id
+            ON agent_action_events (action_id, seq DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_action_events_task_id
+            ON agent_action_events (task_id, seq);
+        CREATE TRIGGER IF NOT EXISTS agent_action_events_no_update
+            BEFORE UPDATE ON agent_action_events
+            BEGIN SELECT RAISE(ABORT, 'agent action events are append-only'); END;
+        CREATE TRIGGER IF NOT EXISTS agent_action_events_no_delete
+            BEFORE DELETE ON agent_action_events
+            BEGIN SELECT RAISE(ABORT, 'agent action events are append-only'); END;
+
+        CREATE TABLE IF NOT EXISTS agent_undo_tokens (
+            token TEXT PRIMARY KEY,
+            action_id TEXT NOT NULL UNIQUE,
+            inverse_json TEXT NOT NULL,
+            scope TEXT,
+            created_at INTEGER NOT NULL,
+            claimed_at INTEGER,
+            consumed_at INTEGER,
+            invalidated_at INTEGER
+        );",
     )
     .map_err(|e| format!("agent.db migrate failed: {e}"))?;
+    Ok(())
+}
+
+pub(crate) fn open_db() -> Result<Connection, String> {
+    let path = data_dir().join("agent.db");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(&path).map_err(|e| format!("agent.db open failed: {e}"))?;
+    conn.pragma_update(None, "journal_mode", "WAL").ok();
+    conn.busy_timeout(std::time::Duration::from_secs(2))
+        .map_err(|e| format!("agent.db busy timeout failed: {e}"))?;
+    migrate_connection(&conn)?;
     Ok(conn)
 }
 
@@ -71,7 +145,14 @@ pub fn finish_task(
                  SET status = ?2, finished_at = ?3, result_text = ?4,
                      model_used = ?5, tool_calls_json = ?6
                  WHERE id = ?1",
-                params![id, status, now_ts(), result_text, model_used, tool_calls_json],
+                params![
+                    id,
+                    status,
+                    now_ts(),
+                    result_text,
+                    model_used,
+                    tool_calls_json
+                ],
             ) {
                 log::warn!("[symon-agent] finish_task failed: {e}");
             }
@@ -84,7 +165,9 @@ pub fn finish_task(
 /// rolling conversation context. Only `done` tasks with a non-empty reply
 /// inside the age window count — a denied card or a crash is not conversation.
 pub fn recent_exchanges(max_age_secs: i64, limit: usize) -> Vec<(String, String)> {
-    let Ok(conn) = open_db() else { return Vec::new() };
+    let Ok(conn) = open_db() else {
+        return Vec::new();
+    };
     let cutoff = now_ts() - max_age_secs;
     let Ok(mut stmt) = conn.prepare(
         "SELECT intent_text, result_text FROM agent_tasks

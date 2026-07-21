@@ -57,11 +57,18 @@ function sleep(ms: number) {
  * cache. `deriveOk` runs in-page (mirrors realtime-client.ts). Slots older than
  * 5 min are reaped so a dropped/late result can't leak memory.
  */
-function buildToolEval(sessionId: string, callId: string, tool: string, args: unknown): string {
+function buildToolEval(
+  sessionId: string,
+  callId: string,
+  tool: string,
+  args: unknown,
+  utterance?: string,
+): string {
   const session = JSON.stringify(sessionId);
   const id = JSON.stringify(callId);
   const name = JSON.stringify(tool);
   const argsJson = JSON.stringify(args ?? {});
+  const utteranceJson = JSON.stringify(utterance || undefined);
   return `(() => {
     const w = window;
     const A = w.__o8SymonAgent;
@@ -75,7 +82,7 @@ function buildToolEval(sessionId: string, callId: string, tool: string, args: un
     let slot = store[key];
     if (!slot) {
       slot = store[key] = { startedAt: NOW, done: false, decisionSubmitted: false, tool: ${name} };
-      Promise.resolve().then(() => A.invokeTool(${name}, ${argsJson}, { sessionId, callId })).then((result) => {
+      Promise.resolve().then(() => A.invokeTool(${name}, ${argsJson}, { sessionId, callId }, ${utteranceJson})).then((result) => {
         const errored = !!(result && typeof result === 'object' && 'error' in result);
         store[key] = Object.assign(store[key] || {}, { done: true, ok: !errored, result: result });
       }).catch((e) => {
@@ -104,9 +111,10 @@ async function executeViaBridge(
   callId: string,
   tool: string,
   args: unknown,
+  utterance?: string,
 ): Promise<SymonToolRelayResult> {
   const client = webviewClient();
-  const code = buildToolEval(sessionId, callId, tool, args);
+  const code = buildToolEval(sessionId, callId, tool, args, utterance);
   const deadline = Date.now() + TOOL_TIMEOUT_MS;
   let sawBridge = false;
 
@@ -156,13 +164,23 @@ export async function POST(request: NextRequest) {
   if (denied) return denied;
 
   const body = (await request.json().catch(() => null)) as
-    | { sessionId?: unknown; callId?: unknown; tool?: unknown; args?: unknown; dryRun?: unknown }
+    | {
+      sessionId?: unknown;
+      callId?: unknown;
+      tool?: unknown;
+      args?: unknown;
+      utterance?: unknown;
+      dryRun?: unknown;
+    }
     | null;
 
   const callId = typeof body?.callId === 'string' ? body.callId : '';
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
   const tool = typeof body?.tool === 'string' ? body.tool : '';
   const args = body?.args !== undefined && body?.args !== null && typeof body.args === 'object' ? body.args : {};
+  const utterance = typeof body?.utterance === 'string'
+    ? body.utterance.trim().slice(0, 8_000)
+    : '';
 
   if (!sessionId || !tool || !callId) {
     return NextResponse.json(toolErrorResult('bad_request', 'sessionId, callId, and tool are required'));
@@ -189,7 +207,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const outcome = await executeViaBridge(sessionId, callId, tool, scoped.args);
+    const outcome = await executeViaBridge(
+      sessionId,
+      callId,
+      tool,
+      scoped.args,
+      utterance || undefined,
+    );
     return NextResponse.json(outcome);
   } catch (error) {
     // Defensive — executeViaBridge already returns structured results, but a

@@ -8,8 +8,9 @@
 pub enum SafetyClass {
     /// No side effects — search, list, read, open an app. Always autonomous.
     ReadOnly,
-    /// Has side effects but is undoable (create reminder/event/note). Confirm
-    /// unless the user has flipped blanket consent.
+    /// Has side effects but remains model-reachable behind a confirmation card.
+    /// This is a governance class, not a promise of semantic undo; the action
+    /// ledger's `UndoCapability` owns that narrower contract.
     Reversible,
     /// Permanent / high-impact (send mail, delete, run Shortcuts). Always
     /// confirm — the consent toggle is ignored.
@@ -197,6 +198,10 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "git_log" => SafetyClass::ReadOnly,
         "gh_pr_list" => SafetyClass::ReadOnly,
         "gh_issue_list" => SafetyClass::ReadOnly,
+        // Reading the ledger is observational. Its undo executes a persisted
+        // inverse and always receives a fresh confirmation card.
+        "symon_ledger_recent" => SafetyClass::ReadOnly,
+        "symon_ledger_undo" => SafetyClass::Reversible,
         // Unknown — default to destructive.
         _ => SafetyClass::Destructive,
     }

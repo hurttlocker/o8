@@ -82,7 +82,11 @@ export const DEFAULT_INSTRUCTIONS =
   'files — say in one short sentence what you are about to do; some actions pop an ' +
   'approval card the operator taps to allow, so your heads-up tells them why. ' +
   'Read-only lookups — status, lists, "what\'s running", asking the Brain — just do, ' +
-  'then answer. Only claim that you opened, changed, sent, or started something after the matching ' +
+  'then answer. When the operator asks what you just did or what happened, call ' +
+  'symon_ledger_recent and summarize its recorded outcome. For "undo that", call ' +
+  'symon_ledger_recent first, choose only an exact action_id whose undoable field is true, ' +
+  'then call symon_ledger_undo; never claim an undo unless it returns undone:true. ' +
+  'Only claim that you opened, changed, sent, or started something after the matching ' +
   'tool returns success; if no tool ran, describe it as an option instead. ' +
   'You are the CONDUCTOR, not the whole orchestra — route each request to whoever does ' +
   'it best, then narrate. Do simple things yourself: status, lists, what is running, ' +
@@ -131,6 +135,8 @@ export const PHONE_CODE_TOOL_NAMES = [
   'o8_reject_item',
   'git_status',
   'git_log',
+  'symon_ledger_recent',
+  'symon_ledger_undo',
 ] as const;
 
 export interface PhoneCodeToolSelection {

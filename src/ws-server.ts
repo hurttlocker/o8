@@ -3468,6 +3468,7 @@ async function invokeSymonTool(call: PendingToolCall): Promise<SymonToolRelayRes
         // These are the original server-scoped arguments. A confirmation frame
         // carries no args and therefore cannot widen or replace repo scope.
         args: call.args ?? {},
+        utterance: call.utterance,
       },
       timeoutMs: TOOL_TIMEOUT_MS + 5_000,
     });
@@ -3479,6 +3480,7 @@ async function invokeSymonTool(call: PendingToolCall): Promise<SymonToolRelayRes
 async function resolveSymonConfirmation(
   confirmation: SymonPendingConfirmation,
   allow: boolean,
+  terminal?: 'expired' | 'preempted',
 ): Promise<{ ok: boolean; resolution?: SymonConfirmationResolution }> {
   try {
     return await fetchNextJson('/api/mobile/symon/confirm', {
@@ -3488,6 +3490,7 @@ async function resolveSymonConfirmation(
         callId: confirmation.callId,
         confirmationId: confirmation.confirmationId,
         allow,
+        terminal,
       },
       timeoutMs: 15_000,
     });
@@ -3534,13 +3537,15 @@ async function settleSymonConfirmation(input: {
   resume: boolean;
   settleRoute?: SymonSessionRoute;
 }): Promise<boolean> {
-  const response = await resolveSymonConfirmation(input.confirmation, input.allow);
+  const response = await resolveSymonConfirmation(
+    input.confirmation,
+    input.allow,
+    input.forcedOutcome,
+  );
   const resolvedOutcome = response.ok && response.resolution
     ? confirmationOutcomeFromResolution(response.resolution)
     : null;
-  const outcome = resolvedOutcome && input.forcedOutcome && resolvedOutcome !== 'approved'
-    ? input.forcedOutcome
-    : resolvedOutcome;
+  const outcome = resolvedOutcome;
   if (!outcome) {
     symonConfirmationTracker.release(
       input.confirmation.sessionId,
@@ -3645,6 +3650,9 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
   const callId = typeof msg.callId === 'string' ? msg.callId : '';
   const tool = typeof msg.tool === 'string' ? msg.tool : '';
   const args = msg.args && typeof msg.args === 'object' ? (msg.args as Record<string, unknown>) : {};
+  const utterance = typeof msg.utterance === 'string'
+    ? msg.utterance.trim().slice(0, 8_000)
+    : '';
   if (!sessionId || !callId || !tool) return;
   const grant = activeSymonGrant(client, sessionId);
   if (!grant) {
@@ -3722,6 +3730,7 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
       __symonSessionId: sessionId,
       __symonCallId: callId,
     },
+    utterance: utterance || undefined,
     protocolVersion,
     startedAt: Date.now(),
   };

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tauri::Emitter;
 
-use super::{confirm_if_needed_opts_correlated, tools, ConfirmCorrelation, TaskCtx};
+use super::{execute_realtime_tool_call, tools, ConfirmCorrelation, TaskCtx};
 
 /// Monotonic per-call id source — keeps each realtime tool call's confirm card
 /// addressable without pulling in `uuid` (not a dependency) or `Date`.
@@ -46,6 +46,26 @@ pub async fn realtime_invoke_tool(
     args: Value,
     session_id: Option<String>,
     call_id: Option<String>,
+    utterance: Option<String>,
+) -> Result<Value, String> {
+    realtime_invoke_tool_inner(
+        Some(app),
+        name,
+        args,
+        session_id,
+        call_id,
+        utterance,
+    )
+    .await
+}
+
+async fn realtime_invoke_tool_inner(
+    app: Option<tauri::AppHandle>,
+    name: String,
+    args: Value,
+    session_id: Option<String>,
+    call_id: Option<String>,
+    utterance: Option<String>,
 ) -> Result<Value, String> {
     let seq = REALTIME_TASK_SEQ.fetch_add(1, Ordering::SeqCst);
     // Observability: every voice tool call + outcome lands in the app log
@@ -54,6 +74,11 @@ pub async fn realtime_invoke_tool(
     log::info!("[symon-rt] tool → {name} {args_preview}");
     let ctx = TaskCtx {
         task_id: format!("realtime-{seq}"),
+        utterance: utterance.unwrap_or_default(),
+        ledger_session_id: session_id
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned(),
         app,
         screen: None,
         spatial: false,
@@ -79,24 +104,12 @@ pub async fn realtime_invoke_tool(
         }
         _ => None,
     };
-    if !confirm_if_needed_opts_correlated(&ctx, &name, &args, false, correlation).await {
-        log::info!("[symon-rt] tool {name} = declined");
-        return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
-    }
-
-    match tools::dispatch_tool_call(&name, args, &ctx).await {
-        Ok(output) => {
-            log::info!(
-                "[symon-rt] tool {name} = {}",
-                if output.get("error").is_some() { "error" } else { "ok" }
-            );
-            Ok(output)
-        }
-        Err(e) => {
-            log::warn!("[symon-rt] tool {name} = err: {e}");
-            Ok(json!({ "error": e }))
-        }
-    }
+    let output = execute_realtime_tool_call(&ctx, &name, args, correlation).await;
+    log::info!(
+        "[symon-rt] tool {name} = {}",
+        if output.get("error").is_some() { "error" } else { "ok" }
+    );
+    Ok(output)
 }
 
 /// Mirror a client-side realtime lifecycle event (status changes, function-call
@@ -125,4 +138,63 @@ pub fn realtime_status_changed(app: tauri::AppHandle, status: String) {
     let payload = json!({ "status": status });
     let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:realtime-status", payload.clone());
     let _ = app.emit("o8:realtime-status", payload);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn realtime_command_persists_phone_utterance_and_session() {
+        let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("realtime-ledger-seam-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        super::super::store::with_test_data_dir(data_dir.clone(), || {
+            runtime
+                .block_on(realtime_invoke_tool_inner(
+                    None,
+                    "symon_ledger_recent".to_string(),
+                    json!({ "limit": 3 }),
+                    Some("phone-session-seam".to_string()),
+                    Some("phone-call-seam".to_string()),
+                    Some("what did you just do".to_string()),
+                ))
+                .unwrap();
+        });
+
+        let conn = rusqlite::Connection::open(data_dir.join("agent.db")).unwrap();
+        let persisted = conn
+            .query_row(
+                "SELECT utterance, source, session_id, call_id, phase, outcome
+                 FROM agent_action_events ORDER BY seq DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(persisted.0.as_deref(), Some("what did you just do"));
+        assert_eq!(persisted.1, "phone_realtime");
+        assert_eq!(persisted.2.as_deref(), Some("phone-session-seam"));
+        assert_eq!(persisted.3.as_deref(), Some("phone-call-seam"));
+        assert_eq!(persisted.4, "terminal");
+        assert_eq!(persisted.5, "succeeded");
+
+        drop(conn);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
 }

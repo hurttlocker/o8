@@ -46,6 +46,94 @@ export interface StartRealtimeOptions {
 
 const LOG = '[realtime]';
 
+export interface RealtimeUtteranceTracker {
+  observe: (event: Record<string, unknown>) => void;
+  /** Empty string means a system-only response; null means ASR failed. */
+  transcriptForResponse: (responseId: string) => Promise<string | null>;
+}
+
+/**
+ * Attribute completed input transcripts by their Realtime conversation item,
+ * then bind each response to the item active at response.created. Transcription
+ * completion is asynchronous and may arrive after response.done, so callers
+ * await that item's completed/failed event instead of borrowing whichever
+ * transcript was completed most recently or imposing a guessed deadline.
+ */
+export function createRealtimeUtteranceTracker(): RealtimeUtteranceTracker {
+  let currentItemId = '';
+  const transcripts = new Map<string, string | null>();
+  const responseItems = new Map<string, string>();
+  const waiters = new Map<string, Set<(transcript: string | null) => void>>();
+  const itemOrder: string[] = [];
+
+  const rememberItem = (itemId: string) => {
+    if (!itemId || itemOrder.includes(itemId)) return;
+    itemOrder.push(itemId);
+    while (itemOrder.length > 32) {
+      const expired = itemOrder.shift();
+      if (!expired) break;
+      transcripts.delete(expired);
+      waiters.delete(expired);
+      for (const [responseId, responseItemId] of responseItems) {
+        if (responseItemId === expired) responseItems.delete(responseId);
+      }
+    }
+  };
+
+  return {
+    observe: (event) => {
+      if (
+        event.type === 'input_audio_buffer.speech_started'
+        || event.type === 'input_audio_buffer.committed'
+      ) {
+        const itemId = event['item_id'];
+        if (typeof itemId === 'string' && itemId) {
+          currentItemId = itemId;
+          rememberItem(itemId);
+        }
+      }
+      if (event.type === 'response.created') {
+        const response = event['response'];
+        const responseId = response && typeof response === 'object'
+          ? (response as Record<string, unknown>)['id']
+          : undefined;
+        if (typeof responseId === 'string' && responseId && currentItemId) {
+          responseItems.set(responseId, currentItemId);
+        }
+      }
+      if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        const itemId = event['item_id'];
+        const transcript = event['transcript'];
+        if (typeof itemId !== 'string' || !itemId || typeof transcript !== 'string') return;
+        const normalized = transcript.trim();
+        rememberItem(itemId);
+        transcripts.set(itemId, normalized);
+        for (const resolve of waiters.get(itemId) ?? []) resolve(normalized);
+        waiters.delete(itemId);
+      }
+      if (event.type === 'conversation.item.input_audio_transcription.failed') {
+        const itemId = event['item_id'];
+        if (typeof itemId !== 'string' || !itemId) return;
+        rememberItem(itemId);
+        transcripts.set(itemId, null);
+        for (const resolve of waiters.get(itemId) ?? []) resolve(null);
+        waiters.delete(itemId);
+      }
+    },
+    transcriptForResponse: async (responseId) => {
+      const itemId = responseItems.get(responseId);
+      if (!itemId) return '';
+      const ready = transcripts.get(itemId);
+      if (ready !== undefined) return ready;
+      return new Promise<string | null>((resolve) => {
+        const itemWaiters = waiters.get(itemId) ?? new Set<(transcript: string | null) => void>();
+        itemWaiters.add(resolve);
+        waiters.set(itemId, itemWaiters);
+      });
+    },
+  };
+}
+
 /**
  * Mirror a key realtime event into the Rust app log (record_realtime_event →
  * o8.log) so a live voice test is observable from outside the webview — the
@@ -111,6 +199,10 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   let micStream: MediaStream | null = null;
   let audioEl: HTMLAudioElement | null = null;
   let toolDefs: Array<Record<string, unknown>> = [];
+  // OpenAI emits input transcription as a separate asynchronous server event.
+  // Keep the latest completed utterance so native tool calls can persist the
+  // operator's words alongside the action they triggered.
+  const utteranceTracker = createRealtimeUtteranceTracker();
 
   const setStatus = (s: RealtimeStatus, detail?: string) => {
     status = s;
@@ -162,6 +254,8 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
         !!it && typeof it === 'object' && (it as { type?: string }).type === 'function_call',
     );
     if (!calls.length) return;
+    const responseId = typeof response['id'] === 'string' ? response['id'] : '';
+    const actionUtterance = await utteranceTracker.transcriptForResponse(responseId);
 
     let mod: typeof import('@tauri-apps/api/core') | null = null;
     try { mod = await import('@tauri-apps/api/core'); } catch { /* not in a Tauri webview */ }
@@ -176,8 +270,16 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       forwardLog(`function_call: ${name}`);
 
       let result: unknown = { error: 'tool bridge unavailable' };
-      if (mod) {
-        try { result = await mod.invoke('realtime_invoke_tool', { name, args }); }
+      if (actionUtterance === null) {
+        result = { error: 'utterance_transcription_failed' };
+      } else if (mod) {
+        try {
+          result = await mod.invoke('realtime_invoke_tool', {
+            name,
+            args,
+            utterance: actionUtterance || undefined,
+          });
+        }
         catch (e) { result = { error: (e as Error)?.message || String(e) }; }
       }
       const errored = !!(result && typeof result === 'object' && 'error' in (result as Record<string, unknown>));
@@ -292,6 +394,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
           }
         }
       }
+      utteranceTracker.observe(parsed);
       if (parsed.type === 'response.done') {
         const response = parsed['response'];
         if (response && typeof response === 'object') {

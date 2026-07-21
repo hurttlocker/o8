@@ -18,7 +18,9 @@ pub mod codex;
 pub mod edit_ctx;
 pub mod eval;
 pub mod event_kit;
+mod execution;
 pub mod gemini;
+pub mod ledger;
 pub mod o8_http;
 pub mod openrouter;
 pub mod planner_route;
@@ -31,8 +33,11 @@ pub mod store;
 pub mod symon_task_bridge;
 pub mod term_watch;
 pub mod tools;
-pub mod worker_pulse;
+pub mod undo;
 pub mod web_localization;
+pub mod worker_pulse;
+
+pub(crate) use execution::{execute_cascaded_tool_call, execute_realtime_tool_call};
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -53,7 +58,16 @@ const CLAUDE_BRAIN_MODEL: &str = crate::models::CLAUDE_BRAIN_MODEL;
 #[derive(Clone)]
 pub struct TaskCtx {
     pub task_id: String,
-    pub app: tauri::AppHandle,
+    /// The operator's original spoken request. Tool actions inherit this so
+    /// the action ledger can answer "what did you just do?" truthfully.
+    pub utterance: String,
+    /// Present only for phone-hosted Realtime. Ledger reads and undo use this
+    /// immutable session boundary so a repo-scoped Code session cannot inspect
+    /// or reverse actions from a Life or desktop session.
+    pub ledger_session_id: Option<String>,
+    /// Real desktop handle in production. The command seam permits `None` only
+    /// in persisted read-only tests; any app-dependent action fails closed.
+    pub app: Option<tauri::AppHandle>,
     /// Intent-gated screenshot of the cursor's monitor (dossier #2) — attached
     /// to the model request and used to map `[POINT:...]` tags back to screen
     /// coordinates. None unless the prompt referenced the screen.
@@ -82,6 +96,12 @@ impl TaskCtx {
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
+
+    pub fn app_handle(&self) -> Result<&tauri::AppHandle, String> {
+        self.app
+            .as_ref()
+            .ok_or_else(|| "This action requires the live o8 desktop app".to_string())
+    }
 }
 
 /// Result of one agent reasoning loop (shared by both providers).
@@ -104,7 +124,9 @@ const SYMON_SYSTEM_PROMPT_V1: &str = include_str!(concat!(
 /// Shared system prompt: the agent persona + current-time grounding. Spoken
 /// aloud, so it asks for short, markdown-free replies.
 pub(crate) fn system_prompt() -> String {
-    let when = chrono::Local::now().format("%A, %B %-d %Y, %-I:%M %p").to_string();
+    let when = chrono::Local::now()
+        .format("%A, %B %-d %Y, %-I:%M %p")
+        .to_string();
     let mut prompt = SYMON_SYSTEM_PROMPT_V1
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -128,7 +150,10 @@ pub(crate) fn smart_compose(
     let screen = screen::capture(app);
     let title = window.window_title.as_deref().unwrap_or("Unknown window");
     let selection = window.selected_text.as_deref().unwrap_or("None");
-    let excerpt = window.ax_excerpt.as_deref().unwrap_or("No Accessibility text available");
+    let excerpt = window
+        .ax_excerpt
+        .as_deref()
+        .unwrap_or("No Accessibility text available");
     let mut prompt = format!(
         "You are Symon Smart Compose. Write the text the user wants inserted at the current caret. \
          Return ONLY the insertion text: no explanation, no quotes, no Markdown fence. Use the \
@@ -339,9 +364,8 @@ fn take_staged_block() -> Option<String> {
     if at.elapsed().as_secs() > STAGED_TTL_SECS || files.is_empty() {
         return None;
     }
-    let mut block = String::from(
-        "[Files the user just dropped onto the dock as context for this request]",
-    );
+    let mut block =
+        String::from("[Files the user just dropped onto the dock as context for this request]");
     for f in &files {
         let kb = (f.size as f64 / 1024.0).max(0.1);
         match f.content.as_deref().filter(|c| !c.trim().is_empty()) {
@@ -455,6 +479,42 @@ pub struct ConfirmCorrelation {
     pub call_id: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmationOutcome {
+    NotRequired,
+    Approved,
+    Rejected,
+    Expired,
+    Preempted,
+}
+
+impl ConfirmationOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRequired => "not_required",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::Expired => "expired",
+            Self::Preempted => "preempted",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ConfirmationReceipt {
+    pub confirmation_id: Option<String>,
+    pub outcome: ConfirmationOutcome,
+}
+
+impl ConfirmationReceipt {
+    pub fn approved(&self) -> bool {
+        matches!(
+            self.outcome,
+            ConfirmationOutcome::NotRequired | ConfirmationOutcome::Approved
+        )
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConfirmResolution {
@@ -505,7 +565,9 @@ fn resolve_confirm_entry(
     now_ms: u64,
 ) -> (ConfirmResolution, Option<oneshot::Sender<bool>>, bool) {
     if entry.terminal == Some(ConfirmTerminal::Preempted) {
-        return (ConfirmResolution::Preempted, None, false);
+        entry.decision = Some(false);
+        entry.settled_at_ms.get_or_insert(now_ms);
+        return (ConfirmResolution::Preempted, entry.sender.take(), false);
     }
     if entry.terminal == Some(ConfirmTerminal::Expired) || now_ms >= entry.expires_at_ms {
         entry.terminal = Some(ConfirmTerminal::Expired);
@@ -514,7 +576,11 @@ fn resolve_confirm_entry(
         return (ConfirmResolution::Expired, entry.sender.take(), false);
     }
     if let Some(first) = entry.decision {
-        return (ConfirmResolution::AlreadyResolved { allow: first }, None, first);
+        return (
+            ConfirmResolution::AlreadyResolved { allow: first },
+            None,
+            first,
+        );
     }
     entry.decision = Some(allow);
     entry.settled_at_ms = Some(now_ms);
@@ -557,10 +623,34 @@ pub async fn confirm_if_needed_opts_correlated(
     speak: bool,
     correlation: Option<ConfirmCorrelation>,
 ) -> bool {
+    confirm_with_receipt(ctx, tool_name, args, speak, correlation)
+        .await
+        .approved()
+}
+
+async fn confirm_with_receipt(
+    ctx: &TaskCtx,
+    tool_name: &str,
+    args: &Value,
+    speak: bool,
+    correlation: Option<ConfirmCorrelation>,
+) -> ConfirmationReceipt {
     let class = safety::tool_safety_class(tool_name);
-    if !safety::requires_confirmation(class, safety::reversible_silent_consent()) {
-        return true;
+    // Undo is a fresh side effect over a persisted inverse. It always gets its
+    // own card even when the operator has allowed other reversible tools to run
+    // silently.
+    if !requires_confirmation_for_call(tool_name, class, safety::reversible_silent_consent()) {
+        return ConfirmationReceipt {
+            confirmation_id: None,
+            outcome: ConfirmationOutcome::NotRequired,
+        };
     }
+    let Some(app) = ctx.app.as_ref() else {
+        return ConfirmationReceipt {
+            confirmation_id: None,
+            outcome: ConfirmationOutcome::Rejected,
+        };
+    };
 
     let (tx, rx) = oneshot::channel();
     let now_ms = epoch_millis();
@@ -575,7 +665,10 @@ pub async fn confirm_if_needed_opts_correlated(
         prune_confirmations(&mut chans, now_ms);
         // A task can expose only one active gate at a time. Preserve completed
         // tombstones, but preempt a stale active sender for the same task.
-        for entry in chans.iter_mut().filter(|entry| entry.task_id == ctx.task_id) {
+        for entry in chans
+            .iter_mut()
+            .filter(|entry| entry.task_id == ctx.task_id)
+        {
             if let Some(sender) = entry.sender.take() {
                 entry.decision = Some(false);
                 entry.terminal = Some(ConfirmTerminal::Preempted);
@@ -599,16 +692,19 @@ pub async fn confirm_if_needed_opts_correlated(
     // card remains the binding gate — this just lets the user hear what's about
     // to happen (esp. the repo on an o8_dispatch) and catch a mishear by ear.
     if speak {
-        crate::tts::playback::play_thread(confirm_spoken(tool_name, args), crate::tts::load_config());
+        crate::tts::playback::play_thread(
+            confirm_spoken(tool_name, args, ctx.ledger_session_id.as_deref()),
+            crate::tts::load_config(),
+        );
     }
 
     emit_confirm(
-        &ctx.app,
+        app,
         json!({
             "confirmationId": confirmation_id,
             "taskId": ctx.task_id,
             "tool": tool_name,
-            "summary": confirm_summary(tool_name, args),
+            "summary": confirm_summary(tool_name, args, ctx.ledger_session_id.as_deref()),
             "expiresAt": expires_at_ms,
             "target": confirm_target(args),
             "sessionId": correlation.as_ref().map(|value| value.session_id.as_str()),
@@ -637,7 +733,33 @@ pub async fn confirm_if_needed_opts_correlated(
         }
         prune_confirmations(&mut chans, now_ms);
     }
-    approved
+    let outcome = if approved {
+        ConfirmationOutcome::Approved
+    } else {
+        let chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        match chans
+            .iter()
+            .find(|entry| entry.confirmation_id == confirmation_id)
+            .and_then(|entry| entry.terminal)
+        {
+            Some(ConfirmTerminal::Expired) => ConfirmationOutcome::Expired,
+            Some(ConfirmTerminal::Preempted) => ConfirmationOutcome::Preempted,
+            None => ConfirmationOutcome::Rejected,
+        }
+    };
+    ConfirmationReceipt {
+        confirmation_id: Some(confirmation_id),
+        outcome,
+    }
+}
+
+fn requires_confirmation_for_call(
+    tool_name: &str,
+    class: safety::SafetyClass,
+    reversible_silent_consent: bool,
+) -> bool {
+    tool_name == "symon_ledger_undo"
+        || safety::requires_confirmation(class, reversible_silent_consent)
 }
 
 /// Resolve a pending confirm — called by the SYNC `agent_confirm` command.
@@ -668,6 +790,7 @@ pub fn resolve_confirm_v2(
     session_id: &str,
     call_id: &str,
     allow: bool,
+    terminal: Option<&str>,
 ) -> ConfirmResolution {
     let now_ms = epoch_millis();
     let (resolution, sender, decision) = {
@@ -680,9 +803,16 @@ pub fn resolve_confirm_v2(
             Some(entry)
                 if entry.correlation.as_ref().is_some_and(|correlation| {
                     correlation.session_id == session_id && correlation.call_id == call_id
-                }) => {
-                let (resolution, sender, decision) =
-                    resolve_confirm_entry(entry, allow, now_ms);
+                }) =>
+            {
+                if !allow && entry.decision.is_none() && entry.terminal.is_none() {
+                    entry.terminal = match terminal {
+                        Some("expired") => Some(ConfirmTerminal::Expired),
+                        Some("preempted") => Some(ConfirmTerminal::Preempted),
+                        _ => None,
+                    };
+                }
+                let (resolution, sender, decision) = resolve_confirm_entry(entry, allow, now_ms);
                 (resolution, sender, decision)
             }
             Some(_) => (ConfirmResolution::NotFound, None, false),
@@ -782,8 +912,13 @@ fn confirm_target(args: &Value) -> Value {
 }
 
 /// Human phrasing for a confirm card.
-fn confirm_summary(tool_name: &str, args: &Value) -> String {
-    let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str>) -> String {
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     match tool_name {
         "mac_reminders_create" => {
             let title = s("title");
@@ -826,11 +961,26 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 format!("Update the event “{}”", s("title"))
             }
         }
-        "o8_dispatch" => format!("Dispatch work in {}: {}", s("repoPath"), s("task")),
-        "o8_delegate" => format!("Start a live agent turn in {}: {}", s("repoPath"), s("task")),
+        "o8_dispatch" => {
+            let repo = if s("repoPath").is_empty() {
+                s("repo")
+            } else {
+                s("repoPath")
+            };
+            format!("Dispatch work in {repo}: {}", s("task"))
+        }
+        "o8_delegate" => format!(
+            "Start a live agent turn in {}: {}",
+            s("repoPath"),
+            s("task")
+        ),
         // The model passes the terminal's title from term_list so the card
         // names the real target window, not a bare id.
-        "term_send" => format!("Send “{}” to {}", s("command"), short_term_title(&s("title"))),
+        "term_send" => format!(
+            "Send “{}” to {}",
+            s("command"),
+            short_term_title(&s("title"))
+        ),
         "term_interrupt" => format!("Interrupt {}", short_term_title(&s("title"))),
         "term_key" => format!("Press {} in {}", s("key"), short_term_title(&s("title"))),
         "term_new" => {
@@ -862,7 +1012,10 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         }
         "o8_packet_reset" => format!("Reset packet {} without relaunching it", s("packetId")),
         "o8_stop_agent" => {
-            format!("Stop lane {} — kill it and archive it, no relaunch", s("laneId"))
+            format!(
+                "Stop lane {} — kill it and archive it, no relaunch",
+                s("laneId")
+            )
         }
         "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),
         "o8_add_repo" => {
@@ -870,7 +1023,10 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
             if project.is_empty() {
                 format!("Add {} as a repo in o8", s("path"))
             } else {
-                format!("Add {} as a repo in o8, in the {project} project", s("path"))
+                format!(
+                    "Add {} as a repo in o8, in the {project} project",
+                    s("path")
+                )
             }
         }
         "o8_approve_item" => format!("Approve {} in o8", s("approvalId")),
@@ -897,6 +1053,9 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         }
         "mac_mail_send_draft" => format!("Send the draft email “{}”", s("subject")),
         "csv_write" => format!("Write the CSV “{}”", s("filename")),
+        "symon_ledger_undo" => ledger::describe_action(&s("action_id"), ledger_session_id)
+            .map(|summary| format!("Undo the action that {summary}"))
+            .unwrap_or_else(|| format!("Undo action {}", s("action_id"))),
         other => format!("Run {other}"),
     }
 }
@@ -916,8 +1075,8 @@ fn short_term_title(title: &str) -> String {
 /// catch a misheard repo/title by ear; the card stays the binding gate (voice
 /// can mishear "yes"). Reuses `confirm_summary`, lowercasing the lead verb so it
 /// reads naturally after "I'm about to".
-fn confirm_spoken(tool_name: &str, args: &Value) -> String {
-    let summary = confirm_summary(tool_name, args);
+fn confirm_spoken(tool_name: &str, args: &Value, ledger_session_id: Option<&str>) -> String {
+    let summary = confirm_summary(tool_name, args, ledger_session_id);
     let mut chars = summary.chars();
     let lowered = match chars.next() {
         Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
@@ -985,7 +1144,11 @@ pub fn speak_filler_now() {
 // bare `emit` can miss. Mirrors lib.rs's `emit_stt`.
 
 pub fn emit_agent_event(app: &tauri::AppHandle, payload: Value) {
-    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:agent-task-event", payload.clone());
+    let _ = app.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:agent-task-event",
+        payload.clone(),
+    );
     let _ = app.emit("o8:agent-task-event", payload);
 }
 
@@ -1024,7 +1187,11 @@ fn glint_for(tool_calls_json: &str) -> Option<&'static str> {
 }
 
 fn emit_confirm(app: &tauri::AppHandle, payload: Value) {
-    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:agent-confirm", payload.clone());
+    let _ = app.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:agent-confirm",
+        payload.clone(),
+    );
     let _ = app.emit("o8:agent-confirm", payload);
 }
 
@@ -1180,8 +1347,7 @@ async fn run_agent_inner(
         Some(sc) => (true, sc.crop_png_base64, Some(sc.screen)),
         None => (false, None, None),
     };
-    let screen_wanted =
-        spatial_active || screen::wants_screen(&prompt) || drawing_session_fresh();
+    let screen_wanted = spatial_active || screen::wants_screen(&prompt) || drawing_session_fresh();
     let mut screen_ctx = if let Some(s) = prebuilt_screen {
         Some(s)
     } else if screen_wanted {
@@ -1204,7 +1370,9 @@ async fn run_agent_inner(
     };
     let ctx = TaskCtx {
         task_id: task_id.clone(),
-        app: app.clone(),
+        utterance: prompt.clone(),
+        ledger_session_id: None,
+        app: Some(app.clone()),
         screen: screen_ctx,
         spatial: spatial_active,
         crop_png_base64: spatial_crop,
@@ -1277,13 +1445,8 @@ async fn run_agent_inner(
     let loop_result = if let Some(selection) = planner_selection {
         match selection.provider {
             planner_route::PlannerProvider::Claude => {
-                claude::run_loop_with_binary(
-                    &selection.binary,
-                    selection.model,
-                    &llm_prompt,
-                    &ctx,
-                )
-                .await
+                claude::run_loop_with_binary(&selection.binary, selection.model, &llm_prompt, &ctx)
+                    .await
             }
             planner_route::PlannerProvider::Codex => {
                 codex::run_loop(
@@ -1327,7 +1490,8 @@ async fn run_agent_inner(
             // Strip [POINT:...] tags BEFORE anything user-facing — the clean
             // text is what gets stored, displayed, and spoken; the tags drive
             // the Symon Points overlay (dossier #1).
-            let (clean_text, point_tags) = crate::point_overlay::parse_point_tags(&result.result_text);
+            let (clean_text, point_tags) =
+                crate::point_overlay::parse_point_tags(&result.result_text);
             if let Some(screen) = &ctx.screen {
                 let native_exact_tag_count = point_tags
                     .iter()
@@ -1358,7 +1522,11 @@ async fn run_agent_inner(
             if !point_tags.is_empty() {
                 if let Some(screen) = &ctx.screen {
                     let refreshed = if point_tags.iter().any(|tag| tag.web_element_id.is_some()) {
-                        Some(web_localization::refresh_targets(&app, screen, &point_tags).await.0)
+                        Some(
+                            web_localization::refresh_targets(&app, screen, &point_tags)
+                                .await
+                                .0,
+                        )
                     } else {
                         None
                     };
@@ -1371,7 +1539,9 @@ async fn run_agent_inner(
                     // it (additive teaching diagrams, #1251).
                     record_last_drawing(stable_drawing_tags(&point_tags));
                 } else {
-                    log::warn!("[symon-agent] model emitted POINT tags without screen context — ignored");
+                    log::warn!(
+                        "[symon-agent] model emitted POINT tags without screen context — ignored"
+                    );
                 }
             }
             #[cfg(not(target_os = "macos"))]
@@ -1387,8 +1557,7 @@ async fn run_agent_inner(
             // Titled Brain sources ride along when the run consulted o8_ask —
             // the dock answer panel renders them as a meta line under the
             // answer (sources-parity pass 2026-06-11).
-            let mut done_payload =
-                json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text });
+            let mut done_payload = json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text });
             if !result.brain_sources.is_empty() {
                 done_payload["sources"] = json!(result.brain_sources);
             }
@@ -1431,7 +1600,10 @@ pub fn spawn_agent(app: tauri::AppHandle, prompt: String) {
         return;
     }
     std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[symon-agent] failed to build runtime: {e}");
@@ -1460,7 +1632,10 @@ pub fn spawn_agent_with_spatial(
         return;
     }
     std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[symon-agent] failed to build runtime: {e}");
@@ -1487,7 +1662,10 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         return;
     }
     std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[symon-agent] failed to build claude-task runtime: {e}");
@@ -1496,7 +1674,14 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         };
         log::info!("[symon-agent] claude-task: {} chars", task.len());
         match rt.block_on(async {
-            run_agent_inner(app, task, Some(CLAUDE_BRAIN_MODEL.to_string()), Some("claude-task"), None).await
+            run_agent_inner(
+                app,
+                task,
+                Some(CLAUDE_BRAIN_MODEL.to_string()),
+                Some("claude-task"),
+                None,
+            )
+            .await
         }) {
             Ok(text) => log::info!("[symon-agent] claude-task done: {} chars", text.len()),
             Err(e) => log::warn!("[symon-agent] claude-task failed: {e}"),
@@ -1510,7 +1695,12 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
 fn notify_done(app: &tauri::AppHandle, result: &str) {
     use tauri_plugin_notification::NotificationExt;
     let body: String = result.chars().take(160).collect();
-    let _ = app.notification().builder().title("Symon").body(&body).show();
+    let _ = app
+        .notification()
+        .builder()
+        .title("Symon")
+        .body(&body)
+        .show();
 }
 
 #[cfg(test)]
@@ -1559,6 +1749,20 @@ mod confirm_registry_tests {
 
     static TEST_CONFIRM_LOCK: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn ledger_undo_never_inherits_blanket_reversible_consent() {
+        assert!(requires_confirmation_for_call(
+            "symon_ledger_undo",
+            safety::SafetyClass::Reversible,
+            true,
+        ));
+        assert!(!requires_confirmation_for_call(
+            "mac_reminders_create",
+            safety::SafetyClass::Reversible,
+            true,
+        ));
+    }
+
     fn entry(
         confirmation_id: &str,
         task_id: &str,
@@ -1591,16 +1795,30 @@ mod confirm_registry_tests {
         {
             let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
             chans.clear();
-            chans.push(entry("confirm-a", "task-a", "sym-1", "call-a", expires, tx_a));
-            chans.push(entry("confirm-b", "task-b", "sym-1", "call-b", expires, tx_b));
+            chans.push(entry(
+                "confirm-a",
+                "task-a",
+                "sym-1",
+                "call-a",
+                expires,
+                tx_a,
+            ));
+            chans.push(entry(
+                "confirm-b",
+                "task-b",
+                "sym-1",
+                "call-b",
+                expires,
+                tx_b,
+            ));
         }
 
         assert_eq!(
-            resolve_confirm_v2("confirm-a", "sym-1", "wrong-call", true),
+            resolve_confirm_v2("confirm-a", "sym-1", "wrong-call", true, None),
             ConfirmResolution::NotFound
         );
         assert_eq!(
-            resolve_confirm_v2("confirm-a", "sym-1", "call-a", true),
+            resolve_confirm_v2("confirm-a", "sym-1", "call-a", true, None),
             ConfirmResolution::Resolved { allow: true }
         );
         assert!(matches!(rx_a.try_recv(), Ok(true)));
@@ -1609,7 +1827,7 @@ mod confirm_registry_tests {
             Err(oneshot::error::TryRecvError::Empty)
         ));
         assert_eq!(
-            resolve_confirm_v2("confirm-a", "sym-1", "call-a", false),
+            resolve_confirm_v2("confirm-a", "sym-1", "call-a", false, None),
             ConfirmResolution::AlreadyResolved { allow: true }
         );
         resolve_confirm("task-b", false);
@@ -1633,10 +1851,45 @@ mod confirm_registry_tests {
             ));
         }
         assert_eq!(
-            resolve_confirm_v2("confirm-expired", "sym-2", "call-expired", true),
+            resolve_confirm_v2("confirm-expired", "sym-2", "call-expired", true, None),
             ConfirmResolution::Expired
         );
         assert!(matches!(rx_expired.try_recv(), Ok(false)));
+
+        let (tx_remote_preempted, mut rx_remote_preempted) = oneshot::channel::<bool>();
+        {
+            let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            chans.clear();
+            chans.push(entry(
+                "confirm-remote-preempted",
+                "task-remote-preempted",
+                "sym-remote",
+                "call-remote",
+                epoch_millis() + 60_000,
+                tx_remote_preempted,
+            ));
+        }
+        assert_eq!(
+            resolve_confirm_v2(
+                "confirm-remote-preempted",
+                "sym-remote",
+                "call-remote",
+                false,
+                Some("preempted"),
+            ),
+            ConfirmResolution::Preempted
+        );
+        assert!(matches!(rx_remote_preempted.try_recv(), Ok(false)));
+        assert_eq!(
+            resolve_confirm_v2(
+                "confirm-remote-preempted",
+                "sym-remote",
+                "call-remote",
+                true,
+                None,
+            ),
+            ConfirmResolution::Preempted
+        );
 
         let (tx_preempted, mut rx_preempted) = oneshot::channel::<bool>();
         {
@@ -1654,7 +1907,7 @@ mod confirm_registry_tests {
         assert_eq!(decline_all_confirms(), 1);
         assert!(matches!(rx_preempted.try_recv(), Ok(false)));
         assert_eq!(
-            resolve_confirm_v2("confirm-preempted", "sym-3", "call-preempted", true),
+            resolve_confirm_v2("confirm-preempted", "sym-3", "call-preempted", true, None),
             ConfirmResolution::Preempted
         );
     }
@@ -1673,6 +1926,18 @@ mod confirm_registry_tests {
                 "packetId": "packet-1",
                 "laneId": "lane-1",
             })
+        );
+    }
+
+    #[test]
+    fn legacy_orchestrator_dispatch_confirmation_names_the_repo() {
+        assert_eq!(
+            confirm_summary(
+                "o8_dispatch",
+                &json!({ "repo": "o8", "task": "Fix the fleet" }),
+                None,
+            ),
+            "Dispatch work in o8: Fix the fleet"
         );
     }
 }

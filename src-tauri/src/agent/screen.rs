@@ -762,7 +762,7 @@ pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Resul
     let png = if let Some(screen) = &ctx.screen {
         screen.png_base64.clone()
     } else {
-        let app = ctx.app.clone();
+        let app = ctx.app_handle()?.clone();
         let captured = tokio::task::spawn_blocking(move || capture(&app))
             .await
             .map_err(|e| format!("screen capture task failed: {e}"))?;

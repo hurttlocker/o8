@@ -68,23 +68,16 @@ pub async fn write_text(args: Value) -> Result<Value, String> {
         ));
     }
 
+    let sandbox = agent_output_dir();
+    super::ensure_directory_tree_no_symlinks(&sandbox)
+        .await
+        .map_err(|e| format!("Agent output sandbox is not trusted: {e}"))?;
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
+        super::ensure_directory_tree_no_symlinks(parent)
             .await
-            .map_err(|e| format!("Failed to create dirs: {e}"))?;
-        let canon_parent = tokio::fs::canonicalize(parent)
-            .await
-            .map_err(|e| format!("Failed to resolve {path_str}: {e}"))?;
-        let canon_sandbox = tokio::fs::canonicalize(agent_output_dir())
-            .await
-            .map_err(|e| format!("Failed to resolve sandbox dir: {e}"))?;
-        if !canon_parent.starts_with(&canon_sandbox) {
-            return Err(format!(
-                "Write outside the agent output directory is not permitted: {path_str}. Use ~/.o8/agent-output/."
-            ));
-        }
+            .map_err(|e| format!("Failed to create a safe output directory: {e}"))?;
     }
-    tokio::fs::write(&path, &content)
+    super::write_file_no_follow(&path, content.as_bytes())
         .await
         .map_err(|e| format!("Failed to write {path_str}: {e}"))?;
 
@@ -158,8 +151,97 @@ mod write_text_sandbox_tests {
                 "content": "x"
             })))
             .unwrap_err();
-        assert!(err.contains("not permitted"), "symlink escape must be refused: {err}");
+        assert!(
+            err.contains("not trusted") || err.contains("safe output directory"),
+            "symlink escape must be refused: {err}"
+        );
         assert!(!outside_dir.join("evil.txt").exists(), "no file may land outside the sandbox");
+
+        // 5. Final-component symlink — the parent is valid but the target file
+        //    itself points outside. Both writers must open with O_NOFOLLOW.
+        let outside_text = outside_dir.join("outside.txt");
+        std::fs::write(&outside_text, "unchanged").unwrap();
+        let text_link = sandbox.join("text-link.txt");
+        std::os::unix::fs::symlink(&outside_text, &text_link).unwrap();
+        let err = rt
+            .block_on(write_text(json!({
+                "path": text_link.to_string_lossy(),
+                "content": "escaped"
+            })))
+            .unwrap_err();
+        assert!(err.contains("Failed to write"));
+        assert_eq!(std::fs::read_to_string(&outside_text).unwrap(), "unchanged");
+
+        let outside_csv = outside_dir.join("outside.csv");
+        std::fs::write(&outside_csv, "unchanged\n").unwrap();
+        let csv_link = sandbox.join("linked.csv");
+        std::os::unix::fs::symlink(&outside_csv, &csv_link).unwrap();
+        let err = rt
+            .block_on(crate::agent::tools::csv::write(json!({
+                "filename": "linked.csv",
+                "headers": ["name"],
+                "rows": [["escaped"]]
+            })))
+            .unwrap_err();
+        assert!(err.contains("Failed to write CSV"));
+        assert_eq!(std::fs::read_to_string(&outside_csv).unwrap(), "unchanged\n");
+
+        // 6. Replacing the sandbox root with a symlink must not turn both the
+        //    lexical root and its canonical path into the same outside target.
+        std::fs::remove_dir_all(&sandbox).unwrap();
+        std::os::unix::fs::symlink(&outside_dir, &sandbox).unwrap();
+        let err = rt
+            .block_on(write_text(json!({
+                "path": sandbox.join("root-escape.txt").to_string_lossy(),
+                "content": "escaped"
+            })))
+            .unwrap_err();
+        assert!(err.contains("not trusted"));
+        let err = rt
+            .block_on(crate::agent::tools::csv::write(json!({
+                "filename": "root-escape.csv",
+                "headers": ["name"],
+                "rows": [["escaped"]]
+            })))
+            .unwrap_err();
+        assert!(err.contains("not trusted"));
+        assert!(!outside_dir.join("root-escape.txt").exists());
+        assert!(!outside_dir.join("root-escape.csv").exists());
+        std::fs::remove_file(&sandbox).unwrap();
+        std::fs::create_dir_all(&sandbox).unwrap();
+
+        // 7. A hard-linked output name must never truncate the shared inode.
+        let outside_hard = outside_dir.join("outside-hard.txt");
+        std::fs::write(&outside_hard, "unchanged hard link").unwrap();
+        let text_hard = sandbox.join("hard.txt");
+        std::fs::hard_link(&outside_hard, &text_hard).unwrap();
+        let err = rt
+            .block_on(write_text(json!({
+                "path": text_hard.to_string_lossy(),
+                "content": "escaped"
+            })))
+            .unwrap_err();
+        assert!(err.contains("multiple hard links"));
+        assert_eq!(
+            std::fs::read_to_string(&outside_hard).unwrap(),
+            "unchanged hard link"
+        );
+
+        let outside_hard_csv = outside_dir.join("outside-hard.csv");
+        std::fs::write(&outside_hard_csv, "unchanged hard csv\n").unwrap();
+        std::fs::hard_link(&outside_hard_csv, sandbox.join("hard.csv")).unwrap();
+        let err = rt
+            .block_on(crate::agent::tools::csv::write(json!({
+                "filename": "hard.csv",
+                "headers": ["name"],
+                "rows": [["escaped"]]
+            })))
+            .unwrap_err();
+        assert!(err.contains("multiple hard links"));
+        assert_eq!(
+            std::fs::read_to_string(&outside_hard_csv).unwrap(),
+            "unchanged hard csv\n"
+        );
 
         let _ = std::fs::remove_dir_all(&fake_home);
     }

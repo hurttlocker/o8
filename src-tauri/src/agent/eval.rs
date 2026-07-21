@@ -70,7 +70,9 @@ pub async fn run_eval(app: tauri::AppHandle, models: Vec<String>) -> String {
         for (i, f) in fx.iter().enumerate() {
             let ctx = TaskCtx {
                 task_id: format!("eval-{i}-{model}"),
-                app: app.clone(),
+                utterance: f.intent.to_string(),
+                ledger_session_id: None,
+                app: Some(app.clone()),
                 screen: None,
                 spatial: false,
                 crop_png_base64: None,

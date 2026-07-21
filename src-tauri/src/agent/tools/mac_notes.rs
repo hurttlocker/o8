@@ -67,16 +67,53 @@ pub async fn create(args: Value) -> Result<Value, String> {
 
     let script = format!(
         "\ntell application \"Notes\"\n\
+         \tset sep to character id 30\n\
          \tset newNote to make new note {folder_clause} with properties {{name:\"{title_esc}\", body:\"{body_esc}\"}}\n\
-         \tname of newNote\n\
+         \tset noteFingerprint to (name of newNote as string) & sep & (body of newNote as string) & sep & (name of container of newNote as string)\n\
+         \t(id of newNote as string) & sep & noteFingerprint\n\
          end tell"
     );
 
-    tokio::task::spawn_blocking(move || run_applescript(&script))
+    let created = tokio::task::spawn_blocking(move || run_applescript(&script))
         .await
         .map_err(|e| format!("spawn_blocking error: {e}"))??;
+    let (note_id, fingerprint) = created
+        .split_once('\u{1e}')
+        .ok_or_else(|| "Notes did not return a stable post-create fingerprint".to_string())?;
 
-    Ok(json!({ "success": true, "title": title }))
+    Ok(json!({
+        "success": true,
+        "title": title,
+        "note_id": note_id,
+        "_ledger_fingerprint": fingerprint,
+    }))
+}
+
+pub async fn delete_created(note_id: &str, expected_sha256: &str) -> Result<Value, String> {
+    let id = as_escape(note_id);
+    let expected = as_escape(expected_sha256);
+    let script = format!(
+        "\ntell application \"Notes\"\n\
+         \tset sep to character id 30\n\
+         \tset matches to notes whose id is \"{id}\"\n\
+         \tif (count of matches) is not 1 then return \"not found\"\n\
+         \tset targetNote to item 1 of matches\n\
+         \tset currentFingerprint to (name of targetNote as string) & sep & (body of targetNote as string) & sep & (name of container of targetNote as string)\n\
+         \tset digestOutput to do shell script \"/usr/bin/printf %s \" & quoted form of currentFingerprint & \" | /usr/bin/shasum -a 256\"\n\
+         \tset currentHash to text 1 thru 64 of digestOutput\n\
+         \tif currentHash is not \"{expected}\" then return \"changed\"\n\
+         \tdelete targetNote\n\
+         \t\"deleted\"\n\
+         end tell"
+    );
+    let deleted = tokio::task::spawn_blocking(move || run_applescript(&script))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))??;
+    match deleted.trim() {
+        "deleted" => Ok(json!({ "undone": true, "note_id": note_id })),
+        "changed" => Err("Cannot undo because the note changed after Symon created it".into()),
+        _ => Err("The created note no longer exists exactly as recorded".into()),
+    }
 }
 
 pub async fn append(args: Value) -> Result<Value, String> {

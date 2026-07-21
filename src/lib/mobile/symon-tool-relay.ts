@@ -64,6 +64,8 @@ export interface PendingToolCall {
   tool: string;
   startedAt: number;
   args?: Record<string, unknown>;
+  /** Exact committed user transcript attributed by the phone Realtime client. */
+  utterance?: string;
   protocolVersion?: SymonProtocolVersion;
   phase?: SymonToolPhase;
   confirmationId?: string;

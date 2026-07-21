@@ -10,6 +10,7 @@
 //! between capture and apply.
 
 use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::Emitter;
 
@@ -260,11 +261,7 @@ fn capture_from_webview(app_handle: &tauri::AppHandle) -> Option<EditContext> {
 /// Apply (or revert) text inside o8's webview. `mode` is "selection" or
 /// "field" — the listener replaces the live selection or the whole focused
 /// editable respectively.
-fn apply_via_webview(
-    app_handle: &tauri::AppHandle,
-    mode: &str,
-    text: &str,
-) -> Result<(), String> {
+fn apply_via_webview(app_handle: &tauri::AppHandle, mode: &str, text: &str) -> Result<(), String> {
     let reply = webview_request(
         app_handle,
         "o8:edit-apply",
@@ -295,11 +292,13 @@ enum Restore {
 }
 
 struct AppliedEdit {
+    id: String,
     restore: Restore,
     app: String,
 }
 
 static LAST_EDIT: Mutex<Option<AppliedEdit>> = Mutex::new(None);
+static EDIT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Friendly app name from a bundle id ("com.apple.mail" → "Mail").
 fn friendly_app(bundle_id: &str) -> String {
@@ -322,12 +321,10 @@ fn observe_applied_field_value(
     target: &crate::paste::FocusedField,
     previous_value: &str,
 ) -> Option<String> {
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(700);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(700);
     while std::time::Instant::now() < deadline {
         if let Some(current) = crate::paste::read_focused_field() {
-            if crate::paste::same_focused_field(target, &current)
-                && current.value != previous_value
+            if crate::paste::same_focused_field(target, &current) && current.value != previous_value
             {
                 return Some(current.value);
             }
@@ -406,14 +403,10 @@ pub fn apply(
         }
         _ => None,
     };
-    let restore = match (
-        &ctx.field_value,
-        &ctx.field_target,
-        observed_field_value,
-    ) {
-        (Some(value), _, _) if ctx.via_webview => {
-            Restore::WebviewField { value: value.clone() }
-        }
+    let restore = match (&ctx.field_value, &ctx.field_target, observed_field_value) {
+        (Some(value), _, _) if ctx.via_webview => Restore::WebviewField {
+            value: value.clone(),
+        },
         (Some(value), Some(target), Some(expected_value)) => Restore::FieldValue {
             value: value.clone(),
             expected_value,
@@ -423,33 +416,81 @@ pub fn apply(
             original: ctx.original.clone(),
         },
     };
+    let edit_id = format!(
+        "edit-{}-{}",
+        crate::agent::store::now_ts(),
+        EDIT_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
     {
         let mut slot = LAST_EDIT.lock().unwrap_or_else(|p| p.into_inner());
-        *slot = Some(AppliedEdit { restore, app: ctx.app.clone() });
+        *slot = Some(AppliedEdit {
+            id: edit_id.clone(),
+            restore,
+            app: ctx.app.clone(),
+        });
     }
 
     let app_name = friendly_app(&ctx.app);
     let payload = json!({ "app": app_name });
-    let _ = app_handle.emit_to(crate::dock_window::DOCK_LABEL, "o8:edit-applied", payload.clone());
+    let _ = app_handle.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:edit-applied",
+        payload.clone(),
+    );
     let _ = app_handle.emit("o8:edit-applied", payload);
-    log::info!("[symon-edit] applied {} chars in {app_name}", new_text.len());
+    log::info!(
+        "[symon-edit] applied {} chars in {app_name}",
+        new_text.len()
+    );
 
-    Ok(json!({ "applied": true, "app": app_name }))
+    Ok(json!({ "applied": true, "app": app_name, "undo_handle": edit_id }))
 }
 
 /// One-tap revert from the dock chip. Whole-field restore when we hold the
 /// pre-edit field value; otherwise the original lands on the clipboard and
 /// Symon says so (honest fallback — never pretend a restore we can't make).
-pub fn revert(app_handle: &tauri::AppHandle) -> Result<(), String> {
+pub fn revert(app_handle: &tauri::AppHandle) -> Result<RevertResult, String> {
+    revert_matching(app_handle, None)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RevertOutcome {
+    Restored,
+    CopiedToClipboard,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertResult {
+    pub edit_id: String,
+    pub outcome: RevertOutcome,
+}
+
+/// Revert only the edit that produced `edit_id`. A later edit supersedes the
+/// old restore buffer, so a stale spoken undo can never hit the wrong field.
+pub fn revert_for(app_handle: &tauri::AppHandle, edit_id: &str) -> Result<RevertOutcome, String> {
+    revert_matching(app_handle, Some(edit_id)).map(|result| result.outcome)
+}
+
+fn revert_matching(
+    app_handle: &tauri::AppHandle,
+    expected_id: Option<&str>,
+) -> Result<RevertResult, String> {
     let edit = {
         let mut slot = LAST_EDIT.lock().unwrap_or_else(|p| p.into_inner());
+        if expected_id.is_some_and(|expected| slot.as_ref().is_some_and(|edit| edit.id != expected))
+        {
+            return Err("That edit is no longer the active revert target".into());
+        }
         slot.take()
     };
     let Some(edit) = edit else {
         return Err("Nothing to revert".into());
     };
 
-    match edit.restore {
+    let edit_id = edit.id.clone();
+    let outcome = match edit.restore {
         Restore::FieldValue {
             value,
             expected_value,
@@ -476,28 +517,40 @@ pub fn revert(app_handle: &tauri::AppHandle) -> Result<(), String> {
                 });
             if restored {
                 log::info!("[symon-edit] reverted in {}", friendly_app(&edit.app));
+                RevertOutcome::Restored
             } else {
                 copy_restore_fallback(&value);
                 log::warn!(
                     "[symon-edit] target changed or restore failed in {}; original copied",
                     friendly_app(&edit.app)
                 );
+                RevertOutcome::CopiedToClipboard
             }
         }
         Restore::WebviewField { value } => {
             if let Err(e) = apply_via_webview(app_handle, "field", &value) {
                 copy_restore_fallback(&value);
                 log::warn!("[symon-edit] webview revert failed ({e}); fell back to clipboard");
+                RevertOutcome::CopiedToClipboard
             } else {
                 log::info!("[symon-edit] reverted in o8");
+                RevertOutcome::Restored
             }
         }
         Restore::Clipboard { original } => {
             copy_restore_fallback(&original);
             log::info!("[symon-edit] revert fell back to clipboard");
+            RevertOutcome::CopiedToClipboard
         }
-    }
-    Ok(())
+    };
+    let result = RevertResult { edit_id, outcome };
+    let _ = app_handle.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:edit-revert-settled",
+        &result,
+    );
+    let _ = app_handle.emit("o8:edit-revert-settled", &result);
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -506,7 +559,9 @@ mod wants_edit_tests {
 
     #[test]
     fn edit_verbs_trigger() {
-        assert!(wants_edit("Can you rewrite this in a more professional way?"));
+        assert!(wants_edit(
+            "Can you rewrite this in a more professional way?"
+        ));
         assert!(wants_edit("fix the grammar here"));
         assert!(wants_edit("make this sound friendlier"));
         assert!(wants_edit("tighten this up please"));
