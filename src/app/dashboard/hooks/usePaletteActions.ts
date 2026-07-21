@@ -37,7 +37,7 @@ interface CurrentIssueTarget {
 
 interface LaunchWorkspaceAgentRequest {
   repoPath: string;
-  runtime?: 'codex' | 'claude-code' | 'gemini' | 'opencode';
+  runtime?: import('@/lib/orchestrator/types').OrchestratorRuntime;
   modelId?: string;
   initialText?: string;
   autoSend?: boolean;

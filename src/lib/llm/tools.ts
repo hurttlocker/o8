@@ -15,7 +15,7 @@ import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib
 import { safeJoinReal } from '@/lib/fs/safe-path';
 import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
 import { resolveTerminalWorkingDirectory } from '@/lib/llm/terminal-working-directory';
-
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 export { canonicalizeTerminalToolArgs, terminalApprovalSummary } from '@/lib/llm/terminal-working-directory';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
@@ -157,7 +157,7 @@ export const TOOLS: ToolDef[] = [
         task: { type: 'string', description: 'The full task description for the agent. Be specific about files to create/edit, constraints, and success criteria.' },
         runtime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'],
+          enum: listDispatchableRuntimes(),
           description: 'Optional override. When omitted, uses the operator default dispatch runtime.',
         },
       },

@@ -1,4 +1,5 @@
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 
 export type ProductEventName =
   | 'app.opened'
@@ -21,28 +22,12 @@ export type ProductEventPayload =
   | { event: 'merge.approved'; props: { runtime: OrchestratorRuntime; pushed: boolean } }
   | { event: 'repo.added'; props: { hasRemote: boolean; isGitRepo: boolean } };
 
-const ALLOWED_RUNTIMES = new Set<OrchestratorRuntime>([
-  'codex',
-  'claude-code',
-  'gemini',
-  'antigravity',
-  'opencode',
-  'openhands',
-  'goose',
-  'qwen',
-  'kimi',
-  'aider',
-  'cursor',
-  'grok',
-  'pi',
-]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function isAllowedRuntime(value: unknown): value is OrchestratorRuntime {
-  return typeof value === 'string' && ALLOWED_RUNTIMES.has(value as OrchestratorRuntime);
+  return isOrchestratorRuntime(value);
 }
 
 /**

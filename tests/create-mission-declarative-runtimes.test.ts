@@ -7,6 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { listDeclarativeRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { OwnedRunRecord } from '@/lib/runtimes/shared/owned-session';
 
 const authMock = vi.hoisted(() => {
@@ -72,7 +73,7 @@ await import('@/lib/runtimes/declarative-workers');
 const { getDeclarativeOwnedRuntime } = await import('@/lib/runtimes/shared/owned-session');
 const { getCostParser } = await import('@/lib/runtimes/shared/cost-parser-registry');
 
-const NEW_RUNTIMES = ['openhands', 'goose', 'qwen', 'kimi', 'aider'] as const;
+const NEW_RUNTIMES = listDeclarativeRuntimes();
 
 function request(runtime: OrchestratorRuntime, issueNumber: number): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/create-mission', {

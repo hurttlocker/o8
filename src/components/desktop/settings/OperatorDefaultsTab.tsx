@@ -55,8 +55,7 @@ const PARALLEL_CAP_PRESETS: Array<{ key: string; label: string; value: number }>
   { key: 'power-user', label: '8', value: 8 },
 ];
 
-const DEFAULT_WORKER_RUNTIME_OPTIONS = DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
-  opt.value === 'codex' || opt.value === 'claude-code');
+const DEFAULT_WORKER_RUNTIME_OPTIONS = DISPATCH_RUNTIME_OPTIONS;
 
 type CliHouseStatus = NonNullable<OperatorDefaultsResponse['cliAuth']>['statuses']['codex'];
 

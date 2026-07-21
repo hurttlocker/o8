@@ -16,7 +16,7 @@ import {
   type ClaudePermissionDecision,
   type WorkspaceStreamEvent,
 } from '@/components/desktop/workspace-terminal/workspace-stream-events';
-import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
   buildQueuedContextCard,
   buildWorkspaceThinkingStep,
@@ -98,7 +98,7 @@ export function useWorkspaceChatPane({
   const chatRuntime = (
     tab.orchestrationPacket?.runtime
     ?? tab.chatRuntime
-  ) as 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'pi' | undefined;
+  ) as OrchestratorRuntime | undefined;
   const chatSessionKey = tab.chatSessionKey;
   const linkedIssue = tab.linkedIssue ?? null;
   const normalizedSessionKey = useMemo(

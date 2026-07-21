@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession, RepoFocusRepo } from '../../types';
 
 export interface ChatHistoryItem {
@@ -31,7 +31,7 @@ export interface ArchivedLaneRow {
   repoPath: string;
   branch: string;
   baseBranch: string;
-  runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
+  runtime: OrchestratorRuntime;
   sessionKey: string | null;
   updatedAt: string;
   status?: string;

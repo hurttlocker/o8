@@ -27,6 +27,11 @@ import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 import {
+  isRuntimeWorkerProvider,
+  listDispatchableRuntimes,
+  listDispatchableWorkerProviders,
+} from '@/lib/orchestrator/runtime-capabilities';
+import {
   apiFetch,
   type McpTool,
   type McpToolResult,
@@ -42,6 +47,11 @@ import {
   textResult,
 } from './shared';
 import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+
+const WORKER_PROVIDER_OPTIONS: WorkerProvider[] = [
+  ...listDispatchableWorkerProviders(),
+  'minimax',
+];
 
 export const MISSION_TOOLS: McpTool[] = [
   {
@@ -74,7 +84,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         runtime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'],
+          enum: listDispatchableRuntimes(),
           description: 'Worker runtime for all mission packets. Codex remains the default; configured local CLI adapters are selected explicitly.',
         },
         workerIntent: {
@@ -84,7 +94,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedProvider: {
           type: 'string',
-          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'aider', 'cursor', 'grok', 'pi'],
+          enum: WORKER_PROVIDER_OPTIONS,
           description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
         },
         constraints: {
@@ -270,13 +280,13 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedProvider: {
           type: 'string',
-          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode', 'cursor', 'grok'],
+          enum: WORKER_PROVIDER_OPTIONS,
           description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'cursor', 'grok'],
-          description: 'Worker runtime for this task. Codex (default), Claude Code, Gemini, Cursor, and Grok Build are dispatchable. Claude Code uses interactive stream-json, never --print.',
+          enum: listDispatchableRuntimes(),
+          description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         model: {
           type: 'string',
@@ -367,13 +377,13 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedProvider: {
           type: 'string',
-          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode', 'cursor', 'grok'],
+          enum: WORKER_PROVIDER_OPTIONS,
           description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'cursor', 'grok'],
-          description: 'Worker runtime for this task. Codex (default), Claude Code, Gemini, Cursor, and Grok Build are dispatchable. Claude Code uses interactive stream-json, never --print.',
+          enum: listDispatchableRuntimes(),
+          description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         projectId: {
           type: 'string',
@@ -778,19 +788,8 @@ function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
 
 function parseWorkerProvider(value: unknown): WorkerProvider | null | undefined {
   if (value === undefined || value === null || value === '') return undefined;
-  if (
-    value === 'codex'
-    || value === 'kimi'
-    || value === 'minimax'
-    || value === 'claude'
-    || value === 'gemini'
-    || value === 'opencode' || value === 'openhands' || value === 'goose'
-    || value === 'cursor' || value === 'qwen'
-    || value === 'grok' || value === 'pi' || value === 'aider'
-  ) {
-    return value;
-  }
-  throw new Error('requestedProvider must be one of: codex, kimi, minimax, claude, gemini, opencode, openhands, goose, qwen, aider, cursor, grok, pi.');
+  if (value === 'minimax' || isRuntimeWorkerProvider(value)) return value;
+  throw new Error(`requestedProvider must be one of: ${WORKER_PROVIDER_OPTIONS.join(', ')}.`);
 }
 
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {

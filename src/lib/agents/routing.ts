@@ -5,13 +5,13 @@ import type {
   WorkerRouting,
   WorkerRoutingConfidence,
 } from '@/lib/orchestrator/types';
-import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  getRuntimeCapability,
+  isOrchestratorRuntime,
+  listDispatchableWorkerProviders,
+  listDispatchableRuntimes,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-
-// Runtimes with a reasoning-effort surface. codex → `-c model_reasoning_effort`,
-// claude-code → `--effort`. opencode has none, so a requested effort is a
-// clean no-op there (selectedEffort stays null and no launch flag is emitted).
-const EFFORT_CAPABLE_RUNTIMES: readonly OrchestratorRuntime[] = ['codex', 'claude-code'];
 
 // Codex stays the always-on fallback workhorse when no dispatchable runtime is
 // requested. Other runtimes are honored when the capability map marks them
@@ -22,22 +22,7 @@ export const PRODUCTION_AGENT_ENFORCEMENT = 'dispatchable_runtimes' as const;
 
 /** Map a dispatchable runtime to its worker provider for routing metadata. */
 function providerForRuntime(runtime: OrchestratorRuntime): WorkerProvider {
-  switch (runtime) {
-    case 'gemini': return 'gemini';
-    case 'antigravity': return 'antigravity';
-    case 'claude-code': return 'claude';
-    case 'opencode': return 'opencode';
-    case 'openhands': return 'openhands';
-    case 'goose': return 'goose';
-    case 'qwen': return 'qwen';
-    case 'kimi': return 'kimi';
-    case 'aider': return 'aider';
-    case 'cursor': return 'cursor';
-    case 'grok': return 'grok';
-    case 'pi': return 'pi';
-    case 'codex':
-    default: return 'codex';
-  }
+  return getRuntimeCapability(runtime).workerProvider;
 }
 
 const WORKER_INTENTS: readonly WorkerIntent[] = [
@@ -49,36 +34,8 @@ const WORKER_INTENTS: readonly WorkerIntent[] = [
 ];
 
 const WORKER_PROVIDERS: readonly WorkerProvider[] = [
-  'codex',
-  'kimi',
+  ...listDispatchableWorkerProviders(),
   'minimax',
-  'claude',
-  'gemini',
-  'antigravity',
-  'opencode',
-  'openhands',
-  'goose',
-  'qwen',
-  'aider',
-  'cursor',
-  'grok',
-  'pi',
-];
-
-const ORCHESTRATOR_RUNTIMES: readonly OrchestratorRuntime[] = [
-  'codex',
-  'claude-code',
-  'gemini',
-  'antigravity',
-  'opencode',
-  'openhands',
-  'goose',
-  'qwen',
-  'kimi',
-  'aider',
-  'cursor',
-  'grok',
-  'pi',
 ];
 
 export interface ResolveWorkerRoutingInput {
@@ -112,9 +69,7 @@ export function normalizeWorkerProvider(value: unknown): WorkerProvider | null {
 }
 
 export function normalizeRequestedRuntime(value: unknown): OrchestratorRuntime | null {
-  return ORCHESTRATOR_RUNTIMES.includes(value as OrchestratorRuntime)
-    ? value as OrchestratorRuntime
-    : null;
+  return isOrchestratorRuntime(value) ? value : null;
 }
 
 function normalizeModel(value: unknown): string | null {
@@ -167,7 +122,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
 
   // Effort applies only when the selected runtime has a reasoning-effort surface;
   // on opencode it's a clean no-op (null → no launch flag).
-  const selectedEffort = requestedEffort && EFFORT_CAPABLE_RUNTIMES.includes(selectedRuntime)
+  const selectedEffort = requestedEffort && getRuntimeCapability(selectedRuntime).reasoningEffort
     ? requestedEffort
     : null;
 

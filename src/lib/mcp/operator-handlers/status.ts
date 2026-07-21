@@ -6,6 +6,7 @@ import {
   requiredString,
   textResult,
 } from './shared';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 
 const LANE_EVENTS_MAX_LONG_POLL_MS = 12_000;
 const LANE_EVENTS_FETCH_MARGIN_MS = 2_500;
@@ -194,7 +195,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         defaultDispatchRuntime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi'],
+          enum: listDispatchableRuntimes(),
           description: 'Default worker runtime for dispatches.',
         },
         defaultDispatchModel: {
