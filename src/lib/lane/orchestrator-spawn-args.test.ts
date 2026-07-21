@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildOrchestratorArgs, MANAGED_ORCHESTRATOR_SETTINGS } from './orchestrator-spawn-args';
+import {
+  buildOrchestratorArgs,
+  CLAUDE_SOLO_DISALLOWED_TOOLS,
+  MANAGED_ORCHESTRATOR_SETTINGS,
+} from './orchestrator-spawn-args';
+import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 
-function argsFor(toolProfile: 'full' | 'fable' = 'full'): string[] {
+function argsFor(toolProfile: ToolProfile = 'full'): string[] {
   return buildOrchestratorArgs({
     permissionMode: 'full',
     toolProfile,
@@ -35,5 +40,24 @@ describe('buildOrchestratorArgs managed isolation', () => {
     const args = argsFor('fable');
     expect(args).toContain('--disallowedTools');
     expect(args.filter((arg) => arg === '--strict-mcp-config')).toHaveLength(1);
+  });
+
+  it('keeps Claude repo tools but removes its native sub-agent in Solo', () => {
+    const args = argsFor('solo');
+    const denyIndex = args.indexOf('--disallowedTools');
+    expect(denyIndex).toBeGreaterThan(-1);
+    expect(args.slice(denyIndex + 1, denyIndex + 1 + CLAUDE_SOLO_DISALLOWED_TOOLS.length))
+      .toEqual([...CLAUDE_SOLO_DISALLOWED_TOOLS]);
+    expect(args).not.toContain('Read');
+    expect(args).not.toContain('Edit');
+    expect(args).not.toContain('Bash');
+  });
+
+  it('lets Fable work directly while retaining its own billing profile in Solo', () => {
+    const args = argsFor('fable-solo');
+    expect(args).toContain('--disallowedTools');
+    expect(args).toContain('Task');
+    expect(args).not.toContain('Read');
+    expect(args).not.toContain('Bash');
   });
 });

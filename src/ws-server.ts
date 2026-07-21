@@ -4260,20 +4260,6 @@ async function handleOrchestratorSendMsgOnce(
       activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
       threadId,
     );
-    if (requestedBackend.id !== activeBackend.id) {
-      // Single remaps non-Codex selections before their backend starts. Move
-      // every view already watching this thread onto the actual Codex route,
-      // not only the socket that originated the turn.
-      const route = {
-        repoPath,
-        threadId,
-        fromBackend: requestedBackend.id,
-        toBackend: activeBackend.id,
-        toSessionName: sessionName,
-      };
-      activeRouteHandle = activeOrchestratorRoutes.register(route);
-      promoteOrchestratorFallbackSubscribers(route);
-    }
     // RC2 (69RMXR) — auto-carry prior transcript when the operator switched to a
     // backend that has no CLI session on this thread yet. Computed BEFORE the
     // current user message is persisted so it reflects PRIOR history only; folded
@@ -4645,13 +4631,16 @@ async function handleOrchestratorSendMsgOnce(
           backend: activeBackend.id,
           agent: activeAgentId,
         });
-        promoteOrchestratorFallbackSubscribers({
+        const fallbackRoute = {
           repoPath,
           threadId,
           fromBackend: fallback.fromBackend,
           toBackend: activeBackend.id,
           toSessionName: sessionName,
-        });
+        };
+        activeOrchestratorRoutes.release(activeRouteHandle);
+        activeRouteHandle = activeOrchestratorRoutes.register(fallbackRoute);
+        promoteOrchestratorFallbackSubscribers(fallbackRoute);
         orchestratorInflightAborts.set(abortKey, turnController);
         broadcastToOrchestratorSession(sessionName, JSON.stringify({
           channel: 'orchestrator',

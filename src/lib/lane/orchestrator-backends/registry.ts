@@ -32,17 +32,10 @@ import { applyOrchestrationMode } from './orchestration-mode';
  */
 export function withOrchestrationMode(
   backend: OrchestratorBackend,
-  resolveBackend: (id: OrchestratorBackendId) => OrchestratorBackend = getOrchestratorBackend,
 ): OrchestratorBackend {
   return {
     ...backend,
     sendTurn(repoPath, message, onEvent, options) {
-      // OpenClaw/ACP/Claude tools execute in warm processes that cannot be
-      // confined per turn. Single always falls back before those processes or
-      // Collide proposers start, so one hardened Codex child is the only actor.
-      if (options?.orchestrationMode === 'single' && backend.id !== 'codex') {
-        return resolveBackend('codex').sendTurn(repoPath, message, onEvent, options);
-      }
       const resolved = applyOrchestrationMode(message, options);
       return backend.sendTurn(repoPath, resolved.message, onEvent, resolved.options);
     },

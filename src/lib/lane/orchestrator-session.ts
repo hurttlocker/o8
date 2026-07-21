@@ -391,7 +391,7 @@ type ClaudeMcpConfig = ReturnType<typeof toClaudeJson>;
 function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: ClaudeMcpConfig): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
-  const suffix = profile === 'propose' ? '-propose' : profile === 'fable' ? '-fable' : '';
+  const suffix = profile === 'full' ? '' : `-${profile}`;
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}${suffix}.json`);
   // The caller fingerprints this exact object. Keeping construction out of the
   // writer prevents transient resolver state from making the stored hash differ
@@ -843,7 +843,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
   // native read/write tools (the token lever). isFable takes precedence over the
   // plan branch so the lockout holds regardless of permission mode. See
   // `fable-profile.ts` for the empirical basis.
-  const isFable = config.toolProfile === 'fable';
+  const isFable = config.toolProfile === 'fable' || config.toolProfile === 'fable-solo';
   const args = buildOrchestratorArgs({
     permissionMode: config.permissionMode,
     toolProfile: config.toolProfile,

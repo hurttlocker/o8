@@ -84,6 +84,27 @@ function setup(opts: {
 }
 
 describe('Collide fusion engine', () => {
+  it('runs only the configured aggregator when the composer selects Solo', async () => {
+    const events: OrchestratorEvent[] = [];
+    const { backend, claudeCalls, codexCalls } = setup({});
+
+    await backend.sendTurn('/repo', 'work alone', (event) => events.push(event), {
+      threadId: MAIN_THREAD,
+      orchestrationMode: 'single',
+    });
+
+    expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
+    expect(claudeCalls.filter(isProposerCall)).toHaveLength(0);
+    expect(codexCalls).toHaveLength(0);
+    expect(claudeCalls[0]?.message).toBe('work alone');
+    expect(claudeCalls[0]?.options).toMatchObject({
+      orchestrationMode: 'single',
+      toolProfile: 'solo',
+    });
+    expect(events.some((event) => event.type === 'collide_phase')).toBe(false);
+    expect(events.some((event) => event.type === 'collide_proposal')).toBe(false);
+  });
+
   it('(a) fires exactly ONE aggregator turn, and one turn per proposer', async () => {
     const { backend, claudeCalls, codexCalls } = setup({});
     await backend.sendTurn('/repo', 'build X', () => {}, { threadId: MAIN_THREAD });

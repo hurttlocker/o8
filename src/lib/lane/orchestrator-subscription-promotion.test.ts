@@ -21,7 +21,7 @@ function route(
 }
 
 describe('orchestrator subscriber promotion', () => {
-  it('moves every same-thread view to Single\'s actual Codex route only', () => {
+  it('moves every same-thread view onto a quota-fallback route only', () => {
     const subscriptions = new Map<string, OrchestratorSubscriptionRoute>([
       ['sender::openclaw::main', route('sender', '/repo', 'thoughts-1')],
       ['canvas::openclaw::main', route('canvas', '/repo', 'thoughts-1')],
@@ -46,7 +46,7 @@ describe('orchestrator subscriber promotion', () => {
     expect(subscriptions.has('other-repo::codex::')).toBe(false);
   });
 
-  it('routes a late same-thread subscriber to active Codex and releases safely', () => {
+  it('routes a late same-thread subscriber to the active fallback and releases safely', () => {
     const registry = new ActiveOrchestratorRouteRegistry();
     const first = registry.register({
       repoPath: '/repo',

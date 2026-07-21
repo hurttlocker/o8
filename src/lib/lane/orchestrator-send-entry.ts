@@ -2,22 +2,16 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { resolveOrchestratorExecutionMode } from './orchestrator-backends/orchestration-mode';
 import type { OrchestratorBackend, OrchestratorBackendId, OrchestratorTurnOptions } from './orchestrator-backends/types';
 
-/**
- * Resolve the backend identity before ws-server creates subscriptions, abort
- * keys, or persisted session metadata. Single's Codex fallback must be visible
- * to those callers; hiding it inside a backend wrapper would mislabel a Codex
- * session as OpenClaw/Claude and poison the next resume.
- */
+/** Resolve the selected backend before subscriptions and persistence are built. */
 export function resolveOrchestratorExecutionBackendId(
   requestedBackendId: OrchestratorBackendId,
   rawOrchestrationMode: unknown,
 ): OrchestratorBackendId {
-  return resolveOrchestratorExecutionMode(rawOrchestrationMode) === 'single'
-    ? 'codex'
-    : requestedBackendId;
+  void rawOrchestrationMode;
+  return requestedBackendId;
 }
 
-/** Single must fail on its hardened Codex turn, never hand off unsandboxed. */
+/** Solo must stay on the selected runtime rather than silently changing houses. */
 export function orchestratorModeAllowsBackendFallback(rawOrchestrationMode: unknown): boolean {
   return resolveOrchestratorExecutionMode(rawOrchestrationMode) !== 'single';
 }
