@@ -93,7 +93,7 @@ Only `workspaceMode: "code"` filters Mac-executed tools. Its exact catalog is:
 `o8_status`, `o8_needs_me`, `o8_review_diff`, `o8_dispatch`, `o8_delegate`,
 `o8_packet_wait`, `o8_packet_steer`, `o8_agent_task`, `o8_packet_rerun`,
 `o8_packet_reset`, `o8_stop_agent`, `o8_approve_item`, `o8_reject_item`,
-`git_status`, and `git_log`.
+`git_status`, `git_log`, `symon_ledger_recent`, and `symon_ledger_undo`.
 
 The phone-local `render_surface` tool is appended after that pack and never
 relayed to the Mac. Mail, media, browser, shell, file, and every other desktop or
@@ -163,7 +163,7 @@ One **additive** field on GET responses: `"agentSession": { "sessionId", "starte
 
 ### POST `/api/mobile/symon/tool` — internal relay target (ws-server → Next; same gate)
 
-Not called by the phone. Body `{ sessionId, callId, tool, args }` re-loads the
+Not called by the phone. Body `{ sessionId, callId, tool, args, utterance? }` re-loads the
 active grant, rejects disallowed tools, overwrites repo arguments with the
 server-owned canonical pair, and then executes through the same Rust dispatcher
 and SafetyClass gate as desk mode. A normal completion returns `{ ok, result }`;
@@ -176,11 +176,13 @@ grant validation and returns the exact scoped args without invoking Rust.
 
 ### POST `/api/mobile/symon/confirm` — internal resolver (ws-server → Next)
 
-Body `{ sessionId, callId, confirmationId, allow }` resolves only the matching
+Body `{ sessionId, callId, confirmationId, allow, terminal? }` resolves only the matching
 cached invoke through `window.__o8SymonAgent.resolveConfirm`. The response is
 `{ok:true,resolution:{status:"resolved"|"already_resolved",allow}}` or a terminal
 `expired`/`preempted` resolution. A mismatched triple fails closed. The route
-never accepts tool arguments or repo context.
+never accepts tool arguments or repo context. `terminal` accepts only `expired`
+or `preempted`, only with `allow:false`; the Rust gate records that exact reason
+instead of letting the relay relabel an ordinary rejection after the fact.
 
 ## WS channel: `symon`  (multiplexed on the existing paired socket, port 3002 — `subscribe("symon", handler)`)
 
@@ -192,7 +194,7 @@ All messages are JSON with `channel: "symon"`. DURABLE semantics (queued under b
 
 | event | payload | semantics |
 |---|---|---|
-| `symon-tool-call` | `{ sessionId, callId, tool, args, protocolVersion?:2 }` | forward of a model `function_call`; v2 opts into phone confirmation; omitted means fail-closed v1 |
+| `symon-tool-call` | `{ sessionId, callId, tool, args, utterance?, protocolVersion?:2 }` | forward of a model `function_call` plus its item-correlated committed transcript for the durable action ledger; v2 opts into phone confirmation; omitted means fail-closed v1 |
 | `symon-confirm-decision` | `{ sessionId, callId, confirmationId, allow, clientMutationId }` | v2 decision for one exact gate; no tool args or scope fields are accepted |
 | `symon-agent-status` | `{ sessionId, status: "connecting" \| "live" \| "error" \| "idle", detail?, protocolVersion?:2 }` | phone reports WebRTC lifecycle and may negotiate additive v2 |
 | `symon-stop` | `{ sessionId }` | phone ended the session (user tap, app background, WebRTC close) |
@@ -236,6 +238,24 @@ Mobile-lane contract-change note: forward `symon-task-complete` into the live We
   `done`/`failed` from the queued orchestrator turn. `stop` emits `stopped` after
   the exact lane has been reaped and archived. The phone forwards every terminal
   update into the live Realtime conversation so Symon answers aloud.
+
+## Durable action ledger
+
+Every tool attempt enters `~/.o8/agent.db` before confirmation or execution.
+The append-only `agent_action_events` rows preserve the spoken utterance, an
+allowlisted argument summary, card identity and decision, execution phase, and
+terminal outcome; inverse payloads live separately as opaque, single-use
+tokens. Phone reads and undo are restricted to the immutable Realtime session
+that created the action, while desktop/Life can read their local history.
+
+`symon_ledger_recent` returns the latest durable phase for each action and an
+explicit `undoable` flag. `symon_ledger_undo` accepts only an exact returned
+`action_id`, always opens a fresh confirmation card, and executes the guarded
+inverse once. Automatic inverses currently cover in-place text edits, text/CSV
+file writes, and newly created Reminders, Calendar events, and Notes. File and
+resource inverses compare the current post-state before changing it; a later
+edit, symlink replacement, resource mutation, consumed token, or app restart
+for an in-memory edit makes the undo fail closed.
 
 ## Mutual exclusion — LAST-START-WINS (symmetric)
 

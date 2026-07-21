@@ -167,25 +167,20 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                 let tool_name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let tool_args = fc.get("args").cloned().unwrap_or(json!({}));
 
-                super::emit_agent_event(
-                    &ctx.app,
-                    json!({ "taskId": ctx.task_id, "kind": "tool_call", "tool": tool_name, "args": tool_args }),
-                );
+                if let Some(app) = ctx.app.as_ref() {
+                    super::emit_agent_event(
+                        app,
+                        json!({ "taskId": ctx.task_id, "kind": "tool_call", "tool": tool_name, "args": tool_args }),
+                    );
+                }
 
-                let tool_result: Value =
-                    if !super::confirm_if_needed(ctx, &tool_name, &tool_args).await {
-                        log::info!("[symon-agent] tool {tool_name} declined by user");
-                        json!({ "error": "User declined this action", "declined_by_user": true })
-                    } else {
-                        super::maybe_speak_filler(&mut spoke_filler, &tool_name);
-                        match tools::dispatch_tool_call(&tool_name, tool_args.clone(), ctx).await {
-                            Ok(output) => output,
-                            Err(e) => {
-                                log::warn!("[symon-agent] tool {tool_name} error: {e}");
-                                json!({ "error": e })
-                            }
-                        }
-                    };
+                let tool_result: Value = super::execute_cascaded_tool_call(
+                    ctx,
+                    &tool_name,
+                    tool_args.clone(),
+                    &mut spoke_filler,
+                )
+                .await;
                 // Logged AFTER the result so the ledger records the outcome —
                 // the glint derivation (remembered / recovered) reads `ok`.
                 tool_call_log.push(json!({
@@ -202,10 +197,12 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                     }
                 }
 
-                super::emit_agent_event(
-                    &ctx.app,
-                    json!({ "taskId": ctx.task_id, "kind": "tool_result", "tool": tool_name, "result": tool_result }),
-                );
+                if let Some(app) = ctx.app.as_ref() {
+                    super::emit_agent_event(
+                        app,
+                        json!({ "taskId": ctx.task_id, "kind": "tool_result", "tool": tool_name, "result": tool_result }),
+                    );
+                }
 
                 function_responses.push(json!({
                     "functionResponse": { "name": tool_name, "response": tool_result }

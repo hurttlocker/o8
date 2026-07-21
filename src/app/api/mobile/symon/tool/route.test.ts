@@ -55,9 +55,10 @@ describe('POST /api/mobile/symon/tool', () => {
       callId: 'call-1',
       tool: 'o8_dispatch',
       args: { task: 'Fix it' },
+      utterance: 'Send this to the fleet',
     }));
     const code = h.evalJs.mock.calls[0]?.[0] ?? '';
-    expect(code).toContain('A.invokeTool("o8_dispatch", {"task":"Fix it","repoId":"repo-1","repoPath":"/repo","repo":"/repo"}, { sessionId, callId })');
+    expect(code).toContain('A.invokeTool("o8_dispatch", {"task":"Fix it","repoId":"repo-1","repoPath":"/repo","repo":"/repo"}, { sessionId, callId }, "Send this to the fleet")');
     expect(code).toContain('JSON.stringify([sessionId, callId])');
     expect(code).toContain('c.sessionId === sessionId && c.callId === callId');
   });

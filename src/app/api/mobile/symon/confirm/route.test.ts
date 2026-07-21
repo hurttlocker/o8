@@ -38,7 +38,8 @@ describe('POST /api/mobile/symon/confirm', () => {
     const code = h.evalJs.mock.calls[0]?.[0] ?? '';
     expect(code).toContain('JSON.stringify([sessionId, callId])');
     expect(code).toContain('slot.confirmationId !== confirmationId');
-    expect(code).toContain('A.resolveConfirm(confirmationId, allow, { sessionId, callId })');
+    expect(code).toContain('A.resolveConfirm(');
+    expect(code).toContain('terminal || undefined');
     expect(code).toContain('JSON.stringify([sessionId, callId, confirmationId])');
   });
 
@@ -74,5 +75,29 @@ describe('POST /api/mobile/symon/confirm', () => {
       sessionId: 'session-1', callId: 'call-1', confirmationId: 'wrong', allow: true,
     }));
     expect(await response.json()).toEqual({ ok: false, error: 'confirmation_mismatch' });
+  });
+
+  it('forwards a terminal preemption reason to Rust and rejects it on approval', async () => {
+    h.evalJs.mockResolvedValue({
+      result: JSON.stringify({ state: 'done', resolution: { status: 'preempted' } }),
+    });
+    const response = await POST(request({
+      sessionId: 'session-1',
+      callId: 'call-1',
+      confirmationId: 'confirm-1',
+      allow: false,
+      terminal: 'preempted',
+    }));
+    expect(await response.json()).toEqual({ ok: true, resolution: { status: 'preempted' } });
+    expect(h.evalJs.mock.calls[0]?.[0]).toContain('const terminal = "preempted"');
+
+    const denied = await POST(request({
+      sessionId: 'session-1',
+      callId: 'call-1',
+      confirmationId: 'confirm-1',
+      allow: true,
+      terminal: 'preempted',
+    }));
+    expect(await denied.json()).toEqual({ ok: false, error: 'bad_request' });
   });
 });

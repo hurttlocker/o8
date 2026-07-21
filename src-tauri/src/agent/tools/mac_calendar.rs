@@ -89,22 +89,68 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
         .unwrap_or_default();
     let script = format!(
         "\ntell application \"Calendar\"\n\
+         \tset sep to character id 30\n\
          \t{start_block}\
          \t{end_block}\
          \t{cal_selection}\
          \ttell targetCal\n\
-         \t\tmake new event with properties {{summary:\"{title_esc}\", start date:startDate, end date:endDate, description:\"{notes_esc}\"{recurrence_prop}}}\n\
+         \t\tset newEvent to make new event with properties {{summary:\"{title_esc}\", start date:startDate, end date:endDate, description:\"{notes_esc}\"{recurrence_prop}}}\n\
          \tend tell\n\
-         \t\"ok\"\n\
+         \tset recurrenceText to \"missing\"\n\
+         \tif recurrence of newEvent is not missing value then set recurrenceText to (recurrence of newEvent as string)\n\
+         \tset eventFingerprint to (summary of newEvent as string) & sep & (start date of newEvent as string) & sep & (end date of newEvent as string) & sep & (description of newEvent as string) & sep & recurrenceText & sep & (allday event of newEvent as string) & sep & (name of targetCal as string)\n\
+         \t(uid of newEvent as string) & sep & eventFingerprint\n\
          end tell"
     );
 
-    tokio::task::spawn_blocking(move || run_applescript(&script))
+    let created = tokio::task::spawn_blocking(move || run_applescript(&script))
         .await
         .map_err(|e| format!("spawn_blocking error: {e}"))??;
+    let (event_uid, fingerprint) = created
+        .split_once('\u{1e}')
+        .ok_or_else(|| "Calendar did not return a stable post-create fingerprint".to_string())?;
 
     let repeats = if repeat.is_empty() { "no".to_string() } else { repeat };
-    Ok(json!({ "success": true, "title": title, "repeats": repeats }))
+    Ok(json!({
+        "success": true,
+        "title": title,
+        "repeats": repeats,
+        "event_uid": event_uid,
+        "_ledger_fingerprint": fingerprint,
+    }))
+}
+
+pub async fn delete_created(event_uid: &str, expected_sha256: &str) -> Result<Value, String> {
+    let uid = as_escape(event_uid);
+    let expected = as_escape(expected_sha256);
+    let script = format!(
+        "\ntell application \"Calendar\"\n\
+         \tset sep to character id 30\n\
+         \tset deletedCount to 0\n\
+         \trepeat with c in calendars\n\
+         \t\tset matches to events of c whose uid is \"{uid}\"\n\
+         \t\trepeat with e in matches\n\
+         \t\t\tset recurrenceText to \"missing\"\n\
+         \t\t\tif recurrence of e is not missing value then set recurrenceText to (recurrence of e as string)\n\
+         \t\t\tset currentFingerprint to (summary of e as string) & sep & (start date of e as string) & sep & (end date of e as string) & sep & (description of e as string) & sep & recurrenceText & sep & (allday event of e as string) & sep & (name of c as string)\n\
+         \t\t\tset digestOutput to do shell script \"/usr/bin/printf %s \" & quoted form of currentFingerprint & \" | /usr/bin/shasum -a 256\"\n\
+         \t\t\tset currentHash to text 1 thru 64 of digestOutput\n\
+         \t\t\tif currentHash is not \"{expected}\" then return \"changed\"\n\
+         \t\t\tdelete e\n\
+         \t\t\tset deletedCount to deletedCount + 1\n\
+         \t\tend repeat\n\
+         \tend repeat\n\
+         \tdeletedCount as string\n\
+         end tell"
+    );
+    let deleted = tokio::task::spawn_blocking(move || run_applescript(&script))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))??;
+    match deleted.trim() {
+        "1" => Ok(json!({ "undone": true, "event_uid": event_uid })),
+        "changed" => Err("Cannot undo because the calendar event changed after Symon created it".into()),
+        _ => Err("The created calendar event no longer exists exactly as recorded".into()),
+    }
 }
 
 /// Update an UPCOMING event in place — move it, rename it, or both. Matches

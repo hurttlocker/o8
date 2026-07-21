@@ -4753,8 +4753,15 @@ fn agent_confirm_v2(
     session_id: String,
     call_id: String,
     allow: bool,
+    terminal: Option<String>,
 ) -> agent::ConfirmResolution {
-    agent::resolve_confirm_v2(&confirmation_id, &session_id, &call_id, allow)
+    agent::resolve_confirm_v2(
+        &confirmation_id,
+        &session_id,
+        &call_id,
+        allow,
+        terminal.as_deref(),
+    )
 }
 
 /// Interrupt Symon: stop every running agent task (the reasoning loops bail
@@ -4795,8 +4802,73 @@ fn agent_set_escalation(policy: String) -> Result<(), String> {
 /// the governance surface for `apply_text_edit`, see agent/edit_ctx.rs).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn agent_edit_revert(app: tauri::AppHandle) -> Result<(), String> {
-    agent::edit_ctx::revert(&app)
+fn agent_edit_revert(app: tauri::AppHandle) -> Result<agent::edit_ctx::RevertResult, String> {
+    agent_edit_revert_inner(|| agent::edit_ctx::revert(&app))
+}
+
+#[cfg(target_os = "macos")]
+fn agent_edit_revert_inner(
+    revert: impl FnOnce() -> Result<agent::edit_ctx::RevertResult, String>,
+) -> Result<agent::edit_ctx::RevertResult, String> {
+    let result = revert()?;
+    if let Err(error) = agent::ledger::invalidate_edit_inverse(&result.edit_id) {
+        log::warn!("[symon-ledger] dock revert could not retire undo token: {error}");
+    }
+    Ok(result)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod agent_edit_revert_command_tests {
+    use super::*;
+
+    #[test]
+    fn command_workflow_retires_the_persisted_edit_token() {
+        let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("dock-revert-ledger-seam-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).unwrap();
+        agent::store::with_test_data_dir(data_dir.clone(), || {
+            let edit_id = "edit-command-seam";
+            let inverse = agent::undo::Inverse::RevertEdit {
+                edit_id: edit_id.to_string(),
+            };
+            agent::ledger::record(agent::ledger::ActionRecord {
+                action_id: "action-command-seam",
+                task_id: "task-command-seam",
+                source: "cascaded",
+                phase: "terminal",
+                utterance: Some("rewrite that"),
+                tool: "apply_text_edit",
+                args: &serde_json::json!({}),
+                confirmation_id: None,
+                confirmation_outcome: "not_required",
+                outcome: "succeeded",
+                session_id: None,
+                call_id: None,
+                inverse: Some(&inverse),
+            })
+            .unwrap();
+            assert_eq!(
+                agent::ledger::recent(1, None).unwrap()["actions"][0]["undoable"],
+                true
+            );
+
+            let result = agent_edit_revert_inner(|| {
+                Ok(agent::edit_ctx::RevertResult {
+                    edit_id: edit_id.to_string(),
+                    outcome: agent::edit_ctx::RevertOutcome::Restored,
+                })
+            })
+            .unwrap();
+            assert_eq!(result.outcome, agent::edit_ctx::RevertOutcome::Restored);
+            assert_eq!(
+                agent::ledger::recent(1, None).unwrap()["actions"][0]["undoable"],
+                false
+            );
+        });
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
 }
 
 /// Answer a pending `o8:edit-capture` request — the main webview reports its

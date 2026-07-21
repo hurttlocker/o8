@@ -91,6 +91,20 @@ async fn canonical_repo_identity(args: &Value) -> Result<RepoIdentity, String> {
         .ok_or_else(|| format!("Repo path '{path}' is not registered in o8."))
 }
 
+/// Validate a dispatch target before its confirmation card is shown, then
+/// return the args with the registry-owned identity attached. This keeps a
+/// spoken legacy repo name from becoming an ambiguous or blank approval.
+pub(crate) async fn canonical_dispatch_args(args: &Value) -> Result<Value, String> {
+    let repo = canonical_repo_identity(args).await?;
+    let mut normalized = args.clone();
+    let object = normalized
+        .as_object_mut()
+        .ok_or_else(|| "dispatch arguments must be an object".to_string())?;
+    object.insert("repoId".to_string(), json!(repo.id));
+    object.insert("repoPath".to_string(), json!(repo.path));
+    Ok(normalized)
+}
+
 async fn optional_repo_scope(args: &Value) -> Result<Option<RepoIdentity>, String> {
     if trimmed_arg(args, "repoId").is_some()
         || trimmed_arg(args, "repoPath").is_some()

@@ -60,12 +60,14 @@ type SymonInvokeTool = (
   name: string,
   args: Record<string, unknown>,
   correlation?: SymonToolCorrelation,
+  utterance?: string,
 ) => Promise<unknown>;
 
 type SymonResolveConfirm = (
   confirmationId: string,
   allow: boolean,
   correlation: SymonToolCorrelation,
+  terminal?: 'expired' | 'preempted',
 ) => Promise<SymonConfirmResolution>;
 
 function stringField(value: unknown): string | undefined {
@@ -307,13 +309,14 @@ export function RealtimeVoiceHost() {
     void import('@tauri-apps/api/core')
       .then(({ invoke }) => {
         if (!alive) return;
-        bridge.invokeTool = (name, args, correlation) => {
+        bridge.invokeTool = (name, args, correlation, utterance) => {
           const startedAt = Date.now();
           const pending = invoke('realtime_invoke_tool', {
             name,
             args,
             sessionId: correlation?.sessionId,
             callId: correlation?.callId,
+            utterance,
           });
           const markSettled = () => {
             for (const entry of confirms) {
@@ -326,12 +329,13 @@ export function RealtimeVoiceHost() {
           void pending.then(markSettled, markSettled);
           return pending;
         };
-        bridge.resolveConfirm = async (confirmationId, allow, correlation) => {
+        bridge.resolveConfirm = async (confirmationId, allow, correlation, terminal) => {
           const result = await invoke<SymonConfirmResolution>('agent_confirm_v2', {
             confirmationId,
             allow,
             sessionId: correlation.sessionId,
             callId: correlation.callId,
+            terminal,
           });
           if (result.status !== 'not_found') {
             const entry = confirms.find((candidate) => candidate.confirmationId === confirmationId);

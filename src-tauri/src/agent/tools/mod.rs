@@ -23,11 +23,17 @@ pub mod mac_system;
 pub mod mac_weather;
 pub mod o8_bridge;
 pub mod o8_ui;
+mod safe_file;
 pub mod terminal_ctl;
 
 use super::{safety, TaskCtx};
 use chrono::{Datelike, Timelike};
 use serde_json::{json, Value};
+
+pub(crate) use safe_file::{
+    ensure_directory_tree_no_symlinks, remove_dir_no_follow, restore_file_if_sha256,
+    write_file_no_follow,
+};
 
 /// All tool schemas, in the `{name, description, parameters}` shape (which wraps
 /// directly into OpenAI's `function` object).
@@ -957,6 +963,28 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "symon_ledger_recent",
+            "description": "Read Symon's durable action ledger. Use for 'what did you just do?', 'what happened?', or before resolving 'undo that'. Results name the exact action_id and whether each action is actually undoable.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "Number of recent actions, default 5 and max 20." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "symon_ledger_undo",
+            "description": "Undo one exact action from symon_ledger_recent. Call recent first and pass its action_id only when undoable is true. The inverse always requires its own confirmation card and is single-use.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action_id": { "type": "string", "description": "Exact action_id returned by symon_ledger_recent." }
+                },
+                "required": ["action_id"]
+            }
+        }),
+        json!({
             "name": "symon_skills_list",
             "description": "List local SKILL.md capabilities Symon can use, including which ones are active. Use when the user asks what skills are installed or wants a writing style/skill but has not named it exactly.",
             "parameters": { "type": "object", "properties": {}, "required": [] }
@@ -1061,7 +1089,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
                 );
             };
             let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
-            crate::agent::edit_ctx::apply(&ctx.app, edit, new_text)
+            crate::agent::edit_ctx::apply(ctx.app_handle()?, edit, new_text)
         }
         "o8_status" => o8_bridge::status(args).await,
         "o8_team_tell" => o8_bridge::team_tell(args).await,
@@ -1072,6 +1100,12 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_ask" => o8_bridge::ask(args).await,
         "o8_dispatch" => o8_bridge::dispatch(args).await,
         "escalate" => {
+            let mut args = args;
+            let ledger_preconfirmed = args
+                .as_object_mut()
+                .and_then(|object| object.remove("_symon_ledger_preconfirmed"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
             let task = args
                 .get("task")
                 .and_then(|v| v.as_str())
@@ -1087,7 +1121,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
                 // Code-repo work → reuse the existing dispatch tool, but re-impose
                 // its confirm card here: `escalate` is ReadOnly, so the loop did
                 // NOT card it, and a worker spawn must never go silent.
-                if !super::confirm_if_needed(ctx, "o8_dispatch", &args).await {
+                if !ledger_preconfirmed && !super::confirm_if_needed(ctx, "o8_dispatch", &args).await {
                     return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
                 }
                 o8_bridge::dispatch(args).await
@@ -1095,7 +1129,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
                 // Heavy personal/Mac task → hand to the background Claude brain and
                 // let the front brain ack instantly. Fire-and-forget; results reach
                 // the user via the dock + TTS when the background run finishes.
-                super::spawn_claude_task(ctx.app.clone(), task);
+                super::spawn_claude_task(ctx.app_handle()?.clone(), task);
                 Ok(json!({
                     "status": "handed_off",
                     "target": "claude_brain",
@@ -1124,8 +1158,8 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_stop_agent" => o8_bridge::stop_agent(args).await,
         "o8_packet_wait" => o8_bridge::packet_wait(args).await,
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
-        "o8_ui_open" => o8_ui::open(&ctx.app, args),
-        "o8_ui_set" => o8_ui::set_setting(&ctx.app, args),
+        "o8_ui_open" => o8_ui::open(ctx.app_handle()?, args),
+        "o8_ui_set" => o8_ui::set_setting(ctx.app_handle()?, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
         "o8_recap" => o8_bridge::recap(args).await,
         "o8_usage" => o8_bridge::usage(args).await,
@@ -1137,11 +1171,11 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "term_interrupt" => terminal_ctl::interrupt(args).await,
         "term_key" => terminal_ctl::key(args).await,
         "term_new" => terminal_ctl::new(args).await,
-        "term_watch" => terminal_ctl::watch(&ctx.app, args),
+        "term_watch" => terminal_ctl::watch(ctx.app_handle()?, args),
         "o8_packet_steer" => o8_bridge::packet_steer(args).await,
         "o8_agent_task" => o8_bridge::agent_task(args).await,
         "o8_packet_rerun" => o8_bridge::packet_rerun(args).await,
-        "o8_orchestrator_draft" => o8_ui::orchestrator_draft(&ctx.app, args),
+        "o8_orchestrator_draft" => o8_ui::orchestrator_draft(ctx.app_handle()?, args),
         "gh_issue_create" => git_github::issue_create(args).await,
         "mac_weather" => mac_weather::current(args).await,
         "mac_volume" => mac_system::volume(args).await,
@@ -1156,6 +1190,26 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "git_log" => o8_bridge::git_log(args).await,
         "gh_pr_list" => git_github::pr_list(args).await,
         "gh_issue_list" => git_github::issue_list(args).await,
+        "symon_ledger_recent" => {
+            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(5) as usize;
+            crate::agent::ledger::recent(limit, ctx.ledger_session_id.as_deref())
+        }
+        "symon_ledger_undo" => {
+            let action_id = args
+                .get("action_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if action_id.is_empty() {
+                return Err("symon_ledger_undo requires an action_id from symon_ledger_recent".into());
+            }
+            crate::agent::ledger::undo_action(
+                action_id,
+                ctx.ledger_session_id.as_deref(),
+                ctx.app_handle()?,
+            )
+            .await
+        }
         "symon_skills_list" => Ok(crate::agent::skills::list_json()),
         "symon_skill_activate" => {
             let name = args.get("name").and_then(|value| value.as_str()).unwrap_or("");
@@ -1301,6 +1355,27 @@ mod escalation_tests {
         // escalate is ReadOnly, so enabled_tools() (which only drops Destructive)
         // must include it — the off-filter is the ONLY thing that removes it.
         assert!(has_escalate(&enabled_tools()));
+    }
+
+    #[test]
+    fn action_ledger_tools_are_reachable_with_strict_object_schemas() {
+        for name in ["symon_ledger_recent", "symon_ledger_undo"] {
+            let tool = all_tools()
+                .into_iter()
+                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+                .unwrap_or_else(|| panic!("missing tool schema: {name}"));
+            assert_eq!(tool["parameters"]["type"], "object");
+            assert!(tool["parameters"]["properties"].is_object());
+            assert!(tool["parameters"]["required"].is_array());
+        }
+        assert_eq!(
+            safety::tool_safety_class("symon_ledger_recent"),
+            safety::SafetyClass::ReadOnly
+        );
+        assert_eq!(
+            safety::tool_safety_class("symon_ledger_undo"),
+            safety::SafetyClass::Reversible
+        );
     }
 
     fn schema(name: &str) -> Value {
