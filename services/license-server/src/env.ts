@@ -120,12 +120,14 @@ export const env = {
   // clerkUserId lookup is unaffected). NEVER shipped in the desktop build.
   CLERK_SECRET_KEY: optional('CLERK_SECRET_KEY', ''),
 
-  // Authorized parties for Clerk session verification (audit #4). Comma-separated
-  // origins that legitimately mint our sessions (e.g. "https://o8.run,tauri://localhost").
-  // verifyClerkSession requires the token's `azp` to match one — blocks
-  // a same-instance token minted by a sibling subdomain from being redeemed here
-  // for a repo-write GitHub token. Empty disables Clerk session verification
-  // even if CLERK_ISSUER is present, so a production misconfiguration fails closed.
+  // Authorized parties for Clerk browser-session verification (audit #4).
+  // Comma-separated origins that legitimately mint our browser sessions (e.g.
+  // "https://o8.run"). A present `azp` must match one exactly, which blocks a
+  // same-instance token minted by a sibling subdomain from being redeemed here
+  // for a repo-write GitHub token. Native desktop tokens use Authorization with
+  // no Origin and legitimately omit `azp`; issuer/signature/expiry verify them.
+  // An empty list therefore rejects every browser-origin token while leaving the
+  // native path available.
   CLERK_AUTHORIZED_PARTIES: optional('CLERK_AUTHORIZED_PARTIES', '')
     .split(',')
     .map((s) => s.trim())

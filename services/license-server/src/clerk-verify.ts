@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
+import { isAuthorizedClerkParty } from './clerk-authorized-party.js';
 import { env } from './env.js';
 
 /**
@@ -28,18 +29,16 @@ export async function verifyClerkSession(token: string | null): Promise<string |
   if (!token) return null;
   const keySet = getJwks();
   if (!keySet) return null;
-  if (env.CLERK_AUTHORIZED_PARTIES.length === 0) {
-    console.error('[clerk-verify] CLERK_AUTHORIZED_PARTIES is required when Clerk verification is enabled');
-    return null;
-  }
   try {
     const { payload } = await jwtVerify(token, keySet, { issuer: env.CLERK_ISSUER });
     // Authorized-party check (audit #4): a signature+issuer-valid token from a
     // sibling app on an allowed Clerk subdomain would otherwise be redeemable
-    // here for a repo-write GitHub token. The allowlist is mandatory whenever
-    // Clerk verification is enabled; a missing deployment setting fails closed.
-    const azp = typeof payload.azp === 'string' ? payload.azp : '';
-    if (!azp || !env.CLERK_AUTHORIZED_PARTIES.includes(azp)) {
+    // here for a repo-write GitHub token. Browser tokens carry `azp` and require
+    // an exact allowlist match. Clerk native-mode tokens intentionally omit the
+    // claim because they use Authorization without Origin; Clerk's verification
+    // guidance says to skip this comparison when the claim does not exist.
+    if (!isAuthorizedClerkParty(payload.azp, env.CLERK_AUTHORIZED_PARTIES)) {
+      const azp = typeof payload.azp === 'string' ? payload.azp : '<malformed>';
       console.warn(`[clerk-verify] rejected token: azp "${azp}" not in authorized parties`);
       return null;
     }

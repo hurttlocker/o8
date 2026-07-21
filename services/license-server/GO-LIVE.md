@@ -23,6 +23,22 @@ Two lanes: **license server / Stripe** (this repo) and **o8-site** (`~/o8-site`,
    - confirm `STRIPE_SECRET_KEY` is the live key
 4. Verify: `curl https://o8-license-server-production.up.railway.app/health` → `{"ok":true}`.
 
+### Managed GitHub App activation
+
+The public `o8-run` App is independent of Stripe but uses the same production
+service. Set all four values before running an external-account walkthrough:
+
+- `GITHUB_APP_ID`
+- `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_APP_SLUG=o8-run`
+- `CLERK_AUTHORIZED_PARTIES=https://o8.run`
+
+The first three identify and authenticate the App to GitHub. The Clerk allowlist
+applies to browser-origin session tokens; native desktop tokens omit `azp` and
+are authenticated by their issuer, signature, and expiry. A signed-in account
+with no installation receives the public install URL, then the next sync mints
+a one-hour installation token. The desktop refreshes it after 50 minutes.
+
 ## 2. o8-site (front-end agent, Vercel)
 - Deploy with **live** `STRIPE_SECRET_KEY` + Clerk **production** keys.
 - Ensure `app/api/founding/checkout/route.ts` keeps `allow_promotion_codes: true`

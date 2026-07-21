@@ -7,6 +7,7 @@ import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbac
 import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
+import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedule';
 
 // The Clerk publishable key is app-wide and public, baked into the build at ship
 // time. When it's absent (fresh build with no Clerk app yet), Clerk is disabled
@@ -209,6 +210,25 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
       if (debounce) clearTimeout(debounce);
+    };
+  }, [isSignedIn, user, runEntitlementSync]);
+
+  // GitHub App installation tokens expire after one hour. Focus re-sync handles
+  // normal window switching, but a continuously focused desktop could otherwise
+  // cross the expiry boundary and lose GitHub access until focus changed. Refresh
+  // at 50 minutes; the server replaces cached tokens inside its 15-minute window.
+  useEffect(() => {
+    if (!isSignedIn || !user) return;
+    let controller: AbortController | null = null;
+    const stop = scheduleManagedGithubRefresh(() => {
+      controller = new AbortController();
+      syncAbortRef.current?.abort();
+      syncAbortRef.current = controller;
+      void runEntitlementSync(user, controller.signal);
+    });
+    return () => {
+      stop();
+      controller?.abort();
     };
   }, [isSignedIn, user, runEntitlementSync]);
 

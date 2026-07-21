@@ -6,6 +6,7 @@ import type { Context } from 'hono';
 import { clerkBackend } from './clerk-backend.js';
 import { env } from './env.js';
 import { verifyClerkSession } from './clerk-verify.js';
+import { isInstallationTokenReusable } from './github-token-cache.js';
 
 /**
  * Managed GitHub App broker (the Cursor-style integration).
@@ -90,15 +91,16 @@ async function listInstallations(): Promise<Installation[]> {
   return list;
 }
 
-// Token cache per installation: GitHub installation tokens live 1h; reuse
-// until 5 min before expiry so a fleet of desktop refreshes shares one mint.
+// Token cache per installation: GitHub installation tokens live 1h. Reuse until
+// 15 min before expiry so a fleet shares mints while the desktop's 50-minute
+// proactive refresh always receives a fresh token rather than one about to die.
 const tokenCache = new Map<number, { token: string; expiresAt: string }>();
 
 async function mintInstallationToken(
   installationId: number,
 ): Promise<{ token: string; expiresAt: string }> {
   const hit = tokenCache.get(installationId);
-  if (hit && Date.parse(hit.expiresAt) - Date.now() > 5 * 60 * 1000) return hit;
+  if (hit && isInstallationTokenReusable(hit.expiresAt, Date.now())) return hit;
   const jwt = await appJwt();
   const res = await fetch(`${GITHUB_API}/app/installations/${installationId}/access_tokens`, {
     method: 'POST',

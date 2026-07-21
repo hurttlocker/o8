@@ -131,6 +131,7 @@ subject. `/validate-entitlement` then cross-checks revocation by that subject.
 | `POST /issue-entitlement` | `Bearer ADMIN_TOKEN` | `{ plan, sub?, days? }` | `{ license, plan, sub, days }` |
 | `DELETE /revoke/:subscriptionId` | `Bearer ADMIN_TOKEN` | path param | `{ revoked, subscriptionId }` |
 | `POST /admin/backfill-github` | `Bearer ADMIN_TOKEN` | `{ dryRun?, limit? }` | `{ dryRun, scanned, resolved, updated, skipped }` |
+| `POST /github/app/token` | Clerk session JWT | — | Managed App install state or a one-hour installation token |
 
 ## GitHub-account identity resolution (#1519)
 
