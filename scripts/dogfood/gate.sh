@@ -14,13 +14,16 @@ command -v pgrep >/dev/null 2>&1 || say ATTENDED
 command -v stat >/dev/null 2>&1 || say ATTENDED
 command -v find >/dev/null 2>&1 || say ATTENDED
 command -v ps >/dev/null 2>&1 || say ATTENDED
+command -v jq >/dev/null 2>&1 || say ATTENDED
+
+now=$(date +%s) || say ATTENDED
+case "$now" in *[!0-9]*|'') say ATTENDED ;; esac
 
 # The operator's kill switch always wins.
 [ -f "$STATE_DIR/.dogfood.STOP" ] && say ATTENDED
 
 # A fresh focused-window heartbeat proves an operator is in o8.
 if [ -f "$HEARTBEAT" ]; then
-  now=$(date +%s) || say ATTENDED
   modified=$(stat -f %m "$HEARTBEAT" 2>/dev/null)
   if [ -z "$modified" ]; then
     modified=$(stat -c %Y "$HEARTBEAT" 2>/dev/null)
@@ -44,10 +47,22 @@ for pid in $(pgrep -fx "$APP_BIN" 2>/dev/null); do
   [ "$pid" != "$loop_pid" ] && say ATTENDED
 done
 
-# A recent in-app orchestrator message is also positive presence evidence.
+# A recent in-app orchestrator message is also positive presence evidence. The
+# desktop rewrites savedAt when it restores a thread, so file mtime alone cannot
+# distinguish startup persistence from a message the operator actually sent.
 if [ -d "$STATE_DIR/chat-history" ]; then
-  recent=$(find "$STATE_DIR/chat-history" -name 'thoughts-*.json' -mmin -15 -print -quit 2>/dev/null)
-  [ -n "$recent" ] && say ATTENDED
+  cutoff_ms=$(((now - 900) * 1000))
+  while IFS= read -r history_file; do
+    jq -e --argjson cutoff "$cutoff_ms" '
+      any(.messages[]?;
+        (.timestamp? | type) == "number"
+        and (if .timestamp < 100000000000 then .timestamp * 1000 else .timestamp end) >= $cutoff
+      )
+    ' "$history_file" >/dev/null 2>&1
+    status=$?
+    [ "$status" -eq 0 ] && say ATTENDED
+    [ "$status" -eq 1 ] || say ATTENDED
+  done < <(find "$STATE_DIR/chat-history" -name 'thoughts-*.json' -mmin -15 -type f -print 2>/dev/null)
 fi
 
 say UNATTENDED

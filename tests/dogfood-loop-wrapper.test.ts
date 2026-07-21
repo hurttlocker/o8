@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const launcher = join(repoRoot, 'scripts/dogfood/loop.sh');
+const presenceGate = join(repoRoot, 'scripts/dogfood/gate.sh');
 const gitShim = join(repoRoot, 'scripts/dogfood/bin/git');
 const hooksDir = join(repoRoot, 'scripts/dogfood/hooks');
 const queueSync = join(repoRoot, 'scripts/dogfood/queue-sync.sh');
@@ -49,6 +50,49 @@ afterEach(() => {
 });
 
 describe('dogfood loop wrapper', () => {
+  it('uses message timestamps instead of savedAt-only rewrites for attendance', () => {
+    const root = tempRoot('presence');
+    const stateDir = join(root, '.o8');
+    const historyDir = join(stateDir, 'chat-history');
+    const historyFile = join(historyDir, 'thoughts-restored.json');
+    const gateEnv = {
+      ...process.env,
+      O8_DOGFOOD_STATE_DIR: stateDir,
+      O8_DOGFOOD_APP_BIN: join(root, 'no-app-running'),
+    };
+    mkdirSync(historyDir, { recursive: true });
+
+    writeFileSync(historyFile, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      messages: [{ role: 'user', content: 'old message', timestamp: Date.now() - 20 * 60_000 }],
+    }));
+    const restored = spawnSync(presenceGate, [], {
+      env: gateEnv,
+      encoding: 'utf8',
+    });
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(restored.stdout.trim()).toBe('UNATTENDED');
+
+    writeFileSync(historyFile, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      messages: [{ role: 'user', content: 'new message', timestamp: Date.now() }],
+    }));
+    const active = spawnSync(presenceGate, [], {
+      env: gateEnv,
+      encoding: 'utf8',
+    });
+    expect(active.status, active.stderr).toBe(0);
+    expect(active.stdout.trim()).toBe('ATTENDED');
+
+    writeFileSync(historyFile, '{');
+    const ambiguous = spawnSync(presenceGate, [], {
+      env: gateEnv,
+      encoding: 'utf8',
+    });
+    expect(ambiguous.status, ambiguous.stderr).toBe(0);
+    expect(ambiguous.stdout.trim()).toBe('ATTENDED');
+  });
+
   it('loads the restricted Claude and MCP profiles, then releases its owned state', () => {
     const root = tempRoot('profile');
     const argsFile = join(root, 'claude-args');
