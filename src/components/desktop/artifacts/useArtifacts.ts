@@ -38,7 +38,12 @@ export function useArtifacts({ packetId, prNumber, laneId, pollMs, enabled = tru
         const res = await fetch(`/api/panel/artifacts?${params.toString()}`);
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         const json = (await res.json()) as { artifacts?: ArtifactRef[] };
-        return Array.isArray(json.artifacts) ? json.artifacts : [];
+        // Report artifacts (packet explainers / buy-in docs) have their own
+        // sandboxed viewers. Proof strips render media thumbnails, so keep
+        // HTML reports out of their image/lightbox path.
+        return Array.isArray(json.artifacts)
+          ? json.artifacts.filter((artifact) => artifact.kind === 'screenshot' || artifact.kind === 'video')
+          : [];
       });
       const snapshot = getSWR<ArtifactRef[]>(cacheKey);
       if (snapshot.data) setArtifacts(snapshot.data);
@@ -47,7 +52,7 @@ export function useArtifacts({ packetId, prNumber, laneId, pollMs, enabled = tru
     } finally {
       setLoading(false);
     }
-  }, [enabled, hasFilter, packetId, prNumber, laneId]);
+  }, [enabled, hasFilter, key, packetId, prNumber, laneId]);
 
   useEffect(() => {
     if (!enabled || !hasFilter) {
