@@ -16,7 +16,7 @@
  */
 
 import { writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   artifactExtForMime,
@@ -168,7 +168,8 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
     }, { threadId });
 
     const worktree = params.lane.worktreePath || params.lane.repoPath;
-    const html = await readFile(join(worktree, explainerFilename(params.packetId)), 'utf8');
+    const scratchPath = join(worktree, explainerFilename(params.packetId));
+    const html = await readFile(scratchPath, 'utf8');
     if (!html.trim()) {
       throw new Error('explainer file was empty');
     }
@@ -191,6 +192,13 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
       repoPath: params.lane.repoPath,
       mimeType: 'text/html',
       bytes: Buffer.byteLength(html),
+    });
+
+    // The durable copy now lives outside the lane worktree. Best-effort cleanup
+    // keeps generated review files from lingering without turning a successful
+    // persistence into a failed explainer if the filesystem refuses deletion.
+    await unlink(scratchPath).catch((error) => {
+      console.warn(`[explainer] Failed to remove scratch HTML for packet ${params.packetId}:`, error);
     });
 
     stamp({
