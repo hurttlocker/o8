@@ -3,6 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  getRuntimeCapability,
+  listDeclarativeRuntimes,
+  listDispatchableRuntimes,
+} from '@/lib/orchestrator/runtime-capabilities';
+
+const declarativeRuntimeIds = listDeclarativeRuntimes();
 
 const authFixture = vi.hoisted(() => ({ home: '', installed: new Set(['opencode']) }));
 const scanAndLinkMock = vi.hoisted(() => vi.fn((binaryName: string) => (
@@ -62,17 +69,20 @@ describe('OpenCode auth preflight', () => {
 });
 
 describe('dispatchable runtime readiness', () => {
-  it('marks the five declarative workers available when their PATH and credential probes pass', async () => {
-    authFixture.installed = new Set(['opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider']);
-    vi.stubEnv('OPENHANDS_API_KEY', 'test-openhands');
-    vi.stubEnv('GOOSE_API_KEY', 'test-goose');
-    vi.stubEnv('QWEN_API_KEY', 'test-qwen');
-    vi.stubEnv('KIMI_API_KEY', 'test-kimi');
-    vi.stubEnv('OPENROUTER_API_KEY', 'test-aider');
+  it('marks every declarative worker available when its PATH and credential probes pass', async () => {
+    authFixture.installed = new Set([
+      'opencode',
+      ...declarativeRuntimeIds.map((runtime) => getRuntimeCapability(runtime).binaryName),
+    ]);
+    for (const runtime of declarativeRuntimeIds) {
+      const envName = getRuntimeCapability(runtime).declarative?.authEnvVars[0];
+      if (!envName) throw new Error(`missing auth env probe for ${runtime}`);
+      vi.stubEnv(envName, `test-${runtime}`);
+    }
     invalidateRuntimeAuthCache();
 
     const inventory = await getDispatchableRuntimeAvailability();
-    for (const runtime of ['openhands', 'goose', 'qwen', 'kimi', 'aider']) {
+    for (const runtime of declarativeRuntimeIds) {
       expect(inventory.find((entry) => entry.id === runtime)).toMatchObject({
         available: true,
         unavailableReason: null,
@@ -80,10 +90,10 @@ describe('dispatchable runtime readiness', () => {
     }
   });
 
-  it.each(['openhands', 'goose', 'qwen', 'kimi', 'aider'] as const)(
+  it.each(declarativeRuntimeIds)(
     'returns a structured not-installed reason for %s when its PATH probe misses',
     async (runtime) => {
-      authFixture.installed.delete(runtime);
+      authFixture.installed.delete(getRuntimeCapability(runtime).binaryName);
       invalidateRuntimeAuthCache();
 
       await expect(assertRuntimeDispatchable(runtime)).rejects.toMatchObject({
@@ -117,20 +127,7 @@ describe('dispatchable runtime readiness', () => {
 
   it('publishes every launch-capable adapter with availability truth', async () => {
     const inventory = await getDispatchableRuntimeAvailability();
-    expect(inventory.map((entry) => entry.id)).toEqual([
-      'codex',
-      'claude-code',
-      'gemini',
-      'opencode',
-      'openhands',
-      'goose',
-      'qwen',
-      'kimi',
-      'aider',
-      'pi',
-      'cursor',
-      'grok',
-    ]);
+    expect(inventory.map((entry) => entry.id)).toEqual(listDispatchableRuntimes());
     expect(inventory.every((entry) => entry.label.length > 0)).toBe(true);
     expect(inventory.find((entry) => entry.id === 'pi')).toMatchObject({
       available: false,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 
 import {
   DISPATCH_RUNTIME_OPTIONS,
@@ -17,12 +18,8 @@ describe('settings dispatch picker menu surface', () => {
     expect(PICKER_MENU_POPOVER_BG).not.toContain('rgba(0, 0, 0, 0)');
   });
 
-  it('keeps the default-worker picker scoped to Codex and Claude Code', () => {
-    const labels = DISPATCH_RUNTIME_OPTIONS
-      .filter((option) => option.value === 'codex' || option.value === 'claude-code')
-      .map((option) => option.label);
-
-    expect(labels).toEqual(['Codex', 'Claude Code']);
+  it('derives every dispatchable worker option from the runtime catalog', () => {
+    expect(DISPATCH_RUNTIME_OPTIONS.map((option) => option.value)).toEqual(listDispatchableRuntimes());
   });
 
   it('keeps only one Dispatch Runtime picker open at a time', () => {

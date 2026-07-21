@@ -1,8 +1,23 @@
 // Capability map for orchestrator runtime adapters. See docs/runtime-adapter-contract.md.
 import { MODEL_IDS } from '@/lib/models';
-import type { OrchestratorRuntime } from './types';
 
-export interface OrchestratorRuntimeCapability {
+export type DeclarativeParserProfile = 'text' | 'openhands-ndjson' | 'qwen-stream-json';
+
+export interface DeclarativeRuntimeManifest {
+  launchArgs: string[];
+  resumeArgs: string[] | null;
+  parserProfile: DeclarativeParserProfile;
+  costFormat: 'structured' | 'text';
+  authEnvVars: string[];
+  authPaths: string[];
+  authFix: string;
+  extraSpawnEnv?: Record<string, string>;
+}
+
+export interface OrchestratorRuntimeCapability<
+  WorkerProvider extends string = string,
+  AuthHouse extends string = string,
+> {
   /** Display label in pickers, chips */
   label: string;
   /** Short label for tight spaces */
@@ -19,6 +34,14 @@ export interface OrchestratorRuntimeCapability {
   binaryName: string;
   /** Human-readable description for the launch picker tooltip */
   description: string;
+  /** Worker-routing provider stamped onto mission metadata. */
+  workerProvider: WorkerProvider;
+  /** Auth inventory bucket; null only for discovery-only runtimes. */
+  authHouse: AuthHouse | null;
+  /** Whether launch accepts a reasoning-effort selection. */
+  reasoningEffort: boolean;
+  /** One-entry adapter + auth definition for straightforward owned CLIs. */
+  declarative?: DeclarativeRuntimeManifest;
   /**
    * Model capability tier, used by the "Workers use the Brain" auto mode:
    * `auto` turns the Engineering Brain on for every NON-frontier worker so a
@@ -30,7 +53,7 @@ export interface OrchestratorRuntimeCapability {
   tier: 'frontier' | 'standard' | 'local';
 }
 
-export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRuntimeCapability> = {
+export const ORCHESTRATOR_RUNTIMES = {
   codex: {
     label: 'Codex',
     shortLabel: 'Codex',
@@ -44,6 +67,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: MODEL_IDS.codexWorkerDefault,
     accentColor: '#2563eb', // blue — matches existing codex tone in display.ts
     binaryName: 'codex',
+    workerProvider: 'codex',
+    authHouse: 'codex',
+    reasoningEffort: true,
     tier: 'frontier',
     description: 'GPT-5.6 coding agent via `codex exec --json` (Sol orchestration · Terra workers). Full-access sandbox, thread resume.',
   },
@@ -58,6 +84,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: MODEL_IDS.claudeWorkerDefault,
     accentColor: '#e07a3a', // orange — matches existing claude-code tone in display.ts
     binaryName: 'claude',
+    workerProvider: 'claude',
+    authHouse: 'claude',
+    reasoningEffort: true,
     tier: 'frontier',
     description: 'Anthropic Claude Code CLI worker via interactive stream-json. Full-access permission mode, sub-billed; never --print.',
   },
@@ -74,6 +103,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'gemini-3-pro-preview',
     accentColor: '#4285f4', // Google blue
     binaryName: 'gemini',
+    workerProvider: 'gemini',
+    authHouse: 'gemini',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Google Gemini CLI worker via headless stream-json with owned-session resume and review support.',
   },
@@ -85,6 +117,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'antigravity-default',
     accentColor: '#0f9d58',
     binaryName: 'agy',
+    workerProvider: 'antigravity',
+    authHouse: null,
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Google Antigravity CLI discovery skeleton. Launch stays disabled until a resumable JSON/event contract is documented.',
   },
@@ -105,6 +140,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'google/gemini-2.5-flash',
     accentColor: '#a855f7', // purple — distinct from the other three
     binaryName: 'opencode',
+    workerProvider: 'opencode',
+    authHouse: 'opencode',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Multi-provider coding CLI via `opencode run --format json`; dispatch requires local opencode auth.',
   },
@@ -115,8 +153,20 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     requiresModel: false,
     accentColor: '#6d5ce7',
     binaryName: 'openhands',
+    workerProvider: 'openhands',
+    authHouse: 'openhands',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Model-agnostic OpenHands CLI worker via headless NDJSON with automatic tool approval.',
+    declarative: {
+      launchArgs: ['--headless', '--json', '-t', '{{prompt}}'],
+      resumeArgs: null,
+      parserProfile: 'openhands-ndjson',
+      costFormat: 'structured',
+      authEnvVars: ['OPENHANDS_API_KEY', 'LLM_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
+      authPaths: ['.openhands/config.toml'],
+      authFix: 'Install OpenHands, then run `openhands login` or configure a model provider.',
+    },
   },
   goose: {
     label: 'Goose',
@@ -125,8 +175,21 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     requiresModel: false,
     accentColor: '#d97706',
     binaryName: 'goose',
+    workerProvider: 'goose',
+    authHouse: 'goose',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'MCP-native Goose CLI worker via bounded automatic headless execution.',
+    declarative: {
+      launchArgs: ['run', '-t', '{{prompt}}', '--max-turns', '100'],
+      resumeArgs: null,
+      parserProfile: 'text',
+      costFormat: 'text',
+      authEnvVars: ['GOOSE_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY'],
+      authPaths: ['.config/goose/config.yaml'],
+      authFix: 'Install Goose, then configure a provider with `goose configure`.',
+      extraSpawnEnv: { GOOSE_MODE: 'auto', GOOSE_MAX_TURNS: '100' },
+    },
   },
   qwen: {
     label: 'Qwen Code',
@@ -135,8 +198,20 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     requiresModel: false,
     accentColor: '#7c3aed',
     binaryName: 'qwen',
+    workerProvider: 'qwen',
+    authHouse: 'qwen',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Qwen Code CLI worker via Gemini-compatible headless stream JSON and YOLO approval mode.',
+    declarative: {
+      launchArgs: ['-p', '{{prompt}}', '--yolo', '--output-format', 'stream-json'],
+      resumeArgs: null,
+      parserProfile: 'qwen-stream-json',
+      costFormat: 'structured',
+      authEnvVars: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'OPENAI_API_KEY'],
+      authPaths: ['.qwen/oauth_creds.json', '.qwen/settings.json'],
+      authFix: 'Install Qwen Code, then run `qwen` once to sign in or configure QWEN_API_KEY.',
+    },
   },
   kimi: {
     label: 'Kimi Code',
@@ -145,8 +220,20 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     requiresModel: false,
     accentColor: '#334155',
     binaryName: 'kimi',
+    workerProvider: 'kimi',
+    authHouse: 'kimi',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Kimi Code CLI worker via automatic non-interactive prompt mode.',
+    declarative: {
+      launchArgs: ['-p', '{{prompt}}'],
+      resumeArgs: null,
+      parserProfile: 'text',
+      costFormat: 'text',
+      authEnvVars: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
+      authPaths: ['.kimi-code/config.toml'],
+      authFix: 'Install Kimi Code, then run `kimi login` or configure KIMI_API_KEY.',
+    },
   },
   aider: {
     label: 'Aider',
@@ -155,8 +242,20 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     requiresModel: false,
     accentColor: '#dc2626',
     binaryName: 'aider',
+    workerProvider: 'aider',
+    authHouse: 'aider',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'Aider one-shot coding worker with automatic approvals and configured test execution.',
+    declarative: {
+      launchArgs: ['--message', '{{prompt}}', '--yes-always', '--auto-test'],
+      resumeArgs: null,
+      parserProfile: 'text',
+      costFormat: 'text',
+      authEnvVars: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY'],
+      authPaths: ['.aider.conf.yml'],
+      authFix: 'Install Aider, then configure a model provider API key.',
+    },
   },
   pi: {
     label: 'Pi',
@@ -165,6 +264,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     requiresModel: false,
     accentColor: '#16a34a',
     binaryName: 'pi',
+    workerProvider: 'pi',
+    authHouse: 'pi',
+    reasoningEffort: false,
     tier: 'standard',
     description: 'earendil-works/pi coding agent via RPC-mode JSONL with native steer.',
   },
@@ -176,6 +278,9 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'cursor-agent',
     accentColor: '#111827',
     binaryName: 'cursor-agent',
+    workerProvider: 'cursor',
+    authHouse: 'cursor',
+    reasoningEffort: false,
     tier: 'frontier',
     description: 'Cursor CLI headless worker via `cursor-agent -p --output-format stream-json`.',
   },
@@ -190,21 +295,62 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: MODEL_IDS.grokWorkerDefault,
     accentColor: '#16a34a',
     binaryName: 'grok',
+    workerProvider: 'grok',
+    authHouse: 'grok',
+    reasoningEffort: false,
     tier: 'frontier',
     description: 'xAI Grok Build coding CLI (grok-4.5) with headless JSON-schema output — sub-billed via SuperGrok.',
   },
-};
+} satisfies Record<string, OrchestratorRuntimeCapability>;
+
+export type OrchestratorRuntime = keyof typeof ORCHESTRATOR_RUNTIMES;
+export type RuntimeWorkerProvider = (typeof ORCHESTRATOR_RUNTIMES)[OrchestratorRuntime]['workerProvider'];
+export type RuntimeAuthHouse = Exclude<
+  (typeof ORCHESTRATOR_RUNTIMES)[OrchestratorRuntime]['authHouse'],
+  null
+>;
+type CatalogRuntimeCapability = OrchestratorRuntimeCapability<RuntimeWorkerProvider, RuntimeAuthHouse>;
+
+export const ORCHESTRATOR_RUNTIME_IDS = Object.freeze(
+  Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[],
+);
+
+export function isOrchestratorRuntime(value: unknown): value is OrchestratorRuntime {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ORCHESTRATOR_RUNTIMES, value);
+}
 
 export function listDispatchableRuntimes(options?: {
   includeExperimental?: boolean;
   experimental?: OrchestratorRuntime[];
 }): OrchestratorRuntime[] {
   void options;
-  return (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
+  return ORCHESTRATOR_RUNTIME_IDS
     .filter((id) => ORCHESTRATOR_RUNTIMES[id].dispatchable);
 }
 
-export function getRuntimeCapability(runtime: OrchestratorRuntime): OrchestratorRuntimeCapability {
+export function isDispatchableRuntime(value: unknown): value is OrchestratorRuntime {
+  return isOrchestratorRuntime(value) && ORCHESTRATOR_RUNTIMES[value].dispatchable;
+}
+
+export function formatDispatchableRuntimeChoices(): string {
+  return listDispatchableRuntimes().map((id) => `"${id}"`).join(', ');
+}
+
+export function listDeclarativeRuntimes(): OrchestratorRuntime[] {
+  return ORCHESTRATOR_RUNTIME_IDS.filter((id) => 'declarative' in ORCHESTRATOR_RUNTIMES[id]);
+}
+
+export function listDispatchableWorkerProviders(): RuntimeWorkerProvider[] {
+  return [...new Set(listDispatchableRuntimes().map(
+    (runtime) => ORCHESTRATOR_RUNTIMES[runtime].workerProvider,
+  ))];
+}
+
+export function isRuntimeWorkerProvider(value: unknown): value is RuntimeWorkerProvider {
+  return typeof value === 'string' && listDispatchableWorkerProviders().includes(value as RuntimeWorkerProvider);
+}
+
+export function getRuntimeCapability(runtime: OrchestratorRuntime): CatalogRuntimeCapability {
   return ORCHESTRATOR_RUNTIMES[runtime];
 }
 

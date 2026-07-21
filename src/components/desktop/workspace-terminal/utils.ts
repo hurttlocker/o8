@@ -9,6 +9,7 @@ import type {
   WorkspaceLaneState,
   WorkspaceOrchestrationPacketBadge,
 } from '@/lib/orchestrator/types';
+import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptThinkingStep,
@@ -25,16 +26,9 @@ import type {
 
 export function isAgentRuntimeTab(
   tab: TerminalTab | null | undefined,
-): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi' } {
+): tab is TerminalTab & { kind: 'chat'; chatRuntime: OrchestratorRuntime } {
   return tab?.kind === 'chat'
-    && (
-      tab.chatRuntime === 'codex'
-      || tab.chatRuntime === 'claude-code'
-      || tab.chatRuntime === 'gemini'
-      || tab.chatRuntime === 'opencode'
-      || tab.chatRuntime === 'cursor'
-      || tab.chatRuntime === 'grok'
-    );
+    && isDispatchableRuntime(tab.chatRuntime);
 }
 
 /**

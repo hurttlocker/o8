@@ -10,6 +10,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MODEL_IDS } from '@/lib/models';
+import {
+  getRuntimeCapability,
+  listDispatchableRuntimes,
+  type OrchestratorRuntime,
+  type RuntimeAuthHouse,
+} from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   APP_FONT_STACK,
@@ -25,7 +31,7 @@ export type { ThinkingEffort };
 export type SettingSource = 'env' | 'file' | 'default';
 
 export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
-export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok' | 'pi';
+export type DispatchRuntime = OrchestratorRuntime;
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
 export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
@@ -91,7 +97,7 @@ export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
   sources: Record<keyof OperatorDefaults, SettingSource>;
   cliAuth?: {
-    statuses: Record<'codex' | 'claude' | 'gemini' | 'opencode' | 'cursor' | 'grok' | 'pi', {
+    statuses: Record<RuntimeAuthHouse, {
       installed: boolean;
       authenticated: boolean;
       detail: string;
@@ -162,14 +168,11 @@ export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }>
   { value: MODEL_IDS.raw.anthropicClaudeHaiku45, label: 'Haiku 4.5' },
 ];
 
-export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> = [
-  { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse (GPT-5.6 Terra workers).' },
-  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — available whenever its local CLI is signed in.' },
-  { value: 'grok', label: 'Grok Build', detail: 'xAI Grok Build CLI — Grok 4.5 (Opus-class), sub-billed via SuperGrok.' },
-  { value: 'cursor', label: 'Cursor', detail: 'Cursor CLI — subscription or CURSOR_API_KEY authenticated.' },
-  { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3 Pro CLI — fastest for parallel fan-out.' },
-  { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
-];
+export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> =
+  listDispatchableRuntimes().map((value) => {
+    const capability = getRuntimeCapability(value);
+    return { value, label: capability.label, detail: capability.description };
+  });
 
 export const PICKER_MENU_POPOVER_BG = 'var(--t-panel-solid)';
 

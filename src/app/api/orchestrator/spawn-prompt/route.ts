@@ -9,19 +9,18 @@ import {
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import {
+  formatDispatchableRuntimeChoices,
+  isDispatchableRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode', 'openhands', 'goose', 'qwen', 'kimi', 'aider', 'cursor', 'grok', 'pi']);
-
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  if (typeof value === 'string' && VALID_REQUESTED_RUNTIMES.has(value as OrchestratorRuntime)) {
-    return value as OrchestratorRuntime;
-  }
-  return null;
+  return isDispatchableRuntime(value) ? value : null;
 }
 
 /**
@@ -60,7 +59,7 @@ export async function POST(request: NextRequest) {
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(requestedRuntimeRaw);
   if (!requestedRuntime) {
-    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode", "cursor", "grok", "pi".', 400);
+    return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
   }
   const defaults = getOperatorDefaultsSync().values;
   const profileRouting = resolveSubscriptionProfileRouting({

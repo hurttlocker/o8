@@ -8,6 +8,7 @@ import { MODEL_IDS } from '@/lib/models';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
@@ -388,13 +389,11 @@ export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: str
   { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite first (~1-3s, pennies per question, daily-capped). Free tiers as fallback.' },
 ];
 
-export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> = [
-  { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
-  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
-  { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
-  { value: 'cursor', label: 'Cursor', detail: 'Cursor CLI — subscription or CURSOR_API_KEY authenticated.' },
-  { value: 'grok', label: 'Grok Build', detail: 'xAI coding CLI — SuperGrok/X or GROK_CODE_XAI_API_KEY authenticated.' },
-];
+export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> =
+  listDispatchableRuntimes().map((value) => {
+    const capability = getRuntimeCapability(value);
+    return { value, label: capability.label, detail: capability.description };
+  });
 
 export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSetting; label: string; detail: string }> = [
   { value: 'auto', label: 'Auto', detail: 'Follow the in-app orchestrator toggle below (Claude when on, Codex when off).' },

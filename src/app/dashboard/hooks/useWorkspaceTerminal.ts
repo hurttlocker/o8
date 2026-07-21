@@ -676,7 +676,7 @@ export function useWorkspaceTerminal({
     packetReferenceLabel?: string | null;
     packetTitle?: string | null;
     sessionKey: string;
-    runtime: 'codex' | 'claude-code' | 'gemini' | 'antigravity' | 'opencode' | 'cursor' | 'grok';
+    runtime: import('@/lib/orchestrator/types').OrchestratorRuntime;
     repoPath: string;
     status?: string | null;
     branch?: string | null;
