@@ -57,7 +57,11 @@ export const fableBackend: OrchestratorBackend = {
       onEvent,
       // model + toolProfile AFTER ...options so they win over the Opus default
       // (orchestrator-session.ts:505) and any caller-supplied profile.
-      { ...options, model, toolProfile: 'fable' },
+      {
+        ...options,
+        model,
+        toolProfile: options?.orchestrationMode === 'single' ? 'fable-solo' : 'fable',
+      },
     );
   },
 };

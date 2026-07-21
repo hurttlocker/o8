@@ -15,8 +15,9 @@ describe('orchestrator execution mode', () => {
 
     expect(resolved.options.permissionMode).toBe('full');
     expect(resolved.options.orchestrationMode).toBe('single');
+    expect(resolved.options.toolProfile).toBe('solo');
     expect(resolved.message).toContain('dispatch disabled');
-    expect(resolved.message).toContain('hardened Codex direct mode');
+    expect(resolved.message).toContain('selected orchestrator runtime');
   });
 
   it('ignores user MCP config and disables native fan-out for Single', () => {

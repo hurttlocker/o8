@@ -315,6 +315,23 @@ export function makeMoaBackend(
       const mainThreadId = options?.threadId ?? null;
       const signal = options?.signal;
 
+      // Collide is a composition backend, not a Solo runtime. If an existing
+      // setting points at Collide while the composer chooses Solo, run only its
+      // configured aggregator and skip the proposal fan-out entirely.
+      if (options?.orchestrationMode === 'single') {
+        const aggregator = deps.resolveBackend(config.aggregator.backend);
+        await aggregator.sendTurn(repoPath, message, onEvent, {
+          ...options,
+          permissionMode: options.permissionMode ?? 'full',
+          model: options.model ?? config.aggregator.model,
+          thinkingEffort: options.thinkingEffort ?? config.aggregator.thinkingEffort,
+          threadId: mainThreadId,
+          signal,
+          toolProfile: 'solo',
+        });
+        return;
+      }
+
       // ── Phase A — parallel independent proposals (read-only) ─────────────────
       // Warm-pool note: the Claude proposer routes through orchestrator-session.ts
       // (RESIDENT process — warm after the first turn). The Codex proposer routes

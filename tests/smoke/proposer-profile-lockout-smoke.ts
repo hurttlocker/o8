@@ -28,6 +28,7 @@ function main(): void {
 
   const full = buildToolRegistry(repo);
   const propose = buildToolRegistry(repo, { profile: 'propose' });
+  const solo = buildToolRegistry(repo, { profile: 'solo' });
 
   // ── External strip — present in full, ABSENT in propose, on BOTH surfaces.
   const claudeFullMap = toClaudeServersMap(full);
@@ -73,6 +74,17 @@ function main(): void {
   assert(cortexEnv(claudeFull).CORTEX_READONLY === undefined, 'Claude FULL cortex has NO read-only flag');
   assert(cortexEnv(codexFull).CORTEX_READONLY === undefined, 'Codex FULL cortex has NO read-only flag');
 
+  // Solo keeps native repo tools in the runtime, but its MCP projection has no
+  // operator dispatch server, no external tools, and read-only cortex memory.
+  const soloIds = new Set(solo.entries.map((e) => e.id));
+  const claudeSolo = toClaudeServersMap(solo);
+  const codexSolo = toCodexServersMap(solo);
+  assert(!soloIds.has('builtin:operator'), 'solo MUST NOT have operator (dispatch lockout)');
+  assert(soloIds.has('builtin:cortex'), 'solo KEEPS cortex (read-only memory)');
+  assert(solo.entries.every((e) => e.source !== 'external'), 'solo registry has ZERO external entries');
+  assert(cortexEnv(claudeSolo).CORTEX_READONLY === '1', 'Claude solo cortex is CORTEX_READONLY=1');
+  assert(cortexEnv(codexSolo).CORTEX_READONLY === '1', 'Codex solo cortex is CORTEX_READONLY=1');
+
   // ── FABLE profile (Slice 1) — KEEPS operator (Fable still dispatches) + cortex
   //    (ask), STRIPS externals; cortex stays at FULL read (CORTEX_READONLY is a
   //    propose-only tightening). Fable's real lockout is Layer B (native tools
@@ -97,7 +109,7 @@ function main(): void {
   );
 
   console.log(
-    '[proposer-profile-lockout-smoke] PASS — propose strips operator (Claude+Codex), keeps cortex; '
+    '[proposer-profile-lockout-smoke] PASS — propose + solo strip operator (Claude+Codex), keep cortex read-only; '
       + 'fable keeps operator+cortex + strips externals (cortex full read); '
       + 'full byte-identical to no-arg',
   );
