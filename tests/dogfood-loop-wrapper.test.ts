@@ -83,6 +83,8 @@ done
     ]);
     expect(args).toContain('TaskCreate');
     expect(args).toContain('EnterPlanMode');
+    expect(args).not.toContain('TeamCreate');
+    expect(args).not.toContain('TeamDelete');
     expect(args).toContain('--append-system-prompt-file');
 
     const mcp = JSON.parse(readFileSync(mcpCopy, 'utf8')) as {

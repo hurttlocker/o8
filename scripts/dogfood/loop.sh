@@ -272,7 +272,7 @@ cd "$REPO_ROOT"
   --setting-sources project \
   --disable-slash-commands \
   --tools 'Read,Edit,Write,Bash,Glob,Grep,WebFetch,WebSearch,Agent' \
-  --disallowedTools TaskCreate TaskUpdate TaskList TaskGet TaskStop TeamCreate TeamDelete SendMessage EnterPlanMode ExitPlanMode \
+  --disallowedTools TaskCreate TaskUpdate TaskList TaskGet TaskStop SendMessage EnterPlanMode ExitPlanMode \
   --append-system-prompt-file "$PROMPT_FILE" \
   --model "$MODEL" \
   --effort "$EFFORT" &
