@@ -28,7 +28,6 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-import type { PendingSteer } from './chat-panel/PendingSteerCard';
 import { serializeThreadToMarkdown } from '@/lib/llm/export-thread';
 import {
   executeOrchestratorSlashCommand,
@@ -57,6 +56,8 @@ import { track } from '@/lib/analytics/track';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
+import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
+import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { useReadyRuntimeCount } from './use-ready-runtimes';
@@ -84,8 +85,6 @@ import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
 import { useThreadHistoryBackfill, type ThreadHistoryPage } from './chat-panel/useThreadHistoryBackfill';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
-import { interruptRuntimeSurface } from './chat-panel/runtimeInterrupt';
-import { useSteerAutoFire } from './chat-panel/useSteerAutoFire';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
@@ -412,12 +411,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [planText, setPlanText] = useState<string | null>(null);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [targetAgentKey, setTargetAgentKey] = useState<string>('__claude__');
-  // ⌘⏎ steer queue. Held locally; not persisted across reloads (ephemeral
-  // intent). Head fires automatically when the agent goes idle (auto-fire
-  // useEffect below sendNow). editingSteerId pauses the auto-fire while the
-  // head row is being edited inline ([[borrow_conductor_steer_queue]]).
-  const [pendingSteers, setPendingSteers] = useState<PendingSteer[]>([]);
-  const [editingSteerId, setEditingSteerId] = useState<string | null>(null);
   const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
@@ -432,7 +425,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const responseSeenRef = useRef(false);
   const idlePollsRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const queuedSteerSendNowRef = useRef<(text?: string) => void>(() => {});
   const orchestratorSessionRef = useRef<string | null>(null);
   const singleRuntimeSessionRef = useRef<string | null>(null);
   const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
@@ -1478,10 +1470,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // the empty-state check matches the empty-state-override condition.
   const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;
   const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : (waitingForReply || (isSingleMode && singleRuntimeSpawning));
-  const { clearFiringSteerLatch } = useSteerAutoFire({
-    displayWaiting, isOrchestratorMode, pendingSteers, editingSteerId, setPendingSteers,
-    sendNowRef: queuedSteerSendNowRef,
-  });
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeBackendIdentity = isOrchestratorMode
@@ -1593,7 +1581,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     if (prev !== 'busy' && next === 'busy') {
       // New turn started — clear stale summary and snapshot the baseline.
-      clearFiringSteerLatch();
       setTurnSummary(null);
       turnStartRef.current = {
         startedAt: Date.now(),
@@ -1682,7 +1669,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         })();
       }
     }
-  }, [clearFiringSteerLatch, displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
+  }, [displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
 
   // Clear the summary when the thread changes — stale cards from a prior
   // thread should not bleed into the new one.
@@ -2106,64 +2093,44 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => { void handleTaskSend(msg); }, 0);
     return true;
   }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
-  queuedSteerSendNowRef.current = sendNow;
 
-  // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
-  // idle → fire immediately via sendNow; busy → push onto pendingSteers and let
-  // the auto-fire effect drain it when displayWaiting falls. handleSteerNow
-  // preempts the running turn by interrupting it; the steered row stays in the
-  // queue and gets picked up by the same auto-fire path on the next idle tick.
-  // Edit/Delete operate on the queue without touching the runtime.
-  const enqueueSteer = useCallback(() => {
-    const msg = latestInputRef.current.trim();
-    if (!msg) return;
-    setInput('');
-    latestInputRef.current = '';
-    if (displayWaiting) {
-      const id = `steer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-      setPendingSteers((prev) => [...prev, { id, text: msg }]);
-      return;
-    }
-    sendNow(msg);
-  }, [displayWaiting, sendNow]);
-
-  const handleSteerNow = useCallback((id: string) => {
-    // Move the target steer to head so the auto-fire effect picks it up first.
-    setPendingSteers((prev) => {
-      const idx = prev.findIndex((s) => s.id === id);
-      if (idx < 0) return prev;
-      if (idx === 0) return prev;
-      const target = prev[idx];
-      return [target, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
+  const dispatchBufferedOrchestratorSend = useCallback((text: string, images: Array<{ name: string; dataUri: string }>) => {
+    if (!isOrchestratorMode) return null;
+    const turnOrchestrationMode = resolveComposerExecutionMode(composerModeRef.current, swarmEnabled, soloOrchestrator);
+    const promptMode = turnOrchestrationMode === 'fusion' && composerModeRef.current === 'solo'
+      ? 'multitask'
+      : composerModeRef.current;
+    const { displayMessage, wireMessage } = composeComposerModeMessage(text, promptMode);
+    track('orchestrator.message');
+    return orchStream.send(wireMessage, {
+      permissionMode,
+      backend: composerBackendTurnOverride(orchestratorBackend),
+      thinkingEffort,
+      model: orchestratorModel,
+      displayMessage,
+      orchestrationMode: turnOrchestrationMode,
+      collide: collideEnabled,
+      ...(images.length > 0 ? { attachments: images } : {}),
     });
-    // Interrupt the running turn so displayWaiting flips false. The effect
-    // below will then dequeue + sendNow on the next render.
-    if (isOrchestratorMode) {
-      orchStream.interrupt?.();
-    } else {
-      const sessionKey = isSingleMode ? singleRuntimeSessionRef.current : targetSessionKey;
-      void interruptRuntimeSurface(sessionKey)
-        .finally(() => {
-          clearPolling();
-          setWaitingForReply(false);
-        });
-    }
-  }, [clearPolling, isOrchestratorMode, isSingleMode, orchStream, targetSessionKey]);
+  }, [collideEnabled, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, soloOrchestrator, swarmEnabled, thinkingEffort]);
 
-  const handleDeleteSteer = useCallback((id: string) => {
-    setPendingSteers((prev) => prev.filter((s) => s.id !== id));
-    setEditingSteerId((curr) => (curr === id ? null : curr));
-  }, []);
-
-  const handleEditSteer = useCallback((id: string, text: string) => {
-    const next = text.trim();
-    if (!next) {
-      // Empty edit = delete (Conductor matches this).
-      setPendingSteers((prev) => prev.filter((s) => s.id !== id));
-      return;
-    }
-    setPendingSteers((prev) => prev.map((s) => (s.id === id ? { ...s, text: next } : s)));
-  }, []);
+  const { sendBuffer, handleSend: handleComposerSend } = useDefaultComposerSendBuffer({
+    active: isOrchestratorMode,
+    busy: displayWaiting,
+    threadId,
+    repoPath: resolvedRepoPath,
+    attachedImages,
+    latestInputRef,
+    inputRef,
+    setInput,
+    addAttachedImage,
+    clearAttachments,
+    dispatch: dispatchBufferedOrchestratorSend,
+    interrupt: orchStream.interrupt,
+    undoSend: orchStream.undoSend,
+    shouldBypass: (text) => Boolean(parseOrchestratorSlashCommand(text) || parseModeRoutingPrefix(text)),
+    sendUnbuffered: (text) => { void handleTaskSend(text); },
+  });
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -2486,14 +2453,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         preEnhanceInput={preEnhanceInput}
         onEnhance={handleEnhance}
         onUndoEnhance={handleUndoEnhance}
-        onSubmit={() => { void handleTaskSend(); }}
-        onStop={orchStream.interrupt}
-        onSteer={enqueueSteer}
-        pendingSteers={pendingSteers}
-        onSteerNow={handleSteerNow}
-        onDeleteSteer={handleDeleteSteer}
-        onEditSteer={handleEditSteer}
-        onEditingSteerChange={setEditingSteerId}
+        onSubmit={handleComposerSend}
+        onStop={sendBuffer.stopOrUndo}
+        onSteer={handleComposerSend}
+        sendBufferStatus={isOrchestratorMode ? (
+          <ComposerSendBufferStatus
+            undoArmed={sendBuffer.undoArmed}
+            undoSequence={sendBuffer.undoSequence}
+            queued={sendBuffer.queued}
+            onUndo={sendBuffer.stopOrUndo}
+            onCancelQueued={sendBuffer.cancelQueued}
+          />
+        ) : null}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}

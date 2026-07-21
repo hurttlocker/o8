@@ -65,6 +65,8 @@ interface CreateOrchestratorMessageHandlerOptions {
   activeTurnBackendRef?: RefLike<string | null>;
   /** Transcript-bearing events observed during the locally active turn. */
   turnTranscriptEventCountRef?: RefLike<number>;
+  /** Drop late stream deltas after undo until the interrupted turn settles. */
+  suppressTurnEventsRef?: RefLike<boolean>;
   /**
    * The thread this view is bound to (null = unbound fresh view). Drives the
    * thread-scope ingest guard: with drag-to-split, several live chat views
@@ -203,6 +205,13 @@ export function createOrchestratorMessageHandler(
       const ownThreadId = options.threadIdRef?.current ?? null;
       if (ownThreadId && evtThreadId !== ownThreadId) return;
       if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
+    }
+
+    if (options.suppressTurnEventsRef?.current) {
+      const terminalStatus = msg.event === 'status'
+        && (msg.data?.status === 'ready' || msg.data?.status === 'dead');
+      if (terminalStatus) options.suppressTurnEventsRef.current = false;
+      return;
     }
 
     const observedAt = Date.now();
