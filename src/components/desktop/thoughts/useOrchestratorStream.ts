@@ -957,9 +957,7 @@ export function useOrchestratorStream(
     const collide = options?.collide === true && requestedOrchestrationMode !== 'single';
     const collideBaseBackend = collide ? options?.backend : undefined;
     const backend = collide ? 'collide' : options?.backend;
-    activeTurnBackendRef.current = requestedOrchestrationMode === 'single'
-      ? 'codex'
-      : backend ?? null;
+    activeTurnBackendRef.current = backend ?? null;
     // Collide owns its proposal/aggregation pass; the separate Fusion directive
     // would nest a second fan-out inside it.
     const orchestrationMode: OrchestratorExecutionMode = collide

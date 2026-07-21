@@ -18,9 +18,12 @@ function fakeBackend(id: OrchestratorBackendId, sendTurn: OrchestratorBackend['s
 }
 
 describe('orchestrator-send backend entry', () => {
-  it('exposes Single\'s Codex fallback before session metadata is created', () => {
-    expect(resolveOrchestratorExecutionBackendId('openclaw', 'single')).toBe('codex');
-    expect(resolveOrchestratorExecutionBackendId('collide', 'single')).toBe('codex');
+  it('keeps Solo on the selected orchestrator backend', () => {
+    expect(resolveOrchestratorExecutionBackendId('openclaw', 'single')).toBe('openclaw');
+    expect(resolveOrchestratorExecutionBackendId('claude', 'single')).toBe('claude');
+    expect(resolveOrchestratorExecutionBackendId('fable', 'single')).toBe('fable');
+    expect(resolveOrchestratorExecutionBackendId('o8', 'single')).toBe('o8');
+    expect(resolveOrchestratorExecutionBackendId('collide', 'single')).toBe('collide');
     expect(resolveOrchestratorExecutionBackendId('openclaw', 'fusion')).toBe('openclaw');
     expect(resolveOrchestratorExecutionBackendId('claude', undefined)).toBe('claude');
     expect(orchestratorModeAllowsBackendFallback('single')).toBe(false);
@@ -28,19 +31,18 @@ describe('orchestrator-send backend entry', () => {
     expect(orchestratorModeAllowsBackendFallback(undefined)).toBe(true);
   });
 
-  it('routes Single around Collide and into hardened Codex before fan-out', async () => {
-    const codexSend = vi.fn<OrchestratorBackend['sendTurn']>(async () => {});
-    const collideSend = vi.fn<OrchestratorBackend['sendTurn']>(async () => {});
-    const codex = withOrchestrationMode(fakeBackend('codex', codexSend), () => codex);
-    const resolve = () => codex;
-    const collide = withOrchestrationMode(fakeBackend('collide', collideSend), resolve);
+  it('sends Solo through the selected backend with its dispatch surface removed', async () => {
+    const claudeSend = vi.fn<OrchestratorBackend['sendTurn']>(async () => {});
+    const claude = withOrchestrationMode(fakeBackend('claude', claudeSend));
 
-    await sendOrchestratorBackendTurn(collide, '/repo', 'work directly', () => {}, {}, 'single');
+    await sendOrchestratorBackendTurn(claude, '/repo', 'work directly', () => {}, {}, 'single');
 
-    expect(collideSend).not.toHaveBeenCalled();
-    expect(codexSend).toHaveBeenCalledOnce();
-    expect(codexSend.mock.calls[0]?.[1]).toContain('hardened Codex direct mode');
-    expect(codexSend.mock.calls[0]?.[3]?.orchestrationMode).toBe('single');
+    expect(claudeSend).toHaveBeenCalledOnce();
+    expect(claudeSend.mock.calls[0]?.[1]).toContain('selected orchestrator runtime');
+    expect(claudeSend.mock.calls[0]?.[3]).toMatchObject({
+      orchestrationMode: 'single',
+      toolProfile: 'solo',
+    });
   });
 
   it('carries Fusion to the selected fan-out backend', async () => {

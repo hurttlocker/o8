@@ -303,9 +303,10 @@ export function buildToolRegistry(
   //     CLI — see `fable-profile.ts`), NOT the MCP surface, so operator/cortex ride.
   // `'full'` returns the catalog untouched — byte-identical to the legacy no-arg path.
   const profile = options?.profile ?? 'full';
-  const stripExternal = profile === 'propose' || profile === 'fable';
-  const dropOperator = profile === 'propose';
-  const cortexReadonly = profile === 'propose';
+  const soloProfile = profile === 'solo' || profile === 'fable-solo';
+  const stripExternal = profile === 'propose' || profile === 'fable' || soloProfile;
+  const dropOperator = profile === 'propose' || soloProfile;
+  const cortexReadonly = profile === 'propose' || soloProfile;
   const projected = (stripExternal || dropOperator)
     ? entries
         .filter((entry) => !(dropOperator && entry.id === 'builtin:operator'))

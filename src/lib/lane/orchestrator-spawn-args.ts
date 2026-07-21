@@ -17,13 +17,20 @@ export interface BuildOrchestratorArgsOptions {
 /** CLI settings override only hooks; auth and the operator's other settings remain available. */
 export const MANAGED_ORCHESTRATOR_SETTINGS = JSON.stringify({ disableAllHooks: true });
 
+/** Native Claude sub-agent entry point; repo read/edit/shell remain available. */
+export const CLAUDE_SOLO_DISALLOWED_TOOLS = ['Task'] as const;
+
 export function buildOrchestratorArgs(options: BuildOrchestratorArgsOptions): string[] {
   const isFable = options.toolProfile === 'fable';
+  const isSolo = options.toolProfile === 'solo' || options.toolProfile === 'fable-solo';
+  const basePermissionArgs = options.permissionMode === 'plan'
+    ? ['--permission-mode', 'plan']
+    : ['--dangerously-skip-permissions'];
   const permissionArgs = isFable
     ? fableLockoutArgs()
-    : options.permissionMode === 'plan'
-      ? ['--permission-mode', 'plan']
-      : ['--dangerously-skip-permissions'];
+    : isSolo
+      ? [...basePermissionArgs, '--disallowedTools', ...CLAUDE_SOLO_DISALLOWED_TOOLS]
+      : basePermissionArgs;
   const strictMcpArgs = permissionArgs.includes('--strict-mcp-config') ? [] : ['--strict-mcp-config'];
   const args = [
     '--input-format', 'stream-json',

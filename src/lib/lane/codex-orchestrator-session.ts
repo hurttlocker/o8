@@ -220,10 +220,10 @@ function syncCodexAuthFiles(codexHome: string): void {
 
 export function ensureCodexHome(repoPath: string, profile: ToolProfile = 'full'): string {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  // 'propose' (Collide proposer) gets its OWN CODEX_HOME so its operator-stripped
-  // config.toml can't be clobbered by a concurrent full-profile turn for the same
-  // repo. 'full' keeps the original dir — byte-identical content + path.
-  const suffix = profile === 'propose' ? '-propose' : '';
+  // Restricted profiles get their OWN CODEX_HOME so an operator-stripped
+  // config.toml cannot race a concurrent full-profile turn for the same repo.
+  // 'full' keeps the original dir — byte-identical content + path.
+  const suffix = profile === 'full' ? '' : `-${profile}`;
   const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, `${repoHash(normalizedRepoPath)}${suffix}`);
   mkdirSync(codexHome, { recursive: true });
 

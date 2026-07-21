@@ -152,11 +152,12 @@
 ### Approach
 
 - Carry one `fleet | single | fusion` field from both the canvas and default composers through the WebSocket entry point and backend registry.
-- Route every Single turn to one Codex orchestrator process before OpenClaw, ACP, Claude, o8, or Collide can start, then disable user MCP configuration and native multi-agent features for that process.
-- Make Single fail closed behind a mandatory macOS Seatbelt boundary that removes inherited control-plane credentials, blocks o8 and Tauri token paths plus tmux/webview sockets, and reopens only the Codex state required to resume the current thread.
+- Keep every Solo turn on the orchestrator runtime already selected in the composer; the mode constrains dispatch and never changes model houses.
+- When Codex is selected, make Solo fail closed behind a mandatory macOS Seatbelt boundary that removes inherited control-plane credentials, blocks o8 and Tauri token paths plus tmux/webview sockets, and reopens only the Codex state required to resume the current thread.
+- When Claude or Fable is selected, remove the operator and external MCP surfaces, relaunch Cortex read-only, and disable Claude's native Task tool while retaining direct repo read, edit, shell, and test tools.
 - Give each Single launch an isolated Codex home with forbidden recursive-launch rules and a PATH guard, while sharing only session/SQLite continuity; a trusted supervisor seals the one private native image before relaying `thread.started`, and sibling launch roots remain unreadable, immutable, and non-executable.
 - Put each supervisor and sandboxed Codex tree in a dedicated process group so Stop and watchdog escalation reach every descendant, including a child that ignores `SIGTERM`.
-- Promote every same-thread subscriber to Single's actual Codex route before streaming, and retain that actual backend in the desktop and canvas clients so reconnects and interrupts cannot fall back to the originally selected backend.
+- Keep subscribers, reconnects, interrupts, session metadata, and history on the selected backend; route promotion is reserved for a real quota fallback.
 - Keep Fusion on the selected backend and add the shared deep-parallel, cross-verification directive.
 
 ### Verification
@@ -172,7 +173,8 @@
 - Scoped ESLint passed with no errors; only existing hook/server warnings remain.
 - `npm run rule-check -- --base=main` scanned 19 files and passed with zero violations.
 - `git diff --check main` passed.
+- The selected-runtime correction passed 8 focused files and 45 tests, the real Tool-Spine smoke, TypeScript, rule-check, scoped ESLint with no errors, and the full `npm test` suite.
 
 ### Deviations
 
-- Single uses hardened Codex as the canonical per-turn fallback for every selected backend because warm OpenClaw and ACP processes cannot be confined after launch. This preserves one resumable orchestrator while preventing their pre-existing tool surfaces from bypassing the selected mode.
+- OpenClaw and Hermes remain registered for existing sessions but are intentionally absent from the normal composer model picker; this correction does not add or change any UI controls.

@@ -3,7 +3,7 @@ import type { OrchestratorTurnOptions } from './types';
 
 const SINGLE_TURN_DIRECTIVE = [
   '[Single agent mode — dispatch disabled]',
-  'Work this turn yourself in hardened Codex direct mode. Mission, task, worker-packet, MCP, and native sub-agent launch capabilities are unavailable. Use your own read, edit, shell, and test tools end-to-end.',
+  'Work this turn yourself on the selected orchestrator runtime. Mission, task, worker-packet, and native sub-agent launch capabilities are unavailable. Use your own read, edit, shell, and test tools end-to-end.',
 ].join('\n');
 
 const FUSION_TURN_DIRECTIVE = [
@@ -39,7 +39,9 @@ export function applyOrchestrationMode(
     ? SINGLE_TURN_DIRECTIVE
     : FUSION_TURN_DIRECTIVE;
   return {
-    message: `${directive}\n\n${message}`,
-    options,
+    message: message.startsWith(`${directive}\n\n`) ? message : `${directive}\n\n${message}`,
+    options: orchestrationMode === 'single'
+      ? { ...options, toolProfile: 'solo' }
+      : options,
   };
 }

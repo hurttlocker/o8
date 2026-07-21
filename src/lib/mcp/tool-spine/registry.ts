@@ -35,13 +35,17 @@ export type ToolSurface =
  *    MIXED surface (read tools + mutators like `cortex_launch_agent`, which
  *    dispatches a worker), so it is relaunched read-only (CORTEX_READONLY=1) —
  *    only its allowlisted read tools survive. The #1075 dispatch lockout, as data.
+ *  - `'solo'`   → the selected orchestrator works directly: operator dispatch
+ *    and external MCP servers are omitted, while native repo tools remain.
  *  - `'fable'`   → the Fable orchestrator profile: KEEPS operator (dispatch) +
  *    cortex (ask) so Fable can still orchestrate, but STRIPS every external
  *    (user-configured) server. The real token lever is Layer B — Claude's native
  *    read/write tools are locked out at the CLI (see `fable-profile.ts`); this
  *    profile only shapes the MCP surface. cortex stays at full read for now.
+ *  - `'fable-solo'` combines Fable billing/model selection with the Solo MCP
+ *    projection and direct native repo tools.
  */
-export type ToolProfile = 'full' | 'propose' | 'fable';
+export type ToolProfile = 'full' | 'propose' | 'solo' | 'fable' | 'fable-solo';
 
 /** Inert in Phase 1; the vault-phase credential-injection hook. */
 export interface SecretRef {

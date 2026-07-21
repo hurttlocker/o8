@@ -185,7 +185,6 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     if (!ws || ws.readyState !== WebSocket.OPEN) return null;
     let threadId = threadIds.get(repoPath);
     const orchestrationMode = opts?.orchestrationMode ?? 'fleet';
-    const subscriptionBackend = orchestrationMode === 'single' ? 'codex' : undefined;
     if (!threadId) {
       threadId = `thoughts-${Date.now()}`;
       threadIds.set(repoPath, threadId);
@@ -197,18 +196,9 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       lastSeqRef.current = 0;
       ws.send(JSON.stringify({
         type: 'orchestrator-subscribe', repoPath, threadId, since: 0,
-        ...(subscriptionBackend ? { backend: subscriptionBackend } : {}),
-      }));
-    } else if (subscriptionBackend) {
-      // Single deterministically executes on Codex even when the operator's
-      // selected/default backend is Claude, OpenClaw, ACP, or Collide.
-      lastSeqRef.current = 0;
-      ws.send(JSON.stringify({
-        type: 'orchestrator-subscribe', repoPath, threadId, since: 0, backend: subscriptionBackend,
       }));
     }
-    if (subscriptionBackend) backendByThreadRef.current.set(threadId, subscriptionBackend);
-    else backendByThreadRef.current.delete(threadId);
+    backendByThreadRef.current.delete(threadId);
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
       repoPath,
