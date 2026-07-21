@@ -15,6 +15,8 @@
  */
 
 import { useCallback, useState } from 'react';
+import { ArtifactStrip } from '../../artifacts/ArtifactStrip';
+import type { ArtifactRef } from '../../artifacts/types';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 import { UI_FONT } from './constants';
 
@@ -43,6 +45,7 @@ export function LaneReviewSummaryHeader({
   packetId,
   laneStatus,
   refreshStatus,
+  artifacts,
   onMerged,
 }: {
   summary: string | null;
@@ -53,6 +56,7 @@ export function LaneReviewSummaryHeader({
   packetId?: string | null;
   laneStatus?: string | null;
   refreshStatus?: () => Promise<string | null>;
+  artifacts: ArtifactRef[];
   onMerged?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -275,6 +279,12 @@ export function LaneReviewSummaryHeader({
         </>
       ) : null}
 
+      {artifacts.length > 0 ? (
+        <div style={{ marginTop: summary ? 14 : 0, marginBottom: files.length > 0 ? 14 : 0 }}>
+          <ArtifactStrip artifacts={artifacts} />
+        </div>
+      ) : null}
+
       {files.length > 0 ? (
         <>
           <div
@@ -282,7 +292,7 @@ export function LaneReviewSummaryHeader({
               display: 'flex',
               alignItems: 'baseline',
               gap: 7,
-              marginTop: summary ? 12 : 0,
+              marginTop: summary && artifacts.length === 0 ? 12 : 0,
               marginBottom: 3,
             }}
           >

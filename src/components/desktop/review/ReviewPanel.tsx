@@ -8,6 +8,7 @@ import { useLaneReviewSummary } from './useLaneReviewSummary';
 import { LaneReviewSummaryHeader } from './panel/LaneReviewSummaryHeader';
 import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewGitActions } from './ReviewGitActions';
+import { useArtifacts } from '../artifacts/useArtifacts';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { DiffMode, CollapseSignal, ReviewScope } from './panel/types';
 import {
@@ -57,6 +58,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const laneChanges = useLaneReviewChanges(reviewLaneId);
   const changes = reviewLaneId ? laneChanges : localChanges;
   const laneSummary = useLaneReviewSummary(reviewLaneId);
+  const { artifacts: laneArtifacts } = useArtifacts({ laneId: reviewLaneId, enabled: Boolean(reviewLaneId) });
   const [fileQuery, setFileQuery] = useState('');
   const [mode, setMode] = useState<DiffMode>('unified');
   const [wrap, setWrap] = useState(true);
@@ -409,6 +411,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
                 packetId={laneSummary.packetId}
                 laneStatus={laneSummary.laneStatus}
                 refreshStatus={laneSummary.refreshStatus}
+                artifacts={laneArtifacts}
                 onMerged={() => { void changes.refresh(); }}
               />
             ) : null}
