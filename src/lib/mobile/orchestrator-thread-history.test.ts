@@ -53,6 +53,55 @@ describe('orchestrator thread history persistence', () => {
     ]);
   });
 
+  it('rewinds an undone turn from its exact client message id', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: 'keep this turn',
+      messageId: 'orch-user-send-1',
+      backend: 'codex',
+      timestampMs: 1000,
+    });
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      messageId: 'assistant-1000',
+      content: 'kept',
+      backend: 'codex',
+      timestampMs: 1001,
+    });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: 'undo this turn',
+      messageId: 'orch-user-send-2',
+      backend: 'codex',
+      timestampMs: 2000,
+    });
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      messageId: 'assistant-2000',
+      content: 'partial response',
+      backend: 'codex',
+      timestampMs: 2001,
+    });
+
+    history.truncateMobileOrchestratorThreadFromMessage({
+      tabId: thread.id,
+      messageId: 'orch-user-send-2',
+    });
+
+    const persisted = JSON.parse(readFileSync(history.safeOrchestratorHistoryPath(thread.id), 'utf-8'));
+    expect(persisted.messages.map((message: { id?: string }) => message.id)).toEqual([
+      'orch-user-send-1',
+      'assistant-1000',
+    ]);
+  });
+
   it('reuses cached parses until the history file mtime or size changes', async () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Alpha' });
