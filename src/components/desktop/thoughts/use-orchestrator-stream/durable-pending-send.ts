@@ -116,6 +116,20 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     persistOrchestratorPendingSend(record);
   }, []);
 
+  const cancelPending = useCallback((clientMessageId: string) => {
+    const activeRecord = activeRecordRef.current;
+    const record = activeRecord?.clientMessageId === clientMessageId
+      ? activeRecord
+      : threadId ? readPersistedOrchestratorPendingSend(threadId, clientMessageId) : null;
+    if (record) settlePersistedOrchestratorPendingSend(record.threadId, record.clientMessageId);
+    if (pendingRef.current?.clientMessageId === clientMessageId) {
+      clearTimeout(pendingRef.current.timeoutId);
+      pendingRef.current = null;
+    }
+    if (activeRecord?.clientMessageId === clientMessageId) activeRecordRef.current = null;
+    removeFailureEntry(clientMessageId);
+  }, [pendingRef, removeFailureEntry, threadId]);
+
   const failPending = useCallback((record: PersistedOrchestratorPendingSend) => {
     setStatusReady();
     appendOrchestratorDeliveryFailureEntry(setMessages, messagesRef, {
@@ -190,5 +204,5 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     armRecord(newest, newest.sentAtMs);
   }, [armRecord, ensureUserBubble, failPending, pendingRef, setStatusBusy, threadId]);
 
-  return { armRecord, failPending, observeActivity, recordPending, retryPending };
+  return { armRecord, cancelPending, failPending, observeActivity, recordPending, retryPending };
 }

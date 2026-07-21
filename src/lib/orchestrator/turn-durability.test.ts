@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -44,6 +44,49 @@ afterEach(() => {
 const REPO = '/tmp/repo';
 
 describe('orchestrator turn durability + reattach', () => {
+  it('routes desktop undo-send through the WebSocket entry point into durable transcript truncation', async () => {
+    const clientSource = readFileSync(join(process.cwd(), 'src/components/desktop/thoughts/useOrchestratorStream.ts'), 'utf-8');
+    const serverSource = readFileSync(join(process.cwd(), 'src/ws-server.ts'), 'utf-8');
+    expect(clientSource).toContain("type: 'orchestrator-undo-send'");
+    expect(serverSource).toContain("case 'orchestrator-undo-send':");
+    expect(serverSource).toContain('truncateMobileOrchestratorThreadFromMessage({');
+
+    const history = await loadHistory();
+    const threadId = 'thoughts-undo-reachability';
+    history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath: REPO,
+      message: 'keep',
+      messageId: 'orch-user-keep',
+      backend: 'codex',
+      timestampMs: 1000,
+    });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath: REPO,
+      message: 'undo me',
+      messageId: 'orch-user-orch-send-undo',
+      backend: 'codex',
+      timestampMs: 2000,
+    });
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: threadId,
+      repoPath: REPO,
+      messageId: 'assistant-2000',
+      content: 'partial',
+      backend: 'codex',
+      timestampMs: 2001,
+    });
+    history.truncateMobileOrchestratorThreadFromMessage({
+      tabId: threadId,
+      messageId: 'orch-user-orch-send-undo',
+    });
+
+    expect(history.readOrchestratorThreadMessages(threadId)).toEqual([
+      { role: 'user', content: 'keep' },
+    ]);
+  });
+
   it('assistant text keeps persisting and the replay buffer serves a reattaching client after the origin client disconnects', async () => {
     const history = await loadHistory();
     const replay = new OrchestratorReplayBuffers();

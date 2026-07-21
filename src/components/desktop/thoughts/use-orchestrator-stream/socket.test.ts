@@ -25,6 +25,7 @@ function makeHarness(initial: {
   lastEventAt?: number;
   /** Thread this view is bound to (thread-scope ingest guard). */
   threadId?: string | null;
+  suppressTurnEvents?: boolean;
 }) {
   const ws = {} as WebSocket;
   const statusRef = { current: initial.status };
@@ -41,6 +42,7 @@ function makeHarness(initial: {
   const snapshotSeenRef = { current: false };
   const onSnapshotTurnTerminal = vi.fn();
   const onSettledAssistantMissing = vi.fn();
+  const suppressTurnEventsRef = { current: initial.suppressTurnEvents ?? false };
 
   const handler = createOrchestratorMessageHandler({
     captureFirstTurnPlanRef: { current: false },
@@ -63,6 +65,7 @@ function makeHarness(initial: {
     setMessages,
     setStatus,
     statusRef,
+    suppressTurnEventsRef,
     threadIdRef: { current: initial.threadId ?? null },
     wsRef: { current: ws },
   });
@@ -86,6 +89,7 @@ function makeHarness(initial: {
     snapshotSeenRef,
     onSnapshotTurnTerminal,
     onSettledAssistantMissing,
+    suppressTurnEventsRef,
   };
 }
 
@@ -98,6 +102,18 @@ const userMsg: MobileTranscriptEntry = {
 };
 
 describe('orchestrator socket — first-turn streaming race', () => {
+  it('drops late stream events after undo until the interrupted turn settles', () => {
+    const h = makeHarness({ status: 'ready', suppressTurnEvents: true });
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'late token' } });
+    expect(h.currentAssistantRef.current).toBeNull();
+    expect(h.scheduleFlushCurrentAssistant).not.toHaveBeenCalled();
+    expect(h.suppressTurnEventsRef.current).toBe(true);
+
+    h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'ready' } });
+    expect(h.suppressTurnEventsRef.current).toBe(false);
+  });
+
   it('a subscribe-ack snapshot "ready" must not clobber an in-flight busy, and the next token still renders', () => {
     // send() just set busy and the user bubble is on screen; then the
     // threadId-mint re-subscribe replies with a stale snapshot:ready.
