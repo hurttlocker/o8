@@ -103,6 +103,7 @@ import {
   listMobileOrchestratorThreads,
   markMobileOrchestratorThreadFailed,
   mobileOrchestratorThreadHistoryStatTokenAsync,
+  truncateMobileOrchestratorThreadFromMessage,
   upsertMobileOrchestratorAssistantMessage,
   writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
@@ -961,6 +962,10 @@ const activeOrchestratorRoutes = new ActiveOrchestratorRouteRegistry();
 // turns on the same repo don't clobber each other. Entries are removed when the
 // turn resolves.
 const orchestratorInflightAborts = new Map<string, AbortController>();
+// Exact optimistic user-message ids currently being undone. The send handler
+// checks this before every durable append so an abort racing a final stream
+// flush cannot resurrect the turn after the transcript was rewound.
+const undoneOrchestratorUserMessageIds = new Set<string>();
 
 // ── Fable Slice 6 #2 — server-side metered-window valve state ────────────────
 // The metered auto-compact target mirrors ORCHESTRATOR_METERED_AUTO_COMPACT_
@@ -3212,6 +3217,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'orchestrator-interrupt':
       handleOrchestratorInterrupt(client, msg);
       break;
+    case 'orchestrator-undo-send':
+      handleOrchestratorUndoSend(client, msg);
+      break;
 
     // ── Symon Agent Mode channel (phone-hosted voice, Mac-executed tools) ──
     case 'symon-tool-call':
@@ -4212,6 +4220,9 @@ async function handleOrchestratorSendMsgOnce(
   // a later client POST that replaces the array can't double-write.
   const isThreadBacked = typeof threadId === 'string' && threadId.startsWith('thoughts-');
   const turnStartedAtMs = Date.now();
+  const userMessageId = correlationId
+    ? `orch-user-${correlationId}`
+    : `user-${turnStartedAtMs}`;
   const assistantMessageId = isThreadBacked ? `assistant-${turnStartedAtMs}` : null;
   const assistantStartedAtMs = turnStartedAtMs;
   let assistantTextAccum = '';
@@ -4227,6 +4238,7 @@ async function handleOrchestratorSendMsgOnce(
 
   const persistAssistantText = (sessionId: string | null, backendId: OrchestratorBackendId = activeBackend.id) => {
     if (!isThreadBacked || !assistantMessageId) return;
+    if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
     if (!assistantTextAccum || assistantTextAccum === lastPersistedAssistantText) return;
     try {
       const updatedThread = upsertMobileOrchestratorAssistantMessage({
@@ -4268,10 +4280,15 @@ async function handleOrchestratorSendMsgOnce(
     if (carryPrelude) {
       console.log(`[backend-switch-carry] Injected prior transcript into first ${activeBackend.id} turn (thread=${threadId ?? 'none'})`);
     }
+    // The undo can arrive while backend/session setup is still resolving. In
+    // that case the client already restored the draft and there is no turn to
+    // start or persist.
+    if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
     const updatedThread = appendMobileOrchestratorUserMessage({
       tabId: threadId,
       repoPath,
       message: transcriptMessage,
+      messageId: userMessageId,
       backend: activeBackend.id,
       agent: activeAgentTag,
       timestampMs: turnStartedAtMs,
@@ -4319,6 +4336,7 @@ async function handleOrchestratorSendMsgOnce(
         }));
       }
     }
+    if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
     const sendTurn = (
       turnBackend: OrchestratorBackend,
       turnAgentTag: string | undefined,
@@ -4720,6 +4738,7 @@ async function handleOrchestratorSendMsgOnce(
     // After the user message completes, drain any queued supervisor escalations.
     void drainOrchestratorAutoQueue();
   } catch (err) {
+    const turnWasUndone = undoneOrchestratorUserMessageIds.has(userMessageId);
     activeOrchestratorRoutes.release(activeRouteHandle);
     if (turnController) {
       for (const key of turnAbortKeys) {
@@ -4731,23 +4750,35 @@ async function handleOrchestratorSendMsgOnce(
     // Save any partial assistant text accumulated before the failure so
     // mobile listings still show what arrived rather than a blank turn.
     persistAssistantText(null);
-    try {
-      const failedThread = markMobileOrchestratorThreadFailed({
-        tabId: threadId,
-        repoPath,
-        error: err instanceof Error ? err.message : 'Failed to send message',
-        backend: activeBackend.id,
-        agent: activeAgentTag,
-      });
-      if (failedThread) {
-        broadcast({
-          channel: 'orchestrator-threads',
-          event: 'upsert',
-          data: { thread: failedThread },
+    if (!turnWasUndone) {
+      try {
+        const failedThread = markMobileOrchestratorThreadFailed({
+          tabId: threadId,
+          repoPath,
+          error: err instanceof Error ? err.message : 'Failed to send message',
+          backend: activeBackend.id,
+          agent: activeAgentTag,
         });
+        if (failedThread) {
+          broadcast({
+            channel: 'orchestrator-threads',
+            event: 'upsert',
+            data: { thread: failedThread },
+          });
+        }
+      } catch (markErr) {
+        console.warn('[ws-server][orchestrator] failed to mark thread failed', markErr);
       }
-    } catch (markErr) {
-      console.warn('[ws-server][orchestrator] failed to mark thread failed', markErr);
+    }
+    if (turnWasUndone) {
+      if (sessionName) {
+        broadcastToOrchestratorSession(sessionName, JSON.stringify({
+          channel: 'orchestrator',
+          event: 'status',
+          data: { status: 'ready', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
+        }));
+      }
+      return;
     }
     // Broadcast the error to EVERY subscriber on this thread, not just the
     // origin client — a phone-started turn that throws must also release the
@@ -4776,6 +4807,8 @@ async function handleOrchestratorSendMsgOnce(
     if (correlationId && !commandAccepted) {
       throw new OrchestratorSendRejectedBeforeAcceptance(err);
     }
+  } finally {
+    undoneOrchestratorUserMessageIds.delete(userMessageId);
   }
 }
 
@@ -4837,6 +4870,43 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   });
   // Leave the map entry in place; handleOrchestratorSendMsg removes it when
   // the turn resolves (the abort causes close to fire within 1-2s).
+}
+
+function handleOrchestratorUndoSend(client: ClientState, msg: Record<string, unknown>) {
+  const threadId = resolveMsgThreadId(msg);
+  const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+  const userMessageId = typeof msg.userMessageId === 'string' ? msg.userMessageId.trim() : '';
+  if (!threadId?.startsWith('thoughts-') || !correlationId) return;
+  if (userMessageId !== `orch-user-${correlationId}`) return;
+
+  undoneOrchestratorUserMessageIds.add(userMessageId);
+  // A completed turn may receive undo just after its send handler released;
+  // bound the tombstone even when there is no handler left to clear it.
+  setTimeout(() => undoneOrchestratorUserMessageIds.delete(userMessageId), 60_000).unref?.();
+
+  handleOrchestratorInterrupt(client, msg);
+  const updatedThread = truncateMobileOrchestratorThreadFromMessage({
+    tabId: threadId,
+    messageId: userMessageId,
+  });
+  if (updatedThread) {
+    broadcast({
+      channel: 'orchestrator-threads',
+      event: 'upsert',
+      data: { thread: updatedThread },
+    });
+  }
+
+  send(client, {
+    channel: 'orchestrator',
+    event: 'undo-ack',
+    data: {
+      repoPath: typeof msg.repoPath === 'string' ? msg.repoPath : null,
+      threadId,
+      userMessageId,
+      ...orchestratorCommandAckCorrelation(correlationId),
+    },
+  });
 }
 
 async function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
