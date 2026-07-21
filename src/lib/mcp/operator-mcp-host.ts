@@ -270,6 +270,27 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'report_packet_event'),
 ];
 
+/**
+ * The autonomous dogfood process is an external Claude client that needs the
+ * installed app as its hands and eyes, not a second control plane. Its launcher
+ * sets this process-local profile so task creation, dispatch, approvals, merge,
+ * and every non-webview MCP verb are absent from both discovery and execution.
+ * The default remains the complete operator surface for normal clients.
+ */
+const DOGFOOD_TOOL_NAMES = new Set([
+  ...O8_WEBVIEW_TOOLS.filter((tool) => tool.name.startsWith('o8_view_')).map((tool) => tool.name),
+  'o8_view_console_errors',
+  'o8_view_active_route',
+]);
+
+export function operatorToolsForProfile(profile = process.env.O8_OPERATOR_MCP_PROFILE): McpTool[] {
+  if (!profile || profile === 'full') return TOOLS;
+  if (profile === 'dogfood') return TOOLS.filter((tool) => DOGFOOD_TOOL_NAMES.has(tool.name));
+  // An explicitly requested but unknown profile fails closed. A typo in a
+  // safety launcher must not silently restore approvals or task tools.
+  return [];
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   o8_send: handleSend,
   o8_status: handleStatus,
@@ -346,12 +367,22 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest): Pro
       },
     };
   }
-  if (method === 'tools/list') return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
+  const activeTools = operatorToolsForProfile();
+  if (method === 'tools/list') return { jsonrpc: '2.0', id, result: { tools: activeTools } };
   if (method === 'tools/call') {
     const toolName = (params as Record<string, unknown> | undefined)?.name as string;
     const toolArgs = expandToolPathArgs(
       ((params as Record<string, unknown> | undefined)?.arguments ?? {}) as Record<string, unknown>,
     ) as Record<string, unknown>;
+    const exposed = activeTools.some((tool) => tool.name === toolName);
+    if (!exposed) {
+      const profile = process.env.O8_OPERATOR_MCP_PROFILE?.trim() || 'full';
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: textResult(`Tool unavailable in operator MCP profile ${profile}: ${toolName}`, true),
+      };
+    }
     const handler = TOOL_HANDLERS[toolName];
     if (!handler) return { jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) };
     try {
