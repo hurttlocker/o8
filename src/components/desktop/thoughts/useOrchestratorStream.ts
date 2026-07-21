@@ -15,9 +15,7 @@ import {
   subscribeOrchestratorMissionCompleted,
   type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
-import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import {
   createOrchestratorClientMessageId,
   deliverOrchestratorPayload,
@@ -60,6 +58,13 @@ import {
   type CurrentAssistantStreamState,
   type OrchestratorSnapshotTurn,
 } from './use-orchestrator-stream/socket';
+import type {
+  OrchestratorSendHandle,
+  OrchestratorSendOptions,
+  OrchestratorStreamResult,
+} from './use-orchestrator-stream/types';
+
+export type { OrchestratorSendHandle } from './use-orchestrator-stream/types';
 
 export {
   DEFAULT_ORCHESTRATOR_MODEL,
@@ -75,59 +80,6 @@ export type {
 // module-level so remounts (tab flaps) can't re-rotate a mission whose
 // completion event re-fires from boot-time state oscillation.
 const rotatedMissionIds = new Set<string>();
-
-interface OrchestratorStreamResult {
-  messages: MobileTranscriptEntry[];
-  planText: string | null;
-  status: OrchestratorStreamStatus;
-  busyState: ThoughtsOrchestratorBusyState;
-  tokenCount: number;
-  runningTotal: number;
-  estimateNextTurnTokens: (message: string) => number;
-  send: (message: string, options?: OrchestratorSendOptions) => void;
-  interrupt: () => void;
-  appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
-  replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
-  fetchTelemetrySnapshot: () => Promise<{ totalTokens: number | null; estimatedCostUsd: number | null; model: string | null }>;
-  compactNow: (options?: { keepTailCount?: number; source?: 'manual' | 'handoff' }) => Promise<{
-    applied: boolean;
-    transcript: MobileTranscriptEntry[];
-    resumePrelude: string | null;
-    tokensAfter: number;
-  } | null>;
-  reset: () => void;
-  retryPendingSend: (clientMessageId: string) => void;
-  connected: boolean;
-}
-
-interface OrchestratorSendOptions {
-  permissionMode?: OrchestratorPermissionMode;
-  backend?: OrchestratorBackendId;
-  thinkingEffort?: ThinkingEffort;
-  model?: string;
-  /**
-   * Text shown in the transcript for the user's turn. The outbound `message`
-   * can be a structured dispatcher prompt while the visible chat stays clean.
-   */
-  displayMessage?: string;
-  /** Local system/command entries inserted immediately after the user bubble. */
-  localEntriesAfterUser?: MobileTranscriptEntry[];
-  /** Canonical per-turn dispatch policy shared with the canvas composer. */
-  orchestrationMode?: OrchestratorExecutionMode;
-  /**
-   * Collide / MoA mode. When true, the turn routes to the `collide` backend:
-   * Claude + Codex propose independently (read-only), Claude synthesizes + does
-   * the work. Forces `backend: 'collide'` on the outbound payload; the swarm
-   * directive is NOT applied (Collide is its own fusion).
-   */
-  collide?: boolean;
-  /**
-   * Composer picture pills. ThoughtsChatPanel has always passed these; the
-   * wire silently dropped them until 2026-06-12 — now they ride the
-   * orchestrator-send payload and reach the model as image blocks.
-   */
-  attachments?: Array<{ dataUri: string; name?: string }>;
-}
 
 interface ActiveTurnState {
   startedAt: number;
@@ -167,7 +119,7 @@ export function useOrchestratorStream(
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
-  const [busyState, setBusyState] = useState<ThoughtsOrchestratorBusyState>(() => createIdleBusyState());
+  const [busyState, setBusyState] = useState(() => createIdleBusyState());
   const [connected, setConnected] = useState(false);
   const [tokenCount, setTokenCount] = useState(0);
   const [runningTotal, setRunningTotal] = useState(0);
@@ -243,6 +195,7 @@ export function useOrchestratorStream(
   // after the socket opened means the turn is legitimately starting (and may be
   // cold-starting the orchestrator before its first event), not stale carryover.
   const lastSendAtRef = useRef(0);
+  const suppressTurnEventsRef = useRef(false);
   const RECONNECT_HEAL_DELAY_MS = 3000;
   useEffect(() => {
     messagesRef.current = messages;
@@ -674,6 +627,7 @@ export function useOrchestratorStream(
       setMessages,
       setStatus,
       statusRef,
+      suppressTurnEventsRef,
       turnTranscriptEventCountRef,
       wsRef,
     });
@@ -943,7 +897,7 @@ export function useOrchestratorStream(
               timestampLabel: formatTimestampLabel(at),
             }]
       ));
-      return;
+      return null;
     }
 
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
@@ -963,6 +917,28 @@ export function useOrchestratorStream(
     const orchestrationMode: OrchestratorExecutionMode = collide
       ? 'fleet'
       : requestedOrchestrationMode;
+    suppressTurnEventsRef.current = false;
+    const clientMessageId = createOrchestratorClientMessageId();
+    const sentAtMs = Date.now();
+    const transcriptBeforeSend = messagesRef.current;
+
+    // Mint before returning the handle so undo always targets the exact durable
+    // thread even when this is the first message on a fresh tab.
+    if (!threadIdRef.current) {
+      const minted = `thoughts-${Date.now()}`;
+      threadIdRef.current = minted;
+      try { onThreadIdMintRef.current?.(minted); } catch { /* parent owns the consequence */ }
+    }
+    const sendHandle: OrchestratorSendHandle = {
+      clientMessageId,
+      userMessageId: `orch-user-${clientMessageId}`,
+      threadId: threadIdRef.current,
+      backend: backend ?? null,
+      transcriptBeforeSend,
+    };
+    lastSendAtRef.current = sentAtMs;
+    lastEventAtRef.current = sentAtMs;
+    setPendingStatusBusy();
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
@@ -970,7 +946,7 @@ export function useOrchestratorStream(
         activeTurnBackendRef.current = null;
         return;
       }
-      const transcriptSnapshot = messagesRef.current;
+      const transcriptSnapshot = transcriptBeforeSend;
       let planCaptureSource = transcriptSnapshot;
       const projectedTokens = estimateNextTurnTokens(message);
       if (projectedTokens >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
@@ -1025,10 +1001,8 @@ export function useOrchestratorStream(
           return;
         }
       }
-      const clientMessageId = createOrchestratorClientMessageId();
-      const sentAtMs = Date.now();
       const userEntry: MobileTranscriptEntry = {
-        id: `orch-user-${clientMessageId}`,
+        id: sendHandle.userMessageId,
         role: 'user',
         text: displayMessage,
         timestamp: sentAtMs,
@@ -1043,20 +1017,8 @@ export function useOrchestratorStream(
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
 
-      // Mint a threadId synchronously if the parent's state hasn't landed
-      // yet. ws-server uses `threadId.startsWith('thoughts-')` to decide
-      // whether to persist the assistant reply — without an id here, the
-      // turn streams to the open client but never lands in
-      // ~/.o8/chat-history/<id>.json, so a reload shows the user message
-      // alone with no reply. Notify the parent so its `threadId` state
-      // catches up on the next render.
-      if (!threadIdRef.current) {
-        const minted = `thoughts-${Date.now()}`;
-        threadIdRef.current = minted;
-        try { onThreadIdMintRef.current?.(minted); } catch { /* parent owns the consequence */ }
-      }
       let outboundMessage = message;
-      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, threadIdRef.current);
+      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId);
       if (resumePrelude) {
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
       }
@@ -1064,7 +1026,7 @@ export function useOrchestratorStream(
       const payload = JSON.stringify({
         type: 'orchestrator-send',
         repoPath: activeRepoPath,
-        ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
+        threadId: sendHandle.threadId,
         clientMessageId,
         message: outboundMessage,
         // What the TRANSCRIPT stores/shows — the user's own words, never the
@@ -1083,7 +1045,7 @@ export function useOrchestratorStream(
       const pendingRecord = {
         text: outboundMessage,
         displayMessage,
-        threadId: threadIdRef.current!,
+        threadId: sendHandle.threadId,
         clientMessageId,
         sentAtMs,
         wirePayload: payload,
@@ -1107,7 +1069,39 @@ export function useOrchestratorStream(
       durablePendingSend.armRecord(pendingRecord, deliveredAt);
       setPendingStatusBusy();
     })();
+    return sendHandle;
   }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy]);
+
+  const undoSend = useCallback((handle: OrchestratorSendHandle) => {
+    const activeRepoPath = repoPathRef.current;
+    durablePendingSend.cancelPending(handle.clientMessageId);
+    syncMessages(handle.transcriptBeforeSend);
+    currentAssistantRef.current = null;
+    activeTurnRef.current = null;
+    activeTurnBackendRef.current = null;
+    suppressTurnEventsRef.current = true;
+    turnTranscriptEventCountRef.current = 0;
+    resetFirstTurnPlanCapture();
+    const nextStatus = connected ? 'ready' : 'connecting';
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
+    setBusyState(createIdleBusyState());
+
+    if (!activeRepoPath) return;
+    const payload = JSON.stringify({
+      type: 'orchestrator-undo-send',
+      repoPath: activeRepoPath,
+      threadId: handle.threadId,
+      clientMessageId: handle.clientMessageId,
+      userMessageId: handle.userMessageId,
+      ...(handle.backend ? { backend: handle.backend } : {}),
+    });
+    void deliverOrchestratorPayload({
+      payload,
+      getWebSocket: () => wsRef.current,
+      connect: () => { console.warn('[orchestrator-stream] WS not open, reconnecting to undo send...'); connect(); },
+    });
+  }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages]);
 
   return {
     messages,
@@ -1119,6 +1113,7 @@ export function useOrchestratorStream(
     estimateNextTurnTokens,
     send,
     interrupt,
+    undoSend,
     appendLocalEntries,
     replaceTranscript,
     fetchTelemetrySnapshot: async () => (

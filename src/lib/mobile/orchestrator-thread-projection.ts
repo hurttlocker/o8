@@ -1,0 +1,156 @@
+import { basename } from 'node:path';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
+import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
+
+const DEFAULT_MODEL = 'claude-code';
+
+export type ChatHistoryMessage = {
+  id?: string;
+  role?: string;
+  content?: string;
+  timestamp?: number;
+  persistedVersion?: number;
+};
+
+export type OrchestratorHistoryRecord = {
+  messages?: ChatHistoryMessage[];
+  model?: string | null;
+  savedAt?: string | null;
+  title?: string | null;
+  repoPath?: string | null;
+  repoName?: string | null;
+  repoBranch?: string | null;
+  remoteUrl?: string | null;
+  backend?: string | null;
+  agent?: string | null;
+  archivedAt?: string | null;
+  starred?: boolean;
+  pinned?: boolean;
+  orchestratorVisible?: boolean;
+  mobileCreatedAt?: string | null;
+  mobileRevealRequestedAt?: string | null;
+  orchestratorTerminalStatus?: 'failed' | null;
+  orchestratorTerminalError?: string | null;
+  orchestratorTerminalAt?: string | null;
+  orchestratorSessionIds?: Record<string, string | null>;
+  orchestratorSessionUpdatedAt?: string | null;
+};
+
+export function normalizeSessionIds(value: unknown): Record<string, string | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized: Record<string, string | null> = {};
+  for (const [key, rawSessionId] of Object.entries(value as Record<string, unknown>)) {
+    if (!key) continue;
+    if (rawSessionId === null) {
+      normalized[key] = null;
+      continue;
+    }
+    if (typeof rawSessionId !== 'string') continue;
+    const sessionId = rawSessionId.trim();
+    if (sessionId) normalized[key] = sessionId;
+  }
+  return normalized;
+}
+
+export function normalizeBackend(value: unknown): MobileOrchestratorBackend | null {
+  return isOrchestratorBackendId(value) ? value : null;
+}
+
+export function normalizeAgent(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 128) : null;
+}
+
+export function normalizeErrorMessage(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 500) : null;
+}
+
+function inferRuntime(model: string | undefined | null): MobileOrchestratorThread['runtime'] {
+  if (!model) return 'unknown';
+  const lower = model.toLowerCase();
+  if (lower.includes('claude')) return 'claude-code';
+  if (lower.includes('gemini')) return 'gemini';
+  if (lower.includes('opencode')) return 'opencode';
+  if (lower.includes('codex') || lower.startsWith('gpt')) return 'codex';
+  return 'unknown';
+}
+
+export function inferBackendFromSessionIds(record: OrchestratorHistoryRecord): MobileOrchestratorBackend | null {
+  const sessionIds = normalizeSessionIds(record.orchestratorSessionIds);
+  if (sessionIds.claude) return 'claude';
+  if (sessionIds.codex) return 'codex';
+  return null;
+}
+
+export function modelForBackend(backend: MobileOrchestratorBackend | null): string | null {
+  if (backend === 'claude') return 'claude-code';
+  if (backend === 'codex') return 'codex';
+  if (backend === 'openclaw') return 'openclaw';
+  if (backend === 'hermes') return 'hermes';
+  return null;
+}
+
+export function effectiveBackend(record: OrchestratorHistoryRecord): MobileOrchestratorBackend | null {
+  return normalizeBackend(record.backend) ?? inferBackendFromSessionIds(record);
+}
+
+function effectiveModel(tabId: string, record: OrchestratorHistoryRecord): string | null {
+  if (typeof record.model === 'string' && record.model.trim()) return record.model.trim();
+  const backendModel = modelForBackend(effectiveBackend(record));
+  if (backendModel) return backendModel;
+  return tabId.startsWith('thoughts-') ? DEFAULT_MODEL : null;
+}
+
+export function trimTitle(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  return trimmed.slice(0, 80);
+}
+
+export function repoNameFromPath(repoPath: string | null): string | null {
+  if (!repoPath) return null;
+  const name = basename(repoPath.replace(/[/\\]+$/, ''));
+  return name || null;
+}
+
+export function projectOrchestratorThread(
+  tabId: string,
+  record: OrchestratorHistoryRecord,
+  modifiedAt: string,
+): MobileOrchestratorThread {
+  const messages = Array.isArray(record.messages) ? record.messages : [];
+  const lastMessage = messages[messages.length - 1];
+  const fallbackTitle = stableOrchestratorThreadTitleForId(tabId, record.savedAt || modifiedAt);
+  const repoPath = typeof record.repoPath === 'string' ? record.repoPath : null;
+  const githubIdentity = resolveRepoGithubIdentity(repoPath, record.remoteUrl);
+  const lastSpokeMs = messages.reduce((max, message) => (
+    Number.isFinite(message?.timestamp) && (message.timestamp as number) > max
+      ? (message.timestamp as number)
+      : max
+  ), 0);
+
+  return {
+    id: tabId,
+    title: trimTitle(record.title, fallbackTitle),
+    lastMessageAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : (record.savedAt || modifiedAt),
+    runtime: inferRuntime(effectiveModel(tabId, record)),
+    status: record.orchestratorTerminalStatus === 'failed'
+      ? 'failed'
+      : messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
+    messageCount: messages.length,
+    repoPath,
+    repoName: typeof record.repoName === 'string' && record.repoName.trim()
+      ? record.repoName
+      : repoNameFromPath(repoPath),
+    repoBranch: typeof record.repoBranch === 'string' ? record.repoBranch : null,
+    githubOwner: githubIdentity.githubOwner,
+    githubRepo: githubIdentity.githubRepo,
+    backend: effectiveBackend(record),
+    agent: normalizeAgent(record.agent),
+    pinned: record.pinned === true,
+  };
+}

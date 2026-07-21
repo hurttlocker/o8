@@ -5,7 +5,6 @@ import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
-import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
@@ -71,18 +70,9 @@ interface ComposerAreaProps {
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
   composerLeadingExtras?: React.ReactNode;
-  /** ⌘⏎ in the composer fires this. Consumer enqueues when busy, sends when idle. */
+  /** ⌘⏎ or Return while busy routes through the host send buffer. */
   onSteer?: () => void;
-  /** Queued steers waiting for an idle agent. Rendered as a card above the composer. */
-  pendingSteers?: PendingSteer[];
-  /** Preempt: abort the running turn + bump this steer to fire next. */
-  onSteerNow?: (id: string) => void;
-  /** Discard a queued steer without firing. */
-  onDeleteSteer?: (id: string) => void;
-  /** Commit an inline-edit on a queued steer. */
-  onEditSteer?: (id: string, text: string) => void;
-  /** Notify the consumer when a row enters/leaves inline-edit. Used to pause auto-fire of the head while it's being edited. */
-  onEditingSteerChange?: (id: string | null) => void;
+  sendBufferStatus?: React.ReactNode;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -136,27 +126,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSelectRepoPath,
   composerLeadingExtras,
   onSteer,
-  pendingSteers,
-  onSteerNow,
-  onDeleteSteer,
-  onEditSteer,
-  onEditingSteerChange,
+  sendBufferStatus,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  // Conductor-style keyboard queue (borrow: @mattyp tweet). queueNavIndex !== null
-  // means keyboard focus is "in" the steer queue (the index is the focused steer);
-  // null means the composer has focus. autoEditSteerId asks PendingSteerCard to
-  // begin an inline edit on that steer (the E key).
-  const [queueNavIndex, setQueueNavIndex] = useState<number | null>(null);
-  const [autoEditSteerId, setAutoEditSteerId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!pendingSteers || pendingSteers.length === 0) {
-      setQueueNavIndex(null);
-      setAutoEditSteerId(null);
-    }
-  }, [pendingSteers]);
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -351,6 +325,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           awaitingReply={awaitingReply}
         />
       ) : null}
+      {sendBufferStatus}
       <div style={{ position: 'relative' }}>
         <SlashCommandPicker
           suggestions={slashSuggestions}
@@ -541,30 +516,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             </div>
           ) : null}
 
-          {pendingSteers && pendingSteers.length > 0 && onSteerNow && onDeleteSteer && onEditSteer ? (
-            <PendingSteerCard
-              steers={pendingSteers}
-              focusedIndex={queueNavIndex}
-              autoEditId={autoEditSteerId}
-              onSteerNow={onSteerNow}
-              onDelete={onDeleteSteer}
-              onEdit={onEditSteer}
-              onEditingChange={(id) => {
-                onEditingSteerChange?.(id);
-                if (id === null) {
-                  // Inline edit finished — drop the E-trigger, exit queue nav, and
-                  // return focus to the composer so ↑ can re-enter the queue.
-                  setAutoEditSteerId(null);
-                  setQueueNavIndex(null);
-                  requestAnimationFrame(() => {
-                    const node = inputRef && typeof inputRef !== 'function' && 'current' in inputRef ? inputRef.current : null;
-                    node?.focus();
-                  });
-                }
-              }}
-            />
-          ) : null}
-
           <textarea
             ref={inputRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
@@ -576,25 +527,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
             onKeyDown={(event) => {
-              // Conductor-style keyboard queue: when focus is "in" the steer queue,
-              // ↑/↓ navigate, E edits, Return steers-now, Delete removes, Esc/any
-              // other key returns to the composer. The textarea keeps DOM focus
-              // (the queue is navigated virtually) until E moves focus into the
-              // inline editor.
-              if (queueNavIndex !== null && pendingSteers && pendingSteers.length > 0) {
-                const count = pendingSteers.length;
-                const idx = Math.min(queueNavIndex, count - 1);
-                if (event.key === 'ArrowUp') { event.preventDefault(); setQueueNavIndex(Math.max(0, idx - 1)); return; }
-                if (event.key === 'ArrowDown') { event.preventDefault(); setQueueNavIndex(idx >= count - 1 ? null : idx + 1); return; }
-                if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSteerNow?.(pendingSteers[idx].id); setQueueNavIndex(null); return; }
-                if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); onDeleteSteer?.(pendingSteers[idx].id); setQueueNavIndex(count - 1 <= 0 ? null : Math.min(idx, count - 2)); return; }
-                if (event.key === 'e' || event.key === 'E') { event.preventDefault(); setAutoEditSteerId(pendingSteers[idx].id); return; }
-                if (event.key === 'Escape') { event.preventDefault(); setQueueNavIndex(null); return; }
-                if (event.key === 'Shift' || event.key === 'Meta' || event.key === 'Control' || event.key === 'Alt') { return; }
-                // Any other key (typing) exits queue nav and falls through so the
-                // keystroke lands in the composer.
-                setQueueNavIndex(null);
-              }
               if (slashSuggestions.length > 0) {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault();
@@ -615,12 +547,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
               if (event.key === 'ArrowUp' && !input.trim()) {
                 event.preventDefault();
-                // ↑ on an empty composer enters the steer queue if one exists
-                // (Conductor borrow); otherwise recall the last sent message.
-                if (pendingSteers && pendingSteers.length > 0) {
-                  setQueueNavIndex(pendingSteers.length - 1);
-                  return;
-                }
                 const lastUserMsg = [...chatMessages].reverse().find((message) => message.role === 'user');
                 if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;

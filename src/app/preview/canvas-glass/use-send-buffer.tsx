@@ -21,14 +21,19 @@
  * value lives in the composer).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import {
+  SEND_UNDO_GRACE_MS,
+  useComposerSendBuffer,
+  type ComposerSendBuffer,
+  type ComposerSendImage,
+  type QueuedComposerSend,
+} from '@/lib/hooks/use-composer-send-buffer';
 import { FONT } from './ui';
 
-export const SEND_UNDO_GRACE_MS = 4500;
-
-export interface ComposerImage { name: string; dataUri: string }
-export interface QueuedSend { id: number; text: string; images: ComposerImage[] }
+export { SEND_UNDO_GRACE_MS };
+export type ComposerImage = ComposerSendImage;
+export type QueuedSend = QueuedComposerSend;
 
 /** Where an undo would truncate the transcript back to. Returned by a
  *  successful dispatch; null means the send never went out (don't arm undo). */
@@ -49,101 +54,17 @@ export interface SendBufferConfig {
   truncate: (lane: string, fromEntryId: number) => void;
 }
 
-export interface SendBuffer {
-  /** Queue when busy, else dispatch + arm the undo window. Returns true when
-   *  the message was accepted (so the composer can clear). */
-  send: (text: string, images?: ComposerImage[]) => boolean;
-  /** Always stops the run; within the grace window also restores + erases. */
-  stopOrUndo: () => void;
-  /** A just-sent message is still take-back-able. */
-  undoArmed: boolean;
-  queued: QueuedSend[];
-  cancelQueued: (id: number) => void;
-}
+export type SendBuffer = ComposerSendBuffer;
 
 export function useSendBuffer(config: SendBufferConfig): SendBuffer {
-  // Host callbacks change identity every render; mirror them so the edge
-  // effect and stable callbacks below always see the latest without re-running.
-  const cfgRef = useRef(config);
-  cfgRef.current = config;
-  const graceMs = config.graceMs ?? SEND_UNDO_GRACE_MS;
-
-  const [queued, setQueued] = useState<QueuedSend[]>([]);
-  const queuedRef = useRef(queued);
-  queuedRef.current = queued;
-  const idRef = useRef(1);
-
-  const [undoArmed, setUndoArmed] = useState(false);
-  const undoRef = useRef<{ text: string; images: ComposerImage[]; lane: string; fromEntryId: number } | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevBusyRef = useRef(config.busy);
-
-  const disarm = useCallback(() => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    undoRef.current = null;
-    setUndoArmed(false);
-  }, []);
-
-  const arm = useCallback((handle: DispatchHandle, text: string, images: ComposerImage[]) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    undoRef.current = { text, images, lane: handle.lane, fromEntryId: handle.fromEntryId };
-    setUndoArmed(true);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      undoRef.current = null;
-      setUndoArmed(false);
-    }, graceMs);
-  }, [graceMs]);
-
-  const send = useCallback((text: string, images: ComposerImage[] = []) => {
-    const trimmed = text.trim();
-    if (!trimmed) return false;
-    if (cfgRef.current.busy) {
-      const id = idRef.current;
-      idRef.current += 1;
-      setQueued((previous) => [...previous, { id, text: trimmed, images }]);
-      return true;
-    }
-    const handle = cfgRef.current.dispatch(trimmed, images);
-    if (!handle) return false;
-    arm(handle, trimmed, images);
-    return true;
-  }, [arm]);
-
-  const stopOrUndo = useCallback(() => {
-    cfgRef.current.interrupt(); // the run always stops
-    const buf = undoRef.current;
-    if (!buf) return; // past the window — just a stop
-    disarm();
-    cfgRef.current.truncate(buf.lane, buf.fromEntryId);
-    cfgRef.current.restore(buf.text, buf.images);
-  }, [disarm]);
-
-  const cancelQueued = useCallback((id: number) => {
-    setQueued((previous) => previous.filter((item) => item.id !== id));
-  }, []);
-
-  // Busy → idle edge: the finished turn's undo window closes, and the next
-  // queued message fires. Edge-detection serializes the queue — the dispatched
-  // message flips busy back on, so the next one waits for the following edge.
-  useEffect(() => {
-    const was = prevBusyRef.current;
-    prevBusyRef.current = config.busy;
-    if (was && !config.busy) {
-      disarm();
-      const q = queuedRef.current;
-      if (q.length > 0) {
-        const [head, ...rest] = q;
-        setQueued(rest);
-        const handle = cfgRef.current.dispatch(head.text, head.images);
-        if (handle) arm(handle, head.text, head.images);
-      }
-    }
-  }, [config.busy, disarm, arm]);
-
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
-
-  return { send, stopOrUndo, undoArmed, queued, cancelQueued };
+  return useComposerSendBuffer({
+    busy: config.busy,
+    graceMs: config.graceMs,
+    dispatch: config.dispatch,
+    interrupt: config.interrupt,
+    restore: config.restore,
+    truncate: (handle) => config.truncate(handle.lane, handle.fromEntryId),
+  });
 }
 
 /** The take-it-back affordance — a quiet pill that surfaces for the grace
