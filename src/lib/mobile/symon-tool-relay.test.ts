@@ -9,11 +9,15 @@ import {
   ToolCallTracker,
   SymonAsyncActionTracker,
   SymonConfirmationTracker,
+  PLAN_TOOL_TIMEOUT_MS,
   TOOL_TIMEOUT_MS,
   buildSymonActionComplete,
   toolTimeoutResult,
   toolErrorResult,
   deriveOk,
+  parseSymonPendingConfirmation,
+  symonReviewGuardId,
+  symonToolTimeoutMs,
 } from './symon-tool-relay';
 
 function call(callId: string, sessionId = 'sym-1', tool = 'o8_status', startedAt = 0) {
@@ -77,6 +81,21 @@ describe('ToolCallTracker — strict callId correlation', () => {
     expect(t.replay('sym-1', 'stale', now)?.outcome).toEqual(toolTimeoutResult());
   });
 
+  it('gives a bounded plan chain five action windows before timing it out', () => {
+    const t = new ToolCallTracker();
+    t.add(call('plan', 'sym-1', 'symon_execute_plan', 0));
+    expect(symonToolTimeoutMs('o8_status')).toBe(TOOL_TIMEOUT_MS);
+    expect(symonToolTimeoutMs('symon_execute_plan')).toBe(PLAN_TOOL_TIMEOUT_MS);
+    expect(t.timedOut(TOOL_TIMEOUT_MS + 1)).toEqual([]);
+    expect(t.timedOut(PLAN_TOOL_TIMEOUT_MS + 1).map((item) => item.callId)).toEqual(['plan']);
+  });
+
+  it('derives one exact native cancellation guard from session + call correlation', () => {
+    expect(symonReviewGuardId('session-1', 'call-1')).toBe('phone:["session-1","call-1"]');
+    expect(symonReviewGuardId('session-1', 'call-2')).not.toBe(symonReviewGuardId('session-1', 'call-1'));
+    expect(symonReviewGuardId('a:b', 'c')).not.toBe(symonReviewGuardId('a', 'b:c'));
+  });
+
   it('removeSession drops every call for a session (stop / preemption)', () => {
     const t = new ToolCallTracker();
     t.add(call('a', 'sym-1'));
@@ -106,6 +125,43 @@ describe('ToolCallTracker — strict callId correlation', () => {
     expect(t.timedOut(TOOL_TIMEOUT_MS + 1)).toEqual([]);
     t.markExecuting('sym-1', 'confirm', TOOL_TIMEOUT_MS + 1);
     expect(t.timedOut((TOOL_TIMEOUT_MS * 2) + 2).map((item) => item.callId)).toEqual(['confirm']);
+    expect(t.markInterrupting('sym-1', 'confirm')).toMatchObject({ phase: 'interrupting' });
+    expect(t.markInterrupting('sym-1', 'confirm')).toBeNull();
+    expect(t.timedOut((TOOL_TIMEOUT_MS * 3) + 3)).toEqual([]);
+  });
+
+  it('rotates serial confirmation ids without completing the parent plan call', () => {
+    const t = new ToolCallTracker();
+    t.add(call('plan-call', 'sym-1', 'symon_execute_plan'));
+    expect(t.markAwaitingConfirmation('sym-1', 'plan-call', 'confirm-plan')).toMatchObject({
+      phase: 'awaiting_confirmation',
+      confirmationId: 'confirm-plan',
+    });
+    expect(t.markExecuting('sym-1', 'plan-call', 10)).toMatchObject({ phase: 'executing' });
+    expect(t.markAwaitingConfirmation('sym-1', 'plan-call', 'confirm-destructive')).toMatchObject({
+      phase: 'awaiting_confirmation',
+      confirmationId: 'confirm-destructive',
+    });
+    expect(t.replay('sym-1', 'plan-call', 11)).toBeNull();
+    expect(t.complete('sym-1', 'plan-call', { ok: true, result: { ok: true } }, 12)?.action)
+      .toMatchObject({ status: 'done', confirmationId: 'confirm-destructive' });
+  });
+
+  it('keeps interrupt-before-confirmation-registration terminal and replayable', () => {
+    const t = new ToolCallTracker();
+    t.add(call('plan-call', 'sym-1', 'symon_execute_plan'));
+    const stopped = t.complete(
+      'sym-1',
+      'plan-call',
+      { ok: false, result: { error: 'session_preempted' } },
+      10,
+    );
+    expect(stopped?.action.status).toBe('stopped');
+    expect(t.markAwaitingConfirmation('sym-1', 'plan-call', 'late-confirm')).toBeNull();
+    expect(t.replay('sym-1', 'plan-call', 11)?.outcome).toEqual({
+      ok: false,
+      result: { error: 'session_preempted' },
+    });
   });
 
   it('preemption tombstones active calls so a retry cannot execute twice', () => {
@@ -139,6 +195,57 @@ describe('tool-relay result shapes', () => {
     expect(deriveOk('a string result')).toBe(true);
     expect(deriveOk(null)).toBe(true);
     expect(deriveOk({ value: 42 })).toBe(true);
+  });
+
+  it('classifies failed and cancelled native plan results at the outer relay boundary', () => {
+    const cancelled = { ok: false, error: 'session_stopped', cancelled: true };
+    const failed = { ok: false, error: 'plan_failed', failedStep: 2 };
+    expect(deriveOk(cancelled)).toBe(false);
+    expect(deriveOk(failed)).toBe(false);
+    expect(buildSymonActionComplete(
+      call('cancelled-plan', 'sym-1', 'symon_execute_plan'),
+      { ok: deriveOk(cancelled), result: cancelled },
+      1,
+    ).status).toBe('stopped');
+    expect(buildSymonActionComplete(
+      call('failed-plan', 'sym-1', 'symon_execute_plan'),
+      { ok: deriveOk(failed), result: failed },
+      1,
+    ).status).toBe('failed');
+  });
+});
+
+describe('parseSymonPendingConfirmation', () => {
+  it('preserves a correlated numbered plan without trusting malformed steps', () => {
+    const expected = { sessionId: 'sym-1', callId: 'call-1', tool: 'symon_execute_plan' };
+    const value = {
+      ...expected,
+      confirmationId: 'confirm-1',
+      taskId: 'realtime-1',
+      summary: 'I will do two things.',
+      expiresAt: 10_000,
+      target: {},
+      kind: 'plan',
+      plan: {
+        planId: 'plan-1',
+        steps: [
+          { index: 1, summary: 'Read the repository status' },
+          { index: 2, summary: 'Dispatch the approved task' },
+        ],
+      },
+    };
+    expect(parseSymonPendingConfirmation(value, expected)).toMatchObject({
+      kind: 'plan',
+      plan: { planId: 'plan-1', steps: value.plan.steps },
+    });
+    expect(parseSymonPendingConfirmation({
+      ...value,
+      plan: { ...value.plan, steps: [{ index: 1, summary: '' }] },
+    }, expected)).toBeNull();
+    expect(parseSymonPendingConfirmation({
+      ...value,
+      plan: { ...value.plan, steps: [{ index: 2, summary: 'Out of order' }, value.plan.steps[1]] },
+    }, expected)).toBeNull();
   });
 });
 
@@ -193,6 +300,43 @@ describe('SymonConfirmationTracker', () => {
       sessionId: 'sym-1', callId: 'call-1', confirmationId: 'confirm-1',
       allow: true, clientMutationId: 'm-2', now: 1,
     })).toMatchObject({ kind: 'in_flight' });
+  });
+
+  it('preempts only the exact interrupted call while leaving sibling cards live', () => {
+    const t = new SymonConfirmationTracker();
+    const first = confirmation(100);
+    const sibling = { ...first, callId: 'call-2', confirmationId: 'confirm-2' };
+    t.register(first, 0);
+    t.register(sibling, 0);
+    expect(t.preemptCall('sym-1', 'call-1')).toEqual([first]);
+    expect(t.claim({
+      sessionId: 'sym-1', callId: 'call-1', confirmationId: 'confirm-1',
+      allow: true, clientMutationId: 'm-1', now: 1,
+    })).toMatchObject({ kind: 'in_flight' });
+    expect(t.claim({
+      sessionId: 'sym-1', callId: 'call-2', confirmationId: 'confirm-2',
+      allow: true, clientMutationId: 'm-2', now: 1,
+    })).toMatchObject({ kind: 'claimed', allow: true });
+  });
+
+  it('accepts a second exact card after the aggregate plan card settles', () => {
+    const t = new SymonConfirmationTracker();
+    const aggregate = confirmation(1_000);
+    const destructive = { ...aggregate, confirmationId: 'confirm-2', summary: 'Send the draft' };
+    expect(t.register(aggregate, 0)).toBe(true);
+    expect(t.claim({
+      sessionId: 'sym-1', callId: 'call-1', confirmationId: 'confirm-1',
+      allow: true, clientMutationId: 'm-plan', now: 1,
+    })).toMatchObject({ kind: 'claimed', allow: true });
+    t.settle('sym-1', 'call-1', 'confirm-1', 'approved', 2);
+
+    expect(t.register(destructive, 3)).toBe(true);
+    expect(t.claim({
+      sessionId: 'sym-1', callId: 'call-1', confirmationId: 'confirm-2',
+      allow: false, clientMutationId: 'm-destructive', now: 4,
+    })).toMatchObject({ kind: 'claimed', allow: false });
+    expect(t.get('sym-1', 'call-1', 'confirm-1')).toMatchObject({ confirmationId: 'confirm-1' });
+    expect(t.get('sym-1', 'call-1', 'confirm-2')).toMatchObject({ confirmationId: 'confirm-2' });
   });
 });
 

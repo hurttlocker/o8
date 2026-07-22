@@ -334,6 +334,36 @@ export function scopeSymonToolArgs(
   if (!grant.allowedTools.includes(tool)) {
     return { ok: false, error: 'tool_not_allowed', detail: `${tool} is not allowed for this Symon session` };
   }
+
+  // A governed plan is one outer model call, but its concrete steps remain
+  // separate authorities. Scope and allowlist every nested call now, at the
+  // same immutable phone-session boundary used for ordinary tools, so wrapping
+  // an action in a plan can never widen its repository grant.
+  if (tool === 'symon_execute_plan' && Array.isArray(args.steps)) {
+    const scopedSteps: unknown[] = [];
+    for (const value of args.steps) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        scopedSteps.push(value);
+        continue;
+      }
+      const step = value as Record<string, unknown>;
+      const stepTool = typeof step.tool === 'string' ? step.tool : '';
+      if (stepTool === 'symon_execute_plan') {
+        return {
+          ok: false,
+          error: 'tool_not_allowed',
+          detail: 'A Symon plan cannot contain another plan',
+        };
+      }
+      const stepArgs = step.args && typeof step.args === 'object' && !Array.isArray(step.args)
+        ? step.args as Record<string, unknown>
+        : {};
+      const scoped = scopeSymonToolArgs(grant, stepTool, stepArgs);
+      if (!scoped.ok) return scoped;
+      scopedSteps.push({ ...step, args: scoped.args });
+    }
+    return { ok: true, args: { ...args, steps: scopedSteps } };
+  }
   if (grant.workspaceMode !== 'code' || !grant.repoId || !grant.repoPath) return { ok: true, args: { ...args } };
 
   const scopedArgs = {

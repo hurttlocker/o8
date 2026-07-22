@@ -33,11 +33,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
+import { formatPlanProgressGlint, type PlanProgressEvent, type PlanProgressGlint } from '@/components/desktop/dictation/planPresentation';
 import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
 import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentConfirmations';
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
+import { DockGlint } from './DockGlint';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,6 +74,7 @@ type TtsControlState = 'idle' | 'playing' | 'paused';
 type AskMode = 'idle' | 'listening' | 'answer';
 type WorkerSnapshot = { count: number; working: number; waiting: number; repos: string[] };
 type ParkedLaneSnapshot = { waiting: number; repos: string[]; tooltip: string | null };
+type DockGlint = PlanProgressGlint;
 const ASK_IDLE_COLLAPSE_MS = 45_000; // auto-collapse the panel after idle
 const ASK_RESUME_WINDOW_MS = 60_000; // preserve the thread if reopened within
 const ASK_MAX_TURNS = 16; // 8 exchanges before trimming the oldest
@@ -678,13 +681,20 @@ export default function DictationPillPage() {
 
   // Memory glint (dossier #4): a quiet one-line chip under the dock that fades
   // in, holds ~4s, fades out. Driven by `kind: glint` agent events.
-  const [glint, setGlint] = useState<string | null>(null);
+  const [glint, setGlint] = useState<DockGlint | null>(null);
   const [glintFading, setGlintFading] = useState(false);
   const glintTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const showGlint = useCallback((text: string) => {
+  const showGlint = useCallback((
+    text: string,
+    options: { key?: string; tone?: DockGlint['tone'] } = {},
+  ) => {
     for (const t of glintTimersRef.current) clearTimeout(t);
     glintTimersRef.current = [];
-    setGlint(text);
+    setGlint({
+      key: options.key ?? 'ambient',
+      text,
+      tone: options.tone ?? 'progress',
+    });
     setGlintFading(false);
     glintTimersRef.current.push(setTimeout(() => setGlintFading(true), 4200));
     glintTimersRef.current.push(setTimeout(() => { setGlint(null); setGlintFading(false); }, 4800));
@@ -736,8 +746,15 @@ export default function DictationPillPage() {
     import('@tauri-apps/api/event')
       .then(async ({ listen }) => {
         const add = (u: () => void) => { if (disposed) u(); else offs.push(u); };
-        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string; text?: string; sources?: Array<{ kind?: string; title?: string; url?: string }> }>('o8:agent-task-event', (e) => {
+        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string; text?: string; planId?: string; stepIndex?: number; stepCount?: number; summary?: string; sources?: Array<{ kind?: string; title?: string; url?: string }> }>('o8:agent-task-event', (e) => {
           const kind = e.payload?.kind;
+          if (kind === 'plan_progress') {
+            const progress = formatPlanProgressGlint(e.payload as PlanProgressEvent);
+            if (progress) {
+              showGlint(progress.text, { key: progress.key, tone: progress.tone });
+            }
+            return;
+          }
           if (kind === 'tool_call') {
             // Track the live tool so the working capsule can say "Synthesizing…"
             // for the Brain (o8_ask) vs a generic "Working…".
@@ -1008,34 +1025,7 @@ export default function DictationPillPage() {
           />
           <EditRevertChip onError={dockLog} />
         </div>
-        {glint ? (
-          <div
-            style={{
-              marginTop: 6,
-              paddingTop: 3,
-              paddingBottom: 3,
-              paddingLeft: 10,
-              paddingRight: 10,
-              borderRadius: 9,
-              background: 'linear-gradient(rgba(20,24,34,0.6), rgba(14,18,28,0.54))',
-              border: '1px solid rgba(255,255,255,0.14)',
-              fontSize: 9.5,
-              fontWeight: 260,
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase',
-              color: 'rgba(255, 255, 255, 0.82)',
-              textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
-              whiteSpace: 'nowrap',
-              opacity: glintFading ? 0 : 1,
-              transition: 'opacity 0.5s ease',
-              animation: 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
-              pointerEvents: 'none',
-            }}
-          >
-            {glint}
-            <style>{'@keyframes o8GlintIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }'}</style>
-          </div>
-        ) : null}
+        {glint ? <DockGlint key={glint.key} glint={glint} fading={glintFading} /> : null}
       </div>
     </div>
   );

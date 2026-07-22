@@ -4858,6 +4858,7 @@ mod agent_edit_revert_command_tests {
                 outcome: "succeeded",
                 session_id: None,
                 call_id: None,
+                plan: None,
                 inverse: Some(&inverse),
             })
             .unwrap();

@@ -77,8 +77,9 @@ import {
   SymonAsyncActionTracker,
   SymonConfirmationTracker,
   ToolCallTracker,
-  TOOL_TIMEOUT_MS,
   confirmationOutcomeFromResolution,
+  symonToolTimeoutMs,
+  type CompletedToolCall,
   type PendingToolCall,
   type SymonActionComplete,
   type SymonConfirmationOutcome,
@@ -3228,6 +3229,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'symon-confirm-decision':
       void handleSymonConfirmDecision(client, msg);
       break;
+    case 'symon-tool-interrupt':
+      void handleSymonToolInterrupt(client, msg);
+      break;
     case 'symon-agent-status':
       handleSymonAgentStatus(client, msg);
       break;
@@ -3339,19 +3343,46 @@ function pushSymonActionComplete(clientId: string, action: SymonActionComplete):
   send(client, { channel: 'symon', type: 'symon-action-complete', ...action });
 }
 
-function abortSymonSessionCalls(
+async function interruptSymonTool(call: PendingToolCall): Promise<boolean> {
+  try {
+    const result = await fetchNextJson<{ ok?: boolean; delivered?: boolean }>('/api/mobile/symon/tool', {
+      method: 'DELETE',
+      body: { sessionId: call.sessionId, callId: call.callId },
+      timeoutMs: 5_000,
+    });
+    return result.ok === true && result.delivered === true;
+  } catch (error) {
+    console.warn(`[symon-agent] native interrupt failed callId=${call.callId}: ${String(error)}`);
+    return false;
+  }
+}
+
+async function abortSymonSessionCalls(
   sessionId: string,
   route: SymonSessionRoute,
   error: 'session_stopped' | 'session_preempted',
-): void {
+): Promise<void> {
   symonAsyncActionTracker.removeSession(sessionId);
-  for (const completed of symonToolTracker.abortSession(sessionId, error, Date.now())) {
+  const calls = symonToolTracker.callsForSession(sessionId);
+  const deliveries = await Promise.all(calls.map((call) => interruptSymonTool(call)));
+  for (const [index, call] of calls.entries()) {
+    const outcome = deliveries[index]
+      ? { ok: false, result: { error } }
+      : {
+        ok: false,
+        result: {
+          error: 'interrupt_delivery_failed',
+          detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
+        },
+      };
+    const completed = symonToolTracker.complete(sessionId, call.callId, outcome, Date.now());
+    if (!completed) continue;
     pushSymonToolResult(
       route.clientId,
       sessionId,
-      completed.call.callId,
-      completed.outcome.ok,
-      completed.outcome.result,
+      call.callId,
+      outcome.ok,
+      outcome.result,
     );
     if (route.protocolVersion === 2) pushSymonActionComplete(route.clientId, completed.action);
   }
@@ -3379,7 +3410,7 @@ function preemptOtherSymonSessions(keepSessionId: string, detail: string): void 
   for (const [sid, route] of Array.from(symonSessions.entries())) {
     if (sid === keepSessionId) continue;
     void denySymonSessionConfirmations(sid, route, 'preempted');
-    abortSymonSessionCalls(sid, route, 'session_preempted');
+    void abortSymonSessionCalls(sid, route, 'session_preempted');
     pushSymonStatus(route.clientId, sid, 'idle', detail);
     symonSessions.delete(sid);
     clearSymonScopeGrant(sid);
@@ -3403,7 +3434,7 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
     const owner = symonSessions.get(sessionId);
     if (owner?.clientId === client.id) {
       void denySymonSessionConfirmations(sessionId, owner, 'preempted');
-      abortSymonSessionCalls(sessionId, owner, 'session_stopped');
+      void abortSymonSessionCalls(sessionId, owner, 'session_stopped');
       symonSessions.delete(sessionId);
     }
     stopAgentSession(sessionId);
@@ -3416,7 +3447,7 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
   // (last-start-wins; makes phone-app restarts self-healing).
   if (existingOwner && (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant))) {
     void denySymonSessionConfirmations(sessionId, existingOwner, 'preempted');
-    abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
+    void abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
     pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
   }
   startAgentSession(sessionId);
@@ -3442,7 +3473,7 @@ function handleSymonStop(client: ClientState, msg: Record<string, unknown>): voi
   if (owner && owner.clientId !== client.id) return;
   if (owner) void denySymonSessionConfirmations(sessionId, owner, 'preempted');
   symonSessions.delete(sessionId);
-  if (owner) abortSymonSessionCalls(sessionId, owner, 'session_stopped');
+  if (owner) void abortSymonSessionCalls(sessionId, owner, 'session_stopped');
   stopAgentSession(sessionId);
   clearSymonScopeGrant(sessionId);
   persistAgentRegistry();
@@ -3470,10 +3501,19 @@ async function invokeSymonTool(call: PendingToolCall): Promise<SymonToolRelayRes
         args: call.args ?? {},
         utterance: call.utterance,
       },
-      timeoutMs: TOOL_TIMEOUT_MS + 5_000,
+      timeoutMs: symonToolTimeoutMs(call.tool) + 5_000,
     });
   } catch {
-    return { ok: false, result: { error: 'tool_timeout' } };
+    const delivered = await interruptSymonTool(call);
+    return delivered
+      ? { ok: false, result: { error: 'tool_timeout' } }
+      : {
+        ok: false,
+        result: {
+          error: 'interrupt_delivery_failed',
+          detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
+        },
+      };
   }
 }
 
@@ -3499,9 +3539,8 @@ async function resolveSymonConfirmation(
   }
 }
 
-function finishSymonToolCall(call: PendingToolCall, outcome: SymonToolRelayResult): void {
-  const completed = symonToolTracker.complete(call.sessionId, call.callId, outcome, Date.now());
-  if (!completed) return;
+function publishCompletedSymonToolCall(completed: CompletedToolCall): void {
+  const { call, outcome } = completed;
   if (completed.action.status === 'accepted') {
     const repoPath = typeof call.args?.repoPath === 'string' ? call.args.repoPath : '';
     symonAsyncActionTracker.register(completed.action, repoPath, completed.completedAt);
@@ -3523,11 +3562,109 @@ function finishSymonToolCall(call: PendingToolCall, outcome: SymonToolRelayResul
   }
 }
 
+function finishSymonToolCall(call: PendingToolCall, outcome: SymonToolRelayResult): void {
+  const completed = symonToolTracker.complete(call.sessionId, call.callId, outcome, Date.now());
+  if (completed) publishCompletedSymonToolCall(completed);
+}
+
+async function timeoutSymonToolCall(call: PendingToolCall): Promise<void> {
+  if (!symonToolTracker.markInterrupting(call.sessionId, call.callId)) return;
+  const delivered = await interruptSymonTool(call);
+  const completed = symonToolTracker.complete(
+    call.sessionId,
+    call.callId,
+    delivered
+      ? { ok: false, result: { error: 'tool_timeout' } }
+      : {
+        ok: false,
+        result: {
+          error: 'interrupt_delivery_failed',
+          detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
+        },
+      },
+    Date.now(),
+  );
+  if (!completed) return;
+  publishCompletedSymonToolCall(completed);
+}
+
 async function resumeSymonToolAfterConfirmation(confirmation: SymonPendingConfirmation): Promise<void> {
   const call = symonToolTracker.markExecuting(confirmation.sessionId, confirmation.callId, Date.now());
   if (!call || !currentSymonOwner(call.sessionId)) return;
+  touchAgentSession(call.sessionId);
+  persistAgentRegistry();
   const outcome = await invokeSymonTool(call);
-  finishSymonToolCall(call, outcome);
+  await handleSymonToolOutcome(call, outcome);
+}
+
+async function handleSymonToolOutcome(
+  call: PendingToolCall,
+  outcome: SymonToolRelayResult,
+): Promise<void> {
+  if (!outcome.confirmation) {
+    finishSymonToolCall(call, outcome);
+    return;
+  }
+  const confirmation = outcome.confirmation;
+  if (!symonToolTracker.markAwaitingConfirmation(
+    call.sessionId,
+    call.callId,
+    confirmation.confirmationId,
+  ) || !symonConfirmationTracker.register(confirmation, Date.now())) {
+    finishSymonToolCall(call, {
+      ok: false,
+      result: { error: 'confirmation_mismatch', detail: 'Confirmation identity collision.' },
+    });
+    return;
+  }
+
+  touchAgentSession(call.sessionId);
+  persistAgentRegistry();
+
+  const owner = currentSymonOwner(call.sessionId);
+  if (!owner) return;
+  pushSymonStatus(owner.route.clientId, call.sessionId, 'acting', 'awaiting approval');
+  if (Date.now() >= confirmation.expiresAt) {
+    symonConfirmationTracker.claim({
+      sessionId: call.sessionId,
+      callId: call.callId,
+      confirmationId: confirmation.confirmationId,
+      allow: false,
+      clientMutationId: `expired-deny:${confirmation.confirmationId}`,
+      now: Date.now(),
+    });
+    await settleSymonConfirmationWithRetry({
+      confirmation,
+      allow: false,
+      forcedOutcome: 'expired',
+      resume: true,
+    });
+    return;
+  }
+  if (call.protocolVersion === 2) {
+    pushSymonConfirmRequired(owner.route.clientId, confirmation);
+    return;
+  }
+
+  // Legacy clients cannot approve on-phone. Every card in a serial chain is
+  // denied immediately, including a destructive step that follows an approved
+  // aggregate plan card.
+  const claim = symonConfirmationTracker.claim({
+    sessionId: call.sessionId,
+    callId: call.callId,
+    confirmationId: confirmation.confirmationId,
+    allow: false,
+    clientMutationId: `legacy-deny:${confirmation.confirmationId}`,
+    now: Date.now(),
+  });
+  if (claim.kind === 'claimed') {
+    await settleSymonConfirmationWithRetry({
+      confirmation,
+      allow: false,
+      forcedOutcome: claim.forcedOutcome,
+      resume: true,
+    });
+  }
 }
 
 async function settleSymonConfirmation(input: {
@@ -3613,6 +3750,8 @@ async function handleSymonConfirmDecision(client: ClientState, msg: Record<strin
   const grant = activeSymonGrant(client, sessionId);
   if (!route || route.protocolVersion !== 2 || route.clientId !== client.id
     || !grant || !isSameSymonGrant(route.scope, grant)) return;
+  touchAgentSession(sessionId);
+  persistAgentRegistry();
 
   const claim = symonConfirmationTracker.claim({
     sessionId,
@@ -3643,6 +3782,46 @@ async function handleSymonConfirmDecision(client: ClientState, msg: Record<strin
     forcedOutcome: claim.forcedOutcome,
     resume: true,
   });
+}
+
+async function handleSymonToolInterrupt(client: ClientState, msg: Record<string, unknown>): Promise<void> {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const callId = typeof msg.callId === 'string' ? msg.callId : '';
+  if (!sessionId || !callId) return;
+  const route = symonSessions.get(sessionId);
+  const grant = activeSymonGrant(client, sessionId);
+  if (!route || route.protocolVersion !== 2 || route.clientId !== client.id
+    || !grant || !isSameSymonGrant(route.scope, grant)) return;
+  const call = symonToolTracker.get(sessionId, callId);
+  if (!call) return;
+  touchAgentSession(sessionId);
+  persistAgentRegistry();
+  const delivered = await interruptSymonTool(call);
+  if (!delivered) {
+    finishSymonToolCall(call, {
+      ok: false,
+      result: {
+        error: 'interrupt_delivery_failed',
+        detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
+      },
+    });
+    return;
+  }
+  const preemptedConfirmations = symonConfirmationTracker.preemptCall(sessionId, callId);
+  for (const confirmation of preemptedConfirmations) {
+    symonConfirmationTracker.settle(
+      sessionId,
+      callId,
+      confirmation.confirmationId,
+      'preempted',
+      Date.now(),
+    );
+    pushSymonConfirmSettled(route.clientId, confirmation, 'preempted');
+  }
+  // Complete every authenticated exact interrupt, even if it beat the
+  // confirmation mirror registration. A late route outcome is then an
+  // idempotent no-op against this replayable tombstone.
+  finishSymonToolCall(call, { ok: false, result: { error: 'session_preempted' } });
 }
 
 async function handleSymonToolCall(client: ClientState, msg: Record<string, unknown>): Promise<void> {
@@ -3682,7 +3861,7 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
     || existingOwner.protocolVersion !== protocolVersion) {
     if (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant)) {
       void denySymonSessionConfirmations(sessionId, existingOwner, 'preempted');
-      abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
+      void abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
       pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
     }
     symonSessions.set(sessionId, { clientId: client.id, scope: grant, protocolVersion });
@@ -3722,14 +3901,10 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
     sessionId,
     callId,
     tool,
-    // These correlation fields are server-owned and never accepted from the
-    // model. The delegate bridge returns them to this host so its queued turn
-    // can emit the eventual done/failed event to the exact phone call.
-    args: {
-      ...scoped.args,
-      __symonSessionId: sessionId,
-      __symonCallId: callId,
-    },
+    // Correlation stays on the server-owned call record. The native execution
+    // seam injects it only into o8_delegate's final dispatch args, after any
+    // immutable plan has been validated and approved.
+    args: scoped.args,
     utterance: utterance || undefined,
     protocolVersion,
     startedAt: Date.now(),
@@ -3738,61 +3913,7 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
   pushSymonStatus(client.id, sessionId, 'acting');
 
   const outcome = await invokeSymonTool(call);
-  if (!outcome.confirmation) {
-    finishSymonToolCall(call, outcome);
-    return;
-  }
-  const confirmation = outcome.confirmation;
-  if (!symonToolTracker.markAwaitingConfirmation(sessionId, callId, confirmation.confirmationId)
-    || !symonConfirmationTracker.register(confirmation, Date.now())) {
-    finishSymonToolCall(call, {
-      ok: false,
-      result: { error: 'confirmation_mismatch', detail: 'Confirmation identity collision.' },
-    });
-    return;
-  }
-
-  pushSymonStatus(client.id, sessionId, 'acting', 'awaiting approval');
-  if (Date.now() >= confirmation.expiresAt) {
-    symonConfirmationTracker.claim({
-      sessionId,
-      callId,
-      confirmationId: confirmation.confirmationId,
-      allow: false,
-      clientMutationId: `expired-deny:${confirmation.confirmationId}`,
-      now: Date.now(),
-    });
-    await settleSymonConfirmationWithRetry({
-      confirmation,
-      allow: false,
-      forcedOutcome: 'expired',
-      resume: true,
-    });
-    return;
-  }
-  if (protocolVersion === 2) {
-    pushSymonConfirmRequired(client.id, confirmation);
-    return;
-  }
-
-  // Legacy clients cannot approve on-phone. Deny the Rust gate immediately,
-  // then return only the invoke's final declined result: no side effect can run.
-  const claim = symonConfirmationTracker.claim({
-    sessionId,
-    callId,
-    confirmationId: confirmation.confirmationId,
-    allow: false,
-    clientMutationId: `legacy-deny:${confirmation.confirmationId}`,
-    now: Date.now(),
-  });
-  if (claim.kind === 'claimed') {
-    await settleSymonConfirmationWithRetry({
-      confirmation,
-      allow: false,
-      forcedOutcome: claim.forcedOutcome,
-      resume: true,
-    });
-  }
+  await handleSymonToolOutcome(call, outcome);
 }
 
 /** Disconnect cleanup — drop any symon sessions this socket owned. */
@@ -3802,7 +3923,7 @@ function cleanupSymonForClient(clientId: string): void {
     if (route.clientId !== clientId) continue;
     void denySymonSessionConfirmations(sid, route, 'preempted');
     symonSessions.delete(sid);
-    abortSymonSessionCalls(sid, route, 'session_stopped');
+    void abortSymonSessionCalls(sid, route, 'session_stopped');
     stopAgentSession(sid);
     clearSymonScopeGrant(sid);
     changed = true;
@@ -3812,8 +3933,8 @@ function cleanupSymonForClient(clientId: string): void {
 
 /**
  * Stale sweep — an agent session with no status event or tool call for 10 min is
- * marked idle + dropped (contract §"Session registry"). Also reaps any tool call
- * that somehow outlived the route's 60s cap.
+ * marked idle + dropped (contract §"Session registry"). Also interrupts and
+ * reaps any tool call that outlived its tool-aware execution budget.
  */
 function sweepStaleSymon(): void {
   symonAsyncActionTracker.prune(Date.now());
@@ -3822,7 +3943,7 @@ function sweepStaleSymon(): void {
     const route = symonSessions.get(dropped.sessionId);
     if (route) {
       void denySymonSessionConfirmations(dropped.sessionId, route, 'preempted');
-      abortSymonSessionCalls(dropped.sessionId, route, 'session_stopped');
+      void abortSymonSessionCalls(dropped.sessionId, route, 'session_stopped');
       pushSymonStatus(route.clientId, dropped.sessionId, 'idle', 'stale');
     }
     symonSessions.delete(dropped.sessionId);
@@ -3830,7 +3951,7 @@ function sweepStaleSymon(): void {
     persistAgentRegistry();
   }
   for (const call of symonToolTracker.timedOut(Date.now())) {
-    finishSymonToolCall(call, { ok: false, result: { error: 'tool_timeout' } });
+    void timeoutSymonToolCall(call);
   }
   for (const confirmation of symonConfirmationTracker.expire(Date.now())) {
     void settleSymonConfirmationWithRetry({
@@ -3861,7 +3982,7 @@ async function sweepDeskPreemption(): Promise<void> {
   if (!deskLive) return;
   for (const [sid, route] of Array.from(symonSessions.entries())) {
     void denySymonSessionConfirmations(sid, route, 'preempted');
-    abortSymonSessionCalls(sid, route, 'session_preempted');
+    void abortSymonSessionCalls(sid, route, 'session_preempted');
     pushSymonStatus(route.clientId, sid, 'idle', 'preempted_by_desk');
     symonSessions.delete(sid);
     clearSymonScopeGrant(sid);

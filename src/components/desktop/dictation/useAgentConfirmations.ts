@@ -7,6 +7,39 @@ export interface AgentConfirmation {
   taskId: string;
   tool: string;
   summary: string;
+  kind?: 'action' | 'plan';
+  plan?: AgentConfirmationPlan;
+}
+
+export interface AgentConfirmationPlan {
+  planId: string;
+  steps: AgentPlanStep[];
+}
+
+export interface AgentPlanStep {
+  index: number;
+  summary: string;
+}
+
+function parsePlanSteps(value: unknown): AgentPlanStep[] | undefined {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 5) return undefined;
+  const steps: AgentPlanStep[] = [];
+  for (const [offset, step] of value.entries()) {
+    if (!step || typeof step !== 'object') return undefined;
+    const candidate = step as { index?: unknown; summary?: unknown };
+    const summary = typeof candidate.summary === 'string' ? candidate.summary.trim() : '';
+    if (!summary || candidate.index !== offset + 1) return undefined;
+    steps.push({ index: offset + 1, summary });
+  }
+  return steps;
+}
+
+export function parseConfirmationPlan(value: unknown): AgentConfirmationPlan | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as { planId?: unknown; steps?: unknown };
+  const planId = typeof candidate.planId === 'string' ? candidate.planId.trim() : '';
+  const steps = parsePlanSteps(candidate.steps);
+  return planId && steps ? { planId, steps } : undefined;
 }
 
 export function useAgentConfirmations(
@@ -29,9 +62,21 @@ export function useAgentConfirmations(
         const taskId = payload?.taskId ?? '';
         const tool = payload?.tool ?? '';
         const summary = payload?.summary ?? 'Run this action?';
+        const kind = payload?.kind === 'plan' ? 'plan' : undefined;
+        const plan = parseConfirmationPlan(payload?.plan);
         log(`agent-confirm ${tool}`);
         if (confirmationId && taskId) {
-          setConfirmation({ confirmationId, taskId, tool, summary });
+          if (kind === 'plan' && !plan) {
+            log(`agent-confirm rejected malformed plan ${confirmationId}`);
+            return;
+          }
+          setConfirmation({
+            confirmationId,
+            taskId,
+            tool,
+            summary,
+            ...(kind === 'plan' && plan ? { kind, plan } : {}),
+          });
         }
       }));
       add(await listen<Partial<AgentConfirmation>>(

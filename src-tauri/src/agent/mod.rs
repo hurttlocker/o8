@@ -23,6 +23,8 @@ pub mod gemini;
 pub mod ledger;
 pub mod o8_http;
 pub mod openrouter;
+mod plan;
+mod plan_validation;
 pub mod planner_route;
 pub mod realtime_bridge;
 pub mod router;
@@ -632,11 +634,14 @@ pub async fn confirm_if_needed_opts_correlated(
 }
 
 fn has_trusted_spoken_review(tool_name: &str, args: &Value) -> bool {
-    matches!(tool_name, "o8_approve_item" | "o8_reject_item")
-        && args
-            .get("_symonSpokenReviewSummary")
-            .and_then(Value::as_str)
-            .is_some_and(|summary| !summary.trim().is_empty())
+    let summary_key = match tool_name {
+        "o8_approve_item" | "o8_reject_item" => "_symonSpokenReviewSummary",
+        "symon_execute_plan" => "_symonPlanSpokenReadback",
+        _ => return false,
+    };
+    args.get(summary_key)
+        .and_then(Value::as_str)
+        .is_some_and(|summary| !summary.trim().is_empty())
 }
 
 fn requires_completed_review_speech(
@@ -766,19 +771,24 @@ async fn confirm_with_receipt(
         );
     }
 
-    emit_confirm(
-        app,
-        json!({
-            "confirmationId": confirmation_id,
-            "taskId": ctx.task_id,
-            "tool": tool_name,
-            "summary": confirm_summary(tool_name, args, ctx.ledger_session_id.as_deref()),
-            "expiresAt": expires_at_ms,
-            "target": confirm_target(args),
-            "sessionId": correlation.as_ref().map(|value| value.session_id.as_str()),
-            "callId": correlation.as_ref().map(|value| value.call_id.as_str()),
-        }),
-    );
+    let mut confirmation_payload = json!({
+        "confirmationId": confirmation_id,
+        "taskId": ctx.task_id,
+        "tool": tool_name,
+        "summary": confirm_summary(tool_name, args, ctx.ledger_session_id.as_deref()),
+        "expiresAt": expires_at_ms,
+        "target": confirm_target(args),
+        "sessionId": correlation.as_ref().map(|value| value.session_id.as_str()),
+        "callId": correlation.as_ref().map(|value| value.call_id.as_str()),
+    });
+    if tool_name == "symon_execute_plan" {
+        confirmation_payload["kind"] = json!("plan");
+        confirmation_payload["plan"] = json!({
+            "planId": args.get("_symonPlanId").and_then(Value::as_str),
+            "steps": args.get("_symonPlanSteps").cloned().unwrap_or_else(|| json!([])),
+        });
+    }
+    emit_confirm(app, confirmation_payload);
 
     // An interrupt can land after the pre-emit check but before the event. Emit
     // the scoped dismissal again after the card so that every ordering leaves
@@ -1110,6 +1120,20 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
             s("repoPath"),
             s("task")
         ),
+        "o8_browser_act" => match s("verb").as_str() {
+            "click" => format!("Click {} in the browser", s("selector")),
+            "type" if args.get("submit") == Some(&Value::Bool(true)) => {
+                format!("Type into {} in the browser and submit", s("selector"))
+            }
+            "type" => format!("Type into {} in the browser", s("selector")),
+            "open" => format!("Open {} in the browser", s("url")),
+            _ => "Act on the current browser page".to_string(),
+        },
+        "terminal_send" => format!(
+            "Send “{}” to the o8 terminal “{}”",
+            s("text"),
+            s("session_name")
+        ),
         // The model passes the terminal's title from term_list so the card
         // names the real target window, not a bare id.
         "term_send" => format!(
@@ -1206,6 +1230,7 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
         "symon_ledger_undo" => ledger::describe_action(&s("action_id"), ledger_session_id)
             .map(|summary| format!("Undo the action that {summary}"))
             .unwrap_or_else(|| format!("Undo action {}", s("action_id"))),
+        "symon_execute_plan" => s("_symonPlanSummary"),
         other => format!("Run {other}"),
     }
 }
@@ -1226,6 +1251,13 @@ fn short_term_title(title: &str) -> String {
 /// can mishear "yes"). Reuses `confirm_summary`, lowercasing the lead verb so it
 /// reads naturally after "I'm about to".
 fn confirm_spoken(tool_name: &str, args: &Value, ledger_session_id: Option<&str>) -> String {
+    if tool_name == "symon_execute_plan" {
+        return args
+            .get("_symonPlanSpokenReadback")
+            .and_then(Value::as_str)
+            .unwrap_or("I couldn't read this plan back safely, so I won't run it.")
+            .to_string();
+    }
     let summary = confirm_summary(tool_name, args, ledger_session_id);
     let mut chars = summary.chars();
     let lowered = match chars.next() {
@@ -2200,6 +2232,18 @@ mod confirm_registry_tests {
     }
 
     #[test]
+    fn always_carded_terminal_confirmation_names_exact_input_and_target() {
+        assert_eq!(
+            confirm_summary(
+                "terminal_send",
+                &json!({ "session_name": "cortex-dash", "text": "npm test" }),
+                None,
+            ),
+            "Send “npm test” to the o8 terminal “cortex-dash”"
+        );
+    }
+
+    #[test]
     fn trusted_review_playback_covers_cascade_and_desktop_realtime_only() {
         let packet_review = json!({
             "_symonSpokenReviewSummary": "Three files changed. The review approved.",
@@ -2233,6 +2277,20 @@ mod confirm_registry_tests {
             &packet_review,
             true,
             false,
+        ));
+
+        let native_plan_review = json!({
+            "_symonPlanSpokenReadback": "First, check the weather. Finally, review reminders.",
+        });
+        assert!(requires_completed_review_speech(
+            "symon_execute_plan",
+            &native_plan_review,
+            true,
+            false,
+        ));
+        assert!(!has_trusted_spoken_review(
+            "symon_execute_plan",
+            &json!({ "spokenReadback": "model-authored authority" }),
         ));
     }
 }

@@ -9,10 +9,21 @@
  * unit-testable core of that bookkeeping — no WS, no fetch, no clock of its own.
  */
 
-/** Per-call execution timeout. A late Mac-side result after this is dropped. */
+/** Per-call execution timeout for an ordinary single action. */
 export const TOOL_TIMEOUT_MS = 60_000;
+/** A bounded chain may contain five serial actions and therefore gets a wider budget. */
+export const PLAN_TOOL_TIMEOUT_MS = 5 * 60_000;
 /** Final call/decision tombstones retained for idempotent phone retries. */
 export const SYMON_REPLAY_TTL_MS = 5 * 60_000;
+
+export function symonToolTimeoutMs(tool: string): number {
+  return tool === 'symon_execute_plan' ? PLAN_TOOL_TIMEOUT_MS : TOOL_TIMEOUT_MS;
+}
+
+/** Stable across phone, server, webview, and Rust so interruption can beat registration. */
+export function symonReviewGuardId(sessionId: string, callId: string): string {
+  return `phone:${JSON.stringify([sessionId, callId])}`;
+}
 
 export type SymonProtocolVersion = 1 | 2;
 
@@ -30,6 +41,11 @@ export interface SymonPendingConfirmation {
   taskId: string;
   tool: string;
   summary: string;
+  kind?: 'action' | 'plan';
+  plan?: {
+    planId: string;
+    steps: Array<{ index: number; summary: string }>;
+  };
   expiresAt: number;
   target: SymonConfirmationTarget;
 }
@@ -56,7 +72,7 @@ export function confirmationOutcomeFromResolution(
   return null;
 }
 
-export type SymonToolPhase = 'running' | 'awaiting_confirmation' | 'executing';
+export type SymonToolPhase = 'running' | 'awaiting_confirmation' | 'executing' | 'interrupting';
 
 export interface PendingToolCall {
   sessionId: string;
@@ -166,6 +182,26 @@ export function parseSymonPendingConfirmation(
     const targetValue = rawTarget[key];
     if (typeof targetValue === 'string' && targetValue.length > 0) target[key] = targetValue;
   }
+  let plan: SymonPendingConfirmation['plan'];
+  if (record.kind === 'plan') {
+    if (!record.plan || typeof record.plan !== 'object' || Array.isArray(record.plan)) return null;
+    const rawPlan = record.plan as Record<string, unknown>;
+    if (typeof rawPlan.planId !== 'string'
+      || !rawPlan.planId
+      || !Array.isArray(rawPlan.steps)
+      || rawPlan.steps.length < 2
+      || rawPlan.steps.length > 5) return null;
+    const steps: NonNullable<SymonPendingConfirmation['plan']>['steps'] = [];
+    for (const [offset, value] of rawPlan.steps.entries()) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+      const step = value as Record<string, unknown>;
+      if (step.index !== offset + 1 || typeof step.summary !== 'string' || !step.summary.trim()) {
+        return null;
+      }
+      steps.push({ index: offset + 1, summary: step.summary.trim() });
+    }
+    plan = { planId: rawPlan.planId, steps };
+  }
   return {
     sessionId: expected.sessionId,
     callId: expected.callId,
@@ -173,6 +209,8 @@ export function parseSymonPendingConfirmation(
     taskId: record.taskId,
     tool: expected.tool,
     summary: record.summary,
+    kind: record.kind === 'plan' ? 'plan' : 'action',
+    ...(plan ? { plan } : {}),
     expiresAt: record.expiresAt,
     target,
   };
@@ -296,6 +334,13 @@ export class ToolCallTracker {
     return call;
   }
 
+  markInterrupting(sessionId: string, callId: string): PendingToolCall | null {
+    const call = this.get(sessionId, callId);
+    if (!call || call.phase === 'interrupting') return null;
+    call.phase = 'interrupting';
+    return call;
+  }
+
   /** Resolve + remove an active call without caching a result. */
   resolve(sessionId: string, callId: string): PendingToolCall | null {
     const key = toolCallKey(sessionId, callId);
@@ -336,11 +381,16 @@ export class ToolCallTracker {
     return n;
   }
 
+  callsForSession(sessionId: string): PendingToolCall[] {
+    return Array.from(this.calls.values()).filter((call) => call.sessionId === sessionId);
+  }
+
   /** Return expired calls; the caller completes/caches each terminal timeout. */
-  timedOut(now: number, ttlMs: number = TOOL_TIMEOUT_MS): PendingToolCall[] {
+  timedOut(now: number): PendingToolCall[] {
     const stale: PendingToolCall[] = [];
     for (const call of this.calls.values()) {
-      if (call.phase !== 'awaiting_confirmation' && now - call.startedAt > ttlMs) stale.push(call);
+      if (call.phase !== 'awaiting_confirmation' && call.phase !== 'interrupting'
+        && now - call.startedAt > symonToolTimeoutMs(call.tool)) stale.push(call);
     }
     return stale;
   }
@@ -469,6 +519,10 @@ function confirmationSnapshot(record: ConfirmationRecord): SymonPendingConfirmat
     taskId: record.taskId,
     tool: record.tool,
     summary: record.summary,
+    kind: record.kind,
+    ...(record.plan
+      ? { plan: { planId: record.plan.planId, steps: record.plan.steps.map((step) => ({ ...step })) } }
+      : {}),
     expiresAt: record.expiresAt,
     target: { ...record.target },
   };
@@ -577,6 +631,17 @@ export class SymonConfirmationTracker {
     const preempted: SymonPendingConfirmation[] = [];
     for (const record of this.records.values()) {
       if (record.sessionId === sessionId && !record.outcome) {
+        if (record.decisionAllow === undefined) record.decisionAllow = false;
+        preempted.push(confirmationSnapshot(record));
+      }
+    }
+    return preempted;
+  }
+
+  preemptCall(sessionId: string, callId: string): SymonPendingConfirmation[] {
+    const preempted: SymonPendingConfirmation[] = [];
+    for (const record of this.records.values()) {
+      if (record.sessionId === sessionId && record.callId === callId && !record.outcome) {
         if (record.decisionAllow === undefined) record.decisionAllow = false;
         preempted.push(confirmationSnapshot(record));
       }

@@ -53,7 +53,32 @@ pub struct ActionRecord<'a> {
     pub outcome: &'a str,
     pub session_id: Option<&'a str>,
     pub call_id: Option<&'a str>,
+    pub plan: Option<PlanStepContext<'a>>,
     pub inverse: Option<&'a Inverse>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlanStepContext<'a> {
+    pub plan_id: &'a str,
+    /// One-based position in the immutable plan shown to the operator.
+    pub step_index: usize,
+    pub step_count: usize,
+}
+
+#[derive(Debug)]
+pub struct PlanLifecycleRecord<'a> {
+    pub plan_id: &'a str,
+    pub task_id: &'a str,
+    pub source: &'a str,
+    pub phase: &'a str,
+    /// A caller-authored, trusted description. Never pass model args or tool
+    /// results here; those can contain note bodies, commands, or form values.
+    pub redacted_summary: &'a str,
+    pub outcome: &'a str,
+    pub session_id: Option<&'a str>,
+    /// One-based for step lifecycle events and `None` for plan-level events.
+    pub step_index: Option<usize>,
+    pub step_count: usize,
 }
 
 pub fn next_action_id() -> String {
@@ -159,6 +184,25 @@ fn action_summary(tool: &str, args: &Value, outcome: &str) -> String {
     }
 }
 
+fn validate_plan_position(
+    plan_id: &str,
+    step_index: Option<usize>,
+    step_count: usize,
+) -> Result<(), String> {
+    if plan_id.trim().is_empty() {
+        return Err("plan id cannot be empty".to_string());
+    }
+    if !(2..=5).contains(&step_count) {
+        return Err("plan step count must be between 2 and 5".to_string());
+    }
+    if let Some(step_index) = step_index {
+        if !(1..=step_count).contains(&step_index) {
+            return Err("plan step index must be one-based and within the plan".to_string());
+        }
+    }
+    Ok(())
+}
+
 fn record_with_conn(conn: &mut Connection, record: &ActionRecord<'_>) -> Result<(), String> {
     let args_summary = args_summary(record.tool, record.args).to_string();
     let result_summary = result_summary(record.outcome).to_string();
@@ -173,6 +217,16 @@ fn record_with_conn(conn: &mut Connection, record: &ActionRecord<'_>) -> Result<
         .map(serde_json::to_string)
         .transpose()
         .map_err(|error| format!("serialize undo token failed: {error}"))?;
+    let (plan_id, plan_step_index, plan_step_count) = if let Some(plan) = record.plan {
+        validate_plan_position(plan.plan_id, Some(plan.step_index), plan.step_count)?;
+        (
+            Some(plan.plan_id),
+            Some(plan.step_index as i64),
+            Some(plan.step_count as i64),
+        )
+    } else {
+        (None, None, None)
+    };
     let tx = conn
         .transaction()
         .map_err(|error| format!("agent action transaction failed: {error}"))?;
@@ -180,8 +234,9 @@ fn record_with_conn(conn: &mut Connection, record: &ActionRecord<'_>) -> Result<
         "INSERT INTO agent_action_events (
             action_id, task_id, source, created_at, phase, utterance, tool, args_summary,
             confirmation_id, confirmation_outcome, outcome, result_summary,
-            undo_token, session_id, call_id
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            undo_token, session_id, call_id, plan_id, plan_step_index, plan_step_count
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                   ?16, ?17, ?18)",
         params![
             record.action_id,
             record.task_id,
@@ -198,6 +253,9 @@ fn record_with_conn(conn: &mut Connection, record: &ActionRecord<'_>) -> Result<
             token,
             record.session_id,
             record.call_id,
+            plan_id,
+            plan_step_index,
+            plan_step_count,
         ],
     )
     .map_err(|error| format!("insert agent action failed: {error}"))?;
@@ -236,6 +294,43 @@ pub fn record(record: ActionRecord<'_>) -> Result<(), String> {
         ensure_process_invalidations(&conn)?;
         record_with_conn(&mut conn, &record)
     })
+}
+
+fn record_plan_lifecycle_with_conn(
+    conn: &Connection,
+    record: &PlanLifecycleRecord<'_>,
+) -> Result<(), String> {
+    validate_plan_position(record.plan_id, record.step_index, record.step_count)?;
+    let redacted_summary = record
+        .redacted_summary
+        .chars()
+        .take(2_000)
+        .collect::<String>();
+    conn.execute(
+        "INSERT INTO agent_plan_events (
+            plan_id, task_id, source, created_at, phase, redacted_summary,
+            outcome, session_id, step_index, step_count
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            record.plan_id,
+            record.task_id,
+            record.source,
+            super::store::now_ts(),
+            record.phase,
+            redacted_summary,
+            record.outcome,
+            record.session_id,
+            record.step_index.map(|value| value as i64),
+            record.step_count as i64,
+        ],
+    )
+    .map_err(|error| format!("insert agent plan event failed: {error}"))?;
+    Ok(())
+}
+
+/// Append a trusted, redacted lifecycle checkpoint for one immutable plan.
+pub fn record_plan_lifecycle(record: PlanLifecycleRecord<'_>) -> Result<(), String> {
+    super::store::open_db().and_then(|conn| record_plan_lifecycle_with_conn(&conn, &record))
 }
 
 /// Text-edit inverses point at an in-memory AX/webview restore buffer. They are
@@ -280,6 +375,7 @@ fn recent_with_conn(
              SELECT a.action_id, a.created_at, a.utterance, a.tool,
                     a.args_summary, a.confirmation_id, a.confirmation_outcome,
                     a.outcome, a.result_summary, a.source, a.session_id, a.call_id, a.phase,
+                    a.plan_id, a.plan_step_index, a.plan_step_count,
                     CASE WHEN u.token IS NOT NULL AND u.claimed_at IS NULL
                                    AND u.consumed_at IS NULL
                                    AND u.invalidated_at IS NULL THEN 1 ELSE 0 END,
@@ -300,9 +396,12 @@ fn recent_with_conn(
             let outcome: String = row.get(7)?;
             let args = serde_json::from_str::<Value>(&args_text).unwrap_or_else(|_| json!({}));
             let summary = action_summary(&tool, &args, &outcome);
-            let sql_undoable = row.get::<_, i64>(13)? == 1;
+            let plan_id = row.get::<_, Option<String>>(13)?;
+            let plan_step_index = row.get::<_, Option<i64>>(14)?;
+            let plan_step_count = row.get::<_, Option<i64>>(15)?;
+            let sql_undoable = row.get::<_, i64>(16)? == 1;
             let inverse_consumed = row
-                .get::<_, Option<String>>(14)?
+                .get::<_, Option<String>>(17)?
                 .and_then(|text| serde_json::from_str::<Inverse>(&text).ok())
                 .as_ref()
                 .map(edit_inverse_was_consumed)
@@ -323,6 +422,11 @@ fn recent_with_conn(
                 "session_id": row.get::<_, Option<String>>(10)?,
                 "call_id": row.get::<_, Option<String>>(11)?,
                 "phase": row.get::<_, String>(12)?,
+                "plan": plan_id.map(|plan_id| json!({
+                    "plan_id": plan_id,
+                    "step_index": plan_step_index,
+                    "step_count": plan_step_count,
+                })),
                 "undoable": sql_undoable && !inverse_consumed,
             }))
         })
@@ -337,6 +441,89 @@ pub fn recent(limit: usize, session_id: Option<&str>) -> Result<Value, String> {
     let conn = super::store::open_db()?;
     ensure_process_invalidations(&conn)?;
     recent_with_conn(&conn, limit, session_id)
+}
+
+fn plan_history_with_conn(
+    conn: &Connection,
+    plan_id: &str,
+    session_id: Option<&str>,
+) -> Result<Value, String> {
+    let mut event_statement = conn
+        .prepare(
+            "SELECT created_at, phase, redacted_summary, outcome, source,
+                    session_id, step_index, step_count
+             FROM agent_plan_events
+             WHERE plan_id = ?1 AND (?2 IS NULL OR session_id = ?2)
+             ORDER BY seq ASC",
+        )
+        .map_err(|error| format!("prepare plan history failed: {error}"))?;
+    let events = event_statement
+        .query_map(params![plan_id, session_id], |row| {
+            Ok(json!({
+                "timestamp": row.get::<_, i64>(0)?,
+                "phase": row.get::<_, String>(1)?,
+                "summary": row.get::<_, String>(2)?,
+                "outcome": row.get::<_, String>(3)?,
+                "source": row.get::<_, String>(4)?,
+                "session_id": row.get::<_, Option<String>>(5)?,
+                "step_index": row.get::<_, Option<i64>>(6)?,
+                "step_count": row.get::<_, i64>(7)?,
+            }))
+        })
+        .map_err(|error| format!("query plan history failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("read plan history failed: {error}"))?;
+
+    let mut step_statement = conn
+        .prepare(
+            "WITH latest AS (
+                SELECT event.* FROM agent_action_events event
+                INNER JOIN (
+                    SELECT action_id, MAX(seq) AS seq
+                    FROM agent_action_events
+                    WHERE plan_id = ?1
+                    GROUP BY action_id
+                ) final ON final.seq = event.seq
+             )
+             SELECT action_id, plan_step_index, plan_step_count, phase, tool,
+                    outcome, result_summary, confirmation_outcome
+             FROM latest
+             WHERE (?2 IS NULL OR session_id = ?2)
+             ORDER BY plan_step_index ASC, seq ASC",
+        )
+        .map_err(|error| format!("prepare plan steps failed: {error}"))?;
+    let steps = step_statement
+        .query_map(params![plan_id, session_id], |row| {
+            let result_summary: String = row.get(6)?;
+            Ok(json!({
+                "action_id": row.get::<_, String>(0)?,
+                "step_index": row.get::<_, i64>(1)?,
+                "step_count": row.get::<_, i64>(2)?,
+                "phase": row.get::<_, String>(3)?,
+                "tool": row.get::<_, String>(4)?,
+                "outcome": row.get::<_, String>(5)?,
+                "result_summary": serde_json::from_str::<Value>(&result_summary)
+                    .unwrap_or_else(|_| json!({})),
+                "confirmation": row.get::<_, String>(7)?,
+            }))
+        })
+        .map_err(|error| format!("query plan steps failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("read plan step failed: {error}"))?;
+
+    Ok(json!({
+        "plan_id": plan_id,
+        "events": events,
+        "steps": steps,
+    }))
+}
+
+/// Reconstruct one plan from redacted lifecycle checkpoints and the latest
+/// durable phase for each linked action. Session-scoped callers cannot cross
+/// the same boundary enforced by the action ledger.
+pub fn plan_history(plan_id: &str, session_id: Option<&str>) -> Result<Value, String> {
+    let conn = super::store::open_db()?;
+    plan_history_with_conn(&conn, plan_id, session_id)
 }
 
 fn describe_action_with_conn(

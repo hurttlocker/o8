@@ -3,8 +3,47 @@
 use serde_json::{json, Value};
 
 use super::{
-    confirm_with_receipt, ledger, maybe_speak_filler, tools, undo, ConfirmCorrelation, TaskCtx,
+    confirm_with_receipt, ledger, maybe_speak_filler, plan, tools, undo, ConfirmCorrelation,
+    TaskCtx,
 };
+
+#[derive(Clone, Copy)]
+struct TrackedPlanStep<'a> {
+    grant: &'a plan::PlanGrant,
+    step_index: usize,
+    step_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlanConfirmationRoute {
+    Invalid,
+    Aggregate,
+    Individual,
+}
+
+fn plan_confirmation_route(
+    has_plan_step: bool,
+    plan_exact: bool,
+    aggregate_authorized: bool,
+) -> PlanConfirmationRoute {
+    if has_plan_step && !plan_exact {
+        PlanConfirmationRoute::Invalid
+    } else if aggregate_authorized {
+        PlanConfirmationRoute::Aggregate
+    } else {
+        PlanConfirmationRoute::Individual
+    }
+}
+
+impl<'a> TrackedPlanStep<'a> {
+    fn ledger_context(self) -> ledger::PlanStepContext<'a> {
+        ledger::PlanStepContext {
+            plan_id: self.grant.plan_id(),
+            step_index: self.step_index,
+            step_count: self.step_count,
+        }
+    }
+}
 
 async fn execute_tracked_tool_call(
     ctx: &TaskCtx,
@@ -15,6 +54,7 @@ async fn execute_tracked_tool_call(
     source: &str,
     utterance: Option<&str>,
     mut spoke_filler: Option<&mut bool>,
+    plan_step: Option<TrackedPlanStep<'_>>,
 ) -> Value {
     let action_id = ledger::next_action_id();
     let session_id = correlation.as_ref().map(|value| value.session_id.clone());
@@ -32,6 +72,7 @@ async fn execute_tracked_tool_call(
         outcome: "pending",
         session_id: session_id.as_deref(),
         call_id: call_id.as_deref(),
+        plan: plan_step.map(|step| step.ledger_context()),
         inverse: None,
     }) {
         log::warn!("[symon-ledger] refused unrecorded action: {error}");
@@ -57,17 +98,55 @@ async fn execute_tracked_tool_call(
     } else {
         (tool_name, args.clone(), None)
     };
-    let confirmation = if preflight_error.is_none() {
-        confirm_with_receipt(ctx, effective_tool, &effective_args, speak, correlation).await
-    } else {
+    let plan_exact = match plan_step {
+        Some(step) => step.grant.matches_exact(
+            &ctx.task_id,
+            ctx.ledger_session_id.as_deref(),
+            step.step_index,
+            effective_tool,
+            &effective_args,
+        ),
+        None => true,
+    };
+    let plan_authorized = plan_step.is_some_and(|step| {
+        step.grant.authorizes_safe_step(
+            &ctx.task_id,
+            ctx.ledger_session_id.as_deref(),
+            step.step_index,
+            effective_tool,
+            &effective_args,
+        )
+    });
+    let plan_confirmation =
+        plan_confirmation_route(plan_step.is_some(), plan_exact, plan_authorized);
+    let confirmation = if ctx.is_cancelled() {
+        super::ConfirmationReceipt {
+            confirmation_id: None,
+            outcome: super::ConfirmationOutcome::Preempted,
+        }
+    } else if plan_confirmation == PlanConfirmationRoute::Invalid || preflight_error.is_some() {
         super::ConfirmationReceipt {
             confirmation_id: None,
             outcome: super::ConfirmationOutcome::NotRequired,
         }
+    } else if plan_confirmation == PlanConfirmationRoute::Aggregate {
+        super::ConfirmationReceipt {
+            confirmation_id: plan_step
+                .and_then(|step| step.grant.confirmation_id())
+                .map(str::to_string),
+            outcome: super::ConfirmationOutcome::Approved,
+        }
+    } else {
+        confirm_with_receipt(ctx, effective_tool, &effective_args, speak, correlation).await
     };
 
     let mut prepared_undo = None;
-    let mut result = if let Some(error) = preflight_error {
+    let mut result = if !plan_exact {
+        json!({
+            "error": "The approved plan no longer matches this step, so it was not run",
+            "plan_grant_mismatch": true,
+        })
+    } else if let Some(error) = preflight_error {
         json!({ "error": error })
     } else if !confirmation.approved() {
         log::info!(
@@ -86,6 +165,11 @@ async fn execute_tracked_tool_call(
             "error": error,
             "declined_by_user": true,
             "confirmation_outcome": confirmation.outcome.as_str(),
+        })
+    } else if ctx.is_cancelled() {
+        json!({
+            "error": "The plan was stopped before this step ran",
+            "cancelled": true,
         })
     } else {
         // Capture the inverse immediately before execution, after any confirm
@@ -107,6 +191,7 @@ async fn execute_tracked_tool_call(
             outcome: "executing",
             session_id: session_id.as_deref(),
             call_id: call_id.as_deref(),
+            plan: plan_step.map(|step| step.ledger_context()),
             inverse: None,
         }) {
             log::warn!("[symon-ledger] refused action without execution checkpoint: {error}");
@@ -121,6 +206,18 @@ async fn execute_tracked_tool_call(
         let mut dispatch_args = effective_args.clone();
         if nested_orchestrator_dispatch {
             dispatch_args["_symon_ledger_preconfirmed"] = Value::Bool(true);
+        }
+        // Phone correlation is server-owned execution metadata, never part of
+        // model-authored arguments or a plan fingerprint. Inject it only after
+        // validation/confirmation and only for the delegate handler that needs
+        // to correlate its WS-host task.
+        if tool_name == "o8_delegate" {
+            if let Some(value) = session_id.as_deref() {
+                dispatch_args["__symonSessionId"] = json!(value);
+            }
+            if let Some(value) = call_id.as_deref() {
+                dispatch_args["__symonCallId"] = json!(value);
+            }
         }
         match tools::dispatch_tool_call(tool_name, dispatch_args, ctx).await {
             Ok(output) => output,
@@ -150,6 +247,7 @@ async fn execute_tracked_tool_call(
         outcome: outcome.as_str(),
         session_id: session_id.as_deref(),
         call_id: call_id.as_deref(),
+        plan: plan_step.map(|step| step.ledger_context()),
         inverse: inverse.as_ref(),
     }) {
         // Attempted + executing events are already durable, so a crash or DB
@@ -205,6 +303,19 @@ pub(crate) async fn execute_cascaded_tool_call(
     args: Value,
     spoke_filler: &mut bool,
 ) -> Value {
+    if tool_name == plan::PLAN_TOOL_NAME {
+        return plan::execute_plan(
+            ctx,
+            args,
+            plan::PlanSurface::Cascaded,
+            true,
+            None,
+            "cascaded",
+            Some(&ctx.utterance),
+            Some(spoke_filler),
+        )
+        .await;
+    }
     execute_tracked_tool_call(
         ctx,
         tool_name,
@@ -214,6 +325,7 @@ pub(crate) async fn execute_cascaded_tool_call(
         "cascaded",
         Some(&ctx.utterance),
         Some(spoke_filler),
+        None,
     )
     .await
 }
@@ -230,6 +342,19 @@ pub(crate) async fn execute_realtime_tool_call(
     } else {
         "desktop_realtime"
     };
+    if tool_name == plan::PLAN_TOOL_NAME {
+        return plan::execute_plan(
+            ctx,
+            args,
+            plan::PlanSurface::Realtime,
+            false,
+            correlation,
+            source,
+            Some(&ctx.utterance),
+            None,
+        )
+        .await;
+    }
     execute_tracked_tool_call(
         ctx,
         tool_name,
@@ -239,6 +364,42 @@ pub(crate) async fn execute_realtime_tool_call(
         source,
         Some(&ctx.utterance),
         None,
+        None,
+    )
+    .await
+}
+
+/// Execute one exact, native-approved plan step through the same action-ledger,
+/// confirmation, undo, and dispatch seam as an ordinary provider tool call.
+/// The grant is an opaque Rust value created only after the plan card resolves;
+/// no model argument can manufacture or widen it.
+pub(super) async fn execute_plan_step(
+    ctx: &TaskCtx,
+    grant: &plan::PlanGrant,
+    step_index: usize,
+    step_count: usize,
+    tool_name: &str,
+    args: Value,
+    speak: bool,
+    correlation: Option<ConfirmCorrelation>,
+    source: &str,
+    utterance: Option<&str>,
+    spoke_filler: Option<&mut bool>,
+) -> Value {
+    execute_tracked_tool_call(
+        ctx,
+        tool_name,
+        args,
+        speak,
+        correlation,
+        source,
+        utterance,
+        spoke_filler,
+        Some(TrackedPlanStep {
+            grant,
+            step_index,
+            step_count,
+        }),
     )
     .await
 }
@@ -276,6 +437,25 @@ mod tests {
         assert_eq!(
             action_outcome(&json!({ "ok": true })),
             ActionOutcome::Succeeded
+        );
+    }
+
+    #[test]
+    fn exact_always_carded_plan_step_routes_to_individual_confirmation() {
+        assert!(crate::agent::safety::requires_individual_plan_confirmation(
+            "term_send"
+        ));
+        assert_eq!(
+            plan_confirmation_route(true, true, false),
+            PlanConfirmationRoute::Individual,
+        );
+        assert_eq!(
+            plan_confirmation_route(true, false, false),
+            PlanConfirmationRoute::Invalid,
+        );
+        assert_eq!(
+            plan_confirmation_route(true, true, true),
+            PlanConfirmationRoute::Aggregate,
         );
     }
 

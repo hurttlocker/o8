@@ -81,7 +81,7 @@ export async function fetchWithRetry(input: string, init: RequestInit): Promise<
 export async function fetchNextJson<T>(
   pathname: string,
   options: {
-    method?: 'GET' | 'POST';
+    method?: 'GET' | 'POST' | 'DELETE';
     searchParams?: URLSearchParams;
     body?: unknown;
     timeoutMs?: number;

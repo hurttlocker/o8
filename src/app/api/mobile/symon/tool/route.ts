@@ -5,8 +5,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import {
-  TOOL_TIMEOUT_MS,
   parseSymonPendingConfirmation,
+  symonToolTimeoutMs,
   toolTimeoutResult,
   toolErrorResult,
   type SymonToolRelayResult,
@@ -29,8 +29,9 @@ import {
  * (`window.__o8SymonAgent.invokeTool`) — the same reason the mint route reads
  * tools from the bridge: bare-specifier dynamic imports don't resolve inside a
  * raw eval string, so the webview does the invoke and we poll a window-side
- * result cache keyed by sessionId + callId. 60s cap → tool_timeout (Mac execution is NOT
- * cancelled; a late result is dropped, same as desk mode).
+ * result cache keyed by sessionId + callId. Every execution has a bounded,
+ * tool-aware timeout; expiry interrupts the exact native task before the relay
+ * reports tool_timeout.
  *
  * Confirm-gated tools keep their cached Rust invoke alive. The exact correlated
  * pending gate is returned to ws-server; after a decision, polling this same
@@ -57,7 +58,7 @@ function sleep(ms: number) {
  * cache. `deriveOk` runs in-page (mirrors realtime-client.ts). Slots older than
  * 5 min are reaped so a dropped/late result can't leak memory.
  */
-function buildToolEval(
+export function buildToolEval(
   sessionId: string,
   callId: string,
   tool: string,
@@ -74,36 +75,102 @@ function buildToolEval(
     const A = w.__o8SymonAgent;
     const store = (w.__o8SymonToolCalls = w.__o8SymonToolCalls || {});
     const NOW = Date.now();
-    for (const k in store) { if (store[k] && NOW - (store[k].startedAt || 0) > 300000) delete store[k]; }
-    if (!A || typeof A.invokeTool !== 'function') return JSON.stringify({ state: 'no_bridge' });
     const sessionId = ${session};
     const callId = ${id};
     const key = JSON.stringify([sessionId, callId]);
+    for (const k in store) {
+      const entry = store[k];
+      if (!entry) continue;
+      const terminalAt = entry.completedAt || entry.lastTouched || entry.startedAt || 0;
+      const abandonedAt = entry.lastTouched || entry.startedAt || 0;
+      if ((entry.done && NOW - terminalAt > 300000) || (k !== key && NOW - abandonedAt > 300000)) {
+        delete store[k];
+      }
+    }
+    if (!A || typeof A.invokeTool !== 'function') return JSON.stringify({ state: 'no_bridge' });
     let slot = store[key];
     if (!slot) {
-      slot = store[key] = { startedAt: NOW, done: false, decisionSubmitted: false, tool: ${name} };
+      slot = store[key] = { startedAt: NOW, lastTouched: NOW, done: false, decisionSubmitted: false, tool: ${name} };
       Promise.resolve().then(() => A.invokeTool(${name}, ${argsJson}, { sessionId, callId }, ${utteranceJson})).then((result) => {
         const errored = !!(result && typeof result === 'object' && 'error' in result);
-        store[key] = Object.assign(store[key] || {}, { done: true, ok: !errored, result: result });
+        store[key] = Object.assign(store[key] || {}, { done: true, completedAt: Date.now(), ok: !errored, result: result });
       }).catch((e) => {
-        store[key] = Object.assign(store[key] || {}, { done: true, ok: false, result: { error: 'tool_failed', detail: String((e && e.message) || e) } });
+        store[key] = Object.assign(store[key] || {}, { done: true, completedAt: Date.now(), ok: false, result: { error: 'tool_failed', detail: String((e && e.message) || e) } });
       });
     }
+    if (!slot.done) slot.lastTouched = NOW;
     if (slot.tool !== ${name}) return JSON.stringify({ state: 'call_mismatch' });
     if (slot.done) return JSON.stringify({ state: 'done', ok: slot.ok, result: slot.result });
+    if (Array.isArray(A.pendingConfirmations)) {
+      const hit = A.pendingConfirmations.find((c) => c && c.sessionId === sessionId && c.callId === callId && c.tool === ${name});
+      if (hit && hit.confirmationId !== slot.confirmationId) {
+        slot.confirmation = hit;
+        slot.confirmationId = hit.confirmationId;
+        slot.decisionSubmitted = false;
+        delete slot.confirmResolution;
+      }
+    }
     if (slot.confirmation && !slot.decisionSubmitted) {
       return JSON.stringify({ state: 'needs_confirmation', confirmation: slot.confirmation });
     }
-    if (!slot.confirmation && Array.isArray(A.pendingConfirmations)) {
-      const hit = A.pendingConfirmations.find((c) => c && c.sessionId === sessionId && c.callId === callId && c.tool === ${name});
-      if (hit) {
-        slot.confirmation = hit;
-        slot.confirmationId = hit.confirmationId;
-        return JSON.stringify({ state: 'needs_confirmation', confirmation: hit });
-      }
-    }
     return JSON.stringify({ state: 'pending' });
   })()`;
+}
+
+export function buildToolInterruptEval(sessionId: string, callId: string): string {
+  const session = JSON.stringify(sessionId);
+  const id = JSON.stringify(callId);
+  return `(() => {
+    const w = window;
+    const A = w.__o8SymonAgent;
+    if (!A || typeof A.interruptTool !== 'function') return JSON.stringify({ state: 'no_bridge' });
+    const sessionId = ${session};
+    const callId = ${id};
+    const key = JSON.stringify([sessionId, callId]);
+    const interrupts = (w.__o8SymonToolInterrupts = w.__o8SymonToolInterrupts || {});
+    const NOW = Date.now();
+    for (const interruptKey in interrupts) {
+      const candidate = interrupts[interruptKey];
+      if (candidate && NOW - (candidate.startedAt || 0) > 300000) delete interrupts[interruptKey];
+    }
+    let entry = interrupts[key];
+    if (!entry) {
+      entry = interrupts[key] = { startedAt: NOW, done: false };
+      Promise.resolve().then(() => A.interruptTool({ sessionId, callId })).then((active) => {
+        interrupts[key] = Object.assign(interrupts[key] || {}, { done: true, active: Boolean(active) });
+      }).catch((error) => {
+        interrupts[key] = Object.assign(interrupts[key] || {}, {
+          done: true,
+          error: String((error && error.message) || error),
+        });
+      });
+    }
+    if (entry.done && entry.error) {
+      delete interrupts[key];
+      return JSON.stringify({ state: 'error', detail: entry.error });
+    }
+    if (entry.done) return JSON.stringify({ state: 'done', active: entry.active });
+    return JSON.stringify({ state: 'pending' });
+  })()`;
+}
+
+type BridgeInterruptResult = { delivered: true; wasActive: boolean } | { delivered: false };
+
+async function interruptViaBridge(sessionId: string, callId: string): Promise<BridgeInterruptResult> {
+  const client = webviewClient();
+  const code = buildToolInterruptEval(sessionId, callId);
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      const { result } = await client.evalJs(code);
+      const parsed = JSON.parse(result) as { state?: string; active?: boolean };
+      if (parsed.state === 'done') return { delivered: true, wasActive: Boolean(parsed.active) };
+    } catch {
+      // The app/webview may be between mounts. Retry within the bounded window.
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { delivered: false };
 }
 
 async function executeViaBridge(
@@ -115,7 +182,7 @@ async function executeViaBridge(
 ): Promise<SymonToolRelayResult> {
   const client = webviewClient();
   const code = buildToolEval(sessionId, callId, tool, args, utterance);
-  const deadline = Date.now() + TOOL_TIMEOUT_MS;
+  const deadline = Date.now() + symonToolTimeoutMs(tool);
   let sawBridge = false;
 
   while (Date.now() < deadline) {
@@ -156,7 +223,32 @@ async function executeViaBridge(
     await sleep(POLL_INTERVAL_MS);
   }
   console.warn(`${LOG} tool_timeout callId=${callId} tool=${tool}`);
-  return toolTimeoutResult();
+  const interrupted = await interruptViaBridge(sessionId, callId);
+  return interrupted.delivered
+    ? toolTimeoutResult()
+    : toolErrorResult(
+      'interrupt_delivery_failed',
+      'The tool exceeded its execution budget, but native cancellation could not be delivered; its outcome is unknown.',
+    );
+}
+
+export async function DELETE(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
+  const callId = typeof body?.callId === 'string' ? body.callId : '';
+  if (!sessionId || !callId) {
+    return NextResponse.json({ ok: false, error: 'bad_request' });
+  }
+  const interrupted = await interruptViaBridge(sessionId, callId);
+  return interrupted.delivered
+    ? NextResponse.json({ ok: true, delivered: true, wasActive: interrupted.wasActive })
+    : NextResponse.json(
+      { ok: false, delivered: false, error: 'interrupt_delivery_failed' },
+      { status: 503 },
+    );
 }
 
 export async function POST(request: NextRequest) {

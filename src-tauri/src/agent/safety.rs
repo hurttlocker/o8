@@ -202,6 +202,10 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // inverse and always receives a fresh confirmation card.
         "symon_ledger_recent" => SafetyClass::ReadOnly,
         "symon_ledger_undo" => SafetyClass::Reversible,
+        // The pseudo-tool only proposes a native-validated, immutable plan.
+        // Its one card grants exact read-only/reversible steps; destructive
+        // steps still receive their own confirmation during execution.
+        "symon_execute_plan" => SafetyClass::Reversible,
         // Unknown — default to destructive.
         _ => SafetyClass::Destructive,
     }
@@ -211,6 +215,47 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
 /// A later version can read this from voice prefs.
 pub fn reversible_silent_consent() -> bool {
     false
+}
+
+/// Meta/control tools cannot be smuggled into a plan as ordinary steps. These
+/// tools change the active agent, approval, or execution topology itself; they
+/// retain their existing one-call governance flow instead.
+pub fn is_plan_control_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "symon_execute_plan"
+            | "symon_ledger_undo"
+            | "escalate"
+            | "o8_dispatch"
+            | "o8_delegate"
+            | "o8_approve_item"
+            | "o8_reject_item"
+            | "o8_stop_agent"
+            | "o8_packet_steer"
+            | "o8_agent_task"
+            | "o8_packet_rerun"
+            | "o8_packet_reset"
+            | "o8_packet_wait"
+            | "o8_orchestrator_draft"
+    )
+}
+
+/// Steps whose ordinary policy promises a dedicated card keep that card even
+/// after the operator approves the surrounding plan. This is stricter than the
+/// broad Reversible class: terminal/browser actions can execute opaque input,
+/// while control-plane actions release work or tear down live state.
+pub fn requires_individual_plan_confirmation(tool_name: &str) -> bool {
+    tool_safety_class(tool_name) == SafetyClass::Destructive
+        || is_plan_control_tool(tool_name)
+        || matches!(
+            tool_name,
+            "o8_browser_act"
+                | "terminal_send"
+                | "term_send"
+                | "term_interrupt"
+                | "term_key"
+                | "term_new"
+        )
 }
 
 /// Tools that are NEVER run, regardless of confirmation (hard refuse).
@@ -232,4 +277,23 @@ pub fn is_never_do_tool(tool_name: &str) -> bool {
 
 pub fn is_never_do_path(path: &str) -> bool {
     NEVER_DO_PATHS.iter().any(|p| path.contains(p))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_control_tools_are_explicit_and_actions_remain_composable() {
+        assert!(is_plan_control_tool("symon_execute_plan"));
+        assert!(is_plan_control_tool("o8_approve_item"));
+        assert!(is_plan_control_tool("o8_packet_reset"));
+        assert!(!is_plan_control_tool("mac_reminders_create"));
+        assert!(!is_plan_control_tool("mac_shortcuts_run"));
+        assert!(requires_individual_plan_confirmation("term_send"));
+        assert!(requires_individual_plan_confirmation("terminal_send"));
+        assert!(requires_individual_plan_confirmation("o8_browser_act"));
+        assert!(requires_individual_plan_confirmation("mac_shortcuts_run"));
+        assert!(!requires_individual_plan_confirmation("mac_reminders_create"));
+    }
 }

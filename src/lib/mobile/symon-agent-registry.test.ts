@@ -222,6 +222,49 @@ describe('symon-agent-registry — immutable scope grant', () => {
     });
   });
 
+  it('scopes and allowlists every concrete action nested in a governed plan', () => {
+    const planGrant = {
+      ...deviceGrant,
+      allowedTools: [...deviceGrant.allowedTools, 'symon_execute_plan'],
+    };
+    expect(scopeSymonToolArgs(planGrant, 'symon_execute_plan', {
+      steps: [
+        { tool: 'git_status', args: { repo: '/Users/operator/other' } },
+        { tool: 'o8_dispatch', args: { repoPath: '/Users/operator/other', task: 'Fix it' } },
+      ],
+    })).toEqual({
+      ok: true,
+      args: {
+        steps: [
+          {
+            tool: 'git_status',
+            args: {
+              repo: '/Users/operator/o8-mobile',
+              repoId: 'repo-o8-mobile',
+              repoPath: '/Users/operator/o8-mobile',
+            },
+          },
+          {
+            tool: 'o8_dispatch',
+            args: {
+              repo: '/Users/operator/o8-mobile',
+              repoId: 'repo-o8-mobile',
+              repoPath: '/Users/operator/o8-mobile',
+              task: 'Fix it',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(scopeSymonToolArgs(planGrant, 'symon_execute_plan', {
+      steps: [{ tool: 'symon_execute_plan', args: { steps: [] } }],
+    })).toMatchObject({ ok: false, error: 'tool_not_allowed' });
+    expect(scopeSymonToolArgs(planGrant, 'symon_execute_plan', {
+      steps: [{ tool: 'mac_mail_send_draft', args: {} }],
+    })).toMatchObject({ ok: false, error: 'tool_not_allowed' });
+  });
+
   it('rejects an explicit repo mismatch on stable-target Code tools', () => {
     expect(scopeSymonToolArgs(deviceGrant, 'o8_review_diff', {
       packetId: 'pkt-auth',
