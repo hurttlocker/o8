@@ -43,10 +43,16 @@ async fn execute_tracked_tool_call(
 
     let nested_orchestrator_dispatch = tool_name == "escalate"
         && args.get("target").and_then(Value::as_str) == Some("orchestrator");
+    let packet_approval_action = matches!(tool_name, "o8_approve_item" | "o8_reject_item");
     let (effective_tool, effective_args, preflight_error) = if nested_orchestrator_dispatch {
         match tools::o8_bridge::canonical_dispatch_args(&args).await {
             Ok(normalized) => ("o8_dispatch", normalized, None),
             Err(error) => ("o8_dispatch", args.clone(), Some(error)),
+        }
+    } else if packet_approval_action {
+        match tools::o8_bridge::preflight_approval_review_receipt(&args).await {
+            Ok(normalized) => (tool_name, normalized, None),
+            Err(error) => (tool_name, args.clone(), Some(error)),
         }
     } else {
         (tool_name, args.clone(), None)
@@ -68,8 +74,16 @@ async fn execute_tracked_tool_call(
             "[symon-agent] tool {tool_name} did not run: {}",
             confirmation.outcome.as_str()
         );
+        let error = if matches!(
+            confirmation.outcome,
+            super::ConfirmationOutcome::SpeechInterrupted
+        ) {
+            "The spoken review was interrupted, so no confirmation card was shown and no action ran"
+        } else {
+            "User declined this action"
+        };
         json!({
-            "error": "User declined this action",
+            "error": error,
             "declined_by_user": true,
             "confirmation_outcome": confirmation.outcome.as_str(),
         })

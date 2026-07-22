@@ -2,6 +2,7 @@ import { asc, eq, or } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getDb, laneEvents, sessionOutcomes } from '@/lib/db';
+import { getLaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
@@ -411,11 +412,14 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const lane = findLaneByPacket(normalizedPacketId);
   const projectId = getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
 
-  const [transcriptResult, changedFilesResult, agentResult, telemetryResult] = await Promise.allSettled([
+  const [transcriptResult, changedFilesResult, agentResult, telemetryResult, spokenDiffResult] = await Promise.allSettled([
     runtime?.readTranscript(normalizedSessionKey, undefined, TRANSCRIPT_CAPTURE_LIMIT) ?? Promise.resolve([]),
     runtime?.getChangedFiles(normalizedSessionKey) ?? Promise.resolve([]),
     findAgentSummary(normalizedSessionKey),
     runtime?.getTelemetry?.(normalizedSessionKey) ?? Promise.resolve(undefined),
+    Promise.resolve().then(() => (
+      lane ? getLaneSpokenDiffFacts(lane) : undefined
+    )),
   ]);
 
   const transcript = transcriptResult.status === 'fulfilled' ? transcriptResult.value : [];
@@ -440,6 +444,12 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     packetId: normalizedPacketId,
     projectId,
     sessionKey: normalizedSessionKey,
+    ...(spokenDiffResult.status === 'fulfilled' && spokenDiffResult.value
+      ? {
+          headSha: spokenDiffResult.value.headSha,
+          diffFingerprint: spokenDiffResult.value.fingerprint,
+        }
+      : {}),
     summary: buildPacketSummary({
       lifecycleSummary: normalizeSummaryText(agent?.runtimeSurface?.lifecycle?.summary ?? '', SUMMARY_LIMIT),
       assistantSummary: normalizeSummaryText(stripPacketSelfReview(lastAssistantEntry?.text ?? ''), SUMMARY_LIMIT),

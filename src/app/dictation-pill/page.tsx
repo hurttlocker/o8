@@ -34,6 +34,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
 import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
+import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentConfirmations';
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
@@ -222,10 +223,7 @@ export default function DictationPillPage() {
   const [askOpen, setAskOpen] = useState(false);
   const [askMode, setAskMode] = useState<AskMode>('idle');
   const [askThread, setAskThread] = useState<AskTurn[]>([]);
-  // Symon voice agent: a pending confirm card + the working indicator.
-  const [agentConfirm, setAgentConfirm] = useState<
-    { taskId: string; tool: string; summary: string } | null
-  >(null);
+  const [agentConfirm, setAgentConfirm] = useAgentConfirmations(dockLog);
   const [agentWorking, setAgentWorking] = useState(false);
   // Current running tool + when the task started — drive the working capsule's
   // "Synthesizing…/Working…" label + live elapsed timer.
@@ -673,10 +671,10 @@ export default function DictationPillPage() {
   }, [armAskIdleTimer, openPanel]);
 
   // Resolve a pending agent confirm card → tell Rust, clear the card locally.
-  const handleAgentConfirm = useCallback((taskId: string, allow: boolean) => {
-    invokeCmd('agent_confirm', { taskId, allow });
+  const handleAgentConfirm = useCallback((confirmationId: string, taskId: string, allow: boolean) => {
+    invokeCmd('agent_confirm_exact', { confirmationId, taskId, allow });
     setAgentConfirm(null);
-  }, []);
+  }, [setAgentConfirm]);
 
   // Memory glint (dossier #4): a quiet one-line chip under the dock that fades
   // in, holds ~4s, fades out. Driven by `kind: glint` agent events.
@@ -738,13 +736,6 @@ export default function DictationPillPage() {
     import('@tauri-apps/api/event')
       .then(async ({ listen }) => {
         const add = (u: () => void) => { if (disposed) u(); else offs.push(u); };
-        add(await listen<{ taskId?: string; tool?: string; summary?: string }>('o8:agent-confirm', (e) => {
-          const taskId = e.payload?.taskId ?? '';
-          const tool = e.payload?.tool ?? '';
-          const summary = e.payload?.summary ?? 'Run this action?';
-          dockLog(`agent-confirm ${tool}`);
-          if (taskId) setAgentConfirm({ taskId, tool, summary });
-        }));
         add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string; text?: string; sources?: Array<{ kind?: string; title?: string; url?: string }> }>('o8:agent-task-event', (e) => {
           const kind = e.payload?.kind;
           if (kind === 'tool_call') {
@@ -848,7 +839,7 @@ export default function DictationPillPage() {
       disposed = true;
       for (const off of offs) { try { off(); } catch { /* noop */ } }
     };
-  }, [openPanel, showGlint, updatePanelPending]);
+  }, [openPanel, setAgentConfirm, showGlint, updatePanelPending]);
 
   // Escape collapses the open Ask panel.
   useEffect(() => {

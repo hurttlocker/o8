@@ -1,4 +1,5 @@
-import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
+import { resolveApproval } from '@/lib/approvals/resolution';
+import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';

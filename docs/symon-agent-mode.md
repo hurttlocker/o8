@@ -107,6 +107,27 @@ fails as `503 desktop_unavailable` with the missing names instead of silently
 creating a partial Code agent. This strict failure applies only to Code; Life,
 legacy `{}`, and desktop continue using their full catalogs.
 
+### Spoken packet review
+
+Packet approvals use the canonical `review-state` route through
+`o8_review_diff`. The tool takes the exact `approvalId` and `packetId`, then
+returns a bounded `spokenSummary`, structured evidence, and a five-minute,
+single-use `reviewReceipt` bound to that approval, packet, and reviewed HEAD.
+The evidence includes committed, tracked-dirty, and untracked paths, deletions,
+migration/schema paths, API or command surfaces, current-HEAD AI findings,
+merge-gate checks, blind second-pass status, and current-attempt test status.
+Symon reads the summary and passes the receipt to `o8_approve_item` or
+`o8_reject_item`; it never reads raw diff hunks aloud.
+
+The review read and native confirmation preflight fail closed when the brief,
+receipt, approval binding, or reviewed HEAD is unavailable or stale. The
+confirmation card repeats the bounded summary as a visual fallback if audio is
+still playing. Test status is explicitly `not-reported` unless current-attempt,
+HEAD-bound evidence names an executed passing or failing command; older
+evidence is `stale`. Second-pass state remains distinct as
+`not-required`, `pending`, `agreed`, or `blocked` so a missing verdict is never
+spoken as approval.
+
 Success `200`:
 ```json
 {

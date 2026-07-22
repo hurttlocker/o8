@@ -424,6 +424,10 @@ export interface PacketContext {
   packetId: string;
   projectId?: string | null;
   sessionKey: string;
+  /** Exact worktree HEAD captured with this completion attempt. */
+  headSha?: string;
+  /** Fingerprint of committed, dirty, and untracked evidence at completion. */
+  diffFingerprint?: string;
   summary: string;
   changedFiles: string[];
   attemptLearnings?: string[];

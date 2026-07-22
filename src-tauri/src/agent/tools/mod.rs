@@ -416,22 +416,24 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_approve_item",
-            "description": "Approve ONE pending o8 approval by exact approvalId supplied by the operator or returned by o8_needs_me. Never identify approvals by title. Call directly when the operator already gave approvalId; the native confirmation gate runs after the call.",
+            "description": "Approve ONE pending o8 approval by exact approvalId. Packet approvals require the reviewReceipt returned by o8_review_diff for this exact approval and packet HEAD. Speak that tool's spokenSummary first, then pass its receipt here. Never identify approvals by title. The native confirmation card repeats the bounded review before execution.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "approvalId": { "type": "string", "description": "Exact approvalId returned by o8_needs_me." }
+                    "approvalId": { "type": "string", "description": "Exact approvalId returned by o8_needs_me." },
+                    "reviewReceipt": { "type": "string", "description": "For packet approvals, the short-lived exact receipt returned by o8_review_diff." }
                 },
                 "required": ["approvalId"]
             }
         }),
         json!({
             "name": "o8_reject_item",
-            "description": "Reject ONE pending o8 approval by exact approvalId supplied by the operator or returned by o8_needs_me. Never identify approvals by title. Call directly when the operator already gave approvalId; the native confirmation gate runs after the call.",
+            "description": "Reject ONE pending o8 approval by exact approvalId. Packet approvals require the reviewReceipt returned by o8_review_diff for this exact approval and packet HEAD. Speak that tool's spokenSummary first, then pass its receipt here. Never identify approvals by title. The native confirmation card repeats the bounded review before execution.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "approvalId": { "type": "string", "description": "Exact approvalId returned by o8_needs_me." },
+                    "reviewReceipt": { "type": "string", "description": "For packet approvals, the short-lived exact receipt returned by o8_review_diff." },
                     "reason": { "type": "string", "description": "Optional short reason the user gave for rejecting." }
                 },
                 "required": ["approvalId"]
@@ -538,13 +540,14 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 Review (inspect a packet's diff before approving) ───────────────
         json!({
             "name": "o8_review_diff",
-            "description": "Inspect the diff and review state for one exact packetId supplied by the operator or returned by o8_status or o8_needs_me. ReadOnly; use o8_approve_item with approvalId to release governed work.",
+            "description": "Prepare the bounded spoken review for one exact approvalId and packetId: files touched, deletions, migration/API surfaces, AI findings, merge-gate risks, second-pass verdict, and current-attempt test status. Read spokenSummary aloud, then pass reviewReceipt to o8_approve_item or o8_reject_item. Never speak raw diff hunks.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." }
+                    "packetId": { "type": "string", "description": "Exact packetId returned by o8_status or o8_needs_me." },
+                    "approvalId": { "type": "string", "description": "Exact pending approvalId returned by o8_needs_me for this packet." }
                 },
-                "required": ["packetId"]
+                "required": ["packetId", "approvalId"]
             }
         }),
         // ── Conductor delegation (hand a task to the live agent engine) ────────
@@ -1425,8 +1428,13 @@ mod escalation_tests {
         for name in ["o8_approve_item", "o8_reject_item"] {
             let props = properties(name);
             assert!(props.contains_key("approvalId"));
+            assert!(props.contains_key("reviewReceipt"));
             assert!(!props.contains_key("title"));
         }
+        assert_eq!(
+            schema("o8_review_diff")["parameters"]["required"],
+            json!(["packetId", "approvalId"])
+        );
     }
 
     #[test]

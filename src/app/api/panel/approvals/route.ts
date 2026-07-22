@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { applyApprovedFileEdit } from '@/lib/approvals/file-edit';
 import { applyApprovedSpecUpdate } from '@/lib/approvals/spec-update';
+import { verifySpokenReviewMutationEvidence } from '@/lib/approvals/spoken-review-guard';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
+import {
+  claimApprovalResolution,
+  reopenApprovalAfterEvidenceDrift,
+} from '@/lib/approvals/resolution';
 import {
   createApproval,
   createTestApproval,
   getApproval,
   listApprovals,
   listApprovalsForContext,
-  resolveApproval,
 } from '@/lib/approvals/store';
 import type { CreateApprovalInput } from '@/lib/approvals/types';
 import { launchRuntimeSurface } from '@/lib/runtime/actions';
@@ -18,6 +22,7 @@ import type { RuntimeId } from '@/lib/runtimes';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { getLane } from '@/lib/lane/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -173,6 +178,10 @@ export async function POST(request: NextRequest) {
   }
 
   const editedCommand = typeof body.editedCommand === 'string' ? body.editedCommand : undefined;
+  const requestedStrategy = typeof body.strategy === 'string'
+    && (body.strategy === 'ours' || body.strategy === 'theirs' || body.strategy === 'manual')
+    ? body.strategy
+    : undefined;
   const current = getApproval(id);
   if (!current) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
@@ -184,12 +193,70 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    let spokenReviewEvidence;
+    try {
+      spokenReviewEvidence = await verifySpokenReviewMutationEvidence(
+        body.spokenReviewEvidence,
+        current,
+      );
+    } catch (error) {
+      return NextResponse.json({
+        ok: false,
+        error: error instanceof Error ? error.message : 'Spoken review evidence is no longer current.',
+        code: 'spoken_review_changed',
+      }, {
+        status: 409,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
+    if (
+      spokenReviewEvidence
+      && requestedStrategy !== undefined
+      && current.continuation?.kind === 'lane'
+      && requestedStrategy !== current.continuation.strategy
+    ) {
+      return NextResponse.json({
+        ok: false,
+        error: 'The selected merge strategy was not included in the spoken review. Review the packet again.',
+        code: 'spoken_review_changed',
+      }, {
+        status: 409,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
+    const reviewedLaneStatus = current.continuation?.kind === 'lane'
+      ? getLane(current.continuation.laneId)?.status
+      : undefined;
+
     // resolveApproval is atomic in SQLite and guards against double-resolve.
     // Call it first so a concurrent request loses the race and short-circuits
     // before any file mutation occurs (close TOCTOU window).
-    const approval = resolveApproval(id, action, 'desktop');
+    const resolutionClaim = claimApprovalResolution(
+      id,
+      action,
+      'desktop',
+      undefined,
+      current.updatedAt,
+    );
+    const approval = resolutionClaim.approval;
     if (!approval) {
       return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
+    }
+    if (!resolutionClaim.claimed) {
+      const status = approval.status === 'pending' ? 409 : 200;
+      return NextResponse.json({
+        ok: approval.status !== 'pending',
+        approval,
+        resolved: action,
+        note: approval.status === 'pending'
+          ? 'Approval changed while it was being resolved. Review it again.'
+          : 'Approval was already resolved.',
+      }, {
+        status,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
     }
 
     // If resolveApproval returned a record that is already resolved (status !== pending
@@ -265,19 +332,58 @@ export async function POST(request: NextRequest) {
     } else if (continuation?.kind === 'lane' && action === 'approve') {
       // Lane continuation — re-dispatch the lane command
       // Accept optional merge strategy from the operator's approval action
-      const strategy = typeof body.strategy === 'string'
-        && (body.strategy === 'ours' || body.strategy === 'theirs' || body.strategy === 'manual')
-        ? body.strategy
-        : continuation.strategy;
+      const strategy = requestedStrategy ?? continuation.strategy;
       const { dispatch } = await import('@/lib/lane/commands');
       const result = await dispatch({
         verb: continuation.verb,
         laneId: continuation.laneId,
         commitMessage: continuation.commitMessage,
-        expectedHeadSha: continuation.expectedHeadSha,
+        expectedHeadSha: spokenReviewEvidence?.reviewedHeadSha ?? continuation.expectedHeadSha,
+        expectedDiffFingerprint: spokenReviewEvidence?.reviewedDiffFingerprint,
+        expectedGovernanceFingerprint: spokenReviewEvidence?.reviewedGovernanceFingerprint,
+        spokenReviewApprovalId: spokenReviewEvidence?.approvalId,
+        spokenReviewClaimId: spokenReviewEvidence ? resolutionClaim.claimId : undefined,
+        spokenReviewUpdatedAt: spokenReviewEvidence ? current.updatedAt : undefined,
+        spokenReviewLaneStatus: spokenReviewEvidence ? reviewedLaneStatus : undefined,
         strategy,
         actor: 'user',
       } as Parameters<typeof dispatch>[0]);
+      const spokenReviewDrift = result.reason === 'diff_changed_since_spoken_review'
+        || result.reason === 'governance_changed_since_spoken_review'
+        || result.reason === 'head_moved_since_review'
+        || (Boolean(spokenReviewEvidence) && Boolean(result.expectedHeadSha));
+      if (spokenReviewDrift) {
+        const reopened = reopenApprovalAfterEvidenceDrift(
+          approval.id,
+          resolutionClaim.claimId!,
+          result.note,
+        );
+        invalidateApprovalCaches();
+        await publishRealtimeMutation({
+          mutation: {
+            mutationId: `approval-review-stale-${approval.id}`,
+            source: 'desktop',
+            action: 'approve',
+            sessionKey: approval.sessionKey,
+            surfaceId: approval.sessionKey,
+            status: 'pending',
+            note: result.note,
+            createdAt: new Date().toISOString(),
+          },
+          refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+          sessionKeys: [approval.sessionKey],
+          fresh: true,
+        });
+        return NextResponse.json({
+          ok: false,
+          error: result.note,
+          code: 'spoken_review_changed',
+          approval: reopened,
+        }, {
+          status: 409,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      }
       decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
     } else if (continuation?.kind === 'plan' && action === 'approve') {
       // Plan continuation — create mission from approved plan

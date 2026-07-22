@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getApproval, listApprovals, resolveApproval } from '@/lib/approvals/store';
+import { resolveApproval } from '@/lib/approvals/resolution';
+import { getApproval, listApprovals } from '@/lib/approvals/store';
 import {
   buildPiPermissionDefaultResponse,
   handlePiPermissionRequest,

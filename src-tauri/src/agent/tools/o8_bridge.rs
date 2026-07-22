@@ -12,6 +12,17 @@
 
 use crate::agent::o8_http;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::io::Read;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const REVIEW_RECEIPT_TTL_MS: u64 = 5 * 60 * 1_000;
+const SPOKEN_REVIEW_SUMMARY_LIMIT: usize = 1_200;
+static REVIEW_RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
+static REVIEW_RECEIPTS: OnceLock<Mutex<HashMap<String, ApprovalReviewReceipt>>> = OnceLock::new();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RepoIdentity {
@@ -27,6 +38,146 @@ struct LaneTarget {
     session_key: Option<String>,
     label: String,
     repo_path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingApproval {
+    id: String,
+    title: String,
+    packet_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ApprovalReviewReceipt {
+    approval_id: String,
+    packet_id: String,
+    reviewed_head_sha: String,
+    reviewed_diff_fingerprint: String,
+    reviewed_governance_fingerprint: String,
+    approval_title: String,
+    spoken_summary: String,
+    expires_at_ms: u64,
+}
+
+fn epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn review_receipts() -> &'static Mutex<HashMap<String, ApprovalReviewReceipt>> {
+    REVIEW_RECEIPTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn prune_review_receipts(receipts: &mut HashMap<String, ApprovalReviewReceipt>, now_ms: u64) {
+    receipts.retain(|_, receipt| receipt.expires_at_ms > now_ms);
+}
+
+fn new_review_receipt_token(
+    approval_id: &str,
+    packet_id: &str,
+    reviewed_head_sha: &str,
+    now_ms: u64,
+) -> String {
+    let mut random = [0_u8; 32];
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut random))
+        .is_ok()
+    {
+        return hex::encode(random);
+    }
+
+    // Non-Unix fallback: process-local uniqueness still protects the receipt
+    // flow when the OS random device is unavailable.
+    let nonce = REVIEW_RECEIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut digest = Sha256::new();
+    digest.update(std::process::id().to_le_bytes());
+    digest.update(now_ms.to_le_bytes());
+    digest.update(nonce.to_le_bytes());
+    digest.update(approval_id.as_bytes());
+    digest.update(packet_id.as_bytes());
+    digest.update(reviewed_head_sha.as_bytes());
+    hex::encode(digest.finalize())
+}
+
+fn mint_approval_review_receipt_at(
+    approval: &PendingApproval,
+    packet_id: &str,
+    reviewed_head_sha: &str,
+    reviewed_diff_fingerprint: &str,
+    reviewed_governance_fingerprint: &str,
+    spoken_summary: &str,
+    now_ms: u64,
+) -> (String, u64) {
+    let expires_at_ms = now_ms.saturating_add(REVIEW_RECEIPT_TTL_MS);
+    let token = new_review_receipt_token(&approval.id, packet_id, reviewed_head_sha, now_ms);
+    let summary = spoken_summary.chars().take(SPOKEN_REVIEW_SUMMARY_LIMIT).collect();
+    let mut receipts = review_receipts().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_review_receipts(&mut receipts, now_ms);
+    receipts.retain(|_, receipt| receipt.approval_id != approval.id);
+    receipts.insert(token.clone(), ApprovalReviewReceipt {
+        approval_id: approval.id.clone(),
+        packet_id: packet_id.to_string(),
+        reviewed_head_sha: reviewed_head_sha.to_string(),
+        reviewed_diff_fingerprint: reviewed_diff_fingerprint.to_string(),
+        reviewed_governance_fingerprint: reviewed_governance_fingerprint.to_string(),
+        approval_title: approval.title.clone(),
+        spoken_summary: summary,
+        expires_at_ms,
+    });
+    (token, expires_at_ms)
+}
+
+fn checked_approval_review_receipt_at(
+    token: &str,
+    approval: &PendingApproval,
+    now_ms: u64,
+    consume: bool,
+) -> Result<ApprovalReviewReceipt, String> {
+    let packet_id = approval.packet_id.as_deref().ok_or_else(|| {
+        "That approval is not attached to a packet and does not need a spoken review receipt."
+            .to_string()
+    })?;
+    let mut receipts = review_receipts().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_review_receipts(&mut receipts, now_ms);
+    let receipt = receipts.get(token).cloned().ok_or_else(|| {
+        "The spoken review receipt is missing, expired, or already used. Review the packet again before approving or rejecting it."
+            .to_string()
+    })?;
+    if receipt.approval_id != approval.id
+        || receipt.packet_id != packet_id
+        || receipt.approval_title != approval.title
+    {
+        return Err(
+            "That spoken review receipt belongs to a different approval or packet. Review this exact packet before continuing."
+                .to_string(),
+        );
+    }
+    if consume {
+        receipts.remove(token);
+    }
+    Ok(receipt)
+}
+
+fn verify_current_receipt_evidence(
+    receipt: &ApprovalReviewReceipt,
+    current_head: &str,
+    current_fingerprint: &str,
+) -> Result<(), String> {
+    if current_head != receipt.reviewed_head_sha {
+        return Err(format!(
+            "Packet HEAD changed after the spoken review: reviewed {}, current {}. Review it again before continuing.",
+            receipt.reviewed_head_sha, current_head
+        ));
+    }
+    if current_fingerprint != receipt.reviewed_diff_fingerprint {
+        return Err(
+            "The packet diff changed after the spoken review. Review it again before continuing."
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn trimmed_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -369,6 +520,57 @@ fn approval_lane_target(approval: &Value, lanes: &[Value]) -> Option<LaneTarget>
     })
 }
 
+fn approval_packet_id(approval: &Value, lanes: &[Value]) -> Option<String> {
+    let continuation = approval.get("continuation");
+    let lane_review_action = continuation.is_some_and(|value| {
+        value.get("kind").and_then(Value::as_str) == Some("lane")
+            && matches!(
+                value.get("verb").and_then(Value::as_str),
+                Some("merge" | "create_pr")
+            )
+    });
+    let review_record = approval.get("toolName").and_then(Value::as_str)
+        == Some("orchestrator_review");
+    let merge_policy = matches!(
+        approval.get("policyRuleId").and_then(Value::as_str),
+        Some(
+            "lane-merge"
+                | "merge-gate-violation"
+                | "worker-merge-governance"
+                | "surface-dispatcher-review"
+        )
+    );
+    if !lane_review_action && !review_record && !merge_policy {
+        return None;
+    }
+
+    if let Some(packet_id) = nested_string(approval, "metadata", "Packet")
+        .or_else(|| nested_string(approval, "continuation", "packetId"))
+        .or_else(|| nested_string(approval, "args", "packetId"))
+    {
+        return Some(packet_id.to_string());
+    }
+
+    let continuation = continuation?;
+    let packet_lane_id = match (
+        continuation.get("kind").and_then(Value::as_str),
+        continuation.get("verb").and_then(Value::as_str),
+    ) {
+        (Some("lane"), Some("merge" | "create_pr")) => continuation
+            .get("laneId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        _ => None,
+    }?;
+
+    lanes
+        .iter()
+        .filter_map(lane_target)
+        .find(|lane| lane.lane_id == packet_lane_id)
+        .map(|lane| lane.packet_id)
+}
+
 fn approval_repo_path(approval: &Value, target: Option<&LaneTarget>) -> Option<String> {
     target
         .map(|lane| lane.repo_path.clone())
@@ -417,9 +619,10 @@ pub async fn needs_me(args: Value) -> Result<Value, String> {
         }
         let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
         let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+        let packet_id = approval_packet_id(a, &lanes);
         let mut card = json!({
             "approvalId": a.get("id").and_then(Value::as_str).unwrap_or(""),
-            "packetId": target.as_ref().map(|lane| lane.packet_id.as_str()),
+            "packetId": packet_id,
             "laneId": target.as_ref().map(|lane| lane.lane_id.as_str()),
             "sessionKey": target.as_ref().and_then(|lane| lane.session_key.as_deref())
                 .or_else(|| a.get("sessionKey").and_then(Value::as_str)),
@@ -488,7 +691,7 @@ pub async fn needs_me(args: Value) -> Result<Value, String> {
 
 /// Resolve exactly one pending approval by its stable id and, for Code calls,
 /// prove that the approval belongs to the relay-injected repo scope.
-async fn exact_pending_approval(args: &Value) -> Result<(String, String), String> {
+async fn exact_pending_approval(args: &Value) -> Result<PendingApproval, String> {
     let approval_id = trimmed_arg(args, "approvalId")
         .ok_or_else(|| "approvalId is required; copy it exactly from o8_needs_me".to_string())?;
     let repo_scope = optional_repo_scope(args).await?;
@@ -504,9 +707,9 @@ async fn exact_pending_approval(args: &Value) -> Result<(String, String), String
         .find(|approval| approval.get("id").and_then(Value::as_str) == Some(approval_id))
         .ok_or_else(|| format!("No pending approval has exact approvalId '{approval_id}'. Refresh o8_needs_me and try again."))?;
 
+    let lanes = all_lane_values().await?;
+    let target = approval_lane_target(approval, &lanes);
     if let Some(scope) = repo_scope {
-        let lanes = all_lane_values().await?;
-        let target = approval_lane_target(approval, &lanes);
         let path = approval_repo_path(approval, target.as_ref())
             .ok_or_else(|| "That approval has no verifiable repository in the active Code scope.".to_string())?;
         if path != scope.path {
@@ -514,10 +717,149 @@ async fn exact_pending_approval(args: &Value) -> Result<(String, String), String
         }
     }
 
-    Ok((
-        approval_id.to_string(),
-        approval.get("title").and_then(Value::as_str).unwrap_or("Untitled").to_string(),
+    let packet_id = approval_packet_id(approval, &lanes);
+    Ok(PendingApproval {
+        id: approval_id.to_string(),
+        title: approval.get("title").and_then(Value::as_str).unwrap_or("Untitled").to_string(),
+        packet_id,
+    })
+}
+
+async fn current_spoken_review_evidence(
+    packet_id: &str,
+    approval_id: &str,
+) -> Result<(String, String, String), String> {
+    let review_state = o8_http::get_json(&format!(
+        "/api/orchestrator/review-state?packetId={}&spoken=1&approvalId={}",
+        qenc(packet_id),
+        qenc(approval_id),
     ))
+    .await?;
+    let evidence = review_state
+        .get("spokenReview")
+        .and_then(|review| review.get("evidence"))
+        .ok_or_else(|| {
+            "o8 could not verify the packet evidence for spoken review. Review the packet again before continuing."
+                .to_string()
+        })?;
+    let head_sha = evidence
+        .get("headSha")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "o8 could not verify the packet HEAD for spoken review. Review the packet again before continuing."
+                .to_string()
+        })?;
+    let fingerprint = evidence
+        .get("fingerprint")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "o8 could not verify the packet diff fingerprint for spoken review. Review the packet again before continuing."
+                .to_string()
+        })?;
+    let governance_fingerprint = evidence
+        .get("governanceFingerprint")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "o8 could not bind the spoken review to the current approval and governance state. Review the packet again before continuing."
+                .to_string()
+        })?;
+    Ok((
+        head_sha.to_string(),
+        fingerprint.to_string(),
+        governance_fingerprint.to_string(),
+    ))
+}
+
+/// Validate packet-bound review evidence before the native confirmation card
+/// exists. Non-packet approvals preserve their established confirmation flow.
+pub(crate) async fn preflight_approval_review_receipt(args: &Value) -> Result<Value, String> {
+    let approval = exact_pending_approval(args).await?;
+    let mut normalized = args.clone();
+    let object = normalized
+        .as_object_mut()
+        .ok_or_else(|| "approval arguments must be an object".to_string())?;
+    object.remove("_symonSpokenReviewSummary");
+    object.remove("_symonApprovalTitle");
+    object.insert("_symonApprovalTitle".to_string(), json!(approval.title.clone()));
+
+    let Some(packet_id) = approval.packet_id.as_deref() else {
+        return Ok(normalized);
+    };
+    let token = trimmed_arg(args, "reviewReceipt").ok_or_else(|| {
+        "This packet approval requires a spoken review receipt. Call o8_review_diff with the exact approvalId and packetId first."
+            .to_string()
+    })?;
+    let receipt = checked_approval_review_receipt_at(token, &approval, epoch_millis(), false)?;
+    let (current_head, current_fingerprint, current_governance_fingerprint) =
+        current_spoken_review_evidence(packet_id, &approval.id).await?;
+    verify_current_receipt_evidence(&receipt, &current_head, &current_fingerprint)?;
+    if current_governance_fingerprint != receipt.reviewed_governance_fingerprint {
+        return Err(
+            "The approval or governance state changed after the spoken review. Review it again before continuing."
+                .to_string(),
+        );
+    }
+    object.insert("packetId".to_string(), json!(packet_id));
+    object.insert(
+        "_symonApprovalTitle".to_string(),
+        json!(receipt.approval_title),
+    );
+    object.insert("reviewedHeadSha".to_string(), json!(receipt.reviewed_head_sha));
+    object.insert(
+        "reviewedDiffFingerprint".to_string(),
+        json!(receipt.reviewed_diff_fingerprint),
+    );
+    object.insert(
+        "reviewedGovernanceFingerprint".to_string(),
+        json!(receipt.reviewed_governance_fingerprint),
+    );
+    object.insert(
+        "_symonSpokenReviewSummary".to_string(),
+        json!(receipt.spoken_summary),
+    );
+    Ok(normalized)
+}
+
+async fn consume_packet_review_receipt(
+    args: &Value,
+    approval: &PendingApproval,
+) -> Result<Option<ApprovalReviewReceipt>, String> {
+    let Some(packet_id) = approval.packet_id.as_deref() else {
+        return Ok(None);
+    };
+    let token = trimmed_arg(args, "reviewReceipt").ok_or_else(|| {
+        "This packet approval requires a spoken review receipt. Review the packet again before continuing."
+            .to_string()
+    })?;
+    // Consume before the final network check. A failed or interrupted mutation
+    // cannot replay evidence; the operator must review again.
+    let receipt = checked_approval_review_receipt_at(token, approval, epoch_millis(), true)?;
+    let (current_head, current_fingerprint, current_governance_fingerprint) =
+        current_spoken_review_evidence(packet_id, &approval.id).await?;
+    verify_current_receipt_evidence(&receipt, &current_head, &current_fingerprint)?;
+    if current_governance_fingerprint != receipt.reviewed_governance_fingerprint {
+        return Err(
+            "The approval or governance state changed after the spoken review. Review it again before continuing."
+                .to_string(),
+        );
+    }
+    Ok(Some(receipt))
+}
+
+fn spoken_review_evidence_body(receipt: &ApprovalReviewReceipt) -> Value {
+    json!({
+        "approvalId": receipt.approval_id,
+        "packetId": receipt.packet_id,
+        "reviewedHeadSha": receipt.reviewed_head_sha,
+        "reviewedDiffFingerprint": receipt.reviewed_diff_fingerprint,
+        "reviewedGovernanceFingerprint": receipt.reviewed_governance_fingerprint,
+    })
 }
 
 /// `o8_approve_item` — approve one pending o8 approval card by stable id.
@@ -526,13 +868,16 @@ async fn exact_pending_approval(args: &Value) -> Result<(String, String), String
 /// gate; this just executes the operator's decision against the same endpoint
 /// the desktop Approve button uses.
 pub async fn approve_item(args: Value) -> Result<Value, String> {
-    let (id, title) = exact_pending_approval(&args).await?;
+    let approval = exact_pending_approval(&args).await?;
+    let review_evidence = consume_packet_review_receipt(&args, &approval).await?;
+    let id = approval.id;
+    let title = approval.title;
 
-    let resp = o8_http::post_json(
-        "/api/panel/approvals",
-        json!({ "action": "approve", "id": id }),
-    )
-    .await?;
+    let mut body = json!({ "action": "approve", "id": id });
+    if let Some(receipt) = review_evidence.as_ref() {
+        body["spokenReviewEvidence"] = spoken_review_evidence_body(receipt);
+    }
+    let resp = o8_http::post_json("/api/panel/approvals", body).await?;
     if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't approve \u{201c}{title}\u{201d}: {err}"));
@@ -550,9 +895,15 @@ pub async fn approve_item(args: Value) -> Result<Value, String> {
 /// Same resolve + gate story as `o8_approve_item`. The optional spoken reason
 /// rides the request body for the audit trail.
 pub async fn reject_item(args: Value) -> Result<Value, String> {
-    let (id, title) = exact_pending_approval(&args).await?;
+    let approval = exact_pending_approval(&args).await?;
+    let review_evidence = consume_packet_review_receipt(&args, &approval).await?;
+    let id = approval.id;
+    let title = approval.title;
 
     let mut body = json!({ "action": "reject", "id": id });
+    if let Some(receipt) = review_evidence.as_ref() {
+        body["spokenReviewEvidence"] = spoken_review_evidence_body(receipt);
+    }
     if let Some(reason) = args
         .get("reason")
         .and_then(|v| v.as_str())
@@ -1621,29 +1972,121 @@ pub async fn browser_act(args: Value) -> Result<Value, String> {
 
 // ── Review (inspect a packet's diff before approving) ──────────────────────────
 
-/// `o8_review_diff` — inspect what a packet's worktree changed before approving:
-/// the diffstat (files + insertions/deletions, speakable) plus the canonical
-/// review state (working / ready-to-merge / needs-revision / merged / failed).
-/// ReadOnly — the operator still releases the merge via o8_approve_item; this
-/// just lets voice SEE the diff instead of approving blind.
+fn project_spoken_review(
+    review_state: &Value,
+) -> Result<(String, String, String, String, Value), String> {
+    let spoken_review = review_state
+        .get("spokenReview")
+        .cloned()
+        .ok_or_else(|| {
+            "o8 did not return a spoken review brief; do not approve this packet yet".to_string()
+        })?;
+    let spoken_summary = spoken_review
+        .get("spokenSummary")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "o8 returned an empty spoken review brief; do not approve this packet yet".to_string()
+        })?
+        .to_string();
+    let head_sha = spoken_review
+        .get("evidence")
+        .and_then(|evidence| evidence.get("headSha"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "o8 did not bind the spoken review to a packet HEAD; do not approve this packet yet"
+                .to_string()
+        })?
+        .to_string();
+    let fingerprint = spoken_review
+        .get("evidence")
+        .and_then(|evidence| evidence.get("fingerprint"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "o8 did not bind the spoken review to a diff fingerprint; do not approve this packet yet"
+                .to_string()
+        })?
+        .to_string();
+    let governance_fingerprint = spoken_review
+        .get("evidence")
+        .and_then(|evidence| evidence.get("governanceFingerprint"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "o8 did not bind the spoken review to the current approval and governance state; do not approve this packet yet"
+                .to_string()
+        })?
+        .to_string();
+    Ok((
+        spoken_summary,
+        head_sha,
+        fingerprint,
+        governance_fingerprint,
+        spoken_review,
+    ))
+}
+
+/// `o8_review_diff` — prepare one bounded spoken review for an exact pending
+/// approval and packet. The returned short-lived receipt binds the approval,
+/// packet, HEAD, and full worktree-diff fingerprint. ReadOnly — the operator
+/// still releases the action through the native confirmation card.
 pub async fn review_diff(args: Value) -> Result<Value, String> {
     let target = exact_lane_target(&args, "packetId").await?;
-
-    // Diffstat only — small cap; we want the spoken summary, not the full patch.
-    // packet_id is a url-safe slug (pkt-…), so direct interpolation is safe.
-    let diff = o8_http::get_json(&format!("/api/lanes/{}/diff?maxBytes=2000", target.packet_id)).await?;
-    if diff.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-        let note = diff.get("note").and_then(|v| v.as_str()).unwrap_or("no diff available");
-        return Err(format!("Couldn't read the diff for packet '{}': {note}", target.packet_id));
+    let approval = exact_pending_approval(&args).await?;
+    if approval.packet_id.as_deref() != Some(target.packet_id.as_str()) {
+        return Err(format!(
+            "approvalId '{}' does not belong to packetId '{}'. Refresh o8_needs_me and use the exact pair.",
+            approval.id, target.packet_id
+        ));
     }
-    let stat = diff.get("stat").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let branch = diff.get("branch").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-    // Review state — best-effort; the diffstat is the primary payload.
-    let state = o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={}", target.packet_id))
-        .await
-        .ok()
-        .and_then(|r| r.get("state").and_then(|v| v.as_str()).map(str::to_string));
+    // The canonical route now assembles the bounded, speakable evidence brief.
+    // Fail closed when it is unavailable: approving with only a diffstat is the
+    // exact blind-review behavior this tool exists to prevent.
+    let review_state = o8_http::get_json(&format!(
+        "/api/orchestrator/review-state?packetId={}&spoken=1&approvalId={}",
+        qenc(&target.packet_id),
+        qenc(&approval.id),
+    ))
+    .await?;
+    let state = review_state
+        .get("state")
+        .and_then(|value| value.as_str())
+        .unwrap_or("working")
+        .to_string();
+    let (
+        spoken_summary,
+        reviewed_head_sha,
+        reviewed_diff_fingerprint,
+        reviewed_governance_fingerprint,
+        spoken_review,
+    ) = project_spoken_review(&review_state)?;
+    let stat = spoken_review
+        .get("evidence")
+        .and_then(|evidence| evidence.get("stat"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let branch = review_state
+        .get("branch")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let (review_receipt, review_receipt_expires_at) = mint_approval_review_receipt_at(
+        &approval,
+        &target.packet_id,
+        &reviewed_head_sha,
+        &reviewed_diff_fingerprint,
+        &reviewed_governance_fingerprint,
+        &spoken_summary,
+        epoch_millis(),
+    );
 
     Ok(json!({
         "ok": true,
@@ -1653,6 +2096,13 @@ pub async fn review_diff(args: Value) -> Result<Value, String> {
         "branch": branch,
         "state": state,
         "stat": if stat.is_empty() { "no changes".to_string() } else { stat },
+        "reviewedHeadSha": reviewed_head_sha,
+        "reviewedDiffFingerprint": reviewed_diff_fingerprint,
+        "reviewedGovernanceFingerprint": reviewed_governance_fingerprint,
+        "reviewReceipt": review_receipt,
+        "reviewReceiptExpiresAt": review_receipt_expires_at,
+        "spokenSummary": spoken_summary,
+        "spokenReview": spoken_review,
     }))
 }
 
@@ -1824,6 +2274,93 @@ pub async fn spec_annotate(args: Value) -> Result<Value, String> {
 mod canvas_tests {
     use super::*;
 
+    static RECEIPT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    #[test]
+    fn packet_review_receipts_are_bound_short_lived_and_single_use() {
+        let _guard = RECEIPT_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        review_receipts()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        let approval_a = PendingApproval {
+            id: "approval-a".to_string(),
+            title: "Merge packet A".to_string(),
+            packet_id: Some("packet-a".to_string()),
+        };
+        let approval_b = PendingApproval {
+            id: "approval-b".to_string(),
+            title: "Merge packet B".to_string(),
+            packet_id: Some("packet-b".to_string()),
+        };
+        let now = epoch_millis();
+        let (token, _) = mint_approval_review_receipt_at(
+            &approval_a,
+            "packet-a",
+            "head-a",
+            "diff-a",
+            "governance-a",
+            "Packet A changes two files and its review approved.",
+            now,
+        );
+
+        assert!(checked_approval_review_receipt_at("missing", &approval_a, now, false).is_err());
+        assert!(checked_approval_review_receipt_at(&token, &approval_b, now, false).is_err());
+        let receipt = checked_approval_review_receipt_at(&token, &approval_a, now, false).unwrap();
+        assert_eq!(receipt.reviewed_head_sha, "head-a");
+        assert_eq!(receipt.reviewed_governance_fingerprint, "governance-a");
+        assert!(verify_current_receipt_evidence(&receipt, "head-a", "diff-a").is_ok());
+        assert!(verify_current_receipt_evidence(&receipt, "head-b", "diff-a").is_err());
+        assert!(verify_current_receipt_evidence(&receipt, "head-a", "diff-b").is_err());
+        assert!(checked_approval_review_receipt_at(&token, &approval_a, now, true).is_ok());
+        assert!(checked_approval_review_receipt_at(&token, &approval_a, now, false).is_err());
+
+        let (expired, _) = mint_approval_review_receipt_at(
+            &approval_a,
+            "packet-a",
+            "head-a",
+            "diff-a",
+            "governance-a",
+            "Expired summary.",
+            now.saturating_sub(REVIEW_RECEIPT_TTL_MS + 1),
+        );
+        assert!(checked_approval_review_receipt_at(&expired, &approval_a, now, false).is_err());
+    }
+
+    #[test]
+    fn spoken_review_projection_requires_a_nonempty_summary() {
+        assert!(project_spoken_review(&json!({})).is_err());
+        assert!(project_spoken_review(&json!({ "spokenReview": { "spokenSummary": " " } })).is_err());
+        assert!(project_spoken_review(&json!({
+            "spokenReview": { "spokenSummary": "Reviewed." }
+        })).is_err());
+    }
+
+    #[test]
+    fn spoken_review_projection_keeps_the_structured_brief() {
+        let state = json!({
+            "spokenReview": {
+                "spokenSummary": "Three files changed and the review approved.",
+                "evidence": {
+                    "headSha": "abc123",
+                    "fingerprint": "diff123",
+                    "governanceFingerprint": "governance123"
+                },
+                "files": { "count": 3 },
+            }
+        });
+        let (summary, head_sha, fingerprint, governance_fingerprint, brief) =
+            project_spoken_review(&state).unwrap();
+        assert_eq!(summary, "Three files changed and the review approved.");
+        assert_eq!(head_sha, "abc123");
+        assert_eq!(fingerprint, "diff123");
+        assert_eq!(governance_fingerprint, "governance123");
+        assert_eq!(brief["files"]["count"], 3);
+    }
+
     #[test]
     fn maps_send_prompt_text_under_args() {
         let body = canvas_intent_body("send-prompt", &json!({ "text": "fix the failing test" }));
@@ -1969,6 +2506,62 @@ mod canvas_tests {
         let target = approval_lane_target(&approval, &lanes).expect("approval target");
         assert_eq!(target.packet_id, "pkt-9");
         assert_eq!(target.lane_id, "lane-7");
+    }
+
+    #[test]
+    fn session_correlation_does_not_make_an_approval_packet_bound() {
+        let lanes = vec![json!({
+            "id": "lane-7",
+            "packetId": "pkt-9",
+            "sessionKey": "codex:pkt-9",
+            "repoPath": "/Users/operator/o8",
+            "label": "Fix auth",
+        })];
+        let approval = json!({
+            "id": "approval-runtime",
+            "sessionKey": "codex:pkt-9",
+            "metadata": { "Packet": "pkt-9", "Lane": "lane-7" },
+            "args": { "packetId": "pkt-9" },
+            "continuation": { "kind": "runtime", "action": "resume" },
+        });
+
+        assert!(approval_lane_target(&approval, &lanes).is_some());
+        assert_eq!(approval_packet_id(&approval, &lanes), None);
+    }
+
+    #[test]
+    fn merge_lane_continuation_is_packet_bound() {
+        let lanes = vec![json!({
+            "id": "lane-7",
+            "packetId": "pkt-9",
+            "sessionKey": "codex:pkt-9",
+            "repoPath": "/Users/operator/o8",
+            "label": "Fix auth",
+        })];
+        let approval = json!({
+            "id": "approval-merge",
+            "continuation": { "kind": "lane", "laneId": "lane-7", "verb": "merge" },
+        });
+
+        assert_eq!(approval_packet_id(&approval, &lanes).as_deref(), Some("pkt-9"));
+    }
+
+    #[test]
+    fn resume_lane_continuation_is_not_packet_review_governed() {
+        let lanes = vec![json!({
+            "id": "lane-7",
+            "packetId": "pkt-9",
+            "sessionKey": "codex:pkt-9",
+            "repoPath": "/Users/operator/o8",
+            "label": "Fix auth",
+        })];
+        let approval = json!({
+            "id": "approval-resume",
+            "metadata": { "Packet": "pkt-9" },
+            "continuation": { "kind": "lane", "laneId": "lane-7", "verb": "resume" },
+        });
+
+        assert_eq!(approval_packet_id(&approval, &lanes), None);
     }
 
     #[test]

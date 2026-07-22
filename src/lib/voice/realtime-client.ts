@@ -48,8 +48,193 @@ const LOG = '[realtime]';
 
 export interface RealtimeUtteranceTracker {
   observe: (event: Record<string, unknown>) => void;
-  /** Empty string means a system-only response; null means ASR failed. */
-  transcriptForResponse: (responseId: string) => Promise<string | null>;
+  /** Empty string means a system-only response; null means ASR failed or timed out. */
+  transcriptForResponse: (responseId: string, timeoutMs?: number) => Promise<string | null>;
+}
+
+const SPOKEN_REVIEW_APPROVAL_TOOLS = new Set([
+  'o8_approve_item',
+  'o8_reject_item',
+]);
+const PROTECTED_ASR_TIMEOUT_MS = 10_000;
+
+export type RealtimeApprovalAudioFailure =
+  | 'no_audio'
+  | 'interrupted'
+  | 'response_incomplete'
+  | 'session_ended'
+  | 'audio_already_claimed'
+  | 'timeout';
+
+export type RealtimeApprovalAudioResult =
+  | { ok: true }
+  | { ok: false; reason: RealtimeApprovalAudioFailure };
+
+export interface RealtimeApprovalAudioGate {
+  observe: (event: Record<string, unknown>) => void;
+  waitForPlaybackStop: (responseId: string) => Promise<RealtimeApprovalAudioResult>;
+  claimForProtectedCall: (responseId: string) => RealtimeApprovalAudioResult;
+  abort: () => void;
+}
+
+interface ApprovalAudioState {
+  started: boolean;
+  guarded: boolean;
+  claimed: boolean;
+  result: RealtimeApprovalAudioResult | null;
+  waiters: Set<(result: RealtimeApprovalAudioResult) => void>;
+}
+
+function responseIdFromRealtimeEvent(event: Record<string, unknown>): string {
+  const direct = event['response_id'];
+  if (typeof direct === 'string' && direct) return direct;
+  const response = event['response'];
+  if (!response || typeof response !== 'object') return '';
+  const nested = (response as Record<string, unknown>)['id'];
+  return typeof nested === 'string' ? nested : '';
+}
+
+/**
+ * Hold packet approval/rejection calls until the review audio has actually left
+ * the WebRTC output buffer. A generated response is insufficient: interruption,
+ * teardown, or a response with no audio must never reach the native confirm gate.
+ */
+export function createRealtimeApprovalAudioGate(
+  timeoutMs = 30_000,
+): RealtimeApprovalAudioGate {
+  const states = new Map<string, ApprovalAudioState>();
+  let activeResponseId = '';
+  let playbackResponseId = '';
+  let ended = false;
+
+  const stateFor = (responseId: string) => {
+    let state = states.get(responseId);
+    if (!state) {
+      state = {
+        started: false,
+        guarded: false,
+        claimed: false,
+        result: null,
+        waiters: new Set(),
+      };
+      states.set(responseId, state);
+    }
+    return state;
+  };
+
+  const settle = (
+    responseId: string,
+    result: RealtimeApprovalAudioResult,
+    override = false,
+  ) => {
+    if (!responseId) return;
+    const state = stateFor(responseId);
+    if (state.claimed) return;
+    if (state.result && !override) return;
+    state.result = result;
+    for (const resolve of state.waiters) resolve(result);
+    state.waiters.clear();
+  };
+
+  const failCurrentPlayback = (
+    reason: RealtimeApprovalAudioFailure,
+    responseIdHint = '',
+  ) => {
+    const responseId = responseIdHint || playbackResponseId || activeResponseId;
+    if (responseId) settle(responseId, { ok: false, reason }, true);
+    playbackResponseId = '';
+  };
+
+  return {
+    observe: (event) => {
+      const type = typeof event.type === 'string' ? event.type : '';
+      const eventResponseId = responseIdFromRealtimeEvent(event);
+      if (type === 'response.created') {
+        activeResponseId = eventResponseId;
+        if (activeResponseId) stateFor(activeResponseId);
+        return;
+      }
+      if (type === 'output_audio_buffer.started') {
+        const responseId = eventResponseId || activeResponseId;
+        if (!responseId) return;
+        playbackResponseId = responseId;
+        stateFor(responseId).started = true;
+        return;
+      }
+      if (type === 'output_audio_buffer.stopped') {
+        const responseId = eventResponseId || playbackResponseId || activeResponseId;
+        const state = responseId ? states.get(responseId) : undefined;
+        if (responseId && state?.started) settle(responseId, { ok: true });
+        if (playbackResponseId === responseId) playbackResponseId = '';
+        return;
+      }
+      if (type === 'output_audio_buffer.cleared') {
+        failCurrentPlayback('interrupted', eventResponseId);
+        return;
+      }
+      if (type === 'input_audio_buffer.speech_started') {
+        for (const [responseId, state] of states) {
+          if (state.guarded && !state.claimed) {
+            settle(responseId, { ok: false, reason: 'interrupted' }, true);
+          }
+        }
+        if (playbackResponseId || activeResponseId) failCurrentPlayback('interrupted');
+        return;
+      }
+      if (type === 'response.done') {
+        const response = event['response'];
+        const status = response && typeof response === 'object'
+          ? (response as Record<string, unknown>)['status']
+          : undefined;
+        if (eventResponseId && typeof status === 'string' && status !== 'completed') {
+          settle(eventResponseId, { ok: false, reason: 'response_incomplete' });
+        }
+        if (activeResponseId === eventResponseId) activeResponseId = '';
+      }
+    },
+    waitForPlaybackStop: async (responseId) => {
+      if (ended) return { ok: false, reason: 'session_ended' };
+      const state = responseId ? states.get(responseId) : undefined;
+      if (!state?.started) return { ok: false, reason: 'no_audio' };
+      state.guarded = true;
+      if (state.result) return state.result;
+
+      return new Promise<RealtimeApprovalAudioResult>((resolve) => {
+        let settled = false;
+        const finish = (result: RealtimeApprovalAudioResult) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          state.waiters.delete(finish);
+          resolve(result);
+        };
+        const timer = setTimeout(() => {
+          settle(responseId, { ok: false, reason: 'timeout' });
+        }, timeoutMs);
+        state.waiters.add(finish);
+      });
+    },
+    claimForProtectedCall: (responseId) => {
+      if (ended) return { ok: false, reason: 'session_ended' };
+      const state = responseId ? states.get(responseId) : undefined;
+      if (!state?.started) return { ok: false, reason: 'no_audio' };
+      if (state.claimed) return { ok: false, reason: 'audio_already_claimed' };
+      if (!state.result?.ok) {
+        return state.result ?? { ok: false, reason: 'response_incomplete' };
+      }
+      state.claimed = true;
+      return { ok: true };
+    },
+    abort: () => {
+      if (ended) return;
+      ended = true;
+      for (const responseId of states.keys()) {
+        settle(responseId, { ok: false, reason: 'session_ended' });
+      }
+      activeResponseId = '';
+      playbackResponseId = '';
+    },
+  };
 }
 
 /**
@@ -120,15 +305,26 @@ export function createRealtimeUtteranceTracker(): RealtimeUtteranceTracker {
         waiters.delete(itemId);
       }
     },
-    transcriptForResponse: async (responseId) => {
+    transcriptForResponse: async (responseId, timeoutMs) => {
       const itemId = responseItems.get(responseId);
       if (!itemId) return '';
       const ready = transcripts.get(itemId);
       if (ready !== undefined) return ready;
       return new Promise<string | null>((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = (transcript: string | null) => {
+          if (timer) clearTimeout(timer);
+          const itemWaiters = waiters.get(itemId);
+          itemWaiters?.delete(finish);
+          if (itemWaiters?.size === 0) waiters.delete(itemId);
+          resolve(transcript);
+        };
         const itemWaiters = waiters.get(itemId) ?? new Set<(transcript: string | null) => void>();
-        itemWaiters.add(resolve);
+        itemWaiters.add(finish);
         waiters.set(itemId, itemWaiters);
+        if (timeoutMs !== undefined) {
+          timer = setTimeout(() => finish(null), Math.max(0, timeoutMs));
+        }
       });
     },
   };
@@ -203,6 +399,18 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   // Keep the latest completed utterance so native tool calls can persist the
   // operator's words alongside the action they triggered.
   const utteranceTracker = createRealtimeUtteranceTracker();
+  const approvalAudioGate = createRealtimeApprovalAudioGate();
+  const activeNativeReviewGuards = new Set<string>();
+
+  const interruptNativeReviews = () => {
+    const guardIds = [...activeNativeReviewGuards];
+    if (guardIds.length === 0) return;
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => Promise.all(guardIds.map((reviewGuardId) => (
+        invoke('realtime_interrupt_review', { reviewGuardId })
+      ))))
+      .catch((error) => console.warn(`${LOG} native review interrupt failed:`, error));
+  };
 
   const setStatus = (s: RealtimeStatus, detail?: string) => {
     status = s;
@@ -213,6 +421,8 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   };
 
   const teardown = async () => {
+    approvalAudioGate.abort();
+    interruptNativeReviews();
     try { dc?.close(); } catch { /* already closed */ }
     try {
       if (pc) {
@@ -255,7 +465,21 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     );
     if (!calls.length) return;
     const responseId = typeof response['id'] === 'string' ? response['id'] : '';
-    const actionUtterance = await utteranceTracker.transcriptForResponse(responseId);
+    const hasProtectedCall = calls.some((call) => SPOKEN_REVIEW_APPROVAL_TOOLS.has(call.name || ''));
+    // Arm both waits before yielding. Playback may already be stopped when
+    // response.done arrives, but the guarded state stays interruptible until one
+    // protected call atomically claims it below. Bounding ASR keeps a missing
+    // terminal transcription event from holding a protected action forever.
+    const protectedPlaybackPromise = hasProtectedCall
+      ? approvalAudioGate.waitForPlaybackStop(responseId)
+      : null;
+    const actionUtterancePromise = utteranceTracker.transcriptForResponse(
+      responseId,
+      hasProtectedCall ? PROTECTED_ASR_TIMEOUT_MS : undefined,
+    );
+    const [actionUtterance, protectedPlayback] = protectedPlaybackPromise
+      ? await Promise.all([actionUtterancePromise, protectedPlaybackPromise])
+      : [await actionUtterancePromise, null];
 
     let mod: typeof import('@tauri-apps/api/core') | null = null;
     try { mod = await import('@tauri-apps/api/core'); } catch { /* not in a Tauri webview */ }
@@ -272,6 +496,41 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       let result: unknown = { error: 'tool bridge unavailable' };
       if (actionUtterance === null) {
         result = { error: 'utterance_transcription_failed' };
+      } else if (SPOKEN_REVIEW_APPROVAL_TOOLS.has(name)) {
+        const playback = protectedPlayback ?? { ok: false as const, reason: 'no_audio' as const };
+        if (!playback.ok) {
+          result = {
+            error: 'spoken_review_audio_incomplete',
+            reason: playback.reason,
+            detail: 'The spoken packet review did not finish playing. Review the packet again before approving or rejecting it.',
+          };
+        } else {
+          const claim = approvalAudioGate.claimForProtectedCall(responseId);
+          if (!claim.ok) {
+            result = {
+              error: 'spoken_review_audio_incomplete',
+              reason: claim.reason,
+              detail: claim.reason === 'audio_already_claimed'
+                ? 'One spoken review can authorize only one approval or rejection attempt.'
+                : 'The spoken packet review was interrupted before the action could be claimed. Review the packet again before approving or rejecting it.',
+            };
+          } else if (mod) {
+            const reviewGuardId = `${meterSessionId}:${responseId}`;
+            activeNativeReviewGuards.add(reviewGuardId);
+            try {
+              result = await mod.invoke('realtime_invoke_tool', {
+                name,
+                args,
+                utterance: actionUtterance || undefined,
+                reviewGuardId,
+              });
+            } catch (e) {
+              result = { error: (e as Error)?.message || String(e) };
+            } finally {
+              activeNativeReviewGuards.delete(reviewGuardId);
+            }
+          }
+        }
       } else if (mod) {
         try {
           result = await mod.invoke('realtime_invoke_tool', {
@@ -395,6 +654,10 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
         }
       }
       utteranceTracker.observe(parsed);
+      approvalAudioGate.observe(parsed);
+      if (parsed.type === 'input_audio_buffer.speech_started') {
+        interruptNativeReviews();
+      }
       if (parsed.type === 'response.done') {
         const response = parsed['response'];
         if (response && typeof response === 'object') {

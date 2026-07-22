@@ -1,7 +1,3 @@
-import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
-import { promisify } from 'node:util';
-
 import type {
   ApprovalConflictReport,
   ApprovalGateResult,
@@ -22,7 +18,16 @@ import {
 } from '@/lib/lane/registry';
 import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
-import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import {
+  commitSpokenReviewSnapshotWithDriftRecovery,
+  rejectInvalidSpokenReviewExecution,
+  rejectSpokenReviewGovernanceDrift,
+  rejectSpokenReviewSnapshotDrift,
+  resolveSpokenReviewSnapshotSha,
+  spokenReviewResolutionTransition,
+  SpokenReviewSnapshotChangedError,
+  validateSpokenReviewEvidenceBundle,
+} from '@/lib/lane/spoken-review-snapshot';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import {
@@ -30,8 +35,28 @@ import {
   WorktreeRebaseConflictError,
   type WorktreeRebaseStrategy,
 } from '@/lib/worktree/manager';
+import {
+  amendViaO8Suffix,
+  commitDirtyWorktree,
+  createDetachedIntegrationWorktree,
+  currentBranch,
+  deleteRefBestEffort,
+  exactPushLeaseForCandidate,
+  fetchWorkerHeadIntoMainRepo,
+  git,
+  gitErrorMessage,
+  isAncestor,
+  mergeRefForLane,
+  pushExactBase, pushWorkerBranchBestEffort,
+  pushWorkerBranchLeaseBestEffort,
+  readHeadSha,
+  refExists,
+  refPointsTo,
+  refreshOriginBaseBestEffort,
+  worktreeExistsOnDisk,
+} from '@/lib/lane/worktree-merge-git';
+import { withRepoActionLock } from '@/lib/lane/repo-action-lock';
 
-const execFileAsync = promisify(execFile);
 const BASE_ADVANCED_RETRY_LIMIT = 3;
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
@@ -65,137 +90,6 @@ export interface WorktreeSideMergeInput {
   createLaneActionApproval: CreateLaneActionApproval;
 }
 
-async function git(cwd: string, args: string[], opts: { timeout?: number; maxBuffer?: number } = {}) {
-  return execFileAsync('git', args, {
-    cwd,
-    timeout: opts.timeout ?? 60_000,
-    maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,
-  });
-}
-
-function gitErrorMessage(error: unknown): string {
-  const err = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
-  const stderr = typeof err.stderr === 'string' ? err.stderr.trim()
-    : err.stderr instanceof Buffer ? err.stderr.toString('utf8').trim()
-    : '';
-  const stdout = typeof err.stdout === 'string' ? err.stdout.trim()
-    : err.stdout instanceof Buffer ? err.stdout.toString('utf8').trim()
-    : '';
-  const message = typeof err.message === 'string' ? err.message.trim() : String(error);
-  return stderr || stdout || message || 'Git command failed.';
-}
-
-async function worktreeExistsOnDisk(worktreePath: string): Promise<boolean> {
-  try {
-    const dirStat = await stat(worktreePath);
-    if (!dirStat.isDirectory()) return false;
-    const gitStat = await stat(`${worktreePath}/.git`);
-    return gitStat.isFile() || gitStat.isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-async function commitDirtyWorktree(worktreePath: string, commitMessage: string): Promise<void> {
-  await git(worktreePath, ['add', '-A']);
-  const { stdout: porcelain } = await git(worktreePath, ['status', '--porcelain'], { timeout: 5000 });
-  if (porcelain.trim()) {
-    await git(worktreePath, ['commit', '-m', resolveAttributedCommitMessage(commitMessage)]);
-  }
-}
-
-async function currentBranch(cwd: string): Promise<string> {
-  const { stdout } = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 });
-  return stdout.trim();
-}
-async function amendViaO8Suffix(worktreePath: string, fallbackSubject?: string): Promise<void> {
-  try {
-    const { stdout: tipSubject } = await git(worktreePath, ['log', '-1', '--pretty=%s'], { timeout: 5000 });
-    const subject = tipSubject.trim();
-    if (subject && !subject.includes('[via-o8]')) {
-      const nextSubject = subject === 'auto-commit: agent work before review' && fallbackSubject?.trim() ? fallbackSubject.trim() : subject;
-      await git(worktreePath, ['commit', '--amend', '-m', `${nextSubject} [via-o8]`, '--allow-empty']);
-    }
-  } catch {
-    // Best-effort tag for changelog rendering. Never block a valid merge.
-  }
-}
-
-function mergeRefForLane(laneId: string): string {
-  return `refs/o8/merge/${laneId.replace(/[^A-Za-z0-9._-]/g, '-')}`;
-}
-
-async function deleteRefBestEffort(repoPath: string, ref: string): Promise<void> {
-  try {
-    await git(repoPath, ['update-ref', '-d', ref], { timeout: 5000 });
-  } catch {
-    // Temporary integration refs are best-effort cleanup only.
-  }
-}
-
-async function pushWorkerBranchBestEffort(worktreePath: string, actualBranch: string): Promise<void> {
-  try {
-    await git(worktreePath, ['push', '-u', 'origin', actualBranch], { timeout: 60_000 });
-    console.log(`[lane-merge] Pushed worker branch ${actualBranch} to origin before fast-forward.`);
-  } catch (error) {
-    console.warn(
-      `[lane-merge] Worker branch push skipped for ${actualBranch}: ${gitErrorMessage(error)}`,
-    );
-  }
-}
-
-async function fetchWorkerHeadIntoMainRepo(
-  repoPath: string,
-  worktreePath: string,
-  actualBranch: string,
-  integrationRef: string,
-): Promise<void> {
-  await git(repoPath, ['fetch', worktreePath, `+${actualBranch}:${integrationRef}`], { timeout: 60_000 });
-}
-
-async function refExists(cwd: string, ref: string): Promise<boolean> {
-  try {
-    await git(cwd, ['rev-parse', '--verify', ref], { timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
-  try {
-    await git(cwd, ['merge-base', '--is-ancestor', ancestor, descendant], { timeout: 10_000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function refreshOriginBaseBestEffort(repoPath: string, baseBranch: string): Promise<string | null> {
-  try {
-    await git(repoPath, ['fetch', 'origin', baseBranch, '--quiet'], { timeout: 60_000 });
-  } catch (error) {
-    console.warn(`[lane-merge] Could not refresh origin/${baseBranch} before fast-forward: ${gitErrorMessage(error)}`);
-  }
-
-  const originRef = `origin/${baseBranch}`;
-  return await refExists(repoPath, originRef) ? originRef : null;
-}
-
-async function syncWorktreeBaseForCleanup(
-  repoPath: string,
-  worktreePath: string,
-  baseBranch: string,
-): Promise<void> {
-  try {
-    await git(worktreePath, ['fetch', repoPath, `${baseBranch}:${baseBranch}`], { timeout: 30_000 });
-  } catch (error) {
-    console.warn(
-      `[lane-merge] Could not sync ${baseBranch} back into worktree before cleanup: ${gitErrorMessage(error)}`,
-    );
-  }
-}
-
 async function enqueueDecompositions(repoPath: string, runtime: Lane['runtime']): Promise<string> {
   try {
     const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
@@ -226,19 +120,22 @@ function classifyFastForwardFailure(message: string): 'dirty-working-tree' | 'no
 async function createRebaseConflictApproval(
   input: WorktreeSideMergeInput,
   error: WorktreeRebaseConflictError,
+  recoveryWorktreePath = error.worktreePath,
 ): Promise<LaneCommandResult> {
   const { lane, command, actor, gateResult, createLaneActionApproval } = input;
   const files = error.conflictFiles;
   const conflictList = files.length > 0
     ? `\n\nConflicting files:\n${files.map((file) => `- ${file}`).join('\n')}`
     : '';
+  const recoveryInstruction = recoveryWorktreePath === error.worktreePath ? `Resolve the rebase in ${recoveryWorktreePath}, or choose a conflict strategy and retry.`
+    : `The isolated integration checkout was discarded. Reproduce the rebase from the packet worktree at ${recoveryWorktreePath}, or choose a conflict strategy and retry.`;
   return createLaneActionApproval(lane, actor, {
     verb: 'merge',
     commitMessage: command.commitMessage,
     expectedHeadSha: command.expectedHeadSha,
     reviewSummary: command.reviewSummary,
     title: `Rebase conflict: ${lane.label}`,
-    description: `Worktree-side rebase failed before main was touched: ${error.message}${conflictList}\n\nResolve the rebase in ${error.worktreePath}, or choose a conflict strategy and retry. o8 will not fall back to merging this packet into the operator checkout.`,
+    description: `Worktree-side rebase failed before main was touched: ${error.message}${conflictList}\n\n${recoveryInstruction} o8 will not fall back to merging this packet into the operator checkout.`,
     summary: `Rebase conflict on ${lane.branch} -> ${lane.baseBranch}. ${files.length} file${files.length === 1 ? '' : 's'} conflicting.`,
     risk: 'high',
     policyRuleId: 'rebase_conflict_escalation',
@@ -525,7 +422,7 @@ async function retryBaseAdvancedAfterRebase(
           // operator hunting for conflicts that don't exist.
           return createFastForwardFailureApproval(input, error);
         }
-        return createRebaseConflictApproval(input, error);
+        return createRebaseConflictApproval(input, error, lane.worktreePath ?? error.worktreePath);
       }
       if (error instanceof WorktreeFetchUnreachableError) {
         return createFetchUnreachableResult(input, error);
@@ -538,7 +435,13 @@ async function retryBaseAdvancedAfterRebase(
       return handlePostRebaseVerifyFailure(input, verify);
     }
 
-    await fetchWorkerHeadIntoMainRepo(lane.repoPath, opts.worktreePath, opts.actualBranch, opts.integrationRef);
+    const { stdout: rebasedShaOutput } = await git(opts.worktreePath, ['rev-parse', 'HEAD']);
+    await fetchWorkerHeadIntoMainRepo(
+      lane.repoPath,
+      opts.worktreePath,
+      rebasedShaOutput.trim(),
+      opts.integrationRef,
+    );
     try {
       await fetchOriginBaseForBaseDriftRetry(lane.repoPath, lane.baseBranch, opts.actualBranch);
     } catch (error) {
@@ -565,21 +468,8 @@ async function retryBaseAdvancedAfterRebase(
   );
 }
 
-/**
- * Per-repo merge serialization. The fast-forward + push section mutates the
- * SHARED operator checkout (`lane.repoPath`) — two concurrent merges in the
- * same repo race `git merge --ff-only` / `git push` / index locks against
- * each other. Different repos still merge in parallel. Single-process by
- * design: every merge flows through this module via dispatchLaneCommand.
- */
-const repoMergeChains = new Map<string, Promise<unknown>>();
-
-function withRepoMergeLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
-  return chainOnKey(repoMergeChains, repoPath, fn);
-}
-
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
-  return withRepoMergeLock(input.lane.repoPath, () => performWorktreeSideMergeInner(input));
+  return withRepoActionLock(input.lane.repoPath, () => performWorktreeSideMergeInner(input));
 }
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
@@ -590,16 +480,38 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
   if (!worktreePath) {
     return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
   }
-
+  const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
+  let cleanupIntegrationWorktree: (() => Promise<void>) | undefined;
   try {
     if (!(await worktreeExistsOnDisk(worktreePath))) {
       setLaneStatus(command.laneId, 'reviewing', 'system', 'worktree_not_found');
-      return {
-        ok: false,
-        laneId: command.laneId,
-        note: `Worktree not found on disk: ${worktreePath}`,
-      };
+      return { ok: false, laneId: command.laneId, note: `Worktree not found on disk: ${worktreePath}` };
     }
+
+    const executionDrift = rejectInvalidSpokenReviewExecution({
+      ...command,
+      lane,
+      actor,
+      verb: 'merge',
+    });
+    if (executionDrift) return executionDrift;
+
+    const governanceDrift = await rejectSpokenReviewGovernanceDrift({
+      lane,
+      actor,
+      approvalId: command.spokenReviewApprovalId,
+      expectedFingerprint: command.expectedGovernanceFingerprint,
+      resolutionTransition: spokenReviewResolutionTransition(command),
+      action: 'merging',
+    });
+    if (governanceDrift) return governanceDrift;
+
+    const spokenDrift = await rejectSpokenReviewSnapshotDrift({
+      lane, actor, expectedFingerprint: command.expectedDiffFingerprint, action: 'merging',
+    });
+    if (spokenDrift) return spokenDrift;
+
+    setLaneStatus(command.laneId, 'merging', actor, 'merging');
 
     const mgr = getWorktreeManager(lane.repoPath);
     // Resolve the manager's worktree id from metadata; the path's last segment
@@ -639,18 +551,6 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       };
     }
 
-    if (command.commitMessage) {
-      try {
-        await commitDirtyWorktree(worktreePath, command.commitMessage);
-      } catch (err) {
-        // Preserve historical merge behavior: a clean tree or failed empty commit
-        // attempt should not block the merge path. Log it — a genuinely failed
-        // commit (lock contention, hooks, disk) otherwise resurfaces later as a
-        // confusing "rebase conflict" with no cause attached.
-        console.warn(`[lane-merge] commitDirtyWorktree non-fatal: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
     const actualBranch = await currentBranch(worktreePath);
     if (!actualBranch || actualBranch === 'HEAD') {
       return { ok: false, laneId: command.laneId, note: 'Cannot merge detached worktree HEAD.' };
@@ -666,11 +566,73 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       };
     }
 
+    let reviewedSnapshotSha: string;
+    if (spokenEvidence.present && command.commitMessage) {
+      const commit = await commitSpokenReviewSnapshotWithDriftRecovery({
+        lane,
+        actor,
+        commitMessage: resolveAttributedCommitMessage(command.commitMessage),
+        expectedFingerprint: command.expectedDiffFingerprint,
+      });
+      if (commit.result) return commit.result;
+      if (commit.error) {
+        // Surface snapshot failures at the commit boundary so the lane never
+        // continues into rebase with an unpublished or ambiguous reviewed tree.
+        console.warn(`[lane-merge] commitSpokenReviewSnapshot failed: ${commit.error instanceof Error ? commit.error.message : String(commit.error)}`);
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: commit.error instanceof Error ? commit.error.message : String(commit.error),
+        };
+      }
+      reviewedSnapshotSha = commit.snapshotSha!;
+    } else if (spokenEvidence.present) {
+      try {
+        reviewedSnapshotSha = await resolveSpokenReviewSnapshotSha({
+          lane,
+          expectedFingerprint: command.expectedDiffFingerprint,
+        });
+      } catch (error) {
+        if (error instanceof SpokenReviewSnapshotChangedError) {
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: error.message,
+            reason: 'diff_changed_since_spoken_review',
+          };
+        }
+        throw error;
+      }
+    } else {
+      if (command.commitMessage) {
+        try {
+          await commitDirtyWorktree(
+            worktreePath,
+            resolveAttributedCommitMessage(command.commitMessage),
+          );
+        } catch (error) {
+          console.warn(`[lane-merge] commitDirtyWorktree non-fatal: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      reviewedSnapshotSha = await readHeadSha(worktreePath);
+    }
+
+    let mergeWorktreePath = worktreePath;
+    if (spokenEvidence.present) {
+      const integration = await createDetachedIntegrationWorktree({
+        repoPath: lane.repoPath,
+        sourceWorktreePath: worktreePath,
+        sourceSha: reviewedSnapshotSha,
+      });
+      mergeWorktreePath = integration.path;
+      cleanupIntegrationWorktree = integration.cleanup;
+    }
+
     const rebaseStrategy: WorktreeRebaseStrategy | undefined = command.strategy === 'ours' || command.strategy === 'theirs'
       ? command.strategy
       : undefined;
     try {
-      await mgr.rebaseOntoMain(worktreePath, {
+      await mgr.rebaseOntoMain(mergeWorktreePath, {
         baseBranch: lane.baseBranch,
         branchName: actualBranch,
         strategy: rebaseStrategy,
@@ -685,7 +647,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
           // operator hunting for conflicts that don't exist.
           return createFastForwardFailureApproval(input, error);
         }
-        return createRebaseConflictApproval(input, error);
+        return createRebaseConflictApproval(input, error, worktreePath);
       }
       if (error instanceof WorktreeFetchUnreachableError) {
         return createFetchUnreachableResult(input, error);
@@ -694,7 +656,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     }
 
     const verify = await runLaneRebaseVerify({
-      cwd: worktreePath,
+      cwd: mergeWorktreePath,
       actualBranch,
       logPrefix: 'lane-merge',
     });
@@ -707,17 +669,30 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return handlePostRebaseVerifyFailure(input, verify);
     }
 
-    if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(worktreePath, lane.label);
-    await pushWorkerBranchBestEffort(worktreePath, actualBranch);
+    if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(mergeWorktreePath, lane.label);
+    const { stdout: rebasedShaOutput } = await git(mergeWorktreePath, ['rev-parse', 'HEAD']);
+    const rebasedSha = rebasedShaOutput.trim();
 
+    const publicationGovernanceDrift = await rejectSpokenReviewGovernanceDrift({
+      lane,
+      actor,
+      approvalId: command.spokenReviewApprovalId,
+      expectedFingerprint: command.expectedGovernanceFingerprint,
+      resolutionTransition: spokenReviewResolutionTransition(command),
+      action: 'merging',
+    });
+    if (publicationGovernanceDrift) return publicationGovernanceDrift;
     const integrationRef = mergeRefForLane(command.laneId);
+    let mergeCandidateSha = rebasedSha;
+    let expectedRemoteBaseSha: string | undefined;
     try {
-      await fetchWorkerHeadIntoMainRepo(lane.repoPath, worktreePath, actualBranch, integrationRef);
+      await fetchWorkerHeadIntoMainRepo(lane.repoPath, mergeWorktreePath, rebasedSha, integrationRef);
+      await pushWorkerBranchBestEffort(worktreePath, actualBranch, rebasedSha);
       const originBaseRef = await refreshOriginBaseBestEffort(lane.repoPath, lane.baseBranch);
       if (originBaseRef && !(await isAncestor(lane.repoPath, originBaseRef, integrationRef))) {
         const retryResult = await retryBaseAdvancedAfterRebase(input, {
           mgr,
-          worktreePath,
+          worktreePath: mergeWorktreePath,
           actualBranch,
           rebaseStrategy,
           integrationRef,
@@ -736,6 +711,25 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         };
       }
 
+      const integrationSha = (await git(lane.repoPath, ['rev-parse', integrationRef], { timeout: 5000 })).stdout.trim();
+      mergeCandidateSha = integrationSha;
+      if (integrationSha !== rebasedSha) {
+        await pushWorkerBranchLeaseBestEffort(worktreePath, actualBranch, integrationSha, rebasedSha);
+      }
+      const pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
+      if (!pushLease.safe) return createFastForwardFailureApproval(input, new Error(`${originBaseRef} is no longer an ancestor of the exact reviewed candidate.`));
+      expectedRemoteBaseSha = pushLease.expectedRemoteSha;
+
+      const finalGovernanceDrift = await rejectSpokenReviewGovernanceDrift({
+        lane,
+        actor,
+        approvalId: command.spokenReviewApprovalId,
+        expectedFingerprint: command.expectedGovernanceFingerprint,
+        resolutionTransition: spokenReviewResolutionTransition(command),
+        action: 'merging',
+      });
+      if (finalGovernanceDrift) return finalGovernanceDrift;
+
       try {
         await git(lane.repoPath, ['merge', '--ff-only', integrationRef], { timeout: 60_000 });
       } catch (error) {
@@ -745,12 +739,19 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       await deleteRefBestEffort(lane.repoPath, integrationRef);
     }
 
-    const { stdout: mergeShaStdout } = await git(lane.repoPath, ['rev-parse', 'HEAD'], { timeout: 5000 });
-    const mergeSha = mergeShaStdout.trim();
+    if (!(await refPointsTo(lane.repoPath, `refs/heads/${lane.baseBranch}`, mergeCandidateSha))) {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'base_changed_after_fast_forward');
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: `Local ${lane.baseBranch} changed during final publication. The exact reviewed commit was not pushed.`,
+      };
+    }
+    const mergeSha = mergeCandidateSha;
     appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergeSha, baseBranch: lane.baseBranch });
     let pushedToOrigin = false, pushError: string | undefined;
     try {
-      await git(lane.repoPath, ['push', 'origin', lane.baseBranch], { timeout: 60_000 });
+      await pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha);
       pushedToOrigin = true;
       console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
     } catch (error) {
@@ -758,8 +759,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
     }
 
-    await syncWorktreeBaseForCleanup(lane.repoPath, worktreePath, lane.baseBranch);
-    await mgr.cleanup(worktreeId, { force: true, deleteBranch: true });
+    await mgr.cleanup(worktreeId, { force: true, deleteBranch: true, mergedEquivalentHeadSha: spokenEvidence.present ? reviewedSnapshotSha : undefined });
     void mgr.prune().catch(() => {});
     updateLane(command.laneId, {
       worktreePath: null,
@@ -791,5 +791,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
   } catch (error) {
     setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
     return { ok: false, laneId: command.laneId, note: gitErrorMessage(error) };
+  } finally {
+    await cleanupIntegrationWorktree?.();
   }
 }

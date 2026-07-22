@@ -4743,6 +4743,18 @@ fn agent_confirm(task_id: String, allow: bool) {
     agent::resolve_confirm(&task_id, allow);
 }
 
+/// Resolve the exact dock card that the operator clicked. A delayed card from
+/// an earlier gate for the same task must never decide the current gate.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_confirm_exact(
+    confirmation_id: String,
+    task_id: String,
+    allow: bool,
+) -> agent::ConfirmResolution {
+    agent::resolve_confirm_exact(&confirmation_id, &task_id, allow)
+}
+
 /// Resolve a pending agent confirm by its gate-owned v2 identity. Unlike the
 /// legacy taskId command, this reports whether this decision won, repeated an
 /// earlier decision, or arrived after expiry/preemption.
@@ -5783,6 +5795,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             agent_confirm,
             #[cfg(target_os = "macos")]
+            agent_confirm_exact,
+            #[cfg(target_os = "macos")]
             agent_confirm_v2,
             #[cfg(target_os = "macos")]
             agent_interrupt,
@@ -5790,6 +5804,8 @@ pub fn run() {
             agent::realtime_bridge::realtime_tools,
             #[cfg(target_os = "macos")]
             agent::realtime_bridge::realtime_invoke_tool,
+            #[cfg(target_os = "macos")]
+            agent::realtime_bridge::realtime_interrupt_review,
             #[cfg(target_os = "macos")]
             agent::realtime_bridge::record_realtime_event,
             #[cfg(target_os = "macos")]

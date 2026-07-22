@@ -193,6 +193,17 @@ export type LaneCommand =
       commitMessage?: string;
       /** Orchestrator review verdict — shown on the approval card */
       reviewSummary?: string;
+      /** Exact spoken-review diff fingerprint expected at action time */
+      expectedDiffFingerprint?: string;
+      /** Receipt-bound governance fingerprint expected at action time */
+      expectedGovernanceFingerprint?: string;
+      /** Approval whose exact governed continuation was spoken */
+      spokenReviewApprovalId?: string;
+      /** Exact CAS claim that owns this spoken approval resolution */
+      spokenReviewClaimId?: string;
+      /** Approval version and lane state that were spoken before resolution */
+      spokenReviewUpdatedAt?: number;
+      spokenReviewLaneStatus?: LaneStatus;
       actor?: LaneEventActor;
     }
   | {
@@ -207,6 +218,17 @@ export type LaneCommand =
       strategy?: 'ours' | 'theirs' | 'manual';
       /** Reviewed worktree HEAD expected by the operator at merge time */
       expectedHeadSha?: string;
+      /** Exact spoken-review diff fingerprint expected at merge time */
+      expectedDiffFingerprint?: string;
+      /** Receipt-bound governance fingerprint expected at merge time */
+      expectedGovernanceFingerprint?: string;
+      /** Approval whose exact governed continuation was spoken */
+      spokenReviewApprovalId?: string;
+      /** Exact CAS claim that owns this spoken approval resolution */
+      spokenReviewClaimId?: string;
+      /** Approval version and lane state that were spoken before resolution */
+      spokenReviewUpdatedAt?: number;
+      spokenReviewLaneStatus?: LaneStatus;
       /** An authenticated dispatcher explicitly invoked approve_and_merge.
        * Satisfies only the surface dispatcher-review policy; merge gates and
        * all other approval postures remain authoritative. */

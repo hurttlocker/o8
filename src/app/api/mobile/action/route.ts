@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildErrorPayload, sanitizeErrorMessage } from '@/lib/api/error-format';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
-import { getApproval, listApprovals, resolveApproval } from '@/lib/approvals/store';
+import { claimApprovalResolution } from '@/lib/approvals/resolution';
+import { getApproval, listApprovals } from '@/lib/approvals/store';
 import {
   buildLlmRequestMessages,
   cleanProxyContent,
@@ -436,16 +437,15 @@ async function handleMobileActionPost(request: NextRequest) {
       }
 
       const approvalId = currentApproval.id;
-      const approvalDecisionNote = payload.message?.trim();
-      const approval = resolveApproval(
+      const resolutionClaim = claimApprovalResolution(
         approvalId,
         action === 'approve' ? 'approve' : 'reject',
-        'mobile',
-        approvalDecisionNote,
+        'mobile', payload.message?.trim(),
+        currentApproval.updatedAt,
       );
-      if (!approval) {
-        return actionErrorResponse('Approval not found.', 404);
-      }
+      const approval = resolutionClaim.approval;
+      if (!approval) return actionErrorResponse('Approval not found.', 404);
+      if (!resolutionClaim.claimed) return actionStructuredError('approval_resolved', 410);
 
       let decisionNote = action === 'approve' ? 'Approved.' : action === 'request_changes' ? 'Changes requested.' : 'Denied.';
       const continuation = approval.continuation;

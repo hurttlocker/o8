@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -28,7 +28,12 @@ const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const { steerPacket } = await import('@/lib/orchestrator/operator-mission-service/steer');
 const typecheckAvailability = await import('@/lib/lane/typecheck-availability');
 const runtimeActions = await import('@/lib/runtime/actions');
-const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { createApproval, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
+const { currentSpokenReviewGovernanceFingerprint } = await import('@/lib/approvals/spoken-review-guard');
+const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
+const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
+const { createDetachedIntegrationWorktree } = await import('@/lib/lane/worktree-merge-git');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 const tempDirs: string[] = [dataDir];
@@ -114,6 +119,49 @@ async function mergeLane(lane: ReturnType<typeof createLane>) {
   return { result, approvals };
 }
 
+async function spokenMergeCommand(lane: ReturnType<typeof createLane>) {
+  const reviewedHeadSha = git(lane.worktreePath!, ['rev-parse', 'HEAD']);
+  recordOrchestratorReview(lane.packetId!, {
+    approved: true,
+    findings: [],
+    reviewer: 'codex',
+    reviewedHeadSha,
+    requiresSecondPass: false,
+  });
+  const approval = createApproval({
+    source: 'runtime',
+    runtime: 'codex',
+    agent: 'worker',
+    sessionKey: lane.sessionKey!,
+    title: 'Merge reviewed packet',
+    description: 'Merge reviewed packet',
+    summary: 'Merge reviewed packet',
+    risk: 'high',
+    policyRuleId: 'lane-merge',
+    continuation: { kind: 'lane', laneId: lane.id, verb: 'merge' },
+  });
+  const reviewed = await getLaneSpokenDiffFacts(lane);
+  const expectedGovernanceFingerprint = await currentSpokenReviewGovernanceFingerprint(approval, lane);
+  const spokenReviewLaneStatus = getLane(lane.id)!.status;
+  const claim = claimApprovalResolution(approval.id, 'approve', 'desktop', undefined, approval.updatedAt);
+  return {
+    reviewedHeadSha,
+    approval,
+    command: {
+      verb: 'merge' as const,
+      laneId: lane.id,
+      actor: 'user' as const,
+      expectedHeadSha: reviewedHeadSha,
+      expectedDiffFingerprint: reviewed.fingerprint,
+      expectedGovernanceFingerprint,
+      spokenReviewApprovalId: approval.id,
+      spokenReviewClaimId: claim.claimId,
+      spokenReviewUpdatedAt: approval.updatedAt,
+      spokenReviewLaneStatus,
+    },
+  };
+}
+
 function packetFixture(id: string, repoPath: string, retries = 0): OrchestratorPacket {
   return {
     id,
@@ -162,6 +210,75 @@ afterAll(async () => {
 });
 
 describe('worktree-side merge with real git repos', () => {
+  it('preserves local transport config and resolves relative remotes in the disposable clone', async () => {
+    const { repo, origin } = makeRepo('o8-merge-transport-config');
+    const worktree = await makeWorktree(repo, 'pkt-transport-config', 'inline/transport-config');
+    const sshCommand = 'ssh -F /tmp/o8-test-ssh-config';
+    git(worktree.path, ['config', 'core.sshCommand', sshCommand]);
+    git(worktree.path, ['config', 'credential.helper', 'o8-test-helper']);
+    git(worktree.path, ['remote', 'set-url', 'origin', relative(worktree.path, origin)]);
+    git(worktree.path, ['remote', 'set-url', '--add', '--push', 'origin', 'test-host:repo.git']);
+
+    const integration = await createDetachedIntegrationWorktree({
+      repoPath: repo,
+      sourceWorktreePath: worktree.path,
+      sourceSha: git(worktree.path, ['rev-parse', 'HEAD']),
+    });
+    try {
+      expect(git(integration.path, ['config', '--get', 'core.sshCommand'])).toBe(sshCommand);
+      expect(git(integration.path, ['config', '--get', 'credential.helper'])).toBe('o8-test-helper');
+      expect(git(integration.path, ['remote', 'get-url', 'origin'])).toBe(origin);
+      expect(git(integration.path, ['remote', 'get-url', '--push', 'origin'])).toBe('test-host:repo.git');
+      expect(() => git(integration.path, ['fetch', 'origin', 'main', '--quiet'])).not.toThrow();
+    } finally {
+      await integration.cleanup();
+    }
+    expect(existsSync(integration.path)).toBe(false);
+  }, 20_000);
+
+  it('publishes the rebased spoken-review SHA to the remote worker branch', async () => {
+    const { repo, origin, root } = makeRepo('o8-spoken-rebased-worker-branch');
+    const worktree = await makeWorktree(repo, 'pkt-spoken-rebased', 'inline/spoken-rebased');
+    writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
+    commitAll(worktree.path, 'worker change');
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: 'inline/spoken-rebased',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-spoken-rebased',
+      sessionKey: 'codex:pkt-spoken-rebased',
+    });
+    const spoken = await spokenMergeCommand(lane);
+
+    const upstream = join(root, 'upstream');
+    execFileSync('git', ['clone', origin, upstream], { stdio: 'pipe' });
+    git(upstream, ['checkout', 'main']);
+    writeFileSync(join(upstream, 'upstream.txt'), 'upstream\n');
+    commitAll(upstream, 'upstream change');
+    git(upstream, ['push', 'origin', 'main']);
+
+    const result = await performWorktreeSideMerge({
+      lane,
+      command: spoken.command,
+      actor: 'user',
+      gateResult: { passed: true, violations: [] },
+      createLaneActionApproval,
+    });
+
+    expect(result.ok).toBe(true);
+    const remoteMain = git(repo, ['ls-remote', '--heads', 'origin', 'main']).split(/\s+/)[0];
+    const remoteWorker = git(repo, ['ls-remote', '--heads', 'origin', lane.branch]).split(/\s+/)[0];
+    expect(remoteWorker).toBe(remoteMain);
+    expect(remoteWorker).not.toBe(spoken.reviewedHeadSha);
+    expect(() => git(repo, [
+      'rev-parse',
+      '--verify',
+      'refs/heads/preserved/packet-pkt-spoken-rebased',
+    ])).toThrow();
+  }, 30_000);
+
   it('fast-forwards the operator checkout from the worker worktree without checkout/stash detours', async () => {
     const { repo } = makeRepo('o8-merge-ff');
     const worktree = await makeWorktree(repo, 'pkt-ff', 'inline/ff');
@@ -227,6 +344,7 @@ describe('worktree-side merge with real git repos', () => {
     const hook = join(repo, '.git', 'hooks', 'pre-push');
     writeFileSync(hook, [
       '#!/bin/sh',
+      'unset $(git rev-parse --local-env-vars)',
       `if [ ! -f "${hookFlag}" ]; then`,
       `  touch "${hookFlag}"`,
       '  tmp="$(mktemp -d)"',
@@ -262,6 +380,134 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(repo, ['show', 'HEAD:upstream.txt'])).toBe('upstream');
     expect(git(repo, ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'])).toBe('');
   }, 20_000);
+
+  it('does not recreate a remotely deleted base branch from a stale reviewed candidate', async () => {
+    const { repo, origin } = makeRepo('o8-merge-base-deleted');
+    const worktree = await makeWorktree(repo, 'pkt-base-deleted', 'inline/base-deleted');
+    writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
+    commitAll(worktree.path, 'worker change');
+    const hook = join(repo, '.git', 'hooks', 'pre-push');
+    writeFileSync(hook, [
+      '#!/bin/sh',
+      'unset $(git rev-parse --local-env-vars)',
+      'while read local_ref local_sha remote_ref remote_sha; do',
+      '  if [ "$remote_ref" = "refs/heads/main" ]; then',
+      `    git --git-dir="${origin}" update-ref -d refs/heads/main`,
+      '  fi',
+      'done',
+      'exit 0',
+      '',
+    ].join('\n'));
+    chmodSync(hook, 0o755);
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: 'inline/base-deleted',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-base-deleted',
+    });
+
+    const { result } = await mergeLane(lane);
+
+    expect(result).toMatchObject({ ok: true, pushedToOrigin: false });
+    expect(git(repo, ['show', 'HEAD:worker.txt'])).toBe('worker');
+    expect(git(repo, ['ls-remote', '--heads', 'origin', 'main'])).toBe('');
+  }, 20_000);
+
+  it('keeps the reviewed packet worktree recoverable when a spoken retry conflicts', async () => {
+    const { repo, origin, root } = makeRepo('o8-spoken-retry-conflict');
+    const worktree = await makeWorktree(repo, 'pkt-spoken-retry-conflict', 'inline/spoken-retry-conflict');
+    writeFileSync(join(worktree.path, 'file.txt'), 'worker\n');
+    commitAll(worktree.path, 'worker conflict change');
+    const reviewedHeadSha = git(worktree.path, ['rev-parse', 'HEAD']);
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: 'inline/spoken-retry-conflict',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-spoken-retry-conflict',
+      sessionKey: 'codex:pkt-spoken-retry-conflict',
+    });
+    recordOrchestratorReview(lane.packetId!, {
+      approved: true,
+      findings: [],
+      reviewer: 'codex',
+      reviewedHeadSha,
+      requiresSecondPass: false,
+    });
+    const approval = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'worker',
+      sessionKey: lane.sessionKey!,
+      title: 'Merge reviewed packet',
+      description: 'Merge reviewed packet',
+      summary: 'Merge reviewed packet',
+      risk: 'high',
+      policyRuleId: 'lane-merge',
+      continuation: { kind: 'lane', laneId: lane.id, verb: 'merge' },
+    });
+    const reviewed = await getLaneSpokenDiffFacts(lane);
+    const governanceFingerprint = await currentSpokenReviewGovernanceFingerprint(approval, lane);
+    const reviewedLaneStatus = getLane(lane.id)!.status;
+    const claim = claimApprovalResolution(approval.id, 'approve', 'desktop', undefined, approval.updatedAt);
+
+    const hookFlag = join(root, 'spoken-base-moved-once');
+    const hook = join(repo, '.git', 'hooks', 'pre-push');
+    writeFileSync(hook, [
+      '#!/bin/sh',
+      'unset $(git rev-parse --local-env-vars)',
+      `if [ ! -f "${hookFlag}" ]; then`,
+      `  touch "${hookFlag}"`,
+      '  tmp="$(mktemp -d)"',
+      `  git clone "${origin}" "$tmp/repo" >/dev/null 2>&1`,
+      '  cd "$tmp/repo" || exit 1',
+      '  git checkout main >/dev/null 2>&1',
+      '  git config user.name o8-test',
+      '  git config user.email o8@example.test',
+      '  printf "upstream\\n" > file.txt',
+      '  git add file.txt',
+      '  git commit -m "upstream conflict" >/dev/null 2>&1',
+      '  git push origin main >/dev/null 2>&1',
+      'fi',
+      'exit 0',
+      '',
+    ].join('\n'));
+    chmodSync(hook, 0o755);
+
+    const result = await performWorktreeSideMerge({
+      lane,
+      command: {
+        verb: 'merge',
+        laneId: lane.id,
+        actor: 'user',
+        expectedHeadSha: reviewedHeadSha,
+        expectedDiffFingerprint: reviewed.fingerprint,
+        expectedGovernanceFingerprint: governanceFingerprint,
+        spokenReviewApprovalId: approval.id,
+        spokenReviewClaimId: claim.claimId,
+        spokenReviewUpdatedAt: approval.updatedAt,
+        spokenReviewLaneStatus: reviewedLaneStatus,
+      },
+      actor: 'user',
+      gateResult: { passed: true, violations: [] },
+      createLaneActionApproval,
+    });
+
+    expect(result.ok).toBe(false);
+    const conflictApproval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.policyRuleId === 'rebase_conflict_escalation');
+    expect(conflictApproval?.description).toContain(worktree.path);
+    expect(conflictApproval?.description).toContain('isolated integration checkout was discarded');
+    expect(conflictApproval?.description).not.toContain('o8-reviewed-integration-');
+    expect(existsSync(worktree.path)).toBe(true);
+    expect(git(worktree.path, ['rev-parse', 'HEAD'])).toBe(reviewedHeadSha);
+    expect(git(worktree.path, ['status', '--porcelain'])).toBe('');
+    expect(conflictApproval?.args?.preservedRef).toEqual(expect.any(String));
+    expect(git(repo, ['rev-parse', String(conflictApproval?.args?.preservedRef)])).toBe(reviewedHeadSha);
+  }, 30_000);
 
   it('merge approval emits nothing while product telemetry is off and once while on', async () => {
     const previousProxyUrl = process.env.O8_PROXY_URL;
