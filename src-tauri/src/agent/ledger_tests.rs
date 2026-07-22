@@ -33,6 +33,212 @@ fn migration_keeps_legacy_task_history() {
 }
 
 #[test]
+fn migration_adds_plan_linkage_without_rewriting_legacy_actions() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE agent_action_events (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            utterance TEXT,
+            tool TEXT NOT NULL,
+            args_summary TEXT NOT NULL,
+            confirmation_id TEXT,
+            confirmation_outcome TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            result_summary TEXT NOT NULL,
+            undo_token TEXT,
+            session_id TEXT,
+            call_id TEXT
+         );
+         INSERT INTO agent_action_events (
+            action_id, task_id, source, created_at, phase, tool, args_summary,
+            confirmation_outcome, outcome, result_summary
+         ) VALUES (
+            'legacy-action', 'legacy-task', 'cascaded', 1, 'terminal',
+            'open_app', '{}', 'not_required', 'succeeded', '{\"status\":\"succeeded\"}'
+         );
+         CREATE TRIGGER agent_action_events_no_update
+            BEFORE UPDATE ON agent_action_events
+            BEGIN SELECT RAISE(ABORT, 'agent action events are append-only'); END;
+         CREATE TRIGGER agent_action_events_no_delete
+            BEFORE DELETE ON agent_action_events
+            BEGIN SELECT RAISE(ABORT, 'agent action events are append-only'); END;",
+    )
+    .unwrap();
+
+    super::super::store::migrate_connection(&conn).unwrap();
+    let legacy: (String, Option<String>, Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT action_id, plan_id, plan_step_index, plan_step_count
+             FROM agent_action_events WHERE action_id = 'legacy-action'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(legacy, ("legacy-action".to_string(), None, None, None));
+
+    // The migration is idempotent and does not duplicate or rewrite history.
+    super::super::store::migrate_connection(&conn).unwrap();
+    let row_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM agent_action_events", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(row_count, 1);
+}
+
+#[test]
+fn linked_plan_steps_and_lifecycle_can_be_reconstructed_without_raw_args() {
+    let mut conn = memory_db();
+    for (phase, summary, outcome, step_index) in [
+        ("proposed", "Two-step Notes plan", "pending", None),
+        ("approved", "Two-step Notes plan", "approved", None),
+        (
+            "step_completed",
+            "Step 1 of 2 completed",
+            "succeeded",
+            Some(1),
+        ),
+        (
+            "step_completed",
+            "Step 2 of 2 completed",
+            "succeeded",
+            Some(2),
+        ),
+        (
+            "completed",
+            "Both approved steps completed",
+            "succeeded",
+            None,
+        ),
+    ] {
+        record_plan_lifecycle_with_conn(
+            &conn,
+            &PlanLifecycleRecord {
+                plan_id: "plan-one",
+                task_id: "task-one",
+                source: "desktop_realtime",
+                phase,
+                redacted_summary: summary,
+                outcome,
+                session_id: Some("session-one"),
+                step_index,
+                step_count: 2,
+            },
+        )
+        .unwrap();
+    }
+
+    for (action_id, step_index, tool, args) in [
+        (
+            "action-plan-one",
+            1,
+            "mac_notes_create",
+            json!({ "title": "Trip", "body": "private itinerary" }),
+        ),
+        (
+            "action-plan-two",
+            2,
+            "mac_notes_append",
+            json!({ "title": "Trip", "text": "secret confirmation number" }),
+        ),
+    ] {
+        record_with_conn(
+            &mut conn,
+            &ActionRecord {
+                action_id,
+                task_id: "task-one",
+                source: "desktop_realtime",
+                phase: "terminal",
+                utterance: None,
+                tool,
+                args: &args,
+                confirmation_id: Some("plan-confirm"),
+                confirmation_outcome: "approved",
+                outcome: "succeeded",
+                session_id: Some("session-one"),
+                call_id: None,
+                plan: Some(PlanStepContext {
+                    plan_id: "plan-one",
+                    step_index,
+                    step_count: 2,
+                }),
+                inverse: None,
+            },
+        )
+        .unwrap();
+    }
+
+    let history = plan_history_with_conn(&conn, "plan-one", Some("session-one")).unwrap();
+    assert_eq!(history["events"].as_array().unwrap().len(), 5);
+    assert_eq!(history["events"][2]["step_index"], 1);
+    assert_eq!(history["steps"].as_array().unwrap().len(), 2);
+    assert_eq!(history["steps"][0]["step_index"], 1);
+    assert_eq!(history["steps"][1]["tool"], "mac_notes_append");
+    let encoded = history.to_string();
+    assert!(!encoded.contains("private itinerary"));
+    assert!(!encoded.contains("secret confirmation number"));
+
+    let recent = recent_with_conn(&conn, 2, Some("session-one")).unwrap();
+    assert_eq!(recent["actions"][0]["plan"]["plan_id"], "plan-one");
+    assert_eq!(recent["actions"][0]["plan"]["step_index"], 2);
+    assert_eq!(recent["actions"][1]["plan"]["step_count"], 2);
+    assert!(
+        plan_history_with_conn(&conn, "plan-one", Some("another-session")).unwrap()["events"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        plan_history_with_conn(&conn, "plan-one", Some("another-session")).unwrap()["steps"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn plan_lifecycle_is_append_only_and_rejects_invalid_positions() {
+    let conn = memory_db();
+    let record = PlanLifecycleRecord {
+        plan_id: "plan-two",
+        task_id: "task-two",
+        source: "cascaded",
+        phase: "step_started",
+        redacted_summary: "Step 1 of 2 started",
+        outcome: "executing",
+        session_id: None,
+        step_index: Some(1),
+        step_count: 2,
+    };
+    record_plan_lifecycle_with_conn(&conn, &record).unwrap();
+    assert!(conn
+        .execute(
+            "UPDATE agent_plan_events SET outcome = 'succeeded' WHERE plan_id = 'plan-two'",
+            [],
+        )
+        .is_err());
+    assert!(conn
+        .execute(
+            "DELETE FROM agent_plan_events WHERE plan_id = 'plan-two'",
+            []
+        )
+        .is_err());
+
+    let invalid = PlanLifecycleRecord {
+        step_index: Some(3),
+        ..record
+    };
+    assert!(record_plan_lifecycle_with_conn(&conn, &invalid)
+        .unwrap_err()
+        .contains("within the plan"));
+}
+
+#[test]
 fn transient_process_invalidation_failure_can_retry() {
     let conn = Connection::open_in_memory().unwrap();
     let initialized = OnceLock::new();
@@ -67,6 +273,7 @@ fn action_rows_are_redacted_and_report_undoability() {
             outcome: "succeeded",
             session_id: Some("session-1"),
             call_id: Some("call-1"),
+            plan: None,
             inverse: Some(&inverse),
         },
     )
@@ -111,6 +318,7 @@ fn undo_tokens_can_only_be_claimed_once() {
             outcome: "succeeded",
             session_id: None,
             call_id: None,
+            plan: None,
             inverse: Some(&inverse),
         },
     )
@@ -161,6 +369,7 @@ fn recent_reports_latest_durable_phase_when_terminal_event_is_missing() {
                 outcome,
                 session_id: None,
                 call_id: None,
+                plan: None,
                 inverse: None,
             },
         )
@@ -191,6 +400,7 @@ fn phone_sessions_cannot_read_or_describe_each_others_actions() {
                 outcome: "succeeded",
                 session_id: Some(session_id),
                 call_id: None,
+                plan: None,
                 inverse: None,
             },
         )
@@ -224,6 +434,7 @@ fn direct_edit_revert_retires_the_matching_ledger_token() {
             outcome: "succeeded",
             session_id: None,
             call_id: None,
+            plan: None,
             inverse: Some(&inverse),
         },
     )
@@ -268,6 +479,7 @@ fn direct_edit_revert_before_terminal_record_never_mints_a_stale_token() {
             outcome: "succeeded",
             session_id: None,
             call_id: None,
+            plan: None,
             inverse: Some(&inverse),
         },
     )
@@ -300,6 +512,7 @@ fn consumed_edit_is_hidden_and_unclaimable_after_db_invalidation_failure() {
             outcome: "succeeded",
             session_id: None,
             call_id: None,
+            plan: None,
             inverse: Some(&inverse),
         },
     )

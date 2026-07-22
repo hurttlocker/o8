@@ -34,7 +34,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { DictationSnapshot, DictationState } from './types';
 import { DockAskPanel, type AskTurn } from './DockAskPanel';
 import { DockConfirmationCard } from './DockConfirmationCard';
-
+import type { AgentConfirmation } from './useAgentConfirmations';
 // ── Symon brand gradient (cyan → periwinkle → pink → gold) ──
 // Verbatim from SymonPillWaveform.svelte / SquiggleLoader.svelte.
 const GRADIENT_STOPS: Array<[number, string]> = [
@@ -476,7 +476,7 @@ interface DockNotchSurfaceProps {
   onCloseAsk?: () => void;
   /** Symon voice agent — a pending confirm card for a risky action (Allow /
    * Cancel), the working indicator while the loop runs, and the resolver. */
-  agentConfirm?: { confirmationId: string; taskId: string; tool: string; summary: string } | null;
+  agentConfirm?: AgentConfirmation | null;
   agentWorking?: boolean;
   /** Current running tool (from tool_call events) — 'o8_ask' shows "Synthesizing…". */
   agentTool?: string;

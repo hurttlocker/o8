@@ -40,6 +40,31 @@ pub(crate) use safe_file::{
 pub fn all_tools() -> Vec<Value> {
     vec![
         json!({
+            "name": "symon_execute_plan",
+            "description": "Compose and execute one ordered plan when the user asks for 2 to 5 concrete actions in sequence (for example, 'do X, then Y, then tell me'). Put every action in steps in the exact order requested. Native code validates and reads back the immutable plan, then asks once before running its read-only/reversible steps. Destructive steps still ask separately. Never include another symon_execute_plan, an approval/undo, or an orchestration control tool as a step.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool": { "type": "string", "description": "Exact name of another tool currently offered in this session." },
+                                "args": { "type": "object", "description": "Arguments for that tool, matching its schema exactly." }
+                            },
+                            "required": ["tool", "args"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["steps"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "open_app",
             "description": "Open (launch and bring to the front) any installed macOS application by name — first-party (Reminders, Calendar, Safari) or third-party (Google Chrome, Slack, Figma). Fuzzy-matches the installed apps, so a casual name like 'chrome' works. If the name is ambiguous it returns the candidates. Use when the user asks to open, show, or pull up an app, including right after creating something in that app.",
             "parameters": {
@@ -1058,6 +1083,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
     }
 
     match name {
+        "symon_execute_plan" => Err(
+            "symon_execute_plan must run through the governed native plan executor".to_string(),
+        ),
         "open_app" => apps::open_app(args).await,
         "list_apps" => apps::list_apps(args).await,
         "mac_reminders_list" => mac_reminders::list(args).await,

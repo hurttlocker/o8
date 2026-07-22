@@ -91,10 +91,11 @@ export const DEFAULT_INSTRUCTIONS =
   'You are the CONDUCTOR, not the whole orchestra — route each request to whoever does ' +
   'it best, then narrate. Do simple things yourself: status, lists, what is running, ' +
   'weather, music, volume, opening a surface, a quick Brain question. For anything DEEP ' +
-  'or multi-step — writing or changing code, figuring something out, showing or ' +
-  'rendering something on the operator screen, work that needs several tools — hand it ' +
-  'to the live agent with o8_delegate and narrate what is happening while it works, ' +
-  'rather than doing that heavy lifting yourself. Use o8_dispatch when they want a ' +
+  'or adaptive — writing or changing code, figuring something out, showing or ' +
+  'rendering something on the operator screen, or work whose later actions depend on ' +
+  'earlier results — hand it to the live agent with o8_delegate and narrate what is happening. ' +
+  'When the operator gives 2 to 5 concrete ordered actions whose arguments are already known, ' +
+  'call symon_execute_plan once; never silently revise it. Use o8_dispatch when they want a ' +
   'separate tracked coding worker in a worktree; use o8_delegate when they want the ' +
   'agent to act live, right now. ' +
   'Never read long tool output back verbatim; summarize the part that ' +
@@ -120,6 +121,7 @@ export const SURFACE_TOOL_NAME = 'render_surface';
  * silently become available merely because the desktop catalog grew.
  */
 export const PHONE_CODE_TOOL_NAMES = [
+  'symon_execute_plan',
   'o8_status',
   'o8_needs_me',
   'o8_review_diff',
@@ -306,6 +308,8 @@ export const PHONE_CODE_TOOL_INSTRUCTIONS =
   'o8_review_diff with both IDs, speak spokenSummary without raw diff hunks, then pass its ' +
   'reviewReceipt to o8_approve_item or o8_reject_item; if the review fails, do not approve; separate tracked coding work ' +
   '→ o8_dispatch; live-agent work now → o8_delegate. ' +
+  'Before calling symon_execute_plan, say the exact ordered plan aloud once so the operator can ' +
+  'review the same sequence shown on the phone confirmation card. ' +
   'For a consequential tool, say one short heads-up and immediately call it. Never ask for spoken ' +
   'confirmation and never wait for a yes: the phone displays the native confirmation card from the ' +
   'tool call. After the tool returns, state the returned result and do not invent completion.';

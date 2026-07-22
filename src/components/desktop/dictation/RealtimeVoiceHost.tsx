@@ -20,6 +20,7 @@ import {
   type RealtimeSessionHandle,
   type RealtimeStatus,
 } from '@/lib/voice/realtime-client';
+import { symonReviewGuardId } from '@/lib/mobile/symon-tool-relay';
 import { REALTIME_MODEL, DEFAULT_VOICE } from '@/lib/voice/realtime-session-config';
 
 const LOG = '[realtime-host]';
@@ -37,11 +38,18 @@ interface SymonConfirmTarget {
 }
 
 /** A gate-owned confirmation surfaced to the phone relay while its invoke waits. */
+interface SymonConfirmPlan {
+  planId: string;
+  steps: Array<{ index: number; summary: string }>;
+}
+
 interface SymonConfirmEntry {
   confirmationId: string;
   tool: string;
   taskId: string;
   summary: string;
+  kind?: 'action' | 'plan';
+  plan?: SymonConfirmPlan;
   expiresAt: number;
   target: SymonConfirmTarget;
   sessionId?: string;
@@ -70,13 +78,34 @@ type SymonResolveConfirm = (
   terminal?: 'expired' | 'preempted',
 ) => Promise<SymonConfirmResolution>;
 
+type SymonInterruptTool = (correlation: SymonToolCorrelation) => Promise<boolean>;
+
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function confirmationPlan(value: unknown): SymonConfirmPlan | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const planId = stringField(record.planId);
+  if (!planId || !Array.isArray(record.steps) || record.steps.length < 2 || record.steps.length > 5) {
+    return undefined;
+  }
+  const steps: SymonConfirmPlan['steps'] = [];
+  for (const [offset, step] of record.steps.entries()) {
+    if (!step || typeof step !== 'object' || Array.isArray(step)) return undefined;
+    const item = step as Record<string, unknown>;
+    const summary = stringField(item.summary);
+    if (item.index !== offset + 1 || !summary) return undefined;
+    steps.push({ index: offset + 1, summary });
+  }
+  return { planId, steps };
 }
 
 /** window.__o8SymonAgent — the phone-hosted Agent Mode surface (see the bridge effect). */
 interface SymonAgentBridge {
   invokeTool: SymonInvokeTool | null;
+  interruptTool: SymonInterruptTool | null;
   resolveConfirm: SymonResolveConfirm | null;
   config: { model: string; voice: string; tools: Array<Record<string, unknown>> } | null;
   /** Legacy relay alias; entries are now fully correlated when callers pass metadata. */
@@ -281,6 +310,8 @@ export function RealtimeVoiceHost() {
   // gated routes reach through the webview eval bridge:
   //   • __o8SymonAgent.invokeTool(name, args, correlation?) — the SAME
   //     realtime_invoke_tool the desk session calls, with additive phone IDs;
+  //   • __o8SymonAgent.interruptTool(correlation) — cancels that exact native
+  //     task on phone barge-in, stop, preemption, or timeout;
   //   • __o8SymonAgent.resolveConfirm(id, allow) — resolves the Rust oneshot by
   //     its gate-owned identity; the original invoke remains pending meanwhile;
   //   • __o8SymonAgent.config.tools — realtime_tools() schemas so /session bakes
@@ -295,6 +326,7 @@ export function RealtimeVoiceHost() {
     const confirms: SymonConfirmEntry[] = [];
     const bridge: SymonAgentBridge = {
       invokeTool: null,
+      interruptTool: null,
       resolveConfirm: null,
       config: null,
       confirms,
@@ -318,6 +350,9 @@ export function RealtimeVoiceHost() {
             sessionId: correlation?.sessionId,
             callId: correlation?.callId,
             utterance,
+            reviewGuardId: correlation
+              ? symonReviewGuardId(correlation.sessionId, correlation.callId)
+              : undefined,
           });
           const markSettled = () => {
             for (const entry of confirms) {
@@ -330,6 +365,9 @@ export function RealtimeVoiceHost() {
           void pending.then(markSettled, markSettled);
           return pending;
         };
+        bridge.interruptTool = (correlation) => invoke<boolean>('realtime_interrupt_review', {
+          reviewGuardId: symonReviewGuardId(correlation.sessionId, correlation.callId),
+        });
         bridge.resolveConfirm = async (confirmationId, allow, correlation, terminal) => {
           const result = await invoke<SymonConfirmResolution>('agent_confirm_v2', {
             confirmationId,
@@ -369,6 +407,8 @@ export function RealtimeVoiceHost() {
             taskId: stringField(p.taskId) || '',
             tool: stringField(p.tool) || '',
             summary: stringField(p.summary) || '',
+            kind: p.kind === 'plan' ? 'plan' : 'action',
+            plan: confirmationPlan(p.plan),
             expiresAt: typeof p.expiresAt === 'number' ? p.expiresAt : Date.now() + 120_000,
             target: {
               approvalId: stringField(rawTarget.approvalId),

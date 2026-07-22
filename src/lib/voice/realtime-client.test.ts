@@ -2,7 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createRealtimeApprovalAudioGate,
   createRealtimeUtteranceTracker,
+  realtimeCallReviewGuardId,
 } from './realtime-client';
+
+describe('Realtime native cancellation guards', () => {
+  it('binds every ordinary native invocation to its exact session and call', () => {
+    expect(realtimeCallReviewGuardId('session-1', 'plan-call'))
+      .toBe('desktop:["session-1","plan-call"]');
+    expect(realtimeCallReviewGuardId('session-1', 'other-call'))
+      .not.toBe(realtimeCallReviewGuardId('session-1', 'plan-call'));
+    expect(realtimeCallReviewGuardId('a:b', 'c')).not.toBe(realtimeCallReviewGuardId('a', 'b:c'));
+  });
+});
 
 describe('Realtime utterance attribution', () => {
   it('retains one transcript across chained responses in the same voice turn', async () => {

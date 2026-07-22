@@ -8,21 +8,29 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_INSTRUCTIONS,
   REALTIME_MODEL,
   REALTIME_FLAGSHIP_MODEL,
   DEFAULT_VOICE,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
   REALTIME_TOKEN_TTL_SECONDS,
-  DEFAULT_INSTRUCTIONS,
   PHONE_CODE_TOOL_NAMES,
   selectPhoneCodeTools,
   selectPhoneRealtimeModel,
   buildRealtimeMintSession,
   buildClientSecretsBody,
   MIC_PROFILE_AUDIO_INPUT,
+  PHONE_CODE_TOOL_INSTRUCTIONS,
 } from './realtime-session-config';
 
 describe('realtime-session-config — shared assembler', () => {
+  it('routes concrete ordered actions through the governed plan tool', () => {
+    expect(DEFAULT_INSTRUCTIONS).toContain('2 to 5 concrete ordered actions');
+    expect(DEFAULT_INSTRUCTIONS).toContain('call symon_execute_plan once');
+    expect(DEFAULT_INSTRUCTIONS).not.toContain('say the exact ordered plan aloud');
+    expect(PHONE_CODE_TOOL_INSTRUCTIONS).toContain('say the exact ordered plan aloud once');
+  });
+
   it('desk inputs (model + voice) produce the exact legacy minimal shape — NO gate', () => {
     // The desk mic was explicitly fine (Q 2026-07-11): no micProfile → no
     // audio.input → byte-identical to the pre-gate desk mint.
@@ -169,6 +177,7 @@ describe('realtime-session-config — shared assembler', () => {
 
     expect(selection.missing).toEqual([]);
     expect(selection.tools.map((tool) => tool.name)).toEqual(PHONE_CODE_TOOL_NAMES);
+    expect(selection.tools.map((tool) => tool.name)).toContain('symon_execute_plan');
     expect(selection.tools.map((tool) => tool.name)).not.toContain('send_email');
     expect(selection.tools.map((tool) => tool.name)).not.toContain('spotify_play');
     for (const tool of selection.tools) {

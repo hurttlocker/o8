@@ -19,11 +19,19 @@ vi.mock('@/lib/mobile/symon-agent-registry', async () => {
   return { ...actual, loadSymonScopeGrant: h.loadSymonScopeGrant };
 });
 
-const { POST } = await import('./route');
+const { DELETE, POST, buildToolEval, buildToolInterruptEval } = await import('./route');
 
 function request(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/mobile/symon/tool', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function interruptRequest(body: Record<string, unknown>) {
+  return new NextRequest('http://localhost/api/mobile/symon/tool', {
+    method: 'DELETE',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -46,6 +54,111 @@ beforeEach(() => {
 });
 
 describe('POST /api/mobile/symon/tool', () => {
+  it('interrupts the exact correlated native task through the persistent webview bridge', async () => {
+    const interruptTool = vi.fn().mockResolvedValue(true);
+    const windowState = { __o8SymonAgent: { interruptTool } };
+    const script = buildToolInterruptEval('session-1', 'call-1');
+    const first = Function('window', `return ${script}`)(windowState) as string;
+    expect(JSON.parse(first)).toEqual({ state: 'pending' });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const second = Function('window', `return ${script}`)(windowState) as string;
+    expect(JSON.parse(second)).toEqual({ state: 'done', active: true });
+    expect(interruptTool).toHaveBeenCalledWith({ sessionId: 'session-1', callId: 'call-1' });
+  });
+
+  it('drops a rejected interrupt cache entry so the next delivery can retry', async () => {
+    const interruptTool = vi.fn()
+      .mockRejectedValueOnce(new Error('bridge remount'))
+      .mockResolvedValueOnce(false);
+    const windowState = { __o8SymonAgent: { interruptTool } };
+    const script = buildToolInterruptEval('session-1', 'call-1');
+    expect(JSON.parse(Function('window', `return ${script}`)(windowState) as string))
+      .toEqual({ state: 'pending' });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(Function('window', `return ${script}`)(windowState) as string))
+      .toMatchObject({ state: 'error' });
+    expect(JSON.parse(Function('window', `return ${script}`)(windowState) as string))
+      .toEqual({ state: 'pending' });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(Function('window', `return ${script}`)(windowState) as string))
+      .toEqual({ state: 'done', active: false });
+    expect(interruptTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('exposes an authenticated DELETE interrupt seam for stop, preemption, and timeout', async () => {
+    h.evalJs.mockResolvedValue({ result: JSON.stringify({ state: 'done', active: true }) });
+    const response = await DELETE(interruptRequest({ sessionId: 'session-1', callId: 'call-1' }));
+    expect(await response.json()).toEqual({ ok: true, delivered: true, wasActive: true });
+    expect(h.evalJs.mock.calls[0]?.[0]).toContain('A.interruptTool({ sessionId, callId })');
+  });
+
+  it('keeps the exact in-flight plan slot alive across a serial chain longer than five minutes', () => {
+    const sessionId = 'session-1';
+    const callId = 'plan-call';
+    const key = JSON.stringify([sessionId, callId]);
+    const invokeTool = vi.fn();
+    const slot = {
+      startedAt: 1,
+      lastTouched: 120_000,
+      done: false,
+      decisionSubmitted: true,
+      tool: 'symon_execute_plan',
+    };
+    const windowState = {
+      __o8SymonAgent: { invokeTool, pendingConfirmations: [] },
+      __o8SymonToolCalls: {
+        [key]: slot,
+        stale: { startedAt: 1, lastTouched: 1 },
+      } as Record<string, Record<string, unknown>>,
+    };
+    const now = vi.spyOn(Date, 'now').mockReturnValue(600_001);
+    try {
+      const script = buildToolEval(sessionId, callId, 'symon_execute_plan', { steps: [] });
+      const raw = Function('window', `return ${script}`)(windowState) as string;
+      expect(JSON.parse(raw)).toEqual({ state: 'pending' });
+      expect(invokeTool).not.toHaveBeenCalled();
+      expect(windowState.__o8SymonToolCalls[key]).toBe(slot);
+      expect(slot.lastTouched).toBe(600_001);
+      expect(windowState.__o8SymonToolCalls.stale).toBeUndefined();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('expires the current terminal slot after the replay TTL so a reused call id can run', async () => {
+    const sessionId = 'session-1';
+    const callId = 'reused-call';
+    const key = JSON.stringify([sessionId, callId]);
+    const invokeTool = vi.fn().mockResolvedValue({ ok: true });
+    const windowState = {
+      __o8SymonAgent: { invokeTool, pendingConfirmations: [] },
+      __o8SymonToolCalls: {
+        [key]: {
+          startedAt: 1,
+          lastTouched: 1,
+          completedAt: 1,
+          done: true,
+          ok: true,
+          result: { stale: true },
+          tool: 'symon_execute_plan',
+        },
+      } as Record<string, Record<string, unknown>>,
+    };
+    const now = vi.spyOn(Date, 'now').mockReturnValue(600_001);
+    try {
+      const script = buildToolEval(sessionId, callId, 'symon_execute_plan', { steps: [] });
+      const raw = Function('window', `return ${script}`)(windowState) as string;
+      expect(JSON.parse(raw)).toEqual({ state: 'pending' });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(invokeTool).toHaveBeenCalledTimes(1);
+      expect(windowState.__o8SymonToolCalls[key]?.startedAt).toBe(600_001);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+
   it('passes exact correlation to invokeTool and keys its persistent slot by session + call', async () => {
     h.evalJs.mockResolvedValue({
       result: JSON.stringify({ state: 'done', ok: true, result: { accepted: true } }),
@@ -61,6 +174,8 @@ describe('POST /api/mobile/symon/tool', () => {
     expect(code).toContain('A.invokeTool("o8_dispatch", {"task":"Fix it","repoId":"repo-1","repoPath":"/repo","repo":"/repo"}, { sessionId, callId }, "Send this to the fleet")');
     expect(code).toContain('JSON.stringify([sessionId, callId])');
     expect(code).toContain('c.sessionId === sessionId && c.callId === callId');
+    expect(code).toContain('hit.confirmationId !== slot.confirmationId');
+    expect(code).toContain('slot.decisionSubmitted = false');
   });
 
   it('returns the exact pending confirmation without completing the cached invoke', async () => {

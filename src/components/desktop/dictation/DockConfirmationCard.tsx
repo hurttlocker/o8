@@ -1,7 +1,9 @@
 import type { CSSProperties } from 'react';
 
+import type { AgentConfirmation } from './useAgentConfirmations';
+
 interface DockConfirmationCardProps {
-  confirm: { confirmationId: string; taskId: string; summary: string };
+  confirm: AgentConfirmation;
   onDecision?: (confirmationId: string, taskId: string, allow: boolean) => void;
 }
 
@@ -19,6 +21,7 @@ const actionButtonStyle: CSSProperties = {
 
 /** Fixed-footprint confirmation body with a scrollable review and pinned actions. */
 export function DockConfirmationCard({ confirm, onDecision }: DockConfirmationCardProps) {
+  const isPlan = confirm.kind === 'plan' && !!confirm.plan?.steps.length;
   return (
     <div
       style={{
@@ -56,10 +59,10 @@ export function DockConfirmationCard({ confirm, onDecision }: DockConfirmationCa
             textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
           }}
         >
-          Symon wants to
+          {isPlan ? 'Symon’s plan' : 'Symon wants to'}
         </span>
-        <span
-          aria-label="Spoken review for confirmation"
+        <div
+          aria-label={isPlan ? 'Plan review for confirmation' : 'Spoken review for confirmation'}
           tabIndex={0}
           style={{
             display: 'block',
@@ -79,8 +82,40 @@ export function DockConfirmationCard({ confirm, onDecision }: DockConfirmationCa
           }}
           title={confirm.summary}
         >
-          {confirm.summary}
-        </span>
+          {isPlan ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 3,
+              }}
+            >
+              {confirm.plan?.steps.map((step, offset) => (
+                <div
+                  key={`${step.index}-${offset}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '16px minmax(0, 1fr)',
+                    gap: 4,
+                    alignItems: 'start',
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      color: '#ffffff99',
+                      fontVariantNumeric: 'tabular-nums',
+                      textAlign: 'right',
+                    }}
+                  >
+                    {step.index}.
+                  </span>
+                  <span>{step.summary}</span>
+                </div>
+              ))}
+            </div>
+          ) : confirm.summary}
+        </div>
       </div>
       <div
         style={{
@@ -118,7 +153,7 @@ export function DockConfirmationCard({ confirm, onDecision }: DockConfirmationCa
             fontWeight: 500,
           }}
         >
-          Allow
+          {isPlan ? 'Run plan' : 'Allow'}
         </button>
       </div>
     </div>

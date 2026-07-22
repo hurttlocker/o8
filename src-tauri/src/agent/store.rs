@@ -7,6 +7,46 @@
 
 use rusqlite::{params, Connection};
 
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| format!("agent.db inspect {table} failed: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("agent.db list {table} columns failed: {error}"))?;
+    for existing in columns {
+        if existing.map_err(|error| format!("agent.db read {table} column failed: {error}"))?
+            == column
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn ensure_table_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    if table_has_column(conn, table, column)? {
+        return Ok(());
+    }
+    if let Err(error) = conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    ) {
+        // Multiple fresh connections can migrate concurrently. If another
+        // connection won the additive-column race, the desired state exists.
+        if table_has_column(conn, table, column)? {
+            return Ok(());
+        }
+        return Err(format!("agent.db add {column} failed: {error}"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 thread_local! {
     static TEST_DATA_DIR: std::cell::RefCell<Option<std::path::PathBuf>> = const {
@@ -63,7 +103,10 @@ pub(crate) fn migrate_connection(conn: &Connection) -> Result<(), String> {
             result_summary TEXT NOT NULL,
             undo_token TEXT,
             session_id TEXT,
-            call_id TEXT
+            call_id TEXT,
+            plan_id TEXT,
+            plan_step_index INTEGER,
+            plan_step_count INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_agent_action_events_created_at
             ON agent_action_events (created_at DESC, seq DESC);
@@ -90,6 +133,46 @@ pub(crate) fn migrate_connection(conn: &Connection) -> Result<(), String> {
         );",
     )
     .map_err(|e| format!("agent.db migrate failed: {e}"))?;
+
+    // `agent_action_events` predates chained plans. Additive columns preserve
+    // every immutable action row and keep existing #1217 databases readable.
+    for (column, definition) in [
+        ("plan_id", "TEXT"),
+        ("plan_step_index", "INTEGER"),
+        ("plan_step_count", "INTEGER"),
+    ] {
+        ensure_table_column(conn, "agent_action_events", column, definition)?;
+    }
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_agent_action_events_plan_id
+            ON agent_action_events (plan_id, plan_step_index, seq);
+
+        CREATE TABLE IF NOT EXISTS agent_plan_events (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            redacted_summary TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            session_id TEXT,
+            step_index INTEGER,
+            step_count INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_plan_events_plan_id
+            ON agent_plan_events (plan_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_agent_plan_events_task_id
+            ON agent_plan_events (task_id, seq);
+        CREATE TRIGGER IF NOT EXISTS agent_plan_events_no_update
+            BEFORE UPDATE ON agent_plan_events
+            BEGIN SELECT RAISE(ABORT, 'agent plan events are append-only'); END;
+        CREATE TRIGGER IF NOT EXISTS agent_plan_events_no_delete
+            BEFORE DELETE ON agent_plan_events
+            BEGIN SELECT RAISE(ABORT, 'agent plan events are append-only'); END;",
+    )
+    .map_err(|error| format!("agent.db plan migration failed: {error}"))?;
     Ok(())
 }
 

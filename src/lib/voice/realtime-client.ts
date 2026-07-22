@@ -26,6 +26,10 @@ export type RealtimeStatus =
   | 'stopping'
   | 'error';
 
+export function realtimeCallReviewGuardId(sessionId: string, callId: string): string {
+  return `desktop:${JSON.stringify([sessionId, callId])}`;
+}
+
 export interface RealtimeSessionHandle {
   stop: () => Promise<void>;
   readonly status: RealtimeStatus;
@@ -532,14 +536,18 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
           }
         }
       } else if (mod) {
+        const reviewGuardId = realtimeCallReviewGuardId(meterSessionId, callId);
+        activeNativeReviewGuards.add(reviewGuardId);
         try {
           result = await mod.invoke('realtime_invoke_tool', {
             name,
             args,
             utterance: actionUtterance || undefined,
+            reviewGuardId,
           });
         }
         catch (e) { result = { error: (e as Error)?.message || String(e) }; }
+        finally { activeNativeReviewGuards.delete(reviewGuardId); }
       }
       const errored = !!(result && typeof result === 'object' && 'error' in (result as Record<string, unknown>));
       console.log(`${LOG} tool ${name} → ${errored ? 'error' : 'ok'}`);
