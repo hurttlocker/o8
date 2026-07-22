@@ -1,4 +1,5 @@
-import { createApproval, getApproval, resolveApproval } from '@/lib/approvals/store';
+import { resolveApproval } from '@/lib/approvals/resolution';
+import { createApproval, getApproval } from '@/lib/approvals/store';
 import { appendEvent, findLaneBySession } from '@/lib/lane/registry';
 import { compactText } from '@/lib/runtimes/shared/owned-session';
 

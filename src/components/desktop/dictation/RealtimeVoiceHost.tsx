@@ -305,6 +305,7 @@ export function RealtimeVoiceHost() {
     };
     w.__o8SymonAgent = bridge;
     let unlistenConfirm: (() => void) | null = null;
+    let unlistenConfirmDismissed: (() => void) | null = null;
 
     void import('@tauri-apps/api/core')
       .then(({ invoke }) => {
@@ -384,10 +385,26 @@ export function RealtimeVoiceHost() {
       )
       .then((un) => { if (alive) unlistenConfirm = un; else un(); })
       .catch(() => { /* not in a Tauri webview */ });
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<Record<string, unknown>>('o8:agent-confirm-dismissed', (e) => {
+          const p = e.payload || {};
+          const confirmationId = stringField(p.confirmationId);
+          const taskId = stringField(p.taskId);
+          for (const entry of confirms) {
+            if (entry.confirmationId === confirmationId && entry.taskId === taskId) {
+              entry.settled = true;
+            }
+          }
+        }),
+      )
+      .then((un) => { if (alive) unlistenConfirmDismissed = un; else un(); })
+      .catch(() => { /* not in a Tauri webview */ });
 
     return () => {
       alive = false;
       unlistenConfirm?.();
+      unlistenConfirmDismissed?.();
       if (w.__o8SymonAgent === bridge) w.__o8SymonAgent = undefined;
     };
   }, []);

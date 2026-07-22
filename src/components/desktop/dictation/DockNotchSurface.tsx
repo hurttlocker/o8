@@ -33,6 +33,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DictationSnapshot, DictationState } from './types';
 import { DockAskPanel, type AskTurn } from './DockAskPanel';
+import { DockConfirmationCard } from './DockConfirmationCard';
 
 // ── Symon brand gradient (cyan → periwinkle → pink → gold) ──
 // Verbatim from SymonPillWaveform.svelte / SquiggleLoader.svelte.
@@ -475,13 +476,13 @@ interface DockNotchSurfaceProps {
   onCloseAsk?: () => void;
   /** Symon voice agent — a pending confirm card for a risky action (Allow /
    * Cancel), the working indicator while the loop runs, and the resolver. */
-  agentConfirm?: { taskId: string; tool: string; summary: string } | null;
+  agentConfirm?: { confirmationId: string; taskId: string; tool: string; summary: string } | null;
   agentWorking?: boolean;
   /** Current running tool (from tool_call events) — 'o8_ask' shows "Synthesizing…". */
   agentTool?: string;
   /** Epoch ms when the working task started, for the live elapsed timer. */
   agentStartedAt?: number;
-  onAgentConfirm?: (taskId: string, allow: boolean) => void;
+  onAgentConfirm?: (confirmationId: string, taskId: string, allow: boolean) => void;
   /** Drag-files-into-Symon (dossier #3): a Finder drag is over the dock window
    * → the sliver morphs into the glass drop zone. */
   dropActive?: boolean;
@@ -659,8 +660,8 @@ export function DockNotchSurface({
   // idle: 128×16 sliver. listening/thinking: 248×40 capsule. done: 420×44 wide.
   const geometry: React.CSSProperties = (() => {
     if (isConfirming) {
-      // Confirm card — wide enough for the summary + Allow/Cancel. Fits the
-      // collapsed 520×120 dock window, so no expand needed.
+      // Confirm card — the review body scrolls inside this fixed footprint, so
+      // Allow/Cancel stay reachable without resizing the 520×120 dock host.
       return {
         width: 420,
         height: 96,
@@ -840,99 +841,8 @@ export function DockNotchSurface({
   // ── Inner content per mode ──
   let body: React.ReactNode = null;
   if (isConfirming && agentConfirm) {
-    const confirm = agentConfirm;
     body = (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          gap: 9,
-          width: '100%',
-          height: '100%',
-          paddingLeft: 18,
-          paddingRight: 18,
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <span
-            style={{
-              fontSize: 9.5,
-              fontWeight: 260,
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase',
-              color: 'rgba(255, 255, 255, 0.7)',
-              textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
-            }}
-          >
-            Symon wants to
-          </span>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 320,
-              letterSpacing: '-0.1px',
-              color: '#fff',
-              textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-            title={confirm.summary}
-          >
-            {confirm.summary}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            onClick={() => onAgentConfirm?.(confirm.taskId, false)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: 28,
-              paddingLeft: 14,
-              paddingRight: 14,
-              borderRadius: 14,
-              border: '1px solid rgba(255, 255, 255, 0.32)',
-              background: 'rgba(255, 255, 255, 0.12)',
-              color: 'rgba(255, 255, 255, 0.92)',
-              fontSize: 12,
-              fontWeight: 400,
-              letterSpacing: '-0.1px',
-              textAlign: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => onAgentConfirm?.(confirm.taskId, true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: 28,
-              paddingLeft: 18,
-              paddingRight: 18,
-              borderRadius: 14,
-              border: '1px solid rgba(255, 255, 255, 0.5)',
-              background: 'rgba(255, 255, 255, 0.92)',
-              color: '#1a1730',
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: '-0.1px',
-              textAlign: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            Allow
-          </button>
-        </div>
-      </div>
+      <DockConfirmationCard confirm={agentConfirm} onDecision={onAgentConfirm} />
     );
   } else if (isDropTarget) {
     body = (

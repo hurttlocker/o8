@@ -109,6 +109,8 @@ export interface CleanupOptions {
   deleteBranch?: boolean;
   /** Caller already confirmed the bound session process exited. */
   overrideLiveGuard?: true;
+  /** Exact clean HEAD already published through an equivalent rebased commit. */
+  mergedEquivalentHeadSha?: string;
 }
 
 /**

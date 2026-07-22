@@ -36,6 +36,7 @@
 use super::TtsConfig;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout, Duration};
 
 // Speed is applied PITCH-PRESERVING at synthesis time (ElevenLabs
@@ -174,6 +175,19 @@ pub fn play_thread(text: String, config: TtsConfig) {
     play_thread_with_message(text, config, None);
 }
 
+/// Speak one governed utterance and resolve `true` only after every audio chunk
+/// finishes naturally. Stop, supersession, synthesis failure, or fallback
+/// interruption resolve `false`, allowing callers to keep a protected action
+/// behind the audible review instead of racing the confirmation card.
+pub fn play_thread_with_completion(
+    text: String,
+    config: TtsConfig,
+) -> oneshot::Receiver<bool> {
+    let (sender, receiver) = oneshot::channel();
+    play_thread_inner(text, config, None, Some(sender));
+    receiver
+}
+
 /// Queue a short lifecycle callout behind any pending/active utterance. The
 /// actual audio still uses the normal single-flight playback path; this wrapper
 /// only waits its turn so callouts do not cut off Symon's final answer.
@@ -202,7 +216,19 @@ pub fn play_status_queued(text: String, config: TtsConfig) {
 /// spoken line. When `None`, the classic `build_chunks` path runs and no new
 /// event is emitted.
 pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Option<String>) {
+    play_thread_inner(text, config, message_id, None);
+}
+
+fn play_thread_inner(
+    text: String,
+    config: TtsConfig,
+    message_id: Option<String>,
+    completion: Option<oneshot::Sender<bool>>,
+) {
     if text.trim().is_empty() {
+        if let Some(sender) = completion {
+            let _ = sender.send(false);
+        }
         return;
     }
 
@@ -216,6 +242,9 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
     // gibberish. The chunker + say-fallback both operate on this spoken form.
     let text = crate::speech_text::prepare_text_for_speech(&text);
     if text.trim().is_empty() {
+        if let Some(sender) = completion {
+            let _ = sender.send(false);
+        }
         return;
     }
 
@@ -242,6 +271,21 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
     let generation = ctl.generation.clone();
 
     std::thread::spawn(move || {
+        struct CompletionGuard {
+            sender: Option<oneshot::Sender<bool>>,
+            completed: bool,
+        }
+        impl Drop for CompletionGuard {
+            fn drop(&mut self) {
+                if let Some(sender) = self.sender.take() {
+                    let _ = sender.send(self.completed);
+                }
+            }
+        }
+        let mut completion = CompletionGuard {
+            sender: completion,
+            completed: false,
+        };
         let speed = config.speed;
 
         // Supersession bail BEFORE any dock/state emit, so a thread that already
@@ -291,12 +335,21 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[tts] failed to build playback runtime: {e}; falling back to say");
-                run_say_fallback(&text, speed, &is_active, &is_pending, &sink_slot, &generation, my_gen);
+                completion.completed = run_say_fallback(
+                    &text,
+                    speed,
+                    &is_active,
+                    &is_pending,
+                    &sink_slot,
+                    &generation,
+                    my_gen,
+                );
                 return;
             }
         };
 
         let mut tts_failed_before_audio = false;
+        let mut playback_completed = false;
 
         rt.block_on(async {
             // Chunk the text. With a messageId we split at BLOCK boundaries and
@@ -368,6 +421,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
                 // Stop / supersede check between chunks.
                 if !is_active.load(Ordering::SeqCst) || generation.load(Ordering::SeqCst) != my_gen
                 {
+                    stopped_mid_read = true;
                     break;
                 }
 
@@ -427,10 +481,14 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
                                 None
                             }
                         };
-                        let (_, next) = tokio::join!(
+                        let (drained, next) = tokio::join!(
                             wait_for_sink_to_drain(&sink_slot, &is_active, &generation, my_gen),
                             prefetch
                         );
+                        if !drained {
+                            stopped_mid_read = true;
+                            break;
+                        }
                         pending = next;
                     }
                     Err(err) => {
@@ -456,7 +514,16 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
             }
 
             if any_chunk_played {
-                wait_for_sink_to_drain(&sink_slot, &is_active, &generation, my_gen).await;
+                let drained = wait_for_sink_to_drain(
+                    &sink_slot,
+                    &is_active,
+                    &generation,
+                    my_gen,
+                )
+                .await;
+                playback_completed = drained
+                    && !stopped_mid_read
+                    && generation.load(Ordering::SeqCst) == my_gen;
                 if stopped_mid_read {
                     log::warn!("[tts] stopped before completion to keep voice consistent");
                 } else {
@@ -469,7 +536,7 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
         // played. `run_say_fallback` itself re-checks the generation, so a
         // superseded thread never speaks the stale text.
         if tts_failed_before_audio {
-            run_say_fallback(
+            playback_completed = run_say_fallback(
                 &text,
                 speed,
                 &is_active,
@@ -479,6 +546,8 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
                 my_gen,
             );
         }
+
+        completion.completed = playback_completed;
 
         // Release our sink + flags if we're still current — under the lock, and
         // re-checked inside it (a superseding speak/stop already owns the state).
@@ -504,7 +573,7 @@ fn run_say_fallback(
     sink_slot: &Arc<Mutex<Option<rodio::Sink>>>,
     generation: &Arc<AtomicU64>,
     my_gen: u64,
-) {
+) -> bool {
     // Raise is_active UNDER the sink lock with an in-lock gen re-check, mirroring
     // the cloud publish path — so a concurrent stop()/new-speak that already
     // bumped the generation is observed here and we neither speak nor re-raise
@@ -512,13 +581,13 @@ fn run_say_fallback(
     {
         let _guard = lock_recover(sink_slot);
         if generation.load(Ordering::SeqCst) != my_gen {
-            return;
+            return false;
         }
         is_active.store(true, Ordering::SeqCst);
         is_pending.store(false, Ordering::SeqCst);
     }
     log::warn!("[tts] no audio played; falling back to macOS say");
-    super::native_say::speak_with_say_cancellable(text, speed, &|| {
+    let completed = super::native_say::speak_with_say_cancellable(text, speed, &|| {
         generation.load(Ordering::SeqCst) != my_gen
     });
     // Clear is_active only if still current — under the lock, so a concurrent
@@ -527,6 +596,7 @@ fn run_say_fallback(
     if generation.load(Ordering::SeqCst) == my_gen {
         is_active.store(false, Ordering::SeqCst);
     }
+    completed && generation.load(Ordering::SeqCst) == my_gen
 }
 
 /// Synthesize one chunk → MP3 bytes, with a timeout + one retry before giving up.
@@ -562,17 +632,17 @@ async fn wait_for_sink_to_drain(
     is_active: &Arc<AtomicBool>,
     generation: &Arc<AtomicU64>,
     my_gen: u64,
-) {
+) -> bool {
     loop {
         if !is_active.load(Ordering::SeqCst) || generation.load(Ordering::SeqCst) != my_gen {
-            break;
+            return false;
         }
         let empty = {
             let guard = lock_recover(sink_slot);
             guard.as_ref().map(|s| s.empty()).unwrap_or(true)
         };
         if empty {
-            break;
+            return true;
         }
         sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
     }
@@ -826,4 +896,24 @@ fn split_long_paragraph(text: &str) -> Vec<String> {
         chunks.push(remaining.trim().to_string());
     }
     chunks
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn empty_governed_utterance_fails_closed() {
+        let config = TtsConfig {
+            provider: super::super::TtsProvider::EdgeFree,
+            voice_id: "test".to_string(),
+            speed: 1.0,
+            pitch: 0.0,
+        };
+        let completed = play_thread_with_completion("   ".to_string(), config)
+            .await
+            .expect("completion sender");
+
+        assert!(!completed);
+    }
 }

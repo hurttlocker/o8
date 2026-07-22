@@ -44,6 +44,18 @@ import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { resolvePortInfo } from '@/lib/panel/api-port';
+import { getLaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
+import {
+  commitSpokenReviewSnapshot,
+  rejectInvalidSpokenReviewExecution,
+  rejectSpokenReviewGovernanceDrift,
+  resolveSpokenReviewSnapshotSha,
+  spokenReviewResolutionTransition,
+  SpokenReviewSnapshotChangedError,
+  validateSpokenReviewEvidenceBundle,
+} from '@/lib/lane/spoken-review-snapshot';
+import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
+import { withRepoActionLock } from '@/lib/lane/repo-action-lock';
 
 /**
  * #2 Stage 5b — worker-context merge governance. A dispatched worker that calls
@@ -405,6 +417,15 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to create PR from. Lane is on the main working tree.' };
+      const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
+      if (!spokenEvidence.complete) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: 'Spoken review evidence is incomplete. Review the packet again before creating the pull request.',
+          reason: 'spoken_review_evidence_incomplete',
+        };
+      }
 
       // Policy gate — require approval for PR creation
       const hasApprovedReview = actor === 'user' ? true : await hasDurableApprovedReview(lane);
@@ -429,55 +450,124 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (create_pr)`);
       }
 
-      setLaneStatus(command.laneId, 'merging', actor, 'creating_pr');
+      return withRepoActionLock(lane.repoPath, async () => {
+        const lockedLane = getLane(command.laneId);
+        if (!lockedLane) {
+          return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+        }
+        const executionDrift = rejectInvalidSpokenReviewExecution({
+          ...command,
+          lane: lockedLane,
+          actor,
+          verb: 'create_pr',
+        });
+        if (executionDrift) return executionDrift;
+        const governanceDrift = await rejectSpokenReviewGovernanceDrift({
+          lane: lockedLane,
+          actor,
+          approvalId: command.spokenReviewApprovalId,
+          expectedFingerprint: command.expectedGovernanceFingerprint,
+          resolutionTransition: spokenReviewResolutionTransition(command),
+          action: 'creating the pull request',
+        });
+        if (governanceDrift) return governanceDrift;
 
-      try {
-        if (!lane.worktreePath || !(await worktreeExistsOnDisk(lane.worktreePath))) {
+        setLaneStatus(command.laneId, 'merging', actor, 'creating_pr');
+
+        try {
+          if (!lockedLane.worktreePath || !(await worktreeExistsOnDisk(lockedLane.worktreePath))) {
           setLaneStatus(command.laneId, 'reviewing', 'system', 'worktree_not_found');
           return {
             ok: false,
             laneId: command.laneId,
-            note: `Worktree not found on disk: ${lane.worktreePath ?? '<unset>'}`,
+            note: `Worktree not found on disk: ${lockedLane.worktreePath ?? '<unset>'}`,
           };
         }
 
-        // Commit any uncommitted changes first.
-        // F32 (#1024): match the merge-path fix — only commit when there are
-        // real uncommitted changes. --allow-empty here created duplicate
-        // commits on every create_pr call when Codex had already committed.
-        if (command.commitMessage) {
-          try {
-            const { execFile } = await import('node:child_process');
-            const { promisify } = await import('node:util');
-            const execFileAsync = promisify(execFile);
-            await execFileAsync('git', ['add', '-A'], { cwd: lane.worktreePath });
-            const { stdout: porcelain } = await execFileAsync(
-              'git', ['status', '--porcelain'],
-              { cwd: lane.worktreePath, timeout: 5000 },
-            );
-            if (porcelain.trim()) {
-              await execFileAsync('git', ['commit', '-m', command.commitMessage], { cwd: lane.worktreePath });
-            }
-          } catch {
-            // May fail if nothing to commit — that's fine
+        if (command.expectedDiffFingerprint) {
+          const current = await getLaneSpokenDiffFacts(lockedLane);
+          if (current.fingerprint !== command.expectedDiffFingerprint) {
+            setLaneStatus(command.laneId, 'reviewing', 'system', 'spoken_review_invalidated');
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: 'Packet diff changed after the spoken review. Review it again before creating the pull request.',
+              reason: 'diff_changed_since_spoken_review',
+            };
           }
         }
 
-        // Push branch
+        // Freeze the reviewed bytes to one immutable commit. A later worker
+        // write or stage can change the local branch, but the push below names
+        // this SHA directly and cannot publish those unreviewed bytes.
+        // F32 (#1024): match the merge-path fix — only commit when there are
+        // real uncommitted changes. --allow-empty here created duplicate
+        // commits on every create_pr call when Codex had already committed.
+        let reviewedSnapshotSha: string;
+        if (spokenEvidence.present) {
+          try {
+            reviewedSnapshotSha = command.commitMessage
+              ? await commitSpokenReviewSnapshot({
+                lane: lockedLane,
+                commitMessage: command.commitMessage,
+                expectedFingerprint: command.expectedDiffFingerprint,
+              })
+              : await resolveSpokenReviewSnapshotSha({
+                lane: lockedLane,
+                expectedFingerprint: command.expectedDiffFingerprint,
+              });
+          } catch (error) {
+            if (error instanceof SpokenReviewSnapshotChangedError) {
+              setLaneStatus(command.laneId, 'reviewing', 'system', 'spoken_review_invalidated');
+              return {
+                ok: false,
+                laneId: command.laneId,
+                note: error.message,
+                reason: 'diff_changed_since_spoken_review',
+              };
+            }
+            throw error;
+          }
+        } else {
+          if (command.commitMessage) {
+            try {
+              await commitDirtyWorktree(lockedLane.worktreePath, command.commitMessage);
+            } catch {
+              // Preserve legacy PR behavior when an optional auto-commit fails.
+            }
+          }
+          reviewedSnapshotSha = await readHeadSha(lockedLane.worktreePath);
+        }
+
+        const publicationGovernanceDrift = await rejectSpokenReviewGovernanceDrift({
+          lane: lockedLane,
+          actor,
+          approvalId: command.spokenReviewApprovalId,
+          expectedFingerprint: command.expectedGovernanceFingerprint,
+          resolutionTransition: spokenReviewResolutionTransition(command),
+          action: 'creating the pull request',
+        });
+        if (publicationGovernanceDrift) return publicationGovernanceDrift;
+
+        // Push the immutable reviewed commit, never the mutable local branch.
         const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
-        await execFileAsync('git', ['push', '-u', 'origin', lane.branch], { cwd: lane.worktreePath });
+        await execFileAsync('git', [
+          'push',
+          'origin',
+          `${reviewedSnapshotSha}:refs/heads/${lockedLane.branch}`,
+        ], { cwd: lockedLane.worktreePath });
 
         // Create PR via gh CLI
-        const prTitle = lane.label || `${lane.branch}`;
+        const prTitle = lockedLane.label || `${lockedLane.branch}`;
         const prResult = await execFileAsync('gh', [
           'pr', 'create',
-          '--base', lane.baseBranch,
-          '--head', lane.branch,
+          '--base', lockedLane.baseBranch,
+          '--head', lockedLane.branch,
           '--title', prTitle,
-          '--body', command.reviewSummary?.trim() || `Automated PR from lane \`${lane.id}\`.\n\nRuntime: ${lane.runtime}\nPacket: ${lane.packetId ?? 'none'}`,
-        ], { cwd: lane.repoPath });
+          '--body', command.reviewSummary?.trim() || `Automated PR from lane \`${lockedLane.id}\`.\n\nRuntime: ${lockedLane.runtime}\nPacket: ${lockedLane.packetId ?? 'none'}`,
+        ], { cwd: lockedLane.repoPath });
 
         const prUrl = prResult.stdout.trim();
         const prNumber = parsePullRequestNumber(prUrl);
@@ -489,16 +579,26 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         setLaneStatus(command.laneId, 'reviewing', actor, 'pr_created');
         const updated = getLane(command.laneId);
         return { ok: true, laneId: command.laneId, note: `PR created: ${prUrl}`, lane: updated ?? undefined };
-      } catch (err) {
-        setLaneStatus(command.laneId, 'reviewing', 'system', 'pr_failed');
-        const message = err instanceof Error ? err.message : 'PR creation failed.';
-        return { ok: false, laneId: command.laneId, note: message };
-      }
+        } catch (err) {
+          setLaneStatus(command.laneId, 'reviewing', 'system', 'pr_failed');
+          const message = err instanceof Error ? err.message : 'PR creation failed.';
+          return { ok: false, laneId: command.laneId, note: message };
+        }
+      });
     }
 
     case 'merge': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
+      if (!spokenEvidence.complete) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: 'Spoken review evidence is incomplete. Review the packet again before merging.',
+          reason: 'spoken_review_evidence_incomplete',
+        };
+      }
       // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
       if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
       const isRemoteCustomerLane = (lane.runtime as string) === 'remote-customer';
@@ -635,9 +735,8 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (merge)`);
       }
 
-      setLaneStatus(command.laneId, 'merging', actor, 'merging');
-
       if (isRemoteCustomerLane) {
+        setLaneStatus(command.laneId, 'merging', actor, 'merging');
         return performRemoteCustomerMerge(lane, command, actor);
       }
 

@@ -47,8 +47,9 @@ fn preferred_male_voice() -> Option<&'static str> {
 /// Speak `text` via the macOS `say` binary at `175 * speed` words/min, polling
 /// `should_cancel` (~every 100ms) so a stop / new speak can interrupt it. The
 /// `say` child is killed mid-utterance when `should_cancel()` returns true.
-/// Returns whether it ran (to completion OR cancelled); `false` only if the
-/// process could not be spawned/waited. macOS only.
+/// Returns whether it ran to completion. Cancellation and process failures are
+/// both `false` so governed callers never mistake interrupted speech for heard
+/// evidence. macOS only.
 #[cfg(target_os = "macos")]
 pub fn speak_with_say_cancellable(
     text: &str,
@@ -74,12 +75,12 @@ pub fn speak_with_say_cancellable(
     };
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return true,
+            Ok(Some(status)) => return status.success(),
             Ok(None) => {
                 if should_cancel() {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return true;
+                    return false;
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }

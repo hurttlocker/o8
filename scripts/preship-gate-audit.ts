@@ -2,7 +2,8 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 
-import { createApproval, resolveApproval } from '../src/lib/approvals/store';
+import { resolveApproval } from '../src/lib/approvals/resolution';
+import { createApproval } from '../src/lib/approvals/store';
 
 type GateOutcome = 'PASS' | 'FAIL' | 'BYPASS';
 

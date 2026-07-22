@@ -1207,10 +1207,18 @@ export class WorktreeManager {
       // agent's diff. Without this, every Codex/Gemini/opencode packet
       // commits the file by accident (observed on o8-site #8 and #9) — the
       // file then ships scope-creep that has to be reverted in review.
-      // Writing to .git/info/exclude is local-only; never affects the
-      // upstream .gitignore or other worktrees.
+      // Writing to Git's resolved info/exclude is repository-local and never
+      // affects the upstream .gitignore. `--git-path` is required because a
+      // linked worktree's `.git` is a file, not a directory.
       try {
-        const excludePath = path.join(worktreePath, '.git', 'info', 'exclude');
+        const { stdout: excludePathOutput } = await execFileAsync(
+          'git', ['rev-parse', '--git-path', 'info/exclude'],
+          { cwd: worktreePath, timeout: 5000 },
+        );
+        const resolvedExcludePath = excludePathOutput.trim();
+        const excludePath = path.isAbsolute(resolvedExcludePath)
+          ? resolvedExcludePath
+          : path.join(worktreePath, resolvedExcludePath);
         let existing = '';
         try { existing = await readFile(excludePath, 'utf8'); } catch { /* file may not exist yet */ }
         if (!existing.split('\n').some((line) => line.trim() === '.claude/')) {
@@ -1320,19 +1328,34 @@ export class WorktreeManager {
       const preserved = await this.preserveUncommittedWork(worktreePath, worktreeId);
       if (preserved === 'skip') return false; // Could not save work — abort prune
 
+      let reviewedHeadWasMerged = false;
+      if (opts?.mergedEquivalentHeadSha) {
+        try {
+          const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+            cwd: worktreePath,
+            timeout: 5000,
+          });
+          reviewedHeadWasMerged = stdout.trim() === opts.mergedEquivalentHeadSha;
+        } catch {
+          // Fall through to the normal preservation guard.
+        }
+      }
+
       // #1103 — a *clean* worktree can still hold committed-but-unmerged work
       // (an agent committed, but the lane was marked no_changes_produced before
       // review and the worktree later went stale). Removing the dir + force-
       // deleting the branch would discard those commits. Copy them into the main
       // repo as a `preserved/<id>` branch first, so disk is still reclaimed but
       // the work survives and is recoverable.
-      const committed = await this.preserveCommittedWork(
-        worktreePath,
-        worktreeId,
-        entry?.baseBranch ?? 'main',
-        entry?.isolationKind ?? 'git-worktree',
-      );
-      if (committed === 'skip') return false; // Could not preserve commits — abort to avoid loss
+      if (!reviewedHeadWasMerged) {
+        const committed = await this.preserveCommittedWork(
+          worktreePath,
+          worktreeId,
+          entry?.baseBranch ?? 'main',
+          entry?.isolationKind ?? 'git-worktree',
+        );
+        if (committed === 'skip') return false; // Could not preserve commits — abort to avoid loss
+      }
     }
 
     if ((entry?.isolationKind ?? 'git-worktree') === 'apfs-cow-clone') {

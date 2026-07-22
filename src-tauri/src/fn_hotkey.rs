@@ -457,14 +457,16 @@ extern "C" {
 /// tap callback.
 #[cfg(target_os = "macos")]
 fn begin_system_dictation(smart_compose: bool) {
+    // Fn is a barge-in gesture. Stop governed review speech before opening the
+    // mic so interrupted audio can never drain as authorization.
+    crate::tts::playback::stop();
     if smart_compose {
         // Boot Sonnet alongside capture. Spawning the CLI synchronously here can
         // take seconds on Intel and would open the mic late enough to lose the
         // operator's first words.
         std::thread::spawn(crate::agent::claude_pool::prewarm_smart_compose);
     }
-    // Duck system audio so the mic hears over playing audio — including o8's
-    // own TTS, so the user can talk back while it's still speaking (#1207).
+    // Duck other system audio so the mic hears the operator clearly (#1207).
     // Keep the handle: we wait (bounded) for the first volume-set to land
     // before opening the mic below, so playing audio can't bleed into the
     // start of the message (#1544). This runs on a spawned worker thread (see
@@ -764,6 +766,7 @@ fn discard_brush() {
 /// `LONG_FORM_ACTIVE` is already set true synchronously by the tap callback.
 #[cfg(target_os = "macos")]
 fn begin_long_form_dictation() {
+    crate::tts::playback::stop();
     let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     crate::paste::save_frontmost_app();
@@ -1009,6 +1012,10 @@ fn discard_ask_dictation() {
 /// Mirror of `begin_ask_dictation`. Worker thread, never the tap.
 #[cfg(target_os = "macos")]
 fn begin_agent_dictation() {
+    // Right-Option is a barge-in gesture. Stop pending or active TTS before the
+    // recognizer starts; a governed review completion then resolves false and
+    // can never surface its confirmation card after the operator talked over it.
+    crate::tts::playback::stop();
     // Pre-warm a `claude` session NOW (the Option down edge) so the CLI bootstrap
     // overlaps speech-to-text — by the time the prompt is assembled the proc is
     // booted and waiting, killing the turn-1 wait (#1252 speed pass). No-op when

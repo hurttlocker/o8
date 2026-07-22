@@ -15,8 +15,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import { getLaneSpokenDiffFacts, type LaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
+import { normalizeHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLatestLaneByPacket, findLaneBySession, getLaneEvents } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
+import { classifyReviewRisk } from '@/lib/lane/review-risk';
 import type { Lane } from '@/lib/lane/types';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import {
@@ -25,6 +28,15 @@ import {
   type DeriveReviewStateOrchestratorReview,
 } from '@/lib/orchestrator/derive-review-state';
 import { syncOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
+import {
+  buildSpokenReviewBrief,
+  type SpokenReviewBrief,
+  type SpokenReviewFinding,
+  type SpokenSecondPassStatus,
+} from '@/lib/orchestrator/spoken-review-brief';
+import { findCurrentSpokenReviewApproval } from '@/lib/orchestrator/spoken-review-evidence';
+import { fingerprintSpokenReviewGovernance } from '@/lib/orchestrator/spoken-review-governance';
 import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
 import { requirePanelAuth } from '@/lib/panel/auth';
 
@@ -56,25 +68,77 @@ function approvalReviewedAt(approval: ApprovalRecord): string {
   return new Date(ts).toISOString();
 }
 
-function toDurableOrchestratorReview(packetId: string, lane: Lane | null): DeriveReviewStateOrchestratorReview | null {
-  const approval = listApprovalsForContext({
-    packetId,
-    laneId: lane?.id,
-    sessionKey: lane?.sessionKey ?? undefined,
-  }).find((candidate) =>
-    candidate.toolName === 'orchestrator_review'
-    && (candidate.status === 'approved' || candidate.status === 'rejected')
-  );
+function latestApproval(approvals: ApprovalRecord[], toolName: string) {
+  return approvals
+    .filter((candidate) => candidate.toolName === toolName && candidate.args?.reviewSuperseded !== true)
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+}
 
-  if (!approval) return null;
-  const approved = typeof approval.args?.approved === 'boolean'
-    ? approval.args.approved
-    : approval.status === 'approved';
+function toDurableOrchestratorReview(approval: ApprovalRecord | null): DeriveReviewStateOrchestratorReview | null {
+  if (!approval || typeof approval.args?.approved !== 'boolean') return null;
+  const approved = approval.args.approved;
   return {
     verdict: approved ? 'approved' : 'rejected',
     ts: approvalReviewedAt(approval),
     summary: approval.description || approval.summary || '',
   };
+}
+
+function toSpokenFinding(value: unknown): SpokenReviewFinding | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const file = typeof record.file === 'string' ? record.file.trim() : '';
+  const description = typeof record.description === 'string' ? record.description.trim() : '';
+  if (!file || !description) return null;
+  const rawSeverity = typeof record.severity === 'string' ? record.severity : 'note';
+  const severity = rawSeverity === 'bug' || rawSeverity === 'high'
+    ? 'high'
+    : rawSeverity === 'rule_violation' || rawSeverity === 'warning'
+      ? 'warning'
+      : 'info';
+  return {
+    file,
+    line: typeof record.line === 'number' ? record.line : null,
+    severity,
+    description,
+    resolution: typeof record.resolution === 'string' ? record.resolution : null,
+  };
+}
+
+function spokenFindings(value: unknown): SpokenReviewFinding[] {
+  return Array.isArray(value)
+    ? value.map(toSpokenFinding).filter((finding): finding is SpokenReviewFinding => finding !== null)
+    : [];
+}
+
+function secondPassState(
+  approvals: ApprovalRecord[],
+  reviewApproval: ApprovalRecord | null,
+): { status: SpokenSecondPassStatus; detail?: string } {
+  if (reviewApproval?.args?.requiresSecondPass !== true) {
+    return { status: 'not-required' };
+  }
+  if (reviewApproval.args?.secondPassAgreed === true) {
+    return { status: 'agreed' };
+  }
+  const reviewedHeadSha = typeof reviewApproval.args?.reviewedHeadSha === 'string'
+    ? reviewApproval.args.reviewedHeadSha
+    : reviewApproval.metadata?.['Reviewed HEAD'];
+  const secondPass = approvals
+    .filter((candidate) => candidate.toolName === 'orchestrator_second_pass')
+    .filter((candidate) => candidate.args?.reviewSuperseded !== true)
+    .filter((candidate) => (
+      candidate.args?.approvalId === reviewApproval.id
+      || (reviewedHeadSha && candidate.args?.reviewedHeadSha === reviewedHeadSha)
+    ))
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+  if (secondPass) {
+    const detail = typeof secondPass.args?.finding === 'string'
+      ? secondPass.args.finding
+      : secondPass.summary || secondPass.description;
+    return { status: 'blocked', ...(detail ? { detail } : {}) };
+  }
+  return { status: 'pending' };
 }
 
 // #1476 lie 3b — the gate is recomputed on every poll, so its timestamp must
@@ -134,6 +198,8 @@ export async function GET(request: NextRequest) {
   if (!packetId) {
     return errorResponse('invalid_request', 'packetId or sessionKey query parameter is required.', 400);
   }
+  const includeSpokenReview = request.nextUrl.searchParams.get('spoken') === '1';
+  const spokenApprovalId = request.nextUrl.searchParams.get('approvalId')?.trim() ?? '';
 
   try {
     const mission = await syncOrchestratorControlPlaneState();
@@ -150,6 +216,49 @@ export async function GET(request: NextRequest) {
       return errorResponse('packet_not_found', `Packet ${packetId} not found.`, 404);
     }
     const packet = missionPacket ?? synthesizePacketFromLane(packetId, lane!);
+    const approvals = listApprovalsForContext({
+      packetId,
+      laneId: lane?.id,
+      sessionKey: lane?.sessionKey ?? undefined,
+    });
+    const targetApproval = spokenApprovalId
+      ? approvals.find((candidate) => candidate.id === spokenApprovalId) ?? null
+      : null;
+    if (spokenApprovalId && (!targetApproval || targetApproval.status !== 'pending')) {
+      return errorResponse(
+        'spoken_review_approval_changed',
+        'The pending approval changed while the spoken review was being prepared. Refresh and review it again.',
+        409,
+      );
+    }
+    const reviewApproval = latestApproval(approvals, 'orchestrator_review');
+    let spokenDiffFacts: LaneSpokenDiffFacts | null = null;
+    let spokenReviewApproval: ApprovalRecord | null = null;
+    if (includeSpokenReview) {
+      if (!lane) {
+        return errorResponse(
+          'spoken_review_unavailable',
+          `Packet ${packetId} has no reviewable lane worktree.`,
+          409,
+        );
+      }
+      try {
+        spokenDiffFacts = await getLaneSpokenDiffFacts(lane);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to read packet diff evidence.';
+        console.warn(`${LOG_PREFIX} spoken diff evidence failed for packet ${packetId}:`, error);
+        return errorResponse('spoken_review_unavailable', message, 409);
+      }
+      spokenReviewApproval = spokenDiffFacts.dirtyFiles.length === 0
+        && spokenDiffFacts.untrackedFiles.length === 0
+        ? findCurrentSpokenReviewApproval(
+            approvals,
+            packetId,
+            lane,
+            spokenDiffFacts.headSha,
+          )
+        : null;
+    }
 
     // Merge preview is computed on-demand from the lane's diff. If the lane is
     // gone (archived / never spawned) we can't run the gate — fall back to
@@ -160,20 +269,119 @@ export async function GET(request: NextRequest) {
     if (lane) {
       try {
         mergePreview = await buildPreviewForLane(lane, packetId, {
-          orchestratorApproved: packet.review?.approved === true,
+          orchestratorApproved: includeSpokenReview
+            ? spokenReviewApproval?.status === 'approved'
+              && spokenReviewApproval.args?.approved === true
+            : packet.review?.approved === true,
         });
       } catch (error) {
         console.warn(`${LOG_PREFIX} buildPreviewForLane failed for packet ${packetId}:`, error);
         mergePreview = null;
       }
     }
+    if (includeSpokenReview && lane && spokenDiffFacts) {
+      try {
+        const verifiedFacts = await getLaneSpokenDiffFacts(lane);
+        if (
+          verifiedFacts.headSha !== spokenDiffFacts.headSha
+          || verifiedFacts.fingerprint !== spokenDiffFacts.fingerprint
+        ) {
+          return errorResponse(
+            'spoken_review_changed',
+            'Packet evidence changed while the spoken review was being prepared. Retry the review.',
+            409,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to verify packet diff evidence.';
+        console.warn(`${LOG_PREFIX} spoken diff verification failed for packet ${packetId}:`, error);
+        return errorResponse('spoken_review_unavailable', message, 409);
+      }
+    }
 
-    const orchestratorReview = toOrchestratorReview(packet.review ?? null)
-      ?? toDurableOrchestratorReview(packetId, lane)
-      ?? toLaneEventOrchestratorReview(lane);
+    const orchestratorReview = includeSpokenReview
+      ? toDurableOrchestratorReview(spokenReviewApproval)
+      : toOrchestratorReview(packet.review ?? null)
+        ?? toDurableOrchestratorReview(reviewApproval)
+        ?? toLaneEventOrchestratorReview(lane);
     const mergeGate = toMergeGate(mergePreview, lane?.lastEventAt ?? packet.lastEventAt ?? null);
     const recovery = packet.recovery
       ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
+    let spokenReview: SpokenReviewBrief | null = null;
+    if (includeSpokenReview && spokenDiffFacts && lane) {
+      const diffFacts = spokenDiffFacts;
+      const completionContext = await readPacketCompletionContext(packetId);
+      const reviewRisk = classifyReviewRisk(diffFacts.changedFiles, diffFacts.addedLines);
+      const durableFindings = spokenFindings(spokenReviewApproval?.args?.findings);
+      const completionHeadSha = normalizeHeadSha(completionContext?.headSha);
+      const completionEvidenceCurrent = Boolean(
+        completionContext
+        && lane.sessionKey
+        && completionContext.sessionKey === lane.sessionKey
+        && completionHeadSha === diffFacts.headSha
+        && completionContext.diffFingerprint === diffFacts.fingerprint,
+      );
+      spokenReview = buildSpokenReviewBrief({
+        packetId,
+        title: packet.title ?? lane?.label ?? `Packet ${packetId}`,
+        evidence: {
+          headSha: diffFacts.headSha,
+          fingerprint: diffFacts.fingerprint,
+          diffBase: diffFacts.against,
+          diffBaseWarning: diffFacts.diffBase.warning,
+          stat: diffFacts.stat,
+        },
+        fileChanges: diffFacts.fileChanges,
+        review: {
+          verdict: orchestratorReview?.verdict ?? 'unreviewed',
+          summary: orchestratorReview?.summary ?? '',
+          findings: durableFindings,
+        },
+        approvalRisk: spokenReviewApproval?.risk ?? null,
+        reviewRiskReasons: [
+          ...reviewRisk.reasons,
+          ...(diffFacts.diffBase.usedFallback || diffFacts.diffBase.warning
+            ? [`diff base unverified: ${diffFacts.diffBase.warning ?? `using fallback ${diffFacts.against}`}`]
+            : []),
+          ...(diffFacts.dirtyFiles.length > 0
+            ? [`uncommitted tracked changes: ${diffFacts.dirtyFiles.length} file${diffFacts.dirtyFiles.length === 1 ? '' : 's'}`]
+            : []),
+          ...(diffFacts.untrackedFiles.length > 0
+            ? [`untracked changes: ${diffFacts.untrackedFiles.length} file${diffFacts.untrackedFiles.length === 1 ? '' : 's'}`]
+            : []),
+        ],
+        mergeGate: {
+          verdict: diffFacts.diffBase.usedFallback || diffFacts.diffBase.warning
+            ? 'unavailable'
+            : mergePreview
+              ? (mergePreview.wouldMerge ? 'passing' : 'failing')
+              : 'unavailable',
+          checks: mergePreview?.checks ?? [],
+        },
+        secondPass: secondPassState(approvals, spokenReviewApproval),
+        ...(completionContext ? {
+          testEvidence: {
+            current: completionEvidenceCurrent,
+            selfReview: completionContext.selfReview,
+          },
+        } : {}),
+      });
+      if (targetApproval) {
+        spokenReview = {
+          ...spokenReview,
+          evidence: {
+            ...spokenReview.evidence,
+            governanceFingerprint: fingerprintSpokenReviewGovernance({
+              targetApproval,
+              approvals,
+              lane,
+              completionContext,
+              mergePreview,
+            }),
+          },
+        };
+      }
+    }
 
     const { state, stateChangedAt } = derivePacketReviewState({
       packet,
@@ -196,6 +404,7 @@ export async function GET(request: NextRequest) {
       outcome: lane?.outcome ?? null,
       outcomeNote: lane?.outcomeNote ?? null,
       recovery,
+      ...(spokenReview ? { spokenReview } : {}),
     }, { headers: JSON_HEADERS });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to read review state.';

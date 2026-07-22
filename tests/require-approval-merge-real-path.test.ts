@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +18,9 @@ const tempDirs: string[] = [];
 const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.json');
 
 const { listApprovals, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const approvalsRoute = await import('@/app/api/panel/approvals/route');
 const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
@@ -26,6 +28,7 @@ const { recordMission } = await import('@/lib/db/missions-store');
 const { dispatch } = await import('@/lib/lane/commands');
 const { decideSurfaceMerge } = await import('@/lib/lane/surface-merge-decision');
 const { archiveLane, createLane, getLane } = await import('@/lib/lane/registry');
+const { withRepoActionLock } = await import('@/lib/lane/repo-action-lock');
 const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/mission');
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
@@ -156,7 +159,7 @@ async function createBudgetBlockedLane(label: string) {
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
   writeFileSync(join(worktree.path, 'safe.ts'), [
     ...Array.from({ length: 10 }, (_, index) => `export const base${index} = ${index};`),
-    ...Array.from({ length: 7 }, (_, index) => `export const expansion${index} = ${index};`),
+    ...Array.from({ length: 10 }, (_, index) => `export const expansion${index} = ${index};`),
     '',
   ].join('\n'));
   commitAll(worktree.path, 'expand safe module');
@@ -274,6 +277,38 @@ afterEach(() => {
 });
 
 describe('requireApproval merge governance through the real command path', () => {
+  it('does not let a pending review waive spoken merge-gate blockers', async () => {
+    const fixture = await createBudgetBlockedLane('pending-spoken-review');
+    recordOrchestratorReview(fixture.lane.packetId!, {
+      approved: true,
+      findings: [{
+        file: 'safe.ts',
+        severity: 'note',
+        description: 'The expansion still needs operator acceptance.',
+        resolution: 'deferred',
+      }],
+      reviewer: 'codex',
+      reviewedHeadSha: fixture.reviewedHeadSha,
+      requiresSecondPass: false,
+    });
+    expect(listApprovalsForContext({ laneId: fixture.lane.id })
+      .find((candidate) => candidate.toolName === 'orchestrator_review'))
+      .toMatchObject({ status: 'pending', args: { approved: true } });
+
+    const response = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(fixture.lane.packetId!)}&spoken=1`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.spokenReview.review.verdict).toBe('approved');
+    expect(payload.spokenReview.mergeGate.verdict).toBe('failing');
+    expect(payload.spokenReview.mergeGate.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ verdict: 'fail' }),
+    ]));
+  }, 30_000);
+
   it('keeps approved gate-blocked work operator-actionable and surfaces its preserved ref through status reads', async () => {
     await updateOperatorDefaults({ requireApproval: 'surface' });
     const gated = await createStandardLane('recoverable-gate-block', true, true, true);
@@ -306,7 +341,7 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(git(gated.repo, ['rev-parse', preservedRef])).toBe(gated.reviewedHeadSha);
 
     const reviewResponse = await reviewStateRoute.GET(new NextRequest(
-      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(gated.lane.packetId!)}`,
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(gated.lane.packetId!)}&spoken=1`,
       { headers: { host: 'localhost:3001' } },
     ));
     const reviewPayload = await reviewResponse.json();
@@ -314,6 +349,34 @@ describe('requireApproval merge governance through the real command path', () =>
       preservedRef,
       preservedHeadSha: gated.reviewedHeadSha,
     });
+    expect(reviewPayload.spokenReview).toMatchObject({
+      packetId: gated.lane.packetId,
+      review: { verdict: 'approved' },
+      tests: { status: 'not-reported' },
+    });
+    expect(reviewPayload.spokenReview.files.count).toBeGreaterThanOrEqual(1);
+    expect(reviewPayload.spokenReview.files.touched).toContain('src/lib/lane/commands.ts');
+    expect(reviewPayload.spokenReview.riskFlags).toContain(
+      'path-glob: live lane state machine: src/lib/lane/commands.ts',
+    );
+    expect(reviewPayload.spokenReview.spokenSummary).not.toContain('@@');
+
+    const untrackedPath = join(gated.lane.worktreePath!, 'unreviewed-note.txt');
+    writeFileSync(untrackedPath, 'changed after AI review\n');
+    const dirtyReviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(gated.lane.packetId!)}&spoken=1`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const dirtyReviewPayload = await dirtyReviewResponse.json();
+    expect(dirtyReviewPayload.spokenReview).toMatchObject({
+      evidence: { headSha: gated.reviewedHeadSha },
+      review: { verdict: 'unreviewed' },
+    });
+    expect(dirtyReviewPayload.spokenReview.files.touched).toContain('unreviewed-note.txt');
+    expect(dirtyReviewPayload.spokenReview.riskFlags).toContain('untracked changes: 1 file');
+    expect(dirtyReviewPayload.spokenReview.evidence.fingerprint)
+      .not.toBe(reviewPayload.spokenReview.evidence.fingerprint);
+    rmSync(untrackedPath);
 
     const archived = archiveLane(gated.lane.id, 'system');
     expect(archived).toMatchObject({
@@ -502,6 +565,422 @@ describe('requireApproval merge governance through the real command path', () =>
         verb: 'merge',
       },
     });
+  }, 30_000);
+
+  it('rejects stale spoken-review evidence before resolving a lane merge approval', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane, repo, baseHeadSha } = await createStandardLane('stale-spoken-receipt');
+
+    const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId);
+    expect(approval).toMatchObject({ status: 'pending', policyRuleId: 'lane-merge' });
+
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval!.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const reviewPayload = await reviewResponse.json();
+    const reviewedEvidence = reviewPayload.spokenReview.evidence;
+    expect(reviewedEvidence).toMatchObject({
+      headSha: expect.any(String),
+      fingerprint: expect.any(String),
+      governanceFingerprint: expect.any(String),
+    });
+
+    writeFileSync(join(lane.worktreePath!, 'changed-after-speaking.txt'), 'new evidence\n');
+    const mutationResponse = await approvalsRoute.POST(new NextRequest(
+      'http://localhost:3001/api/panel/approvals',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${getOrCreateWsToken()}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'approve',
+          id: approval!.id,
+          spokenReviewEvidence: {
+            approvalId: approval!.id,
+            packetId: lane.packetId,
+            reviewedHeadSha: reviewedEvidence.headSha,
+            reviewedDiffFingerprint: reviewedEvidence.fingerprint,
+            reviewedGovernanceFingerprint: reviewedEvidence.governanceFingerprint,
+          },
+        }),
+      },
+    ));
+    const mutationPayload = await mutationResponse.json();
+
+    expect(mutationResponse.status).toBe(409);
+    expect(mutationPayload).toMatchObject({ ok: false, code: 'spoken_review_changed' });
+    expect(listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval!.id)?.status).toBe('pending');
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
+  }, 30_000);
+
+  it('resolves and merges the exact packet after a current spoken review', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane, repo, reviewedHeadSha } = await createStandardLane('current-spoken-receipt');
+    const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const evidence = (await reviewResponse.json()).spokenReview.evidence;
+
+    const response = await approvalsRoute.POST(new NextRequest(
+      'http://localhost:3001/api/panel/approvals',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${getOrCreateWsToken()}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'approve',
+          id: approval.id,
+          spokenReviewEvidence: {
+            approvalId: approval.id,
+            packetId: lane.packetId,
+            reviewedHeadSha: evidence.headSha,
+            reviewedDiffFingerprint: evidence.fingerprint,
+            reviewedGovernanceFingerprint: evidence.governanceFingerprint,
+          },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, resolved: 'approve' });
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(reviewedHeadSha);
+    expect(listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval.id)?.status).toBe('approved');
+  }, 30_000);
+
+  it('pushes the exact packet and opens a PR after a current spoken review', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane, repo, reviewedHeadSha } = await createStandardLane('current-spoken-pr');
+    const result = await dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const evidence = (await reviewResponse.json()).spokenReview.evidence;
+    const fakeBin = mkdtempSync(join(os.tmpdir(), 'o8-spoken-pr-bin-'));
+    tempDirs.push(fakeBin);
+    const fakeGh = join(fakeBin, 'gh');
+    writeFileSync(fakeGh, '#!/bin/sh\nprintf "%s\\n" "https://github.com/hurttlocker/o8/pull/1218"\n');
+    chmodSync(fakeGh, 0o755);
+    const previousPath = process.env.PATH ?? '';
+    process.env.PATH = `${fakeBin}:${previousPath}`;
+
+    try {
+      const response = await approvalsRoute.POST(new NextRequest(
+        'http://localhost:3001/api/panel/approvals',
+        {
+          method: 'POST',
+          headers: {
+            host: 'localhost:3001',
+            authorization: `Bearer ${getOrCreateWsToken()}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'approve',
+            id: approval.id,
+            spokenReviewEvidence: {
+              approvalId: approval.id,
+              packetId: lane.packetId,
+              reviewedHeadSha: evidence.headSha,
+              reviewedDiffFingerprint: evidence.fingerprint,
+              reviewedGovernanceFingerprint: evidence.governanceFingerprint,
+            },
+          }),
+        },
+      ));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, resolved: 'approve' });
+    } finally {
+      process.env.PATH = previousPath;
+    }
+
+    expect(git(repo, ['rev-parse', `origin/${lane.branch}`])).toBe(reviewedHeadSha);
+    expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: 'pr_opened' });
+  }, 30_000);
+
+  it('keeps a receipted approval pending when the request changes merge strategy', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane } = await createStandardLane('spoken-strategy-change');
+    const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const evidence = (await reviewResponse.json()).spokenReview.evidence;
+
+    const response = await approvalsRoute.POST(new NextRequest(
+      'http://localhost:3001/api/panel/approvals',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${getOrCreateWsToken()}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'approve',
+          id: approval.id,
+          strategy: 'ours',
+          spokenReviewEvidence: {
+            approvalId: approval.id,
+            packetId: lane.packetId,
+            reviewedHeadSha: evidence.headSha,
+            reviewedDiffFingerprint: evidence.fingerprint,
+            reviewedGovernanceFingerprint: evidence.governanceFingerprint,
+          },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      code: 'spoken_review_changed',
+    });
+    expect(listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval.id)?.status).toBe('pending');
+  }, 30_000);
+
+  it('rejects a changed merge strategy again at the lane execution boundary', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane, repo, baseHeadSha } = await createStandardLane('execution-strategy-change');
+    const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const evidence = (await reviewResponse.json()).spokenReview.evidence;
+    const reviewedLaneStatus = getLane(lane.id)!.status;
+    const claim = claimApprovalResolution(
+      approval.id,
+      'approve',
+      'desktop',
+      undefined,
+      approval.updatedAt,
+    );
+
+    const mutation = await dispatch({
+      verb: 'merge',
+      laneId: lane.id,
+      actor: 'user',
+      strategy: 'ours',
+      expectedHeadSha: evidence.headSha,
+      expectedDiffFingerprint: evidence.fingerprint,
+      expectedGovernanceFingerprint: evidence.governanceFingerprint,
+      spokenReviewApprovalId: approval.id,
+      spokenReviewClaimId: claim.claimId,
+      spokenReviewUpdatedAt: approval.updatedAt,
+      spokenReviewLaneStatus: reviewedLaneStatus,
+    });
+
+    expect(mutation).toMatchObject({
+      ok: false,
+      reason: 'governance_changed_since_spoken_review',
+    });
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
+  }, 30_000);
+
+  it('rejects a spoken receipt when review findings change without a Git change', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane, reviewedHeadSha } = await createStandardLane('stale-governance');
+    const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const reviewPayload = await reviewResponse.json();
+    const evidence = reviewPayload.spokenReview.evidence;
+
+    recordOrchestratorReview(lane.packetId!, {
+      approved: false,
+      findings: [{
+        file: 'file.txt',
+        severity: 'bug',
+        description: 'A new blocking finding arrived after speech.',
+        resolution: 'deferred',
+      }],
+      reviewer: 'codex',
+      reviewedHeadSha,
+      requiresSecondPass: true,
+    });
+    const response = await approvalsRoute.POST(new NextRequest(
+      'http://localhost:3001/api/panel/approvals',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${getOrCreateWsToken()}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'approve',
+          id: approval.id,
+          spokenReviewEvidence: {
+            approvalId: approval.id,
+            packetId: lane.packetId,
+            reviewedHeadSha: evidence.headSha,
+            reviewedDiffFingerprint: evidence.fingerprint,
+            reviewedGovernanceFingerprint: evidence.governanceFingerprint,
+          },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      code: 'spoken_review_changed',
+    });
+    expect(listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval.id)?.status).toBe('pending');
+  }, 30_000);
+
+  it('rechecks governance after waiting for the repository publication lock', async () => {
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const { lane, repo, reviewedHeadSha, baseHeadSha } = await createStandardLane('locked-governance');
+    const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === result.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const evidence = (await reviewResponse.json()).spokenReview.evidence;
+
+    let releaseLock!: () => void;
+    const lockHeld = new Promise<void>((resolve) => { releaseLock = resolve; });
+    const blocker = withRepoActionLock(repo, async () => lockHeld);
+    const responsePromise = approvalsRoute.POST(new NextRequest(
+      'http://localhost:3001/api/panel/approvals',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${getOrCreateWsToken()}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'approve',
+          id: approval.id,
+          spokenReviewEvidence: {
+            approvalId: approval.id,
+            packetId: lane.packetId,
+            reviewedHeadSha: evidence.headSha,
+            reviewedDiffFingerprint: evidence.fingerprint,
+            reviewedGovernanceFingerprint: evidence.governanceFingerprint,
+          },
+        }),
+      },
+    ));
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (listApprovalsForContext({ laneId: lane.id })
+        .find((candidate) => candidate.id === approval.id)?.status === 'approved') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval.id)?.status).toBe('approved');
+    recordOrchestratorReview(lane.packetId!, {
+      approved: false,
+      findings: [{
+        file: 'file.txt',
+        severity: 'bug',
+        description: 'Finding arrived while publication waited for the repository lock.',
+        resolution: 'deferred',
+      }],
+      reviewer: 'codex',
+      reviewedHeadSha,
+      requiresSecondPass: true,
+    });
+    releaseLock();
+    await blocker;
+    const response = await responsePromise;
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ ok: false, code: 'spoken_review_changed' });
+    expect(listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval.id)?.status).toBe('pending');
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
+  }, 30_000);
+
+  it('rejects late diff drift again at the final user merge boundary', async () => {
+    const { lane, repo, baseHeadSha, reviewedHeadSha } = await createStandardLane('late-spoken-drift');
+    await updateOperatorDefaults({ requireApproval: 'always' });
+    const approvalResult = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const approval = listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approvalResult.approvalId)!;
+    const reviewResponse = await reviewStateRoute.GET(new NextRequest(
+      `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(lane.packetId!)}&spoken=1&approvalId=${encodeURIComponent(approval.id)}`,
+      { headers: { host: 'localhost:3001' } },
+    ));
+    const evidence = (await reviewResponse.json()).spokenReview.evidence;
+    const reviewedLaneStatus = getLane(lane.id)!.status;
+    const claim = claimApprovalResolution(
+      approval.id,
+      'approve',
+      'desktop',
+      undefined,
+      approval.updatedAt,
+    );
+
+    writeFileSync(join(lane.worktreePath!, 'late-untracked.txt'), 'arrived after route verification\n');
+    const result = await dispatch({
+      verb: 'merge',
+      laneId: lane.id,
+      actor: 'user',
+      expectedHeadSha: reviewedHeadSha,
+      expectedDiffFingerprint: evidence.fingerprint,
+      expectedGovernanceFingerprint: evidence.governanceFingerprint,
+      spokenReviewApprovalId: approval.id,
+      spokenReviewClaimId: claim.claimId,
+      spokenReviewUpdatedAt: approval.updatedAt,
+      spokenReviewLaneStatus: reviewedLaneStatus,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'governance_changed_since_spoken_review',
+    });
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
+  }, 30_000);
+
+  it('fails closed when a caller supplies only part of the spoken evidence bundle', async () => {
+    const { lane, repo, baseHeadSha } = await createStandardLane('partial-spoken-evidence');
+    const result = await dispatch({
+      verb: 'merge',
+      laneId: lane.id,
+      actor: 'user',
+      expectedDiffFingerprint: 'partial-only',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'spoken_review_evidence_incomplete',
+    });
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
   }, 30_000);
 
   it('keeps explicit high-risk mode on today\'s standard-diff auto-merge behavior', async () => {

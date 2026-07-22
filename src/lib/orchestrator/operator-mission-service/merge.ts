@@ -723,7 +723,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
         orchestratorApproved: packet.review?.approved === true,
       });
       if (preview.wouldMerge) {
-        const { resolveApproval } = await import('@/lib/approvals/store');
+        const { resolveApproval } = await import('@/lib/approvals/resolution');
         resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator waiver now satisfies the merge gate.');
       } else {
         return withGateVerdict(packet.id, {
@@ -733,7 +733,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
         }, packet.review?.approved === true);
       }
     } else if (input.actor === 'user') {
-      const { resolveApproval } = await import('@/lib/approvals/store');
+      const { resolveApproval } = await import('@/lib/approvals/resolution');
       resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator merged directly from the review surface.');
     } else {
       return withGateVerdict(packet.id, {

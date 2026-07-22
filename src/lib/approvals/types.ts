@@ -185,6 +185,8 @@ export interface ApprovalRecord {
     action: Exclude<ApprovalStatus, 'pending'>;
     actor: ApprovalActor;
     note?: string;
+    /** Unique compare-and-swap owner for post-resolution continuation work. */
+    claimId?: string;
   };
   audit: ApprovalAuditEvent[];
   fingerprint: string;

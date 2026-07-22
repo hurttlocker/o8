@@ -302,7 +302,9 @@ export const PHONE_CODE_TOOL_INSTRUCTIONS =
   'packet diff → o8_review_diff; wait for a packet → o8_packet_wait; tell or steer a packet → ' +
   'o8_packet_steer; tell or steer a lane → o8_agent_task with laneId; rerun a packet → ' +
   'o8_packet_rerun; reset a packet → o8_packet_reset; stop a lane → o8_stop_agent; approve or ' +
-  'reject an explicit approvalId → o8_approve_item or o8_reject_item; separate tracked coding work ' +
+  'reject an explicit approvalId → first resolve its packetId with o8_needs_me when needed, call ' +
+  'o8_review_diff with both IDs, speak spokenSummary without raw diff hunks, then pass its ' +
+  'reviewReceipt to o8_approve_item or o8_reject_item; if the review fails, do not approve; separate tracked coding work ' +
   '→ o8_dispatch; live-agent work now → o8_delegate. ' +
   'For a consequential tool, say one short heads-up and immediately call it. Never ask for spoken ' +
   'confirmation and never wait for a yes: the phone displays the native confirmation card from the ' +

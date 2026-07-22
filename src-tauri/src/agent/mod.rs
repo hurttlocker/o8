@@ -471,6 +471,7 @@ fn next_task_id_with_prefix(prefix: &str) -> String {
 // entries remain as five-minute tombstones so retries cannot execute twice.
 
 const CONFIRM_REPLAY_TTL_MS: u64 = 5 * 60 * 1_000;
+const REVIEW_SPEECH_TIMEOUT_SECS: u64 = 180;
 static CONFIRM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug)]
@@ -486,6 +487,7 @@ pub enum ConfirmationOutcome {
     Rejected,
     Expired,
     Preempted,
+    SpeechInterrupted,
 }
 
 impl ConfirmationOutcome {
@@ -496,6 +498,7 @@ impl ConfirmationOutcome {
             Self::Rejected => "rejected",
             Self::Expired => "expired",
             Self::Preempted => "preempted",
+            Self::SpeechInterrupted => "speech_interrupted",
         }
     }
 }
@@ -628,6 +631,23 @@ pub async fn confirm_if_needed_opts_correlated(
         .approved()
 }
 
+fn has_trusted_spoken_review(tool_name: &str, args: &Value) -> bool {
+    matches!(tool_name, "o8_approve_item" | "o8_reject_item")
+        && args
+            .get("_symonSpokenReviewSummary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| !summary.trim().is_empty())
+}
+
+fn requires_completed_review_speech(
+    tool_name: &str,
+    args: &Value,
+    speak: bool,
+    has_correlation: bool,
+) -> bool {
+    has_trusted_spoken_review(tool_name, args) && (speak || !has_correlation)
+}
+
 async fn confirm_with_receipt(
     ctx: &TaskCtx,
     tool_name: &str,
@@ -651,6 +671,41 @@ async fn confirm_with_receipt(
             outcome: ConfirmationOutcome::Rejected,
         };
     };
+
+    let has_trusted_review_summary = has_trusted_spoken_review(tool_name, args);
+    // Cascaded speech and desktop Realtime both use native playback for the
+    // receipt-bound summary. Realtime's model audio may contain any words; only
+    // this native path proves the trusted review itself finished. Phone
+    // Realtime has a correlation id and proves playback on the phone instead.
+    let requires_completed_review_speech =
+        requires_completed_review_speech(tool_name, args, speak, correlation.is_some());
+    if requires_completed_review_speech {
+        if ctx.cancel.load(Ordering::SeqCst) {
+            return ConfirmationReceipt {
+                confirmation_id: None,
+                outcome: ConfirmationOutcome::SpeechInterrupted,
+            };
+        }
+        let completion = crate::tts::playback::play_thread_with_completion(
+            confirm_spoken(tool_name, args, ctx.ledger_session_id.as_deref()),
+            crate::tts::load_config(),
+        );
+        let heard = matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(REVIEW_SPEECH_TIMEOUT_SECS),
+                completion,
+            )
+            .await,
+            Ok(Ok(true)),
+        );
+        if !heard || ctx.cancel.load(Ordering::SeqCst) {
+            crate::tts::playback::stop();
+            return ConfirmationReceipt {
+                confirmation_id: None,
+                outcome: ConfirmationOutcome::SpeechInterrupted,
+            };
+        }
+    }
 
     let (tx, rx) = oneshot::channel();
     let now_ms = epoch_millis();
@@ -688,10 +743,23 @@ async fn confirm_with_receipt(
         });
     }
 
-    // Speak the proposal aloud before showing the card (fire-and-forget). The
-    // card remains the binding gate — this just lets the user hear what's about
-    // to happen (esp. the repo on an o8_dispatch) and catch a mishear by ear.
-    if speak {
+    // Desktop Realtime interruption can race the transition from completed
+    // native speech to card registration. The guard is installed before this
+    // second check; a later interrupt resolves it, while an earlier one keeps
+    // the card from ever being emitted.
+    if ctx.cancel.load(Ordering::SeqCst) {
+        if let Some(dismissed_id) = preempt_confirm_for_task(&ctx.task_id) {
+            emit_confirm_dismissed(app, &ctx.task_id, &dismissed_id);
+        }
+        return ConfirmationReceipt {
+            confirmation_id: Some(confirmation_id),
+            outcome: ConfirmationOutcome::Preempted,
+        };
+    }
+
+    // Packet approvals wait for the complete bounded review above. Other
+    // confirmation prompts preserve the established fire-and-forget behavior.
+    if speak && !has_trusted_review_summary {
         crate::tts::playback::play_thread(
             confirm_spoken(tool_name, args, ctx.ledger_session_id.as_deref()),
             crate::tts::load_config(),
@@ -712,10 +780,24 @@ async fn confirm_with_receipt(
         }),
     );
 
+    // An interrupt can land after the pre-emit check but before the event. Emit
+    // the scoped dismissal again after the card so that every ordering leaves
+    // the dock and Realtime bridge with the terminal state last.
+    if ctx.cancel.load(Ordering::SeqCst) {
+        if let Some(dismissed_id) = preempt_confirm_for_task(&ctx.task_id) {
+            emit_confirm_dismissed(app, &ctx.task_id, &dismissed_id);
+        }
+        return ConfirmationReceipt {
+            confirmation_id: Some(confirmation_id),
+            outcome: ConfirmationOutcome::Preempted,
+        };
+    }
+
     let approved = tokio::select! {
         decision = rx => decision.unwrap_or(false),
         _ = tokio::time::sleep(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS)) => false,
     };
+    emit_confirm_dismissed(app, &ctx.task_id, &confirmation_id);
 
     if !approved {
         let now_ms = epoch_millis();
@@ -783,6 +865,60 @@ pub fn resolve_confirm(task_id: &str, allow: bool) {
     if let Some(tx) = sender {
         let _ = tx.send(decision);
     }
+}
+
+pub fn resolve_confirm_exact(
+    confirmation_id: &str,
+    task_id: &str,
+    allow: bool,
+) -> ConfirmResolution {
+    let now_ms = epoch_millis();
+    let (resolution, sender, decision) = {
+        let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        prune_confirmations(&mut chans, now_ms);
+        match chans
+            .iter_mut()
+            .find(|entry| entry.confirmation_id == confirmation_id && entry.task_id == task_id)
+        {
+            Some(entry) => resolve_confirm_entry(entry, allow, now_ms),
+            None => (ConfirmResolution::NotFound, None, false),
+        }
+    };
+    if let Some(tx) = sender {
+        let _ = tx.send(decision);
+    }
+    resolution
+}
+
+/// Preempt the newest active confirmation for one task. A preempted tombstone
+/// remains addressable so a racing emitter can send the same scoped dismissal
+/// after its stale card event and restore the correct terminal UI state.
+pub(super) fn preempt_confirm_for_task(task_id: &str) -> Option<String> {
+    let now_ms = epoch_millis();
+    let (confirmation_id, sender) = {
+        let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        prune_confirmations(&mut chans, now_ms);
+        match chans
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.task_id == task_id)
+        {
+            Some(entry) if entry.sender.is_some() => {
+                entry.decision = Some(false);
+                entry.terminal = Some(ConfirmTerminal::Preempted);
+                entry.settled_at_ms = Some(now_ms);
+                (Some(entry.confirmation_id.clone()), entry.sender.take())
+            }
+            Some(entry) if entry.terminal == Some(ConfirmTerminal::Preempted) => {
+                (Some(entry.confirmation_id.clone()), None)
+            }
+            _ => (None, None),
+        }
+    };
+    if let Some(tx) = sender {
+        let _ = tx.send(false);
+    }
+    confirmation_id
 }
 
 pub fn resolve_confirm_v2(
@@ -1029,10 +1165,24 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
                 )
             }
         }
-        "o8_approve_item" => format!("Approve {} in o8", s("approvalId")),
+        "o8_approve_item" => {
+            let spoken_review = s("_symonSpokenReviewSummary");
+            let title = s("_symonApprovalTitle");
+            if spoken_review.is_empty() {
+                format!("Approve {} in o8", s("approvalId"))
+            } else {
+                format!("Approve “{title}” after this review: {spoken_review}")
+            }
+        }
         "o8_reject_item" => {
             let reason = s("reason");
-            if reason.is_empty() {
+            let spoken_review = s("_symonSpokenReviewSummary");
+            let title = s("_symonApprovalTitle");
+            if !spoken_review.is_empty() && reason.is_empty() {
+                format!("Reject “{title}” after this review: {spoken_review}")
+            } else if !spoken_review.is_empty() {
+                format!("Reject “{title}” after this review: {spoken_review} Reason: {reason}")
+            } else if reason.is_empty() {
                 format!("Reject {} in o8", s("approvalId"))
             } else {
                 format!("Reject {} in o8 — {reason}", s("approvalId"))
@@ -1193,6 +1343,19 @@ fn emit_confirm(app: &tauri::AppHandle, payload: Value) {
         payload.clone(),
     );
     let _ = app.emit("o8:agent-confirm", payload);
+}
+
+pub(super) fn emit_confirm_dismissed(app: &tauri::AppHandle, task_id: &str, confirmation_id: &str) {
+    let payload = json!({
+        "taskId": task_id,
+        "confirmationId": confirmation_id,
+    });
+    let _ = app.emit_to(
+        crate::dock_window::DOCK_LABEL,
+        "o8:agent-confirm-dismissed",
+        payload.clone(),
+    );
+    let _ = app.emit("o8:agent-confirm-dismissed", payload);
 }
 
 // ── orchestration ────────────────────────────────────────────────────────────
@@ -1835,6 +1998,38 @@ mod confirm_registry_tests {
     }
 
     #[test]
+    fn exact_dock_identity_cannot_resolve_a_later_card_for_the_same_task() {
+        let _serial = TEST_CONFIRM_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let (tx, mut rx) = oneshot::channel::<bool>();
+        {
+            let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            chans.clear();
+            chans.push(entry(
+                "confirm-current",
+                "task-reused",
+                "sym-dock",
+                "call-current",
+                epoch_millis() + 60_000,
+                tx,
+            ));
+        }
+
+        assert_eq!(
+            resolve_confirm_exact("confirm-stale", "task-reused", true),
+            ConfirmResolution::NotFound
+        );
+        assert!(matches!(
+            rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            resolve_confirm_exact("confirm-current", "task-reused", false),
+            ConfirmResolution::Resolved { allow: false }
+        );
+        assert!(matches!(rx.try_recv(), Ok(false)));
+    }
+
+    #[test]
     fn expiry_and_preemption_fail_closed() {
         let _serial = TEST_CONFIRM_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let (tx_expired, mut rx_expired) = oneshot::channel::<bool>();
@@ -1913,6 +2108,53 @@ mod confirm_registry_tests {
     }
 
     #[test]
+    fn task_preemption_is_exact_and_keeps_a_replay_tombstone() {
+        let _serial = TEST_CONFIRM_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let (tx_target, mut rx_target) = oneshot::channel::<bool>();
+        let (tx_other, mut rx_other) = oneshot::channel::<bool>();
+        let expires = epoch_millis() + 60_000;
+        {
+            let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            chans.clear();
+            chans.push(entry(
+                "confirm-target",
+                "task-target",
+                "sym-target",
+                "call-target",
+                expires,
+                tx_target,
+            ));
+            chans.push(entry(
+                "confirm-other",
+                "task-other",
+                "sym-other",
+                "call-other",
+                expires,
+                tx_other,
+            ));
+        }
+
+        assert_eq!(
+            preempt_confirm_for_task("task-target").as_deref(),
+            Some("confirm-target")
+        );
+        assert!(matches!(rx_target.try_recv(), Ok(false)));
+        assert!(matches!(
+            rx_other.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            preempt_confirm_for_task("task-target").as_deref(),
+            Some("confirm-target")
+        );
+        assert_eq!(
+            resolve_confirm_v2("confirm-target", "sym-target", "call-target", true, None,),
+            ConfirmResolution::Preempted
+        );
+        assert_eq!(preempt_confirm_for_task("task-missing"), None);
+    }
+
+    #[test]
     fn stable_target_projection_uses_ids_not_labels() {
         assert_eq!(
             confirm_target(&json!({
@@ -1939,5 +2181,58 @@ mod confirm_registry_tests {
             ),
             "Dispatch work in o8: Fix the fleet"
         );
+    }
+
+    #[test]
+    fn packet_approval_confirmation_carries_the_bounded_review() {
+        assert_eq!(
+            confirm_summary(
+                "o8_approve_item",
+                &json!({
+                    "approvalId": "approval-1",
+                    "_symonApprovalTitle": "Merge spoken review",
+                    "_symonSpokenReviewSummary": "Three files changed. The review approved.",
+                }),
+                None,
+            ),
+            "Approve “Merge spoken review” after this review: Three files changed. The review approved."
+        );
+    }
+
+    #[test]
+    fn trusted_review_playback_covers_cascade_and_desktop_realtime_only() {
+        let packet_review = json!({
+            "_symonSpokenReviewSummary": "Three files changed. The review approved.",
+        });
+        assert!(requires_completed_review_speech(
+            "o8_approve_item",
+            &packet_review,
+            true,
+            false,
+        ));
+        assert!(requires_completed_review_speech(
+            "o8_reject_item",
+            &packet_review,
+            false,
+            false,
+        ));
+        assert!(!requires_completed_review_speech(
+            "o8_approve_item",
+            &packet_review,
+            false,
+            true,
+        ));
+        assert!(!requires_completed_review_speech(
+            "o8_approve_item",
+            &json!({}),
+            true,
+            false,
+        ));
+        assert!(!requires_completed_review_speech(
+            "o8_status",
+            &packet_review,
+            true,
+            false,
+        ));
     }
 }

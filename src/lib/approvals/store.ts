@@ -6,6 +6,7 @@ import {
   normalizeApprovalLookupValue,
   scoreApprovalContextMatch,
 } from '@/lib/approvals/context';
+import { stableApprovalJson } from '@/lib/approvals/fingerprint';
 import {
   allFindingsResolved,
   buildOrchestratorReviewApprovalInput,
@@ -26,6 +27,9 @@ import type {
   CreateApprovalInput,
   MobileApprovalCard,
 } from '@/lib/approvals/types';
+import { resolveApproval } from '@/lib/approvals/resolution';
+
+export { resolveApproval } from '@/lib/approvals/resolution';
 
 type ApprovalRow = typeof approvalsTable.$inferSelect;
 type ApprovalInsert = typeof approvalsTable.$inferInsert;
@@ -148,24 +152,6 @@ function updateApprovalRecord(approval: ApprovalRecord) {
     .run();
 }
 
-function normalizeForFingerprint(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(normalizeForFingerprint);
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, normalizeForFingerprint(nested)]),
-    );
-  }
-  return value;
-}
-
-function stableJson(value: unknown) {
-  return JSON.stringify(normalizeForFingerprint(value));
-}
-
 function fingerprintForApproval(input: CreateApprovalInput) {
   const projectId = inferApprovalProjectId(input);
   return [
@@ -175,7 +161,7 @@ function fingerprintForApproval(input: CreateApprovalInput) {
     input.sessionKey,
     input.toolName ?? '',
     input.summary,
-    stableJson(input.args ?? {}),
+    stableApprovalJson(input.args ?? {}),
   ].join('::');
 }
 
@@ -230,7 +216,7 @@ function createApprovalRecord(input: CreateApprovalInput): ApprovalRecord {
   };
 }
 
-function auditEvent(
+export function auditEvent(
   type: ApprovalAuditEvent['type'],
   actor: ApprovalActor,
   note?: string,
@@ -245,7 +231,7 @@ function auditEvent(
   };
 }
 
-function insertApprovalEvent(approvalId: string, event: ApprovalAuditEvent): void {
+export function insertApprovalEvent(approvalId: string, event: ApprovalAuditEvent): void {
   const { type: eventType, actor, note, timestamp, ...rest } = event;
   getApprovalDb().insert(approvalEventsTable).values({
     id: `evt-${approvalId}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
@@ -603,34 +589,6 @@ export function supersedeOrchestratorReviewApprovals(packetId: string, reason: s
     insertApprovalEvent(approval.id, event);
   }
   return approvals.length;
-}
-
-export function resolveApproval(id: string, action: 'approve' | 'reject', actor: ApprovalActor, note?: string) {
-  const existing = getApproval(id);
-  if (!existing) {
-    return null;
-  }
-
-  if (existing.status !== 'pending') {
-    return existing;
-  }
-
-  const resolvedAt = Date.now();
-  const nextStatus = action === 'approve' ? 'approved' : 'rejected';
-  const next: ApprovalRecord = {
-    ...existing,
-    status: nextStatus,
-    updatedAt: resolvedAt,
-    resolvedAt,
-    resolution: {
-      action: nextStatus,
-      actor,
-      note: note?.trim() || undefined,
-    },
-    audit: [...existing.audit, auditEvent(action === 'approve' ? 'approved' : 'rejected', actor, note)],
-  };
-  updateApprovalRecord(next);
-  return next;
 }
 
 export function recordOrchestratorReview(
