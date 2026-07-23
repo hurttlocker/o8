@@ -16,8 +16,13 @@
  */
 
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+import {
+  COMPOSER_MODE_DIRECTIVES,
+  composeComposerWireMessage,
+  type ComposerWireMode,
+} from '@/lib/orchestrator/composer-wire';
 
-export type ComposerMode = 'solo' | 'multitask' | 'moa';
+export type ComposerMode = ComposerWireMode;
 
 export interface ComposerModeSpec {
   id: ComposerMode;
@@ -37,7 +42,7 @@ export const COMPOSER_MODES: readonly ComposerModeSpec[] = [
     chip: 'Solo',
     sublabel: 'Works alone — nothing is dispatched',
     placeholder: 'Build solo — no dispatches · / for commands',
-    directive: '[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.',
+    directive: COMPOSER_MODE_DIRECTIVES.solo,
   },
   {
     id: 'multitask',
@@ -45,7 +50,7 @@ export const COMPOSER_MODES: readonly ComposerModeSpec[] = [
     chip: 'Multitask',
     sublabel: 'Dispatches parallel worker packets in isolated worktrees',
     placeholder: 'Fan out — describe work to parallelize into packets…',
-    directive: '[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. Review and merge through the gate as they finish.',
+    directive: COMPOSER_MODE_DIRECTIVES.multitask,
   },
   {
     id: 'moa',
@@ -53,7 +58,7 @@ export const COMPOSER_MODES: readonly ComposerModeSpec[] = [
     chip: 'MoA',
     sublabel: 'Plans with both frontier models, then dispatches',
     placeholder: 'Mixture of Agents — plan with both frontiers, then fan out…',
-    directive: '[Mode: Mixture of Agents] After the proposal round, decompose the work into parallel worker packets and dispatch them into isolated worktrees. Review and merge through the gate as they finish.',
+    directive: COMPOSER_MODE_DIRECTIVES.moa,
   },
 ];
 
@@ -79,10 +84,16 @@ export function composeComposerModeMessage(message: string, mode: ComposerMode):
   displayMessage: string;
   wireMessage: string;
 } {
-  if (message.startsWith('/')) return { displayMessage: message, wireMessage: message };
-  const spec = composerModeSpec(mode);
-  return {
-    displayMessage: message,
-    wireMessage: spec.directive ? `${spec.directive}\n\n${message}` : message,
-  };
+  return composeComposerWireMessage(message, mode);
+}
+
+export function composeComposerTurnMessage(
+  message: string,
+  mode: ComposerMode,
+  fusionEnabled: boolean,
+  forceSingle: boolean,
+) {
+  const orchestrationMode = resolveComposerExecutionMode(mode, fusionEnabled, forceSingle);
+  const promptMode = orchestrationMode === 'fusion' && mode === 'solo' ? 'multitask' : mode;
+  return { ...composeComposerModeMessage(message, promptMode), orchestrationMode };
 }
