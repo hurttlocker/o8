@@ -27,8 +27,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type AgentSessionStatus = 'connecting' | 'live' | 'acting' | 'idle' | 'error';
 
@@ -210,7 +210,7 @@ export function sweepStaleAgentSession(
 // ── Disk mirror (cross-process: ws-server writes, Next GET reads) ─────────────
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+  return getDataDir();
 }
 
 function sessionFilePath(): string {

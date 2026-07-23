@@ -28,8 +28,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type CrashSource = string;
 
@@ -60,9 +60,7 @@ const MAX_STACK_CHARS = 8_000;
 
 function dataDir(): string {
   return (
-    process.env.O8_DATA_DIR
-    || process.env.CORTEX_IDE_DATA_DIR
-    || path.join(os.homedir(), '.o8')
+    getDataDir()
   );
 }
 

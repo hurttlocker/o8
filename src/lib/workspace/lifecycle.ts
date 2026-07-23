@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describeWorkflowStage, workflowBadge, type WorkflowStageBadge } from '@/lib/workflows/status';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 type WorkspaceStatus = 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
 
@@ -56,7 +57,7 @@ type WorkspaceMutation =
   | { action: 'restore'; workspaceId: string }
   | { action: 'mark_read'; workspaceId: string };
 
-const STATE_DIR = path.join(os.homedir(), '.o8');
+const STATE_DIR = getDataDir();
 const STORE_PATH = path.join(STATE_DIR, 'workspace-lifecycle.json');
 
 function nowIso() {

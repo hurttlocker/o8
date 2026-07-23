@@ -19,13 +19,13 @@
 import 'server-only';
 
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ENC_PREFIX = 'enc:' as const;
-const CONFIG_DIR = join(homedir(), '.o8');
+const CONFIG_DIR = getDataDir();
 const ENV_FILE = join(CONFIG_DIR, '.env.local');
 
 // ── Lazy sync parse of ~/.o8/.env.local ──────────────────────────────────────

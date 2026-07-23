@@ -6,9 +6,10 @@ import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
 import { listLanes } from '@/lib/lane/registry';
 import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const HOME = process.env.HOME ?? '/tmp';
-const STATE_DIR = path.join(HOME, '.o8');
+const STATE_DIR = getDataDir();
 const STATE_SCOPE_DIR = path.join(STATE_DIR, 'terminal-states');
 const LEGACY_STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
 

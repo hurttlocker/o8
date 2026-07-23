@@ -18,7 +18,6 @@
  * Surfaces `gemini-owned:<id>` ids; data dir is `~/.o8/owned-gemini/`.
  */
 
-import os from 'node:os';
 import path from 'node:path';
 import type { RuntimeReviewCommandEvidence } from '@/lib/fleet/types';
 import {
@@ -32,6 +31,7 @@ import {
   type OwnedTailEntry,
   type ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Gemini-specific public types ─────────────────────────────────────────────
 
@@ -573,7 +573,7 @@ const geminiAdapter: OwnedRuntimeAdapter = {
   // Prefix is load-bearing: drives session routing in the runtime registry.
   surfaceIdPrefix: 'gemini-owned:',
   rootEnvVar: 'O8_OWNED_GEMINI_ROOT',
-  rootDefault: path.join(os.homedir(), '.o8', 'owned-gemini'),
+  rootDefault: path.join(getDataDir(), 'owned-gemini'),
   binaryName: 'gemini',
   binaryEnvOverride: 'O8_GEMINI_BIN',
   // Gemini CLI in --output-format stream-json mode (which o8 uses for headless

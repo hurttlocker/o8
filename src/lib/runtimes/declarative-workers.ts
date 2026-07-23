@@ -1,4 +1,3 @@
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -18,6 +17,7 @@ import {
   type DeclarativeOwnedRuntimeConfig,
   type DeclarativeRunLogPatterns,
 } from './shared/owned-session';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface DeclarativeWorkerConfig extends DeclarativeOwnedRuntimeConfig {
   runtimeId: OrchestratorRuntime;
@@ -145,7 +145,7 @@ function materializeDeclarativeWorkerConfig(runtimeId: OrchestratorRuntime): Dec
     displayName: capability.label,
     surfaceIdPrefix: `${runtimeId}-owned:`,
     rootEnvVar: `O8_OWNED_${token}_ROOT`,
-    rootDefault: path.join(os.homedir(), '.o8', `owned-${runtimeId}`),
+    rootDefault: path.join(getDataDir(), `owned-${runtimeId}`),
     binaryName: capability.binaryName,
     binaryEnvOverride: `O8_${token}_BIN`,
     humanLabel: `Owned ${capability.shortLabel}`,

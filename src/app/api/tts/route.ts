@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import { synthesizeEdgeNeural } from '@/lib/tts/edge-neural';
+import { ensureEdgeTtsInstalled } from '@/lib/tts/ensure-edge-tts';
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,6 +30,11 @@ export async function POST(req: NextRequest) {
 
     // Limit text length to prevent abuse
     const trimmedText = text.slice(0, 10_000);
+
+    // Installation is demand-driven: a fresh boot never mutates Python. The
+    // native client serves this request while the optional fallback prepares
+    // in the background for future protocol-drift failures.
+    void ensureEdgeTtsInstalled();
 
     // Native Node synthesis first — zero machine deps, works on a fresh
     // laptop (report S9KT8H: the pip-only path silently failed there and the

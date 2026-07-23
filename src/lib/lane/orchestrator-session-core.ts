@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 
@@ -18,7 +18,7 @@ export const PROCESS_TIMEOUT_MS = 14_400_000;
 export const PREEMPT_SETTLE_MS = 4_000;
 
 export function orchestratorDataDir(name: string): string {
-  return join(process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'), name);
+  return join(getDataDir(), name);
 }
 
 export function normalizeRepoPath(repoPath: string): string {

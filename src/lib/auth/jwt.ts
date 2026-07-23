@@ -9,12 +9,12 @@
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Secret management ──
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 const SECRET_FILE = path.join(DATA_DIR, '.jwt-secret');
 
 function getSecret(): Uint8Array {

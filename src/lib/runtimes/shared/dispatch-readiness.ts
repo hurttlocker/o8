@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const DEFAULT_PROBE_TIMEOUT_MS = 1_500;
 const DEFAULT_MAX_WAIT_MS = 20_000;
@@ -36,7 +37,7 @@ interface WaitForDispatchBackendReadyOptions {
 }
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.o8');
+  return getDataDir();
 }
 
 function apiPortFilePresent(): boolean {

@@ -21,6 +21,11 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
+
+function dataDirForHome(home: string): string {
+  return home === os.homedir() ? getDataDir() : getDataDir({}, home);
+}
 
 /**
  * Scan a version-manager root (nvm/fnm layout: <root>/<version>/...) and
@@ -58,7 +63,7 @@ function versionManagerBinDirs(root: string, binSubpath: string[]): string[] {
  */
 export function wellKnownCliDirs(home: string = os.homedir()): string[] {
   const staticDirs = [
-    path.join(home, '.o8', 'bin'), // our own symlink farm — repaired links win
+    path.join(dataDirForHome(home), 'bin'), // our own symlink farm — repaired links win
     path.join(home, '.local', 'bin'), // Claude Code NATIVE installer default
     path.join(home, '.claude', 'local'), // claude migrate-installer target
     path.join(home, '.npm-global', 'bin'),
@@ -119,7 +124,7 @@ export function ensureCliSymlink(
   home: string = os.homedir(),
 ): string | null {
   try {
-    const binDir = path.join(home, '.o8', 'bin');
+    const binDir = path.join(dataDirForHome(home), 'bin');
     mkdirSync(binDir, { recursive: true });
     const linkPath = path.join(binDir, binaryName);
     // Never link a farm entry to itself (scan can hand us ~/.o8/bin/<name>).

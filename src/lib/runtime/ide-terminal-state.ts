@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { listIdeSurfaceRepoPaths } from '@/lib/runtime/ide-surface-state';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type PersistedChatRuntime = 'codex' | 'claude-code';
 
@@ -31,7 +31,7 @@ export type IdeTerminalStateFile = {
   tabs: PersistedTab[];
 };
 
-const TERMINAL_STATE_DIR = path.join(homedir(), '.o8', 'terminal-states');
+const TERMINAL_STATE_DIR = path.join(getDataDir(), 'terminal-states');
 
 function toMillis(isoLike?: string) {
   if (!isoLike) return 0;

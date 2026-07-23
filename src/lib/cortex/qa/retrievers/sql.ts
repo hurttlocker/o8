@@ -23,12 +23,12 @@
 import 'server-only';
 
 import { existsSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 import { getSqlite } from '@/lib/db';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const DEFAULT_LIMIT = 20;
 
@@ -158,7 +158,7 @@ function detectOutcomeQueryIntent(question: string): OutcomeQueryIntent | null {
 
 // ── Repo registry (sync read) ────────────────────────────────────────────────
 
-const REPO_REGISTRY_PATH = path.join(os.homedir(), '.o8', 'repos.json');
+const REPO_REGISTRY_PATH = path.join(getDataDir(), 'repos.json');
 
 /** Sync read of the repo registry. Returns [] on any error so the retriever
  *  never throws. */

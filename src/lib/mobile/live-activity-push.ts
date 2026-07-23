@@ -3,12 +3,12 @@ import 'server-only';
 import { existsSync, readFileSync } from 'node:fs';
 import { connect, constants as http2Constants } from 'node:http2';
 import type { ClientHttp2Stream } from 'node:http2';
-import os from 'node:os';
 import { basename, join } from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
 import type { AgentStatus } from '@/lib/fleet/types';
 import { getSqlite } from '@/lib/db';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 type MobileLiveActivityStatus =
   | 'queued'
@@ -146,7 +146,7 @@ function optionalString(value: string | undefined) {
 function apnsConfigPath() {
   return process.env.O8_APNS_CONFIG_PATH?.trim()
     || join(
-      process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || join(os.homedir(), '.o8'),
+      getDataDir(),
       'apns.json',
     );
 }

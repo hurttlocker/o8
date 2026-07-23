@@ -62,7 +62,7 @@ describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
   });
 
   it('opens after two consecutive 402s and skips fetch while open', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(402, insufficientCredits));
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(402, insufficientCredits)));
 
     await expect(callOpenRouter('q1')).rejects.toThrow('HTTP 402');
     expect(isOpenRouterCircuitOpen()).toBe(false);
@@ -72,11 +72,12 @@ describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
 
     // Third call must fail fast WITHOUT another network round-trip.
     await expect(callOpenRouter('q3')).rejects.toThrow('circuit open');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('a success between hard failures resets the consecutive count', async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, {}))
       .mockResolvedValueOnce(jsonResponse(402, insufficientCredits))
       .mockResolvedValueOnce(jsonResponse(200, okBody))
       .mockResolvedValueOnce(jsonResponse(402, insufficientCredits));
@@ -87,26 +88,45 @@ describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
 
     // Only one consecutive failure since the success — still closed.
     expect(isOpenRouterCircuitOpen()).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('does not trip on transient 5xx failures', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(503, { error: { message: 'upstream busy' } }));
+    fetchMock.mockImplementation(() => Promise.resolve(
+      jsonResponse(503, { error: { message: 'upstream busy' } }),
+    ));
 
     await expect(callOpenRouter('q1')).rejects.toThrow('HTTP 503');
     await expect(callOpenRouter('q2')).rejects.toThrow('HTTP 503');
     await expect(callOpenRouter('q3')).rejects.toThrow('HTTP 503');
 
     expect(isOpenRouterCircuitOpen()).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('trips on 401 (bad key) the same as 402', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(401, { error: { message: 'bad key' } }));
+    fetchMock.mockImplementation(() => Promise.resolve(
+      jsonResponse(401, { error: { message: 'bad key' } }),
+    ));
 
     await expect(callOpenRouter('q1')).rejects.toThrow('HTTP 401');
     await expect(callOpenRouter('q2')).rejects.toThrow('HTTP 401');
 
     expect(isOpenRouterCircuitOpen()).toBe(true);
+  });
+
+  it('warms OpenRouter only when the first direct request is made', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(200, okBody))
+      .mockResolvedValueOnce(jsonResponse(200, okBody));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(callOpenRouter('q1')).resolves.toBe('OK');
+    await expect(callOpenRouter('q2')).resolves.toBe('OK');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://openrouter.ai/api/v1/models');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' });
   });
 });

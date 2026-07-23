@@ -131,6 +131,7 @@ function recordSuccess(): void {
 export function resetOpenRouterCircuit(): void {
   consecutiveHardFailures = 0;
   circuitOpenUntil = 0;
+  warmupStarted = false;
 }
 
 /** True while the breaker is open (tier should be skipped). */
@@ -169,6 +170,11 @@ export async function callOpenRouter(
   if (!route) {
     throw new Error('[qa][openrouter] no route (no proxy token, local endpoint, or BYO key)');
   }
+
+  // Keep boot offline. Only a real request headed directly to OpenRouter pays
+  // the one-time connection warm-up; local and managed-proxy routes never
+  // contact openrouter.ai from this machine.
+  if (route.via === 'direct') await warmupOpenRouter();
 
   // The daily spend cap is the DESKTOP guardrail on the USER's own key/credits.
   // In proxy mode the user isn't spending their own OpenRouter $ (we are) and
@@ -248,19 +254,18 @@ export function describeOpenRouterModel(servedModel: string | undefined): string
 //
 // The first real call to `callOpenRouter` pays ~1.7s for DNS + TLS + HTTP/2
 // connection setup before the request lands on a warm undici pool. Subsequent
-// calls hit the pool and run in ~200-700ms. We pre-pay that one-time cost by
-// firing a tiny unauthenticated GET against `/api/v1/models` at boot so the
-// pool is hot before the first user question lands.
+// calls hit the pool and run in ~200-700ms. We pre-pay that one-time cost
+// lazily by firing a tiny unauthenticated GET against `/api/v1/models`
+// immediately before the first real direct request.
 //
-// The probe is fire-and-forget: it never throws, never rejects, never blocks
-// the boot path. Net cost: one ~200ms request per Node process lifetime.
+// The probe is best-effort: it never throws and cannot block application boot.
+// The first direct request awaits it; later calls reuse the warmed pool.
 
 let warmupStarted = false;
 
 /**
  * Warm the undici connection pool to openrouter.ai. Idempotent — safe to call
- * many times; only the first call fires a request. Returns immediately and
- * resolves when the probe finishes (callers should rarely await this).
+ * many times; only the first call fires a request.
  */
 export async function warmupOpenRouter(): Promise<void> {
   if (warmupStarted) return;
@@ -278,8 +283,7 @@ export async function warmupOpenRouter(): Promise<void> {
     await res.arrayBuffer().catch(() => undefined);
     console.info(`[qa][openrouter] warm-up ${res.status} in ${Date.now() - startedAt}ms`);
   } catch (err) {
-    // Silent — boot must never fail because the warm-up couldn't reach
-    // OpenRouter (offline dev, captive portal, etc.). Real calls will retry.
+    // A failed probe must not suppress the real user-initiated call.
     console.info(`[qa][openrouter] warm-up skipped (${Date.now() - startedAt}ms): ${err instanceof Error ? err.message : err}`);
   }
 }

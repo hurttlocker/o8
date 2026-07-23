@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
 import { buildFirstRunClarifyNote } from './clarify-first';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Shared o8 orchestrator system prompt assembly.
@@ -34,8 +34,7 @@ function resolvePromptFilePath(): string {
  */
 function repoHasDispatchHistory(repoPath: string): boolean {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR ?? join(homedir(), '.o8');
-    const db = new Database(join(dataDir, 'cortex-ide.db'), { readonly: true, fileMustExist: true });
+    const db = new Database(join(getDataDir(), 'cortex-ide.db'), { readonly: true, fileMustExist: true });
     try {
       return db.prepare('SELECT 1 FROM lanes WHERE repo_path = ? LIMIT 1').get(repoPath) !== undefined;
     } finally {
@@ -57,7 +56,7 @@ export function buildOrchestratorSystemPrompt(
 
   let allRepos: Array<{ name: string; localPath: string }> = [];
   try {
-    const reposFile = join(homedir(), '.o8', 'repos.json');
+    const reposFile = join(getDataDir(), 'repos.json');
     if (existsSync(reposFile)) {
       const parsed = JSON.parse(readFileSync(reposFile, 'utf-8'));
       allRepos = (parsed.repos ?? []).map((r: { name?: string; localPath: string }) => ({

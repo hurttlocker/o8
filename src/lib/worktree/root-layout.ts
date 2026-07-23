@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const LEGACY_WORKTREE_DIR_NAME = '.cortex-worktrees';
 export const WORKTREE_ROOT_ENV = 'O8_WORKTREE_ROOT';
@@ -42,7 +42,7 @@ export function resolveWorktreeRootLayout(
   repoRoot: string,
   env: NodeJS.ProcessEnv = process.env,
 ): WorktreeRootLayout {
-  const dataDir = env.CORTEX_IDE_DATA_DIR?.trim() || path.join(os.homedir(), '.o8');
+  const dataDir = getDataDir(env);
   const configuredRoot = path.resolve(env[WORKTREE_ROOT_ENV]?.trim() || path.join(dataDir, 'worktrees'));
   const repoKey = worktreeRepoKey(repoRoot);
   const primaryBase = path.join(configuredRoot, repoKey, LEGACY_WORKTREE_DIR_NAME);

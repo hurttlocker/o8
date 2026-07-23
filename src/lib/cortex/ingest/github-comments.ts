@@ -21,12 +21,12 @@
 import 'server-only';
 
 import { existsSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { getSqlite } from '@/lib/db';
 import { githubInstallationFetch } from '@/lib/github-broker/auth';
 import { getGitHubAppConfig } from '@/lib/github-broker/env';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Repo registry loader (duplicated to avoid pulling in 'server-only' imports) ──
 //
@@ -48,13 +48,6 @@ interface RepoRegistry {
   repos: RepoRegistryRow[];
 }
 
-function getDataDir(): string {
-  return (
-    process.env.O8_DATA_DIR ||
-    process.env.CORTEX_IDE_DATA_DIR ||
-    path.join(os.homedir(), '.o8')
-  );
-}
 
 function loadRepos(): RepoRegistryRow[] {
   const registryPath = path.join(getDataDir(), 'repos.json');

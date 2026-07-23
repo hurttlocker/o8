@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 export const WS_TOKEN_PATH = path.join(DATA_DIR, 'ws-token');
 const TOKEN_LENGTH = 32; // 256-bit token
 const MIN_TOKEN_LENGTH = 16;

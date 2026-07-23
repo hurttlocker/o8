@@ -26,7 +26,6 @@
  *   - review packet assembly (wraps getRuntimeRepoReview + worktree join)
  */
 
-import os from 'node:os';
 import path from 'node:path';
 import type { RuntimeReviewCommandEvidence } from '@/lib/fleet/types';
 import {
@@ -43,6 +42,7 @@ import {
 import { codexModelArgs } from './local-model';
 import { resolveCodexReasoningEffort } from './reasoning-effort';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // Re-export the fleet additions shape under its original Codex name.
 export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-session';
@@ -639,7 +639,7 @@ const codexAdapter: OwnedRuntimeAdapter = {
   // IMPORTANT: Keep 'codex-owned:' prefix — load-bearing for session routing.
   surfaceIdPrefix: 'codex-owned:',
   rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT',
-  rootDefault: path.join(os.homedir(), '.o8', 'owned-codex'),
+  rootDefault: path.join(getDataDir(), 'owned-codex'),
   binaryName: 'codex',
   binaryEnvOverride: 'O8_CODEX_BIN',
   binaryExtraEnvOverrides: ['CODEX_HOME'],

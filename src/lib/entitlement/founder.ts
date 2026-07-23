@@ -1,10 +1,10 @@
 import 'server-only';
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import type { FounderInfo } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Founding Operator local record (`~/.o8/founder.json`).
@@ -24,7 +24,7 @@ export interface FounderRecord extends FounderInfo {
 
 function founderPath(): string {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
+    getDataDir(),
     'founder.json',
   );
 }

@@ -2,11 +2,11 @@ export const dynamic = 'force-dynamic';
 
 import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Live WS credentials for an already-loaded page.
@@ -30,7 +30,7 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 function portFromFile(): number | null {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+    const dataDir = getDataDir();
     const filePath = path.join(dataDir, 'ws-port');
     if (!existsSync(filePath)) return null;
     const parsed = parseInt(readFileSync(filePath, 'utf8').trim(), 10);

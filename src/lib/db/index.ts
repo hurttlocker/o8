@@ -12,9 +12,8 @@
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 import { extractApprovalContextIdsFromMetadataJson } from '@/lib/approvals/context';
 import * as schema from './schema';
 import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
@@ -34,9 +33,7 @@ import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 
 migrateDataDirOnce();
 
-const DATA_DIR = process.env.O8_DATA_DIR
-  || process.env.CORTEX_IDE_DATA_DIR
-  || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 // Keep the filename as cortex-ide.db so the data dir migration's byte-for-byte
 // copy still points at the right file. Renaming the file would require a
 // second migration step with no user-facing benefit.

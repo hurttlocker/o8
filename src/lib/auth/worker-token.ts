@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * The local-worker token — a distinct credential from the shared ws-token,
@@ -15,7 +15,7 @@ import path from 'node:path';
  * impersonate the operator. This (Tier-1) stops the prompt-injected worker that
  * drives the CLI; true isolation is the Tier-2 sandbox.
  */
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 export const LOCAL_WORKER_TOKEN_PATH = path.join(DATA_DIR, 'worker-token');
 const TOKEN_LENGTH = 32; // 256-bit
 const MIN_TOKEN_LENGTH = 16;

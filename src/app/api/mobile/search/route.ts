@@ -17,11 +17,11 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
+const HISTORY_DIR = join(getDataDir(), 'chat-history');
 const MAX_PER_GROUP = 20;
 const PREVIEW_LEN = 140;
 

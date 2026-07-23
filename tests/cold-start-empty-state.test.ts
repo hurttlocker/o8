@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -17,6 +17,8 @@ const { getDataDir } = await import('@/lib/data-dir-migration');
 const { getProjectsLedger } = await import('@/lib/repos/projects');
 const { listRepos } = await import('@/lib/repos/registry');
 const { ORCHESTRATOR_HISTORY_DIR } = await import('@/lib/mobile/orchestrator-thread-history');
+const { resolveRepoPath } = await import('@/lib/intake/resolve-repo');
+const { buildOrchestratorSystemPrompt } = await import('@/lib/lane/orchestrator-system-prompt');
 
 afterAll(() => {
   if (priorO8DataDir === undefined) delete process.env.O8_DATA_DIR;
@@ -61,5 +63,26 @@ describe('cold start with only CORTEX_IDE_DATA_DIR configured', () => {
       skippedSteps?: string[];
     };
     expect(persisted.skippedSteps).toEqual(['runtime']);
+  });
+
+  it('resolves intake and orchestrator repo context from the override directory', () => {
+    const primaryRepo = path.join(dataDir, 'workspaces', 'primary');
+    const registeredRepo = path.join(dataDir, 'workspaces', 'registered-repo');
+    mkdirSync(primaryRepo, { recursive: true });
+    mkdirSync(registeredRepo, { recursive: true });
+    writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({
+      version: 1,
+      repos: [{
+        id: 'registered-repo',
+        name: 'Registered Repo',
+        localPath: registeredRepo,
+        remoteUrl: null,
+        defaultBranch: 'main',
+      }],
+    }));
+
+    expect(resolveRepoPath('example/registered-repo')).toBe(registeredRepo);
+    expect(buildOrchestratorSystemPrompt(primaryRepo, { firstRunClarify: false }))
+      .toContain(`Registered Repo → ${registeredRepo}`);
   });
 });

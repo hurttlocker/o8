@@ -7,7 +7,7 @@ import { getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 function stateDirs() {
-  return Array.from(new Set([getDataDir(), path.join(homedir(), '.o8')]));
+  return Array.from(new Set([getDataDir(), getDataDir({}, homedir())]));
 }
 
 export interface RepoPathRepointStats {

@@ -2,12 +2,12 @@ import 'server-only';
 
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { clampPlan, readDevPlanOverride, readDevPlanOverrideSync } from './dev-override';
 import { resolveFlags } from './flags';
 import type { EntitlementState, Plan } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Entitlement reader — resolves the active plan with env > file > default
@@ -41,7 +41,7 @@ interface EntitlementFile {
 // or a verified Pro license lands in a file the store never reads.
 export function getEntitlementPath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
+    getDataDir(),
     ENTITLEMENT_FILE,
   );
 }

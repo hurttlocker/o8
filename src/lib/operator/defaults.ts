@@ -2,7 +2,6 @@ import 'server-only';
 
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { MODEL_IDS } from '@/lib/models';
 
@@ -77,6 +76,7 @@ import {
   type ClassAComposer,
   type WorkersUseBrain,
 } from './defaults-env';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination } from './defaults-env';
 export type {
@@ -426,7 +426,7 @@ const OPERATOR_DEFAULTS_FILE = 'operator-defaults.json';
 
 function getOperatorDefaultsPath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
+    getDataDir(),
     OPERATOR_DEFAULTS_FILE,
   );
 }

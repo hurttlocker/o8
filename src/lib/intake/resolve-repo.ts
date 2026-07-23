@@ -1,6 +1,6 @@
 /**
  * Resolve a GitHub repo full name (e.g., "hurttlocker/o8") to a local
- * filesystem path using the repo registry at ~/.o8/repos.json.
+ * filesystem path using the canonical o8 data-dir repo registry.
  */
 
 import 'server-only';
@@ -9,12 +9,16 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-
-const REGISTRY_PATH = join(homedir(), '.o8', 'repos.json');
+import { getDataDir } from '@/lib/data-dir-migration';
 
 function getRemoteSlug(repoPath: string): string | null {
   try {
-    const remote = execSync('git remote get-url origin', { cwd: repoPath, timeout: 3000, encoding: 'utf-8' }).trim();
+    const remote = execSync('git remote get-url origin', {
+      cwd: repoPath,
+      timeout: 3000,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
     const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
     return match?.[1]?.toLowerCase() ?? null;
   } catch {
@@ -24,19 +28,21 @@ function getRemoteSlug(repoPath: string): string | null {
 
 export function resolveRepoPath(repoFullName: string): string | null {
   const target = repoFullName.toLowerCase();
+  const registryPath = join(getDataDir(), 'repos.json');
 
-  if (!existsSync(REGISTRY_PATH)) return null;
+  if (!existsSync(registryPath)) return null;
 
   try {
-    const raw = readFileSync(REGISTRY_PATH, 'utf-8');
+    const raw = readFileSync(registryPath, 'utf-8');
     const parsed = JSON.parse(raw);
-    const repos: Array<{ path: string }> = Array.isArray(parsed)
+    const repos: Array<{ localPath?: string; path?: string }> = Array.isArray(parsed)
       ? parsed
       : Array.isArray(parsed?.repos) ? parsed.repos : [];
 
     for (const repo of repos) {
-      if (!repo.path) continue;
-      const expanded = resolve(repo.path.replace(/^~(?=\/|$)/, homedir()));
+      const repoPath = repo.localPath ?? repo.path;
+      if (!repoPath) continue;
+      const expanded = resolve(repoPath.replace(/^~(?=\/|$)/, homedir()));
       if (!existsSync(expanded)) continue;
 
       // Match by git remote

@@ -2,7 +2,6 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getAllRuntimes } from '@/lib/runtimes';
@@ -25,8 +24,9 @@ import type {
   BoardTaskPatch,
   BoardTaskView,
 } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const BOARD_STORE_DIR = path.join(os.homedir(), '.o8', 'boards');
+const BOARD_STORE_DIR = path.join(getDataDir(), 'boards');
 const BOARD_VERSION = 1;
 const BOARD_COLUMN_TITLES: Record<BoardColumnId, string> = {
   backlog: 'Backlog',

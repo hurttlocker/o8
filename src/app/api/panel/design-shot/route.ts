@@ -1,8 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { mkdirSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Persist a Design Mode draw screenshot (captured from the LIVE native
@@ -38,7 +38,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ ok: false, error: 'invalid base64 payload' }, { status: 400 });
   }
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+    const dataDir = getDataDir();
     const shotsDir = path.join(dataDir, 'design-shots');
     mkdirSync(shotsDir, { recursive: true });
     const filePath = path.join(shotsDir, `draw-${ts}${isCrop ? '-crop' : ''}.png`);

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { and, asc, desc, eq, gt, isNotNull, ne, notInArray } from 'drizzle-orm';
 import { expireStaleApprovals, listApprovalsForContext } from '@/lib/approvals/store';
@@ -25,6 +24,7 @@ import type {
   LaneStatus,
 } from './types';
 import { cleanupLaneWorktree } from './worktree-cleanup';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export {
   findLanesTouching,
@@ -58,7 +58,7 @@ function generateEventId(): string {
 const SESSION_LOST_GRACE_MS = 90_000;
 const sessionMissingSince = new Map<string, number>();
 const REVIEW_SCREENSHOT_DIR = join(
-  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
+  getDataDir(),
   'review-screenshots',
 );
 let reviewScreenshotClient: O8WebviewClient | null = null;

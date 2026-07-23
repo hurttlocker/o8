@@ -24,7 +24,6 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { setApiBase } from '@/lib/mcp/operator-handlers/shared';
@@ -33,6 +32,7 @@ import {
   type OperatorMcpRequest as JsonRpcRequest,
   type OperatorMcpResponse as JsonRpcResponse,
 } from '@/lib/mcp/operator-mcp-host';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const ORPHAN_MIN_AGE_SECONDS = 30;
 const OPERATOR_COMMAND_RE = /^(?:\S+\/)?(?:npm|npx|node|tsx)\b.*(?:^|\s)\S*operator-mcp-server\.ts(?:\s|$)/;
@@ -168,9 +168,6 @@ function runPreflightDiagnostics(): void {
 
 // ── Config ──
 
-function getDataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
-}
 
 /**
  * Resolve the backend base URL. Priority:

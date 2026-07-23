@@ -2,12 +2,12 @@ import 'server-only';
 
 import { spawn } from 'node:child_process';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
-const HISTORY_DIR = path.join(homedir(), '.o8', 'chat-history');
-const ARCHIVE_DIR = path.join(homedir(), '.o8', 'orchestrator-archives');
+import { getDataDir } from '@/lib/data-dir-migration';
+const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
+const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
 type PersistedThread = { filePath: string; tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[]; mtimeMs: number };
 export interface AutoCompactResult { applied: boolean; transcript: MobileTranscriptEntry[]; resumePrelude: string | null; tokensAfter: number; }

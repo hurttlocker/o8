@@ -18,8 +18,8 @@
 import 'server-only';
 
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const POLL_INTERVAL_MS = 1500;
 const DEFAULT_WAIT_TIMEOUT_MS = 60_000;
@@ -30,12 +30,9 @@ export function resolveCodebaseMemoryBin(): string | null {
     return fromEnv;
   }
 
-  const home = process.env.HOME || process.env.USERPROFILE || homedir();
-  if (!home) return null;
-
   const fileName =
     process.platform === 'win32' ? 'codebase-memory-mcp.exe' : 'codebase-memory-mcp';
-  const deterministic = join(home, '.o8', 'bin', fileName);
+  const deterministic = join(getDataDir(), 'bin', fileName);
   if (existsSync(deterministic)) {
     return deterministic;
   }

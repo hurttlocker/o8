@@ -2,10 +2,10 @@ import 'server-only';
 
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import type { Plan } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Dev "View as Free" override (#1517) — a machine-local switch that lets the
@@ -61,7 +61,7 @@ export function clampPlan(actual: Plan, override: Plan | null): Plan {
 // CORTEX_IDE_DATA_DIR in tests points every entitlement file at one place.
 export function getDevOverridePath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
+    getDataDir(),
     OVERRIDE_FILE,
   );
 }

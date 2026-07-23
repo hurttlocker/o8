@@ -9,14 +9,14 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import nacl from 'tweetnacl';
 
 import { b64encode, b64decode } from '@/lib/mobile/e2ee-crypto';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 export const E2EE_IDENTITY_PATH = path.join(DATA_DIR, 'e2ee-identity.key');
 
 export interface ServerIdentity {

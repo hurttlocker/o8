@@ -19,8 +19,8 @@ import 'server-only';
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { randomInt } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /** Crockford-ish: no 0/O/1/I/L/U — these ids get read aloud and typed into commits. */
 const ID_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -50,9 +50,7 @@ export interface ReportRecord {
 
 function dataDir(): string {
   return (
-    process.env.O8_DATA_DIR
-    || process.env.CORTEX_IDE_DATA_DIR
-    || path.join(os.homedir(), '.o8')
+    getDataDir()
   );
 }
 

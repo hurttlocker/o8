@@ -3,19 +3,17 @@ import 'server-only';
 import { createGateway, type GatewayProviderOptions } from '@ai-sdk/gateway';
 import { streamText, type ModelMessage } from 'ai';
 import { existsSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { ChatHistoryMessage } from '@/lib/chat/types';
 import { MODEL_IDS } from '@/lib/models';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const FREE_CHAT_MODEL_ID = 'deepseek/deepseek-v3.2';
 export const PAID_CHAT_MODEL_ID = `anthropic/${MODEL_IDS.claudeQaDefault}`;
 export const CHAT_GATEWAY_PROVIDER = 'deepseek';
 
 const ENC_PREFIX = 'enc:' as const;
-const DATA_DIR = process.env.O8_DATA_DIR
-  || process.env.CORTEX_IDE_DATA_DIR
-  || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 const ENV_FILES = [
   path.join(process.cwd(), '.env.local'),
   path.join(DATA_DIR, '.env.local'),

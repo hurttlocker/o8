@@ -23,7 +23,6 @@ import './neutralize-server-only';
 
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT, DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { parseMcpConfigInput, type ParsedMcpServer } from './parse-config';
@@ -43,6 +42,7 @@ import {
   removeSuggestionFromCache,
   suggestProjects,
 } from '../projects/suggest';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -54,7 +54,7 @@ function resolveApiBase(): string {
   if (process.env.CORTEX_API_BASE) return process.env.CORTEX_API_BASE;
   if (process.env.O8_API_PORT) return `http://127.0.0.1:${process.env.O8_API_PORT}`;
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);

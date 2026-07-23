@@ -8,11 +8,11 @@
 
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { ChunkCacheRow, CodeChunk, FileChunks, FileSkeleton, SkeletonCacheRow, SkeletonSymbol, SymbolKind } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 const DB_PATH = path.join(DATA_DIR, 'skeleton.db');
 
 // ── Singleton ──

@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const STATE_DIR = path.join(os.homedir(), '.o8');
+const STATE_DIR = getDataDir();
 const STATE_SCOPE_DIR = path.join(STATE_DIR, 'terminal-states');
 const LEGACY_STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
 

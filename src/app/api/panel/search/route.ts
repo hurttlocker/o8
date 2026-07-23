@@ -36,7 +36,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { parseDirectiveFile } from '@/lib/cortex/directives/parse';
 
 const HOME = process.env.HOME || os.homedir();
-const CHAT_HISTORY_DIR = join(HOME, '.o8', 'chat-history');
+const CHAT_HISTORY_DIR = join(getDataDir(), 'chat-history');
 const execFileAsync = promisify(execFile);
 
 type SearchKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive';

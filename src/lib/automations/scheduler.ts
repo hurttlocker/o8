@@ -27,12 +27,12 @@
 
 import { and, eq, lte } from 'drizzle-orm';
 import { writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { runAutomation } from './runner';
 import { computeNextRunAt } from './cron';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const TICK_MS = 30_000;
 const DEFAULT_STALE_RUN_MS = 60 * 60 * 1000; // 60 minutes
@@ -43,7 +43,7 @@ const STALE_RUN_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_STALE_RUN_MS;
 })();
 const HEARTBEAT_PATH = path.join(
-  process.env.CORTEX_IDE_DATA_DIR ?? path.join(homedir(), '.o8'),
+  getDataDir(),
   'automations-scheduler.heartbeat',
 );
 let started = false;
