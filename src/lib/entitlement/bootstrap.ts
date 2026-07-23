@@ -5,23 +5,29 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
-
-import { readCachedEntitlement, verifyLicense, writeCachedEntitlement } from './license';
+import {
+  configuredLicenseServerBaseUrl,
+  readCachedEntitlement,
+  verifyLicense,
+  writeCachedEntitlement,
+} from './license';
 
 /**
- * First-run free-account issuance (epic #1249, monetization plan §11).
+ * Optional first-run hosted-account issuance (epic #1249, monetization plan
+ * §11).
  *
- * On a fresh install (no entitlement.json) this requests a FREE token from the
- * license server, bound to a stable per-install id, and caches it — so every
- * install has a stable account `sub` for usage attribution AND can reach the
- * managed proxy. There is no payment in this release; the token is a free
- * credential, not a receipt.
+ * When a hosted service is configured, a fresh install can request a FREE
+ * token bound to a stable per-install id. In the open BYO build there is no
+ * configured service, so the canonical store simply resolves the plan to
+ * `free` without network activity.
  *
- * Fail-soft by design: offline / server error → no-op, the app runs tokenless
- * and the next boot retries. NEVER overwrites an existing token (especially a
- * paid one) and NEVER blocks the UI.
+ * Fail-soft by design: offline / server error → bounded no-op with a cooldown.
+ * NEVER overwrites an existing token (especially a paid one) and NEVER blocks
+ * the UI indefinitely.
  */
+
+const LICENSE_SERVER_TIMEOUT_MS = 5_000;
+const LICENSE_SERVER_RETRY_COOLDOWN_MS = 5 * 60_000;
 
 function dataDir(): string {
   return process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
@@ -42,38 +48,58 @@ export function getOrCreateInstallId(): string {
     mkdirSync(path.dirname(idPath), { recursive: true });
     writeFileSync(idPath, `${id}\n`, { mode: 0o600 });
   } catch (err) {
-    console.error('[entitlement-bootstrap] failed to persist install-id:', err);
+    console.error('[entitlement] Failed to persist install id:', err);
   }
   return id;
 }
 
 let inFlight: Promise<void> | null = null;
+let retryAfterMs = 0;
 
 export async function ensureFreeEntitlement(): Promise<void> {
   // Already holding a token (free or paid) → nothing to do.
   if (readCachedEntitlement()?.licenseKey) return;
   // An env-pinned plan (O8_PLAN) owns the entitlement → don't fetch one.
   if (process.env.O8_PLAN) return;
+  const licenseServerBaseUrl = configuredLicenseServerBaseUrl();
+  if (!licenseServerBaseUrl) {
+    console.debug('[entitlement] License server not configured; using free plan.');
+    return;
+  }
+  if (Date.now() < retryAfterMs) return;
 
   // Single-flight: coalesce concurrent boot calls into one issuance.
   if (inFlight) return inFlight;
   inFlight = (async () => {
     try {
       const installId = getOrCreateInstallId();
-      const res = await fetch(`${proxyBaseUrl()}/issue-free`, {
+      const res = await fetch(`${licenseServerBaseUrl}/issue-free`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ installId }),
+        signal: AbortSignal.timeout(LICENSE_SERVER_TIMEOUT_MS),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        retryAfterMs = Date.now() + LICENSE_SERVER_RETRY_COOLDOWN_MS;
+        console.debug(`[entitlement] License server returned ${res.status}; using free plan.`);
+        return;
+      }
       const data = (await res.json()) as { license?: unknown };
       const license = typeof data.license === 'string' ? data.license : '';
-      if (!license) return;
+      if (!license) {
+        retryAfterMs = Date.now() + LICENSE_SERVER_RETRY_COOLDOWN_MS;
+        console.debug('[entitlement] License server returned no license; using free plan.');
+        return;
+      }
 
       // Verify the server-minted token against the baked public key before we
       // trust + cache it (same path as a manually-applied license).
       const verified = await verifyLicense(license);
-      if (!verified.valid || !verified.plan) return;
+      if (!verified.valid || !verified.plan) {
+        retryAfterMs = Date.now() + LICENSE_SERVER_RETRY_COOLDOWN_MS;
+        console.debug('[entitlement] License server returned an invalid license; using free plan.');
+        return;
+      }
 
       writeCachedEntitlement({
         plan: verified.plan,
@@ -81,8 +107,9 @@ export async function ensureFreeEntitlement(): Promise<void> {
         expiresAt: verified.expiresAt,
         licenseKey: license,
       });
-    } catch (err) {
-      console.error('[entitlement-bootstrap] free issuance skipped:', err);
+    } catch {
+      retryAfterMs = Date.now() + LICENSE_SERVER_RETRY_COOLDOWN_MS;
+      console.debug('[entitlement] License server unavailable; using free plan.');
     } finally {
       inFlight = null;
     }

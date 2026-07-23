@@ -14,7 +14,8 @@ import type { EntitlementState, Plan } from './types';
  * precedence, modeled on src/lib/worker/feature-flags.ts. ENOENT-tolerant
  * (a missing file is the common free case, not an error). Never throws.
  *
- * The license/Stripe path (M4/M5) writes the file; M1 only reads it.
+ * The optional hosted-license path writes the file. With no hosted service
+ * configured, a missing file resolves directly to the open-build free plan.
  *
  * View-as clamp (#1517): after the real plan resolves (env > file > free), the
  * dev `~/.o8/dev-plan-override` switch is applied as `min(realPlan, override)`,

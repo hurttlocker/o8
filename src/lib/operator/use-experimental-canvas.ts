@@ -25,11 +25,9 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 export function useExperimentalCanvasFlag(): boolean {
   const isFounder = useFounderStatus();
   // Canvas is OUT OF BETA (Q ruling 2026-07-14): the button and mechanics are
-  // on for everyone. Tier differences live where they belong — the free tier
-  // gets the Paper look only (FREE_TIER_LOOKS in canvas-mode/glass-settings),
-  // never a locked door on the surface itself. The hook shape survives so
-  // call sites don't churn; the remote flag + founder read stay wired for a
-  // future kill-switch but can no longer turn Canvas off.
+  // on for everyone, including every look and cosmetic control. The hook shape
+  // survives so call sites don't churn; the remote flag + founder read stay
+  // wired for a future kill-switch but can no longer turn Canvas off.
   void useRetryingRemoteFlag(fetchFlag, cache);
   void isFounder;
   return true;

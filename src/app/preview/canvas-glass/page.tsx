@@ -34,8 +34,6 @@ import { SmoothCorners } from '@lisse/react';
 import {
   CANVAS_GLASS_DEFAULTS,
   applyCanvasGlassSettings,
-  canvasFreeLook,
-  canvasFreeLookIdFor,
   readCanvasGlassSettings,
   readPersonalDefault,
   savePersonalDefault,
@@ -509,35 +507,6 @@ export default function CanvasGlassPreviewPage() {
       xtermHandlesRef.current.get(sessionName)?.setError(error);
     },
   });
-
-  // Free canvas is Paper-only, light or dark (operator, 2026-07-06) — founders
-  // get every look + dial. null = entitlement not resolved yet (panel renders
-  // full, enforcement waits; the clamp lands the moment free resolves).
-  const [foundersGlass, setFoundersGlass] = useState<boolean | null>(null);
-  useEffect(() => {
-    let alive = true;
-    fetch('/api/panel/entitlement', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!alive) return;
-        const plan = data?.plan;
-        const isFounders = Boolean(data?.founder) || plan === 'founder' || plan === 'pro' || plan === 'team';
-        setFoundersGlass(isFounders);
-        if (!isFounders) {
-          // Clamp whatever was stored to the nearest free look — Paper
-          // light/dark or Glass — so a saved Glass survives relaunch.
-          const stored = readCanvasGlassSettings();
-          const clamped = canvasFreeLook(canvasFreeLookIdFor(stored));
-          setSettings(clamped);
-          writeCanvasGlassSettings(clamped);
-          applyCanvasGlassSettings(clamped);
-          void setCanvasMaterial(clamped.material);
-          void setCanvasBackdropBlur(clamped.backdropFrost);
-        }
-      })
-      .catch(() => { if (alive) setFoundersGlass(true); /* fail-open visually; API gate is authoritative */ });
-    return () => { alive = false; };
-  }, []);
 
   useEffect(() => {
     const stored = readCanvasGlassSettings();
@@ -5454,7 +5423,7 @@ export default function CanvasGlassPreviewPage() {
             settings={settings}
             onChange={updateSettings}
             inTauri={inTauri}
-            full={foundersGlass !== false}
+            full
             personalDefault={personalDefault}
             loupeSize={loupeSize}
             loupeSizeRange={LOUPE_SIZE_RANGE}
