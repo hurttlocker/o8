@@ -19,6 +19,8 @@ export type OrchestratorHistoryRecord = {
   model?: string | null;
   savedAt?: string | null;
   title?: string | null;
+  titleSource?: 'code' | 'llm' | 'operator' | null;
+  autoTitledAtCount?: number | null;
   repoPath?: string | null;
   repoName?: string | null;
   repoBranch?: string | null;

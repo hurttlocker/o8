@@ -2,6 +2,8 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { formatTimestampLabel } from './shared';
 
+export { buildOrchestratorSendPayload } from './send-payload';
+
 const RETRY_INTERVAL_MS = 200;
 const DELIVERY_FAILURE_ID_PREFIX = 'orch-delivery-error-';
 export const ORCHESTRATOR_SEND_RETRY_TIMEOUT_MS = 5000;

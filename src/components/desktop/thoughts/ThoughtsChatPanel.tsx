@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
-import { composeComposerModeMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
+import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
@@ -1710,11 +1710,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
     const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
-    orchStream.send(request.prompt, {
+    orchStream.send(request.displayMessage, {
       permissionMode,
       backend: composerBackendTurnOverride(orchestratorBackend),
       thinkingEffort,
       model: orchestratorModel,
+      wireMessage: request.prompt,
       displayMessage: request.displayMessage,
       localEntriesAfterUser,
       orchestrationMode: resolveComposerExecutionMode('multitask', swarmEnabled, soloOrchestrator),
@@ -1796,11 +1797,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!rawMsg) return;
     // The mode directive goes to the model, while bubbles and auto-titles keep
     // the operator's exact words. Slash commands pass through untouched.
-    const turnOrchestrationMode = resolveComposerExecutionMode(composerModeRef.current, swarmEnabled, soloOrchestrator);
-    const promptMode = turnOrchestrationMode === 'fusion' && composerModeRef.current === 'solo'
-      ? 'multitask'
-      : composerModeRef.current;
-    const { displayMessage, wireMessage } = composeComposerModeMessage(rawMsg, promptMode);
+    const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(rawMsg, composerModeRef.current, swarmEnabled, soloOrchestrator);
 
     track('orchestrator.message'); // coarse usage signal (analytics epic #1249) — no content
 
@@ -1978,12 +1975,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const attachments = attachedImages.length > 0
         ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
         : undefined;
-      const outgoing = wireMessage;
       const orchOptions = {
         permissionMode,
         backend: composerBackendTurnOverride(orchestratorBackend),
         thinkingEffort,
         model: orchestratorModel,
+        wireMessage,
         orchestrationMode: turnOrchestrationMode,
         collide: collideEnabled,
         ...(attachments ? { attachments } : {}),
@@ -1993,11 +1990,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // KEEP the composer text so the user's message isn't lost to the void
         // (the fresh-user "I typed and nothing happened" trap). Leave the toggle
         // armed — nothing dispatched, so the clarify intent still stands.
-        orchStream.send(outgoing, { ...orchOptions, displayMessage });
+        orchStream.send(displayMessage, { ...orchOptions, displayMessage });
         return;
       }
       setInput('');
-      orchStream.send(outgoing, { ...orchOptions, displayMessage });
+      orchStream.send(displayMessage, { ...orchOptions, displayMessage });
       clearAttachments();
       return;
     }
@@ -2074,12 +2071,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const attachments = options?.attachments ?? (attachedImages.length > 0
           ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
           : undefined);
-        orchStream.send(msg, {
+        const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(msg, composerModeRef.current, swarmEnabled, soloOrchestrator);
+        orchStream.send(displayMessage, {
           permissionMode,
           backend: composerBackendTurnOverride(orchestratorBackend),
           thinkingEffort,
           model: orchestratorModel,
-          orchestrationMode: resolveComposerExecutionMode(composerModeRef.current, swarmEnabled, soloOrchestrator),
+          wireMessage,
+          displayMessage,
+          orchestrationMode: turnOrchestrationMode,
           collide: collideEnabled,
           ...(attachments ? { attachments } : {}),
         });
@@ -2096,17 +2096,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const dispatchBufferedOrchestratorSend = useCallback((text: string, images: Array<{ name: string; dataUri: string }>) => {
     if (!isOrchestratorMode) return null;
-    const turnOrchestrationMode = resolveComposerExecutionMode(composerModeRef.current, swarmEnabled, soloOrchestrator);
-    const promptMode = turnOrchestrationMode === 'fusion' && composerModeRef.current === 'solo'
-      ? 'multitask'
-      : composerModeRef.current;
-    const { displayMessage, wireMessage } = composeComposerModeMessage(text, promptMode);
+    const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(text, composerModeRef.current, swarmEnabled, soloOrchestrator);
     track('orchestrator.message');
-    return orchStream.send(wireMessage, {
+    return orchStream.send(displayMessage, {
       permissionMode,
       backend: composerBackendTurnOverride(orchestratorBackend),
       thinkingEffort,
       model: orchestratorModel,
+      wireMessage,
       displayMessage,
       orchestrationMode: turnOrchestrationMode,
       collide: collideEnabled,

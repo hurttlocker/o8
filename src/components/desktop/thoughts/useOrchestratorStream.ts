@@ -17,6 +17,7 @@ import {
 } from '@/lib/orchestrator/store';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import {
+  buildOrchestratorSendPayload,
   createOrchestratorClientMessageId,
   deliverOrchestratorPayload,
   type PendingOrchestratorSend,
@@ -904,6 +905,7 @@ export function useOrchestratorStream(
     const thinkingEffort = options?.thinkingEffort;
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
     const displayMessage = options?.displayMessage?.trim() || message;
+    const wireMessage = options?.wireMessage?.trim() || message;
     const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
     const requestedOrchestrationMode = options?.orchestrationMode ?? 'fleet';
     // Single is the hard boundary: even a stale UI state that still has MoA
@@ -948,7 +950,7 @@ export function useOrchestratorStream(
       }
       const transcriptSnapshot = transcriptBeforeSend;
       let planCaptureSource = transcriptSnapshot;
-      const projectedTokens = estimateNextTurnTokens(message);
+      const projectedTokens = estimateNextTurnTokens(wireMessage);
       if (projectedTokens >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
         const compactingId = `orch-compacting-${Date.now()}`;
         const compactingAt = Date.now();
@@ -969,18 +971,18 @@ export function useOrchestratorStream(
             await new Promise((resolve) => window.setTimeout(resolve, remaining));
           }
           if (!primed) {
-            throw new Error(`Compaction failed before send. Re-send this message:\n\n${message}`);
+            throw new Error(`Compaction failed before send. Re-send this message:\n\n${displayMessage}`);
           }
           if (!primed.resumePrelude) {
-            throw new Error(`Compaction finished without a resume prelude. Re-send this message:\n\n${message}`);
+            throw new Error(`Compaction finished without a resume prelude. Re-send this message:\n\n${displayMessage}`);
           }
           const postCompactProjection = primed.nextTotal
             + ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS
             + ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS
-            + approxTokens(message);
+            + approxTokens(wireMessage);
           if (postCompactProjection >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
             clearQueuedOrchestratorSessionPrelude(activeRepoPath, threadIdRef.current);
-            throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${message}`);
+            throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${displayMessage}`);
           }
           planCaptureSource = primed.transcript;
           setMessages(primed.transcript);
@@ -991,7 +993,7 @@ export function useOrchestratorStream(
             {
               id: `orch-compacting-error-${Date.now()}`,
               role: 'system',
-              text: error instanceof Error ? error.message : `Compaction failed before send. Re-send this message:\n\n${message}`,
+              text: error instanceof Error ? error.message : `Compaction failed before send. Re-send this message:\n\n${displayMessage}`,
               timestamp: Date.now(),
               timestampLabel: formatTimestampLabel(Date.now()),
             },
@@ -1016,31 +1018,29 @@ export function useOrchestratorStream(
         && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
-
-      let outboundMessage = message;
+      let outboundMessage = wireMessage;
       const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId);
       if (resumePrelude) {
-        outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
+        outboundMessage = `${resumePrelude}\n\nOperator message:\n${wireMessage}`;
       }
       turnTranscriptEventCountRef.current = 0;
-      const payload = JSON.stringify({
-        type: 'orchestrator-send',
+      const payload = buildOrchestratorSendPayload({
         repoPath: activeRepoPath,
         threadId: sendHandle.threadId,
         clientMessageId,
-        message: outboundMessage,
+        wireMessage: outboundMessage,
         // What the TRANSCRIPT stores/shows — the user's own words, never the
-        // mode directives or resume prelude baked into `message` for the model.
+        // mode directives or resume prelude baked into the wire for the model.
         displayMessage,
         permissionMode,
         orchestrationMode,
-        ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
+        thinkingEffort,
         model,
         // Per-turn backend override keeps the composer chip truthful even while
         // the global operator default write is still settling.
-        ...(backend ? { backend } : {}),
-        ...(collideBaseBackend ? { collideBaseBackend } : {}),
-        ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
+        backend,
+        collideBaseBackend,
+        attachments: options?.attachments,
       });
       const pendingRecord = {
         text: outboundMessage,

@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COMPOSER_MODE_DIRECTIVES } from '@/lib/orchestrator/composer-wire';
 
 const tempHomes: string[] = [];
 
@@ -26,6 +27,35 @@ afterEach(() => {
 });
 
 describe('orchestrator thread history persistence', () => {
+  it('repairs exact legacy composer preambles in bubbles and auto-derived titles', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({
+      repoPath: '/tmp/repo',
+      title: '[Mode: Solo] Work directly in this session',
+    });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: `${COMPOSER_MODE_DIRECTIVES.solo}\n\nFix the title source`,
+      backend: 'codex',
+      timestampMs: 1_000,
+    });
+
+    history.repairComposerPreamblePollution();
+
+    const persisted = JSON.parse(
+      readFileSync(history.safeOrchestratorHistoryPath(thread.id), 'utf-8'),
+    ) as {
+      title?: string;
+      titleSource?: string;
+      messages: Array<{ role?: string; content?: string }>;
+    };
+    expect(persisted.messages.find((message) => message.role === 'user')?.content)
+      .toBe('Fix the title source');
+    expect(persisted.title).toBe('Fix the title source');
+    expect(persisted.titleSource).toBe('code');
+  });
+
   it('can pair a streamed assistant message with the exact persisted user timestamp', async () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });

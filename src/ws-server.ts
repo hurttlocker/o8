@@ -113,6 +113,7 @@ import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempo
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { buildBackendSwitchCarryPrelude } from './lib/orchestrator/backend-switch-carry';
+import { resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
@@ -4289,10 +4290,12 @@ async function handleOrchestratorSendMsgOnce(
   // model-facing scaffolding the client prepends (mode directives, compaction
   // resume prelude) — persisting it verbatim rendered those directives
   // as a user bubble after reload (Chris's screenshot, 2026-07-16). Older
-  // clients omit the field and fall back to the wire message, same as before.
-  const transcriptMessage = typeof msg.displayMessage === 'string' && msg.displayMessage.trim()
-    ? msg.displayMessage
-    : message;
+  // clients may omit the field, so the persistence seam also recognizes and
+  // removes only o8's exact composer preambles.
+  const transcriptMessage = resolveOrchestratorTranscriptMessage({
+    message,
+    displayMessage: msg.displayMessage,
+  });
 
   // Permission mode travels with the user message. Defaults to 'full' to
   // match legacy behavior for clients that haven't been updated yet.

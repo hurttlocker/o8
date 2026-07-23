@@ -18,6 +18,8 @@ export interface OrchestratorSendOptions {
   backend?: OrchestratorBackendId;
   thinkingEffort?: ThinkingEffort;
   model?: string;
+  /** Model-facing text. The positional message remains operator-authored text. */
+  wireMessage?: string;
   displayMessage?: string;
   localEntriesAfterUser?: MobileTranscriptEntry[];
   orchestrationMode?: OrchestratorExecutionMode;

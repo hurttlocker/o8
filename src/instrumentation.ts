@@ -49,8 +49,12 @@ export async function register(): Promise<void> {
   // marker lands.
   void (async () => {
     try {
-      const { repairFlippedOrchestratorTranscripts } = await import('@/lib/mobile/orchestrator-thread-history');
+      const {
+        repairComposerPreamblePollution,
+        repairFlippedOrchestratorTranscripts,
+      } = await import('@/lib/mobile/orchestrator-thread-history');
       repairFlippedOrchestratorTranscripts();
+      repairComposerPreamblePollution();
     } catch {
       // never blocks boot
     }

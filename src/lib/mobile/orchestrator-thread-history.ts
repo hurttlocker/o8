@@ -3,6 +3,7 @@ import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
 import {
   effectiveBackend,
   inferBackendFromSessionIds,
@@ -179,6 +180,10 @@ export function repairFlippedOrchestratorTranscripts(): void {
   } catch (err) {
     console.warn('[transcript-repair] skipped:', err);
   }
+}
+
+export function repairComposerPreamblePollution(): void {
+  repairComposerPreambleHistory(ORCHESTRATOR_HISTORY_DIR, (filePath) => { historyParseCache.delete(filePath); historyWriteVersion += 1; });
 }
 
 function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
