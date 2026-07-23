@@ -19,7 +19,8 @@ vi.mock('@/lib/mobile/symon-agent-registry', async () => {
   return { ...actual, loadSymonScopeGrant: h.loadSymonScopeGrant };
 });
 
-const { DELETE, POST, buildToolEval, buildToolInterruptEval } = await import('./route');
+const { DELETE, POST } = await import('./route');
+const { buildToolEval, buildToolInterruptEval } = await import('@/lib/mobile/symon-tool-eval');
 
 function request(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/mobile/symon/tool', {
