@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type IdeSurfaceState = {
   updatedAt: string;
@@ -8,7 +8,7 @@ export type IdeSurfaceState = {
   activeRepoPath?: string | null;
 };
 
-const STATE_DIR = path.join(homedir(), '.o8');
+const STATE_DIR = getDataDir();
 const SURFACE_STATE_FILE = path.join(STATE_DIR, 'ide-surface-state.json');
 
 function normalizeRepoPath(repoPath?: string | null) {

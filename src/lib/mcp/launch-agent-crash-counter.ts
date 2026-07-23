@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const OPERATOR_MCP_LAUNCH_AGENT_LABEL = 'com.rainwater.mcp-o8';
 export const LAUNCH_AGENT_WINDOW_MS = 60 * 60_000;
@@ -13,9 +13,7 @@ export interface LaunchAgentCounterFile {
 }
 
 function resolveCounterDataDir(): string {
-  return process.env.O8_DATA_DIR
-    || process.env.CORTEX_IDE_DATA_DIR
-    || join(homedir(), '.o8');
+  return getDataDir();
 }
 
 export function resolveLaunchAgentLabel(

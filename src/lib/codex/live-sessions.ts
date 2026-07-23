@@ -27,10 +27,11 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_STATE_DB = path.join(CODEX_HOME, 'state_5.sqlite');
-const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.o8', 'owned-codex');
+const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(getDataDir(), 'owned-codex');
 
 const DEFAULT_STALE_HOURS = (() => {
   const raw = process.env.O8_STALE_SESSION_HOURS;

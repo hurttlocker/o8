@@ -19,8 +19,7 @@
  * documented v1 limitation; see docs/openclaw-integration.md.
  */
 
-import { spawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
@@ -38,6 +37,7 @@ import type {
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
+import { getDataDir } from '@/lib/data-dir-migration';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface OpenclawOrchestratorSession {
@@ -94,7 +94,7 @@ const O8_PROFILE_SCHEMA = 4;
  * generated profile — because openclaw's config validator rejects any
  * unrecognized top-level key.
  */
-const OPENCLAW_PROFILE_SCHEMA_FILE = join(homedir(), '.o8', 'openclaw-profile-schema');
+const OPENCLAW_PROFILE_SCHEMA_FILE = join(getDataDir(), 'openclaw-profile-schema');
 
 /**
  * The o8 profile gets its OWN gateway port — never the operator's personal
@@ -102,7 +102,7 @@ const OPENCLAW_PROFILE_SCHEMA_FILE = join(homedir(), '.o8', 'openclaw-profile-sc
  * (mirrors ~/.o8/api-port).
  */
 const OPENCLAW_GATEWAY_PORT_BASE = 18800;
-const OPENCLAW_GATEWAY_PORT_FILE = join(homedir(), '.o8', 'openclaw-gateway-port');
+const OPENCLAW_GATEWAY_PORT_FILE = join(getDataDir(), 'openclaw-gateway-port');
 /** The operator's personal openclaw gateway — never reuse this port. */
 const OPENCLAW_PERSONAL_GATEWAY_PORT = 18789;
 
@@ -331,7 +331,7 @@ export async function ensureOpenclawGatewayPort(): Promise<number> {
     }
   }
 
-  mkdirSync(join(homedir(), '.o8'), { recursive: true });
+  mkdirSync(getDataDir(), { recursive: true });
   writeFileSync(OPENCLAW_GATEWAY_PORT_FILE, `${port}\n`, 'utf8');
   console.log(`[openclaw-orchestrator] Allocated o8 gateway port ${port} -> ${OPENCLAW_GATEWAY_PORT_FILE}`);
   return port;
@@ -561,7 +561,7 @@ export function ensureOpenclawProfile(): void {
   writeFileSync(OPENCLAW_O8_CONFIG, `${JSON.stringify(o8Config, null, 2)}\n`, { mode: 0o600 });
   // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
   // unrecognized keys inside its own config).
-  mkdirSync(join(homedir(), '.o8'), { recursive: true });
+  mkdirSync(getDataDir(), { recursive: true });
   writeFileSync(OPENCLAW_PROFILE_SCHEMA_FILE, `${O8_PROFILE_SCHEMA}\n`, 'utf8');
 
   // Seed credentials so the isolated profile can resolve model auth.
@@ -614,7 +614,7 @@ function buildRepoContextPreamble(repoPath: string): string {
 
   let repoList = `  - ${repoName} -> ${repoPath}`;
   try {
-    const reposFile = join(homedir(), '.o8', 'repos.json');
+    const reposFile = join(getDataDir(), 'repos.json');
     if (existsSync(reposFile)) {
       const parsed = JSON.parse(readFileSync(reposFile, 'utf8')) as {
         repos?: Array<{ name?: string; localPath: string }>;

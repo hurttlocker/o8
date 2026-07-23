@@ -1,10 +1,10 @@
 import type Database from 'better-sqlite3';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { ApprovalRecord } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const LEGACY_STORE_PATH = path.join(os.homedir(), '.o8', 'approvals.json');
+const LEGACY_STORE_PATH = path.join(getDataDir(), 'approvals.json');
 
 interface LegacyApprovalStoreShape {
   version: 1;

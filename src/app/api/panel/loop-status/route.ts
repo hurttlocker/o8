@@ -24,8 +24,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 interface CronStatePayload {
   ok: boolean;
@@ -56,7 +56,7 @@ function pickString(value: unknown): string | null {
 }
 
 export async function GET(): Promise<NextResponse<CronStatePayload>> {
-  const filePath = path.join(os.homedir(), '.o8', 'loop-cron-state.json');
+  const filePath = path.join(getDataDir(), 'loop-cron-state.json');
 
   let raw: string;
   try {

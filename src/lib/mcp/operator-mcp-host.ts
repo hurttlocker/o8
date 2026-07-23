@@ -69,6 +69,7 @@ import {
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
 import { TARGETING_TOOLS, handleTargets } from '@/lib/mcp/operator-handlers/targeting';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface OperatorMcpRequest {
   jsonrpc: '2.0';
@@ -84,9 +85,6 @@ export interface OperatorMcpResponse {
   error?: { code: number; message: string };
 }
 
-function getDataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
-}
 
 function expandHomePath(value: string): string {
   const trimmed = value.trim();

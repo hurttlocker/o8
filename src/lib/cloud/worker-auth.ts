@@ -24,7 +24,7 @@ import 'server-only';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface CloudWorkerKey {
   id: string;
@@ -51,8 +51,7 @@ export interface CloudAuthErr {
 const KEY_PREFIX = 'cwk_';
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR
-    || join(process.env.HOME || homedir(), '.o8');
+  return getDataDir();
 }
 
 export function cloudWorkersDir(): string {

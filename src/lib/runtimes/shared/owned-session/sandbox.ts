@@ -32,6 +32,7 @@ import { realpath, writeFile } from 'node:fs/promises';
 import { access, constants as fsConstants } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /** Absolute path to Apple's seatbelt runner. */
 export const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec';
@@ -183,7 +184,7 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
 
   // Secret trees that must be unreachable regardless of anything above.
   const secretRoots = uniq([
-    path.join(home, '.o8'),
+    getDataDir({}, home),
     path.join(home, '.cortex-ide'),
     path.join(home, '.tauri'),
     // gh CLI credential store (~/.config/gh/hosts.yml holds the operator's

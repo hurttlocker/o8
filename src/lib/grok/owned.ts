@@ -6,11 +6,11 @@
  * parser remains defensive around streamed tool and status events.
  */
 
-import os from 'node:os';
 import path from 'node:path';
 import type { OwnedRuntimeAdapter, OwnedRunRecord, OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
 import { createOwnedSessionStore } from '@/lib/runtimes/shared/owned-session';
 import { compactText, formatClock } from '@/lib/runtimes/shared/owned-session/helpers';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const GROK_RESULT_SCHEMA = JSON.stringify({
   type: 'object',
@@ -233,7 +233,7 @@ const grokStore = createOwnedSessionStore({
   runtimeId: 'grok',
   surfaceIdPrefix: 'grok-owned:',
   rootEnvVar: 'O8_OWNED_GROK_ROOT',
-  rootDefault: path.join(os.homedir(), '.o8', 'owned-grok'),
+  rootDefault: path.join(getDataDir(), 'owned-grok'),
   binaryName: 'grok',
   binaryEnvOverride: 'O8_GROK_BIN',
   binaryExtraEnvOverrides: ['GROK_BUILD_BIN'],

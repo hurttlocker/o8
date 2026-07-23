@@ -1,8 +1,8 @@
 import 'server-only';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DOGFOOD_PR_ONLY_NOTE, type LaneMergePolicy } from '@/lib/lane/merge-mode';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * PR-only safety wall for the autonomous dogfood loop (#1173). While the loop is
@@ -13,7 +13,7 @@ import { DOGFOOD_PR_ONLY_NOTE, type LaneMergePolicy } from '@/lib/lane/merge-mod
  * unaffected; the kill switch (dogfood-stop.sh) removes it on stop.
  */
 export function dogfoodPrOnlyActive(): boolean {
-  const dir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+  const dir = getDataDir();
   return existsSync(join(dir, '.dogfood-pr-only'));
 }
 

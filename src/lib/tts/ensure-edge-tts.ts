@@ -1,5 +1,5 @@
 /**
- * Boot-time ensure that edge-tts is installed in the same `python3` the
+ * Lazy ensure that edge-tts is installed in the same `python3` the
  * /api/tts route spawns — the Steffan male voice the message action-bar "play"
  * button uses to read an orchestrator reply aloud.
  *
@@ -9,10 +9,10 @@
  * the male voice. Sydney's laptop hit exactly this: edge-tts was never in her
  * python; the iMac happened to have it, so the bug was invisible here.
  *
- * Runs once per server process (fire-and-forget from instrumentation.ts):
- * checks `python3 -c "import edge_tts"`; if missing, pip-installs in the
- * background so the NEXT play uses the real voice. Never throws, never blocks
- * boot. PEP-668 ("externally-managed") pythons reject a bare install, so a
+ * Runs once per server process on the first TTS request: checks
+ * `python3 -c "import edge_tts"`; if missing, pip-installs in the background
+ * so the next play uses the real voice. Never throws. PEP-668
+ * ("externally-managed") pythons reject a bare install, so a
  * first attempt that trips that guard retries with --break-system-packages.
  *
  * The route resolves `python3` off the server PATH (the Tauri sidecar augments
@@ -66,7 +66,7 @@ export async function ensureEdgeTtsInstalled(): Promise<void> {
   attempted = true;
   try {
     if (await importsEdgeTts()) return; // already good — the common case, ~100ms
-    console.log('[tts] edge-tts missing — installing the Steffan play voice in the background…');
+    console.log('[tts] first use: edge-tts is missing; installing the optional Python fallback');
     let result = await pipInstall({});
     if (!result.ok && /externally-managed-environment|break-system-packages/i.test(result.detail)) {
       result = await pipInstall({ breakSystem: true });

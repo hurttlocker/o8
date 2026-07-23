@@ -21,15 +21,15 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { encryptValue, decryptValue } from '@/lib/db/master-key';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // Prefix that distinguishes an encrypted value from legacy plaintext.
 const ENC_PREFIX = 'enc:' as const;
 
 // Config lives in ~/.o8/ so it survives app updates
-const CONFIG_DIR = join(homedir(), '.o8');
+const CONFIG_DIR = getDataDir();
 const ENV_FILE = join(CONFIG_DIR, '.env.local');
 
 // Also check project-local .env.local as fallback (dev mode)

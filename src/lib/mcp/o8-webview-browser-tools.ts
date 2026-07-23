@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 type TextContent = { type: 'text'; text: string };
 type ImageContent = { type: 'image'; data: string; mimeType: string };
@@ -86,7 +86,7 @@ async function withStructuredErrors(action: () => Promise<McpToolResult>): Promi
 
 function browserApiBase(): string {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const port = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
@@ -102,7 +102,7 @@ function browserApiBase(): string {
 
 function browserApiToken(): string | null {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const tokenPath = join(dataDir, 'ws-token');
     if (!existsSync(tokenPath)) return null;
     return readFileSync(tokenPath, 'utf-8').trim() || null;

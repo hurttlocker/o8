@@ -10,7 +10,6 @@
 
 import 'server-only';
 import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   generateKeyPairSync,
@@ -19,6 +18,7 @@ import {
   createPublicKey,
   type KeyObject,
 } from 'node:crypto';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 interface VapidKeysOnDisk {
   /** Base64url-encoded uncompressed P-256 public key (65 bytes) */
@@ -40,11 +40,6 @@ export interface VapidKeys {
 
 let _cached: VapidKeys | null = null;
 
-function getDataDir(): string {
-  return process.env.O8_DATA_DIR
-    || process.env.CORTEX_IDE_DATA_DIR
-    || path.join(os.homedir(), '.o8');
-}
 
 function getVapidFilePath(): string {
   return path.join(getDataDir(), 'vapid.json');

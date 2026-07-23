@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type CrashSurvivableOrchestratorBackend = 'claude' | 'codex';
 
@@ -41,7 +41,7 @@ export interface OrchestratorCrashSurvivalMeta {
 
 function rootDir(): string {
   return join(
-    process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
+    getDataDir(),
     'orchestrator-turns',
   );
 }

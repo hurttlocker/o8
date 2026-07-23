@@ -2,8 +2,8 @@ import 'server-only';
 
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export type RemoteRuntimeFlagSource = 'env' | 'file' | 'off';
 
@@ -16,7 +16,7 @@ const FEATURE_FLAGS_FILE = 'feature-flags.json';
 
 function getFeatureFlagsPath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
+    getDataDir(),
     FEATURE_FLAGS_FILE,
   );
 }

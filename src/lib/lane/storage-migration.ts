@@ -1,10 +1,10 @@
 import type Database from 'better-sqlite3';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { Lane, LaneEvent, LaneStoreState } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const LEGACY_STORE_PATH = path.join(os.homedir(), '.o8', 'lanes.json');
+const LEGACY_STORE_PATH = path.join(getDataDir(), 'lanes.json');
 
 function nowIso() {
   return new Date().toISOString();

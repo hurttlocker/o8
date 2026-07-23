@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import packageJson from '../../../package.json';
 import { resolvePortInfo } from '@/lib/panel/api-port';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface InstanceIdentity {
   product: 'o8';
@@ -19,9 +20,7 @@ let fallbackInstanceId: string | null = null;
 let fallbackBootId: string | null = null;
 
 export function instanceIdentityDataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR
-    || process.env.O8_DATA_DIR
-    || join(process.env.HOME || '', '.o8');
+  return getDataDir();
 }
 
 function readTextFile(name: string): string | null {

@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -114,7 +115,7 @@ function loadConfiguredKeyNames(): Set<string> {
   const home = homedir();
   const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
   const names = new Set<string>();
-  for (const envPath of [join(home, '.o8', '.env.local'), join(repoRoot, '.env.local')]) {
+  for (const envPath of [join(getDataDir(), '.env.local'), join(repoRoot, '.env.local')]) {
     if (!existsSync(envPath)) continue;
     try {
       for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
@@ -413,7 +414,7 @@ function detectApiKeys(): DetectedTool {
   // (the Next server's cwd) which is the repo root in both dev and packaged builds.
   const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
   const paths = [
-    join(home, '.o8', '.env.local'),
+    join(getDataDir(), '.env.local'),
     join(repoRoot, '.env.local'),
   ];
 

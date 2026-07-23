@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 type JsonRpcId = number | string | null;
 
-function getDataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
-}
 
 function readTrimmed(path: string): string {
   try { return existsSync(path) ? readFileSync(path, 'utf-8').trim() : ''; } catch { return ''; }

@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { getDataDir } from '@/lib/data-dir-migration';
 import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
 
 /** Resolve repo slug from git remote. */
@@ -166,11 +167,8 @@ function resolveCodebaseMemoryBin(): string | null {
     return fromEnv;
   }
 
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (!home) return null;
-
   const fileName = process.platform === 'win32' ? 'codebase-memory-mcp.exe' : 'codebase-memory-mcp';
-  const deterministic = join(home, '.o8', 'bin', fileName);
+  const deterministic = join(getDataDir(), 'bin', fileName);
   if (existsSync(deterministic)) {
     return deterministic;
   }

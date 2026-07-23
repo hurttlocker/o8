@@ -5,13 +5,13 @@
  * ~/.o8/owned-opencode/ and resume through `--session <ses_xxx>`.
  */
 
-import os from 'node:os';
 import path from 'node:path';
 import { MODEL_IDS } from '@/lib/models';
 import { registerDeclarativeOwnedRuntime } from '@/lib/runtimes/shared/owned-session';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const OPENCODE_OWNED_ROOT = process.env.O8_OWNED_OPENCODE_ROOT
-  ?? path.join(os.homedir(), '.o8', 'owned-opencode');
+  ?? path.join(getDataDir(), 'owned-opencode');
 
 export const OPENCODE_STDERR_NOISE_PATTERNS: RegExp[] = [
   /\[opencode\]\s+loading config from/i,

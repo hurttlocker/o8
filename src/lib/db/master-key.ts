@@ -16,8 +16,8 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Constants ──
 
@@ -29,7 +29,7 @@ const KEYCHAIN_SERVICE = 'ai.o8.master-key';
 const KEYCHAIN_ACCOUNT = 'default';
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+  return getDataDir();
 }
 
 /**

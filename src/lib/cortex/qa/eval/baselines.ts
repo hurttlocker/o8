@@ -16,6 +16,7 @@ import {
   buildStrongGrepTopRowsImpl,
   type StrongGrepOptions,
 } from './strong-grep-baseline';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has',
@@ -53,7 +54,7 @@ export async function buildGrepTopRows(
     sources.push(path.join(repoPath, 'CLAUDE.md'));
   }
   sources.push(path.join(os.homedir(), 'CLAUDE.md'));
-  sources.push(path.join(os.homedir(), '.o8', 'repos.json'));
+  sources.push(path.join(getDataDir(), 'repos.json'));
   sources.push(path.join(os.homedir(), '.cortex-ide', 'repos.json'));
 
   const allMatches: Array<{ source: string; line: number; text: string; score: number }> = [];

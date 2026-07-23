@@ -8,8 +8,9 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createSign } from 'crypto';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const CONFIG_DIR = join(homedir(), '.o8');
+const CONFIG_DIR = getDataDir();
 const PEM_PATH = join(CONFIG_DIR, 'github-app.pem');
 
 // NOTE: no fallback values. A fresh clone without GITHUB_APP_ID set returns

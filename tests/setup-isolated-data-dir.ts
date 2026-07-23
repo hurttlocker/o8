@@ -12,8 +12,9 @@
  *
  * This setup file runs before each test file's imports in every worker, so
  * the env is hermetic before ANY app module can initialize. Individual tests
- * may still override with their own mkdtemp dirs — that stays safe because
- * both paths are temp dirs, never ~/.o8.
+ * may still override CORTEX_IDE_DATA_DIR with their own mkdtemp dirs. Keep
+ * O8_DATA_DIR unset here so the canonical resolver's modern-name precedence
+ * cannot shadow those per-test overrides.
  */
 type FsModule = typeof import('node:fs');
 type OsModule = typeof import('node:os');
@@ -33,21 +34,16 @@ if (!fs || !os || !path) {
 
 if (!process.env.O8_TEST_DATA_DIR_PINNED) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-test-data-'));
+  delete process.env.O8_DATA_DIR;
   process.env.CORTEX_IDE_DATA_DIR = dir;
-  process.env.O8_DATA_DIR = dir;
   process.env.O8_TEST_DATA_DIR_PINNED = dir;
 
   // Layer 3 — sever the OWNED-RUNTIME-ROOT leak (#1585, 2026-07-18).
-  // The data-dir redirect above pins getDb()/lane-registry to a temp dir, but
-  // each owned-session adapter defaults its OWN root to the real
-  // ~/.o8/owned-<runtime> (rootDefault in src/lib/*/owned.ts). So a test that
-  // imports an owned-session module ran its import/launch-time orphan sweep
-  // against the operator's PRODUCTION session dirs while pointed at an empty
-  // isolated lane DB — every live worker looked "orphaned" and got SIGINT'd
-  // (four fleet wipes; the workers running `o8 run -- npm test` were the
-  // killer). Redirect every owned root under the worker's temp dir so a test
-  // can never see, let alone signal, a real session. Keep in sync with the
-  // rootEnvVar of each adapter in src/lib/<runtime>/owned.ts.
+  // The canonical root defaults now follow the data-dir redirect above. Keep
+  // the dedicated owned-root variables pinned too as defense in depth: a test
+  // that overrides one adapter's resolution must still never see, let alone
+  // signal, a real session. Keep this list in sync with each adapter's
+  // rootEnvVar.
   const ownedRootEnvVars = [
     'CORTEX_IDE_OWNED_CODEX_ROOT',
     'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',

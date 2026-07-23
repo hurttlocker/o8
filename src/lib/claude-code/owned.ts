@@ -1,4 +1,3 @@
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -18,6 +17,7 @@ import type {
   OwnedTailEntry,
   ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 function eventText(event: ClaudeCodeStreamJsonParserEvent): string {
   switch (event.type) {
@@ -76,7 +76,7 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'claude-code',
   surfaceIdPrefix: 'claude-code-owned:',
   rootEnvVar: 'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
-  rootDefault: path.join(os.homedir(), '.o8', 'owned-claude-code'),
+  rootDefault: path.join(getDataDir(), 'owned-claude-code'),
   binaryName: 'claude',
   binaryEnvOverride: 'O8_CLAUDE_CODE_BIN',
   binaryExtraEnvOverrides: ['CLAUDE_BIN'],

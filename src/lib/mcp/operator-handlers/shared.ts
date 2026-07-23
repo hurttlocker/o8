@@ -5,6 +5,7 @@ import {
   formatDispatchableRuntimeChoices,
   isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Types ──
 
@@ -56,7 +57,7 @@ function readPanelToken(): string | null {
     const { join } = require('node:path') as typeof import('node:path');
     const { homedir } = require('node:os') as typeof import('node:os');
     // Match middleware's lookup order: CORTEX_IDE_DATA_DIR override, else ~/.o8.
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const tokenPath = join(dataDir, 'ws-token');
     if (!existsSync(tokenPath)) {
       _cachedPanelToken = { value: '', readAt: now };
@@ -88,7 +89,7 @@ function resolveApiBaseLive(): string {
     const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
     const { join } = require('node:path') as typeof import('node:path');
     const { homedir } = require('node:os') as typeof import('node:os');
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);

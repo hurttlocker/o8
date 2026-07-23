@@ -25,6 +25,7 @@ import {
   DEFAULT_API_PORT,
   DEFAULT_WS_PORT,
 } from '@/lib/panel/port-constants';
+import { getDataDir } from '@/lib/data-dir-migration';
 export {
   DEFAULT_API_PORT,
   DEFAULT_WS_PORT,
@@ -48,8 +49,7 @@ export interface PortInfo {
 let _cached: { info: PortInfo; mtimeMs: number } | null = null;
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR
-    || join(process.env.HOME || '', '.o8');
+  return getDataDir();
 }
 
 function readPortFile(name: string): number | null {

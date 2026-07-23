@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { classifyProbe, deriveServerLabel, type HttpProbeResult, type PortKind } from '@/lib/panel/port-classify';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 interface PortEntry {
   port: number;
@@ -54,7 +55,7 @@ const O8_INFRA_COMMAND = /operator-mcp-server|cortex-mcp-server|tauri-plugin-mcp
 const NON_DEV_PROCESS = /google chrome|chromium|firefox|safari|microsoft edge|\bbrave\b|\bopera\b|\barc\b/i;
 
 function o8DataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.o8');
+  return getDataDir();
 }
 
 function readPortFile(name: string): number | null {

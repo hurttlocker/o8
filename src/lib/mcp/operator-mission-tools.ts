@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
@@ -20,7 +19,7 @@ function resolveApiBase(): string {
   // O8_API_BASE was set before a port change. Env-var-first was the old
   // order and stuck MCP on dead ports across the dev-frontend swap.
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
@@ -53,7 +52,7 @@ function readPanelToken(): string | null {
     return _cachedPanelToken.value || null;
   }
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     const tokenPath = join(dataDir, 'ws-token');
     if (!existsSync(tokenPath)) {
       _cachedPanelToken = { value: '', readAt: now };
@@ -80,6 +79,7 @@ import type {
 } from '@/lib/orchestrator/operator-mission-service';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const execFileAsync = promisify(execFile);
 const GH_MAX_BUFFER = 10 * 1024 * 1024;
@@ -176,7 +176,7 @@ let _cachedRegistry: { mtimeMs: number; paths: Set<string> } | null = null;
 
 function loadRegisteredRepoPaths(): Set<string> {
   const registryPath = join(
-    process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.o8'),
+    getDataDir(),
     'repos.json',
   );
 

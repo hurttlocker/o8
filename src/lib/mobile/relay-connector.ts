@@ -1,7 +1,6 @@
 import 'server-only';
 
 import { readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { WebSocket } from 'ws';
@@ -29,6 +28,7 @@ import {
   RelayHttpRequestRegistry,
   type HttpReqFrame,
 } from './relay-connector-protocol';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * o8 Relay connector — the Mac-side outbound leg (docs/relay-v1-design.md §D8.2).
@@ -476,7 +476,7 @@ export function resolveRelayConnectorEnabled(): boolean {
   if (raw === 'off' || raw === 'false' || raw === '0') return false;
   if (raw === 'on' || raw === 'true' || raw === '1') return true;
   try {
-    const p = path.join(process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'), 'operator-defaults.json');
+    const p = path.join(getDataDir(), 'operator-defaults.json');
     const parsed = JSON.parse(readFileSync(p, 'utf8')) as { relayConnectorEnabled?: unknown };
     if (typeof parsed.relayConnectorEnabled === 'boolean') return parsed.relayConnectorEnabled;
   } catch {

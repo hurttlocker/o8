@@ -92,12 +92,20 @@ export function migrateDataDirOnce(): void {
 
 /**
  * Get the canonical data dir, running the one-time migration first.
- * Most modules already inline `process.env.CORTEX_IDE_DATA_DIR ?? join(home, '.o8')`
- * but new code should prefer this helper.
+ * Callers with an injected environment/home get pure resolution without
+ * touching either real data directory.
  */
-export function getDataDir(): string {
-  migrateDataDirOnce();
-  return process.env.O8_DATA_DIR
-    || process.env.CORTEX_IDE_DATA_DIR
-    || join(homedir(), '.o8');
+export function getDataDir(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  homeDir: string = homedir(),
+): string {
+  // Production callers use the process defaults and retain the one-time
+  // migration. Pure resolvers and tests may inject env/home without mutating
+  // either real data directory.
+  if (env === process.env && homeDir === homedir()) {
+    migrateDataDirOnce();
+  }
+  return env.O8_DATA_DIR
+    || env.CORTEX_IDE_DATA_DIR
+    || join(homeDir, '.o8');
 }

@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db';
 import { sessionOutcomes, approvals } from '@/lib/db/schema';
 import { CLOSE_UNMERGED_DISPOSITIONS } from '@/lib/orchestrator/close-unmerged';
 import { gte, sql } from 'drizzle-orm';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -189,7 +190,7 @@ function createSession(id: string, agent: string, surface: SurfaceKey, active: b
 }
 
 function discoverIdeChatSessions(sinceTs: number): Array<{ id: string; model: string }> {
-  const historyDir = join(homedir(), '.o8', 'chat-history');
+  const historyDir = join(getDataDir(), 'chat-history');
   const sessions: Array<{ id: string; model: string }> = [];
 
   for (const file of safeReadDir(historyDir)) {
@@ -404,8 +405,8 @@ export async function GET(request: NextRequest) {
 
     // ── Codex CLI sessions ────────────────────────────────────────────────────
     const codexRoots = [
-      join(homedir(), '.o8', 'owned-codex'),
-      join(homedir(), '.o8', 'owned-codex-archive'),
+      join(getDataDir(), 'owned-codex'),
+      join(getDataDir(), 'owned-codex-archive'),
     ];
 
     for (const root of codexRoots) {

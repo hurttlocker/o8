@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ApprovalRisk, PolicyRule, PolicyRuleOverride } from '@/lib/approvals/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-export const POLICIES_DIR = path.join(homedir(), '.o8');
+export const POLICIES_DIR = getDataDir();
 export const POLICIES_PATH = path.join(POLICIES_DIR, 'policies.json');
 
 interface ParsedPolicyRules {

@@ -24,11 +24,11 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 
 import { distillDocChunkBatch } from '@/lib/cortex/indexer/doc-distill';
 import { getDb, getSqlite } from '@/lib/db';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -62,13 +62,6 @@ interface RegisteredRepo {
   localPath: string;
 }
 
-function getDataDir(): string {
-  return (
-    process.env.O8_DATA_DIR ||
-    process.env.CORTEX_IDE_DATA_DIR ||
-    join(homedir(), '.o8')
-  );
-}
 
 function loadRegisteredRepos(): RegisteredRepo[] {
   const registryPath = join(getDataDir(), 'repos.json');

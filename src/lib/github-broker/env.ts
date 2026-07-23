@@ -1,8 +1,8 @@
 import 'server-only';
 
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface GitHubAppConfig {
   appId: string;
@@ -13,7 +13,7 @@ export interface GitHubAppConfig {
 }
 
 const DEFAULT_APP_ID = '3167857';
-const DEFAULT_PEM_PATH = join(homedir(), '.o8', 'github-app.pem');
+const DEFAULT_PEM_PATH = join(getDataDir(), 'github-app.pem');
 
 function normalizePrivateKey(value: string) {
   return value.includes('\\n') ? value.replace(/\\n/g, '\n') : value;

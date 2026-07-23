@@ -11,10 +11,10 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 export const MOBILE_DEVICE_TOKENS_PATH = path.join(DATA_DIR, 'mobile-device-tokens');
 
 /** Rewrite the active-token-hash file (called by the registry on enroll/revoke). */

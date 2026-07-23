@@ -32,7 +32,7 @@ import {
   isLoopbackAddress,
   isLoopbackHostname,
 } from '@/lib/auth/loopback-request';
-import { migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 // DB-free reader of the registry's derived active-token-hash file (#5). Importing
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
@@ -52,8 +52,7 @@ let _cachedToken: { value: string; mtimeMs: number; size: number } | null = null
 
 function loadPanelToken(): string | null {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR
-      || join(process.env.HOME || '', '.o8');
+    const dataDir = getDataDir();
     const tokenPath = join(dataDir, 'ws-token');
     if (!existsSync(tokenPath)) return null;
 

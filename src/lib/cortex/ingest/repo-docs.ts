@@ -23,11 +23,11 @@
 import 'server-only';
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { getSqlite } from '@/lib/db';
 import { isFts5Available } from '@/lib/db/v14-fts5-migration';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -108,9 +108,7 @@ export interface IngestSummary {
  * cleanly on a fresh install.
  */
 export function readRegisteredRepos(): RegisteredRepo[] {
-  const dataDir = process.env.O8_DATA_DIR
-    || process.env.CORTEX_IDE_DATA_DIR
-    || path.join(os.homedir(), '.o8');
+  const dataDir = getDataDir();
   const registryPath = path.join(dataDir, 'repos.json');
   if (!existsSync(registryPath)) return [];
 

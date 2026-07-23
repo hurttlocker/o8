@@ -41,6 +41,7 @@ import { getCliAccessStatus } from '@/lib/access-points/cli-status';
 import { getMcpSetupReadiness } from '@/lib/mcp/setup-readiness';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 function findCommand(name: string): string | null {
   try {
@@ -87,8 +88,7 @@ export async function GET() {
     const portInfo = resolvePortInfo();
     const webviewSocketPath = `/tmp/tauri-mcp-o8-${userInfo().username}.sock`;
 
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR
-      || join(process.env.HOME || '', '.o8');
+    const dataDir = getDataDir();
     const dbPath = join(dataDir, 'cortex-ide.db');
     const dbExists = existsSync(dbPath);
     const dbSize = dbExists ? statSync(dbPath).size : 0;

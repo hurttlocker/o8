@@ -2,14 +2,12 @@ import 'server-only';
 
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const FREE_TIER_DAILY_LIMIT = 10;
 
-const DATA_DIR = process.env.O8_DATA_DIR
-  || process.env.CORTEX_IDE_DATA_DIR
-  || path.join(os.homedir(), '.o8');
+const DATA_DIR = getDataDir();
 const DB_PATH = path.join(DATA_DIR, 'chat-usage.db');
 
 let sqlite: Database.Database | null = null;

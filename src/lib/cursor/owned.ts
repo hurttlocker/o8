@@ -6,11 +6,11 @@
  * CURSOR_API_KEY in CI/worktree-safe runs.
  */
 
-import os from 'node:os';
 import path from 'node:path';
 import type { OwnedRuntimeAdapter, OwnedRunRecord, OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
 import { createOwnedSessionStore } from '@/lib/runtimes/shared/owned-session';
 import { compactText, formatClock } from '@/lib/runtimes/shared/owned-session/helpers';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -216,7 +216,7 @@ const cursorStore = createOwnedSessionStore({
   runtimeId: 'cursor',
   surfaceIdPrefix: 'cursor-owned:',
   rootEnvVar: 'O8_OWNED_CURSOR_ROOT',
-  rootDefault: path.join(os.homedir(), '.o8', 'owned-cursor'),
+  rootDefault: path.join(getDataDir(), 'owned-cursor'),
   binaryName: 'cursor-agent',
   binaryEnvOverride: 'O8_CURSOR_BIN',
   binaryExtraEnvOverrides: ['CURSOR_AGENT_BIN'],

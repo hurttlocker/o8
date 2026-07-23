@@ -1,16 +1,16 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { mapLlmHistoryToMobileTranscript, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const ARCHIVE_DIR = path.join(homedir(), '.o8', 'orchestrator-archives');
+const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, ' ').trim();
@@ -84,7 +84,7 @@ function matchedWindow(entries: MobileTranscriptEntry[], index: number) {
 }
 
 async function searchThreadHistory(repoPath: string, query: string, limit: number) {
-  const files = await readdir(path.join(homedir(), '.o8', 'chat-history')).catch(() => [] as string[]);
+  const files = await readdir(path.join(getDataDir(), 'chat-history')).catch(() => [] as string[]);
   const matches: Array<{
     id: string;
     score: number;

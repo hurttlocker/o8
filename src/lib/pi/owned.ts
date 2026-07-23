@@ -21,6 +21,7 @@ import type {
   ReviewArtifact,
 } from '@/lib/fleet/types';
 import type { OwnedTailEntry, OwnedTailGroup } from '@/lib/runtimes/shared/owned-session/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export {
   buildPiPermissionDefaultResponse,
@@ -72,7 +73,7 @@ interface PiRpcClient {
 
 export type PiRpcFrame = Record<string, unknown>;
 
-const PI_ROOT = process.env.O8_OWNED_PI_ROOT ?? path.join(os.homedir(), '.o8', 'owned-pi');
+const PI_ROOT = process.env.O8_OWNED_PI_ROOT ?? path.join(getDataDir(), 'owned-pi');
 const RUNS_DIR = 'runs';
 const SURFACE_PREFIX = 'pi-owned:';
 const SESSION_PREFIX = 'pi-owned-';

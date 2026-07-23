@@ -20,13 +20,14 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /** Hermes built-in toolsets that let the agent do work DIRECTLY — denied so the
  *  orchestrator can only dispatch through o8. `delegation` is the native spawn. */
 export const HERMES_DENIED_TOOLSETS = ['delegation', 'terminal', 'file', 'code_execution', 'browser', 'computer_use'];
 
 function o8DataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+  return getDataDir();
 }
 
 function userHermesDir(): string {

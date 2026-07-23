@@ -2,7 +2,6 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -11,6 +10,7 @@ import {
   verifyLicense,
   writeCachedEntitlement,
 } from './license';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Optional first-run hosted-account issuance (epic #1249, monetization plan
@@ -30,7 +30,7 @@ const LICENSE_SERVER_TIMEOUT_MS = 5_000;
 const LICENSE_SERVER_RETRY_COOLDOWN_MS = 5 * 60_000;
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+  return getDataDir();
 }
 
 /** Stable per-install id (the analytics account identity). Created once, then

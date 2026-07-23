@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
-const STATE_DIR = join(homedir(), '.o8');
+const STATE_DIR = getDataDir();
 const ATTACHMENT_STATE_PATH = join(STATE_DIR, 'browser-attachment.json');
 
 function ensureStateDir() {

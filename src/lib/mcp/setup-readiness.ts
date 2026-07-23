@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface McpSetupReadiness {
   ready: boolean;
@@ -55,7 +55,7 @@ export function getMcpSetupReadiness(): McpSetupReadiness {
     };
   }
 
-  const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+  const dataDir = getDataDir();
   const codebaseMemoryBin = process.env.O8_CODEBASE_MEMORY_BIN
     || join(dataDir, 'bin', process.platform === 'win32' ? 'codebase-memory-mcp.exe' : 'codebase-memory-mcp');
   if (existsSync(codebaseMemoryBin)) {

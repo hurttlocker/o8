@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 // via the existing /api/panel/ prefix in src/middleware.ts.
 export async function POST() {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const dataDir = getDataDir();
     await writeFile(join(dataDir, 'attended.heartbeat'), String(Date.now()), 'utf8');
     return NextResponse.json({ ok: true });
   } catch (error) {

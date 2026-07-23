@@ -26,7 +26,6 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
@@ -83,6 +82,7 @@ import {
   type OrchestratorCrashSurvivalMeta,
   type OrchestratorTurnRecord,
 } from './orchestrator-crash-survival';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Types ──
 
@@ -114,7 +114,7 @@ function resolveClaudeBin(): string {
 }
 const ORCHESTRATOR_STATE_DIR = orchestratorDataDir('orchestrator');
 
-const MCP_CONFIG_DIR = join(homedir(), '.o8', 'mcp');
+const MCP_CONFIG_DIR = join(getDataDir(), 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
 /**
  * #457 — Kill the claude process if it doesn't finish within this window.

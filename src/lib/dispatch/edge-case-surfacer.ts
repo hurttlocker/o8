@@ -24,11 +24,11 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { getAllCached, getCached, getImportGraph, getInboundImporters } from '@/lib/skeleton';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 type EdgeCaseKind = NonNullable<NonNullable<OrchestratorPacket['edgeCaseSites']>[number]['kind']>;
 
@@ -47,7 +47,7 @@ export interface SurfaceEdgeCasesResult {
 // ── Cache layer ──
 
 const CACHE_ROOT = join(
-  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
+  getDataDir(),
   'cache',
   'edge-case-sites',
 );

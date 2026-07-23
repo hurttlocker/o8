@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
@@ -19,6 +18,7 @@ import {
   writeActiveIdentity,
   writeManagedGithubState,
 } from '@/lib/github-broker/managed';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +41,7 @@ interface SyncBody {
 }
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+  return getDataDir();
 }
 
 function signOutMarkerPath(): string {

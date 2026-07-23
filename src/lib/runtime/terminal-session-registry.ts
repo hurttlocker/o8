@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 interface TerminalSessionRegistryEntry {
   sessionName: string;
@@ -11,7 +12,7 @@ interface TerminalSessionRegistryEntry {
 
 type TerminalSessionRegistry = Record<string, TerminalSessionRegistryEntry>;
 
-const STATE_DIR = path.join(homedir(), '.o8');
+const STATE_DIR = getDataDir();
 const REGISTRY_PATH = path.join(STATE_DIR, 'runtime-terminal-sessions.json');
 
 function readRegistry(): TerminalSessionRegistry {

@@ -2,8 +2,8 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * Managed GitHub App state (the Cursor-style path).
@@ -50,7 +50,7 @@ export interface ManagedGithubState {
 }
 
 function dataDir(): string {
-  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+  return getDataDir();
 }
 
 function statePath(): string {

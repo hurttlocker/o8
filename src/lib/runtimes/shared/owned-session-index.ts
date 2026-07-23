@@ -18,8 +18,8 @@
  *   - lookup returns `{pid?, tmuxSession?}` → present with an active run
  */
 import { readdir, readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface OwnedActiveRun {
   pid?: number;
@@ -32,19 +32,19 @@ export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
   return [
     {
       marker: 'codex-owned:',
-      root: process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.o8', 'owned-codex'),
+      root: process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(getDataDir(), 'owned-codex'),
     },
     {
       marker: 'claude-code-owned:',
-      root: process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT || path.join(os.homedir(), '.o8', 'owned-claude-code'),
+      root: process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT || path.join(getDataDir(), 'owned-claude-code'),
     },
     {
       marker: 'gemini-owned:',
-      root: process.env.O8_OWNED_GEMINI_ROOT || path.join(os.homedir(), '.o8', 'owned-gemini'),
+      root: process.env.O8_OWNED_GEMINI_ROOT || path.join(getDataDir(), 'owned-gemini'),
     },
     {
       marker: 'opencode-owned:',
-      root: process.env.O8_OWNED_OPENCODE_ROOT || path.join(os.homedir(), '.o8', 'owned-opencode'),
+      root: process.env.O8_OWNED_OPENCODE_ROOT || path.join(getDataDir(), 'owned-opencode'),
     },
   ];
 }
