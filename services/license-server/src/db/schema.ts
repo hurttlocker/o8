@@ -69,7 +69,7 @@ export type NewEntitlementEvent = typeof entitlementEvents.$inferInsert;
  * o8.run/i/<code> landing resolves + redeems against this table.
  */
 export const invites = pgTable('invites', {
-  /** The invite code (`o8_` + 128-bit base64url; legacy NNN-NNN accepted). */
+  /** The invite code (`o8_` + 128-bit base64url). */
   code: text('code').primaryKey(),
   /** Inviter display handle (the "via @handle" on the pass). Display-only, not trusted. */
   owner: text('owner').notNull(),

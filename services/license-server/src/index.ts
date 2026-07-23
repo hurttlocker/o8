@@ -11,7 +11,12 @@ import { env } from './env.js';
 import { mintLicense, type Plan } from './mint.js';
 import { constructEvent, handleStripeEvent } from './stripe-webhook.js';
 import { validateEntitlement } from './validate.js';
-import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
+import {
+  LEGACY_INVITE_CODE_ERROR,
+  redeemInvite,
+  registerInvite,
+  resolveInvite,
+} from './invites.js';
 import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
 import { handleAnalytics, handleSiteEvent, handleTelemetry } from './analytics.js';
 import { handleIssueFree } from './free-issue.js';
@@ -347,6 +352,9 @@ app.post('/invites/redeem', async (c) => {
 
   const result = await redeemInvite(code, email);
   if (!result.ok) {
+    if (result.reason === LEGACY_INVITE_CODE_ERROR) {
+      return c.json({ ok: false, reason: LEGACY_INVITE_CODE_ERROR }, 400);
+    }
     // Do not turn redemption into a state oracle. The public resolve page can
     // present UX status, while this mutation returns one generic rejection.
     return c.json({ ok: false, reason: 'invite_unavailable' }, 400);

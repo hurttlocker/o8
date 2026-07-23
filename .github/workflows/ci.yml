@@ -74,6 +74,38 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm test
 
+  # Launch posture: surface high-severity dependency findings without making
+  # the first OSS PRs unmergeable. Remove continue-on-error once the remaining
+  # semver-major advisories have been adjudicated.
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - name: Audit root dependencies
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Audit license-server dependencies
+        run: npm audit --audit-level=high
+        working-directory: services/license-server
+        continue-on-error: true
+      - name: Audit relay dependencies
+        run: npm audit --audit-level=high
+        working-directory: services/relay
+        continue-on-error: true
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
+        continue-on-error: true
+
   governance-smoke:
     name: Governance Smoke
     runs-on: ubuntu-latest

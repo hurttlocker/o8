@@ -14,13 +14,18 @@ import { invites } from './db/schema.js';
  *  - redeem:   public, one-time. Captures the invitee email.
  */
 
-// Keep legacy NNN-NNN codes redeemable, but every new desktop issues a 128-bit
-// `o8_...` code so the public resolve endpoint is not a six-digit oracle.
-const CODE_RE = /^(?:\d{3}-\d{3}|o8_[A-Za-z0-9_-]{22})$/;
+const CODE_RE = /^o8_[A-Za-z0-9_-]{22}$/;
+const LEGACY_CODE_RE = /^\d{3}-\d{3}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const LEGACY_INVITE_CODE_ERROR = 'legacy invite codes are no longer valid';
 
 export function isValidCodeFormat(code: string): boolean {
   return CODE_RE.test(code);
+}
+
+function invalidCodeReason(code: string): string | null {
+  if (isValidCodeFormat(code)) return null;
+  return LEGACY_CODE_RE.test(code) ? LEGACY_INVITE_CODE_ERROR : 'invalid_code';
 }
 
 export interface RegisterInput {
@@ -32,7 +37,8 @@ export interface RegisterInput {
 
 export async function registerInvite(input: RegisterInput): Promise<{ ok: boolean; reason?: string }> {
   const { code, owner, accent, position } = input;
-  if (!isValidCodeFormat(code)) return { ok: false, reason: 'invalid_code' };
+  const formatError = invalidCodeReason(code);
+  if (formatError) return { ok: false, reason: formatError };
 
   const rows = await db.select().from(invites).where(eq(invites.code, code)).limit(1);
   const row = rows[0];
@@ -60,7 +66,8 @@ export interface ResolveResult {
 }
 
 export async function resolveInvite(code: string): Promise<ResolveResult> {
-  if (!isValidCodeFormat(code)) return { valid: false, reason: 'invalid_code' };
+  const formatError = invalidCodeReason(code);
+  if (formatError) return { valid: false, reason: formatError };
   const rows = await db.select().from(invites).where(eq(invites.code, code)).limit(1);
   const row = rows[0];
   if (!row) return { valid: false, reason: 'not_found' };
@@ -68,7 +75,8 @@ export async function resolveInvite(code: string): Promise<ResolveResult> {
 }
 
 export async function redeemInvite(code: string, email: string): Promise<{ ok: boolean; reason?: string; owner?: string }> {
-  if (!isValidCodeFormat(code)) return { ok: false, reason: 'invalid_code' };
+  const formatError = invalidCodeReason(code);
+  if (formatError) return { ok: false, reason: formatError };
   if (!EMAIL_RE.test(email)) return { ok: false, reason: 'invalid_email' };
 
   const updated = await db
