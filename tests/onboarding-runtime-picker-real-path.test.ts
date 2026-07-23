@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-onboarding-runtime-picker-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-const inventory = [
+let inventory = [
   {
     id: 'codex',
     label: 'Codex',
@@ -32,7 +32,14 @@ const inventory = [
     detail: 'Gemini CLI is installed but not signed in.',
     fix: 'Run `gemini` once to sign in.',
   },
-] as const;
+] as Array<{
+  id: 'codex' | 'claude-code' | 'gemini';
+  label: string;
+  available: boolean;
+  unavailableReason: 'needs_auth' | 'not_installed' | null;
+  detail: string;
+  fix: string;
+}>;
 
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   getRuntimeAuthSnapshot: vi.fn(async () => ({
@@ -86,5 +93,32 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     expect(persisted.values.defaultDispatchRuntime).toBe('claude-code');
     expect(persisted.values.workerRuntimes).toEqual(['claude-code', 'codex']);
     expect(persisted.sources.workerRuntimes).toBe('file');
+  });
+
+  it('returns an honest, skippable empty selection when no agent CLI is installed', async () => {
+    inventory = [
+      {
+        id: 'codex',
+        label: 'Codex',
+        available: false,
+        unavailableReason: 'not_installed',
+        detail: 'Codex CLI is not installed.',
+        fix: 'Install Codex, then run `codex login`.',
+      },
+      {
+        id: 'claude-code',
+        label: 'Claude Code',
+        available: false,
+        unavailableReason: 'not_installed',
+        detail: 'Claude Code CLI is not installed.',
+        fix: 'Install Claude Code, then run `claude` once to sign in.',
+      },
+    ];
+
+    const loaded = await loadOnboardingRuntimeSelection(routeFetch);
+    expect(loaded.inventory.every((runtime) => !runtime.available)).toBe(true);
+    expect(loaded.orchestratorRuntime).toBe('codex');
+    expect(loaded.workerRuntimes).toEqual([]);
+    expect(toggleOnboardingWorkerRuntime([], 'codex', loaded.inventory)).toEqual([]);
   });
 });

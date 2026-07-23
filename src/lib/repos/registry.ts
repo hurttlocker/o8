@@ -6,6 +6,7 @@ import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { readJsonFile, writeJsonFile } from '@/lib/fs/json';
 import type {
   RepoRegistryEntry,
@@ -18,7 +19,7 @@ import { emitProductEvent } from '@/lib/analytics/server';
 
 const execFileAsync = promisify(execFile);
 
-const REGISTRY_DIR = path.join(os.homedir(), '.o8');
+const REGISTRY_DIR = getDataDir();
 const REGISTRY_PATH = path.join(REGISTRY_DIR, 'repos.json');
 
 function nowIso() {

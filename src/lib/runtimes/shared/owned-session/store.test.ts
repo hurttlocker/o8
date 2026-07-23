@@ -86,15 +86,45 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('test-runtime', 'launch');
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
+
+  it('returns a failed launch with an install hint when the worker CLI is missing', async () => {
+    const { invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver');
+    const { createOwnedSessionStore } = await import('./store');
+    delete process.env.O8_TEST_BIN;
+    invalidateCliCache('test-runtime');
+    ensureDispatchBackendReadyMock.mockResolvedValue({
+      ready: true,
+      reason: 'http_200',
+      waitedMs: 0,
+      attempts: 1,
+      lastCheck: {
+        ready: true,
+        reason: 'http_200',
+        apiBase: 'http://o8.test',
+        status: 200,
+        portSource: 'file',
+        apiPortFilePresent: true,
+      },
+    });
+
+    const store = createOwnedSessionStore(testAdapter('o8-definitely-missing-worker-cli'));
+    const result = await store.launch({ cwd: repoPath, prompt: 'do work' });
+
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain('[runtime] Owned Test is not installed');
+    expect(result.note).toContain('o8-definitely-missing-worker-cli');
+    expect(result.note).not.toContain('ENOENT');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
 });
 
-function testAdapter(): OwnedRuntimeAdapter {
+function testAdapter(binaryName = 'node'): OwnedRuntimeAdapter {
   return {
     runtimeId: 'test-runtime',
     surfaceIdPrefix: 'test-owned:',
     rootEnvVar: 'O8_TEST_OWNED_ROOT',
     rootDefault: path.join(os.tmpdir(), 'o8-test-owned-store'),
-    binaryName: 'node',
+    binaryName,
     binaryEnvOverride: 'O8_TEST_BIN',
     humanLabel: 'Owned Test',
     squadShortName: 'Test',

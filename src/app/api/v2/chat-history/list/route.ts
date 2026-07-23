@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 
@@ -21,7 +21,7 @@ import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/
 // empties are exempt and never deleted.
 const EMPTY_FILE_GC_MS = 60 * 60 * 1000; // 1 hour
 
-const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
+const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
 interface ChatHistoryEntry {
   tabId: string;

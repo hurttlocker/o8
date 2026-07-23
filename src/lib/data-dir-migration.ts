@@ -6,7 +6,7 @@
  * file ensures only one wins, the others wait for the marker and then skip.
  *
  * Migration triggers when:
- *   - O8_DATA_DIR is NOT explicitly set (we respect explicit overrides)
+ *   - Neither O8_DATA_DIR nor CORTEX_IDE_DATA_DIR is explicitly set
  *   - ~/.o8 does not exist OR is empty
  *   - ~/.cortex-ide exists with content
  *
@@ -30,10 +30,13 @@ export function migrateDataDirOnce(): void {
   if (_ranInThisProcess) return;
   _ranInThisProcess = true;
 
-  // Respect explicit override — if the user set O8_DATA_DIR, they know what
-  // they're doing and we shouldn't auto-migrate into it.
-  if (process.env.O8_DATA_DIR) {
-    const dir = process.env.O8_DATA_DIR;
+  // Respect either explicit override. Tests, side-by-side installs, and
+  // cold-start probes still use the legacy CORTEX_IDE_DATA_DIR name; treating
+  // it as a migration source copied isolated state into ~/.o8 and broke the
+  // isolation boundary before the server had even opened its database.
+  const explicitDir = process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR;
+  if (explicitDir) {
+    const dir = explicitDir;
     if (!existsSync(dir)) {
       try { mkdirSync(dir, { recursive: true }); } catch {}
     }
@@ -42,7 +45,7 @@ export function migrateDataDirOnce(): void {
 
   const home = homedir();
   const newDir = join(home, '.o8');
-  const oldDir = process.env.CORTEX_IDE_DATA_DIR || join(home, '.cortex-ide');
+  const oldDir = join(home, '.cortex-ide');
   const marker = join(newDir, '.migrated-from-cortex-ide');
 
   // Already migrated → nothing to do

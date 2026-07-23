@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { homedir } from 'node:os';
+import { getDataDir } from '@/lib/data-dir-migration';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
 import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
 import {
@@ -19,7 +19,7 @@ import {
   type OrchestratorHistoryRecord,
 } from './orchestrator-thread-projection';
 
-export const ORCHESTRATOR_HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
+export const ORCHESTRATOR_HISTORY_DIR = join(getDataDir(), 'chat-history');
 const MAX_THREADS = 20;
 const DEFAULT_MODEL = 'claude-code';
 const DEFAULT_BACKEND: MobileOrchestratorBackend = 'claude';
@@ -95,7 +95,7 @@ function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
 }
 
 // Marker so the one-time transcript-order repair runs once per install.
-const TRANSCRIPT_REPAIR_MARKER = join(homedir(), '.o8', '.transcript-order-repaired-v1');
+const TRANSCRIPT_REPAIR_MARKER = join(getDataDir(), '.transcript-order-repaired-v1');
 // Pre-v0.1.229, ws-server froze the assistant timestamp at turn START — a
 // millisecond BEFORE the user message was persisted — so timestamp-sorted
 // transcripts rendered the reply above the question. The inverted pair sits

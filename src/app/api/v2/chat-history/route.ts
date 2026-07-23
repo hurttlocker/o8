@@ -9,8 +9,8 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
@@ -25,7 +25,7 @@ import {
   parseChatHistoryPageRequest,
 } from '@/lib/llm/chat-history-pagination';
 
-const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
+const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
 function ensureDir() {
   mkdirSync(HISTORY_DIR, { recursive: true });

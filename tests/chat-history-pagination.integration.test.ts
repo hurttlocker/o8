@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { DELETE, GET, POST } from '@/app/api/v2/chat-history/route';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const nonce = `${process.pid}-${Math.floor(performance.now())}`;
 const pagingTabId = `paging-${nonce}`;
@@ -11,7 +11,7 @@ const legacyTabId = `legacy-${nonce}`;
 const postIdsTabId = `post-ids-${nonce}`;
 const tabIds = [pagingTabId, legacyTabId, postIdsTabId];
 
-const historyDir = join(homedir(), '.o8', 'chat-history');
+const historyDir = join(getDataDir(), 'chat-history');
 const historyPath = (tabId: string) => join(historyDir, `${tabId}.json`);
 
 const get = (tabId: string, query = '') => GET(new NextRequest(

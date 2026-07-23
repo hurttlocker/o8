@@ -53,7 +53,7 @@ describe('repo re-point contract (#1581)', () => {
     expect(registered.status).toBe(201);
     const repo = registeredData.repo!;
 
-    writeFileSync(path.join(home, '.o8', 'projects.json'), JSON.stringify({
+    writeFileSync(path.join(dataDir, 'projects.json'), JSON.stringify({
       projects: [{ id: 'project-repoint', name: 'Moved repo', repoPaths: [repo.localPath], createdAt: new Date().toISOString() }],
       activeProjectId: 'project-repoint',
     }));
@@ -99,10 +99,10 @@ describe('repo re-point contract (#1581)', () => {
     expect(repointed.status, repointedData.error).toBe(200);
     expect(repointedData.repo).toMatchObject({ id: repo.id, localPath: nextPath });
 
-    const registry = JSON.parse(readFileSync(path.join(home, '.o8', 'repos.json'), 'utf8')) as { repos: Array<{ id: string; localPath: string }> };
+    const registry = JSON.parse(readFileSync(path.join(dataDir, 'repos.json'), 'utf8')) as { repos: Array<{ id: string; localPath: string }> };
     expect(registry.repos).toContainEqual(expect.objectContaining({ id: repo.id, localPath: nextPath }));
 
-    const ledger = JSON.parse(readFileSync(path.join(home, '.o8', 'projects.json'), 'utf8')) as { projects: Array<{ repoPaths: string[] }> };
+    const ledger = JSON.parse(readFileSync(path.join(dataDir, 'projects.json'), 'utf8')) as { projects: Array<{ repoPaths: string[] }> };
     expect(ledger.projects[0]?.repoPaths).toEqual([nextPath]);
     expect(getLane(lane.id)).toMatchObject({
       repoPath: nextPath,

@@ -78,14 +78,18 @@ describe('#1551 — claude orchestrator preflights the repo path', () => {
     ).rejects.toThrow(/Git repository/);
   });
 
-  it('a git work tree passes the preflight (fails later on the fake binary, not the repo)', async () => {
+  it('reports a missing Claude binary distinctly after the repo preflight passes', async () => {
     const repoPath = makeGitDir('claude-git-ok');
     const session = ensureOrchestratorSession(repoPath);
 
     const error = await sendToOrchestrator(session, 'hello', () => {})
       .then(() => null, (thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).not.toContain('Git repository');
-    expect((error as Error).message).not.toContain('no longer exists');
+    const message = (error as Error).message;
+    expect(message).toContain('[runtime] Claude Code is not installed');
+    expect(message).toContain('O8_CLAUDE_CODE_BIN');
+    expect(message).not.toContain('ENOENT');
+    expect(message).not.toContain('Git repository');
+    expect(message).not.toContain('no longer exists');
   });
 });

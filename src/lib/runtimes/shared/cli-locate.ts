@@ -170,11 +170,19 @@ export function scanAndLink(binaryName: string, home: string = os.homedir()): st
 let cachedClaudeBin: string | null = null;
 export function resolveClaudeBinary(home: string = os.homedir()): string {
   const envOverride = process.env.O8_CLAUDE_CODE_BIN || process.env.CLAUDE_BIN;
-  if (envOverride) return envOverride;
+  if (envOverride) {
+    if (existsSync(envOverride)) return envOverride;
+    throw new Error(
+      `[runtime] Claude Code is not installed at ${envOverride}. `
+      + 'Install Claude Code, or update O8_CLAUDE_CODE_BIN/CLAUDE_BIN to its executable path.',
+    );
+  }
   if (cachedClaudeBin && existsSync(cachedClaudeBin)) return cachedClaudeBin;
   cachedClaudeBin = scanForBinary('claude', home);
   if (!cachedClaudeBin) {
-    console.warn('[cli-locate] claude not found in any well-known dir — falling back to ~/.local/bin/claude (likely ENOENT; is Claude Code installed?)');
+    throw new Error(
+      '[runtime] Claude Code is not installed. Install it, run `claude` once to sign in, then retry.',
+    );
   }
-  return cachedClaudeBin ?? path.join(home, '.local', 'bin', 'claude');
+  return cachedClaudeBin;
 }

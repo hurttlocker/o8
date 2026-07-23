@@ -149,7 +149,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     const failedBeforeLaunch = run.outcome === 'failed';
 
     return {
-      ok: true,
+      ok: !failedBeforeLaunch,
       runtime: runtimeId,
       surfaceId: session.surfaceId,
       note: failedBeforeLaunch

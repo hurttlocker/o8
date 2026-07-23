@@ -50,7 +50,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
-import { migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 
 migrateDataDirOnce();
 
@@ -282,7 +282,7 @@ async function pathExists(p: string): Promise<boolean> {
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
 async function listRepoPaths(): Promise<string[]> {
   try {
-    const registryPath = join(homedir(), '.o8', 'repos.json');
+    const registryPath = join(getDataDir(), 'repos.json');
     const raw = await readFile(registryPath, 'utf-8');
     const store = JSON.parse(raw) as { repos?: Array<{ localPath?: string }> };
     return (store.repos ?? []).map(r => r.localPath).filter(Boolean) as string[];
@@ -982,7 +982,7 @@ const meteredWindowValveWarnedStep = new Map<string, number>();
 /** Approximate persisted-thread tokens from the chat-history file (chars/4). */
 async function estimateThreadTokens(threadId: string): Promise<number> {
   try {
-    const raw = await readFile(join(homedir(), '.o8', 'chat-history', `${threadId}.json`), 'utf-8');
+    const raw = await readFile(join(getDataDir(), 'chat-history', `${threadId}.json`), 'utf-8');
     const payload = JSON.parse(raw) as { messages?: Array<{ text?: string; content?: string }> };
     const chars = (payload.messages ?? []).reduce((sum, m) => sum + (m.text ?? m.content ?? '').length, 0);
     return Math.ceil(chars / 4);

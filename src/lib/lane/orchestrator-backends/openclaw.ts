@@ -37,7 +37,7 @@ import type {
 } from './types';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
-
+import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface OpenclawOrchestratorSession {
@@ -375,7 +375,7 @@ async function waitForGatewayReady(proc: ChildProcess, port: number, timeoutMs: 
  * o8 run's gateway), that is reused as-is. The gateway runs the operator's real
  * codex-harness agents — the embedded `--local` harness cannot.
  */
-async function ensureOpenclawGateway(port: number): Promise<void> {
+async function ensureOpenclawGateway(port: number, openclawBin: string): Promise<void> {
   if (gatewayProc && gatewayProc.exitCode === null && !gatewayProc.killed) {
     return; // Our gateway child is alive.
   }
@@ -383,7 +383,6 @@ async function ensureOpenclawGateway(port: number): Promise<void> {
     return; // A gateway is already listening on this port — reuse it.
   }
 
-  const openclawBin = process.env.O8_OPENCLAW_BIN?.trim() || 'openclaw';
   console.log(`[openclaw-gateway] Starting o8-profile gateway on port ${port}`);
   const proc = spawn(
     openclawBin,
@@ -708,10 +707,12 @@ async function sendToOpenclawOrchestrator(
   session.status = 'busy';
   const emitEvent = (event: OrchestratorEvent) => { onEvent(event); publishOpenclawRealtimeEvent(session, event, options.threadId ?? null); };
 
+  let openclawBin: string;
   try {
+    openclawBin = await resolveOpenclawSpawnBinary(session.repoPath);
     const gatewayPort = await ensureOpenclawGatewayPort();
     ensureOpenclawProfile();
-    await ensureOpenclawGateway(gatewayPort);
+    await ensureOpenclawGateway(gatewayPort, openclawBin);
   } catch (err) {
     session.status = 'dead';
     emitEvent({ type: 'error', error: err instanceof Error ? err.message : String(err) });
@@ -719,7 +720,6 @@ async function sendToOpenclawOrchestrator(
     return;
   }
 
-  const openclawBin = process.env.O8_OPENCLAW_BIN?.trim() || 'openclaw';
   // First turn of a session carries the orchestrator framing that used to
   // live in the (now-removed) systemPromptOverride config key — the session
   // retains it as conversation context for every later turn.

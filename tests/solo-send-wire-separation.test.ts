@@ -12,10 +12,14 @@ import { resolveOrchestratorTranscriptMessage } from '@/lib/orchestrator/compose
 
 const tempHomes: string[] = [];
 const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
+const originalO8DataDir = process.env.O8_DATA_DIR;
+const originalCortexDataDir = process.env.CORTEX_IDE_DATA_DIR;
 
 async function loadHistoryInTempHome() {
   const home = mkdtempSync(join(tmpdir(), 'o8-solo-send-'));
   tempHomes.push(home);
+  process.env.O8_DATA_DIR = home;
+  process.env.CORTEX_IDE_DATA_DIR = home;
   vi.resetModules();
   vi.doMock('node:os', async () => ({
     ...(await vi.importActual<typeof import('node:os')>('node:os')),
@@ -30,6 +34,10 @@ afterEach(() => {
   vi.resetModules();
   if (originalOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
   else process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
+  if (originalO8DataDir === undefined) delete process.env.O8_DATA_DIR;
+  else process.env.O8_DATA_DIR = originalO8DataDir;
+  if (originalCortexDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
+  else process.env.CORTEX_IDE_DATA_DIR = originalCortexDataDir;
   for (const home of tempHomes.splice(0)) {
     rmSync(home, { recursive: true, force: true });
   }
