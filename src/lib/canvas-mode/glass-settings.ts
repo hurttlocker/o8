@@ -190,15 +190,15 @@ export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; va
   // translated to canvas vocabulary: FullScreenUI material (the bake-off
   // winner that melts the desktop into structureless color), a mid veil
   // standing in for the IDE's 0.78→0.06 gradient, minimal card tint so the
-  // one-material feel carries, near-white ink. Free tier gets this look.
+  // one-material feel carries, near-white ink.
   { id: 'glass', label: 'Glass', values: { frost: 18, tint: 0.1, ink: 0.96, vibrance: 1.8, veil: 0.45, material: 'fullscreen', backdropFrost: 0, backdrop: 'none', chatFrost: 30, chatTint: 0.5, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.45, textShade: 0.04 } },
 ];
 
 /**
- * The free-tier canvas looks (operator 2026-07-06, extended 2026-07-17):
- * free users get three fixed looks — Paper in light or dark, plus Glass
- * (the locked ALL GLASS recipe). Everything else (other looks, depth,
- * dials, advanced) is founders territory.
+ * The baseline appearance shortcuts (operator 2026-07-06, extended
+ * 2026-07-17). All looks and controls are open in the open build; this compact
+ * mapping remains useful for saved settings and preserves a future cosmetic
+ * policy seam without making today's plan a cosmetic gate.
  */
 export type CanvasFreeLookId = 'light' | 'dark' | 'glass';
 
@@ -229,9 +229,8 @@ export function canvasFreeLook(look: CanvasFreeLookId): CanvasGlassSettings {
   };
 }
 
-/** Which free look a stored settings blob corresponds to — the boot clamp
- *  uses this so a free user's saved Glass survives a relaunch instead of
- *  snapping back to Paper. Glass is tone-dark, so material is the marker. */
+/** Which baseline appearance a stored settings blob corresponds to. Glass is
+ *  tone-dark, so material is the marker. */
 export function canvasFreeLookIdFor(settings: Pick<CanvasGlassSettings, 'tone' | 'material'>): CanvasFreeLookId {
   if (settings.material === 'fullscreen') return 'glass';
   return settings.tone === 'light' ? 'light' : 'dark';

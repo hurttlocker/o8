@@ -81,8 +81,7 @@ export function TunerPanel({
   loupeSizeRange: { min: number; max: number; step: number };
   onLoupeSizeChange: (value: number) => void;
   onSaveDefault: () => void;
-  /** Founders get the whole panel; free gets Paper in light/dark only (the
-   *  look where text reads right) — no other looks, dials, depth, or advanced. */
+  /** Future hosted-policy seam. The open build passes true for every plan. */
   full?: boolean;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -140,7 +139,7 @@ export function TunerPanel({
 
       {!full ? (
         <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5, fontFamily: FONT }}>
-          Looks, depth, and the dials unlock with a founding license.
+          Additional looks and controls are unavailable under the current workspace policy.
         </span>
       ) : null}
 

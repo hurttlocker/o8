@@ -32,6 +32,16 @@ const ALLOWED_ALGS = ['EdDSA', 'RS256'] as const;
 const DEFAULT_GRACE_DAYS = 30;
 
 /**
+ * The hosted license service is optional in the open build. O8_PROXY_URL is
+ * already the shared hosted-service configuration; an absent value means BYO
+ * mode, not an instruction to contact a production default.
+ */
+export function configuredLicenseServerBaseUrl(): string | null {
+  const configured = process.env.O8_PROXY_URL?.trim();
+  return configured ? configured.replace(/\/+$/, '') : null;
+}
+
+/**
  * Claims carried by a signed license token. `exp` is seconds-since-epoch
  * (standard JWT NumericDate), matching `jose`'s payload shape.
  */
