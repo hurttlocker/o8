@@ -4,17 +4,17 @@ Copy everything below the line and paste it into a fresh Claude Code conversatio
 
 ---
 
-Run an end-to-end smoke test of the Cortex IDE dashboard at
-http://localhost:3001/dashboard using Playwright MCP tools.
+Run an end-to-end smoke test of the o8 dashboard at
+http://localhost:47120/dashboard using the o8 browser tools.
 
 ## Setup
-- Verify dev server is running on port 3001 and WS server on 3002
+- Verify the dev server is running on port 47120 and WS server on 47125
 - If not running, start with `npm run desktop:dev`
 
 ## Test Plan
 
 ### 1. Dashboard Load & Connectivity
-- Navigate to http://localhost:3001/dashboard
+- Navigate to http://localhost:47120/dashboard
 - Wait for "Live — WebSocket connected" status in the title bar
 - Verify the session timeline loads with today's activity
 - Verify the left panel shows the cortex-ide repo with branch info
@@ -72,7 +72,7 @@ http://localhost:3001/dashboard using Playwright MCP tools.
 After completing all tests, provide a structured report:
 
 ```
-# Cortex IDE Smoke Test Report — [DATE]
+# o8 Smoke Test Report — [DATE]
 
 ## Results Summary
 | Test | Result | Notes |

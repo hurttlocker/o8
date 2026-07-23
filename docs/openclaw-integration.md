@@ -168,11 +168,11 @@ path agree on the same two fields.
 ## 3. Auth / gating
 
 - `/api/mobile/orchestrator/*` — including `openclaw-availability` and
-  **[step 5]** `openclaw-agents` — is **ungated** (absent from
-  `GATED_PREFIXES` in `src/middleware.ts`), so LAN/Tailscale mobile clients
-  reach it directly. No new gated routes were added.
-- `/api/v2/chat-history` is **gated** (the `/api/v2/chat` prefix). The mobile
-  app already sends `Authorization: Bearer <ws-token>` there; no change.
+  **[step 5]** `openclaw-agents` — is default-deny. Paired mobile clients reach
+  only the methods and paths named in `DEVICE_CAPABILITIES` in
+  `src/middleware.ts`.
+- `/api/v2/chat-history` is also gated. The paired app sends its device bearer;
+  desktop/operator clients send the operator ws-token.
 
 ## 4. The `/openclaw` surface flow
 

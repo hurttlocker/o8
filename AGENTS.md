@@ -146,7 +146,7 @@ o8 task list [--include-done] [--include-brief] [--project <id>] [--repo <path>]
 o8 task create --title "..." [--summary "..." --project <id> --repo <path>]        # add a task to the ready pool
 o8 task brief <id>                     # full project-backed brief for one task
 o8 task claim <id>                     # bind/reserve a task to a lane
-o8 task dispatch <id>                  # launch the claimed task (Codex-only routing)
+o8 task dispatch <id>                  # launch the claimed task through the selected dispatchable runtime
 o8 task block <id> --reason "..."      # mark a task blocked
 o8 task report <id> --event "..."      # append a task progress event
 o8 task archive <id>                   # prune/archive a stale task row

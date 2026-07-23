@@ -1,5 +1,10 @@
 # Runtime Adapter v2 — Universal Agent Runtime Contract
 
+> **Historical design snapshot.** This proposal predates the declarative
+> runtime expansion and still names deleted files and `claude -p`. The current
+> extension contract is [`runtime-adapter-contract.md`](./runtime-adapter-contract.md)
+> and the registry truth is `src/lib/orchestrator/runtime-capabilities.ts`.
+
 ## Problem
 
 Cortex IDE currently has 1,788 lines of Codex-specific code (`sessions.ts` + `owned.ts`) and 257 lines of OpenClaw-specific code (`openclaw.ts`), plus a `switch (agent.runtime)` dispatch in `actions.ts`. Adding Claude Code means either:

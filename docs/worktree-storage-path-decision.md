@@ -1,8 +1,16 @@
 # Workspace Storage Path Decision
 
+> **Superseded by #1594 (2026-07).** Managed worktrees now default to
+> `~/.o8/worktrees/<repo-key>/.cortex-worktrees/`, configurable with
+> `O8_WORKTREE_ROOT`. `src/lib/worktree/root-layout.ts` still discovers
+> repository-local `.cortex-worktrees/` stores for backward compatibility.
+> The remainder records the earlier repo-local decision.
+
 ## Context
 
-Current worktree isolation stores managed worktrees under `.cortex-worktrees/` inside each repository root. An alternative is a global storage root such as `~/.cortex-ide/worktrees/`.
+At the time of this decision, worktree isolation stored managed worktrees under
+`.cortex-worktrees/` inside each repository root. The alternative was a global
+storage root.
 
 This note evaluates the tradeoff for repository onboarding and recommends whether to change the storage model.
 

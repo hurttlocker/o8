@@ -7,8 +7,11 @@ Sister docs: [`canvas-mode-vision.md`](./canvas-mode-vision.md) (where this UI i
 
 ### A. Main window chrome
 
-- **TitleBar** (`src/components/desktop/TitleBar.tsx`) — drag region, traffic lights, **Agents** and **Alerts** buttons (NavRail was retired; these two are the survivors). Always visible.
-- **SessionTimeline** — 36px strip under the TitleBar, **OFF by default** since epic #1089; also hidden under 420px width. Most users never see it: treat as opt-in, not core chrome.
+- **Column header strips** (`src/components/desktop/shell/LeftHeaderStrip.tsx`,
+  `WorkspaceHeaderStrip.tsx`, `PanelHeaderStrip.tsx`) — drag regions, traffic
+  lights, workspace tabs, and column controls. They replaced the retired
+  monolithic TitleBar/NavRail chrome and are always visible for mounted columns.
+- **SessionTimeline** — 36px strip under the column header, **OFF by default** since epic #1089; also hidden under 420px width. Most users never see it: treat as opt-in, not core chrome.
 - **DesktopStatusBar** (`src/components/desktop/DesktopStatusBar.tsx`) — the bottom dock: Settings gear, mobile-pairing button, Add-repo (Iconoir FolderPlus), Ports cluster (web ports popover, Iconoir Internet rows), supervisor-inbox badge (Iconoir Mail/MailOpen), branch-picker pill, global-terminal toggle, merge cluster. This bar is the app's persistent control strip — densest icon surface in the app, all geometry hurttlocker-locked.
 
 ### B. Left panel

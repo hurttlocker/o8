@@ -1,6 +1,6 @@
 # GitHub Broker Setup
 
-This document describes the GitHub App broker path used by Cortex IDE for both local development and production.
+This document describes the GitHub App broker path used by o8 for both local development and production.
 
 ## Goal
 
@@ -20,13 +20,13 @@ Current app:
 
 Current local key path:
 
-- `~/.cortex-ide/github-app.pem`
+- `~/.o8/github-app.pem`
 
 The app is already installed on `hurttlocker` and has broad repository access.
 
 ## Required Environment
 
-Set these on the server that serves Cortex IDE:
+Set these on the server that serves o8:
 
 - `GITHUB_APP_ID`
 - `GITHUB_APP_PRIVATE_KEY`
@@ -46,7 +46,7 @@ Example:
 GITHUB_APP_ID=3167857
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 GITHUB_APP_WEBHOOK_SECRET="replace-me"
-CORTEX_IDE_PUBLIC_BASE_URL="https://cortexide.app"
+CORTEX_IDE_PUBLIC_BASE_URL="https://your-o8-host.example"
 ```
 
 The webhook URL is:
@@ -81,7 +81,7 @@ Local desktop/dev can use the same app.
 
 Requirements:
 
-- keep `~/.cortex-ide/github-app.pem`
+- keep `~/.o8/github-app.pem`
 - set `GITHUB_APP_WEBHOOK_SECRET`
 - optionally set `CORTEX_IDE_PUBLIC_BASE_URL` to a tunnel URL
 
@@ -94,7 +94,7 @@ If you want live webhook delivery locally, use a tunnel:
 Example:
 
 ```bash
-cloudflared tunnel --url http://127.0.0.1:3001
+cloudflared tunnel --url http://127.0.0.1:47120
 ```
 
 Then set:

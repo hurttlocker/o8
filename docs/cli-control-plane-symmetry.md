@@ -74,7 +74,7 @@ The moat held as a verb: the agent drove the entire loop, the one thing it could
 
 **Stage 2 — Mission lifecycle.** `o8 mission create | dispatch | status | wait | tail`. Thin route calls; `wait` mirrors `wait_for_mission_ready`'s terminal/signature-change semantics, `tail` prints packet status transitions until terminal. ✅ DONE (commit c0e0e159) — verified live: create → status-by-id round-trips; tsc + cli typecheck clean.
 
-**Stage 3 — Packet recovery.** `o8 packet reset | retry | rerun | merge-preview`. Pure route calls. Test: each verb's route is in `GATED_PREFIXES` (extend `tests/middleware-gate.test.ts`); CLI smoke for reset+retry on a stuck packet.
+**Stage 3 — Packet recovery.** `o8 packet reset | retry | rerun | merge-preview`. Pure route calls. Test: each verb's route has explicit default-deny middleware coverage (`tests/middleware-gate.test.ts` + `tests/route-coverage.test.ts`); CLI smoke for reset+retry on a stuck packet.
 
 **Stage 4 — Steer extraction.** New `/api/orchestrator/steer-packet` route + service fn; repoint the MCP `steer_packet` handler at it (delete the in-process tangle); add `o8 packet steer`. Test: gate test for the new route + a unit test for the service fn; confirm MCP still steers.
 
