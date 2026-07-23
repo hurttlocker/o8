@@ -4,7 +4,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const PROJECTS_PATH = path.join(os.homedir(), '.o8', 'projects.json');
+import { getDataDir } from '@/lib/data-dir-migration';
+
+const PROJECTS_PATH = path.join(getDataDir(), 'projects.json');
 
 interface StoredProject {
   repoPaths?: unknown;

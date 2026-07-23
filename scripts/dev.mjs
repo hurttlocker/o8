@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const root = process.cwd();
-const stateDir = join(process.env.O8_DATA_DIR || join(homedir(), '.o8'), 'dev');
+const stateDir = join(
+  process.env.O8_DATA_DIR
+    || process.env.CORTEX_IDE_DATA_DIR
+    || join(homedir(), '.o8'),
+  'dev',
+);
 const pidFile = join(stateDir, 'pids.json');
 const env = {
   ...process.env,

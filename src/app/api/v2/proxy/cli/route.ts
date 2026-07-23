@@ -3,6 +3,9 @@ export const dynamic = 'force-dynamic';
 import { spawn } from 'node:child_process';
 import { NextResponse } from 'next/server';
 
+import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
+import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+
 /**
  * POST /api/v2/proxy/cli
  *
@@ -98,13 +101,23 @@ export async function POST(request: Request) {
     if (repoPath?.trim()) {
       const { resolveRepoPathFromRegistry } = await import('@/lib/repos/repo-path-registry');
       const resolved = await resolveRepoPathFromRegistry(repoPath.trim());
-      if (resolved.ok) {
-        cwd = resolved.repoRoot;
+      if (!resolved.ok) {
+        return NextResponse.json({
+          error: `[repo] ${resolved.message}`,
+          code: 'repo_unavailable',
+        }, { status: resolved.status });
       }
+      cwd = resolved.repoRoot;
     }
 
     let cmd: string;
     let args: string[];
+    let cliSpec: {
+      runtimeId: string;
+      binaryName: string;
+      humanLabel: string;
+      envOverride: string;
+    };
 
     switch (runtime) {
       case 'claude-code': {
@@ -120,12 +133,24 @@ export async function POST(request: Request) {
       case 'codex': {
         const cliModel = CODEX_MODEL_MAP[modelKey] ?? 'gpt-5.6-sol';
         cmd = 'codex';
+        cliSpec = {
+          runtimeId: 'codex',
+          binaryName: cmd,
+          humanLabel: 'Codex',
+          envOverride: 'O8_CODEX_BIN',
+        };
         args = ['exec', '--json', '-c', `model="${cliModel}"`, '--', prompt];
         break;
       }
       case 'gemini': {
         const cliModel = GEMINI_MODEL_MAP[modelKey] ?? 'gemini-2.5-flash';
         cmd = 'gemini';
+        cliSpec = {
+          runtimeId: 'gemini',
+          binaryName: cmd,
+          humanLabel: 'Gemini CLI',
+          envOverride: 'O8_GEMINI_BIN',
+        };
         args = ['--prompt', prompt, '--output-format', 'stream-json', '--model', cliModel];
         break;
       }
@@ -135,11 +160,31 @@ export async function POST(request: Request) {
         // the spawn is deterministic. opencode/gpt-5-nano is one of opencode's own free
         // hosted models and works without user auth. Issue #512 tracks per-provider rows.
         cmd = 'opencode';
+        cliSpec = {
+          runtimeId: 'opencode',
+          binaryName: cmd,
+          humanLabel: 'OpenCode',
+          envOverride: 'O8_OPENCODE_BIN',
+        };
         args = ['run', '--format', 'json', '-m', 'opencode/gpt-5-nano', prompt];
         break;
       }
       default:
         return NextResponse.json({ error: `Unsupported runtime: ${runtime}` }, { status: 400 });
+    }
+
+    try {
+      cmd = (await resolveCli(cliSpec)).path;
+    } catch (error) {
+      if (!(error instanceof CliNotFoundError)) throw error;
+      return NextResponse.json({
+        error: formatMissingCliError({
+          ...cliSpec,
+          triedPaths: error.triedPaths,
+        }),
+        code: 'runtime_not_installed',
+        runtime,
+      }, { status: 503 });
     }
 
     const stream = new ReadableStream({

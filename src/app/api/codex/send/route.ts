@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server';
 import { spawn } from 'child_process';
 import os from 'os';
-import path from 'path';
+
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
+import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
+import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const CODEX_BIN = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
 
 interface SendRequest {
   message: string;
@@ -70,7 +71,10 @@ function shouldSuppressCodexStderrLine(line: string) {
  * Otherwise starts a new exec session in the given cwd.
  */
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as SendRequest;
+  const body = await req.json().catch(() => null) as SendRequest | null;
+  if (!body) {
+    return Response.json({ error: 'Request body must be valid JSON.' }, { status: 400 });
+  }
   const { message, cwd, threadId, model } = body;
 
   if (!message?.trim()) {
@@ -83,6 +87,42 @@ export async function POST(req: NextRequest) {
   // Expand tilde in workspace paths
   const expandedCwd = cwd?.replace(/^~/, os.homedir());
   const workingDir = expandedCwd || process.cwd();
+  if (expandedCwd) {
+    try {
+      assertOrchestratorRepoPath(expandedCwd);
+    } catch (error) {
+      return Response.json({
+        error: `[repo] ${error instanceof Error ? error.message : 'The workspace is unavailable.'}`,
+        code: 'repo_unavailable',
+      }, { status: 400 });
+    }
+  }
+
+  const cliSpec = {
+    runtimeId: 'codex',
+    binaryName: 'codex',
+    humanLabel: 'Codex',
+    envOverride: 'O8_CODEX_BIN',
+  };
+  let codexBin: string;
+  try {
+    codexBin = (await resolveCli(cliSpec)).path;
+  } catch (error) {
+    if (!(error instanceof CliNotFoundError)) {
+      console.error('[codex-send] Failed to resolve Codex:', error);
+      return Response.json({
+        error: '[runtime] Codex could not be started. Check the server log for details.',
+        code: 'runtime_resolution_failed',
+      }, { status: 500 });
+    }
+    return Response.json({
+      error: formatMissingCliError({
+        ...cliSpec,
+        triedPaths: error.triedPaths,
+      }),
+      code: 'runtime_not_installed',
+    }, { status: 503 });
+  }
 
   // Build command args
   let args: string[];
@@ -103,7 +143,7 @@ export async function POST(req: NextRequest) {
   let markClientGone: (() => void) | null = null;
   const stream = new ReadableStream({
     start(controller) {
-      const child = spawn(CODEX_BIN, args, {
+      const child = spawn(codexBin, args, {
         cwd: workingDir,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],

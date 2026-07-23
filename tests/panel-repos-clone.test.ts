@@ -17,8 +17,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const REAL_HOME = process.env.HOME;
 const REAL_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
-
-let tmpHome: string;
+const REAL_O8_DATA_DIR = process.env.O8_DATA_DIR;
+// Set process-wide path overrides before importing the real route. Modules
+// intentionally bind their store paths once at server startup.
+const tmpHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-clone-test-')));
+process.env.HOME = tmpHome;
+process.env.CORTEX_IDE_DATA_DIR = path.join(tmpHome, '.o8-data');
+process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
+mkdirSync(process.env.CORTEX_IDE_DATA_DIR, { recursive: true });
 let fixtureBare: string;
 
 function git(args: string[], cwd: string) {
@@ -26,13 +32,6 @@ function git(args: string[], cwd: string) {
 }
 
 beforeAll(() => {
-  // realpath so path assertions survive the macOS /var -> /private/var symlink
-  // (the registry realpaths localPath on inspect).
-  tmpHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-clone-test-')));
-  process.env.HOME = tmpHome;
-  process.env.CORTEX_IDE_DATA_DIR = path.join(tmpHome, '.o8-data');
-  mkdirSync(process.env.CORTEX_IDE_DATA_DIR, { recursive: true });
-
   // Build a real repo with one commit, then a bare mirror to clone from.
   const src = path.join(tmpHome, 'fixture-src');
   mkdirSync(src, { recursive: true });
@@ -49,6 +48,8 @@ afterAll(() => {
   else process.env.HOME = REAL_HOME;
   if (REAL_DATA_DIR === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
   else process.env.CORTEX_IDE_DATA_DIR = REAL_DATA_DIR;
+  if (REAL_O8_DATA_DIR === undefined) delete process.env.O8_DATA_DIR;
+  else process.env.O8_DATA_DIR = REAL_O8_DATA_DIR;
 });
 
 async function postRepos(body: unknown) {
@@ -72,8 +73,8 @@ describe('POST /api/panel/repos action=clone (real route handler)', () => {
     // Actually on disk, actually a git repo with the fixture content.
     expect(existsSync(path.join(localPath, '.git'))).toBe(true);
     expect(existsSync(path.join(localPath, 'README.md'))).toBe(true);
-    // Actually in the persisted registry (~/.o8/repos.json under tmp HOME).
-    const store = JSON.parse(readFileSync(path.join(tmpHome, '.o8', 'repos.json'), 'utf-8')) as { repos: Array<{ localPath: string }> };
+    // Actually in the persisted registry under the isolated data directory.
+    const store = JSON.parse(readFileSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'repos.json'), 'utf-8')) as { repos: Array<{ localPath: string }> };
     expect(store.repos.some(r => r.localPath === localPath)).toBe(true);
   }, 60_000);
 

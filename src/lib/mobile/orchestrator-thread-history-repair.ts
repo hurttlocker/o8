@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { getDataDir } from '@/lib/data-dir-migration';
 import { compactTitleFromMessage } from '@/lib/llm/thread-auto-title';
 import {
   isKnownComposerPreambleTitle,
@@ -10,8 +10,7 @@ import {
 import type { OrchestratorHistoryRecord } from './orchestrator-thread-projection';
 
 const COMPOSER_PREAMBLE_REPAIR_MARKER = join(
-  homedir(),
-  '.o8',
+  getDataDir(),
   '.composer-preamble-repaired-v1',
 );
 

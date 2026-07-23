@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 import type {
   MobileTranscriptEntry,
@@ -10,7 +10,7 @@ import type {
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
 
-const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
+const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
 export interface PersistedLlmChatMessage {
   id: string;

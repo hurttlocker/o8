@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { installClaudeCodePreToolHook } from '@/lib/hooks/install-hooks';
+import { getDataDir } from '@/lib/data-dir-migration';
 import type { SetupConfig } from '@/lib/setup/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CONFIG_DIR = join(homedir(), '.o8');
+const CONFIG_DIR = getDataDir();
 const CONFIG_PATH = join(CONFIG_DIR, 'setup.json');
 
 function getDefaultConfig(): SetupConfig {

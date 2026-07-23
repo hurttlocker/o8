@@ -4,9 +4,10 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const REPO_REGISTRY_DISPLAY_PATH = '~/.o8/repos.json';
-const REPO_REGISTRY_PATH = path.join(os.homedir(), '.o8', 'repos.json');
+const REPO_REGISTRY_PATH = path.join(getDataDir(), 'repos.json');
 
 export interface RegisteredRepoPathEntry extends Record<string, unknown> {
   path: string;

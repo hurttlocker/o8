@@ -5,8 +5,8 @@ import type { RenderBootstrapSource, RenderBootstrapState } from '@/lib/render/c
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
 import type { FleetSnapshot } from '@/lib/fleet/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { dirname, join } from 'node:path';
 
@@ -49,7 +49,7 @@ const EMPTY_BROWSER_INVENTORY: BrowserInventorySnapshot = {
   sourceLabel: 'Browser inventory warming…',
   surfaces: [],
 };
-const RENDER_BOOTSTRAP_CACHE_DIR = join(homedir(), '.o8', 'render-bootstrap');
+const RENDER_BOOTSTRAP_CACHE_DIR = join(getDataDir(), 'render-bootstrap');
 const COMMAND_CENTER_BROKER_PATH = join(RENDER_BOOTSTRAP_CACHE_DIR, 'command-center.json');
 const MOBILE_BROKER_PATH = join(RENDER_BOOTSTRAP_CACHE_DIR, 'mobile.json');
 

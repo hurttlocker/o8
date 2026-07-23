@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { readRepoPathRegistry } from './repo-path-registry';
 import {
@@ -19,7 +20,7 @@ import { listRepos } from './registry';
 import { removeRepoFromPool } from './remove';
 import { reconcileSqliteProjectRepos } from './project-membership';
 
-const PROJECTS_DIR = path.join(os.homedir(), '.o8');
+const PROJECTS_DIR = getDataDir();
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
 export const DEFAULT_PROJECT_ID = 'default';
 const DEFAULT_PROJECT_NAME = 'Workspace';
