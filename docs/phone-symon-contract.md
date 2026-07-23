@@ -18,7 +18,11 @@ Original intent preserved below for the still-proposed sections. Desktop seams w
 - Symon task results already persist to `~/.o8/agent.db` `agent_tasks` (`intent_text`, `result_text`, `tool_calls_json`, `status`, `ts`) and emit `o8:agent-task-event` (webview-only).
 - Symon's safety confirms (`confirm_if_needed`) render dock cards **on the Mac only**, answered by Tauri cmd `agent_confirm(task_id, allow)`; unanswered confirms auto-decline at 2 min. The mobile approvals system (`/api/mobile/action`, `@/lib/approvals/store`, ApprovalStack) is a separate system, not wired to Symon.
 - Cancel: `TaskCtx.cancel: AtomicBool` exists; **no remote cancel command**.
-- Transport: paired mobile WS (port 3002), one master ws-token, `/api/mobile/*` middleware-gated (loopback OR Bearer). Existing conversation shapes: `/api/mobile/chat` (streaming, persisted, approvalRequired) and `/api/mobile/orchestrator/threads`.
+- Transport: paired mobile WS (resolved from `O8_WS_PORT` or `~/.o8/ws-port`;
+  development default 47125), one master ws-token, and default-deny
+  `/api/mobile/*` middleware policies. Existing conversation shapes:
+  `/api/mobile/chat` (streaming, persisted, approvalRequired) and
+  `/api/mobile/orchestrator/threads`.
 - Brain selection is GLOBAL (`~/.o8/agent_models.json` `mac_native_action`, default `claude-sonnet-5`); no per-session override exists.
 
 ## v1 contract (phone-text-first)

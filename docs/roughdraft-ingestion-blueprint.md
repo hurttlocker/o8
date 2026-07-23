@@ -335,9 +335,9 @@ stack — a lighter decoration layer (§3).
 - Storage: plain file at `<repoPath>/o8.md`, 256KB cap, `DEFAULT_TEMPLATE`.
   Route `src/app/api/repo-spec/route.ts` — `GET ?repoPath=` returns
   `{ok, content, exists, path}`; `PUT ?repoPath=` writes `{content}`. `runtime=nodejs`,
-  `force-dynamic`. **`/api/repo-spec` is already in `GATED_PREFIXES`**
-  (`src/middleware.ts:137`) → loopback + ws-token enforced; cross-origin needs
-  `Authorization: Bearer <~/.o8/ws-token>`.
+  `force-dynamic`. **`/api/repo-spec` is covered by the default-deny
+  middleware** → operator clients need the ws-token even on loopback, while
+  paired devices and workers receive only the explicitly listed methods.
 - Editor UI: `src/components/desktop/o8-panel/O8SpecPane.tsx` — a single `<textarea>`
   with 800ms debounced autosave, a +/- line-diff chip, and a `surface` (solid/paper) vs
   glass theme split (re-binds `--t-*` tokens). Tab is `O8Tab 'spec'`, label "o8.md"

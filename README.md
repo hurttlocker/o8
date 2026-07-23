@@ -68,9 +68,9 @@ macOS today; Windows and Linux ports are mapped and in progress.
 git clone https://github.com/hurttlocker/o8.git
 cd o8
 npm install
-npm run dev             # Next.js :3001 + WS :3002
-# native shell:
-cd src-tauri && cargo tauri dev
+npm run dev             # Next.js :47120 + WS :47125
+# native shell (starts its own coordinated dev stack):
+npm run tauri:dev
 ```
 
 Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aider`, …) — the first-run picker finds them. No API keys required to start; [`.env.example`](./.env.example) documents every optional one.

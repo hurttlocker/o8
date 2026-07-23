@@ -205,7 +205,7 @@ never accepts tool arguments or repo context. `terminal` accepts only `expired`
 or `preempted`, only with `allow:false`; the Rust gate records that exact reason
 instead of letting the relay relabel an ordinary rejection after the fact.
 
-## WS channel: `symon`  (multiplexed on the existing paired socket, port 3002 — `subscribe("symon", handler)`)
+## WS channel: `symon`  (multiplexed on the paired socket resolved from `O8_WS_PORT` or `~/.o8/ws-port` — `subscribe("symon", handler)`)
 
 All messages are JSON with `channel: "symon"`. DURABLE semantics (queued under backpressure, like `agent-lifecycle`). No audio ever transits this channel in Architecture A.
 

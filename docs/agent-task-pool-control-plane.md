@@ -26,10 +26,10 @@ run scoped tasks through the same packet, lane, lock, and review pipeline.
 4. Worker routing
    - Tasks carry a worker intent: light worker, heavy worker, reviewer,
      diagnostic, or orchestrator.
-   - Runtime routing can later map those intents to Codex, Kimi, MiniMax,
-     Claude Code, Gemini, or opencode without changing task semantics.
-   - Production currently enforces Codex as the selected runtime for every
-     spawned worker, regardless of caller.
+   - Runtime routing maps those intents to any available dispatchable adapter
+     without changing task semantics.
+   - Codex remains the default when no runtime is selected; production no
+     longer pins every worker to Codex.
 
 ## Existing Surfaces To Reuse
 
@@ -136,7 +136,7 @@ Acceptance:
 
 ## Phase 3: Worker Routing
 
-Status: scaffolded with Codex-only production enforcement.
+Status: implemented with capability-gated, multi-runtime production dispatch.
 
 Add worker intent to packet metadata:
 
@@ -146,19 +146,22 @@ Add worker intent to packet metadata:
 - `diagnostic`: logs, reproduction, environment checks.
 - `orchestrator`: decomposition and coordination only.
 
-Routing policy can map intent to runtime/model later:
+Routing policy maps intent to a selected runtime/model:
 
 - MiniMax-style models: light worker.
 - Kimi-style models: heavy worker.
 - Claude: orchestrator/reviewer.
-- Codex: default coding worker until model-specific adapters are enabled.
+- Codex: default coding worker when no dispatchable runtime is selected.
 
 Current production rule:
 
 - `src/lib/agents/routing.ts` is the single routing resolver.
-- `selectedProvider` and `selectedRuntime` always resolve to Codex.
-- `requestedProvider`, `requestedRuntime`, and `requestedModel` are preserved
-  as metadata for future routing, audit, and UI explanation.
+- A requested runtime is honored when `runtime-capabilities.ts` marks it
+  dispatchable; missing binaries or credentials fail readiness with a
+  runtime-specific remediation.
+- Codex remains the fallback when no runtime is selected.
+- Requested and selected provider/runtime/model values remain in routing
+  metadata for audit and UI explanation.
 - `open_lane`, scheduler dispatch, delegate dispatch, mission creation,
   task dispatch, CLI, MCP, and the chat-side `dispatch_codex_task` helper all
   flow through this rule before any session can launch.
@@ -168,7 +171,7 @@ Acceptance:
 - Dispatch can choose worker intent independently from the selected runtime.
 - The task brief tells the worker why it was routed that way.
 - Task pool API/CLI/MCP results expose worker intent and selected runtime.
-- Non-Codex requested providers are recorded but cannot spawn in production.
+- Any launch-capable runtime can spawn in production after its readiness check.
 
 ## Phase 4: Control Room
 

@@ -1,24 +1,42 @@
 # o8 API reference
 
-This is the canonical reference for every HTTP endpoint o8 exposes. All routes live under `src/app/api/` as Next.js route handlers. **245 routes across 23 families** (auto-generated 2026-05-25 against `main`).
+This is the canonical reference for o8's HTTP surface. All routes live under
+`src/app/api/` as Next.js route handlers. The filesystem currently contains
+**303 route files across 34 top-level families** (audited 2026-07-23 against
+`main`).
 
 ## Auth model
 
-o8's API runs in two security tiers:
+o8's API is default-deny:
 
-- **Loopback (default):** requests from `127.0.0.1`, `localhost`, `tauri://localhost`, or same-origin pass automatically. This covers the desktop app's Next.js webview, the bundled MCP servers, and any local CLI invocation.
-- **Cross-origin:** must present `Authorization: Bearer <ws-token>` where the token matches `~/.o8/ws-token` exactly. Mobile clients use this path over Tailscale.
+- **Operator:** stateful and sensitive routes require
+  `Authorization: Bearer <ws-token>`, including requests originating on
+  loopback. The desktop, CLI, and MCP proxy attach the token.
+- **Paired device / worker:** device and worker tokens can reach only the
+  method-and-path capabilities explicitly listed in `src/middleware.ts`.
+- **Public or self-authenticating:** the small public-read, enrollment,
+  webhook, cloud-worker, and service-account surfaces are individually
+  allowlisted or authenticate inside their handlers.
+- **Loopback-read exceptions:** a few iframe and boot resources accept
+  socket-truth loopback because browser navigation cannot attach a bearer.
 
-The middleware at `src/middleware.ts` gates state-mutating routes on this auth tier. The gated prefixes are: `/api/panel/`, `/api/orchestrator/`, `/api/runtime/`, `/api/lanes`, `/api/worktrees`, `/api/review/`, `/api/board/`, `/api/command-center/`, `/api/claude-code/`, `/api/codex/`, `/api/operator/`, `/api/v2/chat`, `/api/cortex/`, `/api/projects`, `/api/automations`, `/api/repo-spec`, `/api/dictation/`, `/api/setup/`, `/api/mobile/push/`, `/api/mobile/push-url`. Read-only routes used during first-run setup (`/api/setup/*` GETs, `/api/v2/auth/*`, `/api/panel/status`, `/api/panel/github-device/*`, `/api/panel/github-auth/*`, `/api/mobile/push/public-key`) are explicitly allowlisted. Worker routes (`/api/cloud/*`, `/api/worker/*`) bypass the loopback+ws-token gate and authenticate via their own service-account bearer tokens inside each handler.
+There is no gated-prefix allowlist. Every `/api/*` route fails closed unless
+`src/middleware.ts` names its public, principal, or self-authenticating policy;
+`tests/route-coverage.test.ts` keeps that policy exhaustive as route files move.
 
-**Never add a new route prefix that touches agent/repo state without going through this gate.** If you need public GET access for setup or OAuth handshakes, put it under `/api/setup/*` as a GET-only endpoint.
+**Never expose a new route by omission.** Add the narrowest explicit
+method-and-path policy and a middleware/route-coverage test in the same change.
 
 ## Conventions
 
-- Every route file exports `runtime = 'nodejs'` and `dynamic = 'force-dynamic'` (no edge runtime, no caching by default).
+- App Router routes use the Node.js runtime unless a route explicitly declares
+  another runtime. Routes that must bypass caching export
+  `dynamic = 'force-dynamic'`; this is not a universal boilerplate requirement.
 - Errors return structured JSON: `{ ok: false, error: '<message>' }` with appropriate HTTP status. Never throw — always return a response.
 - Pagination is opt-in per-route via `?limit=<n>&offset=<n>` query params (not standardized across the surface).
-- Realtime updates ship over WebSocket (`/ws` → port 3002), not Server-Sent Events. See `src/ws-server.ts`.
+- Realtime updates ship over WebSocket (`/ws`) on the dynamically selected port
+  written to `~/.o8/ws-port` (dev default `47125`; packaged block
+  `47105`–`47109`). See `src/ws-server.ts`.
 Note: the realtime `lane-lifecycle` payload carries lane status in the `status` field, not `laneStatus`; client readers should coalesce via `laneStatusOf()` in `src/lib/orchestrator/status-events.ts`.
 
 ## Route reference
@@ -43,7 +61,7 @@ Routes are grouped by their first path segment.
 | POST | `/api/board` | Apply a board mutation with optimistic concurrency (`expectedRevision`). |
 | POST | `/api/board/tasks/[taskId]/start` | Launch a backlog task in plan mode, building the launch prompt. |
 
-### `/api/browser/*` — In-app browser provider surface (not gated)
+### `/api/browser/*` — In-app browser provider surface (gated)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -58,7 +76,7 @@ Routes are grouped by their first path segment.
 | GET | `/api/claude-code/diffs?sessionKey=...&limit=...` | Extract file edit/write operations from Claude Code JSONL for live rendering. |
 | POST | `/api/claude-code/send` | Send a message to a Claude Code session (delegates to `handleClaudeCodeSend`). |
 
-### `/api/cloud/*` — Cloud worker scaffolding (issue #514, not gated)
+### `/api/cloud/*` — Cloud worker scaffolding (self-authenticating)
 
 Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the panel middleware.
 
@@ -81,7 +99,7 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 |---|---|---|
 | GET | `/api/command-center/snapshot?fresh=1` | Full fleet snapshot (cached unless `fresh=1`). |
 
-### `/api/connectors/*` — Third-party data importers (not gated)
+### `/api/connectors/*` — Third-party data importers (gated)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -104,7 +122,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | POST | `/api/cortex/proposals` | Dismiss a directive proposal. |
 | GET | `/api/cortex/recent-outcomes?repoPath=...&limit=...` | Read recent rows from the `session_outcomes` ledger. |
 | GET | `/api/cortex/runtime-recommendation?repoPath=...` | Dispatch routing recommendation backed by `recommendRuntime()`. |
-| POST | `/api/cortex/spec-ingest` | Manually trigger spec ingestion for one or all repos (#1114). |
 | POST | `/api/cortex/symbol-graph` | Resolve symbol references for a repo from explicit list or free-form text. |
 
 ### `/api/dictation/*` — Push-to-talk voice input (gated)
@@ -114,7 +131,7 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | POST | `/api/dictation/transcribe` | Multipart audio upload → OpenRouter transcription endpoint. |
 | POST | `/api/dictation/polish` | Polish raw Whisper transcript via Gemini Flash Lite (adaptive punctuation). |
 
-### `/api/github/*` — GitHub App webhook receiver (not gated)
+### `/api/github/*` — GitHub App webhook receiver (self-authenticating)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -133,12 +150,14 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | POST | `/api/lanes/[id]/heartbeat` | Record an agent heartbeat tick. |
 | GET | `/api/lanes/[id]/scope` | Get the packet scope (paths/files in scope for the packet). |
 | POST | `/api/lanes/apply-diff` | Create a transient worktree and `git apply` a diff blob. |
-| POST | `/api/lanes/reap` | Preview (`force=false`) or reap (`force=true`) zombie lanes. |
 | GET | `/api/lanes/touches?repo=...&packet=...&path=...` | Find lanes touching given paths or a packet's diff. |
 
 ### `/api/mobile/*` — Mobile surface for the native o8-mobile app (partial)
 
-Mobile clients connect over Tailscale and present `Authorization: Bearer <ws-token>`. Most routes self-enforce auth at the handler level. The push subroutes (`/api/mobile/push/`, `/api/mobile/push-url`) are explicitly gated by `src/middleware.ts`; `/api/mobile/push/public-key` is read-only allowlisted.
+Mobile clients present an enrolled device bearer. `src/middleware.ts` grants
+that principal only the named method-and-path capabilities; operator-only
+mobile routes still require the operator bearer. The VAPID public key is the
+narrow read-only exception.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -167,16 +186,19 @@ Mobile clients connect over Tailscale and present `Authorization: Bearer <ws-tok
 | GET | `/api/mobile/review-file?path=...` | Server-side cached review file content. |
 | GET | `/api/mobile/search?q=...` | Universal mobile search across chats, packets, history. |
 | GET | `/api/mobile/session-media?sessionKey=...` | List media attachments per session (currently returns empty scaffold). |
-| GET | `/api/mobile/stream` | SSE heartbeat for legacy mobile clients (live deltas now ride WS). |
 | POST | `/api/mobile/sync` | Reconcile mobile-side cache with server (multi-type sync envelope). |
 | GET | `/api/mobile/ws-token` | Return `~/.o8/ws-token` for mobile WS handshake. |
 
-### `/api/operator/*` — Operator MCP install + status (gated)
+### `/api/mcp` — Operator MCP streamable-HTTP host (gated)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/operator/install` | Read the Claude config + report install status. |
-| POST | `/api/operator/install` | Merge the operator MCP server entry into `~/.claude/settings.json`. |
+| POST | `/api/mcp` | Streamable-HTTP MCP transport for the shared operator tool registry; requires the operator bearer even on loopback. |
+
+### `/api/operator/*` — Operator status (gated)
+
+| Method | Path | Purpose |
+|---|---|---|
 | GET | `/api/operator/status` | Operator runtime status (agent counts, queue depth). |
 
 ### `/api/orchestrator/*` — Orchestrator mission + packet lifecycle (gated)
@@ -187,15 +209,11 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 |---|---|---|
 | GET | `/api/orchestrator/archive` | Read archived orchestrator transcripts from `~/.o8/orchestrator-archives/`. |
 | POST | `/api/orchestrator/compact` | Compact the orchestrator transcript for a repo. |
-| POST | `/api/orchestrator/comparison-meta` | Side-by-side commentary for a completed best-of-n group. |
 | POST | `/api/orchestrator/comparison-pick` | Pick the winner from a best-of-n comparison group. |
-| GET | `/api/orchestrator/cost` | Aggregate mission cost across packets. |
-| POST | `/api/orchestrator/cost` | (no docstring — see source) |
 | POST | `/api/orchestrator/create-mission` | Create a mission shell; validates `OrchestratorRuntime` + `ExistingBranchPolicy`. |
 | POST | `/api/orchestrator/delegate` | Create packet shell + open lane + launch Codex in one step. |
 | POST | `/api/orchestrator/dispatch` | Dispatch a created mission (spawns agent workers). |
 | POST | `/api/orchestrator/headless-tick` | Run one headless sprint tick (used by autonomous loop). |
-| GET | `/api/orchestrator/health` | Health/warm-up snapshot for the merge subsystem. |
 | GET | `/api/orchestrator/lane-events?since=...` | Long-poll for orchestrator-relevant lane events. |
 | POST | `/api/orchestrator/merge` | Approve + merge a packet (`approveAndMergePacket`). |
 | GET | `/api/orchestrator/packet-spec?packetId=...` | Read the packet's structured spec. |
@@ -215,7 +233,8 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 
 ### `/api/panel/*` — Desktop panel surface (gated)
 
-`/api/panel/status` and `/api/panel/github-device/*` are explicitly allowlisted (read-only). Everything else hits the loopback + ws-token gate.
+`/api/panel/status` is the narrow unauthenticated health read. The GitHub
+device flow and every stateful panel route require the operator bearer.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -223,13 +242,10 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | GET | `/api/panel/approvals` | List pending approvals from the shared queue. |
 | POST | `/api/panel/approvals` | Resolve a pending approval. |
 | POST | `/api/panel/assign-issue` | Assign a GitHub issue to an agent (adds comment + label). |
-| GET | `/api/panel/branch-merged?repoPath=...&branch=...&base=main` | Probe whether a branch has been merged into base. |
-| POST | `/api/panel/branch-merged` | Same probe via POST body. |
 | GET | `/api/panel/branches?repo=...` | List branches with diff stats. |
 | POST | `/api/panel/branches` | Create a branch. |
 | DELETE | `/api/panel/branches` | Delete a branch. |
 | POST | `/api/panel/branches/checkout` | Checkout a branch; checks for uncommitted changes first. |
-| POST | `/api/panel/branches/pr` | Create a PR via `gh pr create`. |
 | POST | `/api/panel/browse-folder` | Open native folder picker (macOS osascript). |
 | GET | `/api/panel/ci?repo=...` | Latest CI workflow runs (60s cache). |
 | GET | `/api/panel/ci/[id]?repo=...` | Detail for a single CI workflow run. |
@@ -256,10 +272,8 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | POST | `/api/panel/fleet/invalidate` | Flush the owned-session fleet cache across every runtime. |
 | GET | `/api/panel/git-log?workspace=...` | Parsed git log with structured ref data. |
 | GET | `/api/panel/git-status?workspace=...` | Working tree + branch-vs-main status. |
-| GET | `/api/panel/git-watch?workspace=...` | SSE watcher on `.git/HEAD` and `.git/index`. |
 | GET | `/api/panel/git/log?workspace=...&limit=...` | Compact git log for Loop Status widget (#796). |
-| POST | `/api/panel/github-auth` | Action-driven gh CLI auth (switch / logout / login_token). |
-| POST | `/api/panel/github-device` | GitHub device-flow handshake (allowlisted — public OAuth). |
+| POST | `/api/panel/github-device` | GitHub device-flow handshake (operator bearer required). |
 | GET | `/api/panel/github-status` | Parsed `gh auth status` output. |
 | GET | `/api/panel/ide-surface` | Read persisted IDE surface state (terminal repos, active repo). |
 | POST | `/api/panel/ide-surface` | Persist IDE surface state. |
@@ -269,9 +283,6 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | POST | `/api/panel/issues/enhance` | Enhance issue body via LLM, parallel-fetching repo context. |
 | GET | `/api/panel/lan-host` | Discover first private LAN IPv4 + reachable dev ports for mobile DevHostFrame. |
 | GET | `/api/panel/loop-status` | Read `~/.o8/loop-cron-state.json` for the autonomous-loop widget. |
-| GET | `/api/panel/mcp-servers` | List registered external MCP servers. |
-| POST | `/api/panel/mcp-servers` | Register a new external MCP server. |
-| DELETE | `/api/panel/mcp-servers/[id]` | Remove a registered MCP server (#519). |
 | POST | `/api/panel/mcp-test` | "Test connection" probe for a registered MCP server (stdio or HTTP). |
 | GET | `/api/panel/mobile-pairing` | Mobile pairing payload (Tailscale URL, ws-token, fingerprints) for QR. |
 | POST | `/api/panel/o8-github-summary` | Summarize a repo's recent GitHub activity via OpenRouter free models. |
@@ -298,17 +309,13 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | GET | `/api/panel/prs/[number]?repo=...` | Detail for a single PR. |
 | POST | `/api/panel/prs/[number]` | PR mutation (close / merge / review / comment). |
 | GET | `/api/panel/prs/[number]/comments?repo=...` | List PR comments + reviews. |
-| GET | `/api/panel/qa-evals?limit=...&format=...` | QA eval runs for the regression dashboard (#969, schema v14). |
 | GET | `/api/panel/readme?workspace=...` | First matching README file in a workspace. |
-| GET | `/api/panel/repo-info?workspace=...` | GitHub owner/repo for a given workspace path. |
 | GET | `/api/panel/repo-status?path=...` | "What changed since I last checked" signal set (commit, diff, etc.). |
 | GET | `/api/panel/repos` | List registered repos. |
 | POST | `/api/panel/repos` | Add / touch / update a registered repo. |
 | DELETE | `/api/panel/repos` | Remove a registered repo (with runtime cleanup). |
 | POST | `/api/panel/repos/init` | Initialize a new git repo at the given path. |
 | POST | `/api/panel/repos/scaffold` | Scaffold a repo from a kind (next, tauri, etc.). |
-| GET | `/api/panel/review` | List orchestrator reviews + approvals for a context. |
-| POST | `/api/panel/review` | Record an orchestrator review verdict. |
 | GET | `/api/panel/search?q=...` | Cmd+K command palette server-side fan-out (#661). |
 | GET | `/api/panel/serve-image?path=...` | Serve image file from allowed roots (`$HOME` or `/tmp`). |
 | GET | `/api/panel/session-costs?agent=...` | Persisted runtime-session cost rows from `usage_logs`. |
@@ -317,7 +324,6 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | GET | `/api/panel/supervisor-inbox?includeDismissed=1&scope=all&projectId=...` | Supervisor inbox items + summary. |
 | POST | `/api/panel/supervisor-inbox` | Dismiss / clear inbox items. |
 | POST | `/api/panel/terminal-exec` | Send a command to a dashboard terminal session (WS bridge). |
-| POST | `/api/panel/terminal-image` | Read image file + return IIP escape sequence (renders inline in xterm). |
 | GET | `/api/panel/terminal-sessions` | List alive dashboard terminal sessions. |
 | GET | `/api/panel/terminal-state?scope=...` | Read persisted terminal state for a scope (per-tile JSON file). |
 | POST | `/api/panel/terminal-state` | Persist terminal state for a scope. |
@@ -380,11 +386,10 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | GET | `/api/runtime/inventory?fresh=1` | Runtime inventory snapshot (all adapters in parallel). |
 | POST | `/api/runtime/launch` | Launch a runtime surface (`launchRuntimeSurface`) and publish realtime mutation. |
 | GET | `/api/runtime/review?surfaceId=...` | Owned Codex review packet for a surface. |
-| GET | `/api/runtime/tail?surfaceId=...` | Read runtime tail for an owned or live Codex surface. |
 | GET | `/api/runtime/telemetry?sessionKey=...` | Per-session telemetry from the adapter (when supported). |
 | GET | `/api/runtime/transcript?sessionKey=...&limit=...&sinceId=...` | Read normalized transcript entries (with compaction metadata). |
 
-### `/api/setup/*` — First-run setup wizard (gated; setup GETs allowlisted)
+### `/api/setup/*` — First-run setup wizard (gated)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -402,9 +407,11 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | PATCH | `/api/setup/mcp-servers` | Toggle enabled state for an external MCP server. |
 | DELETE | `/api/setup/mcp-servers` | Remove an external MCP server. |
 
-### `/api/tasks/*` — Task pool mutation surface (not gated)
+### `/api/tasks/*` — Task pool mutation surface (gated)
 
-Each route self-enforces `requirePanelAuth` at the handler level.
+The global middleware requires an affirmative operator, paired-device, or
+worker principal according to the explicit task capability. Mutation wrappers
+also validate the request body and actor at the handler layer.
 
 Every `[taskId]/<action>` route is a thin wrapper around `runTaskMutationRoute` calling the matching `lib/tasks` mutator.
 
@@ -421,7 +428,7 @@ Every `[taskId]/<action>` route is a thin wrapper around `runTaskMutationRoute` 
 | POST | `/api/tasks/[taskId]/remove` | Remove a task with a reason. |
 | POST | `/api/tasks/[taskId]/report` | Report progress / status / metadata for a task. |
 
-### `/api/tts/*` — Text-to-speech (not gated)
+### `/api/tts/*` — Text-to-speech (operator or paired-device capability)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -429,16 +436,17 @@ Every `[taskId]/<action>` route is a thin wrapper around `runTaskMutationRoute` 
 
 ### `/api/v2/*` — v2 API layer: auth, chat, files, BYOK, proxies (partial)
 
-This is the consumer-facing API. Auth via session JWT cookie (`withOptionalAuth` / `requireAuth`) on most routes. `/api/v2/chat*` is additionally gated by `src/middleware.ts`. `/api/v2/auth/*` is allowlisted (any method) so the OAuth handshake works pre-auth.
+This is the consumer-facing API. Route handlers use the session JWT cookie
+where applicable, while the global middleware still requires an allowed
+principal for stateful routes. Only session inspection (read) and logout
+(self-authenticating cookie revocation) are public middleware exceptions.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/v2/auth/github` | Exchange GitHub access token for a session JWT after device flow. |
 | POST | `/api/v2/auth/logout` | Revoke session row + clear auth cookie. |
 | GET | `/api/v2/auth/session` | Read current authenticated user profile. |
 | GET | `/api/v2/chat/ftux` | Personalized first-touch payload for the chat surface. |
 | POST | `/api/v2/chat` | Streaming chat endpoint (free / paid tier routing via gateway). |
-| POST | `/api/v2/chat/send` | Unified chat send — routes BYOK to `/api/v2/proxy/llm`, managed to gateway. |
 | POST | `/api/v2/chat/suggestions` | Augment-Intent-style suggested-reply chips (0-3 short replies, #771). |
 | GET | `/api/v2/chat-history?tabId=...` | Read persisted LLM chat messages per tab. |
 | POST | `/api/v2/chat-history` | Append a message to a tab's history. |
@@ -456,13 +464,12 @@ This is the consumer-facing API. Auth via session JWT cookie (`withOptionalAuth`
 | POST | `/api/v2/proxy/llm` | BYOK provider proxy (Anthropic / OpenAI / OpenRouter / Gemini) with cost computation + cache multipliers. |
 | GET | `/api/v2/repos` | List registered repos from `~/.o8/repos.json`. |
 
-### `/api/worker/*` — Cloud worker event polling (not gated, bearer-token auth)
+### `/api/worker/*` — Cloud worker event polling (self-authenticating)
 
 Workers authenticate with `Authorization: Bearer cwk_*` per-request.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/worker/poll` | Long-poll for next worker event (progress / branch_pushed / completed / errored). |
 | POST | `/api/worker/event` | Submit a worker event for an in-flight run. |
 
 ### `/api/worktrees/*` — Git worktree management (gated)

@@ -1,20 +1,24 @@
-# Tauri Deployment Guide — Cortex IDE
+# Tauri Deployment Guide — o8
 
-> **Status:** Dev server works perfectly. Tauri .app builds and runs but has production-specific issues that need final fixes.
+> **Status:** Historical packaging snapshot from 2026-03-23. Ports, process
+> supervision, panel geometry, signing, and bundled resources have changed.
+> Use `AGENTS.md`, `src-tauri/tauri.conf.json`, `src-tauri/src/lib.rs`, and
+> `scripts/tauri-export.mjs` as current authority; the remaining issue list is
+> retained as history until this guide is rewritten.
 > **Last updated:** 2026-03-23
 > **Author:** Mister (agent session, handoff for next agent)
 
 ## Architecture
 
-Cortex IDE is a **Next.js 16** app that runs inside a **Tauri v2** native shell on macOS.
+o8 is a **Next.js 16** app that runs inside a **Tauri v2** native shell on macOS.
 
 ```
 ┌─────────────────────────────────────────────────┐
 │ Tauri Shell (.app / .dmg)                       │
-│  ├── WebView → loads localhost:3001/dashboard   │
+│  ├── WebView → loads the selected local API port│
 │  ├── Spawns: node server.js (Next.js standalone)│
 │  ├── Spawns: node ws-server.mjs (WebSocket)     │
-│  └── Resources: server/ + bin/cortex            │
+│  └── Resources: server/ + bin/o8                │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -26,8 +30,8 @@ Cortex IDE is a **Next.js 16** app that runs inside a **Tauri v2** native shell 
 | `src-tauri/tauri.conf.json` | Build config — `frontendDist: "../out/frontend"`, resources: `"../out/server": "server/"` |
 | `scripts/tauri-export.mjs` | Prebuild — splits build into `out/frontend/` (loader HTML) + `out/server/` (standalone) |
 | `scripts/bundle-node.mjs` | **DISABLED** — Node.js is now a prerequisite, not bundled |
-| `out/frontend/index.html` | Loader that polls localhost:3001 until server starts, then redirects |
-| `out/server/` | Next.js standalone server + node_modules + ws-server.mjs + bin/cortex |
+| `out/frontend/index.html` | Loader that probes the packaged API port block until the server starts, then redirects |
+| `out/server/` | Next.js standalone server + node_modules + ws-server.mjs + bin/o8 |
 
 ### Build flow
 
@@ -40,17 +44,17 @@ cargo tauri build --target x86_64-apple-darwin   # or aarch64-apple-darwin
 
 The `tauri:prebuild` script in `package.json` runs `next build && node scripts/tauri-export.mjs`.
 
-## Panel Naming (CANONICAL)
+## Panel Naming (CURRENT)
 
 Every agent must use these names consistently:
 
 | Panel | Code Name | Location | Description |
 |---|---|---|---|
-| **AgentPanelChat** | `AgentPanelChat.tsx` | Right sidebar | Agent conversations, session switcher |
-| **WorkspaceTerminal** | `WorkspaceTerminal.tsx` | Center (tile: `terminal`) | Main chat (Gemini), CLI terminals, sessions |
-| **ContextualPanel** | `ContextualPanel.tsx` | Bottom (tile: `contextual-panel`) | Terminals + canvas tabs (files, issues, diffs, timeline) |
-| **ThoughtsChat** | `ThoughtsCard.tsx` | Cmd+J overlay | Quick overlay for tasks/approvals |
-| **NavRail + AgentPanel** | `NavRail.tsx` + `AgentPanel.tsx` | Left sidebar | Navigation + activity/agents/repos |
+| **AgentPanel** | `src/components/desktop/AgentPanel.tsx` | Left column | Repo-grouped agents, projects, and repository activity |
+| **WorkspaceTerminal** | `src/components/desktop/WorkspaceTerminal.tsx` | Center tile | Orchestrator, runtime chat, terminal, and canvas tabs |
+| **O8Panel** | `src/components/desktop/O8Panel.tsx` | Right column | Workspace, browser, PR, activity, inbox, spec, and utility views |
+| **Header strips** | `src/components/desktop/shell/*HeaderStrip.tsx` | Column headers | Window drag regions, workspace tabs, and column controls |
+| **DesktopStatusBar** | `src/components/desktop/DesktopStatusBar.tsx` | Bottom bar | Settings, pairing, ports, alerts, branch, and terminal controls |
 
 ### Tile system
 
@@ -93,11 +97,11 @@ Native modules (`.node` files) are compiled for a specific Node.js ABI version. 
 **Risk:** User's Node version might not match the compiled native modules. May need to add `npm rebuild` to the first-launch flow.
 
 ### 3. `.env.local` not in bundle
-The standalone server runs from inside `Cortex IDE.app/Contents/Resources/server/`. It doesn't have the project's `.env.local`.
+The standalone server runs from inside `o8.app/Contents/Resources/server/`. It doesn't have the project's `.env.local`.
 
-**Current fix:** Keys route reads from `~/.cortex-ide/.env.local`. Developer must copy their `.env.local` there manually. The Settings → API Keys UI writes to this location.
+**Current fix:** Keys route reads from `~/.o8/.env.local`. The Settings → API Keys UI writes to this location.
 
-**For users:** They set keys through the Settings UI, which writes to `~/.cortex-ide/.env.local`.
+**For users:** They set keys through the Settings UI, which writes to `~/.o8/.env.local`.
 
 ### 4. Zombie server processes
 When Tauri closes, the spawned `node server.js` and `node ws-server.mjs` processes may not be killed. They continue running at 100% CPU (especially if they hit error loops).
@@ -116,24 +120,30 @@ Several API routes use `process.cwd()` as the default workspace root. In the Tau
 
 | Path | Purpose |
 |---|---|
-| `~/.cortex-ide/.env.local` | API keys (Anthropic, OpenAI, Google, GitHub) |
-| `~/.cortex-ide/github-app.pem` | GitHub App private key (for authenticated API) |
-| `~/.cortex-ide/cortex-ide.db` | SQLite database (users, usage, sessions) |
-| `~/.cortex-ide/setup.json` | Setup wizard state |
-| `~/.cortex-ide/chat-history/` | LLM chat history |
-| `~/Library/Logs/com.cortexide.app/` | Tauri app logs |
+| `~/.o8/.env.local` | Optional encrypted/local provider keys |
+| `~/.o8/github-app.pem` | GitHub App private key (when configured) |
+| `~/.o8/cortex-ide.db` | SQLite database |
+| `~/.o8/setup.json` | Setup wizard state |
+| `~/.o8/chat-history/` | Persisted chat history |
+| `~/Library/Logs/ai.o8.desktop/o8.log` | Tauri app log |
 
 ## GitHub Integration
 
 - **GitHub App:** "cortex-dev-agent" (App ID: 3167857)
-- **Auth priority:** GitHub App token → PAT (GH_TOKEN) → `gh auth`
-- **Token source:** `src/lib/github-app.ts` generates JWT, exchanges for installation token
-- **Cache:** `src/lib/github/cache.ts` — 5min TTL for issues/PRs/commits, 10min for CI
-- **All `gh` CLI calls:** Go through `src/lib/github.ts` → `ghExec()` which injects the token
+- **Broker auth:** `src/lib/github-broker/auth.ts` resolves managed or BYO
+  GitHub App installation tokens.
+- **BYO token source:** `src/lib/github-app.ts` generates the app JWT and
+  exchanges it for an installation token.
+- **Broker state/cache:** `src/lib/github-broker/` owns synchronized
+  installation/repository state; `src/lib/github/cache.ts` remains the small
+  process-local cache used by legacy reads.
+- **CLI-backed tools:** `src/lib/github/tools.ts` invokes `gh` with argument
+  arrays and relies on the active `gh auth` identity.
 
 Broker rollout note:
 
-- New broker-backed setup and environment requirements are documented in [GITHUB-BROKER-SETUP.md](/Users/marquisehurtt/clawd/repos/cortex-ide/docs/GITHUB-BROKER-SETUP.md)
+- Broker-backed setup and environment requirements are documented in
+  [GITHUB-BROKER-SETUP.md](./GITHUB-BROKER-SETUP.md).
 - Production webhook sync still requires the final public URL before the GitHub App webhook can be completed
 
 ## Repo Selector

@@ -20,7 +20,8 @@ the "desktop real now" half of the build.
   set of 5 on first read (idempotent), `listInvites`, `markSent`,
   `resolveOwner` (GitHub installation login → OS username → `operator`), and the
   `redeemInvite` stub.
-- **Routes** (gated loopback-only via `GATED_PREFIXES` `'/api/invites'`):
+- **Routes** (default-deny middleware; the desktop attaches the operator bearer
+  even on loopback):
   - `GET /api/invites` → `{ owner, invites: [{code, accent, position, status}] }` (ensures + returns).
   - `POST /api/invites/sent { code }` → marks a pass handed out.
   - `POST /api/invites/redeem { code, redeemedBy? }` → **local stub** (see below).
@@ -32,12 +33,12 @@ Railway + Postgres). What remains is the deploy.
 
 ### Central service (`services/license-server`, Hono + Drizzle)
 
-- `invites` table (`src/db/schema.ts`): `code` (PK), `owner`, `accent`,
+- `invites` table (`services/license-server/src/db/schema.ts`): `code` (PK), `owner`, `accent`,
   `position`, `status` (`sent | redeemed`), `redeemed_by`, timestamps.
-- `src/invites.ts`: `registerInvite` (idempotent per owner; rejects a code
+- `services/license-server/src/invites.ts`: `registerInvite` (idempotent per owner; rejects a code
   another owner already holds → desktop regenerates), `resolveInvite`,
   `redeemInvite` (one-time, captures the invitee email).
-- Routes (`src/index.ts`): `POST /invites/register` (scoped
+- Routes (`services/license-server/src/index.ts`): `POST /invites/register` (scoped
   `INVITE_REGISTER_TOKEN` bearer, 503 when unset), `GET /invites/:code`
   (public resolve), `POST /invites/redeem` (public, one-time).
 
@@ -64,7 +65,8 @@ follow-up.
 
 1. **Railway (license-server):** set `INVITE_REGISTER_TOKEN` (`openssl rand -hex 32`);
    deploy; create the table — `railway run npm run db:push` (or local
-   `DATABASE_URL=… npm run db:push`). Smoke: `curl $URL/invites/000-000` →
+   `DATABASE_URL=… npm run db:push`). Smoke:
+   `curl $URL/invites/o8_0123456789abcdefABCDEF` →
    `{"valid":false,"reason":"not_found"}` (404).
 2. **Vercel (o8-site):** set `INVITE_SERVICE_URL=https://<railway-url>`;
    `git push` (auto-deploys to o8.run).

@@ -1,8 +1,15 @@
 # o8 Operator MCP Bridge — What This Unlocks
 
+> **Current transport (2026-07):** the running app hosts the shared operator
+> tool registry once at the token-gated streamable-HTTP endpoint `/api/mcp`.
+> Client configs launch the thin `operator-mcp-proxy` stdio shim; the standalone
+> stdio server remains only for headless use when the app is not running.
+
 ## What We Built
 
-A 5-tool MCP server that turns any Claude Code session into a remote control for o8. The dashboard, mobile app, and Claude Code terminal are now three peer surfaces to the same execution layer.
+An MCP host that turns any compatible client into a remote control for o8. The
+dashboard, mobile app, and terminal clients are peer surfaces over the same
+execution and governance layer.
 
 ```
 Terminal (Claude Code)  →  o8_send, o8_status, o8_approve...  →  o8 API  →  Agents
@@ -10,7 +17,7 @@ Mobile app              →  WebSocket controller               →  o8 API  →
 Dashboard               →  React UI                           →  o8 API  →  Agents
 ```
 
-One-click install from Settings → Agents → "Connect Claude Code."
+Install and inspect client configuration from Settings → MCP.
 
 ---
 
@@ -22,7 +29,9 @@ One-click install from Settings → Agents → "Connect Claude Code."
 
 **3. Headless CI/CD agent orchestration.** A scheduled Claude Code session (via OpenClaw heartbeat or cron) can call `o8_send` to launch nightly tasks, `o8_status` to check completion, `o8_approve` to auto-approve safe merges. No dashboard open. No human in the loop for routine work.
 
-**4. The MCP server IS the API contract.** The 5 tools define what an operator needs. If we can't do something with these 5 tools, we're missing an API — not a UI element. This forces the API to be complete.
+**4. The MCP server IS the API contract.** The shared tool registry defines
+what an operator can reach from external clients. If a control-plane operation
+isn't represented there or in the CLI, the API surface is incomplete.
 
 ---
 
@@ -50,16 +59,13 @@ One-click install from Settings → Agents → "Connect Claude Code."
 
 ---
 
-## The 5 Tools
+## Tool registry
 
-| Tool | Input | What Happens |
-|------|-------|-------------|
-| `o8_send` | "Fix the auth bug" + repoPath | Opens lane, creates worktree, launches Codex agent. Returns session key + early status. |
-| `o8_send` | "Try a different approach" + sessionKey | Steers existing agent with follow-up instruction. |
-| `o8_status` | (optional sessionKey) | Composites: running agents, pending approvals, last 5 events. One API call. |
-| `o8_approve` | approval ID | Resolves pending approval. Triggers merge/push/continue depending on approval type. |
-| `o8_reject` | approval ID + reason | Rejects with feedback. Agent receives the reason. |
-| `o8_history` | sessionKey + limit | Returns truncated transcript of what the agent has been doing. |
+The shared registry now covers fleet status, missions and packets, review and
+merge governance, webview/canvas control, repo-spec annotations, task-pool
+operations, and operator defaults. Tool definitions and handlers are registered
+once in `src/lib/mcp/operator-mcp-host.ts`; both HTTP and standalone stdio
+transports consume that registry.
 
 ## Architecture Decision
 
@@ -69,4 +75,7 @@ This means o8 is not a monolithic IDE — it's a governance API with multiple fr
 
 ---
 
-*Built 2026-03-30. Files: `src/lib/mcp/operator-mcp-server.ts`, `src/app/api/operator/status/route.ts`, `src/app/api/operator/install/route.ts`*
+*Built 2026-03-30; transport consolidated 2026-07. Current seams:
+`src/lib/mcp/operator-mcp-host.ts`, `src/app/api/mcp/route.ts`,
+`src/lib/mcp/operator-mcp-proxy.ts`, and
+`src/app/api/setup/mcp-config/route.ts`.*

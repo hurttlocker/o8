@@ -273,7 +273,8 @@ Paired with text, never standalone.
 
 Icons are raw `<svg>` elements. Never use `@phosphor-icons/react` or `lucide-react` React components — they don't render correctly in the Tauri webview. Extract path data from `@phosphor-icons/react/dist/defs/` and inline the SVG. For simple glyphs (plus, minus, check), prefer HTML entities.
 
-See `src/components/shared/icons/` for the established pattern. Shim system documented in memory `lucide_shim_system.md`.
+See `src/components/desktop/title-bar/icons.tsx` and
+`src/components/desktop/workspace-terminal/icons.tsx` for established patterns.
 
 ### 06.6 Session timeline
 
@@ -434,7 +435,7 @@ Rules that are permanent. No exceptions, no grandfather clauses.
 - Respect the 800-line file ceiling — decompose before adding more lines. `page.tsx` and `ws-server.ts` are waived.
 - Apple HIG: 44px touch targets, 14px card radii, spring curves
 - `as React.CSSProperties` when using vendor-prefixed or non-standard CSS props
-- Build for both runtimes — Codex and Claude Code. The adapter interface allows adding new runtimes later.
+- Build against the runtime capability contract, not a Codex/Claude special case. Every dispatchable runtime must remain truthful about the capabilities it supports.
 - Console logging prefix `[feature-name]`
 - Commit prefix `feat:` / `fix:` / `refactor:` / `perf:` / `chore:`
 - Public changelog safety — `.github/workflows/sync-changelog.yml` scrubs commit messages before public sync. Add new internal codenames to BOTH the sed filter AND the blocklist.
@@ -461,12 +462,13 @@ Components never import palette hex values directly. All palette access flows th
 
 ### Persistence
 
-User's theme choice persists to `localStorage` under key `cortex-theme`. Override via URL param `?theme=light|midnight` for debugging.
+The palette choice persists to `localStorage` under `cortex-theme-palette`;
+`cortex-theme` is read only as a legacy migration key.
 
 ### When adding a new surface
 
 1. Pick the two-theme values from the palette table (§01)
-2. Define tokens in `src/lib/theme/index.ts`
+2. Define tokens in `src/lib/theme/registry.ts`
 3. Reference in component via `var(--t-your-new-token)`
 4. Verify both themes render correctly
 5. Check contrast ratios hit AA

@@ -329,7 +329,7 @@ o8 has no `qa.rs`. **Create `src-tauri/src/qa.rs`** + `src-tauri/src/ai/gemini_a
 
 **Unary bridge = v1 default** (`aqua gemini_ask.rs:558-595`, FORK E): `STREAMING_PREF_KEY` defaults FALSE → `ask_stream` calls `ask_with_cards` once and fires `on_delta(&answer)` ONCE with the full answer → emit a single `o8:ask-stream-delta` then `o8:ask-stream-done` (UI **snaps**, doesn't type). Port the SSE parser (`ask_stream_real`) too but gate it behind an o8 pref (dead-ready). `cancel_rx` → a `cancel_ask_stream` command (single-slot oneshot).
 
-**FORK A path 2 (alternative):** skip `qa.rs` and have the UP-edge thread POST the polished transcript to o8's existing `/api/cortex/ask` (loopback passes the middleware gate; `/api/cortex/` is in `GATED_PREFIXES`), then emit its SSE tokens as `o8:ask-stream-delta`/`done`. Simpler, reuses done work, but diverges from aqua's prompt/intent/screenshot bundle. **Recommend path 1 (Rust port)** for fidelity if screenshot/selection context matters; path 2 if a fast text-only Ask is acceptable.
+**FORK A path 2 (alternative):** skip `qa.rs` and have the UP-edge thread POST the polished transcript to o8's existing `/api/cortex/ask` with the operator bearer (the route is default-deny, including on loopback), then emit its SSE tokens as `o8:ask-stream-delta`/`done`. Simpler, reuses done work, but diverges from aqua's prompt/intent/screenshot bundle. **Recommend path 1 (Rust port)** for fidelity if screenshot/selection context matters; path 2 if a fast text-only Ask is acceptable.
 
 ## C.3 — Dock answer panel (React, inline styles)
 

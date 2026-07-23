@@ -319,7 +319,8 @@ If the status is not `verified`, label it clearly in the docs or leave it out of
 
 - [ ] Start the app only when needed for screenshot/behavior verification.
   - Command: `npm run dev`
-  - Default ports: Next `3001`, WebSocket `3002`.
+  - Development defaults: Next `47120`, WebSocket `47125`; packaged installs
+    resolve their dynamic ports from `~/.o8/api-port` and `~/.o8/ws-port`.
 - [ ] Capture desktop screenshots for:
   - [ ] First-run / repo connect.
   - [ ] Dashboard shell.
@@ -438,4 +439,3 @@ Ask these only after the repo audit produces concrete options:
 - [ ] Professional docs output list is prioritized.
 - [ ] Open questions for Q are short, specific, and decision-oriented.
 - [ ] A future docs freshness automation path is specified but not overbuilt.
-
