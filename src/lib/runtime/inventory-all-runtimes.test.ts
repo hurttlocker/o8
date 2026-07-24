@@ -66,7 +66,9 @@ function runtime(id: 'gemini' | 'aider'): AgentRuntime {
       canInterrupt: false,
       canReviewDiffs: true,
     },
-    lastActivityAt: new Date(),
+    lastActivityAt: new Date(
+      id === 'gemini' ? '2026-07-24T12:00:01.000Z' : '2026-07-24T12:00:00.000Z',
+    ),
   };
 
   return {
