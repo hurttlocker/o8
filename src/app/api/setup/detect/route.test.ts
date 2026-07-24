@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('node:child_process', () => ({
-  execFileSync: () => {
-    throw new Error('missing cli');
-  },
-}));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execFileSync: () => {
+      throw new Error('missing cli');
+    },
+  };
+});
 
 vi.mock('@/lib/runtimes/shared/cli-locate', () => ({
   scanAndLink: () => null,
@@ -28,6 +32,10 @@ describe('GET /api/setup/detect', () => {
     const response = await GET();
     const data = await response.json() as {
       tools: Array<{ id: string; name: string; detected: boolean; ready?: boolean; authHint?: string }>;
+      codexVoiceCapability?: {
+        capable: boolean;
+        installation: { installed: boolean };
+      };
     };
 
     expect(response.status).toBe(200);
@@ -41,5 +49,9 @@ describe('GET /api/setup/detect', () => {
       expect(tool?.ready).toBeUndefined();
       expect(tool?.authHint).toBeUndefined();
     }
+    expect(data.codexVoiceCapability).toMatchObject({
+      capable: false,
+      installation: { installed: false },
+    });
   });
 });
