@@ -373,6 +373,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
   const [activeTab, setActiveTab] = useState<'all' | 'issues' | 'prs'>('all');
   const [selectedRepo, setSelectedRepo] = useState('all');
   const [diffSheet, setDiffSheet] = useState<{ repo: string; pr: PR } | null>(null);
+  const [loadNote, setLoadNote] = useState<string | null>(null);
 
   const handleOpenPRDiff = useCallback(
     (repo: string, pr: PR) => {
@@ -414,6 +415,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
     if (validRepos.length === 0) {
       setIssues([]);
       setPRs([]);
+      setLoadNote('No GitHub repositories are registered. Add an owner/repo above to begin.');
       setLoading(false);
       return;
     }
@@ -423,24 +425,36 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
     if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
     const issueResults: { issue: Issue; repo: string }[] = [];
     const prResults: { pr: PR; repo: string }[] = [];
+    const errors: string[] = [];
     await Promise.all(
       validRepos.map(async (repo) => {
         try {
           const issueResponse = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`, { headers });
-          const issueData = await issueResponse.json();
+          const issueData = await issueResponse.json() as { issues?: Issue[]; error?: string };
+          if (!issueResponse.ok || issueData.error) {
+            errors.push(issueData.error?.trim() || `Could not load issues for ${repo}.`);
+          }
           for (const issue of issueData.issues ?? []) issueResults.push({ issue, repo });
-        } catch {}
+        } catch {
+          errors.push(`Could not load issues for ${repo}.`);
+        }
         try {
           const prResponse = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`, { headers });
-          const prData = await prResponse.json();
+          const prData = await prResponse.json() as { prs?: PR[]; error?: string };
+          if (!prResponse.ok || prData.error) {
+            errors.push(prData.error?.trim() || `Could not load pull requests for ${repo}.`);
+          }
           for (const pr of prData.prs ?? []) prResults.push({ pr, repo });
-        } catch {}
+        } catch {
+          errors.push(`Could not load pull requests for ${repo}.`);
+        }
       })
     );
     issueResults.sort((a, b) => b.issue.number - a.issue.number);
     prResults.sort((a, b) => b.pr.number - a.pr.number);
     setIssues(issueResults);
     setPRs(prResults);
+    setLoadNote(errors[0] ?? null);
     setLoading(false);
   }, []);
 
@@ -465,6 +479,17 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
 
   const filteredIssues = selectedRepo === 'all' ? issues : issues.filter((entry) => entry.repo === selectedRepo);
   const filteredPRs = selectedRepo === 'all' ? prs : prs.filter((entry) => entry.repo === selectedRepo);
+  const activeResultsEmpty = activeTab === 'all'
+    ? filteredIssues.length === 0 && filteredPRs.length === 0
+    : activeTab === 'issues'
+      ? filteredIssues.length === 0
+      : filteredPRs.length === 0;
+  const emptyMessage = loadNote
+    ?? (activeTab === 'issues'
+      ? 'No open issues'
+      : activeTab === 'prs'
+        ? 'No open pull requests'
+        : 'No open issues or pull requests');
 
   const tabs: { key: 'all' | 'prs' | 'issues'; label: string; count: number }[] = [
     { key: 'all', label: 'All', count: filteredIssues.length + filteredPRs.length },
@@ -594,6 +619,24 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
           </div>
         ) : (
           <>
+            {loadNote && !activeResultsEmpty ? (
+              <div
+                style={{
+                  paddingTop: 12,
+                  paddingRight: 16,
+                  paddingBottom: 12,
+                  paddingLeft: 16,
+                  textAlign: 'center',
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                  borderRadius: 14,
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.cardBorder}`,
+                }}
+              >
+                {loadNote}
+              </div>
+            ) : null}
             {(activeTab === 'all' || activeTab === 'prs') && filteredPRs.length > 0 ? (
               <>
                 {activeTab === 'all' ? <SectionHeader label="Pull Requests" /> : null}
@@ -610,10 +653,13 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
                 ))}
               </>
             ) : null}
-            {activeTab === 'prs' && filteredPRs.length === 0 ? (
+            {activeResultsEmpty ? (
               <div
                 style={{
-                  padding: '32px 20px',
+                  paddingTop: 32,
+                  paddingRight: 20,
+                  paddingBottom: 32,
+                  paddingLeft: 20,
                   textAlign: 'center',
                   color: colors.textSecondary,
                   fontSize: 14,
@@ -622,22 +668,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
                   border: `1px solid ${colors.cardBorder}`,
                 }}
               >
-                No open PRs
-              </div>
-            ) : null}
-            {activeTab === 'issues' && filteredIssues.length === 0 ? (
-              <div
-                style={{
-                  padding: '32px 20px',
-                  textAlign: 'center',
-                  color: colors.textSecondary,
-                  fontSize: 14,
-                  borderRadius: 14,
-                  background: colors.cardBg,
-                  border: `1px solid ${colors.cardBorder}`,
-                }}
-              >
-                No open issues
+                {emptyMessage}
               </div>
             ) : null}
           </>

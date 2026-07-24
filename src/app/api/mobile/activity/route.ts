@@ -17,9 +17,8 @@ export const dynamic = 'force-dynamic';
  * merge / alert. The packet model only tracks the *latest* event timestamp, so
  * this is one event per packet, not a full per-transition timeline.
  *
- * Auth: the whole `/api/mobile/*` surface (except `push/*`) is intentionally
- * ungated in `src/middleware.ts` so LAN/Tailscale mobile clients can reach it.
- * No auth code here — mirrors the sibling mobile routes.
+ * Auth is enforced centrally by middleware for browser operator tokens and
+ * scoped native-device tokens.
  *
  * Never throws — any failure degrades to `{ events: [] }` (or whatever was
  * collected so far). Commits alone are a complete v1; the packet fold-in is
@@ -208,11 +207,15 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
           || packet.lane?.lastEventLabel === 'huddle_ready'
           || (lane?.status === 'awaiting_orchestrator' && (lane.lastEventLabel === 'huddle' || lane.lastEventLabel === 'huddle_ready'));
         let kind: MobileActivityEvent['kind'];
-        if (released || packet.status === 'archived') {
+        if (released) {
           kind = 'merge';
         } else if (huddleLabel) {
           kind = 'huddle';
-        } else if (packet.status === 'failed' || packet.status === 'blocked') {
+        } else if (
+          packet.status === 'failed'
+          || packet.status === 'blocked'
+          || packet.status === 'archived'
+        ) {
           kind = 'alert';
         } else if (packet.status === 'awaiting_review') {
           kind = 'awaiting_review';
@@ -230,7 +233,8 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
 
         const title = packet.title?.trim() || packet.summary?.trim() || 'Untitled packet';
         const branch = packet.branchTarget?.trim();
-        const detail = packet.lastEventLabel?.trim()
+        const detail = packet.recovery?.message?.trim()
+          || packet.lastEventLabel?.trim()
           || (branch ? `${branch} → main` : undefined);
         const huddlePlan = lane
           ? [...getLaneEvents(lane.id, 100)].reverse().find((event) =>
@@ -247,7 +251,11 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
           kind,
           title: title.slice(0, 160),
           detail: kind === 'huddle' ? 'Huddling — aligned its plan, awaiting orchestrator' : detail,
-          comments: typeof huddlePlan === 'string' && huddlePlan.trim() ? [huddlePlan.trim()] : undefined,
+          comments: typeof huddlePlan === 'string' && huddlePlan.trim()
+            ? [huddlePlan.trim()]
+            : packet.recovery?.message
+              ? [packet.recovery.message]
+              : undefined,
           repo,
           previewUrl: repo ? previewUrlForRepo(repo, previewContext) : undefined,
           timestamp,

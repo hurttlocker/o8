@@ -21,11 +21,8 @@ export const dynamic = 'force-dynamic';
  *   4. Map each packet → MobileOrchestratorAgent, computing per-worktree diff
  *      stats with the same git logic /api/worktrees/diff-summary uses.
  *
- * Auth: this mirrors the sibling /api/mobile/orchestrator/threads route, which
- * does NOT call requirePanelAuth — the whole /api/mobile/* surface (except
- * push/*) is intentionally ungated in src/middleware.ts so LAN/Tailscale mobile
- * clients can reach it. /api/mobile/orchestrator/ is deliberately absent from
- * GATED_PREFIXES; do not add it.
+ * Auth is enforced centrally by middleware. Browser pairing supplies the
+ * operator token; enrolled native clients use their scoped device token.
  *
  * Returns: { agents: MobileOrchestratorAgent[] }. Empty/missing repoPath, or no
  * matching packets → { agents: [] }. Never throws — failures degrade to [].
@@ -40,6 +37,7 @@ import { findLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { Lane } from '@/lib/lane/types';
 import type { MobileOrchestratorAgent } from '@/lib/mobile/types';
+import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 
 const execFileAsync = promisify(execFile);
 
@@ -69,11 +67,10 @@ function repoOwnsCandidate(repoPath: string, candidate: string | null | undefine
  *   launching, running, idle,     → running   (launching/recovering are
  *     recovering                              transient "in flight" states)
  *   awaiting_review               → awaiting_review
- *   released, archived            → merged    (released = merged to base;
- *                                              archived terminal packets are
- *                                              shown as merged for the pill)
- *   failed, blocked               → failed    (blocked = stuck, surfaced as
- *                                              failed so the operator notices)
+ *   released                      → merged
+ *   archived, failed, blocked     → failed    (archived is not evidence of a
+ *                                              merge; recovery details remain
+ *                                              attached when work was preserved)
  *
  * releaseState === 'released' wins over status (a released packet may still
  * carry a stale status), matching packetVisualState() in repo-focus/utils.ts.
@@ -104,7 +101,6 @@ function mapPacketStatus(packet: OrchestratorPacket, lane: Lane | null): MobileO
   if (isHuddlingPacket(packet, lane)) return 'huddling';
   switch (packet.status) {
     case 'archived':
-      return 'merged';
     case 'failed':
     case 'blocked':
       return 'failed';
@@ -186,10 +182,7 @@ function packetRuntime(
   lane: Lane | null,
 ): MobileOrchestratorAgent['runtime'] {
   const runtime = lane?.runtime ?? packet.runtime;
-  if (runtime === 'claude-code' || runtime === 'codex' || runtime === 'gemini' || runtime === 'opencode') {
-    return runtime;
-  }
-  return 'unknown';
+  return isDispatchableRuntime(runtime) ? runtime : 'unknown';
 }
 
 function packetTitle(packet: OrchestratorPacket): string {
@@ -247,6 +240,7 @@ export async function GET(req: NextRequest) {
           deletions: diff.deletions,
           huddlePlan: latestHuddlePlan(lane),
           lastEventLabel: lane?.lastEventLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,
+          recovery: packet.recovery ?? null,
           // Lane runtime session key only when the lane is live (findLaneByPacket
           // already excludes archived/completed/failed lanes). null otherwise.
           sessionKey: lane?.sessionKey ?? null,

@@ -18,19 +18,21 @@ const STORAGE_KEY = 'o8:mobile-ws-token';
 
 function captureHashToken(): string | null {
   try {
-    const match = window.location.hash.match(/[#&]tk=([^&]+)/);
-    if (!match?.[1]) return null;
-    const token = decodeURIComponent(match[1]);
+    const hash = window.location.hash.startsWith('#')
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+    const params = new URLSearchParams(hash);
+    const token = params.get('tk');
+    if (!token) return null;
     try {
       window.localStorage.setItem(STORAGE_KEY, token);
     } catch {
       // Private-mode storage failure — token still usable for this page load.
     }
     // Scrub the credential from the visible URL / history entry.
-    const cleanedHash = window.location.hash
-      .replace(/[#&]tk=[^&]*/, '')
-      .replace(/^#&/, '#')
-      .replace(/^#$/, '');
+    params.delete('tk');
+    const remainingHash = params.toString();
+    const cleanedHash = remainingHash ? `#${remainingHash}` : '';
     window.history.replaceState(
       window.history.state,
       '',

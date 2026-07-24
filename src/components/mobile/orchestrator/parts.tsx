@@ -11,6 +11,10 @@ import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
 } from '@/lib/mobile/types';
+import {
+  ORCHESTRATOR_RUNTIMES,
+  isOrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { useTheme } from '../ThemeContext';
 import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
 import { IconClock } from '@/app/mobile/mobile-approvals-shared';
@@ -114,13 +118,9 @@ export function SendIcon({ size = 16 }: { size?: number }) {
 }
 
 export function runtimeLabel(runtime: MobileOrchestratorRuntime): string {
-  switch (runtime) {
-    case 'claude-code': return 'Claude';
-    case 'codex': return 'Codex';
-    case 'gemini': return 'Gemini';
-    case 'opencode': return 'opencode';
-    default: return 'Brain';
-  }
+  return isOrchestratorRuntime(runtime)
+    ? ORCHESTRATOR_RUNTIMES[runtime].shortLabel
+    : 'Agent';
 }
 
 export function relativeLabel(iso: string): string {
