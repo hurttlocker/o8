@@ -38,6 +38,7 @@ import {
   getPendingQueue,
   isPendingStale,
   removePending,
+  refreshPending,
   PENDING_QUEUE_MAX,
   type PendingQueueItem,
 } from '@/lib/mobile/pending-queue';
@@ -85,6 +86,7 @@ const STREAM_FLUSH_MS = 60;
 const PERSIST_DEBOUNCE_MS = 800;
 
 interface ChatHistoryMessage {
+  id?: string;
   role?: string;
   content?: string;
 }
@@ -125,8 +127,12 @@ function historyToTranscript(messages: ChatHistoryMessage[]): MobileOrchestrator
         : message.role === 'assistant' ? 'assistant'
           : message.role === 'tool' ? 'tool'
             : 'system';
+    const entryId = typeof message.id === 'string' && message.id.trim()
+      ? message.id
+      : `history-${counter}`;
+    counter += 1;
     entries.push({
-      id: `history-${counter++}`,
+      id: entryId,
       role,
       text,
       timestamp: Date.now() - (messages.length - counter),
@@ -397,6 +403,25 @@ export function useOrchestratorMobile({
       }
 
       switch (eventType) {
+        case 'send-ack': {
+          const clientMessageId = typeof data.clientMessageId === 'string'
+            ? data.clientMessageId
+            : typeof data.clientMutationId === 'string'
+              ? data.clientMutationId
+              : null;
+          const ackThreadId = typeof data.threadId === 'string'
+            ? data.threadId
+            : currentRoute?.threadId ?? null;
+          if (!clientMessageId || !ackThreadId) break;
+          removePending('orchestrator', ackThreadId, clientMessageId);
+          pendingItemsRef.current.delete(clientMessageId);
+          setTranscript((current) => current.map((entry) =>
+            entry.queueId === clientMessageId
+              ? { ...entry, queued: false, queueId: undefined, queueStale: undefined }
+              : entry,
+          ));
+          break;
+        }
         case 'output': {
           const text = typeof data.text === 'string' ? data.text : '';
           const thinking = data.thinking === true;
@@ -613,8 +638,10 @@ export function useOrchestratorMobile({
     setTranscript((current) => {
       const existingIds = new Set(
         current
-          .filter((entry) => entry.queueId)
-          .map((entry) => entry.queueId as string),
+          .flatMap((entry) => [
+            ...(entry.queueId ? [entry.queueId] : []),
+            ...(entry.id.startsWith('orch-user-') ? [entry.id.slice('orch-user-'.length)] : []),
+          ]),
       );
       const additions = stored
         .filter((item) => !existingIds.has(item.id))
@@ -646,20 +673,11 @@ export function useOrchestratorMobile({
       if (isPendingStale(item)) continue;
       const sent = dispatchOverWs(item.text, item.id);
       if (!sent) break;
-      removePending('orchestrator', tabId, item.id);
-      pendingItemsRef.current.delete(item.id);
       drainedAny = true;
       if (!promotedBusy) {
         setTurnStatus('busy');
         promotedBusy = true;
       }
-      // Flip the queued bubble into a normal user bubble so the message
-      // commits visually as it commits over the wire.
-      setTranscript((current) => current.map((entry) =>
-        entry.queueId === item.id
-          ? { ...entry, queued: false, queueId: undefined, queueStale: undefined }
-          : entry,
-      ));
     }
     if (drainedAny) {
       setErrorNote(null);
@@ -671,50 +689,29 @@ export function useOrchestratorMobile({
   const sendMessage = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const ws = wsRef.current;
     const route = routeRef.current;
     const tabId = activeThreadIdForQueue;
     if (!route) {
       setErrorNote('Pick a thread with a repo first.');
       return;
     }
-    const wsOpen = ws && ws.readyState === WebSocket.OPEN;
-    if (!wsOpen) {
-      // Offline path — enqueue + show a queued bubble.
-      if (!tabId) {
-        setErrorNote('Not connected — try again in a moment.');
-        return;
-      }
-      const queueId = generatePendingId();
-      const item = enqueuePending('orchestrator', tabId, trimmed, queueId);
-      if (!item) {
-        setErrorNote(`Queue full (${PENDING_QUEUE_MAX}). Wait for reconnect.`);
-        return;
-      }
-      pendingItemsRef.current.set(item.id, item);
-      setErrorNote(null);
-      setTranscript((current) => [...current, buildQueuedTranscriptEntry(item)]);
+    if (!tabId) {
+      setErrorNote('Not connected — try again in a moment.');
       return;
     }
-
-    if (mobileOrchestratorRouteKey(subscribedRouteRef.current) !== mobileOrchestratorRouteKey(route)) {
-      sendSubscription(ws);
+    const item = enqueuePending('orchestrator', tabId, trimmed, generatePendingId());
+    if (!item) {
+      setErrorNote(`Queue full (${PENDING_QUEUE_MAX}). Wait for reconnect.`);
+      return;
     }
-
+    pendingItemsRef.current.set(item.id, item);
     setErrorNote(null);
-    setTurnStatus('busy');
-    setTranscript((current) => [
-      ...current,
-      {
-        id: transcriptIdFor('user'),
-        role: 'user',
-        text: trimmed,
-        timestamp: Date.now(),
-      },
-    ]);
+    setTranscript((current) => [...current, buildQueuedTranscriptEntry(item)]);
     streamingBufferRef.current = null;
-    ws.send(JSON.stringify(buildMobileOrchestratorSend(route, trimmed)));
-  }, [activeThreadIdForQueue, buildQueuedTranscriptEntry, sendSubscription]);
+    if (dispatchOverWs(item.text, item.id)) {
+      setTurnStatus('busy');
+    }
+  }, [activeThreadIdForQueue, buildQueuedTranscriptEntry, dispatchOverWs]);
 
   const retryQueued = useCallback((queueId: string) => {
     const tabId = activeThreadIdForQueue;
@@ -723,18 +720,16 @@ export function useOrchestratorMobile({
       ?? getPendingQueue('orchestrator', tabId).find((entry) => entry.id === queueId)
       ?? null;
     if (!item) return;
-    // Reset queuedAt so it's no longer stale, then immediately try to drain.
-    removePending('orchestrator', tabId, queueId);
-    const replacement = enqueuePending('orchestrator', tabId, item.text, generatePendingId());
+    // Reset queuedAt while preserving the idempotency identity, then retry.
+    const replacement = refreshPending('orchestrator', tabId, queueId);
     if (!replacement) {
-      setErrorNote(`Queue full (${PENDING_QUEUE_MAX}). Wait for reconnect.`);
+      setErrorNote('This queued message is no longer available.');
       return;
     }
-    pendingItemsRef.current.delete(queueId);
     pendingItemsRef.current.set(replacement.id, replacement);
     setTranscript((current) => current.map((entry) =>
       entry.queueId === queueId
-        ? { ...entry, queueId: replacement.id, queueStale: false, timestamp: replacement.queuedAt, id: `queued:${replacement.id}` }
+        ? { ...entry, queueStale: false, timestamp: replacement.queuedAt }
         : entry,
     ));
     drainQueue();

@@ -17,7 +17,7 @@ function reviewUnitSignature(unit: MobileInboxSnapshot['reviewUnits'][number]) {
 }
 
 function fleetSessionSignature(session: MobileInboxSnapshot['fleetSessions'][number]) {
-  return `${session.id}:${session.sessionKey}:${session.runtime}:${session.status}:${session.title}:${session.repo}:${session.repoPath}:${session.branch}:${session.worktreePath ?? ''}:${session.terminalSessionName ?? ''}:${session.terminalAvailable ? 1 : 0}:${session.previewUrl ?? ''}:${session.approvalId ?? ''}:${session.reviewAuthority ?? ''}:${session.actions.join(',')}:${session.lastEventAt ?? ''}:${session.lastActivityAt ?? ''}:${session.huddlePlan ?? ''}`;
+  return `${session.id}:${session.sessionKey}:${session.runtime}:${session.runtimeLabel}:${session.runtimeAccent}:${session.status}:${session.title}:${session.repo}:${session.repoPath}:${session.branch}:${session.worktreePath ?? ''}:${session.terminalSessionName ?? ''}:${session.terminalAvailable ? 1 : 0}:${session.previewUrl ?? ''}:${session.approvalId ?? ''}:${session.reviewAuthority ?? ''}:${session.actions.join(',')}:${session.lastEventAt ?? ''}:${session.lastActivityAt ?? ''}:${session.huddlePlan ?? ''}`;
 }
 
 function reviewSignature(review: MobileInboxSnapshot['review']) {

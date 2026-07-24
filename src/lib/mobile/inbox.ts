@@ -9,6 +9,10 @@ import type { MobileControlAction, MobileFleetAction, MobileFleetRuntime, Mobile
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 import { getMobileSessionTranscript } from '@/lib/mobile/history';
 import { buildMobileReviewUnits, shouldExposeWorkspaceReviewSnapshot, summarizeMobileReviewUnits } from '@/lib/mobile/review-units';
+import {
+  isDispatchableRuntime,
+  ORCHESTRATOR_RUNTIMES,
+} from '@/lib/orchestrator/runtime-capabilities';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const runtimeSurface = agent.runtimeSurface;
@@ -116,7 +120,7 @@ function shouldExposeMobileSession(agent: AgentSummary) {
     return Boolean(agent.isCurrentSession) || Boolean(agent.currentTask.trim());
   }
 
-  return agent.runtime === 'codex' || agent.runtime === 'claude-code';
+  return isDispatchableRuntime(agent.runtime);
 }
 
 async function stripDeadTerminalSessions(sessions: AgentSummary[]): Promise<AgentSummary[]> {
@@ -150,7 +154,7 @@ export function mobileSessionIdentity(agent: AgentSummary) {
 }
 
 function mobileFleetRuntime(runtime: string): MobileFleetRuntime {
-  if (runtime === 'codex' || runtime === 'claude-code' || runtime === 'openclaw' || runtime === 'hermes') {
+  if (isDispatchableRuntime(runtime) || runtime === 'openclaw' || runtime === 'hermes') {
     return runtime;
   }
   return 'unknown';
@@ -188,13 +192,19 @@ function mobileFleetActions(agent: AgentSummary, approval?: ApprovalRecord): Mob
 
 export function toMobileFleetSession(agent: AgentSummary, approval?: ApprovalRecord): MobileFleetSession {
   const surface = agent.runtimeSurface;
+  const runtime = mobileFleetRuntime(agent.runtime);
+  const runtimeCapability = isDispatchableRuntime(runtime)
+    ? ORCHESTRATOR_RUNTIMES[runtime]
+    : null;
   const repoPath = surface?.cwd ?? agent.workspace;
   const branch = surface?.reviewContext?.branch ?? surface?.branch ?? agent.branch;
   const previewUrl = agent.browserSurface?.url ?? surface?.browserSurface?.url ?? null;
   return {
     id: mobileSessionIdentity(agent),
     sessionKey: agent.sessionKey,
-    runtime: mobileFleetRuntime(agent.runtime),
+    runtime,
+    runtimeLabel: runtimeCapability?.label ?? agent.runtime,
+    runtimeAccent: runtimeCapability?.accentColor ?? '#64748b',
     status: mobileFleetStatus(agent, approval),
     title: agent.surfaceLabel ?? surface?.title ?? agent.name,
     repo: surface?.reviewContext?.repoSlug ?? agent.workspace,
@@ -294,7 +304,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
   const fresh = options.fresh ?? false;
   const fleet = await getRuntimeInventorySnapshot({ fresh });
   const inventorySessions = fleet.agents
-    .filter((agent) => agent.runtime === 'codex' || agent.runtime === 'claude-code')
+    .filter(shouldExposeMobileSession)
     .map((agent, index) => ({ agent, index }))
     .sort((left, right) => {
       const priorityDiff = mobileSessionPriority(right.agent) - mobileSessionPriority(left.agent);
@@ -572,7 +582,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     sourceLabel: fleet.meta.sourceLabel,
     primarySessionKey: primarySession?.sessionKey,
     note: fleet.meta.mode === 'live'
-      ? 'Mobile now reflects the local Codex and Claude Code runtime inventory, plus IDE chat and review state.'
+      ? 'Mobile reflects every dispatchable local runtime, plus IDE chat and review state.'
       : fleet.meta.note,
     sessions: orderedSessions,
     fleetSessions,

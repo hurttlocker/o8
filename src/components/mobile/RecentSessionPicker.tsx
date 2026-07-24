@@ -3,6 +3,10 @@
 import { memo, type CSSProperties, type ReactNode } from 'react';
 import type { AgentDisplayName, CompactLine, SessionSummary } from './types';
 import { useTheme } from './ThemeContext';
+import {
+  isDispatchableRuntime,
+  ORCHESTRATOR_RUNTIMES,
+} from '@/lib/orchestrator/runtime-capabilities';
 
 interface RecentSessionPickerProps {
   sessions: SessionSummary[];
@@ -340,6 +344,7 @@ function ChevronRightIcon({ color }: { color: string }) {
 
 export function areSessionListRowsEqual(prev: SessionSummary, next: SessionSummary) {
   return prev.sessionKey === next.sessionKey
+    && prev.runtime === next.runtime
     && prev.status === next.status
     && prev.name === next.name
     && prev.currentTask === next.currentTask
@@ -532,6 +537,9 @@ const DefaultSessionRow = memo(function DefaultSessionRow({
 
   const title = renderSessionName(session) || session.name?.trim() || session.surfaceLabel?.trim() || 'Agent';
   const task = session.currentTask?.trim() || 'Waiting for input.';
+  const runtimeCapability = isDispatchableRuntime(session.runtime)
+    ? ORCHESTRATOR_RUNTIMES[session.runtime]
+    : null;
   const liveGroup = sessionGroupId(session);
   const dotColor = liveGroup === 'working'
     ? colors.green
@@ -561,6 +569,18 @@ const DefaultSessionRow = memo(function DefaultSessionRow({
               flexShrink: 0,
             }}
           />
+          {runtimeCapability ? (
+            <span
+              style={{
+                color: runtimeCapability.accentColor,
+                flexShrink: 0,
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {runtimeCapability.label}
+            </span>
+          ) : null}
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {task}
           </span>

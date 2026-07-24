@@ -46,11 +46,19 @@ import { IconCaretUp, IconPlus } from '@/app/mobile/mobile-approvals-shared';
 import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
 import { PullToRefresh } from './PullToRefresh';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import { createMobileOrchestratorThreadFromRepo } from '@/lib/mobile/orchestrator-thread-create';
+import type {
+  MobilePalette,
+} from '@/app/mobile/mobile-approvals-shared';
+import type { MobileRepoOption } from '@/app/mobile/mobile-chat-repos';
+import { FirstConversationCard } from './orchestrator/FirstConversationCard';
 
 interface OrchestratorViewProps {
   onBack: () => void;
   hideHeader?: boolean;
   refreshSignal?: number;
+  repoOptions?: MobileRepoOption[];
+  repoPickerPalette?: MobilePalette;
 }
 
 const POLL_INTERVAL_MS = 8_000;
@@ -144,7 +152,13 @@ function writeStoredActiveThreadId(id: string | null): void {
   }
 }
 
-export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0 }: OrchestratorViewProps) {
+export function OrchestratorView({
+  onBack,
+  hideHeader = false,
+  refreshSignal = 0,
+  repoOptions = [],
+  repoPickerPalette,
+}: OrchestratorViewProps) {
   const { colors } = useTheme();
   const [threads, setThreads] = useState<MobileOrchestratorThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
@@ -153,6 +167,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   const [localThread, setLocalThreadState] = useState<MobileOrchestratorThread | null>(() => readLocalThread());
   const [composerDraft, setComposerDraft] = useState('');
   const [stripOpen, setStripOpen] = useState<boolean>(() => readStripOpen());
+  const [newConversationRepoPath, setNewConversationRepoPath] = useState<string | null>(null);
 
   const setActiveThreadId = useCallback((id: string | null | ((prev: string | null) => string | null)) => {
     setActiveThreadIdState((prev) => {
@@ -288,51 +303,22 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   }, [setActiveThreadId]);
 
   const handleNewConversation = useCallback(async () => {
-    const repoPath = activeThread?.repoPath ?? null;
-    const repoName = activeThread?.repoName ?? null;
-    const runtime = activeThread?.runtime ?? 'claude-code';
+    const repoPath = activeThread?.repoPath ?? newConversationRepoPath;
+    const selectedRepo = repoOptions.find((repo) => repo.localPath === repoPath) ?? null;
+    const repoName = activeThread?.repoName ?? selectedRepo?.name ?? null;
     console.log('[mobile-orchestrator] new conversation requested', { repoPath });
     try {
-      const wsToken = getMobileWsToken();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
-      const response = await fetch('/api/orchestrator/reset-session', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(repoPath ? { repoPath } : {}),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-        throw new Error(payload?.error?.message ?? `Unable to reset orchestrator session (HTTP ${response.status}).`);
-      }
-      console.log('[mobile-orchestrator] reset OK — minting fresh thread');
-
-      // The reset-session call wipes the orchestrator process state but the
-      // server-side chat-history file for the prior tabId still exists.
-      // Mint a brand-new client-side thread (fresh tabId, same repoPath) so
-      // the history-load effect fetches a non-existent tabId → empty
-      // transcript. The first message we send creates the new history file.
-      // Use the `thoughts-` prefix so the threads-list endpoint (which
-      // filters on `thoughts-`) picks up this thread once it's persisted,
-      // and so mobile + desktop share one storage namespace.
-      const freshThreadId = `thoughts-${Date.now()}-mobile-${Math.random().toString(36).slice(2, 6)}`;
-      const freshThread: MobileOrchestratorThread = {
-        id: freshThreadId,
-        title: 'New conversation',
-        repoPath: repoPath,
-        repoName: repoName,
+      const freshThread = await createMobileOrchestratorThreadFromRepo({
+        repoPath: repoPath ?? '',
+        repoName,
         repoBranch: activeThread?.repoBranch ?? null,
-        githubOwner: activeThread?.githubOwner ?? null,
-        githubRepo: activeThread?.githubRepo ?? null,
-        runtime,
-        status: 'ready',
-        lastMessageAt: new Date().toISOString(),
-        messageCount: 0,
-        backend: null,
-        agent: null,
-      };
+        backend: activeThread?.backend ?? null,
+        agent: activeThread?.agent ?? null,
+      }, {
+        token: getMobileWsToken(),
+      });
       setLocalThread(freshThread);
-      setActiveThreadId(freshThreadId);
+      setActiveThreadId(freshThread.id);
       setThreadsError(null);
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
@@ -341,12 +327,13 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
       setThreadsError(message);
     }
   }, [
-    activeThread?.githubOwner,
-    activeThread?.githubRepo,
+    activeThread?.agent,
+    activeThread?.backend,
     activeThread?.repoBranch,
     activeThread?.repoName,
     activeThread?.repoPath,
-    activeThread?.runtime,
+    newConversationRepoPath,
+    repoOptions,
     setActiveThreadId,
     setLocalThread,
   ]);
@@ -396,6 +383,8 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
 
   const isEmpty = visibleThreads.length === 0 && !threadsLoading;
   const wsReady = connectionState === 'connected';
+  const newConversationTargetRepo = activeThread?.repoPath ?? newConversationRepoPath;
+  const canCreateConversation = Boolean(newConversationTargetRepo);
   // Allow sending while offline — sendMessage routes to the offline queue
   // and the user sees a "Queued" bubble that drains on reconnect.
   const canSend =
@@ -558,19 +547,19 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
             onClick={() => { void handleNewConversation(); }}
             aria-label="New conversation"
             title="New conversation"
-            disabled={!activeThread?.repoPath}
+            disabled={!canCreateConversation}
             style={{
-              width: 32, height: 32, minWidth: 32, minHeight: 32,
+              width: 44, height: 44, minWidth: 44, minHeight: 44,
               borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
-              borderColor: activeThread?.repoPath ? colors.accent : colors.surfaceBorder,
-              background: activeThread?.repoPath ? colors.blueGlass : colors.frostStrong,
+              borderColor: canCreateConversation ? colors.accent : colors.surfaceBorder,
+              background: canCreateConversation ? colors.blueGlass : colors.frostStrong,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              cursor: activeThread?.repoPath ? 'pointer' : 'default', flexShrink: 0,
+              cursor: canCreateConversation ? 'pointer' : 'default', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
               padding: 0,
             }}
           >
-            <IconPlus fill={activeThread?.repoPath ? colors.accent : colors.textTertiary} size={16} />
+            <IconPlus fill={canCreateConversation ? colors.accent : colors.textTertiary} size={16} />
           </button>
         </div>
       ) : (
@@ -631,26 +620,13 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
 
       <div ref={transcriptRef} style={transcriptWrapStyle}>
         {!activeThread && isEmpty ? (
-          <div
-            style={{
-              margin: '32px auto', maxWidth: 320, padding: 16, borderRadius: 14,
-              borderWidth: 1, borderStyle: 'solid', borderColor: colors.surfaceBorder,
-              background: colors.surface, color: colors.textSecondary,
-              fontSize: 13, lineHeight: 1.5, textAlign: 'center',
-            }}
-          >
-            <div
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                color: colors.textTertiary, marginBottom: 6,
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-              }}
-            >
-              <IconPlus fill={colors.textTertiary} size={11} />
-              <span>No threads</span>
-            </div>
-            <p style={{ margin: 0 }}>Dispatch a packet from desktop to see it here.</p>
-          </div>
+          <FirstConversationCard
+            repoOptions={repoOptions}
+            repoPickerPalette={repoPickerPalette}
+            selectedRepoPath={newConversationRepoPath}
+            onSelectRepoPath={setNewConversationRepoPath}
+            onCreate={() => { void handleNewConversation(); }}
+          />
         ) : null}
 
         {transcriptLoading && transcript.length === 0 ? (

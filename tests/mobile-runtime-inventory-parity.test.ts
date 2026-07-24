@@ -1,0 +1,126 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentSummary, FleetSnapshot } from '@/lib/fleet/types';
+
+const inventoryFixture = vi.hoisted(() => ({
+  snapshot: null as FleetSnapshot | null,
+}));
+
+vi.mock('@/lib/runtime/inventory', () => ({
+  getRuntimeInventorySnapshot: vi.fn(async () => inventoryFixture.snapshot),
+}));
+
+vi.mock('@/lib/approvals/store', () => ({
+  approvalSeverity: () => 'info',
+  listApprovals: () => [],
+  toMobileApprovalCard: (value: unknown) => value,
+}));
+
+vi.mock('@/lib/runtime/ide-llm-chat-registry', () => ({
+  listIdeLlmChatSessions: () => [],
+}));
+
+vi.mock('@/lib/runtime/pty-bridge', () => ({
+  isBridgeSessionAlive: async () => true,
+}));
+
+vi.mock('@/lib/review/workspace', () => ({
+  getWorkspaceReviewSnapshot: async () => null,
+}));
+
+vi.mock('@/lib/render/bootstrap', () => ({
+  invalidateMobileBootstrapBroker: () => {},
+}));
+
+vi.mock('@/lib/mobile/history', () => ({
+  getMobileSessionTranscript: async () => [],
+}));
+
+vi.mock('@/lib/mobile/review-units', () => ({
+  buildMobileReviewUnits: async () => [],
+  shouldExposeWorkspaceReviewSnapshot: () => false,
+  summarizeMobileReviewUnits: () => ({ reviewItems: 0, inspectOnlyReviews: 0 }),
+}));
+
+const { getMobileInboxSnapshot, invalidateInboxCache } = await import('@/lib/mobile/inbox');
+
+function runtimeAgent(runtime: 'gemini' | 'aider'): AgentSummary {
+  const sessionKey = `${runtime}-owned:mobile-parity`;
+  return {
+    id: sessionKey,
+    name: `${runtime} worker`,
+    squadId: `squad-${runtime}`,
+    runtime,
+    model: runtime,
+    primaryModel: runtime,
+    status: 'running',
+    currentTask: `Working with ${runtime}`,
+    workspace: `/tmp/${runtime}-mobile-parity`,
+    branch: `issue/mobile-${runtime}`,
+    sessionKey,
+    approvalStatus: 'none',
+    lastEventAt: 'just now',
+    lastActivityAt: Date.now(),
+    context: {
+      usedPercent: 10,
+      trend: 'stable',
+    },
+    alerts: 0,
+    runtimeSurface: {
+      id: sessionKey,
+      runtime,
+      kind: 'runtime-session',
+      ownership: 'owned',
+      title: `${runtime} worker`,
+      cwd: `/tmp/${runtime}-mobile-parity`,
+      branch: `issue/mobile-${runtime}`,
+      sourceLabel: `${runtime} owned session`,
+      capabilities: {
+        attach: false,
+        readTail: true,
+        sendInput: false,
+        interrupt: false,
+        resize: false,
+        diffContext: true,
+        reviewContext: true,
+      },
+      lifecycle: {
+        availability: 'running',
+      },
+    },
+  };
+}
+
+describe('mobile full runtime inventory projection', () => {
+  beforeEach(() => {
+    invalidateInboxCache();
+    inventoryFixture.snapshot = {
+      generatedAt: new Date().toISOString(),
+      meta: {
+        mode: 'live',
+        sourceLabel: 'test runtime inventory',
+        gatewayFreshness: 'fresh',
+        observablePending: false,
+        mirrorMode: 'current-session-first',
+        primarySessionKey: 'gemini-owned:mobile-parity',
+      },
+      squads: [],
+      agents: [runtimeAgent('gemini'), runtimeAgent('aider')],
+      events: [],
+      artifacts: [],
+    };
+  });
+
+  it('surfaces Gemini and Aider sessions with canonical runtime presentation', async () => {
+    const snapshot = await getMobileInboxSnapshot({ fresh: true });
+
+    expect(snapshot.sessions.map((session) => session.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.fleetSessions.map((session) => ({
+      runtime: session.runtime,
+      label: session.runtimeLabel,
+      accent: session.runtimeAccent,
+    }))).toEqual([
+      { runtime: 'gemini', label: 'Gemini', accent: '#4285f4' },
+      { runtime: 'aider', label: 'Aider', accent: '#dc2626' },
+    ]);
+  });
+});
