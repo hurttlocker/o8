@@ -57,6 +57,14 @@ interface ToolResultEvent {
 
 type StreamPayload = ContentEvent | ThinkingEvent | ToolUseEvent | ToolResultEvent;
 
+export async function readMobileProxyError(response: Response): Promise<string> {
+  const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+  if (typeof payload?.error === 'string' && payload.error.trim()) {
+    return payload.error.trim();
+  }
+  return `The selected runtime could not answer (HTTP ${response.status || 500}).`;
+}
+
 function normalizeStreamPayload(payload: unknown): StreamPayload | null {
   if (!isRecord(payload)) return null;
 
@@ -328,10 +336,18 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
           body: JSON.stringify(body),
         });
 
-        if (!response.ok || !response.body) {
+        if (!response.ok) {
+          const message = await readMobileProxyError(response);
           yield createAssistantError(
-            'Failed to get a response. Check your API keys.',
-            `LLM proxy request failed with status ${response.status || 500}.`,
+            message,
+            `Mobile proxy request failed with status ${response.status || 500}.`,
+          );
+          return;
+        }
+        if (!response.body) {
+          yield createAssistantError(
+            'The selected runtime returned an empty response.',
+            'Mobile proxy response body was empty.',
           );
           return;
         }

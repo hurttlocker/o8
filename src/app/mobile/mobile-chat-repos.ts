@@ -13,14 +13,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function normalizeMobileRepoList(data: unknown): MobileRepoOption[] {
-  const items = isRecord(data) && Array.isArray(data.repos) ? data.repos : [];
+  const items = Array.isArray(data)
+    ? data
+    : isRecord(data) && Array.isArray(data.repos)
+      ? data.repos
+      : [];
 
   return items.reduce<MobileRepoOption[]>((acc, item) => {
     if (!isRecord(item)) return acc;
 
-    const id = typeof item.id === 'string' && item.id.trim() ? item.id : '';
-    const localPath = typeof item.localPath === 'string' && item.localPath.trim() ? item.localPath : '';
-    if (!id || !localPath) return acc;
+    const localPath = typeof item.localPath === 'string' && item.localPath.trim()
+      ? item.localPath.trim()
+      : typeof item.path === 'string' && item.path.trim()
+        ? item.path.trim()
+        : '';
+    if (!localPath) return acc;
+    const id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : localPath;
 
     acc.push({
       id,

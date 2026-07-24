@@ -1,6 +1,10 @@
 import { basename } from 'node:path';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import {
+  ORCHESTRATOR_RUNTIME_IDS,
+  isOrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 
@@ -73,10 +77,13 @@ export function normalizeErrorMessage(value: unknown): string | null {
 function inferRuntime(model: string | undefined | null): MobileOrchestratorThread['runtime'] {
   if (!model) return 'unknown';
   const lower = model.toLowerCase();
+  if (isOrchestratorRuntime(lower)) return lower;
   if (lower.includes('claude')) return 'claude-code';
   if (lower.includes('gemini')) return 'gemini';
   if (lower.includes('opencode')) return 'opencode';
   if (lower.includes('codex') || lower.startsWith('gpt')) return 'codex';
+  const matchedRuntime = ORCHESTRATOR_RUNTIME_IDS.find((runtime) => lower.includes(runtime));
+  if (matchedRuntime) return matchedRuntime;
   return 'unknown';
 }
 

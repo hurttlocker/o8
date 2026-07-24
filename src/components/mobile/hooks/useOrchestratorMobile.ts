@@ -41,6 +41,16 @@ import {
   PENDING_QUEUE_MAX,
   type PendingQueueItem,
 } from '@/lib/mobile/pending-queue';
+import {
+  buildMobileOrchestratorInterrupt,
+  buildMobileOrchestratorSend,
+  buildMobileOrchestratorStatus,
+  buildMobileOrchestratorSubscribe,
+  buildMobileOrchestratorUnsubscribe,
+  mobileOrchestratorRouteFromThread,
+  mobileOrchestratorRouteKey,
+  type MobileOrchestratorRoute,
+} from '@/lib/mobile/orchestrator-wire';
 
 export type MobileOrchestratorConnectionState =
   | 'disconnected'
@@ -140,11 +150,13 @@ export function useOrchestratorMobile({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // The repoPath we're currently subscribed to on the WS — kept in a ref so
-  // reconnects re-subscribe to the latest repo without re-running the
-  // connection effect.
-  const subscribedRepoRef = useRef<string | null>(null);
-  const repoPathRef = useRef<string | null>(activeThread?.repoPath ?? null);
+  // The full thread route we're currently subscribed to on the WS. A repo can
+  // host several orchestrator threads with different backends, so repoPath
+  // alone is not a safe subscription identity.
+  const subscribedRouteRef = useRef<MobileOrchestratorRoute | null>(null);
+  const routeRef = useRef<MobileOrchestratorRoute | null>(
+    mobileOrchestratorRouteFromThread(activeThread),
+  );
   // Replay cursor — highest orchestrator event seq applied for the current
   // session view. Sent as `since` on (re)subscribe so a reconnect recovers the
   // in-flight turn's missed tokens; reset to 0 on a repo switch.
@@ -162,8 +174,8 @@ export function useOrchestratorMobile({
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    repoPathRef.current = activeThread?.repoPath ?? null;
-  }, [activeThread?.repoPath]);
+    routeRef.current = mobileOrchestratorRouteFromThread(activeThread);
+  }, [activeThread]);
 
   // ── Persistence (debounced) ──
   // Mobile transcripts must round-trip to disk so they survive reloads,
@@ -312,31 +324,39 @@ export function useOrchestratorMobile({
     }
   }, []);
 
-  // ── Subscribe / re-subscribe to orchestrator channel for the active repoPath ──
+  // ── Subscribe / re-subscribe to the active orchestrator thread route ──
   const sendSubscription = useCallback((ws: WebSocket | null) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const next = repoPathRef.current;
-    const prev = subscribedRepoRef.current;
-    if (prev && prev !== next) {
-      ws.send(JSON.stringify({ type: 'orchestrator-unsubscribe' }));
-      subscribedRepoRef.current = null;
-      lastSeqRef.current = 0; // repo switch → new session view, fresh cursor
+    const next = routeRef.current;
+    const prev = subscribedRouteRef.current;
+    const nextKey = mobileOrchestratorRouteKey(next);
+    const prevKey = mobileOrchestratorRouteKey(prev);
+    if (prev && prevKey !== nextKey) {
+      ws.send(JSON.stringify(buildMobileOrchestratorUnsubscribe(prev)));
+      subscribedRouteRef.current = null;
+      lastSeqRef.current = 0;
     }
     if (!next) return;
-    if (prev !== next) {
+    if (prevKey !== nextKey) {
       // since=lastSeq: 0 on a repo switch (reset above), or the live cursor on a
-      // reconnect (onclose nulls subscribedRepoRef) so we replay the missed tail.
-      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: next, since: lastSeqRef.current }));
-      ws.send(JSON.stringify({ type: 'orchestrator-status', repoPath: next }));
-      subscribedRepoRef.current = next;
+      // reconnect (onclose nulls the subscribed route) so we replay missed events.
+      ws.send(JSON.stringify(buildMobileOrchestratorSubscribe(next, lastSeqRef.current)));
+      ws.send(JSON.stringify(buildMobileOrchestratorStatus(next)));
+      subscribedRouteRef.current = next;
     } else {
-      ws.send(JSON.stringify({ type: 'orchestrator-status', repoPath: next }));
+      ws.send(JSON.stringify(buildMobileOrchestratorStatus(next)));
     }
   }, []);
 
   useEffect(() => {
     sendSubscription(wsRef.current);
-  }, [activeThread?.repoPath, sendSubscription]);
+  }, [
+    activeThread?.agent,
+    activeThread?.backend,
+    activeThread?.id,
+    activeThread?.repoPath,
+    sendSubscription,
+  ]);
 
   // ── WS connection lifecycle ──
   useEffect(() => {
@@ -366,6 +386,15 @@ export function useOrchestratorMobile({
 
       const eventType = raw.event as string;
       const data = (raw.data as Record<string, unknown> | undefined) ?? {};
+      const currentRoute = routeRef.current;
+      const eventThreadId = typeof data.threadId === 'string' ? data.threadId : null;
+      const eventRepoPath = typeof data.repoPath === 'string' ? data.repoPath : null;
+      if (currentRoute && (
+        (eventThreadId && eventThreadId !== currentRoute.threadId)
+        || (eventRepoPath && eventRepoPath !== currentRoute.repoPath)
+      )) {
+        return;
+      }
 
       switch (eventType) {
         case 'output': {
@@ -493,7 +522,7 @@ export function useOrchestratorMobile({
 
       ws.onclose = () => {
         wsRef.current = null;
-        subscribedRepoRef.current = null;
+        subscribedRouteRef.current = null;
         if (pingTimerRef.current) {
           clearInterval(pingTimerRef.current);
           pingTimerRef.current = null;
@@ -541,7 +570,7 @@ export function useOrchestratorMobile({
         wsRef.current.close();
         wsRef.current = null;
       }
-      subscribedRepoRef.current = null;
+      subscribedRouteRef.current = null;
       setConnectionState('disconnected');
     };
   }, [flushStreamingBuffer, sealStreamingBuffer, sendSubscription]);
@@ -596,18 +625,12 @@ export function useOrchestratorMobile({
 
   const dispatchOverWs = useCallback((message: string, queueId: string | null) => {
     const ws = wsRef.current;
-    const repoPath = repoPathRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !repoPath) return false;
-    if (subscribedRepoRef.current !== repoPath) {
+    const route = routeRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !route) return false;
+    if (mobileOrchestratorRouteKey(subscribedRouteRef.current) !== mobileOrchestratorRouteKey(route)) {
       sendSubscription(ws);
     }
-    ws.send(JSON.stringify({
-      type: 'orchestrator-send',
-      repoPath,
-      message,
-      permissionMode: 'full',
-      ...(queueId ? { clientMutationId: queueId } : {}),
-    }));
+    ws.send(JSON.stringify(buildMobileOrchestratorSend(route, message, queueId)));
     return true;
   }, [sendSubscription]);
 
@@ -649,9 +672,9 @@ export function useOrchestratorMobile({
     const trimmed = text.trim();
     if (!trimmed) return;
     const ws = wsRef.current;
-    const repoPath = repoPathRef.current;
+    const route = routeRef.current;
     const tabId = activeThreadIdForQueue;
-    if (!repoPath) {
+    if (!route) {
       setErrorNote('Pick a thread with a repo first.');
       return;
     }
@@ -674,7 +697,7 @@ export function useOrchestratorMobile({
       return;
     }
 
-    if (subscribedRepoRef.current !== repoPath) {
+    if (mobileOrchestratorRouteKey(subscribedRouteRef.current) !== mobileOrchestratorRouteKey(route)) {
       sendSubscription(ws);
     }
 
@@ -690,12 +713,7 @@ export function useOrchestratorMobile({
       },
     ]);
     streamingBufferRef.current = null;
-    ws.send(JSON.stringify({
-      type: 'orchestrator-send',
-      repoPath,
-      message: trimmed,
-      permissionMode: 'full',
-    }));
+    ws.send(JSON.stringify(buildMobileOrchestratorSend(route, trimmed)));
   }, [activeThreadIdForQueue, buildQueuedTranscriptEntry, sendSubscription]);
 
   const retryQueued = useCallback((queueId: string) => {
@@ -738,9 +756,9 @@ export function useOrchestratorMobile({
 
   const interrupt = useCallback(() => {
     const ws = wsRef.current;
-    const repoPath = repoPathRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !repoPath) return;
-    ws.send(JSON.stringify({ type: 'orchestrator-interrupt', repoPath }));
+    const route = routeRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !route) return;
+    ws.send(JSON.stringify(buildMobileOrchestratorInterrupt(route)));
     setTurnStatus('idle');
     sealStreamingBuffer();
   }, [sealStreamingBuffer]);

@@ -3,7 +3,7 @@
 import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import type { MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
-import { relativeTimeLabel } from '@/lib/format/relative-time';
+import { formatMobileActivityTime } from '@/lib/mobile/activity-time';
 import { FONTS, usePretextTruncation } from '@/lib/pretext';
 import { useTheme } from './ThemeContext';
 import { PullToRefresh } from './PullToRefresh';
@@ -66,10 +66,6 @@ function renderInlineCodeText(text: string, codeBg: string): ReactNode {
       </code>
     );
   });
-}
-
-function formatRelativeTime(isoDate: string): string {
-  return relativeTimeLabel(new Date(isoDate).getTime(), { subMinute: 'just-now-lower' });
 }
 
 function buildPalette(colors: ThemeColors): ActivityPalette {
@@ -542,7 +538,7 @@ function AgentEventCard({
               </p>
             ) : null}
           </div>
-          <span style={timestampStyle(palette)}>{formatRelativeTime(agent.lastEventAt)}</span>
+          <span style={timestampStyle(palette)}>{formatMobileActivityTime(agent.lastEventAt)}</span>
         </div>
       </button>
     </TimelineItem>

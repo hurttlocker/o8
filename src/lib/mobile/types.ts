@@ -7,6 +7,8 @@ import type {
 } from '@/lib/fleet/types';
 import type { MobileApprovalCard } from '@/lib/approvals/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorPacketRecovery } from '@/lib/orchestrator/types';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
@@ -421,7 +423,7 @@ export interface MobileActionResponse {
 // the existing `orchestrator` WS channel. These shapes are deliberately
 // minimal — alpha is read-mostly with a single composer.
 
-export type MobileOrchestratorRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'grok' | 'unknown';
+export type MobileOrchestratorRuntime = OrchestratorRuntime | 'unknown';
 
 /** The orchestrator backend that ran a thread — distinct from the worker `runtime`.
  *  Derived from the single backend-id source so it tracks new backends (hermes/acp). */
@@ -467,6 +469,8 @@ export interface MobileOrchestratorAgent {
   huddlePlan?: string;
   /** Latest lane/packet event label for additive mobile rendering. */
   lastEventLabel?: string | null;
+  /** Preserved work details when an unreleased packet was archived recoverably. */
+  recovery?: OrchestratorPacketRecovery | null;
   /** Worktree branch the agent commits to. */
   branch: string;
   /** Diff stats for the agent's worktree (zeros for queued packets). */
