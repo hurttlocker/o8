@@ -1,6 +1,10 @@
 'use client';
 
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  isDispatchableRuntime,
+  ORCHESTRATOR_RUNTIMES,
+} from '@/lib/orchestrator/runtime-capabilities';
 import type { SessionSummary } from './types';
 import { relativeTimeLabel } from '@/lib/format/relative-time';
 import { useTheme } from './ThemeContext';
@@ -127,7 +131,23 @@ function RuntimeBadgeIcon({ runtime, size = 16 }: { runtime?: string; size?: num
   if (runtime === 'claude-code') {
     return <img src="/logos/claude.png" alt="Claude" width={size} height={size} style={{ display: 'block', objectFit: 'contain' }} />;
   }
-  return <img src="/logos/codex.webp" alt="Codex" width={size} height={size} style={{ display: 'block', objectFit: 'contain' }} />;
+  if (runtime === 'codex') {
+    return <img src="/logos/codex.webp" alt="Codex" width={size} height={size} style={{ display: 'block', objectFit: 'contain' }} />;
+  }
+  const capability = isDispatchableRuntime(runtime) ? ORCHESTRATOR_RUNTIMES[runtime] : null;
+  return (
+    <span
+      aria-label={capability?.label ?? 'Agent runtime'}
+      style={{
+        color: capability?.accentColor ?? 'var(--t-text-muted)',
+        fontSize: 10,
+        fontWeight: 800,
+        lineHeight: 1,
+      }}
+    >
+      {capability?.shortLabel ?? 'Agent'}
+    </span>
+  );
 }
 
 function statusDotColor(session: SessionSummary): string {

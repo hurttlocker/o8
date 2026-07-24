@@ -845,7 +845,7 @@ export function MobileApprovalsClient({
           {activeView === 'orchestrator' ? (
             <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading orchestrator…')}>
-                <OrchestratorView onBack={handleBackToChats} hideHeader refreshSignal={orchRefreshSignal} />
+                <OrchestratorView onBack={handleBackToChats} hideHeader refreshSignal={orchRefreshSignal} repoOptions={repoOptions} repoPickerPalette={palette} />
               </Suspense>
             </MobileViewShell>
           ) : null}

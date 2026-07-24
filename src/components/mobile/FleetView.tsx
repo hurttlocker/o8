@@ -4,6 +4,7 @@ import { memo, type CSSProperties } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { GroupedSessionList } from './RecentSessionPicker';
 import { useTheme } from './ThemeContext';
+import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 
 interface FleetViewProps {
   sessions: MobileInboxSnapshot['sessions'];
@@ -48,12 +49,7 @@ export const FleetView = memo(function FleetView({
   // alongside spawned agents — those are orchestrator + assistant chats and
   // shouldn't appear in the Agents fleet view. Filter to spawned-agent
   // runtimes only.
-  const spawnedAgents = sessions.filter((session) => (
-    session.runtime === 'codex'
-    || session.runtime === 'claude-code'
-    || session.runtime === 'gemini'
-    || session.runtime === 'opencode'
-  ));
+  const spawnedAgents = sessions.filter((session) => isDispatchableRuntime(session.runtime));
 
   const iconButtonStyle: CSSProperties = {
     width: 36,

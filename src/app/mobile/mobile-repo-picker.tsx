@@ -14,26 +14,35 @@ export function MobileRepoPicker({
   repoOptions,
   selectedRepoPath,
   onSelectRepoPath,
+  allowCurrentProject = true,
+  alwaysVisible = false,
 }: {
   palette: MobilePalette;
   repoOptions: MobileRepoOption[];
   selectedRepoPath: string | null;
   onSelectRepoPath: (repoPath: string | null) => void;
+  allowCurrentProject?: boolean;
+  alwaysVisible?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selectedLabel = useMemo(
-    () => getMobileRepoLabel(selectedRepoPath, repoOptions),
-    [repoOptions, selectedRepoPath],
+    () => selectedRepoPath
+      ? getMobileRepoLabel(selectedRepoPath, repoOptions)
+      : allowCurrentProject
+        ? 'Current project'
+        : 'Choose repository',
+    [allowCurrentProject, repoOptions, selectedRepoPath],
   );
   const options = useMemo(
     () => [
-      { label: 'Current project', repoPath: null },
+      ...(allowCurrentProject ? [{ label: 'Current project', repoPath: null }] : []),
       ...repoOptions.map((repo) => ({ label: repo.name, repoPath: repo.localPath })),
     ],
-    [repoOptions],
+    [allowCurrentProject, repoOptions],
   );
 
-  if (repoOptions.length <= 1) return null;
+  if (!alwaysVisible && repoOptions.length <= 1) return null;
+  if (options.length === 0) return null;
 
   return (
     <div style={{ position: 'relative', padding: '8px 4px 12px' }}>

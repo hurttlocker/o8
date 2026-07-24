@@ -4,12 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
-import { codexRuntime } from '@/lib/runtimes/codex';
-import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
+import { getAllRuntimes } from '@/lib/runtimes';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
-import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  isDispatchableRuntime,
+  ORCHESTRATOR_RUNTIMES,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 
@@ -357,7 +359,7 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
 
   for (const agent of agents) {
     if (existingSessionKeys.has(agent.sessionKey)) continue;
-    if (agent.runtime !== 'codex' && agent.runtime !== 'claude-code') continue;
+    if (!isDispatchableRuntime(agent.runtime)) continue;
     if (!['running', 'reviewing', 'waiting'].includes(agent.status)) continue;
     // Only include IDE-owned sessions as fallbacks — discovered user-terminal
     // sessions shouldn't appear as phantom agents when the runtime restarts.
@@ -376,7 +378,8 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
 }
 
 async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
-  const runtimes: AgentRuntime[] = [codexRuntime, claudeCodeRuntime].filter((runtime) => runtime.capabilities.discover);
+  const runtimes: AgentRuntime[] = getAllRuntimes()
+    .filter((runtime) => runtime.capabilities.discover && isDispatchableRuntime(runtime.id));
   const ideSessions = listIdeRuntimeSessions();
   const ideTabs = listIdeRuntimeTabs();
   const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
@@ -434,7 +437,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     // they're not in the IDE registry (orchestrator dispatch doesn't touch
     // the IDE workspace tabs) and not in the terminal-session registry
     // (orchestrator goes through the bridge terminal, not user PTY).
-    || (session.ownership === 'owned' && session.runtimeId === 'claude-code')
+    || (session.ownership === 'owned' && isDispatchableRuntime(session.runtimeId))
   ));
 
   const agents = discovered.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey)));
@@ -524,7 +527,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       gatewayReachable: true,
       mirrorMode: 'current-session-first',
       observablePending: false,
-      note: 'Showing Codex and Claude Code runtime surfaces only.',
+      note: 'Showing every discovered dispatchable runtime surface.',
       primarySessionKey,
     },
     squads,
@@ -587,7 +590,7 @@ export async function getRuntimeInventorySnapshot(
     try {
       const { reconcileLanesWithSessions } = await import('@/lib/lane/registry');
       const sessionSummaries = snapshot.agents
-        .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
+        .filter((agent) => agent.sessionKey && isDispatchableRuntime(agent.runtime))
         .map((agent) => ({
           sessionKey: agent.sessionKey,
           runtimeId: agent.runtime,

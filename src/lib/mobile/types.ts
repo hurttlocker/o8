@@ -63,7 +63,7 @@ export interface MobileInboxSummary {
   activeRuns: number;
 }
 
-export type MobileFleetRuntime = 'codex' | 'claude-code' | 'openclaw' | 'hermes' | 'unknown';
+export type MobileFleetRuntime = OrchestratorRuntime | 'openclaw' | 'hermes' | 'unknown';
 export type MobileFleetStatus =
   | 'queued'
   | 'running'
@@ -91,6 +91,8 @@ export interface MobileFleetSession {
   id: string;
   sessionKey: string;
   runtime: MobileFleetRuntime;
+  runtimeLabel: string;
+  runtimeAccent: string;
   status: MobileFleetStatus;
   title: string;
   repo: string;

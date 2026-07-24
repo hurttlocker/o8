@@ -115,6 +115,27 @@ export function removePending(
   writeRaw(channel, tabId, next);
 }
 
+/**
+ * Marks a queued item for an explicit retry without changing its idempotency
+ * identity. The server reserves this id for 24 hours, so a new id could turn
+ * a retry into a second orchestrator turn.
+ */
+export function refreshPending(
+  channel: PendingQueueChannel,
+  tabId: string,
+  id: string,
+  now = Date.now(),
+): PendingQueueItem | null {
+  const current = readRaw(channel, tabId);
+  const index = current.findIndex((item) => item.id === id);
+  if (index < 0) return null;
+  const refreshed = { ...current[index], queuedAt: now };
+  const next = current.slice();
+  next[index] = refreshed;
+  writeRaw(channel, tabId, next);
+  return refreshed;
+}
+
 export function clearPending(channel: PendingQueueChannel, tabId: string): void {
   writeRaw(channel, tabId, []);
 }
