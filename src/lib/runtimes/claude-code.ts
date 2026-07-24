@@ -52,7 +52,12 @@ const capabilities: RuntimeCapabilities = {
   discover: true,
   readTranscript: true,
   launch: true,
-  resume: true,
+  // Honesty (#1602): the adapter's resume() is intentionally disabled — owned
+  // Claude workers are one-prompt-per-launch and discovered sessions don't
+  // resume through the stream-json owned path. Declaring false lets the
+  // steer/resume gates fail cleanly ("not supported") instead of passing the
+  // gate and hitting an always-erroring resume().
+  resume: false,
   interrupt: true,
   reviewDiffs: true,
   costTelemetry: true,
