@@ -37,6 +37,17 @@ interface ReapResponse {
   reaped?: Array<{ candidate: ReapCandidate }>;
 }
 
+interface CodexVoiceDoctorCapability {
+  capable: boolean;
+  whyNot: string | null;
+  appServer: {
+    transports: string[];
+  };
+  auth: {
+    mode: string;
+  };
+}
+
 function parseDoctorArgs(rest: string[]) {
   let reap = false;
   let force = false;
@@ -135,11 +146,16 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
   // Sourced from /api/setup/detect so the CLI stays in lockstep with the GUI dots.
   type DetectRuntime = { id: string; name: string; detected: boolean; ready?: boolean; authHint?: string; version?: string };
   let runtimes: DetectRuntime[] = [];
+  let codexVoiceCapability: CodexVoiceDoctorCapability | null = null;
   if (serverReachable) {
     try {
-      const res = await apiFetch<{ tools: DetectRuntime[] }>(cfg, '/api/setup/detect');
+      const res = await apiFetch<{
+        tools: DetectRuntime[];
+        codexVoiceCapability?: CodexVoiceDoctorCapability;
+      }>(cfg, '/api/setup/detect');
       const ids = ['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'pi'];
       runtimes = (res.data?.tools ?? []).filter((t) => ids.includes(t.id));
+      codexVoiceCapability = res.data?.codexVoiceCapability ?? null;
     } catch {
       // best-effort; server reachability is already reported above
     }
@@ -182,6 +198,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       ready: rt.ready ?? rt.detected,
       authHint: rt.authHint ?? null,
     })),
+    codexVoiceCapability,
     findings,
   };
 
@@ -219,6 +236,12 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
             : rt.version ? ` (${rt.version})` : '';
         process.stdout.write(`  ${rt.name}: ${state}${extra}\n`);
       }
+    }
+    if (codexVoiceCapability) {
+      const state = codexVoiceCapability.capable
+        ? `ready (${codexVoiceCapability.auth.mode}; ${codexVoiceCapability.appServer.transports.join(', ')})`
+        : `unavailable — ${codexVoiceCapability.whyNot ?? 'capability could not be confirmed'}`;
+      process.stdout.write(`  Codex Connected Voice: ${state}\n`);
     }
     if (findings.length > 0) {
       printHumanHeading('findings');

@@ -3,6 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import {
+  probeCodexVoiceCapability,
+  type CodexVoiceCapability,
+} from '@/lib/codex/appserver-probe';
 import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -24,6 +28,7 @@ interface DetectedTool {
 
 interface DetectionResult {
   tools: DetectedTool[];
+  codexVoiceCapability?: CodexVoiceCapability;
   hasAnything: boolean;
   hasAgentSurface: boolean;
   hasCliAgent: boolean;
@@ -486,7 +491,11 @@ function buildSummary(tools: DetectedTool[]): string {
   return parts.join(' · ');
 }
 
-function buildDetectionResult(tools: DetectedTool[], flags: { partial?: boolean; timedOut?: boolean } = {}): DetectionResult {
+function buildDetectionResult(
+  tools: DetectedTool[],
+  flags: { partial?: boolean; timedOut?: boolean } = {},
+  codexVoiceCapability?: CodexVoiceCapability,
+): DetectionResult {
   const hasAgentSurface = false;
   const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
@@ -506,6 +515,7 @@ function buildDetectionResult(tools: DetectedTool[], flags: { partial?: boolean;
 
   const result: DetectionResult = {
     tools,
+    codexVoiceCapability,
     hasAnything,
     hasAgentSurface,
     hasCliAgent,
@@ -525,8 +535,17 @@ function isPastDeadline(deadlineAt: number) {
 export async function GET() {
   const deadlineAt = Date.now() + ROUTE_DEADLINE_MS;
   const tools: DetectedTool[] = [];
+  let codexVoiceCapability: CodexVoiceCapability | undefined;
 
-  if (!isPastDeadline(deadlineAt)) tools.push(detectCodex(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) {
+    const codex = detectCodex(deadlineAt);
+    tools.push(codex);
+    codexVoiceCapability = await probeCodexVoiceCapability({
+      binaryPath: codex.path || null,
+      version: codex.version ?? null,
+      timeoutMs: Math.max(MIN_PROBE_TIMEOUT_MS, boundedTimeout(2_500, deadlineAt)),
+    });
+  }
   if (!isPastDeadline(deadlineAt)) tools.push(detectClaudeCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
@@ -538,7 +557,11 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectApiKeys());
 
   const timedOut = isPastDeadline(deadlineAt);
-  const result = buildDetectionResult(tools, timedOut ? { partial: true, timedOut: true } : {});
+  const result = buildDetectionResult(
+    tools,
+    timedOut ? { partial: true, timedOut: true } : {},
+    codexVoiceCapability,
+  );
 
   return NextResponse.json(result);
 }

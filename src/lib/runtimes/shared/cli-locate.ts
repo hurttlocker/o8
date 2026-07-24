@@ -21,7 +21,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getDataDir } from '@/lib/data-dir-migration';
+import { getDataDir } from '../../data-dir-migration';
 
 function dataDirForHome(home: string): string {
   return home === os.homedir() ? getDataDir() : getDataDir({}, home);
