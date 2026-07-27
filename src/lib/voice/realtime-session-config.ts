@@ -67,6 +67,23 @@ export const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_sec
 export const REALTIME_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 export const REALTIME_BASE_URL = 'https://api.openai.com/v1/realtime';
 export const REALTIME_TOKEN_TTL_SECONDS = 600;
+/** Launch contract for the Codex app-server path. Never silently downgrade. */
+export const CODEX_REALTIME_VERSION = 'v2' as const;
+
+export type CodexRealtimeOutputModality = 'text' | 'audio';
+export type CodexRealtimeTransport = 'webrtc' | 'websocket';
+
+export interface CodexRealtimeStartInputs {
+  threadId: string;
+  /** Browser-created offer. Its presence makes WebRTC the default transport. */
+  sdp?: string;
+  transport?: CodexRealtimeTransport;
+  outputModality?: CodexRealtimeOutputModality;
+  prompt?: string | null;
+  model?: string;
+  voice?: string;
+  includeStartupContext?: boolean;
+}
 
 /**
  * Symon's persona + tool-use policy. MOVED here from realtime-client.ts so the
@@ -427,5 +444,30 @@ export function buildClientSecretsBody(
   return {
     expires_after: { anchor: 'created_at', seconds: ttlSeconds },
     session: buildRealtimeMintSession(inputs),
+  };
+}
+
+/**
+ * Build the experimental `thread/realtime/start` payload from the same model,
+ * voice, and persona source as the existing BYOK desk session. WebRTC wins when
+ * the browser supplies an SDP offer; websocket remains available for streamed
+ * appendAudio/outputAudio transport. Version stays pinned to v2 because that is
+ * the Codex-tool handoff contract for this launch slice.
+ */
+export function buildCodexRealtimeStartParams(
+  inputs: CodexRealtimeStartInputs,
+): Record<string, unknown> {
+  const transport = inputs.transport ?? (inputs.sdp ? 'webrtc' : 'websocket');
+  return {
+    threadId: inputs.threadId,
+    outputModality: inputs.outputModality ?? 'audio',
+    version: CODEX_REALTIME_VERSION,
+    includeStartupContext: inputs.includeStartupContext ?? true,
+    prompt: inputs.prompt === undefined ? DEFAULT_INSTRUCTIONS : inputs.prompt,
+    ...(inputs.model ? { model: inputs.model } : {}),
+    ...(inputs.voice ? { voice: inputs.voice } : {}),
+    transport: transport === 'webrtc'
+      ? { type: 'webrtc', sdp: inputs.sdp ?? '' }
+      : { type: 'websocket' },
   };
 }

@@ -17,6 +17,10 @@
 // identical brain. Isomorphic module — safe to import from this browser-only file
 // (it carries no `server-only` poison pill). See docs/symon-agent-mode.md.
 import { DEFAULT_INSTRUCTIONS } from '@/lib/voice/realtime-session-config';
+import {
+  startCodexBrowserRealtimeSession,
+  type CodexBrowserRealtimeSession,
+} from '@/lib/voice/codex-realtime-browser';
 
 export type RealtimeStatus =
   | 'idle'
@@ -32,6 +36,9 @@ export function realtimeCallReviewGuardId(sessionId: string, callId: string): st
 
 export interface RealtimeSessionHandle {
   stop: () => Promise<void>;
+  appendText: (text: string) => Promise<void>;
+  appendSpeech: (text: string) => Promise<void>;
+  readonly mode: 'openai-byok' | 'codex-oauth' | 'text';
   readonly status: RealtimeStatus;
 }
 
@@ -42,6 +49,8 @@ export interface StartRealtimeOptions {
   instructions?: string;
   /** Override the realtime model. */
   model?: string;
+  /** Existing direct OpenAI path, or the fenced local Codex OAuth transport. */
+  transport?: 'openai-byok' | 'codex-oauth';
   onStatus?: (status: RealtimeStatus, detail?: string) => void;
   /** Raw 'oai-events' messages (transcripts, response.done, function_call — P4 hook). */
   onEvent?: (event: Record<string, unknown>) => void;
@@ -398,6 +407,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   let dc: RTCDataChannel | null = null;
   let micStream: MediaStream | null = null;
   let audioEl: HTMLAudioElement | null = null;
+  let codexSession: CodexBrowserRealtimeSession | null = null;
   let toolDefs: Array<Record<string, unknown>> = [];
   // OpenAI emits input transcription as a separate asynchronous server event.
   // Keep the latest completed utterance so native tool calls can persist the
@@ -424,9 +434,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     try { opts.onStatus?.(s, detail); } catch { /* listener threw — ignore */ }
   };
 
-  const teardown = async () => {
-    approvalAudioGate.abort();
-    interruptNativeReviews();
+  const teardownMedia = async () => {
     try { dc?.close(); } catch { /* already closed */ }
     try {
       if (pc) {
@@ -442,6 +450,15 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       }
     } catch { /* */ }
     pc = null; dc = null; micStream = null; audioEl = null;
+  };
+
+  const teardown = async () => {
+    approvalAudioGate.abort();
+    interruptNativeReviews();
+    const activeCodexSession = codexSession;
+    codexSession = null;
+    await activeCodexSession?.stop();
+    await teardownMedia();
   };
 
   const fail = (msg: string) => {
@@ -562,6 +579,18 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
 
   const handle: RealtimeSessionHandle = {
     get status() { return status; },
+    get mode() {
+      return codexSession?.mode
+        ?? (opts.transport === 'codex-oauth' ? 'codex-oauth' : 'openai-byok');
+    },
+    appendText: async (text) => {
+      if (!codexSession) throw new Error('Text append requires the Codex realtime transport.');
+      await codexSession.appendText(text);
+    },
+    appendSpeech: async (text) => {
+      if (!codexSession) throw new Error('Speech append requires the Codex realtime transport.');
+      await codexSession.appendSpeech(text);
+    },
     stop: async () => {
       if (status === 'idle' || status === 'stopping') return;
       aborted = true;
@@ -627,6 +656,10 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     // 3. Data channel — must exist before createOffer so it lands in the SDP.
     dc = pc.createDataChannel('oai-events');
     dc.onopen = () => {
+      if (opts.transport === 'codex-oauth') {
+        console.log(`${LOG} data channel open — Codex app-server owns session config`);
+        return;
+      }
       console.log(`${LOG} data channel open — sending session.update`);
       const update: Record<string, unknown> = {
         type: 'session.update',
@@ -666,7 +699,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       if (parsed.type === 'input_audio_buffer.speech_started') {
         interruptNativeReviews();
       }
-      if (parsed.type === 'response.done') {
+      if (parsed.type === 'response.done' && opts.transport !== 'codex-oauth') {
         const response = parsed['response'];
         if (response && typeof response === 'object') {
           reportUsage((response as Record<string, unknown>)['usage'], opts.model, meterSessionId);
@@ -690,20 +723,44 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
 
     // 5. Exchange the offer for OpenAI's answer through our server proxy.
     let answerSdp = '';
-    try {
-      const r = await fetch('/api/voice/realtime/sdp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ sdp: offerSdp, voice: opts.voice, model: opts.model }),
-      });
-      const d = await r.json().catch(() => null) as { ok?: boolean; sdp?: string; reason?: string } | null;
-      if (!r.ok || !d?.ok || !d?.sdp) {
-        return fail(d?.reason || `SDP exchange failed (${r.status}).`);
+    if (opts.transport === 'codex-oauth') {
+      try {
+        codexSession = await startCodexBrowserRealtimeSession({
+          sdp: offerSdp,
+          voice: opts.voice,
+          model: opts.model,
+          prompt: opts.instructions,
+          onEvent: opts.onEvent,
+          onError: (message) => fail(message),
+        });
+        if (codexSession.mode === 'text') {
+          await teardownMedia();
+          setStatus('live', codexSession.fallbackReason || 'text fallback');
+          return;
+        }
+        if (!codexSession.answerSdp) {
+          return fail('Codex realtime returned no SDP answer.');
+        }
+        answerSdp = codexSession.answerSdp;
+      } catch (e) {
+        return fail(`Codex signaling failed: ${(e as Error)?.message || String(e)}`);
       }
-      answerSdp = d.sdp;
-    } catch (e) {
-      return fail(`Signaling failed: ${(e as Error)?.message || String(e)}`);
+    } else {
+      try {
+        const r = await fetch('/api/voice/realtime/sdp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ sdp: offerSdp, voice: opts.voice, model: opts.model }),
+        });
+        const d = await r.json().catch(() => null) as { ok?: boolean; sdp?: string; reason?: string } | null;
+        if (!r.ok || !d?.ok || !d?.sdp) {
+          return fail(d?.reason || `SDP exchange failed (${r.status}).`);
+        }
+        answerSdp = d.sdp;
+      } catch (e) {
+        return fail(`Signaling failed: ${(e as Error)?.message || String(e)}`);
+      }
     }
     if (aborted) return teardown();
 

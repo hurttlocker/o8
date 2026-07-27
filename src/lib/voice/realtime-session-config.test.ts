@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_INSTRUCTIONS,
+  CODEX_REALTIME_VERSION,
   REALTIME_MODEL,
   REALTIME_FLAGSHIP_MODEL,
   DEFAULT_VOICE,
@@ -19,6 +20,7 @@ import {
   selectPhoneRealtimeModel,
   buildRealtimeMintSession,
   buildClientSecretsBody,
+  buildCodexRealtimeStartParams,
   MIC_PROFILE_AUDIO_INPUT,
   PHONE_CODE_TOOL_INSTRUCTIONS,
 } from './realtime-session-config';
@@ -116,12 +118,42 @@ describe('realtime-session-config — shared assembler', () => {
     });
   });
 
+  it('builds a WebRTC-default v2 Codex start from the shared persona', () => {
+    expect(buildCodexRealtimeStartParams({
+      threadId: 'thread-1',
+      sdp: 'v=0\r\nfixture',
+      voice: 'marin',
+    })).toEqual({
+      threadId: 'thread-1',
+      outputModality: 'audio',
+      version: 'v2',
+      includeStartupContext: true,
+      prompt: DEFAULT_INSTRUCTIONS,
+      voice: 'marin',
+      transport: { type: 'webrtc', sdp: 'v=0\r\nfixture' },
+    });
+  });
+
+  it('keeps websocket v2 available for streamed audio without downgrading', () => {
+    expect(buildCodexRealtimeStartParams({
+      threadId: 'thread-1',
+      transport: 'websocket',
+      outputModality: 'audio',
+      prompt: null,
+    })).toMatchObject({
+      version: CODEX_REALTIME_VERSION,
+      prompt: null,
+      transport: { type: 'websocket' },
+    });
+  });
+
   it('exposes the expected shared constants', () => {
     expect(REALTIME_MODEL).toBe('gpt-realtime-2.1-mini');
     expect(REALTIME_FLAGSHIP_MODEL).toBe('gpt-realtime-2.1');
     expect(DEFAULT_VOICE).toBe('marin');
     expect(REALTIME_INPUT_TRANSCRIPTION_MODEL).toBe('whisper-1');
     expect(REALTIME_TOKEN_TTL_SECONDS).toBe(600);
+    expect(CODEX_REALTIME_VERSION).toBe('v2');
     expect(DEFAULT_INSTRUCTIONS).toContain('You are Symon');
   });
 

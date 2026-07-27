@@ -98,7 +98,12 @@ const LOOPBACK_READ = [
   // cannot attach a bearer (v0.1.600 stuck-boot incident).
   /^\/api\/setup\/identity\/?$/,
 ];
-const EXPLICIT_GATED = [/^\/api\/mcp\/?$/];
+const EXPLICIT_GATED = [
+  /^\/api\/mcp\/?$/,
+  // #1619: local Codex app-server lifecycle + streamed audio/transcript events.
+  // Operator-only because it can start a local Codex thread and reads OAuth state.
+  /^\/api\/voice\/realtime\/codex\/?$/,
+];
 
 type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'gated';
 
