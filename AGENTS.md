@@ -33,7 +33,7 @@ Local state is SQLite/file-backed under `~/.o8` by default. Use `CORTEX_IDE_DATA
 
 For desktop or mobile visual work, read these in order:
 
-1. [`Hurttlocker.md`](./Hurttlocker.md) for operator-locked typography, icon, row, and layout geometry.
+1. [`hurttlocker.md`](./hurttlocker.md) for operator-locked typography, icon, row, and layout geometry.
 2. [`DESIGN.md`](./DESIGN.md) for the desktop visual language, palette, surfaces, and accessibility model.
 3. [`STYLEGUIDE.md`](./STYLEGUIDE.md) for interaction review gates: feedback timing, sibling cohesion, and button hierarchy.
 4. `src/lib/theme/` for the actual light/dark × glass/solid token implementation.
