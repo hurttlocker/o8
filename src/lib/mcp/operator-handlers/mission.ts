@@ -290,7 +290,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         model: {
           type: 'string',
-          description: 'Optional model hint. Only Codex model hints can affect production routing today.',
+          description: 'Optional per-packet model hint. It is applied when its model house matches the selected runtime, including Claude models on claude-code packets.',
         },
         allowedFiles: {
           type: 'array',

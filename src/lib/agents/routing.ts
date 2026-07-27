@@ -76,6 +76,63 @@ function normalizeModel(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+type RuntimeBoundModelHouse = 'codex' | 'claude' | 'gemini' | 'cursor' | 'grok';
+
+function modelHouse(model: string): RuntimeBoundModelHouse | null {
+  const normalized = model.trim().toLowerCase();
+  if (
+    normalized.startsWith('claude-')
+    || normalized.startsWith('anthropic/')
+    || normalized.includes('/claude-')
+  ) {
+    return 'claude';
+  }
+  if (
+    normalized.startsWith('gpt-')
+    || normalized.startsWith('openai-')
+    || normalized.startsWith('openai/')
+    || normalized.includes('/gpt-')
+  ) {
+    return 'codex';
+  }
+  if (
+    normalized.startsWith('gemini-')
+    || normalized.startsWith('google/')
+    || normalized.includes('/gemini-')
+  ) {
+    return 'gemini';
+  }
+  if (normalized.startsWith('cursor-') || normalized.startsWith('cursor/')) {
+    return 'cursor';
+  }
+  if (
+    normalized.startsWith('grok-')
+    || normalized.startsWith('xai/')
+    || normalized.includes('/grok-')
+  ) {
+    return 'grok';
+  }
+  return null;
+}
+
+/**
+ * Single-house CLIs must never receive another provider's model identifier.
+ * Model-agnostic adapters such as opencode/OpenHands intentionally accept
+ * provider-qualified cross-house ids, so they remain unrestricted here.
+ */
+function modelMatchesRuntime(model: string, runtime: OrchestratorRuntime): boolean {
+  const house = modelHouse(model);
+  if (!house) return true;
+  const runtimeHouse = getRuntimeCapability(runtime).authHouse;
+  return runtimeHouse !== 'codex'
+    && runtimeHouse !== 'claude'
+    && runtimeHouse !== 'gemini'
+    && runtimeHouse !== 'cursor'
+    && runtimeHouse !== 'grok'
+    ? true
+    : house === runtimeHouse;
+}
+
 function routingConfidence(intent: WorkerIntent): WorkerRoutingConfidence {
   if (intent === 'light_worker' || intent === 'diagnostic') return 'high';
   if (intent === 'reviewer' || intent === 'orchestrator') return 'medium';
@@ -114,11 +171,15 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     : PRODUCTION_AGENT_RUNTIME;
   const selectedProvider = providerForRuntime(selectedRuntime);
 
-  // A requested model is honored only when it targets the runtime we actually
-  // selected — so a Codex model hint can't leak onto a Gemini packet.
+  // Every upstream model source (explicit hint, stored dispatch default,
+  // persisted packet value) arrives here as requestedModel. Honor it only when
+  // both its routing metadata and its model house target the selected runtime.
+  // A mismatch yields selectedModel=null, so launch resolves through that
+  // runtime adapter's own defaultModel instead of spawning a foreign model.
   const modelTargetsSelected = requestedModel
     && (requestedRuntime === null || requestedRuntime === selectedRuntime)
-    && (requestedProvider === null || requestedProvider === selectedProvider);
+    && (requestedProvider === null || requestedProvider === selectedProvider)
+    && modelMatchesRuntime(requestedModel, selectedRuntime);
 
   // Effort applies only when the selected runtime has a reasoning-effort surface;
   // on opencode it's a clean no-op (null → no launch flag).
