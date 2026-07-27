@@ -324,6 +324,57 @@ function separatorStyle(): CSSProperties {
   };
 }
 
+/** Founding Operator mark — the hairline serial chip ("FOUNDING · 001"),
+ *  founders-only. Lives on the drawer's account row, not in the always-visible
+ *  chrome (Q ruling 2026-07-27): founder identity shows only once settings is
+ *  opened. The one founding orange (#ff5a1f, the founders-wall + edition
+ *  color) marks the serial. Hides while View-as-free is active because the
+ *  effective entitlement's `founder` goes null under the override. */
+const FOUNDER_ORANGE = '#ff5a1f';
+
+function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
+  const serial = String(operatorNumber).padStart(3, '0');
+  return (
+    <div
+      title={`Founding Operator · No. ${serial}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        height: 22,
+        paddingLeft: 9,
+        paddingRight: 9,
+        borderRadius: 6,
+        background: 'rgba(255, 90, 31, 0.08)',
+        borderWidth: '0.5px',
+        borderStyle: 'solid',
+        borderColor: 'rgba(255, 90, 31, 0.24)',
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 10,
+        fontWeight: 500,
+        letterSpacing: '0.11em',
+        textTransform: 'uppercase',
+        color: 'var(--t-text-muted)',
+        userSelect: 'none',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+    >
+      <span>Founding</span>
+      <span style={{ color: 'var(--t-text-faint)', letterSpacing: 0 }}>·</span>
+      <span
+        style={{
+          color: FOUNDER_ORANGE,
+          letterSpacing: '0.04em',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {serial}
+      </span>
+    </div>
+  );
+}
+
 /**
  * Identity header for the quick drawer. Replaces the static "Local desktop
  * profile / o8" header once Clerk is configured: signed-out shows a GitHub
@@ -331,6 +382,7 @@ function separatorStyle(): CSSProperties {
  * Builds without a Clerk key keep the original local-profile header.
  */
 function AccountSection({ auth }: { auth: O8AuthState }) {
+  const { founder } = useEntitlement();
   const [authError, setAuthError] = useState<DesktopAuthError | null>(() => getDesktopAuthError());
 
   useEffect(() => {
@@ -356,6 +408,7 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
               o8
             </div>
           </div>
+          {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
         </div>
         <div style={separatorStyle()} />
       </>
@@ -411,6 +464,7 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
             </div>
           ) : null}
         </div>
+        {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
       </RowButton>
 
       <div style={separatorStyle()} />
