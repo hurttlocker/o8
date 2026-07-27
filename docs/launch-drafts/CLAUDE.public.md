@@ -6,46 +6,45 @@ This file guides Claude Code (and, via `AGENTS.md`, every other coding agent) wh
 
 **o8** is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider.
 
-The shipping pattern: an orchestrator agent plans and reviews; worker agents execute in isolated git worktrees. Twelve runtime adapters (Codex, Claude Code, Gemini, opencode, Cursor, Grok, and friends) route through one universal CLI-based adapter interface (`src/lib/runtimes/`), with separate desktop and mobile surfaces. o8 runs on the subscriptions you already own — it spawns the same CLIs you'd run by hand (your ChatGPT/Codex plan, your Claude plan, your Gemini auth) and adds governance on top. No metered API keys required for the core loop.
+The shipping pattern: an orchestrator agent plans and reviews; worker agents execute in isolated git worktrees. The runtime catalog contains thirteen runtimes, twelve dispatchable, behind one capability-gated CLI adapter contract (`src/lib/runtimes/`). Desktop and mobile use separate surface-specific component trees while sharing selected infrastructure and common components. o8 runs on the subscriptions you already own — it spawns the same CLIs you'd run by hand (your ChatGPT/Codex plan, your Claude plan, your Gemini auth) and adds governance on top. No metered API keys are required for the core loop.
 
-See `docs/how-o8-works.md` for the product story and `docs/system-architecture.md` for the full diagram.
+See `docs/how-o8-works.md` for the product story. Detailed topology and surface inventories live in `docs/system-architecture.md` and `docs/ui-surface-atlas.md`.
 
 ## Commands
 
 ```bash
 # Development
-npm run dev              # Next + ws-server together (kills stale ports) — default
-npm run dev:next         # Next.js dev server alone → http://localhost:3001
-npm run dev:ws           # WebSocket server alone → ws://localhost:3002
+npm run dev              # Next + ws-server together — defaults to 47120 / 47125
+npm run dev:next         # Next.js dev server alone — defaults to http://localhost:47120
+npm run dev:ws           # WebSocket server alone — defaults to ws://localhost:47125
 cargo tauri dev          # Tauri native shell (from src-tauri/)
 
-# Verification (run before every commit)
-npx tsc --noEmit         # Quick type check
-npm run typecheck        # Full: rm types cache → next typegen → tsc --noEmit
-npm test                 # Vitest unit suite
-cargo test --lib         # Rust unit tests (from src-tauri/)
+# Verification
+npx tsc --noEmit                         # Quick type check
+npm run typecheck                        # Clear generated types → next typegen → tsc
+npm test                                 # Vitest suite
+npm run rule-check -- --base=<ref>       # Changed-line UI, port, path, and file-ceiling rules
+npx eslint <changed-files>               # ESLint on touched files
+cargo test --lib                         # Rust unit tests (from src-tauri/)
 
 # Build
 npm run build            # Next.js production build (webpack)
-npm run tauri:build      # Unsigned native macOS app
-
-# Lint
-npm run lint             # ESLint (flat config)
+npm run tauri:build      # Native app build
 ```
 
-**Test runner: vitest** (`vitest.config.ts`). Tests live colocated as `src/**/*.test.ts` plus cross-cutting suites in `tests/`. The `@` alias resolves; Next's `server-only` poison-pill is stubbed via `tests/stubs/server-only.ts`. Tests import `{ describe, it, expect }` from `'vitest'` explicitly (no globals). Key suites: `tests/middleware-gate.test.ts` (the loopback/token auth gate — add a case for every new gated route), `tests/route-coverage.test.ts` (filesystem-driven: every `src/app/api/**/route.ts` must resolve to an explicit middleware policy — a new unclassified route FAILS), `tests/principal-authz.test.ts` (the operator/worker/remote capability matrix through real route handlers).
+**Test runner: Vitest** (`vitest.config.ts`). Tests live colocated as `src/**/*.test.ts` plus cross-cutting suites in `tests/`. The `@` alias resolves; Next's `server-only` poison-pill is stubbed via `tests/stubs/server-only.ts`. Tests import `{ describe, it, expect }` from `'vitest'` explicitly (no globals). `tests/route-coverage.test.ts` walks every real API route and proves the middleware agrees with its expected policy; ordinary routes inherit the default gated policy. Add focused policy entries and middleware cases only for public, loopback-read, self-authenticating, capability-specific, or deliberately explicit gated seams. `tests/principal-authz.test.ts` exercises the operator/worker/remote capability matrix through real handlers.
 
 ### Real-path tests (the reachability rule)
 
-**A new cross-process seam, prompt-taught tool argument, or authorization check requires a test through the REAL entry point against persisted state — never the guard or helper in isolation.** Testing the mechanism with direct arguments while never exercising the path real callers take is the "green tests encode the premise" trap: the mechanism works, but nobody reaches it. We learned this the hard way — twice, a fully unit-tested guard shipped with hundreds of green tests while the real call path never reached it. Drive the actual route handler / prompt assembler / dispatch chain with a constructed Request (or persisted rows), and assert the observable effect. Patterns to copy: `tests/principal-authz.test.ts`, `tests/route-coverage.test.ts`, `tests/real-path-seams.test.ts`.
+**A new cross-process seam, prompt-taught tool argument, persistence path, or authorization check requires a test through the REAL entry point against persisted state — never the guard or helper in isolation.** Testing the mechanism with direct arguments while never exercising the path real callers take is the "green tests encode the premise" trap: the mechanism works, but nobody reaches it. We learned this the hard way — twice, a fully unit-tested guard shipped with hundreds of green tests while the real call path never reached it. Drive the actual route handler / prompt assembler / dispatch chain with a constructed Request (or persisted rows), and assert the observable effect. Patterns to copy: `tests/principal-authz.test.ts`, `tests/route-coverage.test.ts`, `tests/real-path-seams.test.ts`.
 
-## CI Pipeline (`.github/workflows/ci.yml`)
+## CI Pipeline
 
-Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests → Governance Smoke → Build (Node 22, `npm ci`).
+Pull requests run typecheck, lint, unit tests, a dependency security audit, and the governance smoke on Node 22 with `npm ci`; the governance smoke depends on typecheck while the other jobs run independently. Manual dispatch runs the same checks plus the production build. Direct pushes do not trigger CI.
 
 ## Path Aliases
 
-`@/*` maps to `./src/*`. All imports use `@/lib/...`, `@/components/...`, etc.
+`@/*` maps to `./src/*`. Prefer it for imports that cross source domains; colocated relative imports are normal.
 
 ## Design Philosophy
 
@@ -59,150 +58,104 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests → Governance Smok
 
 ## Architecture
 
-### Desktop Layout (`src/app/dashboard/page.tsx`)
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ TitleBar  (drag region · traffic lights · Agents / Alerts buttons)  │
-├──────────────────────┬──────────────────────────┬──────────────────┤
-│   AgentPanel (left)   │  TileContainer (center)  │  O8Panel (right) │
-│   resizable column    │  WorkspaceTerminal tiles │  440px default   │
-│   project drawer      │  with per-column strips  │  workspace · prs │
-│                       │                          │  activity· inbox │
-├──────────────────────┴──────────────────────────┴──────────────────┤
-│ DesktopStatusBar  (Settings · Ports · Add-repo · Terminal · Theme)   │
-└────────────────────────────────────────────────────────────────────┘
-```
+For diagrams, current UI surfaces, and subsystem walkthroughs, use `docs/system-architecture.md` and `docs/ui-surface-atlas.md`. The contracts below are the parts agents must hold while changing code.
 
-The Orchestrator is a TAB inside WorkspaceTerminal (`OrchestratorTab.tsx`), not a floating tile. A fresh workspace has two default tabs: `Orchestrator` and the assistant chat (`llm-chat`). Mission state lives in `OrchestratorDataProvider` (`components/desktop/orchestrator-data-context.tsx`); consumers use `useOrchestratorData()`.
+### Runtime catalog and adapter contract
 
-### Runtime Adapter System (`src/lib/runtimes/`)
+`src/lib/orchestrator/runtime-capabilities.ts` is the canonical catalog: thirteen entries, twelve dispatchable, with the `OrchestratorRuntime` type inferred from its keys. A straightforward CLI normally needs one catalog entry plus coverage in `src/lib/runtimes/declarative-workers-smoke.test.ts`. A stateful or protocol-specific runtime normally needs an owned-session adapter, an `AgentRuntime`, a catalog entry, and registry registration; add a cost parser only when the runtime emits usable telemetry. Follow `docs/runtime-adapter-contract.md`, not a fixed file-count recipe.
 
-Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always through the registry (`registry.ts`). All adapters share: discover, readTranscript, launch, resume, interrupt, reviewDiffs.
+The UI and API consume the registry and capability contract, not vendor protocols. The `AgentRuntime` lifecycle uses `discoverSessions`, `readTranscript`, `launch`, `resume`, `interrupt`, and `getChangedFiles`, with telemetry optional.
 
-**Adding another runtime is a 6-file patch.** See [`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md) for the exact recipe:
-1. `src/lib/<runtime>/owned.ts` — adapter + owned-session store
-2. `src/lib/runtimes/<runtime>.ts` — `AgentRuntime` implementation
-3. `src/lib/runtimes/<runtime>-cost-parser.ts` — telemetry parser
-4. `src/lib/orchestrator/types.ts` — add literal to `OrchestratorRuntime` union
-5. `src/lib/orchestrator/runtime-capabilities.ts` — add row to `ORCHESTRATOR_RUNTIMES`
-6. `src/lib/runtimes/index.ts` — register adapter + cost parser
+### Orchestrator backend versus worker runtime
 
-After step 4, `npx tsc --noEmit` points to every dispatch switch needing a new case.
+The active orchestrator backend and the dispatched worker runtime are independent selections. Never infer one from the other: inspect `src/lib/lane/orchestrator-backends/active-backend.ts`, the backend registry, and the runtime catalog before changing routing.
 
-### WebSocket Server (`src/ws-server.ts`)
+Ad-hoc LLM calls go through the existing proxy and routing layer. `src/lib/chat/gateway-client.ts` is the sanctioned AI SDK import boundary; do not add `ai` or `@ai-sdk/*` imports elsewhere without an explicit architecture change.
 
-Separate process on port 3002 (proxied via Next rewrite at `/ws`). Multiplexes real-time data for mobile clients. Channel semantics matter: **LOSSY** channels (`chat` deltas, `terminal` data) drop intermediate messages under backpressure; **DURABLE** channels (`inbox`, `history`, `review`, `lane-lifecycle`) are queued with safety-net polling fallback. Backpressure: 64KB buffer limit, max 32 queued messages, 50ms flush interval.
+### Dynamic ports
 
-### Desktop vs Mobile
+Development defaults to API `47120` and WS `47125`; packaged instances choose free ports from reserved blocks and write `~/.o8/api-port` and `~/.o8/ws-port`. Never hardcode a backend port. Server code uses `getApiBase()`, `getWsBase()`, or `resolvePortInfo()` from `src/lib/panel/api-port.ts`; standalone CLI and MCP code uses its existing resolver.
 
-**Completely separate codebases by design.** No shared components. Mobile (`src/components/mobile/`) is a remote control surface, not a scaled-down desktop.
+### API security
 
-### Database (`src/lib/db/`)
+Global Node middleware in `src/middleware.ts` is default-deny for `/api/*`. An operator bearer is valid on every API route; loopback is transport context, not identity, and does not replace the bearer except for a narrow read-only capability list. Public and self-authenticating routes are explicit exceptions, and non-loopback requests need an affirmative credential.
 
-SQLite via better-sqlite3 + Drizzle ORM. Data dir: `~/.o8/` (override: `CORTEX_IDE_DATA_DIR`). WAL mode, FK constraints on. Schema auto-migrates on first `getDb()` call. The main DB is `~/.o8/cortex-ide.db` — lanes, lane_events, approvals, chat history, session outcomes, GitHub mirror. Source of truth: `src/lib/db/schema.ts`.
+New routes inherit the gated policy without a manifest entry. To add public, loopback-read, self-authenticating, or principal-specific access, add the narrow middleware policy, verify any in-handler credentials, and update `tests/route-coverage.test.ts` plus focused cases in `tests/middleware-gate.test.ts`. `/api/setup/*` is not a public family; only `/api/setup/identity` has narrow loopback-read access. See `docs/loopback-api.md`.
 
-### Theming (`src/lib/theme/`)
+### MCP schemas
 
-CSS variable system, **two-axis: palette × surface** — `palette` ∈ {light, dark}; `surface` ∈ {glass, solid} (glass bleeds the macOS vibrancy backdrop; solid is the accessibility path). Components reference `var(--t-*)` tokens inside inline styles. The workspace center is always solid — code, chat, and terminal text need a stable paper surface.
+For MCP tools consumed by OpenAI strict mode, keep the top-level `inputSchema` a plain `{ type: 'object', properties, required }`. Do not put `oneOf`, `anyOf`, `allOf`, or `not` beside that object; validate unions and conditional relationships in the handler so one incompatible schema cannot suppress the whole tool list.
 
-### Port resolution (`src/lib/panel/api-port.ts`)
+### Database and local state
 
-**Never hardcode port 3001/3002.** The Tauri sidecar probes for free ports at startup and writes them to `~/.o8/{api-port,ws-port}`. Resolve via `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or the file fallback (standalone processes).
+Local state defaults to `~/.o8`; `O8_DATA_DIR` is the primary override and `CORTEX_IDE_DATA_DIR` is its legacy alias. The main SQLite database defaults to `<data-dir>/cortex-ide.db`, uses WAL and foreign keys, and initializes through `getDb()`. Typed declarations live in `src/lib/db/schema.ts`, while creation and migration truth also lives in `src/lib/db/index.ts` and the versioned migration modules.
 
-### API security (`src/middleware.ts`)
+### Theming
 
-Global Next middleware, Node runtime, **default-deny**: every `/api/*` request is gated on loopback origin + bearer token UNLESS it matches an explicit escape. There is no fail-open family — an unlisted new route is denied, not exposed. In packaged builds the bundled server stamps the real TCP peer address into a trusted header; a non-loopback socket can ONLY pass with the bearer token. Full model: [`docs/loopback-api.md`](./docs/loopback-api.md).
+The theme system has two axes: light/dark palette and glass/solid surface, with an explicit All Glass workspace mode layered through the same token system. Themeable components use `var(--t-*)` tokens in inline styles; do not hardcode surface opacity or add rgba-white surfaces outside the theme registry. Geometry comes from `hurttlocker.md`, `DESIGN.md`, adjacent components, and the relevant touch or desktop context rather than one global radius or touch-target constant.
 
-**Never add a route that touches agent/repo state without going through this gate.** If you need public access, put it under `/api/setup/*` as GET-only, or add an explicit allowlist entry — and update `tests/route-coverage.test.ts`'s expectations plus this file together.
+### Merge governance and escalation
 
-### MCP servers (`src/lib/mcp/`)
-
-Two stdio MCP servers expose o8 to MCP clients: `operator-mcp-server.ts` (operator tools: status, send, approve/reject, missions, dispatch, review, merge, the `o8_view_*` webview-control family, the `o8_spec_*` repo-spec tools) and `cortex-mcp-server.ts` (internal tools for orchestrator sessions). Strict-schema caveat: every tool's `inputSchema` top level must be a plain `{type:'object', properties, required}` — no `oneOf`/`anyOf`/`allOf` siblings; some MCP clients reject them and the whole tool list fails to load. Validate in the handler, not the schema.
-
-### Cortex v2 (organizational memory)
-
-`src/lib/cortex/` is the in-process memory subsystem. Two layers, both SQLite-backed: **Directives** (operator-authored rules, surfaced to the orchestrator at session start) and the **Session ledger** (every completed packet writes an outcome row; a proposer surfaces candidate directives when the same fix-pattern recurs — operator accepts or dismisses, never autonomous writes).
-
-**Spec ingestion feedback loop — important.** At repo connect, `spec-ingest.ts` ingests `README.md`, `CLAUDE.md`, `AGENTS.md`, `DESIGN.md` (plus `docs/*.md`) and converts them into directives the Engineering Brain retrieves against. Editing this file immediately changes what the Brain answers about the repo. Sections chunk at the H3 level and the composer reads ~1,500 chars per row — keep H3 sections chunk-sized.
-
-### Engineering Brain (Q&A surface)
-
-The Q&A layer over the Cortex substrate, for every consumer: the operator, the orchestrator, dispatched workers, and MCP clients. Pipeline (`src/lib/cortex/qa/ask.ts`): classify with speculative retrieval overlapped → parallel retrievers + RRF merge with directive pinning → compose. Streams via SSE; every citation carries a human-readable title. Workers get `o8 ask "<question>"` taught in their packet prompt when enabled — instant cited repo answers instead of context-burning searches. Every worker ask is recorded as a `brain_consulted` lane event the operator can audit.
-
-Spend guardrails are built in: paid-tier calls are logged and hard-capped daily; when the cap is hit the cascade falls through to free tiers; a circuit breaker opens on repeated auth failures. A local-inference tier (Ollama-compatible) is supported for classify/compose. **Never weaken the spend guardrails.**
-
-### Orchestrator Model
-
-Multiple orchestrator backends, registry-based (`src/lib/lane/orchestrator-backends/registry.ts`). The orchestrator can EITHER direct-execute in the repo with full native tools OR dispatch workers into isolated worktrees via missions — the turn decides; both are first-class. Governed external backends run against profiles that deny native execution so they can ONLY dispatch through o8's governance. Before any agent merge, the orchestrator reviews the diff (merge preview → review → approve-and-merge).
-
-**The economics are a feature:** each backend runs on the account you already have — a Claude plan powers Claude Code sessions, a ChatGPT plan powers Codex, Gemini auth powers Gemini. o8 adds the governance layer; it doesn't meter your inference.
-
-### Merge-failure escalation chain (5 layers)
-
-When a packet's post-rebase typecheck fails during merge, recovery escalates — cheap and automatic at the bottom, human at the top. The lane never silently stalls:
+Workers cannot merge their own packets. A worker-side approve-merge request raises an operator approval card; an authenticated dispatcher still goes through review and the merge gate. When post-rebase typecheck fails, recovery escalates without silently stalling:
 
 | Layer | Trigger | Who decides |
 |---|---|---|
-| 1. Auto-rerun (cap 1) | typecheck fails on merge | system |
-| 2. Escalate to orchestrator | layer 1 also fails | system → orchestrator (`awaiting_orchestrator` + full tsc output) |
-| 3. Steer warm session | orchestrator picks "fix it where it sits" | orchestrator (`steer_packet` — reuses the warm thread) |
-| 4. Fresh redispatch | steering fails or session dead | orchestrator (`rerun_with_feedback`) |
-| 5. Human approval card | orchestrator gives up | operator |
+| 1. Auto-rerun, capped at one | merge typecheck fails | system |
+| 2. `awaiting_orchestrator` | the retry also fails | system → orchestrator |
+| 3. Steer the warm session | fix in place | orchestrator |
+| 4. Fresh redispatch | steering fails or the session is dead | orchestrator |
+| 5. Human approval card | automated recovery is exhausted | operator |
 
-Layer 1's retry counter resets on `reset_packet` → dispatch. Prefer layer 3 over 4 — the warm session already has packet context.
-
-### Agent-side CLI (the `o8` binary)
-
-Dispatched agents have the `o8` CLI on `$PATH` inside worktrees — `packet info`, `packet scope`, `packet heartbeat`, `packet report`, `o8 ask`. See [`AGENTS.md`](./AGENTS.md) for the full agent protocol. The CLI is symmetric with the MCP operator tools: the same control-plane verbs reach the same gated routes from either surface. **Governance is gated on context, not verb:** a worker-context `approve-merge` raises an operator approval card; a human operator call merges directly.
+`reset_packet` followed by dispatch resets the layer-one retry budget. Prefer steering the warm session when it is healthy because it retains packet context.
 
 ## Critical Rules
 
 > **Vocabulary** — [`docs/vocabulary.md`](./docs/vocabulary.md) is the canonical glossary of `runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`. MCP tool names and DB columns are frozen for stability.
 
 ### NEVER
-- **Never use CSS classes** — inline styles only (`style={{ }}`). iOS Safari reliability. Permanent.
-- **Never hardcode rgba colors for theme surfaces** — use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`. A hardcoded light rgba renders as a gray blob in dark mode.
-- **Never hardcode port 3001 or 3002** — use `getApiBase()`.
-- **Never hardcode absolute user paths** — use `process.cwd()`, `os.homedir()`, or an env var.
-- **Never bypass the middleware gate** — see API security above.
-- **Never use emoji in UI** — icon libraries only, as raw SVG. Match whichever library the surrounding surface already uses; don't migrate icons between libraries.
-- **Never use React icon components in the Tauri webview** — extract SVG path data and use raw `<svg>` elements.
-- **Never use Material Design patterns** — no borderLeft accents, no MD elevation.
-- **Never use dropdown overflow menus ("...")** — inline actions with confirmation strips.
-- **Never put early `return null` before hooks.**
-- **Never use CSS shorthand** — `paddingTop`/`paddingLeft`, not `padding: "8px 16px"`.
-- **Never throw in API routes** — return structured error responses.
-- **Never use native `<select>` or `<input>` inside packet cards** — Issues-style rows with custom popovers.
+
+- **Never introduce new `className` or CSS classes in TSX** — use inline style objects. Existing legacy classes are not precedent.
+- **Never hardcode rgba-white colors for theme surfaces** — use the matching `var(--t-*)` token.
+- **Never hardcode backend ports** — use the shared resolver.
+- **Never hardcode absolute user paths** — use `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit environment variable.
+- **Never bypass the middleware gate** — exceptions require an explicit policy and real-path tests.
+- **Never add emoji UI** — use raw SVG icons matching the surrounding surface.
+- **Never add React icon-library imports under `src/components/desktop/`** — use the established raw-SVG/shim pattern.
+- **Never use Material Design patterns** — no `borderLeft` accents or MD elevation.
+- **Never use dropdown overflow menus (`...`)** — use inline actions with confirmation strips.
+- **Never put an early `return null` before hooks.**
+- **Never add multi-value `padding` or `margin` shorthand** — use longhand properties so React cannot mix shorthand and longhand.
+- **Never throw from API routes** — return structured error responses.
+- **Never use native `<select>` or `<input>` inside packet cards** — use Issues-style rows and custom popovers.
 
 ### ALWAYS
-- **`npx tsc --noEmit` before every commit.**
-- **Respect the 800-line file ceiling** — decompose before adding logic past it. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are waived.
-- **Apple HIG**: 44px touch targets, 14px card radii, spring curves (framer-motion `stiffness: 400, damping: 30`).
-- **`as React.CSSProperties`** for vendor-prefixed CSS props.
-- **Build through the runtime contract** — never talk to a specific runtime directly.
-- **Console logging prefix**: `[feature-name]`.
-- **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`.
-- **Smoke-test scripts with `tsx <script>`, never `tsx -e "import(...)"`** — the latter silently loses named exports.
+
+- **Run `npx tsc --noEmit` before every commit.**
+- **Respect the 800-line file ceiling.** Current mechanical waivers are `src/app/dashboard/page.tsx`, `src/ws-server.ts`, `src/lib/worktree/manager.ts`, and `src/lib/lane/commands.ts`; new waivers require an explicit decision.
+- **Run `npm run rule-check -- --base=<ref>` for changed TypeScript or TSX.**
+- **Use `as React.CSSProperties` for vendor-prefixed CSS properties.**
+- **Build through the runtime contract** — never wire product callers directly to one vendor protocol.
+- **Prefix console logging with `[feature-name]`.**
+- **Use Conventional Commit prefixes:** `feat:`, `fix:`, `refactor:`, `perf:`, or `chore:`.
+- **Smoke-test scripts with `tsx <script>`, never `tsx -e "import(...)"`** — the latter can silently lose named exports.
 
 ## Environment Variables
 
-See `.env.example` — 40+ documented vars grouped by feature. Most are optional; fresh clones boot with nothing set. `CORTEX_IDE_DATA_DIR` overrides the data dir (default `~/.o8`).
+Most local configuration is optional and fresh clones boot without it. State defaults to `~/.o8`; set `O8_DATA_DIR` to isolate or relocate it. `CORTEX_IDE_DATA_DIR` remains a legacy-compatible alias and has lower precedence.
 
 ## Git Practices
 
-- Maintainers work on `main`; contributors branch and open PRs.
-- `npx tsc --noEmit` + `npm test` green before every commit.
-- Commit with explicit pathspecs in agent workflows — never `git add -A`.
+- Maintainers may work on `main`; contributors branch and open pull requests.
+- Keep `npx tsc --noEmit` and `npm test` green before every commit.
+- In agent workflows, stage explicit pathspecs; never use bare `git add -A` or `git add .`.
 
 ## Documentation
 
-`docs/` contains the architecture and contract docs. Start with:
-- `docs/how-o8-works.md` — what o8 is and does
-- `docs/system-architecture.md` — full system diagram
-- `docs/api.md` — `/api/*` route reference
-- `docs/runtime-adapter-contract.md` — the adapter interface
-- `docs/loopback-api.md` — the API auth gate
-- `docs/canonical-workflow.md` — the dispatch → review → merge loop
-- `docs/vocabulary.md` — canonical glossary
-- `docs/performance-architecture-principles.md` — render speed, bootstrap, streaming
-- `docs/product-telemetry-privacy.md` — privacy posture (telemetry is opt-in)
+- `docs/system-architecture.md` — system diagram and subsystem topology
+- `docs/ui-surface-atlas.md` — current desktop and mobile surface inventory
+- `docs/runtime-adapter-contract.md` — declarative and specialized runtime recipes
+- `docs/loopback-api.md` — API authentication and middleware policy
+- `docs/canonical-workflow.md` — dispatch → review → merge
+- `docs/vocabulary.md` — canonical control-plane terms
+- `docs/performance-architecture-principles.md` — render, bootstrap, and streaming contracts
+- `docs/product-telemetry-privacy.md` — opt-in telemetry posture
