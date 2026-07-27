@@ -178,3 +178,23 @@
 ### Deviations
 
 - OpenClaw and Hermes remain registered for existing sessions but are intentionally absent from the normal composer model picker; this correction does not add or change any UI controls.
+
+## Voice UX: "Voice via your ChatGPT plan" row + narration speaker host (#1620)
+
+### Approach
+
+- Added a lean `GET /api/voice/chatgpt-capability` route wrapping the already-shipped `probeCodexVoiceCapability()` (`src/lib/codex/appserver-probe.ts`, already used by `/api/setup/detect`), so the Settings surface isn't paying for a full multi-CLI detection sweep just to learn whether Codex's ChatGPT-OAuth realtime door is open.
+- The actual "Settings → Voice" surface for realtime voice paths is `RealtimeSection` inside `src/app/voice-settings/tabs/FounderTab.tsx` (the `/voice-settings` window's `founder` tab is user-labeled "Voice" — confirmed via `voice-settings/page.tsx`), which already had the BYOK (OpenAI key) row; added the new "Voice via your ChatGPT plan" row there, between it and the Voice/Start-conversation controls, rendered only when `auth.chatgptOAuth` is detected.
+- Built `NarrationSpeakerHost` (mounted at dashboard level next to `RealtimeVoiceHost`), which long-polls `/api/voice/narration` (already on main) and voices each `spoken` decision via a pure mapper (`src/lib/voice/narration-speaker.ts`, unit tested).
+
+### Deviations
+
+- `RealtimeSessionHandle` (`src/lib/voice/realtime-client.ts`, transport-lane-owned, not modified) exposes only `stop()`/`status` — no way to inject arbitrary text into a live gpt-realtime WebRTC session, and there is no Rust-side bridge for that either. Rather than stub this out, the speaker host drives the existing native Symon TTS callout stack instead (`ttsStop`+`ttsSpeak` for `interrupt-now`; `symonSpeakStatus` for held/ambient decisions, which already implements queue-behind-a-pause semantics natively via `tts::playback::play_status_queued`). This is a real, already-shipped voice channel, not a placeholder — swapping in a dedicated realtime-channel injection hook later is a contained change (just the `speakAction` branch in `NarrationSpeakerHost.tsx`).
+- Both the settings row and the speaker host gate on `chatgptOAuth` (paid ChatGPT-plan sign-in detected) rather than the stricter `capable` flag (which also requires Codex's own experimental realtime config flag) — the narrower flag is the actual "paid plan" signal the feature is named for; `capable` only changes the row's status badge (Available vs. Needs setup).
+
+### Verification
+
+- `npx tsc --noEmit` — clean outside the pre-existing, unrelated `services/license-server` missing-dependency errors (not touched by this packet).
+- `npx vitest run src/lib/voice/narration-speaker.test.ts src/lib/voice/narration-policy.test.ts src/lib/voice/fleet-narration-events.test.ts src/lib/voice/realtime-access.test.ts` — 4 files, 16 tests passed.
+- Scoped ESLint on all seven changed/added files — 0 errors, 1 pre-existing warning in `FounderTab.tsx` on an unrelated `Date.now()` call outside the touched code.
+- Browser/UI smoke intentionally not run per packet sandbox guidance.
