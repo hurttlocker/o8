@@ -48,7 +48,10 @@ export function AccountBlock({
   const initial = Array.from(displayName)[0]?.toUpperCase() ?? '';
   const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  const planLabel = isFounder ? 'Founder' : isPaid ? 'Pro' : 'Free Plan';
+  // Founders present as Pro (Q ruling 2026-07-27): the ladder reads Free/Pro/
+  // Team everywhere; founding identity is the serial chip in the settings
+  // drawer, not a plan name.
+  const planLabel = isFounder || isPaid ? 'Pro' : 'Free Plan';
   const openSettings = onOpenSettings ?? NOOP;
 
   const syncAnchor = useCallback(() => {
