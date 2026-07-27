@@ -42,6 +42,7 @@ import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
 import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
+import { NarrationSpeakerHost } from '@/components/desktop/dictation/NarrationSpeakerHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
 import { TelemetryCrashCapture } from '@/components/desktop/TelemetryCrashCapture';
@@ -4724,6 +4725,7 @@ function DashboardInner() {
       <ThemeLab />
       <UiZoomLayer />
       <RealtimeVoiceHost />
+      <NarrationSpeakerHost />
       <ReportIssueHost />
       <TelemetryCrashCapture />
       <SentryBrowserInit />
