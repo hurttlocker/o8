@@ -10,6 +10,7 @@ const fixtures: string[] = [];
 function makeFixture(
   auth: Record<string, unknown>,
   config = '[features]\nrealtime_conversation = true\n\n[realtime]\ntransport = "websocket"\n',
+  missingRealtimeMethod?: string,
 ) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'o8-codex-voice-probe-'));
   fixtures.push(root);
@@ -42,6 +43,14 @@ if (args[0] === 'app-server' && args[1] === 'daemon' && args[2] === 'version') {
   process.exit(1);
 }
 if (args[0] === 'app-server' && args[1] === '--stdio') {
+  const realtimeMethods = new Set([
+    'thread/realtime/start',
+    'thread/realtime/appendAudio',
+    'thread/realtime/appendText',
+    'thread/realtime/appendSpeech',
+    'thread/realtime/stop',
+  ]);
+  const missingRealtimeMethod = ${JSON.stringify(missingRealtimeMethod ?? '')};
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => {
     for (const line of chunk.trim().split(/\\r?\\n/)) {
@@ -55,6 +64,13 @@ if (args[0] === 'app-server' && args[1] === '--stdio') {
             platformFamily: 'unix',
             platformOs: 'macos',
           },
+        }) + '\\n');
+      } else if (realtimeMethods.has(request.method)) {
+        process.stdout.write(JSON.stringify({
+          id: request.id,
+          ...(request.method === missingRealtimeMethod
+            ? { error: { code: -32601, message: 'Method not found' } }
+            : { error: { code: -32602, message: 'threadId is required' } }),
         }) + '\\n');
       }
     }
@@ -104,7 +120,7 @@ describe('probeCodexVoiceCapability', () => {
       home: fixture.root,
       codexHome: fixture.codexHome,
       env: { HOME: fixture.root, OPENAI_API_KEY: '', CODEX_API_KEY: '' },
-      timeoutMs: 1_000,
+      timeoutMs: 4_000,
     });
 
     expect(capability.installation).toMatchObject({
@@ -114,6 +130,14 @@ describe('probeCodexVoiceCapability', () => {
     expect(capability.appServer).toMatchObject({
       reachable: true,
       transports: ['stdio'],
+      realtimeMethods: [
+        'thread/realtime/start',
+        'thread/realtime/appendAudio',
+        'thread/realtime/appendText',
+        'thread/realtime/appendSpeech',
+        'thread/realtime/stop',
+      ],
+      missingRealtimeMethods: [],
     });
     expect(capability.auth.mode).toBe('api_key');
     expect(capability.auth.whyNot).toContain('text fallback');
@@ -134,7 +158,7 @@ describe('probeCodexVoiceCapability', () => {
       home: fixture.root,
       codexHome: fixture.codexHome,
       env: { HOME: fixture.root, OPENAI_API_KEY: '', CODEX_API_KEY: '' },
-      timeoutMs: 1_000,
+      timeoutMs: 4_000,
     });
 
     expect(capability.capable).toBe(true);
@@ -151,5 +175,30 @@ describe('probeCodexVoiceCapability', () => {
       websocketModeEnabled: true,
       whyNot: null,
     });
+  });
+
+  it('fences the surface when one required realtime method is missing', async () => {
+    const fixture = makeFixture(
+      {
+        auth_mode: 'chatgpt',
+        tokens: { access_token: 'fixture-access' },
+      },
+      undefined,
+      'thread/realtime/appendSpeech',
+    );
+
+    const capability = await probeCodexVoiceCapability({
+      binaryPath: fixture.binaryPath,
+      home: fixture.root,
+      codexHome: fixture.codexHome,
+      env: { HOME: fixture.root, OPENAI_API_KEY: '', CODEX_API_KEY: '' },
+      timeoutMs: 4_000,
+    });
+
+    expect(capability.capable).toBe(false);
+    expect(capability.appServer.missingRealtimeMethods).toEqual([
+      'thread/realtime/appendSpeech',
+    ]);
+    expect(capability.realtime.whyNot).toContain('appendSpeech');
   });
 });

@@ -202,6 +202,18 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('gates the Codex app-server realtime lifecycle and event poll against LAN', () => {
+    for (const method of ['GET', 'POST']) {
+      const res = panelGateMiddleware(
+        gatedRequest('http://192.168.1.50:3001/api/voice/realtime/codex', {
+          method,
+          headers: { host: '192.168.1.50:3001' },
+        }),
+      );
+      expect(res.status).toBe(401);
+    }
+  });
+
   it('gates /api/mobile/symon/session (Agent-mode ephemeral-token mint) against LAN without a token', () => {
     // The phone reaches this with the paired Bearer ws-token; a bare LAN request
     // is denied (mint runs on the operator's BYOK OpenAI key).

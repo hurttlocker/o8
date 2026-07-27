@@ -27,6 +27,11 @@ import 'server-only';
  */
 
 import { getEntitlement } from '@/lib/entitlement/store';
+import {
+  probeCodexVoiceCapability,
+  type CodexVoiceCapability,
+  type CodexVoiceProbeOptions,
+} from '@/lib/codex/appserver-probe';
 
 export type RealtimeMode = 'byok' | 'managed' | 'locked';
 
@@ -44,6 +49,18 @@ export interface RealtimeAccessInput {
   hasByokKey: boolean;
   /** The account's `proxy.inference` entitlement lever (pro/team). */
   proxyInference: boolean;
+}
+
+export type CodexRealtimeTransportMode = 'codex-oauth' | 'text' | 'unavailable';
+
+export interface CodexRealtimeTransportAccess {
+  mode: CodexRealtimeTransportMode;
+  /** The app-server can start the experimental OAuth-backed S2S lifecycle. */
+  s2s: boolean;
+  /** At least a Codex text session can be opened through the same local server. */
+  available: boolean;
+  reason: string;
+  capability: CodexVoiceCapability;
 }
 
 /**
@@ -78,4 +95,59 @@ export function resolveRealtimeAccessWith(input: RealtimeAccessInput): RealtimeA
 export async function resolveRealtimeAccess(hasByokKey: boolean): Promise<RealtimeAccess> {
   const { flags } = await getEntitlement();
   return resolveRealtimeAccessWith({ hasByokKey, proxyInference: flags['proxy.inference'] });
+}
+
+/**
+ * Resolve the launch-scoped Codex transport without changing the existing BYOK
+ * access ladder above. An installed/reachable app-server remains useful when
+ * OAuth realtime is unavailable: API-key auth and experimental-surface drift
+ * both fall back to a normal text thread instead of failing the whole session.
+ */
+export function resolveCodexRealtimeTransportAccessWith(
+  capability: CodexVoiceCapability,
+): CodexRealtimeTransportAccess {
+  if (capability.capable) {
+    return {
+      mode: 'codex-oauth',
+      s2s: true,
+      available: true,
+      reason: 'Using Connected Voice through the local Codex app-server and ChatGPT OAuth.',
+      capability,
+    };
+  }
+
+  if (
+    capability.installation.installed
+    && capability.appServer.reachable
+    && capability.appServer.transports.includes('stdio')
+  ) {
+    const reason = capability.auth.mode === 'api_key'
+      ? 'Codex is using API-key auth, so Connected Voice is unavailable; using text automatically.'
+      : `${capability.whyNot ?? 'Codex realtime is unavailable'} Using text automatically.`;
+    return {
+      mode: 'text',
+      s2s: false,
+      available: true,
+      reason,
+      capability,
+    };
+  }
+
+  return {
+    mode: 'unavailable',
+    s2s: false,
+    available: false,
+    reason: capability.appServer.reachable
+      ? 'The local Codex app-server is reachable, but the launch transport requires stdio.'
+      : capability.whyNot ?? 'The local Codex app-server is unavailable.',
+    capability,
+  };
+}
+
+export async function resolveCodexRealtimeTransportAccess(
+  options: CodexVoiceProbeOptions = {},
+): Promise<CodexRealtimeTransportAccess> {
+  return resolveCodexRealtimeTransportAccessWith(
+    await probeCodexVoiceCapability(options),
+  );
 }

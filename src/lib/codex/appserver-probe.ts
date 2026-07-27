@@ -10,9 +10,17 @@ import { scanForBinary } from '../runtimes/shared/cli-locate';
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 2_500;
 const INITIALIZE_REQUEST_ID = 'o8-codex-voice-probe';
+export const CODEX_REALTIME_METHODS = [
+  'thread/realtime/start',
+  'thread/realtime/appendAudio',
+  'thread/realtime/appendText',
+  'thread/realtime/appendSpeech',
+  'thread/realtime/stop',
+] as const;
 
 export type CodexVoiceAuthMode = 'chatgpt_oauth' | 'api_key' | 'none' | 'unknown';
 export type CodexAppServerTransport = 'stdio' | 'unix' | 'websocket';
+export type CodexRealtimeMethod = (typeof CODEX_REALTIME_METHODS)[number];
 
 export interface CodexVoiceCapability {
   checkedAt: number;
@@ -28,6 +36,8 @@ export interface CodexVoiceCapability {
     reachable: boolean;
     transports: CodexAppServerTransport[];
     supportedTransports: CodexAppServerTransport[];
+    realtimeMethods: CodexRealtimeMethod[];
+    missingRealtimeMethods: CodexRealtimeMethod[];
     whyNot: string | null;
   };
   auth: {
@@ -69,6 +79,11 @@ interface RealtimeConfigState {
   featureEnabled: boolean;
   realtimeSectionPresent: boolean;
   websocketModeEnabled: boolean;
+}
+
+interface StdioCapabilityProbe {
+  reachable: boolean;
+  realtimeMethods: CodexRealtimeMethod[];
 }
 
 async function isExecutable(filePath: string): Promise<boolean> {
@@ -244,28 +259,36 @@ function parseSupportedTransports(help: string): CodexAppServerTransport[] {
   return transports;
 }
 
-async function probeStdioInitialize(
+async function probeStdioCapabilities(
   binaryPath: string,
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
-): Promise<boolean> {
+): Promise<StdioCapabilityProbe> {
   return new Promise((resolve) => {
     const child = spawn(binaryPath, ['app-server', '--stdio'], {
       env,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     let settled = false;
+    let reachable = false;
     let stdout = '';
-    const finish = (reachable: boolean) => {
+    const methodByRequestId = new Map(
+      CODEX_REALTIME_METHODS.map((method, index) => [
+        `${INITIALIZE_REQUEST_ID}:${index + 1}`,
+        method,
+      ]),
+    );
+    const realtimeMethods = new Set<CodexRealtimeMethod>();
+    const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       child.kill('SIGTERM');
-      resolve(reachable);
+      resolve({ reachable, realtimeMethods: [...realtimeMethods] });
     };
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    const timer = setTimeout(finish, timeoutMs);
 
-    child.once('error', () => finish(false));
+    child.once('error', finish);
     child.stdout.setEncoding('utf-8');
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
@@ -273,9 +296,33 @@ async function probeStdioInitialize(
       stdout = lines.pop() ?? '';
       for (const line of lines) {
         try {
-          const message = JSON.parse(line) as { id?: unknown; result?: unknown; error?: unknown };
+          const message = JSON.parse(line) as {
+            id?: unknown;
+            result?: unknown;
+            error?: { code?: unknown };
+          };
           if (message.id === INITIALIZE_REQUEST_ID) {
-            finish(Boolean(message.result) && !message.error);
+            reachable = Boolean(message.result) && !message.error;
+            if (!reachable) {
+              finish();
+              return;
+            }
+            child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`);
+            for (const [id, method] of methodByRequestId) {
+              child.stdin.write(`${JSON.stringify({ id, method, params: {} })}\n`);
+            }
+            continue;
+          }
+          const method = typeof message.id === 'string'
+            ? methodByRequestId.get(message.id)
+            : undefined;
+          if (!method) continue;
+          methodByRequestId.delete(message.id as string);
+          if (!message.error || message.error.code !== -32601) {
+            realtimeMethods.add(method);
+          }
+          if (methodByRequestId.size === 0) {
+            finish();
             return;
           }
         } catch {
@@ -283,8 +330,8 @@ async function probeStdioInitialize(
         }
       }
     });
-    child.once('exit', () => finish(false));
-    child.stdin.on('error', () => finish(false));
+    child.once('exit', finish);
+    child.stdin.on('error', finish);
     child.stdin.write(`${JSON.stringify({
       id: INITIALIZE_REQUEST_ID,
       method: 'initialize',
@@ -326,24 +373,43 @@ export async function probeCodexVoiceCapability(
     ? null
     : 'Codex app/CLI is not installed. Install Codex before using Connected Voice.';
   let version = options.version ? (parseVersion(options.version) ?? options.version) : null;
-  if (binaryPath && !version) {
-    const versionResult = await runCommand(binaryPath, ['--version'], env, timeoutMs);
+  const versionProbe = binaryPath && !version
+    ? runCommand(binaryPath, ['--version'], env, timeoutMs)
+    : Promise.resolve<CommandResult | null>(null);
+  const appServerProbe = binaryPath
+    ? Promise.all([
+      runCommand(binaryPath, ['app-server', '--help'], env, timeoutMs),
+      runCommand(binaryPath, ['app-server', 'daemon', 'version'], env, timeoutMs),
+      options.initializeAppServer === false
+        ? Promise.resolve<StdioCapabilityProbe>({ reachable: false, realtimeMethods: [] })
+        : probeStdioCapabilities(binaryPath, env, timeoutMs),
+    ])
+    : Promise.resolve<[
+      CommandResult,
+      CommandResult,
+      StdioCapabilityProbe,
+    ] | null>(null);
+  const featureProbe = binaryPath
+    ? runCommand(binaryPath, ['features', 'list'], env, timeoutMs)
+    : Promise.resolve<CommandResult | null>(null);
+  const authModeProbe = detectAuthMode(authPath, env);
+  const configContentProbe = readFile(configPath, 'utf-8').catch(() => '');
+
+  const versionResult = await versionProbe;
+  if (versionResult) {
     version = parseVersion(`${versionResult.stdout}\n${versionResult.stderr}`);
   }
 
   let appServerReachable = false;
   let transports: CodexAppServerTransport[] = [];
   let supportedTransports: CodexAppServerTransport[] = [];
-  if (binaryPath) {
-    const [helpResult, daemonResult, stdioReachable] = await Promise.all([
-      runCommand(binaryPath, ['app-server', '--help'], env, timeoutMs),
-      runCommand(binaryPath, ['app-server', 'daemon', 'version'], env, timeoutMs),
-      options.initializeAppServer === false
-        ? Promise.resolve(false)
-        : probeStdioInitialize(binaryPath, env, timeoutMs),
-    ]);
+  let realtimeMethods: CodexRealtimeMethod[] = [];
+  const appServerResult = await appServerProbe;
+  if (appServerResult) {
+    const [helpResult, daemonResult, stdioCapability] = appServerResult;
     supportedTransports = parseSupportedTransports(`${helpResult.stdout}\n${helpResult.stderr}`);
-    if (stdioReachable) transports.push('stdio');
+    realtimeMethods = stdioCapability.realtimeMethods;
+    if (stdioCapability.reachable) transports.push('stdio');
     if (daemonResult.ok) transports.push('unix');
     transports = [...new Set(transports)];
     appServerReachable = transports.length > 0;
@@ -356,7 +422,7 @@ export async function probeCodexVoiceCapability(
         : 'Codex is installed, but its app-server did not answer over stdio and no managed Unix daemon was reachable.'
       : 'Codex is not installed, so its app-server cannot be probed.';
 
-  const authMode = await detectAuthMode(authPath, env);
+  const authMode = await authModeProbe;
   const authWhyNot = authMode === 'chatgpt_oauth'
     ? null
     : authMode === 'api_key'
@@ -365,22 +431,30 @@ export async function probeCodexVoiceCapability(
         ? 'Codex is not signed in. Run `codex login` and choose ChatGPT OAuth.'
         : 'Codex auth exists, but o8 could not confirm ChatGPT OAuth.';
 
-  let configContent = '';
-  try {
-    configContent = await readFile(configPath, 'utf-8');
-  } catch {
-    // Missing config is an ordinary disabled-flags result.
-  }
+  const configContent = await configContentProbe;
   const configState = parseRealtimeConfig(configContent);
   let effectiveFeature = configState.featureEnabled;
-  if (binaryPath) {
-    const featureResult = await runCommand(binaryPath, ['features', 'list'], env, timeoutMs);
+  const featureResult = await featureProbe;
+  if (featureResult) {
     const activeFeature = parseEffectiveRealtimeFeature(`${featureResult.stdout}\n${featureResult.stderr}`);
     if (activeFeature !== null) effectiveFeature = activeFeature;
   }
-  const realtimeWhyNot = effectiveFeature
-    ? null
-    : 'Codex realtime conversation is disabled in the active config. Enable it only in an isolated spike config.';
+  const missingRealtimeMethods = CODEX_REALTIME_METHODS.filter(
+    (method) => !realtimeMethods.includes(method),
+  );
+  const realtimeEnabled = effectiveFeature
+    && configState.realtimeSectionPresent
+    && configState.websocketModeEnabled
+    && missingRealtimeMethods.length === 0;
+  const realtimeWhyNot = !effectiveFeature
+    ? 'Codex realtime conversation is disabled in the active config. Enable it only in an isolated spike config.'
+    : !configState.realtimeSectionPresent
+      ? 'Codex realtime config is missing its [realtime] section.'
+      : !configState.websocketModeEnabled
+        ? 'Codex realtime websocket mode is disabled in the active config.'
+        : missingRealtimeMethods.length > 0
+          ? `Codex app-server is missing realtime methods: ${missingRealtimeMethods.join(', ')}.`
+          : null;
 
   const whyNot = installationWhyNot ?? appServerWhyNot ?? authWhyNot ?? realtimeWhyNot;
   return {
@@ -397,6 +471,8 @@ export async function probeCodexVoiceCapability(
       reachable: appServerReachable,
       transports,
       supportedTransports,
+      realtimeMethods,
+      missingRealtimeMethods,
       whyNot: appServerWhyNot,
     },
     auth: {
@@ -406,7 +482,7 @@ export async function probeCodexVoiceCapability(
       whyNot: authWhyNot,
     },
     realtime: {
-      enabled: effectiveFeature,
+      enabled: realtimeEnabled,
       featureEnabled: effectiveFeature,
       realtimeSectionPresent: configState.realtimeSectionPresent,
       websocketModeEnabled: configState.websocketModeEnabled,
