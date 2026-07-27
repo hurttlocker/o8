@@ -84,11 +84,12 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
   const { plan, founder, actualPlan, actualFounder } = useEntitlement();
   const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  const founderNumber = (founder ?? actualFounder)?.operatorNumber;
-  const planLabel = isFounder
-    ? (typeof founderNumber === 'number' ? `Founder · ${String(founderNumber).padStart(2, '0')}` : 'Founder')
-    : isPaid
-      ? (plan === 'team' || actualPlan === 'team' ? 'Team' : 'Pro')
+  // Founders present as Pro (Q ruling 2026-07-27): the ladder reads Free/Pro/
+  // Team; the founding serial lives on the settings-drawer account row only.
+  const planLabel = plan === 'team' || actualPlan === 'team'
+    ? 'Team'
+    : isFounder || isPaid
+      ? 'Pro'
       : 'Free Plan';
 
   // ── Launch at login (native autostart via the Tauri bridge) ──
@@ -202,7 +203,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       <section style={{ marginBottom: 28 }}>
         <SettingsGroup
           header="Plan"
-          footnote="Your plan and founder status. GitHub identity, repo access, and automation now live together in Git & PRs. License keys activate in Plan & Billing."
+          footnote="Your plan. GitHub identity, repo access, and automation now live together in Git & PRs. License keys activate in Plan & Billing."
         >
           <SettingsRow
             icon={<StarIcon />}
@@ -210,10 +211,10 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
             accessory={<ValuePill tone={isFounder ? 'success' : 'default'}>{planLabel}</ValuePill>}
             divider={!isFounder}
           />
-          {!isFounder ? (
+          {!isFounder && !isPaid ? (
             <SettingsRow
               icon={<ArrowUpIcon />}
-              label="Upgrade to Founders"
+              label="Upgrade to Pro"
               subtitle="o8 is free forever — founders fund the build and get managed inference for life, early access to everything new, and the founder theme. One-time, the first 250."
               accessory={
                 <RamsButton variant="primary" onClick={() => openExternalUrl(FOUNDERS_URL)}>

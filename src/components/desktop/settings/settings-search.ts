@@ -65,7 +65,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Identity", description: "Connect GitHub, manage the account, or sign out", keywords: ['sign in', 'sign out', 'login', 'identity', 'profile', 'github'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share usage data", description: "Allowlisted product events; optional and off by default", keywords: ['telemetry', 'usage', 'analytics', 'privacy'] },
   { tab: 'general', tabLabel: 'General', group: "Plan", label: "Plan", description: "Your current plan and founder status", keywords: ['founder', 'free', 'subscription'] },
-  { tab: 'general', tabLabel: 'General', group: "Plan", label: "Upgrade to Founders", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
+  { tab: 'general', tabLabel: 'General', group: "Plan", label: "Upgrade to Pro", description: "o8 is free — founding passes fund the build", keywords: ['upgrade', 'founder', 'pricing', 'pro'] },
   { tab: 'general', tabLabel: 'General', group: "Startup", label: "Launch at login", description: "Start o8 automatically when you sign in to your Mac", keywords: ['autostart', 'boot', 'startup'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share crash & error data — also required to send bug reports", description: "Optionally send scrubbed error messages, stack traces, and user-initiated bug reports", keywords: ['telemetry', 'sentry', 'privacy', 'bug reports'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Send local crash log to the o8 team", description: "Upload the local ~/.o8/telemetry crash log", keywords: ['telemetry', 'privacy'] },

@@ -50,11 +50,14 @@ interface PostError {
   reason: string;
 }
 
+// The founder plan presents as Pro (Q ruling 2026-07-27): plan ids stay
+// frozen, but the ladder reads Free/Pro/Team everywhere. Founding identity is
+// the serial chip on the settings-drawer account row, not a plan name.
 const PLAN_LABELS: Record<Plan, string> = {
   free: 'Free',
   pro: 'Pro',
   team: 'Team',
-  founder: 'Founding Operator',
+  founder: 'Pro',
 };
 
 const PLAN_TAGLINES: Record<Plan, string> = {
