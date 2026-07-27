@@ -13,11 +13,12 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS, SECTION_BORDER,
 } from '../tokens';
 import {
-  SectionCard, SectionTitle, SectionHint, ControlRow, ToggleRow, Select, Slider, AccentButton, GhostButton, Icon, PageHeader,
+  SectionCard, SectionTitle, SectionHint, ControlRow, ToggleRow, Select, Slider, AccentButton, GhostButton, Icon, PageHeader, StatusBadge,
 } from '../primitives';
 import { prefBool, prefStr, prefNum, prefVoiceLibrary, type VoicePreset, type TabProps } from '../helpers';
 import { ttsSpeak, ttsStop } from '@/lib/tauri/bridge';
 import { startRealtimeSession, type RealtimeStatus, type RealtimeSessionHandle } from '@/lib/voice/realtime-client';
+import { useChatgptVoiceCapability } from '@/lib/voice/use-chatgpt-voice-capability';
 
 const INPUT_BASE: CSSProperties = {
   width: 220, boxSizing: 'border-box', height: 32, paddingLeft: 10, paddingRight: 10,
@@ -237,6 +238,7 @@ function RealtimeSection() {
   const [convStatus, setConvStatus] = useState<RealtimeStatus>('idle');
   const [convError, setConvError] = useState<string | null>(null);
   const sessionRef = useRef<RealtimeSessionHandle | null>(null);
+  const chatgptVoice = useChatgptVoiceCapability();
 
   useEffect(() => {
     let cancelled = false;
@@ -323,6 +325,16 @@ function RealtimeSection() {
           style={{ ...INPUT_BASE, ...focusRing(keyFocus) }}
         />
       </ControlRow>
+      {chatgptVoice.status === 'ready' && chatgptVoice.chatgptOAuth ? (
+        <ControlRow
+          label="Voice via your ChatGPT plan"
+          detail={chatgptVoice.capable
+            ? "Riding your Codex ChatGPT sign-in — no OpenAI key needed, nothing billed to o8."
+            : (chatgptVoice.whyNot ?? 'Detected your ChatGPT sign-in via Codex, but it needs one more step.')}
+        >
+          <StatusBadge ok={chatgptVoice.capable} okLabel="Available" warnLabel="Needs setup" />
+        </ControlRow>
+      ) : null}
       <ControlRow label="Voice" detail="Which gpt-realtime voice Symon speaks with.">
         <Select value={voice} onChange={onVoiceChange} options={REALTIME_VOICE_OPTS} width={200} />
       </ControlRow>
