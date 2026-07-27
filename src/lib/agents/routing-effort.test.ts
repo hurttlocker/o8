@@ -69,3 +69,36 @@ describe('resolveWorkerRouting — effort round-trip (persist → normalize)', (
     expect(restored.selectedEffort).toBe('high');
   });
 });
+
+describe('resolveWorkerRouting — model house', () => {
+  it('rejects a Codex model for a selected Claude runtime', () => {
+    const routing = resolveWorkerRouting({
+      requestedRuntime: 'claude-code',
+      requestedModel: 'gpt-5.6-sol',
+    });
+    expect(routing.selectedRuntime).toBe('claude-code');
+    expect(routing.requestedModel).toBe('gpt-5.6-sol');
+    expect(routing.selectedModel).toBeNull();
+  });
+
+  it('honors a Claude model hint for a selected Claude runtime', () => {
+    expect(resolveWorkerRouting({
+      requestedRuntime: 'claude-code',
+      requestedModel: 'claude-opus-5',
+    }).selectedModel).toBe('claude-opus-5');
+  });
+
+  it('rejects a Claude model for a selected Codex runtime', () => {
+    expect(resolveWorkerRouting({
+      requestedRuntime: 'codex',
+      requestedModel: 'claude-opus-5',
+    }).selectedModel).toBeNull();
+  });
+
+  it('preserves provider-qualified models for model-agnostic runtimes', () => {
+    expect(resolveWorkerRouting({
+      requestedRuntime: 'opencode',
+      requestedModel: 'google/gemini-2.5-flash',
+    }).selectedModel).toBe('google/gemini-2.5-flash');
+  });
+});
