@@ -549,7 +549,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
                     ? (agent === 'flash' ? '#6366f1' : agent === 'sonnet' ? '#2563eb' : '#7c3aed')
                     : 'rgba(148,163,184,0.1)',
                   cursor: 'pointer',
-                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1), font-weight 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   textTransform: 'capitalize',
                 }}
               >

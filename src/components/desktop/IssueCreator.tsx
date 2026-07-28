@@ -225,7 +225,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               alignItems: 'center',
               gap: 5,
               fontFamily: 'var(--font-sans-system)',
-              transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+              transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             {creating ? <Loader2 size={14} className="spin" /> : null}
