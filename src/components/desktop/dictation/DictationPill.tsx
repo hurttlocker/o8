@@ -55,8 +55,10 @@ const WEIGHTS = (() => {
   return out;
 })();
 
-// Symon's signature container easing.
-const SYMON_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
+// EQ ink emphasis — the speaking/listening "hot" state vs the resting "cool"
+// one, applied as canvas alpha inside the draw loop.
+const EQ_EMPHASIS_HOT = 1;
+const EQ_EMPHASIS_COOL = 0.86;
 
 // ── Symon notch idle sliver (verbatim from NotchSurface.svelte `.ndock--idle`) ──
 // The compact always-on idle capsule the screen dock paints at the top of the
@@ -131,6 +133,10 @@ function SymonWaveCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const currentLevelsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
   const targetLevelsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
+  // Hot/cool emphasis, eased inside the draw loop — it used to be a CSS
+  // `filter: saturate()/brightness()` transition, which is paint (motion
+  // audit 009). Canvas ink carries it now, so the toggle costs nothing.
+  const emphasisRef = useRef(EQ_EMPHASIS_COOL);
   const rafRef = useRef<number | null>(null);
   const speakingRef = useRef(speaking);
   const listeningRef = useRef(listening);
@@ -185,6 +191,12 @@ function SymonWaveCanvas({
       const g = ctx.createLinearGradient(0, 0, INNER_W, 0);
       for (const [stop, color] of GRADIENT_STOPS) g.addColorStop(stop, color);
       ctx.fillStyle = g;
+      emphasisRef.current = lerp(
+        emphasisRef.current,
+        (isSpeaking || isListening) ? EQ_EMPHASIS_HOT : EQ_EMPHASIS_COOL,
+        0.12,
+      );
+      ctx.globalAlpha = emphasisRef.current;
 
       for (let i = 0; i < BAR_COUNT; i++) {
         current[i] = lerp(current[i], target[i], smoothing);
@@ -228,8 +240,7 @@ function SymonWaveCanvas({
         display: 'block',
         flexShrink: 0,
         opacity: visible ? 1 : 0.9,
-        filter: (speaking || listening) ? 'saturate(1.06) brightness(1.04)' : 'saturate(0.96) brightness(0.98)',
-        transition: 'opacity 180ms ease, filter 180ms ease',
+        transition: 'opacity 180ms ease',
       }}
       aria-hidden="true"
     />
@@ -593,7 +604,11 @@ export function DictationPillView({ snapshot, onCancel, hideCancel, persistentId
             fontFamily: UI_FONT,
             userSelect: 'none',
             overflow: 'hidden',
-            transition: `width 160ms ${SYMON_EASE}, border-color 120ms ease, box-shadow 120ms ease`,
+            // Width is NOT transitioned (motion audit 005): `pillWidth` is
+            // recomputed on every partial-transcript token, so a width tween
+            // restarts mid-flight per token and relayouts the HUD each frame.
+            // The width already snaps in 8px steps, which reads as growth.
+            transition: 'border-color 120ms ease, box-shadow 120ms ease',
           } as React.CSSProperties}
         >
           {body}

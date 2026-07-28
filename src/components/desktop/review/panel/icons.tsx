@@ -51,12 +51,16 @@ function IconUnified({ size = 14 }: { size?: number }) {
   );
 }
 
-function IconMore({ size = 15 }: { size?: number }) {
+// Vertical sliders — the diff toolbar's "View options" trigger. Deliberately
+// vertical so it never reads as IconScopeFilter (horizontal sliders) two
+// buttons over.
+function IconViewOptions({ size = 15 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block', flexShrink: 0 }}>
-      <circle cx="5" cy="12" r="1.7" />
-      <circle cx="12" cy="12" r="1.7" />
-      <circle cx="19" cy="12" r="1.7" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M5 21v-6M5 11V3" />
+      <path d="M12 21v-9M12 8V3" />
+      <path d="M19 21v-4M19 13V3" />
+      <path d="M3 13h4M10 10h4M17 15h4" />
     </svg>
   );
 }
@@ -85,7 +89,7 @@ export {
   IconScopeFilter,
   IconSplit,
   IconUnified,
-  IconMore,
+  IconViewOptions,
   IconCheck,
   DiffStatBadge,
 };

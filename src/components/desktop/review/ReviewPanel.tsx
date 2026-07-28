@@ -21,7 +21,7 @@ import {
   REVIEW_POPOVER_BG,
   REVIEW_POPOVER_SHADOW,
 } from './panel/constants';
-import { IconFilesDrawer, IconScopeFilter, IconSplit, IconUnified, IconMore, DiffStatBadge } from './panel/icons';
+import { IconFilesDrawer, IconScopeFilter, IconSplit, IconUnified, IconViewOptions, DiffStatBadge } from './panel/icons';
 import { PanelMessage } from './panel/DiffView';
 import { ReviewFileRow, ToolbarButton, MenuItem } from './panel/ReviewFileRow';
 import { FilesDrawer } from './panel/FilesDrawer';
@@ -346,7 +346,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           </ToolbarButton>
           <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
             <ToolbarButton title="View options" active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
-              <IconMore size={15} />
+              <IconViewOptions size={15} />
             </ToolbarButton>
             {menuOpen ? (
               <div

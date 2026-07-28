@@ -391,12 +391,14 @@ const BreakdownRows = memo(function BreakdownRows({
               marginBottom: 6,
             }}>
               <div style={{
-                width: `${Math.max(barPct, 1)}%`,
+                width: '100%',
                 height: '100%',
                 borderRadius: 1,
                 background: RAMS_ACCENT,
                 opacity: 0.7,
-                transition: 'width 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+                transform: `scaleX(${Math.max(barPct, 1) / 100})`,
+                transformOrigin: 'left',
+                transition: 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
               }} />
             </div>
             <div style={{ display: 'flex', gap: 14 }}>
