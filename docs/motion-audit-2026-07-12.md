@@ -60,7 +60,7 @@ Each plan is independent unless a dependency is noted. Recommended order and dep
 
 ## 001 — Kill the live paint-loop shimmer; delete two dead paint-loop keyframes
 
-- **Status**: TODO
+- **Status**: DONE 2026-07-27
 - **Commit**: a5e5b2fd
 - **Severity**: HIGH
 - **Category**: 5 (Performance)
@@ -237,7 +237,7 @@ Use the theme token for the surface color (`var(--t-chat-surface-bg)` — the tr
 
 ## 003 — Tile morph: animate transform, not left/top/width/height
 
-- **Status**: TODO
+- **Status**: DONE 2026-07-27 — FLIP on the leaf wrapper (step 3). The transform-only form in "Target" was rejected: a resting `scale(rect.width, rect.height)` would shrink terminal glyphs permanently, not just during the morph. The percentage rect stays the untransitioned resting layout; a structural change (split / merge / close) replays it as `translate()+scale()` back to the old box, then tweens to `none` on the next frame. Ratio-only changes (split-handle drag) now SNAP instead of tweening — the panes track the handle rather than lagging 220ms behind it, and a resize relayouts once per mousemove instead of once per frame.
 - **Commit**: a5e5b2fd
 - **Severity**: HIGH
 - **Category**: 5 (Performance)
@@ -305,7 +305,7 @@ Note: `scale()` on a tile scales its children visually. If the tile content must
 
 ## 004 — Replace `transition: all` with explicit property lists
 
-- **Status**: TODO
+- **Status**: DONE 2026-07-27
 - **Commit**: a5e5b2fd
 - **Severity**: MEDIUM
 - **Category**: 5 (Performance)
@@ -359,11 +359,15 @@ Where an element animates `transform`/`opacity`, list those. Never leave `all`.
 
 ## 005 — Layout-property animations → transform
 
-- **Status**: TODO
+- **Status**: DONE 2026-07-27 — split across two same-day passes: TSX sites (steps 1/4/5) in the components pass below, `compactPulse` + `slide-in-preview` (steps 2–3) in the plan-001 CSS pass noted further down.
+  - `AnalyticsPage.tsx` bar fill → full-width fill + `transform: scaleX(pct/100)`, `transformOrigin:'left'`, transitions `transform` only.
+  - `DictationPill.tsx` shell → `width` removed from the transition list. It already snaps in 8px steps, which reads as growth; tweening it restarted the tween on every partial-transcript token.
+  - `Onboarding.tsx` step dot → transition removed rather than converted. The doc's fixed-20px-pill + `scaleX` widens a 6-step row from 90px to 150px (67%) on the first-run surface; the dots now snap on a discrete, user-initiated step change. A transform-only morph that preserves the resting geometry needs a sliding-pill rebuild of `StepIndicator` — worth doing, but it's a design change, not a motion fix.
 - **Commit**: a5e5b2fd
 - **Severity**: MEDIUM
 - **Category**: 5 (Performance)
 - **Estimated scope**: 5 sites, small-medium
+- **Partial 2026-07-27** (plan-001 pass): step 2 and step 3 are done. `compactPulse` was DELETED rather than rewritten — a re-grep found zero consumers repo-wide. `slide-in-preview` is now `translateY(-8px)→0` + opacity, consumer `WorkspaceTerminalRoot.tsx:281` unchanged (same keyframe name, same 300ms ease-out). Steps 1 (`AnalyticsPage`), 4 (`Onboarding`), 5 (`DictationPill`) landed the same day in the components pass above.
 
 ### Problem
 
@@ -424,6 +428,7 @@ transition: `width 160ms ${SYMON_EASE}, border-color 120ms ease, box-shadow 120m
 - **Severity**: MEDIUM
 - **Category**: 6 (Accessibility)
 - **Estimated scope**: 1 CSS block, small
+- **Scope shrank 2026-07-27** (plan-001 pass): `pulse-dot`, `alert-bell-shake`, `compactPulse` and `blink` were deleted outright — all four had zero consumers, so there is nothing left to freeze. `o8-text-shimmer` is now an opacity pulse and `AgentPanelExtraAgentRow.tsx` carries the `.o8-text-shimmer` class, so the existing class-based freeze catches the last inline consumer. Remaining loops for this plan: `spin`, `timelineNowPulse`, `o8-sweep-circle`, `tab-label-shimmer`, `o8ToolChipPulse`.
 
 ### Problem
 
@@ -596,7 +601,7 @@ animation: `llmFadeIn 220ms cubic-bezier(0.22, 1, 0.36, 1) ${…}ms both`,
 
 ## 009 — Drop the paint `filter` transition on the dictation EQ
 
-- **Status**: TODO
+- **Status**: DONE 2026-07-27 — `filter` is gone from the canvas style and the transition (`opacity 180ms ease` remains). The hot/cool emphasis moved into the draw call as an eased `ctx.globalAlpha` (1 → 0.86, lerped at 0.12 per frame like the bar levels), so the voice toggle costs no paint and still eases.
 - **Commit**: a5e5b2fd
 - **Severity**: MEDIUM
 - **Category**: 5 (Performance)
