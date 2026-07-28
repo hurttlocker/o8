@@ -2,11 +2,16 @@ import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { cleanupLaneWorktree } from '@/lib/lane/worktree-cleanup';
+import {
+  assessOwnedTranscriptActivity,
+  assessStaleLaneLiveness,
+} from '@/lib/lane/reaper-liveness';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { Lane } from '@/lib/lane/types';
 import type { ExistingBranchPolicy, LoadedIssue } from './types';
 
 const execFileAsync = promisify(execFile);
+const BRANCH_CLEANUP_ACTIVITY_WINDOW_MS = 90_000;
 
 export interface MissionBranchCandidate {
   issue: LoadedIssue;
@@ -214,6 +219,45 @@ async function lanesForBranch(repoPath: string, branch: string) {
 async function archiveLanesForBranch(repoPath: string, branch: string) {
   const { archiveLane, updateLane } = await import('@/lib/lane/registry');
   const lanes = await lanesForBranch(repoPath, branch);
+  const activeLanes = lanes.filter((lane) => !isTerminalLane(lane));
+  const protectedLanes: Array<{ lane: Lane; source: string; note: string }> = [];
+
+  // Preflight every nonterminal lane before changing any row. A sibling mission
+  // reset must be atomic: finding one live/unknown lane aborts the whole branch
+  // cleanup instead of archiving earlier rows and only then discovering life.
+  for (const lane of activeLanes) {
+    const transcriptActivity = await assessOwnedTranscriptActivity(lane, {
+      staleThresholdMs: BRANCH_CLEANUP_ACTIVITY_WINDOW_MS,
+      now: Date.now(),
+    });
+    if (transcriptActivity?.keep) {
+      protectedLanes.push({
+        lane,
+        source: transcriptActivity.source,
+        note: transcriptActivity.note,
+      });
+      continue;
+    }
+
+    const liveness = await assessStaleLaneLiveness(lane, {
+      staleThresholdMs: BRANCH_CLEANUP_ACTIVITY_WINDOW_MS,
+      now: Date.now(),
+    });
+    if (liveness.keep) {
+      protectedLanes.push({ lane, source: liveness.source, note: liveness.note });
+    }
+  }
+
+  if (protectedLanes.length > 0) {
+    const summary = protectedLanes
+      .map(({ lane, source }) => `${lane.id} (${lane.status}, ${source})`)
+      .join(', ');
+    throw new Error(
+      `Refusing to reset branch ${branch}: live or unknown sibling lane liveness for ${summary}. `
+      + 'Stop/reset the owning packet explicitly before preparing this branch.',
+    );
+  }
+
   const worktreePaths = lanes
     .map((lane) => lane.worktreePath?.trim())
     .filter((path): path is string => Boolean(path));

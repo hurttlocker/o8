@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,11 +8,16 @@ import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestr
 
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-merged-by-ancestry-data-'));
 process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
+process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = mkdtempSync(
+  join(tmpdir(), 'o8-merged-by-ancestry-owned-claude-'),
+);
 
 const { createLane, deleteLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
+const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
+const { prepareMissionBranches } = await import('@/lib/orchestrator/operator-mission-service/branch-cleanup');
 
 const tempDirs: string[] = [];
 const laneIds: string[] = [];
@@ -52,15 +57,22 @@ function makeRepo(name: string) {
   return { root, origin, seed, clone };
 }
 
-function packetFixture(repoPath: string, packetId: string, laneId: string): OrchestratorPacket {
+function packetFixture(
+  repoPath: string,
+  packetId: string,
+  laneId: string,
+  options: { branch?: string; runtime?: 'codex' | 'claude-code'; sessionKey?: string } = {},
+): OrchestratorPacket {
+  const branch = options.branch ?? 'packet';
+  const runtime = options.runtime ?? 'codex';
   return {
     id: packetId,
     referenceLabel: packetId,
     title: packetId,
     summary: packetId,
     workspaceTargetPath: repoPath,
-    branchTarget: 'packet',
-    runtime: 'codex',
+    branchTarget: branch,
+    runtime,
     dependencyLabels: [],
     dependencyPacketIds: [],
     queueState: 'held',
@@ -76,11 +88,29 @@ function packetFixture(repoPath: string, packetId: string, laneId: string): Orch
       tabId: laneId,
       repoPath,
       worktreePath: repoPath,
-      runtime: 'codex',
+      runtime,
       laneId,
-      sessionKey: `codex-owned:${laneId}`,
+      sessionKey: options.sessionKey ?? `codex-owned:${laneId}`,
     } satisfies OrchestratorLaneBinding,
   };
+}
+
+function writeFreshClaudeTranscript(sessionKey: string): void {
+  const sessionDir = join(
+    process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT!,
+    sessionKey.replace(/^claude-code-owned:/, ''),
+  );
+  const runsDir = join(sessionDir, 'runs');
+  mkdirSync(runsDir, { recursive: true });
+  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+    surfaceId: sessionKey,
+    activeRun: {},
+  }));
+  const runPath = join(runsDir, 'run-1.jsonl');
+  writeFileSync(runPath, '{"type":"assistant","message":"still working"}\n');
+  const now = new Date();
+  utimesSync(runPath, now, now);
+  resetOwnedSessionIndex();
 }
 
 function seedPacket(repoPath: string, packetId: string) {
@@ -273,5 +303,140 @@ describe('merged-by-ancestry reconciliation', () => {
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 0 });
     expect(getLane(lane.id)?.status).toBe('running');
+  }, 20_000);
+
+  it('keeps an awaiting packet whose isolated worker branch and owned transcript are still live', async () => {
+    const { root, origin, clone } = makeRepo('o8-live-isolated-clone');
+    const workerClone = join(root, 'worker-clone');
+    const branch = 'issue/1622-live-isolated-clone';
+    const packetId = 'pkt-1622-live-isolated-clone';
+    const sessionKey = 'claude-code-owned:issue-1622-live-isolated-clone';
+
+    execFileSync('git', ['clone', origin, workerClone], { stdio: 'pipe' });
+    git(workerClone, ['checkout', '-b', 'main', 'origin/main']);
+    git(workerClone, ['checkout', '-b', branch]);
+    writeFileSync(join(workerClone, 'active.txt'), 'worker is still producing output\n');
+    commitAll(workerClone, 'active worker commit');
+
+    const lane = createLane({
+      repoPath: clone,
+      worktreePath: workerClone,
+      branch,
+      baseBranch: 'main',
+      runtime: 'claude-code',
+      sessionKey,
+      packetId,
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'awaiting_input', 'system', 'worker_turn_active');
+    writeFreshClaudeTranscript(sessionKey);
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-1622-live-isolated-clone',
+      repoPath: clone,
+      packets: [packetFixture(clone, packetId, lane.id, {
+        branch,
+        runtime: 'claude-code',
+        sessionKey,
+      })],
+    });
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({
+      scanned: 1,
+      merged: 0,
+      skipped: 1,
+    });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'awaiting_input',
+      outcome: null,
+      worktreePath: workerClone,
+    });
+    expect(persistedPacket(packetId)).toMatchObject({
+      status: 'awaiting_review',
+      releaseState: 'pending',
+    });
+  }, 20_000);
+
+  it('keeps an awaiting packet when its owned transcript cannot be resolved', async () => {
+    const { clone } = makeRepo('o8-live-owned-transcript-unknown');
+    const branch = 'issue/1622-owned-transcript-unknown';
+    const packetId = 'pkt-1622-owned-transcript-unknown';
+    const sessionKey = 'claude-code-owned:issue-1622-owned-transcript-unknown';
+
+    const lane = createLane({
+      repoPath: clone,
+      worktreePath: clone,
+      branch,
+      baseBranch: 'main',
+      runtime: 'claude-code',
+      sessionKey,
+      packetId,
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'awaiting_input', 'system', 'worker_liveness_unknown');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-1622-owned-transcript-unknown',
+      repoPath: clone,
+      packets: [packetFixture(clone, packetId, lane.id, {
+        branch,
+        runtime: 'claude-code',
+        sessionKey,
+      })],
+    });
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({
+      scanned: 1,
+      merged: 0,
+      skipped: 1,
+    });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'awaiting_input',
+      outcome: null,
+      sessionKey,
+    });
+  }, 20_000);
+
+  it('refuses branch preparation that would reset a fresh sibling mission lane', async () => {
+    const { clone } = makeRepo('o8-live-branch-preparation');
+    const branch = 'issue/1622-live-branch-preparation';
+    const packetId = 'pkt-1622-live-branch-preparation';
+    const sessionKey = 'claude-code-owned:issue-1622-live-branch-preparation';
+    git(clone, ['branch', branch, 'main']);
+
+    const lane = createLane({
+      repoPath: clone,
+      worktreePath: clone,
+      branch,
+      baseBranch: 'main',
+      runtime: 'claude-code',
+      sessionKey,
+      packetId,
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'awaiting_input', 'system', 'worker_turn_active');
+    writeFreshClaudeTranscript(sessionKey);
+
+    await expect(prepareMissionBranches({
+      repoPath: clone,
+      candidates: [{
+        issue: {
+          number: 1622,
+          title: 'Keep a live sibling lane',
+          body: 'Do not archive a lane with fresh transcript activity.',
+          url: 'https://github.com/hurttlocker/o8/issues/1622',
+        },
+        branchTarget: branch,
+      }],
+      previousPackets: [],
+      existingBranchPolicy: 'reset',
+    })).rejects.toThrow(/live or unknown sibling lane liveness/);
+
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'awaiting_input',
+      packetId,
+      worktreePath: clone,
+    });
+    expect(() => git(clone, ['rev-parse', '--verify', `refs/heads/${branch}`])).not.toThrow();
   }, 20_000);
 });
