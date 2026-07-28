@@ -113,7 +113,6 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
             height: 8,
             borderRadius: 4,
             background: i < idx ? 'var(--t-accent)' : i === idx ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
-            transition: 'width 300ms cubic-bezier(0.22, 1, 0.36, 1), background 300ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         />
       ))}

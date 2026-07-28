@@ -10,7 +10,7 @@
  * absolutely-positioned sibling of the container so React preserves
  * component state across split/resize/close changes.
  */
-import { useCallback, useEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
 import { ThreadChatPane } from '@/components/desktop/workspace-terminal/ThreadChatPane';
 import {
@@ -34,6 +34,7 @@ interface SessionTileSurfaceProps {
 }
 
 const HANDLE_SIZE = 8;
+const MORPH_TRANSITION = 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)';
 
 export function SessionTileSurface({
   layout,
@@ -71,6 +72,58 @@ export function SessionTileSurface({
     const leaves = collectAllLeaves(layout.root);
     return { leaves, leafRects, splitFrames };
   }, [layout.root]);
+
+  // FLIP morph (motion audit 003): the percentage rect stays the resting
+  // layout — untransitioned, so a live terminal never relayouts mid-tween —
+  // and a split/merge is played back as a transform-only tween from the old
+  // box to the new one. Split-handle drags change ratios only; those snap so
+  // the panes track the handle instead of lagging a tween behind it.
+  const leafNodesRef = useRef(new Map<string, HTMLDivElement>());
+  const prevRectsRef = useRef<Map<string, SessionTileRect> | null>(null);
+
+  useLayoutEffect(() => {
+    const prev = prevRectsRef.current;
+    prevRectsRef.current = leafRects;
+    const container = containerRef.current;
+    if (!prev || !container) return;
+
+    const structural = prev.size !== leafRects.size
+      || Array.from(leafRects.keys()).some((id) => !prev.has(id));
+    if (!structural) return;
+
+    const box = container.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return;
+
+    const morphing: HTMLDivElement[] = [];
+    leafRects.forEach((rect, id) => {
+      const before = prev.get(id);
+      const node = leafNodesRef.current.get(id);
+      if (!before || !node || rect.width <= 0 || rect.height <= 0) return;
+      const dx = (before.left - rect.left) * box.width;
+      const dy = (before.top - rect.top) * box.height;
+      const sx = before.width / rect.width;
+      const sy = before.height / rect.height;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(sx - 1) < 0.005 && Math.abs(sy - 1) < 0.005) return;
+      node.style.transition = 'none';
+      node.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+      morphing.push(node);
+    });
+    if (morphing.length === 0) return;
+
+    const frame = requestAnimationFrame(() => {
+      for (const node of morphing) {
+        node.style.transition = MORPH_TRANSITION;
+        node.style.transform = 'none';
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      for (const node of morphing) {
+        node.style.transition = '';
+        node.style.transform = '';
+      }
+    };
+  }, [leafRects]);
 
   const makeResizeStart = useCallback(
     (splitId: string, direction: SessionTileSplitDirection, container: SessionTileRect) =>
@@ -124,6 +177,10 @@ export function SessionTileSurface({
         return (
           <div
             key={leaf.id}
+            ref={(node) => {
+              if (node) leafNodesRef.current.set(leaf.id, node);
+              else leafNodesRef.current.delete(leaf.id);
+            }}
             style={{
               position: 'absolute',
               left: `${rect.left * 100}%`,
@@ -135,7 +192,7 @@ export function SessionTileSurface({
               minWidth: 0,
               minHeight: 0,
               overflow: 'hidden',
-              transition: 'left 220ms cubic-bezier(0.22, 1, 0.36, 1), top 220ms cubic-bezier(0.22, 1, 0.36, 1), width 220ms cubic-bezier(0.22, 1, 0.36, 1), height 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+              transformOrigin: 'top left',
             }}
           >
             {leaf.kind === 'chat' ? (
