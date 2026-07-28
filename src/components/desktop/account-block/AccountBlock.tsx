@@ -52,6 +52,11 @@ export function AccountBlock({
   // Team everywhere; founding identity is the serial chip in the settings
   // drawer, not a plan name.
   const planLabel = isFounder || isPaid ? 'Pro' : 'Free Plan';
+  // Signed out while a paid/founder entitlement is still cached = the Clerk
+  // session expired underneath the account (server-side lifetime, #1623) —
+  // an explicit sign-out clears the cached entitlement, so this state can
+  // only be reached by expiry. Say so instead of presenting as never-signed-in.
+  const sessionExpired = !hasUser && (isFounder || isPaid);
   const openSettings = onOpenSettings ?? NOOP;
 
   const syncAnchor = useCallback(() => {
@@ -156,6 +161,7 @@ export function AccountBlock({
                 <span
                   aria-hidden="true"
                   style={{
+                    position: 'relative',
                     width: 28,
                     height: 28,
                     display: 'inline-flex',
@@ -172,6 +178,19 @@ export function AccountBlock({
                   }}
                 >
                   {hasUser ? initial : ''}
+                  {sessionExpired ? (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        right: 0,
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: 'var(--t-brand-orange, #FF5A1F)',
+                      }}
+                    />
+                  ) : null}
                 </span>
               )}
               <span style={{ minWidth: 0, flex: 1 }}>
@@ -188,7 +207,7 @@ export function AccountBlock({
                     lineHeight: 1.25,
                   }}
                 >
-                  {hasUser ? displayName : 'Sign in'}
+                  {hasUser ? displayName : sessionExpired ? 'Session expired' : 'Sign in'}
                 </span>
                 <span
                   style={{
@@ -204,7 +223,7 @@ export function AccountBlock({
                     lineHeight: 1.25,
                   }}
                 >
-                  {hasUser ? planLabel : 'Sync your account'}
+                  {hasUser ? planLabel : sessionExpired ? 'Sign in again to resync' : 'Sync your account'}
                 </span>
               </span>
             </button>
