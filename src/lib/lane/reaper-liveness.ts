@@ -109,6 +109,74 @@ export interface StaleLaneProbes {
   liveProcessInside?: (worktreePath: string) => Promise<boolean>;
 }
 
+export interface OwnedTranscriptActivityDecision {
+  /** true means an automatic cleanup must KEEP the lane. */
+  keep: boolean;
+  source: 'transcript-activity' | 'stale-transcript' | 'unknown-fail-closed';
+  note: string;
+  activityAgeMs?: number;
+}
+
+/**
+ * Automatic archive/cleanup paths use the owned transcript as their primary
+ * liveness signal. A fresh run log is activity, and an unresolvable owned
+ * transcript is UNKNOWN rather than dead, so both keep the lane fail-closed.
+ * Non-owned sessions return null because this probe has no ownership mapping
+ * for them.
+ */
+export async function assessOwnedTranscriptActivity(
+  lane: Lane,
+  opts: {
+    staleThresholdMs: number;
+    now: number;
+    transcriptMtimeMs?: (sessionKey: string) => Promise<number | null>;
+  },
+): Promise<OwnedTranscriptActivityDecision | null> {
+  const sessionKey = lane.sessionKey?.trim();
+  if (!sessionKey || !ownedRoots().some((entry) => sessionKey.startsWith(entry.marker))) {
+    return null;
+  }
+
+  const transcriptMtimeMs = opts.transcriptMtimeMs ?? ownedTranscriptMtimeMs;
+  let mtime: number | null;
+  try {
+    mtime = await transcriptMtimeMs(sessionKey);
+  } catch (error) {
+    return {
+      keep: true,
+      source: 'unknown-fail-closed',
+      note: `owned transcript probe error — keeping fail-closed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  if (mtime === null) {
+    return {
+      keep: true,
+      source: 'unknown-fail-closed',
+      note: 'owned transcript could not be resolved — keeping fail-closed',
+    };
+  }
+
+  const activityAgeMs = opts.now - mtime;
+  if (activityAgeMs <= opts.staleThresholdMs) {
+    return {
+      keep: true,
+      source: 'transcript-activity',
+      note: 'owned transcript written within the stale window',
+      activityAgeMs,
+    };
+  }
+
+  return {
+    keep: false,
+    source: 'stale-transcript',
+    note: 'owned transcript is older than the stale window',
+    activityAgeMs,
+  };
+}
+
 /**
  * Decide whether a stale-heartbeat lane the owner-probe already called dead is
  * REALLY a zombie. Returns `keep:true` when ANY of:

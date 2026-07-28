@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import { promisify } from 'node:util';
 
 import { appendEvent, archiveLane, getLane, listLanes, updateLane } from '@/lib/lane/registry';
+import { assessOwnedTranscriptActivity } from '@/lib/lane/reaper-liveness';
 import type { Lane } from '@/lib/lane/types';
 import {
   readOrchestratorControlPlaneState,
@@ -18,6 +19,7 @@ import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/m
 const execFileAsync = promisify(execFile);
 const DEFAULT_BASE_BRANCH = 'main';
 const MERGED_BY_ANCESTRY_SOURCE = 'merged_by_ancestry_reconcile';
+const AUTOMATIC_ARCHIVE_ACTIVITY_WINDOW_MS = 90_000;
 
 type MergeEvidenceKind = 'ancestor' | 'patch-id' | 'no-changes';
 type NoChangesReason = 'branch_missing' | 'branch_matches_base';
@@ -348,7 +350,11 @@ function buildCandidates(): Candidate[] {
       const lane = (laneId ? laneById.get(laneId) ?? getLane(laneId) : null)
         ?? laneByPacket.get(packet.id)
         ?? null;
-      const repoPath = lane?.repoPath
+      const boundWorktreePath = lane?.worktreePath?.trim()
+        || packet.lane?.worktreePath?.trim()
+        || '';
+      const repoPath = (boundWorktreePath && existsSync(boundWorktreePath) ? boundWorktreePath : '')
+        || lane?.repoPath
         || packet.lane?.repoPath?.trim()
         || packet.workspaceTargetPath?.trim()
         || '';
@@ -529,6 +535,19 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
       if (!evidence) {
         skipped += 1;
         continue;
+      }
+      if (candidate.lane) {
+        const transcriptActivity = await assessOwnedTranscriptActivity(candidate.lane, {
+          staleThresholdMs: AUTOMATIC_ARCHIVE_ACTIVITY_WINDOW_MS,
+          now,
+        });
+        if (transcriptActivity?.keep) {
+          skipped += 1;
+          console.log(
+            `[merged-by-ancestry] ${candidate.lane.id} KEPT via ${transcriptActivity.source}: ${transcriptActivity.note}`,
+          );
+          continue;
+        }
       }
       if (evidence.kind === 'no-changes') {
         await finishWithoutChanges(candidate, evidence);
