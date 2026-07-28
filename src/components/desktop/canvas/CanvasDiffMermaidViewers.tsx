@@ -557,7 +557,7 @@ export function DiffViewer() {
                     alignItems: 'center',
                     borderLeft: isActive ? '2px solid #2563eb' : '2px solid transparent',
                     background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                    transition: 'all 100ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1), border-left-color 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 >
                   <button

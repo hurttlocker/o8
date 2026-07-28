@@ -94,7 +94,7 @@ function ApprovalBannerBase({
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" data-approve-btn="true" onClick={onApprovePending} style={{ paddingTop: 7, paddingRight: 16, paddingBottom: 7, paddingLeft: 16, borderRadius: 8, border: 'none', background: '#3b82f6', color: '#ffffff', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'background 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.background = '#2563eb'; }} onMouseLeave={(event) => { event.currentTarget.style.background = '#3b82f6'; }}>Approve</button>
-        <button type="button" onClick={onDenyPending} style={{ paddingTop: 7, paddingRight: 16, paddingBottom: 7, paddingLeft: 16, borderRadius: 8, border: '1px solid #e2e8f0', background: '#ffffff', color: '#64748b', fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'all 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#cbd5e1'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; }}>Deny</button>
+        <button type="button" onClick={onDenyPending} style={{ paddingTop: 7, paddingRight: 16, paddingBottom: 7, paddingLeft: 16, borderRadius: 8, border: '1px solid #e2e8f0', background: '#ffffff', color: '#64748b', fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'border-color 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#cbd5e1'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; }}>Deny</button>
       </div>
     </div>
   );

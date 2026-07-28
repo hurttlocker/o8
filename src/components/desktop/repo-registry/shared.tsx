@@ -926,7 +926,7 @@ export function RepoActionButton({
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.45 : 1,
         fontFamily: 'var(--font-sans-system)',
-        transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       {icon}

@@ -266,7 +266,7 @@ function ComposerBase({
                   <Square size={14} />
                 </button>
               ) : (
-                <button type="button" data-send-btn="true" onClick={onSend} disabled={!input.trim() && queuedContextCards.length === 0} title="Send message (Enter)" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, border: 'none', borderRadius: 10, background: input.trim() || queuedContextCards.length > 0 ? THEME_ACCENT : 'var(--t-divider-strong)', color: input.trim() || queuedContextCards.length > 0 ? '#ffffff' : 'var(--t-text-faint)', cursor: input.trim() || queuedContextCards.length > 0 ? 'pointer' : 'default', flexShrink: 0, transition: 'all 150ms' }}>
+                <button type="button" data-send-btn="true" onClick={onSend} disabled={!input.trim() && queuedContextCards.length === 0} title="Send message (Enter)" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, border: 'none', borderRadius: 10, background: input.trim() || queuedContextCards.length > 0 ? THEME_ACCENT : 'var(--t-divider-strong)', color: input.trim() || queuedContextCards.length > 0 ? '#ffffff' : 'var(--t-text-faint)', cursor: input.trim() || queuedContextCards.length > 0 ? 'pointer' : 'default', flexShrink: 0, transition: 'background 150ms, color 150ms' }}>
                   <ArrowUp size={16} />
                 </button>
               )}

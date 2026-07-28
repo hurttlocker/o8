@@ -529,7 +529,7 @@ function WorkspaceChatPaneBase({
                       borderRadius: 12,
                       cursor: 'pointer',
                       textAlign: 'left',
-                      transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+                      transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                       animation: `llmFadeIn 400ms ease-out ${100 + index * 50}ms both`,
                     }}
                     onMouseEnter={(event) => {

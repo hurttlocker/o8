@@ -760,7 +760,7 @@ export function renderInline(text: string): React.ReactNode {
               marginRight: 1,
               lineHeight: 1,
               border: `1px solid ${THEME_ACCENT_BORDER}`,
-              transition: 'all 100ms',
+              transition: 'background 100ms, color 100ms, border-color 100ms',
               position: 'relative' as const,
               top: -4,
             }}
