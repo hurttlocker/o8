@@ -153,7 +153,7 @@ function WorkspaceChatComposerBase({
           width: '100%',
           borderRadius: 14,
           border: 'none',
-          background: 'var(--t-input-bg)',
+          background: 'var(--t-chat-surface-input-bg, var(--t-input-bg))',
           boxShadow: '0 1px 3px rgba(40,30,20,0.05), 0 6px 20px rgba(40,30,20,0.07)',
           overflow: 'hidden',
           outline: attachments.dragOver ? '2px solid var(--t-accent)' : 'none',

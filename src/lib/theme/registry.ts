@@ -177,7 +177,10 @@ const LIGHT_BASE: Record<string, string> = {
   // wash over the paper composites to a real tint, not back to the paper.
   '--t-chat-error-bg': 'rgba(249, 115, 22, 0.07)',
   '--t-chat-error-border': 'rgba(249, 115, 22, 0.24)',
-  '--t-chat-surface-input-bg': '#F4F2ED',
+  // Opaque white, not the paper tone: over the #F4F2ED transcript an alpha or
+  // paper-matched fill composites back to the paper and the composer vanishes
+  // (user report Y29EW4, light+glass). White is what light+solid already paints.
+  '--t-chat-surface-input-bg': '#FFFFFF',
   '--t-chat-surface-input-border': 'rgba(15, 23, 42, 0.12)',
   '--t-chat-surface-card-bg': 'rgba(15, 23, 42, 0.04)',
   // Terminal
@@ -377,7 +380,7 @@ const DARK_BASE: Record<string, string> = {
   // wash separates less against a dark ground.
   '--t-chat-error-bg': 'rgba(249, 115, 22, 0.10)',
   '--t-chat-error-border': 'rgba(249, 115, 22, 0.30)',
-  '--t-chat-surface-input-bg': 'rgba(42, 42, 42, 0.5)',
+  '--t-chat-surface-input-bg': '#2a2a2a',
   '--t-chat-surface-input-border': 'rgba(255, 255, 255, 0.1)',
   '--t-chat-surface-card-bg': 'rgba(255, 255, 255, 0.04)',
   '--t-terminal-bg': '#1e1e1e',
