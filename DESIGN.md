@@ -1,6 +1,6 @@
 # o8 Desktop — Design Language (v1)
 
-The authoritative reference for styling every surface in the o8 desktop app. A sister spec to `o8-site/THEME.md` — shared lineage, different medium.
+The authoritative reference for styling every surface in the o8 desktop app. A sister spec to the marketing site's THEME.md — shared lineage, different medium.
 
 If you are building or touching any surface in this app, read this first. If a choice is not covered here, derive it from the principles. If a rule here is wrong, update this file before you ship the exception.
 
@@ -113,7 +113,7 @@ Matches the landing's structural blue. Already in light use on empty states; for
 
 Mono remains SF Mono / Menlo / Consolas fallback chain.
 
-**[`hurttlocker.md`](./hurttlocker.md) is the typography authority** — operator-locked sizes/weights/tracking for every chrome role (row title 13.5/300, row meta 9.5/260, section labels 10/300, etc.). The summary below only sketches the shape; when they disagree, hurttlocker wins.
+**[`hurttlocker.md`](./hurttlocker.md) is the typography authority** — locked sizes/weights/tracking for every chrome role (row title 13.5/300, row meta 9.5/260, section labels 10/300, etc.). The summary below only sketches the shape; when they disagree, hurttlocker wins.
 
 ### Weight scale
 
@@ -302,7 +302,7 @@ Every icon-shaped control across the app uses one visual language. Operator lock
 **What we never do**
 
 - ❌ `var(--t-chrome-btn-bg)` / `var(--t-chrome-btn-shadow)` / `var(--t-chrome-btn-active-shadow)` — these paint chunky boxy bgs and inset borders that read as a toolbar pill against the floating card. The chrome-btn token family is deprecated for new code; the few remaining consumers (footer status badges) override the tokens to `transparent` / `none` at their parent boundary.
-- ❌ Scale-on-hover (`scale: 1.06`) — "moves the whole button". Locked OUT by operator.
+- ❌ Scale-on-hover (`scale: 1.06`) — "moves the whole button". Locked out.
 - ❌ Inset borders / outlines on the active state. State is communicated by the action's *result*, not the button chrome.
 
 **Vertical position in column header strips**
@@ -339,7 +339,7 @@ Sectioned with the landing's editorial rhythm. Uses section labels (`01 — ACCO
 
 ## 08 — Copy voice
 
-Same rules as the landing (`o8-site/THEME.md` §08).
+Same rules as the landing (the site theme spec §08).
 
 - Thesis-first. Short sentences. No exclamation marks.
 - No hype adjectives ("powerful", "seamless", "revolutionary").
@@ -416,7 +416,7 @@ Rules that are permanent. No exceptions, no grandfather clauses.
 - **Never use CSS classes.** Inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
 - **Never hardcode rgba colors for surfaces.** Use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`. Hardcoded `rgba(255, 255, 255, 0.xx)` becomes a light-gray blob in midnight. See commit `929ffdf`.
 - **Never hardcode port 3001 or 3002.** Use `getApiBase()` from `@/lib/panel/api-port`. The Tauri sidecar picks ports dynamically.
-- **Never hardcode `/Users/marquisehurtt/*` paths.** Use `process.cwd()`, `os.homedir()`, `process.env.HOME`.
+- **Never hardcode absolute user paths.** Use `process.cwd()`, `os.homedir()`, `process.env.HOME`.
 - **Never use emoji.** Raw SVG only. Phosphor path data via `@phosphor-icons/react/dist/defs/`.
 - **Never use React icon components in Tauri webview.** Neither `@phosphor-icons/react` nor `lucide-react` render correctly. Raw SVG via the shim system.
 - **Never use dropdown overflow menus ("...")** — use inline actions with confirmation strips.
@@ -581,7 +581,7 @@ If you're ever unsure whether a treatment is shared or diverges, ask. Don't gues
 - **v1** locked 2026-04-17 — alongside the landing site's THEME.md v1 Light lock.
 - Palette update: content surfaces in light mode switched from `#ffffff` to `#F4F2ED` (paper). Chrome unchanged.
 - Typography re-locked 2026-06-11 — system stack per hurttlocker.md (Plus Jakarta Sans rolled back 2026-05).
-- Sister spec: `o8-site/THEME.md` — marketing side.
+- Sister spec: the marketing site's THEME.md — marketing side.
 - Authoritative implementation: `src/lib/theme/` — token definitions live there.
 
 If this doc conflicts with the code, **the doc wins** and the code is a bug. File an issue, fix it.

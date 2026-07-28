@@ -21,7 +21,7 @@ font-family: var(--font-sans-system);
 
 ## Typography tokens (locked — GLOBAL, every surface)
 
-**This table is canonical for every chrome surface in o8 and any project we build going forward.** If the surface has text, it should land in one of these rows or read as a deliberate exception. Operator-locked 2026-05-27 after the o8-panel + popover + workspace-tab sweep brought the entire app into spec.
+**This table is canonical for every chrome surface in o8 and any project we build going forward.** If the surface has text, it should land in one of these rows or read as a deliberate exception. Locked 2026-05-27 after the o8-panel + popover + workspace-tab sweep brought the entire app into spec.
 
 | Role | Size | Weight | Letter-spacing | Line-height | Notes |
 |---|---|---|---|---|---|
@@ -264,15 +264,15 @@ Lucide is the bulk because most of the 85+ shimmed icons read fine. Switching wh
 
 ## Design Engineering Tips (motion / interaction)
 
-Reusable interaction techniques every agent should reach for when building a UI surface — adopt the *principle*, implement it framework-idiomatically. These mirror the operator's global `~/CLAUDE.md` "Design Engineering Tips" (fuller rules + snippets there); kept here so any agent reading the design spec has them. **Gate all of these off under `prefers-reduced-motion`, and the cursor ones only on `(hover: hover) and (pointer: fine)`.**
+Reusable interaction techniques every agent should reach for when building a UI surface — adopt the *principle*, implement it framework-idiomatically. **Gate all of these off under `prefers-reduced-motion`, and the cursor ones only on `(hover: hover) and (pointer: fine)`.**
 
-1. **React to cursor VELOCITY, not just position.** A fast move adds a momentary tilt / specular sheen that springs back — physical because it responds to motion. Use the framework's velocity primitive (motion/react `useVelocity → useTransform/useSpring`), never raw `el.style.transform` (it clobbers existing transforms + spikes on pointer re-entry). Always clamp (rotation ≈ ±6°, scale < 1.5×). **Never on text people read** — sheen/tilt only on spectacle surfaces (hero media, floating cards). Canonical: `~/o8-site/app/components/glass/HeroWindow.tsx`.
+1. **React to cursor VELOCITY, not just position.** A fast move adds a momentary tilt / specular sheen that springs back — physical because it responds to motion. Use the framework's velocity primitive (motion/react `useVelocity → useTransform/useSpring`), never raw `el.style.transform` (it clobbers existing transforms + spikes on pointer re-entry). Always clamp (rotation ≈ ±6°, scale < 1.5×). **Never on text people read** — sheen/tilt only on spectacle surfaces (hero media, floating cards).
 
-2. **React to PROXIMITY, not just hover (the macOS dock).** Nearby items scale + brighten by *distance*, not binary hover. `t = max(0, 1 − dist/RADIUS)` (≈120px), `scale = 1 + t*MAX` (clamp MAX ~0.2 for text). Direct ref writes on `pointermove` are correct here (you touch N elements/frame). On dark themes **brighten, don't darken.** For equal, closely-spaced rows (docks, pill rows) — *not* nav links (hurts click-targeting). Canonical: `~/o8-site/app/components/glass/RuntimeDock.tsx`.
+2. **React to PROXIMITY, not just hover (the macOS dock).** Nearby items scale + brighten by *distance*, not binary hover. `t = max(0, 1 − dist/RADIUS)` (≈120px), `scale = 1 + t*MAX` (clamp MAX ~0.2 for text). Direct ref writes on `pointermove` are correct here (you touch N elements/frame). On dark themes **brighten, don't darken.** For equal, closely-spaced rows (docks, pill rows) — *not* nav links (hurts click-targeting).
 
 3. **Fade scrollable list EDGES, don't hard-cut.** Content dissolves at top/bottom via `mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)` (+ the `-webkit-` twin, `mask-size: 100% 100%`, `mask-repeat: no-repeat`). Only on lists that actually overflow. See **"Mask gradient (scroll fade)"** above for the pinned-header 16/32 variant. Canonical: inline `scrollFadeY` in `src/app/preview/canvas-glass/ui.ts`; the dashboard's `cortex-scroll-fade-y` class (`globals.css`) adds a scroll-timeline dynamic variant that fades only the edge you're scrolled away from.
 
-4. **Reduce backdrop blur while scrolling fast.** Heavy `backdrop-filter` blur during motion kills perceived smoothness + spikes GPU (it re-samples every frame). Scale it via a var multiplier — `blur(calc(var(--frost) * var(--frost-scale, 1)))` — set `--frost-scale ≈ 0.4` on scroll → `1` on settle (debounce ~140ms), **per-surface** (find the `[data-glass-surface]` ancestor), never global, never hardcode the blur value (keep the operator's slider as truth). Invisible at rest — pair with tip 3 for the visible fade. Operator-shared (gabriell_lab on X, 2026-06-13). Canonical: `useScrollBlurFade` in `src/app/preview/canvas-glass/use-scroll-blur-fade.ts`.
+4. **Reduce backdrop blur while scrolling fast.** Heavy `backdrop-filter` blur during motion kills perceived smoothness + spikes GPU (it re-samples every frame). Scale it via a var multiplier — `blur(calc(var(--frost) * var(--frost-scale, 1)))` — set `--frost-scale ≈ 0.4` on scroll → `1` on settle (debounce ~140ms), **per-surface** (find the `[data-glass-surface]` ancestor), never global, never hardcode the blur value (keep the operator's slider as truth). Invisible at rest — pair with tip 3 for the visible fade. Canonical: `useScrollBlurFade` in `src/app/preview/canvas-glass/use-scroll-blur-fade.ts`.
 
 ---
 
@@ -298,7 +298,7 @@ Every floating card on the glass canvas (`/preview/canvas-glass`) — chat, brow
 - **Header layout: title/tabs LEFT, actions RIGHT, one row.** The chat card's two tabs (orchestrator title + Cortex) sit left, the title tab truncating via flex `minWidth: 0` + ellipsis (`DockTab truncate`) as the card narrows; the dock+✕ cluster sits **inline** at the right end behind a reserved flex spacer — never absolute in the corner. The old absolute-corner cluster collided with the right tab AND the NE resize zone, and the long title clipped to a bare "...". Shell cards keep a single **centered** title (they carry no second tab) with the cluster top-right; their titles are short enough not to collide.
 - **Zoom ladder is 130 / 115 / 100 / 85 / 70** (`--cnv-zoom` 0.91 / 0.805 / 0.7 / 0.595 / 0.49). "100%" = 0.7 is the home/fit anchor: the default state and the loupe **Fit** both resolve the `label === 100` step, **not** `zoomSteps[0]` (which is 130% after the zoom-in steps were prepended). 115/130 let the operator zoom IN — cards + text get bigger, not just smaller. The loupe −/+ step the array monotonically (index 0 = most-in); zoom-out bottoms at 70%.
 
-Shipped in #1259 (commits `0dfc1ab1` tokens+shell+chat, `d464bd53` browser, `3213cd7c` media, `af6a00c9` this spec, `866e4ced` header redesign, `c50d72b7` zoom-IN). Verify after any change with dev-browser on `:3010` — measure `getBoundingClientRect().height` of each card's ✕ at `--cnv-zoom` 0.49, 0.7, and 0.91; it must match across kinds at each level (15.4px at 100%, 20px at 130%).
+Shipped in #1259 (commits `0dfc1ab1` tokens+shell+chat, `d464bd53` browser, `3213cd7c` media, `af6a00c9` this spec, `866e4ced` header redesign, `c50d72b7` zoom-IN). Verify after any change in the running app — measure `getBoundingClientRect().height` of each card's ✕ at `--cnv-zoom` 0.49, 0.7, and 0.91; it must match across kinds at each level (15.4px at 100%, 20px at 130%).
 
 ---
 
@@ -307,7 +307,7 @@ Shipped in #1259 (commits `0dfc1ab1` tokens+shell+chat, `d464bd53` browser, `321
 This file captures what got *locked*. The roadmap below is what's *open* — the work that comes next when theme v2 starts from scratch.
 
 1. **Tab-header chat metadata** — when a chat opens in the workspace, the tab header should show chat title + active model + runtime. The sidebar lost its icons because that info should land here instead. Audit existing tab-header surface; either extend it or build new.
-2. **Composer-footer model display** — bottom of the composer should always show the current model name (e.g., "Claude Code · Extra High" or "Codex 5.5 · xhigh"). May partially exist via the existing mode chip; verify before adding.
+2. **Composer-footer model display** — bottom of the composer should always show the current model name (runtime · model · thinking effort). May partially exist via the existing mode chip; verify before adding.
 3. **Dark / midnight palette pass** — the locked typography tokens are theme-agnostic by design (only color tokens vary). When the next palette lands, the row hover background and section-label color need vibrancy-aware values.
 4. **Status text on `ExtraAgentRowView`** — currently only a colored dot distinguishes `reviewing` from `awaiting_input` from `idle`. Add a small text chip so operators can read state at a glance.
 5. **Archived audit** — confirm that "merged + closed" packets reliably land in the `Archived` section under each list (so the operator can verify completion vs missing).
@@ -315,20 +315,20 @@ This file captures what got *locked*. The roadmap below is what's *open* — the
 
 ---
 
-## Sidebar float — LOCKED 2026-07-17 (Claude-desktop card, solid surfaces)
+## Sidebar float — LOCKED 2026-07-17 (floating inset card, solid surfaces)
 
-Q ruling 2026-07-17 (supersedes the 2026-07-16 flush dock). In **solid** surfaces the left sidebar is a floating inset card, Claude-Desktop style. Glass surfaces keep the transparent-chrome treatment (chrome paints nothing) — this section is solid-only.
+Locked 2026-07-17 (supersedes the 2026-07-16 flush dock). In **solid** surfaces the left sidebar is a floating inset card. Glass surfaces keep the transparent-chrome treatment (chrome paints nothing) — this section is solid-only.
 
 - **Float air**: 4px window-backdrop gap on **left, top, and bottom**; 5px on the right (workspace side). The card never touches a window edge.
 - **Corners**: 14px radius on **all four** corners.
-- **Hairline**: `1px solid var(--t-divider-subtle)` on the card. Load-bearing — card tone ≈ backdrop tone, so the hairline is what makes the float read. Q ruling: keep the contrast **very faint** — do NOT darken the backdrop or whiten the card to chase Claude's stronger separation.
+- **Hairline**: `1px solid var(--t-divider-subtle)` on the card. Load-bearing — card tone ≈ backdrop tone, so the hairline is what makes the float read. Keep the contrast **very faint** — do NOT darken the backdrop or whiten the card to chase stronger separation.
 - **One continuous tone**: the header strip (traffic lights + toggle) renders INSIDE the card with `background: transparent` and **no bottom hairline** (`LeftHeaderStrip inCard` prop). No chrome band, no seam — the card is one surface from lights to account row.
 - **No drop shadow** (2026-07-13 ruling still applies — elevation on true overlays only).
 - Implementation: `dashboard/page.tsx` sidebar column (conditional padding on `effectiveGlassSurface`), `shell/LeftHeaderStrip.tsx` (`inCard`), `shell/ColumnHeaderStrip.tsx` (style spread wins).
 
 ---
 
-## ALL GLASS — LOCKED 2026-07-17 (one-material mode, Q-approved by eye)
+## ALL GLASS — LOCKED 2026-07-17 (one-material mode, locked by eye)
 
 All Glass is a MODE, not a playground: one recipe, zero user adjusters, permanent (Apple liquid-glass reference). Implementation: `src/lib/theme/context.tsx` WORKSPACE_GLASS_OVERRIDES + the workspace-glass effect.
 
@@ -336,7 +336,7 @@ All Glass is a MODE, not a playground: one recipe, zero user adjusters, permanen
 - **Material**: `FullScreenUI` (display-capture bake-off winner — melts the desktop into structureless color; Sheet was flat, per-OS chrome material was grey murk). Asserted on mode entry; per-OS chrome material restored on exit.
 - **THE veil** (the one painted thing, window-wide): `linear-gradient(180deg, rgba(10,12,18,0.78) 0%, rgba(10,12,18,0.44) 55%, rgba(10,12,18,0.06) 100%)` — dark where ink lives, opens to bloom at the bottom. **Paints on `body`** — every in-flow div is vibrancy-passthrough (background force-erased `!important`), body is the only surface between the passthrough tree and the material. Red-flash-proven.
 - **Faint white breaths** are the only fills: inputs/search/kbd 6%, secondary buttons 7%, glass-elevated 5%, hover/card stay at their 4–5% palette values.
-- **Ink is WHITE on the glass** (Q ruling 2026-07-17: "in the all-glass mode inside of the composer, all of that text needs to be white"): `--t-chat-surface-text` #fff, `-secondary` white 78%, `-muted` white 62%, `--t-text-muted` white 66%, `--t-text-faint` white 50%. The dark palette's slate inks (#5f6b7a / #8b95a3) read muddy on vibrancy — never let them leak into this mode.
+- **Ink is WHITE on the glass** (locked 2026-07-17 — composer text is white in this mode): `--t-chat-surface-text` #fff, `-secondary` white 78%, `-muted` white 62%, `--t-text-muted` white 66%, `--t-text-faint` white 50%. The dark palette's slate inks (#5f6b7a / #8b95a3) read muddy on vibrancy — never let them leak into this mode.
 - **Stacked overlays keep dark frost** (`--t-panel-solid` untouched): popovers/menus/drawers sit over app content and CSS backdrop-blur is dead in Tauri — transparent overlays would be text-on-text. This is the deliberate divergence from Apple (their overlays are separate OS windows with real blur).
 - **Exit sweep**: overrides apply with inline-`important` (a globals.css `!important` kills the gradient otherwise) and are force-removed BEFORE the target palette repaints on exit — the residue class that broke every other mode on 07-17 must never return.
 - **Dev-loop law**: theme-contract edits need a hard reload (HMR does not re-run the theme effect), and never judge glass through window captures (they kill live backdrop sampling — display captures only).
@@ -344,15 +344,15 @@ All Glass is a MODE, not a playground: one recipe, zero user adjusters, permanen
 ## Composer clusters + "+" switcher — LOCKED 2026-07-17
 
 - **Left cluster = intent**: `+` (attach & mode switcher) · mode chip · mic. **Right cluster = runtime**: context meter · model · thinking · send. Nothing crosses sides.
-- **Modes** (the + menu's top section): Solo / Multitask / Mixture of Agents — Q's exact semantics: Solo = the orchestrator dispatches NOTHING (works with its own tools); Multitask = dispatches parallel worker packets; MoA = plans with both frontier models (flips the Collide backend, synced both ways with any other MoA control) then dispatches. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
+- **Modes** (the + menu's top section): Solo / Multitask / Mixture of Agents — locked semantics: Solo = the orchestrator dispatches NOTHING (works with its own tools); Multitask = dispatches parallel worker packets; MoA = plans with both frontier models (flips the Collide backend, synced both ways with any other MoA control) then dispatches. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
 - **Chip**: always visible beside `+`; Solo renders faint (default stays quiet), active modes render accent; click reopens the switcher; title = mode description.
-- **Placeholder teaches the mode** (Cursor borrow) — rewritten per mode, no extra chrome.
+- **Placeholder teaches the mode** — rewritten per mode, no extra chrome.
 - **The model picker is models + thinking ONLY** — its Mode section is deleted; never reintroduce intent controls there.
 - **Popover recipe** (the locked composer-menu style): 240px drawer, flat single-line rows 26px (radius 7, 12.5px label, check right), ONE faint caption line (fixed height, hover-follows) instead of per-row sublabels, flat rows for actions — never bordered input-bubbles.
 
 ## Free theme trio — LOCKED 2026-07-17 (ships with free/OSS)
 
-Light / Dark / Glass mean the SAME thing on both surfaces (IDE + Canvas). Canvas founders keep the full Looks shelf (o8/Slate/Paper/Clear/Frost/Glass) on top.
+Light / Dark / Glass mean the SAME thing on both surfaces (IDE + Canvas).
 
 - **Light** = cream paper, dark ink (IDE light-solid ↔ canvas Paper-light).
 - **Dark** = opaque graphite (IDE dark-solid ↔ canvas free Dark: veil 0.95 window material — NOT the old translucent 0.3 that read as a second glass).
@@ -362,6 +362,6 @@ Light / Dark / Glass mean the SAME thing on both surfaces (IDE + Canvas). Canvas
 
 ## Why this file exists
 
-The operator asked for it on 2026-05-25 after dialing in the chat-row typography pass: *"we need to lock this style and font in to a new style sheet we will build from scratch later on … hold valuable information about the next level of theming."*
+Locked starting 2026-05-25, after the chat-row typography pass, to hold the values theme v2 must respect.
 
 This is the seed. When theme v2 begins, the rule is: **respect every locked value above, then layer new tokens around them.** Don't re-dial without the operator visually confirming.
