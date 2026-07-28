@@ -421,6 +421,9 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
         <RowButton onClick={auth.signIn}>
           <IconFrame><Github size={13} /></IconFrame>
           <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in with GitHub</span>
+          {/* The founder entitlement is machine-local and survives sign-out, so
+              the serial shows here too — signing out is not un-founding (#1624). */}
+          {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
         </RowButton>
         {authError ? <SignInErrorCard key={authError.id} authError={authError} onRetry={auth.signIn} /> : null}
         <div style={separatorStyle()} />

@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { useEntitlement } from '@/lib/entitlement/context';
 import type { Plan } from '@/lib/entitlement/types';
 
 import {
@@ -86,7 +87,7 @@ const COMING_ROWS: Array<{ label: string; detail: string }> = [
 ];
 
 function coercePlan(value: unknown): Plan {
-  return value === 'pro' || value === 'team' ? value : 'free';
+  return value === 'pro' || value === 'team' || value === 'founder' ? value : 'free';
 }
 
 function coerceSource(value: unknown): EntitlementSource {
@@ -116,6 +117,11 @@ function SoonGlyph() {
 }
 
 export function BillingTab() {
+  // The entitlement provider is the plan truth for DISPLAY — the founder record
+  // is machine-local (~/.o8) and survives Clerk sign-out, so the card must not
+  // read "Free" just because the drawer is signed out (#1624). The local fetch
+  // below still owns the license controls, which need a post-POST refresh.
+  const entitlement = useEntitlement();
   const [plan, setPlan] = useState<Plan>('free');
   const [source, setSource] = useState<EntitlementSource>('default');
   const [loading, setLoading] = useState(true);
@@ -199,8 +205,21 @@ export function BillingTab() {
   }, [busy, applyEntitlement]);
 
   const envManaged = source === 'env';
-  const isPaid = plan === 'pro' || plan === 'team';
   const hasFileLicense = source === 'file';
+
+  // Mirrors GeneralTab's derivation so the ladder reads identically wherever it
+  // appears: either the local fetch or the entitlement provider (effective or
+  // pre-view-as-clamp) claiming a tier is enough to show it.
+  const isFounder = Boolean(entitlement.founder || entitlement.actualFounder)
+    || plan === 'founder' || entitlement.plan === 'founder' || entitlement.actualPlan === 'founder';
+  const isTeam = plan === 'team' || entitlement.plan === 'team' || entitlement.actualPlan === 'team';
+  const isPaid = isFounder || isTeam || plan === 'pro' || entitlement.plan === 'pro' || entitlement.actualPlan === 'pro';
+  // Founders present as Pro via PLAN_LABELS, but keep the founder tagline.
+  const displayPlan: Plan = isTeam ? 'team' : isFounder ? 'founder' : isPaid ? 'pro' : 'free';
+
+  // License controls stay on the LOCAL copy — clearing is only meaningful for a
+  // license this machine actually stores.
+  const canClearLicense = !envManaged && (plan === 'pro' || plan === 'team' || hasFileLicense);
 
   if (loading) {
     return (
@@ -273,7 +292,7 @@ export function BillingTab() {
                   letterSpacing: '-0.03em',
                   lineHeight: 1,
                 }}>
-                  {PLAN_LABELS[plan]}
+                  {PLAN_LABELS[displayPlan]}
                 </span>
                 <BracketLabel tone={isPaid ? 'accent' : 'quiet'}>{sourceLabel(source)}</BracketLabel>
               </div>
@@ -284,7 +303,7 @@ export function BillingTab() {
                 margin: 0,
                 maxWidth: 520,
               }}>
-                {PLAN_TAGLINES[plan]}
+                {PLAN_TAGLINES[displayPlan]}
               </p>
               {envManaged ? (
                 <p style={{ fontSize: 11.5, color: RAMS_INK_QUIET, lineHeight: 1.5, marginTop: 2, marginBottom: 0 }}>
@@ -409,7 +428,7 @@ export function BillingTab() {
               <RamsButton
                 variant="ghost"
                 onClick={() => { void clearLicense(); }}
-                disabled={envManaged || (!isPaid && source !== 'file')}
+                disabled={!canClearLicense}
                 busy={busy === 'clear'}
               >
                 {busy === 'clear' ? 'Clearing...' : 'Clear license'}
