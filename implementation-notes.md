@@ -198,3 +198,12 @@
 - `npx vitest run src/lib/voice/narration-speaker.test.ts src/lib/voice/narration-policy.test.ts src/lib/voice/fleet-narration-events.test.ts src/lib/voice/realtime-access.test.ts` — 4 files, 16 tests passed.
 - Scoped ESLint on all seven changed/added files — 0 errors, 1 pre-existing warning in `FounderTab.tsx` on an unrelated `Date.now()` call outside the touched code.
 - Browser/UI smoke intentionally not run per packet sandbox guidance.
+
+## Orchestrator thread titles (#1627)
+
+- Mission archive titles now use the first operator message, then packet outcome titles, and ignore the legacy stats-shaped summary.
+- Archive titles no longer append merge counts or completion dates because the sidebar already presents relative age separately.
+
+## Deviations
+
+- None.

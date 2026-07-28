@@ -131,10 +131,10 @@ export async function archiveMissionThread(
       messages: serializeThoughtsHistoryMessages(options.transcript),
       model: 'claude-code',
       title: buildMissionArchiveTitle({
+        messages: options.transcript,
         missionSummary: detail.summary,
         compactionSummary: extractLatestCompactionSummary(options.transcript),
-        mergedCount: detail.mergedCount,
-        completedAt: detail.completedAt,
+        outcomeTitles: detail.packets.map((packet) => packet.title),
       }),
       planText: options.planText ?? undefined,
       repoPath: options.repoPath,
