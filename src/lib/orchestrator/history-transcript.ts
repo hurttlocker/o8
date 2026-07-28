@@ -67,6 +67,15 @@ function compactTitle(value: string) {
   return normalized.slice(0, 42).replace(/\s+\S*$/u, '').trim() || normalized.slice(0, 42).trim();
 }
 
+function isMissionStatsTitle(value: string) {
+  return /^[\p{L}\p{N}._/-]+(?:\s+[\p{L}\p{N}._/-]+){0,2}\s+with\s+\d+\s+tasks?(?:\s*·\s*\d+\s+merges?)?(?:\s*·\s*\d{4}-\d{2}-\d{2})?$/iu.test(value);
+}
+
+function titleSeed(value: string | null | undefined) {
+  const normalized = normalizeTitleSeed(value ?? '');
+  return normalized && !isMissionStatsTitle(normalized) ? normalized : '';
+}
+
 function firstMeaningfulTranscriptLine(
   messages: MobileTranscriptEntry[],
   roles?: MobileTranscriptEntry['role'][],
@@ -96,19 +105,18 @@ export function extractLatestCompactionSummary(messages: MobileTranscriptEntry[]
 }
 
 export function buildMissionArchiveTitle(input: {
+  messages?: MobileTranscriptEntry[];
   missionSummary: string;
   compactionSummary?: string | null;
-  mergedCount: number;
-  completedAt: string;
+  outcomeTitles?: string[];
 }) {
-  const compactionSeed = firstMeaningfulCompactionLine(input.compactionSummary);
-  const missionSeed = normalizeTitleSeed(
-    input.missionSummary.replace(/^sprint mission for\s+/iu, ''),
-  );
-  const base = compactTitle(compactionSeed || missionSeed || 'Mission complete');
-  const mergedCount = Math.max(0, Math.floor(input.mergedCount));
-  const date = new Date(input.completedAt).toISOString().slice(0, 10);
-  return `${base} · ${mergedCount} merge${mergedCount === 1 ? '' : 's'} · ${date}`;
+  const userSeed = titleSeed(firstMeaningfulTranscriptLine(input.messages ?? [], ['user']));
+  const outcomeSeed = input.outcomeTitles
+    ?.map(titleSeed)
+    .find(Boolean) ?? '';
+  const compactionSeed = titleSeed(firstMeaningfulCompactionLine(input.compactionSummary));
+  const missionSeed = titleSeed(input.missionSummary.replace(/^sprint mission for\s+/iu, ''));
+  return compactTitle(userSeed || outcomeSeed || compactionSeed || missionSeed || 'Mission complete');
 }
 
 export function buildOrchestratorArchiveTitle(input: {
