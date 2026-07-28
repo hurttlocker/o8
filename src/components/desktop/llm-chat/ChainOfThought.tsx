@@ -42,7 +42,7 @@ function ChainOfThoughtBase({
           width: 'auto',
           minWidth: 0,
           textAlign: 'left',
-          transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+          transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
           fontFamily: 'var(--font-sans-system)',
         }}
       >

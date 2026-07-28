@@ -247,7 +247,7 @@ export const Canvas = memo(function Canvas({
                         background: isActive ? 'var(--t-panel)' : 'transparent',
                         boxShadow: isActive ? 'var(--t-panel-shadow)' : 'none',
                         cursor: 'pointer',
-                        transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+                        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1), font-weight 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                         flexShrink: 0,
                         letterSpacing: '-0.01em',
                         userSelect: 'none',
@@ -272,7 +272,7 @@ export const Canvas = memo(function Canvas({
                           marginLeft: 2,
                           color: 'var(--t-text-muted)',
                           cursor: 'pointer',
-                          transition: 'all 100ms cubic-bezier(0.22, 1, 0.36, 1)',
+                          transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1), color 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                         }}
                         onMouseEnter={(event) => {
                           event.currentTarget.style.background = 'var(--t-divider)';

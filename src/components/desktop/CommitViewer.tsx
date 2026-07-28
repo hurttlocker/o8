@@ -619,7 +619,7 @@ export function CommitViewer({ commitHash, workspace }: { commitHash: string; wo
                   cursor: 'pointer',
                   textAlign: 'left',
                   fontFamily: 'var(--font-sans-system)',
-                  transition: 'all 100ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1), border-left-color 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >
                 <DiffStatusIcon status={file.status ?? 'modified'} />

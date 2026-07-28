@@ -36,7 +36,7 @@ export function AnimatedCheck({ delay = 0 }: { delay?: number }) {
       height: 20,
       borderRadius: '50%',
       background: visible ? '#22c55e' : 'rgba(34,197,94,0.15)',
-      transition: 'all 400ms cubic-bezier(0.34, 1.36, 0.64, 1)',
+      transition: 'background 400ms cubic-bezier(0.34, 1.36, 0.64, 1), transform 400ms cubic-bezier(0.34, 1.36, 0.64, 1), opacity 400ms cubic-bezier(0.34, 1.36, 0.64, 1)',
       transform: visible ? 'scale(1)' : 'scale(0.5)',
       opacity: visible ? 1 : 0.3,
       flexShrink: 0,
@@ -110,7 +110,7 @@ export function CopyCommand({ command }: { command: string }) {
           color: copied ? '#22c55e' : THEME_TEXT_MUTED,
           cursor: 'pointer',
           flexShrink: 0,
-          transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+          transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         {copied ? <Check size={14} strokeWidth={2.5} /> : <Copy size={14} strokeWidth={2} />}
@@ -130,7 +130,7 @@ export function StepDots({ total, current }: { total: number; current: number })
           background: i === current
             ? THEME_ACCENT
             : i < current ? THEME_ACCENT_SOFT_STRONG : THEME_DIVIDER,
-          transition: 'all 300ms cubic-bezier(0.34, 1.36, 0.64, 1)',
+          transition: 'width 300ms cubic-bezier(0.34, 1.36, 0.64, 1), background 300ms cubic-bezier(0.34, 1.36, 0.64, 1)',
         }} />
       ))}
     </div>
@@ -164,7 +164,7 @@ export function GlassButton({
     fontFamily: 'inherit',
     letterSpacing: '-0.01em',
     cursor: disabled ? 'not-allowed' : 'pointer',
-    transition: 'all 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+    transition: 'background 200ms cubic-bezier(0.22, 1, 0.36, 1), color 200ms cubic-bezier(0.22, 1, 0.36, 1), border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms cubic-bezier(0.22, 1, 0.36, 1)',
     border: 'none',
     opacity: disabled ? 0.5 : 1,
     ...(variant === 'primary' ? {
