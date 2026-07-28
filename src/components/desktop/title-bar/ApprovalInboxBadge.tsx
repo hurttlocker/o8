@@ -61,7 +61,6 @@ export function ApprovalInboxBadge({ count, onClick }: ApprovalInboxBadgeProps) 
         letterSpacing: '-0.1px',
         lineHeight: 1,
         flexShrink: 0,
-        marginTop: -3,
         transition: 'filter 120ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',
