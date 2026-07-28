@@ -117,7 +117,7 @@ export function TaskRow({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-accent)') : {}),
+            ...(active ? shimmerTextStyle('var(--t-text)') : {}),
           }}
         >
           {task.title}

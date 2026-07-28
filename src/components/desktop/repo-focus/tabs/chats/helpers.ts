@@ -22,22 +22,16 @@ export function resolveRailActiveSessionKey(
 }
 
 /**
- * ShinyText text shimmer (reactbits mechanic, Q pick 2026-07-14): glyphs keep
- * a translucent `base` fill so they are ALWAYS legible, and a narrow
- * transparent-edged `flare` shine sweeps through the clipped background. The
- * old opaque-ended gradient swept past full coverage (±200%), leaving glyphs
- * unpainted for half the cycle — the whole title read as blinking. Duplicate
- * of control-room/helpers.ts shimmerTextStyle — change both together.
+ * Active-row text cue — solid ink on a slow opacity pulse. The earlier form
+ * swept a flare gradient through a background-clip:text fill, which made
+ * WebKit re-rasterize the glyphs every frame for as long as the row stayed
+ * active. Duplicate of control-room/helpers.ts shimmerTextStyle — change both
+ * together.
  */
-export function shimmerTextStyle(base = 'var(--t-text)', flare = 'var(--t-accent)'): CSSProperties {
+export function shimmerTextStyle(base = 'var(--t-text)'): CSSProperties {
   return {
-    WebkitTextFillColor: `color-mix(in srgb, ${base} 72%, transparent)`,
-    backgroundImage: `linear-gradient(120deg, rgba(0, 0, 0, 0) 42%, ${flare} 50%, rgba(0, 0, 0, 0) 58%)`,
-    backgroundSize: '200% 100%',
-    backgroundRepeat: 'no-repeat',
-    WebkitBackgroundClip: 'text',
-    backgroundClip: 'text',
-    animation: 'o8-text-shimmer 2.35s linear infinite',
+    color: base,
+    animation: 'o8-text-shimmer 2.35s ease-in-out infinite',
   };
 }
 
