@@ -34,10 +34,22 @@ export function QuickActionPalette({ open, onClose, onPick }: QuickActionPalette
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [mounted, setMounted] = useState(false);
+  // Entrance fade — 120ms opacity only, matching the global CommandPalette
+  // (Q ruling 2026-07-28: quick fade on both palettes, no scale, no travel).
+  const [entered, setEntered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      setEntered(false);
+    };
+  }, [open]);
 
   const filtered = useMemo(() => filterQuickActions(query), [query]);
 
@@ -102,6 +114,8 @@ export function QuickActionPalette({ open, onClose, onPick }: QuickActionPalette
     justifyContent: 'center',
     paddingTop: '18vh',
     zIndex: 10000,
+    opacity: entered ? 1 : 0,
+    transition: 'opacity 120ms ease-out',
   };
 
   const paletteStyle: CSSProperties = {

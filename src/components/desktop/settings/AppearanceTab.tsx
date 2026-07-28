@@ -195,6 +195,14 @@ function PalettePreviewCard({
   );
 }
 
+// While All glass is on, the mode pins palette=dark + surface=glass wholesale
+// (WORKSPACE_GLASS_OVERRIDES in theme/context.tsx + the layout.tsx pre-paint
+// stamp), so both controls below are no-ops until it's switched off. We dim
+// them and say so rather than letting a click look like it did something —
+// the preference still persists and applies once All glass turns off (#1625).
+const GLASS_LOCK_HINT = 'Locked by All glass — dark glass while it’s on';
+const GLASS_LOCK_OPACITY = 0.45;
+
 // ── Session Timeline visibility toggle ──────────────────────────────────────
 
 const noopSubscribe = () => () => {};
@@ -247,7 +255,16 @@ export function AppearanceTab() {
       <section>
         <GroupHeader>Palette</GroupHeader>
 
-        <div style={{ display: 'flex', gap: 18, marginTop: 4, flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 18,
+            marginTop: 4,
+            flexWrap: 'wrap',
+            opacity: workspaceGlass ? GLASS_LOCK_OPACITY : 1,
+            transition: 'opacity 160ms',
+          }}
+        >
           {visiblePalettes.map((p) => (
             <PalettePreviewCard
               key={p.id}
@@ -257,6 +274,7 @@ export function AppearanceTab() {
             />
           ))}
         </div>
+        {workspaceGlass ? <GroupFootnote>{GLASS_LOCK_HINT}</GroupFootnote> : null}
         {foundersMode ? (
           <GroupFootnote>More founders themes are on the way — they land here first.</GroupFootnote>
         ) : null}
@@ -279,17 +297,25 @@ export function AppearanceTab() {
           <SettingsRow
             icon={<LayersIcon />}
             label="Window chrome"
-            subtitle="Glass follows your wallpaper; solid is opaque"
+            subtitle={workspaceGlass ? GLASS_LOCK_HINT : 'Glass follows your wallpaper; solid is opaque'}
             accessory={
-              <SettingsSegmented
-                value={reduceTransparency}
-                onChange={(v) => setReduceTransparency(v as ReduceTransparency)}
-                options={[
-                  { value: 'system', label: 'System' },
-                  { value: 'off', label: 'Glass' },
-                  { value: 'on', label: 'Solid' },
-                ]}
-              />
+              <span
+                style={{
+                  display: 'inline-flex',
+                  opacity: workspaceGlass ? GLASS_LOCK_OPACITY : 1,
+                  transition: 'opacity 160ms',
+                }}
+              >
+                <SettingsSegmented
+                  value={reduceTransparency}
+                  onChange={(v) => setReduceTransparency(v as ReduceTransparency)}
+                  options={[
+                    { value: 'system', label: 'System' },
+                    { value: 'off', label: 'Glass' },
+                    { value: 'on', label: 'Solid' },
+                  ]}
+                />
+              </span>
             }
             divider
           />
