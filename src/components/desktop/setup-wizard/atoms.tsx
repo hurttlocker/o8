@@ -130,7 +130,7 @@ export function StepDots({ total, current }: { total: number; current: number })
           background: i === current
             ? THEME_ACCENT
             : i < current ? THEME_ACCENT_SOFT_STRONG : THEME_DIVIDER,
-          transition: 'width 300ms cubic-bezier(0.34, 1.36, 0.64, 1), background 300ms cubic-bezier(0.34, 1.36, 0.64, 1)',
+          transition: 'background 300ms cubic-bezier(0.34, 1.36, 0.64, 1)',
         }} />
       ))}
     </div>
@@ -164,7 +164,7 @@ export function GlassButton({
     fontFamily: 'inherit',
     letterSpacing: '-0.01em',
     cursor: disabled ? 'not-allowed' : 'pointer',
-    transition: 'background 200ms cubic-bezier(0.22, 1, 0.36, 1), color 200ms cubic-bezier(0.22, 1, 0.36, 1), border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+    transition: 'background 200ms cubic-bezier(0.22, 1, 0.36, 1), color 200ms cubic-bezier(0.22, 1, 0.36, 1), border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms cubic-bezier(0.22, 1, 0.36, 1)',
     border: 'none',
     opacity: disabled ? 0.5 : 1,
     ...(variant === 'primary' ? {
