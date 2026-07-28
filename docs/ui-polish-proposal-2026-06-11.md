@@ -1,6 +1,6 @@
 # UI polish proposal — surface-truth walk findings (2026-06-11)
 
-**Status: awaiting operator sign-off.** Evidence captured on installed o8.app 0.1.348, light + midnight, via window-ID screencapture + computed-style measurement. Grouping per the session contract: (a) safe fixes, (b) consistency unifications, (c) locked-geometry — (c) requires explicit approval per item.
+**Status: EXECUTED 2026-06-11** — groups (a)/(b)/(c) landed same-day in commits `afae36e1` / `3b160967` / `ab5d79f7`. Re-verified against code 2026-07-27: 16/18 confirmed fixed (some via later refactors); residual: item 10's trigger still wears the ellipsis glyph (fix in flight), item 17 needs a 4× screenshot-and-measure pass on the live app to confirm the optical column. Evidence was captured on installed o8.app 0.1.348, light + midnight, via window-ID screencapture + computed-style measurement. Grouping per the session contract: (a) safe fixes, (b) consistency unifications, (c) locked-geometry.
 
 Already shipped this session (infrastructure, not pixels): `o8_view_screenshot` captured the Symon dock instead of the main window (title-search bug, fixed by own-pid CG match — plugin 66931f6 + o8 0.1.349); `[mcp-*]` eval beacons flooded the console-error ring (3 per eval, cap 100 — now log-only).
 
