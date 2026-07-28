@@ -650,7 +650,7 @@ transition: 'opacity 180ms var(--ease-out)',
 
 ## 010 — Stop animating the command palette open (keyboard action)
 
-- **Status**: TODO
+- **Status**: DONE 2026-07-28 — landed as a **quick fade on BOTH palettes** (Q ruling), not as this plan proposed. `CommandPalette` card is now opacity-only `{ duration: 0.12, ease: 'easeOut' }` (0.12s, matching its own scrim, rather than the 0.09s written below), and the now-unused local `SPRING` const is gone. `QuickActionPalette`'s instant teleport was rejected as the exemplar: it got the SAME 120ms opacity-only entrance (rAF-gated `entered` flag on the portal overlay — the file is plain inline styles, no framer-motion), so the two palettes feel identical instead of one appearing and one fading.
 - **Commit**: a5e5b2fd
 - **Severity**: MEDIUM
 - **Category**: 1 (Purpose & frequency)

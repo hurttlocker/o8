@@ -106,7 +106,6 @@ interface SearchResponse {
 const RECENTS_KEY = 'o8:command-palette:recents:v1';
 const RECENTS_MAX = 8;
 const DEBOUNCE_MS = 200;
-const SPRING = { type: 'spring' as const, stiffness: 400, damping: 30 };
 const EMPTY_GROUPS: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]> = {
   issue: [],
   file: [],
@@ -516,10 +515,10 @@ export const CommandPalette = memo(function CommandPalette({
       >
         <motion.div
           key="palette-card"
-          initial={{ opacity: 0, scale: 0.96, y: -6 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.97, y: -4 }}
-          transition={SPRING}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.12, ease: 'easeOut' }}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleKeyDown}
           role="dialog"
