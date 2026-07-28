@@ -89,11 +89,12 @@ export function ColumnHeaderStrip({
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
         {center}
       </div>
-      {/* Right slot stays overflow:visible — its buttons use marginTop:-3 to
-          nudge up, which pokes 3px above the auto-sized wrapper; a hidden
-          wrapper clipped the top of their rounded hover fill (operator:
-          "cut off at the top … when I hover"). The strip root still clips at
-          its own 36px bounds, so nothing bleeds past the strip. */}
+      {/* Right slot stays overflow:visible so rounded hover fills never clip
+          at the wrapper (operator: "cut off at the top … when I hover"). The
+          slot centers its children — every control here sits on the shared
+          centerline (the RightPanelMorphButton baseline); optical tweaks go
+          through HeaderIconPill's yNudge, never a raw negative margin. The
+          strip root still clips at its own 36px bounds. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, minWidth: 0, overflow: 'visible' }}>
         {right}
       </div>
