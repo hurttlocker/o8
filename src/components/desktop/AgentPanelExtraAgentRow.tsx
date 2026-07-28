@@ -201,6 +201,7 @@ export function ExtraAgentRowView({
         <AgentStatusDot state={dotState} label={dotLabel} />
       </span>
       <span
+        className={active ? 'o8-text-shimmer' : undefined}
         style={{
           flex: 1,
           minWidth: 0,
@@ -212,7 +213,7 @@ export function ExtraAgentRowView({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-shimmer-flare, var(--t-text))') : {}),
+          ...(active ? shimmerTextStyle('var(--t-text)') : {}),
         }}
       >
         {row.name}

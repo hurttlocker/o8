@@ -247,19 +247,15 @@ export function supervisorStatusTone(status: SupervisorInboxItem['status']) {
 }
 
 /**
- * ShinyText text shimmer — translucent base fill + narrow flare sweeping
- * through the glyphs (always legible; the old opaque-ended ±200% sweep left
- * glyphs unpainted half the cycle). Duplicate of chats/helpers.ts
- * shimmerTextStyle — change both together.
+ * Active-row text cue — solid ink on a slow opacity pulse. The earlier form
+ * swept a flare gradient through a background-clip:text fill, which made
+ * WebKit re-rasterize the glyphs every frame for as long as the row stayed
+ * active. Duplicate of chats/helpers.ts shimmerTextStyle — change both
+ * together.
  */
-export function shimmerTextStyle(base = 'var(--t-text)', flare = 'var(--t-accent)'): CSSProperties {
+export function shimmerTextStyle(base = 'var(--t-text)'): CSSProperties {
   return {
-    WebkitTextFillColor: `color-mix(in srgb, ${base} 72%, transparent)`,
-    backgroundImage: `linear-gradient(120deg, rgba(0, 0, 0, 0) 42%, ${flare} 50%, rgba(0, 0, 0, 0) 58%)`,
-    backgroundSize: '200% 100%',
-    backgroundRepeat: 'no-repeat',
-    WebkitBackgroundClip: 'text',
-    backgroundClip: 'text',
-    animation: 'o8-text-shimmer 2.35s linear infinite',
+    color: base,
+    animation: 'o8-text-shimmer 2.35s ease-in-out infinite',
   };
 }

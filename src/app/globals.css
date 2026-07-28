@@ -1551,11 +1551,6 @@ button.workflow-file-item.workflow-file-item-active {
   animation: spin 1s linear infinite;
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
-}
-
 /* Live "now" cell pulse — applied to the rightmost block of the
  * SessionTimeline strip. Soft opacity breathe (no filter, no color
  * shift) so adjacent error cells can't bleed their hue into the
@@ -1565,9 +1560,12 @@ button.workflow-file-item.workflow-file-item-active {
   50% { opacity: 0.6; }
 }
 
+/* Preview-pane entrance. Transform + opacity only — the old form grew
+   max-height 0 → 2000px, which re-laid-out the whole terminal column every
+   frame. The pane now takes its resting height immediately and slides in. */
 @keyframes slide-in-preview {
-  from { max-height: 0; opacity: 0; }
-  to { max-height: 2000px; opacity: 1; }
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 @keyframes spin {
@@ -1577,15 +1575,6 @@ button.workflow-file-item.workflow-file-item-active {
   to {
     transform: rotate(360deg);
   }
-}
-@keyframes pillBreathe {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(0,122,255,0.1), 0 0 12px rgba(0,122,255,0.12); }
-  50% { box-shadow: 0 0 0 2px rgba(0,122,255,0.18), 0 0 20px rgba(0,122,255,0.2); }
-}
-@keyframes compactPulse {
-  0% { width: 20%; opacity: 0.6; }
-  50% { width: 75%; opacity: 1; }
-  100% { width: 20%; opacity: 0.6; }
 }
 
 .cortex-themed-scroll {
@@ -1771,16 +1760,6 @@ button.workflow-file-item.workflow-file-item-active {
   }
 }
 
-/* ── Alert bell shake animation ── */
-@keyframes alert-bell-shake {
-  0%, 100% { transform: rotate(0deg); }
-  10% { transform: rotate(12deg); }
-  20% { transform: rotate(-10deg); }
-  30% { transform: rotate(8deg); }
-  40% { transform: rotate(-6deg); }
-  50% { transform: rotate(0deg); }
-}
-
 /* Hide scrollbar — AgentPanel */
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
@@ -1801,27 +1780,10 @@ button.workflow-file-item.workflow-file-item-active {
   }
 }
 
-/* Cursor blink for streaming text */
-@keyframes blink {
-  50% { opacity: 0; }
-}
-
 /* Drill-down modal fade in */
 @keyframes drillFadeIn {
   from { opacity: 0; transform: translateY(-8px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-/* Session card pulse — active sessions in drill-down */
-@keyframes sessionPulse {
-  0%, 100% {
-    border-color: rgba(52, 211, 153, 0.25);
-    box-shadow: 0 0 12px rgba(52, 211, 153, 0.08), inset 0 0 8px rgba(52, 211, 153, 0.03);
-  }
-  50% {
-    border-color: rgba(52, 211, 153, 0.08);
-    box-shadow: 0 0 4px rgba(52, 211, 153, 0.02), inset 0 0 4px rgba(52, 211, 153, 0.01);
-  }
 }
 
 /* Active agent label — Superconductor-style shimmer sweep on the
@@ -1835,17 +1797,13 @@ button.workflow-file-item.workflow-file-item-active {
   50%      { opacity: 0.45; }
 }
 
-/* Sweep for shimmerTextStyle (ShinyText mechanic): with the 200%-sized
-   transparent-edged flare gradient, [150%, -50%] carries the shine fully
-   in and out of the glyph span each cycle. Glyph legibility comes from the
-   translucent text-fill, never from gradient coverage. */
+/* Active-row cue for shimmerTextStyle. Opacity pulse, not a moving gradient:
+   the old form swept background-position across a background-clip:text flare,
+   so WebKit re-rasterized the clipped glyphs every frame for as long as a row
+   stayed active. Same shape as tab-label-shimmer above. */
 @keyframes o8-text-shimmer {
-  0% {
-    background-position: 150% center;
-  }
-  100% {
-    background-position: -50% center;
-  }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
 }
 
 /* Three-dot working indicator — staggered fade, light gray. Legacy,
@@ -2282,12 +2240,9 @@ button.workflow-file-item.workflow-file-item-active {
   .o8-pulse-circle {
     animation: none !important;
   }
-  /* ShinyText rows: restore full-opacity ink and drop the shine
+  /* Active rows: hold the pulse at full-opacity ink
      (stylesheet !important beats the inline shimmerTextStyle props). */
-  .o8-text-shimmer {
-    -webkit-text-fill-color: currentColor !important;
-    background-image: none !important;
-  }
+  .o8-text-shimmer { opacity: 1 !important; }
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
   /* Sheen off: restore full-opacity ink and drop the shine entirely. */
