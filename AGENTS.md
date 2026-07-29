@@ -99,6 +99,8 @@ o8 status                                  # fleet snapshot: packets, lanes, mer
 o8 version                                 # CLI + connected server version
 o8 doctor [--reap] [--repair]              # diagnose server/config; reap zombies; repair CLI symlink
 o8 app restart [--if-update-pending]        # request a running-app restart
+o8 connect [--status]                       # register this machine or list connected machines
+o8 disconnect                               # remove this machine from the connected-device registry
 o8 mcp install --claude-code|--cursor|--print
 
 # Run a long process the operator can WATCH LIVE (servers, backtests, scripts)
