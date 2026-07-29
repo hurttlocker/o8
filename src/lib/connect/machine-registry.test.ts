@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   deleteMachine,
+  issueMachineRelayTicket,
   listMachines,
   registerMachine,
   type MachineDevice,
@@ -168,6 +169,57 @@ describe('machine registry client', () => {
         status,
         message: 'The o8 license server does not support machine registry yet.',
       },
+    });
+  });
+
+  it('fetches a machine-scoped relay ticket with the existing account credential', async () => {
+    const baseUrl = await startMockServer((request, response) => {
+      expect(request).toMatchObject({
+        method: 'POST',
+        path: '/machines/machine_1/relay-ticket',
+        authorization: 'Bearer account-token',
+      });
+      json(response, 200, {
+        ticket: 'signed-machine-ticket',
+        expiresAt: '2026-07-29T10:10:00.000Z',
+      });
+    });
+
+    const result = await issueMachineRelayTicket('machine_1', {
+      baseUrl,
+      token: 'account-token',
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        ticket: 'signed-machine-ticket',
+        expiresAt: '2026-07-29T10:10:00.000Z',
+      },
+    });
+  });
+
+  it('distinguishes an absent machine from an unsupported ticket endpoint', async () => {
+    const missingBaseUrl = await startMockServer((_request, response) => {
+      json(response, 404, { error: 'machine_not_found' });
+    });
+    const unsupportedBaseUrl = await startMockServer((_request, response) => {
+      json(response, 501, { error: 'not_implemented' });
+    });
+
+    await expect(issueMachineRelayTicket('missing', {
+      baseUrl: missingBaseUrl,
+      token: 'account-token',
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'not_registered', status: 404 },
+    });
+    await expect(issueMachineRelayTicket('machine_1', {
+      baseUrl: unsupportedBaseUrl,
+      token: 'account-token',
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'unsupported', status: 501 },
     });
   });
 });

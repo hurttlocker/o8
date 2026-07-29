@@ -17,8 +17,6 @@ import { getServerIdentity } from './e2ee-identity';
 import { listDevices, resolveDeviceByToken, type MobileDevice } from './device-registry';
 import { listRemoteNotificationTokens } from './live-activity-push';
 import {
-  buildHttpReplay,
-  chunkBase64,
   deriveRoutingId,
   httpCancelRequestId,
   passthroughCloseCode,
@@ -28,6 +26,8 @@ import {
   RelayHttpRequestRegistry,
   type HttpReqFrame,
 } from './relay-connector-protocol';
+import { replayRelayHttpRequest } from './relay-http-replay';
+import { RelayReconnectPolicy } from './relay-reconnect';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
@@ -61,8 +61,6 @@ import { getDataDir } from '@/lib/data-dir-migration';
  */
 
 const P = '[relay]';
-const RECONNECT_BASE_MS = 1_000;
-const RECONNECT_CAP_MS = 30_000;
 const STREAM_HANDSHAKE_DEADLINE_MS = 8_000; // must beat the relay's 10s deadline
 const HTTP_REPLAY_TIMEOUT_MS = 55_000; // must beat the mobile tunnel's 60s deadline
 
@@ -98,7 +96,7 @@ export interface RelayConnectorConfig {
 export class RelayConnector {
   private ws: WebSocket | null = null;
   private readonly streams = new Map<string, StreamState>();
-  private reconnectAttempts = 0;
+  private readonly reconnect = new RelayReconnectPolicy();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private liveDeviceCount = 0;
@@ -164,7 +162,7 @@ export class RelayConnector {
     this.ws = ws;
 
     ws.on('open', () => {
-      this.reconnectAttempts = 0;
+      this.reconnect.reset();
       console.log(`${P} connector up → ${this.relayUrl} (routingId=${this.routingId.slice(0, 8)}…)`);
     });
     ws.on('message', (raw) => this.onRelayMessage(raw));
@@ -187,8 +185,7 @@ export class RelayConnector {
   private scheduleReconnect(): void {
     if (this.stopped) return;
     for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
-    const delay = Math.min(RECONNECT_CAP_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempts);
-    this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, 8);
+    const delay = this.reconnect.nextDelay();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => this.dial(), delay);
     this.reconnectTimer.unref?.();
@@ -353,56 +350,17 @@ export class RelayConnector {
   }
 
   private async replayHttp(state: StreamState, req: HttpReqFrame): Promise<void> {
-    const rid = typeof req.rid === 'string' && req.rid ? req.rid : null;
-    if (!rid) return;
     const { apiPort } = resolvePortInfo();
-    const plan = buildHttpReplay(req, `http://127.0.0.1:${apiPort}`);
-    if (!plan.ok) {
-      this.sendEncrypted(state, { t: 'http-res', rid, status: plan.status, error: plan.error, bodyB64: '' });
-      return;
-    }
-    const controller = this.httpRequests.begin(state.sid, rid);
-    const timeout = setTimeout(() => {
-      this.httpRequests.timeout(state.sid, rid, controller);
-    }, this.httpRequestTimeoutMs);
-    timeout.unref?.();
-    try {
-      const resp = await fetch(plan.url, {
-        method: plan.method,
-        headers: plan.headers,
-        body: plan.body,
-        signal: controller.signal,
-      });
-      const buf = Buffer.from(await resp.arrayBuffer());
-      if (controller.signal.aborted || this.streams.get(state.sid) !== state) return;
-      if (buf.length > this.maxTunnelBytes) {
-        this.sendEncrypted(state, { t: 'http-res', rid, status: 413, error: 'tunnel_response_too_large', bodyB64: '' });
-        return;
-      }
-      const chunks = chunkBase64(buf.toString('base64'));
-      this.sendEncrypted(state, {
-        t: 'http-res',
-        rid,
-        status: resp.status,
-        headers: subsetResponseHeaders(resp.headers),
-        bodyB64: chunks[0] ?? '',
-        last: chunks.length <= 1,
-      });
-      for (let i = 1; i < chunks.length; i++) {
-        this.sendEncrypted(state, { t: 'http-res-part', rid, i, last: i === chunks.length - 1, bodyB64: chunks[i] });
-      }
-    } catch (err) {
-      if (controller.signal.aborted) {
-        if (controller.signal.reason === 'timeout' && this.streams.get(state.sid) === state) {
-          this.sendEncrypted(state, { t: 'http-res', rid, status: 504, error: 'tunnel_request_timeout', bodyB64: '' });
-        }
-        return;
-      }
-      this.sendEncrypted(state, { t: 'http-res', rid, status: 502, error: errMsg(err), bodyB64: '' });
-    } finally {
-      clearTimeout(timeout);
-      this.httpRequests.finish(state.sid, rid, controller);
-    }
+    await replayRelayHttpRequest({
+      sid: state.sid,
+      request: req,
+      apiBase: `http://127.0.0.1:${apiPort}`,
+      requestRegistry: this.httpRequests,
+      timeoutMs: this.httpRequestTimeoutMs,
+      maxTunnelBytes: this.maxTunnelBytes,
+      isStreamActive: () => this.streams.get(state.sid) === state,
+      send: (frame) => this.sendEncrypted(state, frame),
+    });
   }
 
   // ── push-req (queue-and-notify) ──
@@ -544,14 +502,6 @@ function safeParse(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-function subsetResponseHeaders(headers: Headers): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const key of ['content-type', 'etag', 'cache-control', 'content-language']) {
-    const v = headers.get(key);
-    if (v) out[key] = v;
-  }
-  return out;
 }
 function safe<T>(fn: () => T): T | null {
   try {
