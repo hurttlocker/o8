@@ -47,6 +47,7 @@ import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLaunche
 import { COLLAPSED_BRANCH_RAIL_WIDTH } from '@/components/desktop/branch-rail-geometry';
 import { ThoughtsChatPanel, type ThoughtsChatPanelChromeState, type ThoughtsChatPanelHandle } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
+import { ORCHESTRATOR_HOME_REPO_SENTINEL, resolveOrchestratorClientRepoPath } from '@/components/desktop/thoughts/orchestrator-home-mode';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
 import { SessionTileSurface } from './SessionTileSurface';
@@ -284,6 +285,7 @@ function OrchestratorTabInner({
   turnInjection,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
+  const homeAwareRepoPath = resolveOrchestratorClientRepoPath(repoPath);
   const spawnHandlers = useWorkspaceSpawn();
   const handleModePersist = useCallback((patch: {
     mode?: OrchestrationMode;
@@ -452,7 +454,7 @@ function OrchestratorTabInner({
           // Persist the title alongside the threadId so the next reload
           // can pre-set tab.label at tab-creation time (no "Orchestrator"
           // flash before the chat-history fetch completes).
-          if (activeRef.current && persistLastThread) writeLastOrchestratorThread(repoPath ?? null, threadId, title);
+          if (activeRef.current && persistLastThread) writeLastOrchestratorThread(homeAwareRepoPath, threadId, title);
           window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
             detail: { tabId, threadId, title },
           }));
@@ -484,7 +486,7 @@ function OrchestratorTabInner({
       cancelled = true;
       window.removeEventListener('o8:thread-title-maybe-updated', onMaybeUpdated as EventListener);
     };
-  }, [persistLastThread, tabId, chatChromeState.threadId, lockedMode, repoPath]);
+  }, [persistLastThread, tabId, chatChromeState.threadId, lockedMode, homeAwareRepoPath]);
 
   // Persist the last-active orchestrator thread id globally so dev
   // reloads drop the operator back into their last conversation. Only
@@ -500,9 +502,9 @@ function OrchestratorTabInner({
       // Don't clear the title here — only the threadId update fires this
       // effect. The title-sync effect above handles the (threadId, title)
       // tuple write. Pass `undefined` to leave the stored title alone.
-      writeLastOrchestratorThread(repoPath ?? null, chatChromeState.threadId);
+      writeLastOrchestratorThread(homeAwareRepoPath, chatChromeState.threadId);
     }
-  }, [active, persistLastThread, chatChromeState.threadId, chatChromeState.hasMessages, repoPath]);
+  }, [active, persistLastThread, chatChromeState.threadId, chatChromeState.hasMessages, homeAwareRepoPath]);
 
   // (First-message side-effects useEffect is declared further down,
   // AFTER worktreeMode / pickedBranch / activeWorkspaceTarget so the
@@ -543,7 +545,7 @@ function OrchestratorTabInner({
     // Another orchestrator tab already adopted the global last-thread this
     // session — this one stays fresh, so don't flash the restore shimmer.
     if (globalLastThreadRestoreClaimed) return false;
-    return Boolean(readLastOrchestratorThreadId(repoPath ?? null));
+    return Boolean(readLastOrchestratorThreadId(homeAwareRepoPath));
   });
   // Mark AFTER the initializer ran (effects run post-render, and StrictMode's
   // double-invoked initializer both see the unmarked set) — remounts of this
@@ -555,7 +557,7 @@ function OrchestratorTabInner({
     if (!active) return;
     if (!restoreLastThread) return;
     if (initialThreadId) return; // explicit thread wins
-    const restored = readLastOrchestratorThreadId(repoPath ?? null);
+    const restored = readLastOrchestratorThreadId(homeAwareRepoPath);
     if (!restored) return;
     if (restoredThreadRef.current === restored) return; // already loaded
     // At most ONE orchestrator tab per app load adopts the global last-active
@@ -617,7 +619,7 @@ function OrchestratorTabInner({
       setThreadLoadPending(false);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [active, initialThreadId, restoreLastThread, repoPath, publishWorkspaceThread, tabId]);
+  }, [active, initialThreadId, restoreLastThread, homeAwareRepoPath, publishWorkspaceThread, tabId]);
 
   // The restored tab itself paints immediately. Only show a loader if its
   // transcript remains absent long enough to be perceptible, then remove it
@@ -975,7 +977,7 @@ function OrchestratorTabInner({
       : (data?.workspaceTargets?.find((target) => target.localPath === (repoPath ?? '')) ?? null)
   ), [data?.workspaceTargets, repoPath, scopeCleared]);
   const projectLabel = scopeCleared ? null : (repoLabel ?? activeWorkspaceTarget?.repoName ?? null);
-  const effectiveRepoPath = scopeCleared ? null : (repoPath ?? null);
+  const effectiveRepoPath = scopeCleared ? ORCHESTRATOR_HOME_REPO_SENTINEL : homeAwareRepoPath;
   const branchLabel = pickedBranch ?? activeWorkspaceTarget?.branch?.trim() ?? 'main';
   // Reset the local override whenever the target repo changes — the
   // chip otherwise sticks to the prior repo's branch name.
@@ -1072,13 +1074,11 @@ function OrchestratorTabInner({
   }, []);
   const handleEmptyWorkWithoutProject = useCallback(() => {
     // Local override — tab.repo isn't directly mutable from this
-    // layer, but the empty-state surface respects `scopeCleared` so
-    // the title flips to "your workspace" and the chip reads "No
-    // project". Picking another project resets this.
+    // layer, so `scopeCleared` switches the tab to its home anchor.
     setScopeCleared(true);
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('o8:select-workspace-scope', {
-      detail: { repoPath: null, repoName: null },
+      detail: { repoPath: ORCHESTRATOR_HOME_REPO_SENTINEL, repoName: null },
     }));
   }, []);
 
@@ -1107,7 +1107,7 @@ function OrchestratorTabInner({
       greeting,
       runtimeLabel,
       handleQuickAction,
-      repoPath,
+      effectiveRepoPath,
       projectLabel,
       data?.workspaceTargets,
       handleEmptySelectProject,
@@ -1244,7 +1244,7 @@ function OrchestratorTabInner({
       preferredRuntime={preferredRuntime}
       sessionTargets={sessionTargets}
       workspaceTargets={data.workspaceTargets ?? []}
-      repoPath={repoPath ?? null}
+      repoPath={effectiveRepoPath}
       thoughtsBodyBackground={thoughtsBodyBackground}
       thoughtsElevatedSurface={thoughtsElevatedSurface}
       thoughtsElevatedBorder={thoughtsElevatedBorder}

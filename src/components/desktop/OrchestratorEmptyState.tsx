@@ -106,8 +106,9 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
     );
   }
 
+  const homeMode = repoPath === '~';
   const titleProject = repoLabel ?? 'your workspace';
-  const title = `What should we build in ${titleProject}?`;
+  const title = homeMode ? 'What should we do?' : `What should we build in ${titleProject}?`;
 
   return (
     <div
@@ -464,7 +465,7 @@ function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
       >
         {props.workspaceTargets ? (
           <ProjectChip
-            label={props.repoLabel ?? 'No project'}
+            label={props.repoPath === '~' ? '~' : (props.repoLabel ?? 'No project')}
             workspaceTargets={props.workspaceTargets}
             selectedRepoPath={props.repoPath}
             onSelectProject={props.onSelectProject}
@@ -1068,4 +1069,3 @@ function BranchChip({
     </div>
   );
 }
-

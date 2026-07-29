@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { homedir } from 'node:os';
+import { assertOrchestratorRepoPath } from './repo-preflight';
+import { resolveOrchestratorMessageRepoPath } from '../orchestrator/repo-path';
 import {
   orchestratorModeAllowsBackendFallback,
   resolveOrchestratorExecutionBackendId,
@@ -18,6 +21,21 @@ function fakeBackend(id: OrchestratorBackendId, sendTurn: OrchestratorBackend['s
 }
 
 describe('orchestrator-send backend entry', () => {
+  it('resolves the home sentinel and reaches backend preflight with the real path', async () => {
+    const sendTurn = vi.fn<OrchestratorBackend['sendTurn']>(async (repoPath) => {
+      assertOrchestratorRepoPath(repoPath);
+    });
+    const backend = fakeBackend('claude', sendTurn);
+    const repoPath = resolveOrchestratorMessageRepoPath({
+      type: 'orchestrator-send',
+      repoPath: '~',
+    });
+
+    expect(repoPath).toBe(homedir());
+    await sendOrchestratorBackendTurn(backend, repoPath!, 'hello', () => {}, {}, 'fleet');
+    expect(sendTurn).toHaveBeenCalledWith(homedir(), 'hello', expect.any(Function), expect.any(Object));
+  });
+
   it('keeps Solo on the selected orchestrator backend', () => {
     expect(resolveOrchestratorExecutionBackendId('openclaw', 'single')).toBe('openclaw');
     expect(resolveOrchestratorExecutionBackendId('claude', 'single')).toBe('claude');

@@ -122,4 +122,39 @@ describe('repo re-point contract (#1581)', () => {
     const externalMergeState = JSON.parse(readFileSync(path.join(dataDir, 'external-merge-state.json'), 'utf8')) as { cursors: Record<string, string> };
     expect(externalMergeState.cursors).toEqual({ [nextPath]: 'cursor-before-move' });
   });
+
+  it('never re-points a registered repo to the home-mode anchor', async () => {
+    const repoPath = path.join(home, 'registry-home-guard');
+    initRepo(repoPath);
+    const registered = await post({ action: 'add', localPath: repoPath });
+    const registeredData = await registered.json() as { repo?: { id: string } };
+    expect(registered.status).toBe(201);
+
+    const response = await post({
+      action: 'update',
+      id: registeredData.repo!.id,
+      localPath: os.homedir(),
+    });
+    const data = await response.json() as { error?: string };
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('Home mode is not a registered repository.');
+
+    const registry = JSON.parse(readFileSync(path.join(dataDir, 'repos.json'), 'utf8')) as {
+      repos: Array<{ id: string; localPath: string }>;
+    };
+    expect(registry.repos.find((repo) => repo.id === registeredData.repo!.id)?.localPath).toBe(repoPath);
+    expect(registry.repos.some((repo) => repo.localPath === os.homedir())).toBe(false);
+  });
+
+  it('never adds the home-mode anchor to the repo registry', async () => {
+    const response = await post({ action: 'add', localPath: os.homedir() });
+    const data = await response.json() as { error?: string };
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('Home mode is not a registered repository.');
+
+    const registry = JSON.parse(readFileSync(path.join(dataDir, 'repos.json'), 'utf8')) as {
+      repos: Array<{ localPath: string }>;
+    };
+    expect(registry.repos.some((repo) => repo.localPath === os.homedir())).toBe(false);
+  });
 });

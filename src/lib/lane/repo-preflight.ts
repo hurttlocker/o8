@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
 
 /**
  * #1551 — repo-path preflight shared by BOTH orchestrator spawn paths.
@@ -33,6 +34,7 @@ export function assertOrchestratorRepoPath(repoPath: string | null | undefined):
       + 'Re-add the repo (or point its project at the new location in Settings → Projects), then start a new session.',
     );
   }
+  if (isOrchestratorHomePath(repoPath)) return;
   if (!isGitWorkTreeSync(repoPath)) {
     throw new Error(
       `${repoPath} isn't a Git repository — run "git init" there (or point this chat at a Git repo), then try again.`,

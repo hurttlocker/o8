@@ -22,6 +22,7 @@ import { reloadOrchestratorSession } from '@/lib/lane/orchestrator-session';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { listRepos } from '@/lib/repos/registry';
+import { resolveOrchestratorRepoPath } from '@/lib/orchestrator/repo-path';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -31,7 +32,7 @@ export const dynamic = 'force-dynamic';
 async function resolveRepoPath(value: unknown): Promise<string | null> {
   const explicitRepoPath = typeof value === 'string' ? value.trim() : '';
   if (explicitRepoPath) {
-    return explicitRepoPath;
+    return resolveOrchestratorRepoPath(explicitRepoPath);
   }
 
   const repos = await listRepos().catch(() => []);
