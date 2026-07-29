@@ -56,6 +56,7 @@ import {
   worktreeExistsOnDisk,
 } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
 
@@ -469,7 +470,9 @@ async function retryBaseAdvancedAfterRebase(
 }
 
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
-  return withRepoActionLock(input.lane.repoPath, () => performWorktreeSideMergeInner(input));
+  const canonicalRepoPath = canonicalRepoRoot(input.command.canonicalRepoPath ?? input.lane.repoPath);
+  const canonicalInput = canonicalRepoPath === input.lane.repoPath ? input : { ...input, lane: { ...input.lane, repoPath: canonicalRepoPath } };
+  return withRepoActionLock(canonicalRepoPath, () => performWorktreeSideMergeInner(canonicalInput));
 }
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
@@ -739,13 +742,14 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       await deleteRefBestEffort(lane.repoPath, integrationRef);
     }
 
-    if (!(await refPointsTo(lane.repoPath, `refs/heads/${lane.baseBranch}`, mergeCandidateSha))) {
-      setLaneStatus(command.laneId, 'reviewing', 'system', 'base_changed_after_fast_forward');
-      return {
-        ok: false,
-        laneId: command.laneId,
-        note: `Local ${lane.baseBranch} changed during final publication. The exact reviewed commit was not pushed.`,
-      };
+    const canonicalAncestryVerified = await isAncestor(lane.repoPath, mergeCandidateSha, lane.baseBranch);
+    if (!(await refPointsTo(lane.repoPath, `refs/heads/${lane.baseBranch}`, mergeCandidateSha)) || !canonicalAncestryVerified) {
+      const failure = await createFastForwardFailureApproval(
+        input,
+        new Error(`canonical merge ancestry postcondition failed: ${mergeCandidateSha} is not an ancestor of ${lane.baseBranch} in ${lane.repoPath}`),
+      );
+      setLaneStatus(command.laneId, 'awaiting_orchestrator', 'system', 'canonical_merge_ancestry_failed');
+      return { ...failure, reason: 'canonical_merge_ancestry_failed' };
     }
     const mergeSha = mergeCandidateSha;
     appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergeSha, baseBranch: lane.baseBranch });

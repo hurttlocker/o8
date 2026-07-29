@@ -6,7 +6,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 export const LEGACY_WORKTREE_DIR_NAME = '.cortex-worktrees';
 export const WORKTREE_ROOT_ENV = 'O8_WORKTREE_ROOT';
 
-function canonicalRepoRoot(repoRoot: string): string {
+export function canonicalRepoRoot(repoRoot: string): string {
   try {
     return realpathSync.native(repoRoot);
   } catch {

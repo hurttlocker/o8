@@ -218,6 +218,8 @@ export type LaneCommand =
       strategy?: 'ours' | 'theirs' | 'manual';
       /** Reviewed worktree HEAD expected by the operator at merge time */
       expectedHeadSha?: string;
+      /** Canonical mission repository; packet clones must never publish into themselves. */
+      canonicalRepoPath?: string;
       /** Exact spoken-review diff fingerprint expected at merge time */
       expectedDiffFingerprint?: string;
       /** Receipt-bound governance fingerprint expected at merge time */
