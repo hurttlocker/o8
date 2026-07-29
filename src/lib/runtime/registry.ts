@@ -16,6 +16,7 @@ const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
   openhands: ['openhands'],
   goose: ['goose'],
   qwen: ['qwen'],
+  qoder: ['qodercli'],
   kimi: ['kimi'],
   aider: ['aider'],
   cursor: ['cursor-agent'],

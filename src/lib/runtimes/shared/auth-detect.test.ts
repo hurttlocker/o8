@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -75,9 +75,20 @@ describe('dispatchable runtime readiness', () => {
       ...declarativeRuntimeIds.map((runtime) => getRuntimeCapability(runtime).binaryName),
     ]);
     for (const runtime of declarativeRuntimeIds) {
-      const envName = getRuntimeCapability(runtime).declarative?.authEnvVars[0];
-      if (!envName) throw new Error(`missing auth env probe for ${runtime}`);
-      vi.stubEnv(envName, `test-${runtime}`);
+      const declarative = getRuntimeCapability(runtime).declarative;
+      const envName = declarative?.authEnvVars[0];
+      if (envName) {
+        vi.stubEnv(envName, `test-${runtime}`);
+        continue;
+      }
+      // Env-less runtimes (qoder) authenticate by credential file only —
+      // materialize the declared authPath in the fixture home instead of
+      // inventing an env var the real CLI would ignore.
+      const authPath = declarative?.authPaths[0];
+      if (!authPath) throw new Error(`missing auth probe for ${runtime}`);
+      const target = path.join(authFixture.home, authPath);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, '{}');
     }
     invalidateRuntimeAuthCache();
 

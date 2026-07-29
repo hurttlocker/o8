@@ -113,6 +113,7 @@ describe('create_mission runtime reachability', () => {
     ['qwen', 91_598_013],
     ['kimi', 91_598_014],
     ['aider', 91_598_015],
+    ['qoder', 91_598_016],
   ] as const)('%s remains selected through the real route and persisted mission', async (runtime, issueNumber) => {
     const response = await createMissionRoute.POST(request(runtime, issueNumber));
     expect(response.status).toBe(201);
@@ -177,6 +178,7 @@ describe('create_mission runtime reachability', () => {
       openhands: ['--headless', '--json', '-t', 'fix the bug'],
       goose: ['run', '-t', 'fix the bug', '--max-turns', '100'],
       qwen: ['-p', 'fix the bug', '--yolo', '--output-format', 'stream-json'],
+      qoder: ['-p', 'fix the bug', '-m', 'Qwen3.8-Max-Preview', '--dangerously-skip-permissions', '--output-format', 'stream-json'],
       kimi: ['-p', 'fix the bug'],
       aider: ['--message', 'fix the bug', '--yes-always', '--auto-test'],
     });
