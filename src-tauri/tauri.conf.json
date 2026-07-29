@@ -34,11 +34,6 @@
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* wss://speech.platform.bing.com; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; frame-src http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'"
-    },
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "tooltip": "o8"
     }
   },
   "bundle": {

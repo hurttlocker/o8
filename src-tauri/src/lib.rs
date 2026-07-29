@@ -5870,6 +5870,14 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
 
             let tray = TrayIconBuilder::new()
+                // Menu-bar glyph: the o8 monogram as a TEMPLATE image (black +
+                // alpha; macOS renders it from the alpha channel so it adapts
+                // to light/dark menu bars). Without an explicit icon the item
+                // painted as a blank rounded box (live-hit 2026-07-29) — the
+                // old config-level aurora tile is a mostly-opaque squircle, so
+                // its alpha silhouette IS a box under template treatment.
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?)
+                .icon_as_template(true)
                 .menu(&menu)
                 // Show menu on left-click (default is right-click only on
                 // macOS) so the count-aware list is one click away.
