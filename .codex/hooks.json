@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/claude-code-pretool-hook.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/post-edit-typecheck.js\"",
+            "timeout": 35
+          }
+        ]
+      },
+      {
+        "matcher": "Stop|TaskComplete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/completion-gate.js\"",
+            "timeout": 50
+          }
+        ]
+      }
+    ]
+  }
+}
