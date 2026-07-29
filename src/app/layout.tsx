@@ -4,6 +4,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import NavigationBridge from '@/components/NavigationBridge';
 import { O8AuthProvider } from '@/components/auth/O8AuthProvider';
 import { ApiBearerBootstrap } from '@/components/security/ApiBearerBootstrap';
+import { PRE_PAINT_THEME_STAMP } from '@/lib/theme/pre-paint-stamp';
 import { headers } from 'next/headers';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -54,64 +55,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           ? <meta name={O8_AUTH_MODE_META} content={O8_WEB_MACHINE_SURFACE} />
           : null}
         {operatorToken ? <meta name="ws-token" content={operatorToken} /> : null}
-        {/* Pre-paint theme stamp — mirrors ThemeProvider's persisted-theme
-            resolution (src/lib/theme/context.tsx: readPaletteId /
-            readReduceTransparency / resolveSurface) so data-palette /
-            data-surface are truthful BEFORE first paint. The boot cover
-            (--o8-boot-cover-* in globals.css) and all pre-hydration chrome
-            key off these attrs; without this, a dark-palette user paints a
-            light shell until the ThemeProvider effect runs. Keep the three
-            storage keys + fallbacks in sync with context.tsx. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function () {
-                try {
-                  var ls = window.localStorage;
-                  var pal = ls.getItem('cortex-theme-palette');
-                  var legacy = ls.getItem('cortex-theme');
-                  var rt = ls.getItem('cortex-reduce-transparency');
-                  var hasPref = pal !== null || legacy !== null || rt !== null;
-                  if (pal !== 'light' && pal !== 'dark') {
-                    var remap = { light: 'light', midnight: 'dark', dark: 'dark', chocolate: 'dark' };
-                    pal = (legacy && remap[legacy]) || (hasPref ? 'dark' : 'light');
-                  }
-                  if (rt !== 'on' && rt !== 'off' && rt !== 'system') {
-                    rt = hasPref ? 'system' : 'on';
-                  }
-                  var surface = rt === 'on' ? 'solid' : 'glass';
-                  // ALL GLASS mode overrides both axes wholesale (mirrors
-                  // effectiveSurface / getPalette('dark') in context.tsx:
-                  // workspace glass forces the dark-glass theme regardless of
-                  // the stored palette/transparency prefs). Missing this
-                  // painted a cream cover under a dark-glass boot.
-                  if (ls.getItem('cortex-workspace-glass') === 'true') {
-                    pal = 'dark';
-                    surface = 'glass';
-                  }
-                  var el = document.documentElement;
-                  el.dataset.theme = pal;
-                  el.dataset.palette = pal;
-                  el.dataset.surface = surface;
-                  // Inline cover vars — the boot cover must paint the right
-                  // theme even BEFORE the stylesheet applies (the packaged
-                  // webview painted the inline cream fallback for ~1s on a
-                  // dark-glass machine, a cream blink between the dark native
-                  // splash and the dark cover). Values mirror the
-                  // --o8-boot-cover-* block in globals.css.
-                  var coverBg = surface === 'glass'
-                    ? 'linear-gradient(180deg, rgb(32, 36, 42) 0%, rgb(18, 20, 24) 100%)'
-                    : (pal === 'dark' ? '#242424' : '#F4F2ED');
-                  var coverInk = surface === 'glass'
-                    ? 'rgba(244, 244, 245, 0.5)'
-                    : (pal === 'dark' ? 'rgba(232, 236, 242, 0.45)' : 'rgba(15, 23, 42, 0.45)');
-                  el.style.setProperty('--o8-boot-cover-bg', coverBg);
-                  el.style.setProperty('--o8-boot-cover-ink', coverInk);
-                } catch (e) {}
-              })();
-            `,
-          }}
-        />
+        {/* Pre-paint theme stamp — see @/lib/theme/pre-paint-stamp (it mirrors
+            ThemeProvider's resolution and is tested against the same cases). */}
+        <script dangerouslySetInnerHTML={{ __html: PRE_PAINT_THEME_STAMP }} />
       </head>
       <body style={{ background: '#1C1C1E', margin: 0, fontFamily: 'var(--font-sans-system)' }} suppressHydrationWarning>
         {operatorToken ? <ApiBearerBootstrap source="meta" /> : null}

@@ -13,6 +13,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import type { LaneLifecycleEventPayload, RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
+import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -266,7 +267,11 @@ export function useDesktopWebSocket(
       if (disposedRef.current) return;
       setConnectionState(prev => prev === 'disconnected' ? 'connecting' : 'reconnecting');
 
-      const ws = new WebSocket(url);
+      const ws = openSurfaceWebSocket(url);
+      if (!ws) {
+        setConnectionState('disconnected');
+        return;
+      }
 
       ws.onopen = () => {
         if (disposedRef.current) { ws.close(); return; }

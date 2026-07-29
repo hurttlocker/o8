@@ -47,8 +47,8 @@ import {
   createIdleBusyState,
   emitTokenUsage,
   formatTimestampLabel,
-  getWsUrl,
   normalizeRepoPath,
+  openOrchestratorWebSocket,
   refreshWsCredentials,
   sortTranscriptEntries,
   type OrchestratorPermissionMode,
@@ -544,10 +544,8 @@ export function useOrchestratorStream(
   const connect = useCallback(() => {
     if (!repoPathRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
-    const wsUrl = getWsUrl();
-    if (!wsUrl) return;
-
-    const ws = new WebSocket(wsUrl);
+    const ws = openOrchestratorWebSocket();
+    if (!ws) return;
     wsRef.current = ws;
     // Distinguishes "connection dropped" from "handshake never succeeded" —
     // the latter means our baked credentials are stale (app restarted under
