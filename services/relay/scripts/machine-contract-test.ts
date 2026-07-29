@@ -9,6 +9,7 @@ import type { WebSocket } from 'ws';
 import { createLicenseServerClient } from '../src/license-client.js';
 import { verifyMachineRelayTicketWith } from '../src/machine-ticket.js';
 import { RelayServer } from '../src/relay.js';
+import { verifyWebSessionTicketWith } from '../src/web-ticket.js';
 
 const ISSUER = 'o8-license';
 const NOW_MS = Date.parse('2026-07-29T16:00:00.000Z');
@@ -96,6 +97,11 @@ async function main(): Promise<void> {
       issuer: ISSUER,
       now: new Date(NOW_MS),
     }),
+    verifyWebTicket: (token) => verifyWebSessionTicketWith(token, {
+      publicKeyPem,
+      issuer: ISSUER,
+      now: new Date(NOW_MS),
+    }),
     authorizeWebMachine: licenseClient.authorizeWebMachine,
     heartbeatMachine: licenseClient.heartbeatMachine,
     machineHeartbeatMs: 60_000,
@@ -157,6 +163,93 @@ async function main(): Promise<void> {
     authorization: `Bearer ${validTicket}`,
   }]);
   console.log('  PASS: an accepted machine is indexed and heartbeats with its relay ticket');
+
+  const webTicket = await mint(privateKeyPem, {
+    accountId: 'account-a',
+    machineId: 'machine-a',
+    installId: 'ignored-web-claim',
+  }, { audience: 'o8-relay-web' });
+
+  const expiredWeb = new FakeSocket();
+  await relay.onBrowserSurfaceConnected(
+    socket(expiredWeb),
+    'machine-a',
+    request({
+      cookie: `__Host-o8-web-session=${await mint(privateKeyPem, {
+        accountId: 'account-a',
+        machineId: 'machine-a',
+        installId: 'ignored-web-claim',
+      }, { audience: 'o8-relay-web', expiresInSeconds: -1 })}`,
+      origin: 'https://o8.run',
+    }),
+  );
+  assert.deepEqual(expiredWeb.closed, { code: 4401, reason: 'web_ticket_invalid' });
+  console.log('  PASS: the browser edge rejects an expired web-session ticket');
+
+  const wrongAudienceWeb = new FakeSocket();
+  await relay.onBrowserSurfaceConnected(
+    socket(wrongAudienceWeb),
+    'machine-a',
+    request({
+      cookie: `__Host-o8-web-session=${validTicket}`,
+      origin: 'https://o8.run',
+    }),
+  );
+  assert.deepEqual(
+    wrongAudienceWeb.closed,
+    { code: 4401, reason: 'web_ticket_invalid' },
+  );
+  console.log('  PASS: the browser edge rejects a wrong-audience ticket');
+
+  const crossMachineWeb = new FakeSocket();
+  await relay.onBrowserSurfaceConnected(
+    socket(crossMachineWeb),
+    'machine-b',
+    request({
+      cookie: `__Host-o8-web-session=${webTicket}`,
+      origin: 'https://o8.run',
+    }),
+  );
+  assert.deepEqual(
+    crossMachineWeb.closed,
+    { code: 4403, reason: 'machine_mismatch' },
+  );
+  console.log('  PASS: a machine-a web ticket cannot address machine-b');
+
+  const crossAccountWeb = new FakeSocket();
+  const crossAccountTicket = await mint(privateKeyPem, {
+    accountId: 'account-b',
+    machineId: 'machine-a',
+    installId: 'ignored-web-claim',
+  }, { audience: 'o8-relay-web' });
+  await relay.onBrowserSurfaceConnected(
+    socket(crossAccountWeb),
+    'machine-a',
+    request({
+      cookie: `__Host-o8-web-session=${crossAccountTicket}`,
+      origin: 'https://o8.run',
+    }),
+  );
+  assert.deepEqual(
+    crossAccountWeb.closed,
+    { code: 4403, reason: 'machine_not_owned' },
+  );
+  console.log('  PASS: relay live-account ownership blocks a cross-account ticket');
+
+  const browser = new FakeSocket();
+  await relay.onBrowserSurfaceConnected(
+    socket(browser),
+    'machine-a',
+    request({
+      cookie: `__Host-o8-web-session=${webTicket}`,
+      origin: 'https://relay.o8.run',
+    }),
+  );
+  assert.equal(browser.closed, null);
+  assert.equal(relay.stats().webMachineSessions, 1);
+  browser.finish();
+  assert.equal(relay.stats().webMachineSessions, 0);
+  console.log('  PASS: a relay-origin iframe WS uses the existing machine mux');
 
   const crossAccount = new FakeSocket();
   await relay.onWebMachineConnected(

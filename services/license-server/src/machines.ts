@@ -19,6 +19,7 @@ import { env } from './env.js';
 import {
   authorizeMachineHeartbeat,
   mintMachineRelayTicketWith,
+  mintMachineWebSessionTicketWith,
   verifyMachineRelayTicketWith,
 } from './relay-ticket.js';
 import { getDerivedPublicKeyPem, validateEntitlement } from './validate.js';
@@ -270,6 +271,15 @@ export function registerProductionMachineRoutes(app: Hono): void {
         issuer: env.ISSUER,
         now,
       }),
+      mintWebSession: ({ accountId, machine, now }) =>
+        mintMachineWebSessionTicketWith({
+          accountId,
+          machineId: machine.machineId,
+        }, {
+          privateKeyPem: env.LICENSE_PRIVATE_KEY,
+          issuer: env.ISSUER,
+          now,
+        }),
       authorizeHeartbeat: (token, machineId) => authorizeMachineHeartbeat({
         token,
         machineId,

@@ -6,11 +6,18 @@ import {
 } from './machines-core.js';
 
 export const MACHINE_RELAY_AUDIENCE = 'o8-relay';
+export const WEB_RELAY_AUDIENCE = 'o8-relay-web';
 
 export interface MachineRelayTicketClaims {
   accountId: string;
   machineId: string;
   installId: string;
+  exp: number;
+}
+
+export interface MachineWebSessionTicketClaims {
+  accountId: string;
+  machineId: string;
   exp: number;
 }
 
@@ -35,6 +42,13 @@ export interface VerifyMachineRelayTicketOptions {
 
 export type MachineRelayTicketVerification =
   | { ok: true; claims: MachineRelayTicketClaims }
+  | {
+    ok: false;
+    reason: 'malformed' | 'expired' | 'wrong_audience' | 'invalid_claims' | 'invalid';
+  };
+
+export type MachineWebSessionTicketVerification =
+  | { ok: true; claims: MachineWebSessionTicketClaims }
   | {
     ok: false;
     reason: 'malformed' | 'expired' | 'wrong_audience' | 'invalid_claims' | 'invalid';
@@ -81,6 +95,26 @@ export async function mintMachineRelayTicketWith(
   return { ticket, expiresAt };
 }
 
+export async function mintMachineWebSessionTicketWith(
+  input: { accountId: string; machineId: string },
+  options: MintMachineRelayTicketOptions,
+): Promise<{ ticket: string; expiresAt: number }> {
+  const key = await importPKCS8(options.privateKeyPem, 'EdDSA');
+  const nowSec = Math.floor((options.now ?? new Date()).getTime() / 1000);
+  const expiresAt = nowSec + (options.ttlSeconds ?? RELAY_TICKET_TTL_SECONDS);
+  const ticket = await new SignJWT({
+    accountId: input.accountId,
+    machineId: input.machineId,
+  })
+    .setProtectedHeader({ alg: 'EdDSA' })
+    .setIssuer(options.issuer)
+    .setAudience(WEB_RELAY_AUDIENCE)
+    .setIssuedAt(nowSec)
+    .setExpirationTime(expiresAt)
+    .sign(key);
+  return { ticket, expiresAt };
+}
+
 export async function verifyMachineRelayTicketWith(
   token: string | null | undefined,
   options: VerifyMachineRelayTicketOptions,
@@ -117,6 +151,56 @@ export async function verifyMachineRelayTicketWith(
         accountId: payload.accountId,
         machineId: payload.machineId,
         installId: payload.installId,
+        exp: payload.exp,
+      },
+    };
+  } catch (error) {
+    if (error instanceof joseErrors.JWTExpired) {
+      return { ok: false, reason: 'expired' };
+    }
+    if (
+      error instanceof joseErrors.JWTClaimValidationFailed
+      && error.claim === 'aud'
+    ) {
+      return { ok: false, reason: 'wrong_audience' };
+    }
+    return { ok: false, reason: 'invalid' };
+  }
+}
+
+export async function verifyMachineWebSessionTicketWith(
+  token: string | null | undefined,
+  options: VerifyMachineRelayTicketOptions,
+): Promise<MachineWebSessionTicketVerification> {
+  const raw = typeof token === 'string' ? token.trim() : '';
+  if (!raw || raw.split('.').length !== 3) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  try {
+    const key = await importPublicKey(options.publicKeyPem);
+    const verified = await jwtVerify(raw, key, {
+      algorithms: ['EdDSA'],
+      audience: WEB_RELAY_AUDIENCE,
+      issuer: options.issuer,
+      clockTolerance: 0,
+      currentDate: options.now,
+    });
+    const payload = verified.payload;
+    if (
+      typeof payload.accountId !== 'string'
+      || !payload.accountId
+      || typeof payload.machineId !== 'string'
+      || !payload.machineId
+      || typeof payload.exp !== 'number'
+    ) {
+      return { ok: false, reason: 'invalid_claims' };
+    }
+    return {
+      ok: true,
+      claims: {
+        accountId: payload.accountId,
+        machineId: payload.machineId,
         exp: payload.exp,
       },
     };

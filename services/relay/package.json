@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "o8 off-network relay — zero-knowledge WebSocket concentrator that forwards opaque E2EE frames between a Mac connector (dials out) and paired phones. Verifies the plan-JWT + relay.offNetwork entitlement; never reads a frame body, never holds a session key. Deploys to Railway next to license-server.",
+  "description": "o8 off-network relay — forwards opaque E2EE mobile frames and terminates account-authenticated web-machine surface sessions. It never holds a mobile session key. Deploys to Railway next to license-server.",
   "engines": {
     "node": ">=22"
   },

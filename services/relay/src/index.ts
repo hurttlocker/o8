@@ -9,6 +9,8 @@ import { createLicenseServerClient } from './license-client.js';
 import { verifyMachineRelayTicketWith } from './machine-ticket.js';
 import { verifyPlanTokenWith } from './plan-jwt.js';
 import { RelayServer } from './relay.js';
+import { registerWebSurfaceRoutes } from './web-surface.js';
+import { verifyWebSessionTicketWith } from './web-ticket.js';
 
 /**
  * o8 relay entrypoint. Hono serves a stateless `/health` (same ops story as
@@ -30,6 +32,10 @@ const relay = new RelayServer({
     publicKeyPem: env.LICENSE_PUBLIC_KEY,
     issuer: env.ISSUER,
   }),
+  verifyWebTicket: (token) => verifyWebSessionTicketWith(token, {
+    publicKeyPem: env.LICENSE_PUBLIC_KEY,
+    issuer: env.ISSUER,
+  }),
   authorizeWebMachine: licenseClient.authorizeWebMachine,
   heartbeatMachine: licenseClient.heartbeatMachine,
   sendApprovalAlert,
@@ -48,6 +54,9 @@ app.get('/health', (c) =>
     ...relay.stats(),
   }),
 );
+registerWebSurfaceRoutes(app, relay, {
+  maxTunnelBytes: env.MAX_TUNNEL_BYTES,
+});
 app.all('*', (c) => c.json({ error: 'not_found' }, 404));
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {

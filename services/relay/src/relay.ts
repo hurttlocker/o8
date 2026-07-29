@@ -10,6 +10,12 @@ import type { PushResult } from './apns.js';
 import type { MachineHeartbeatResult } from './license-client.js';
 import type { MachineTicketResult } from './machine-ticket.js';
 import {
+  isAllowedBrowserSurfaceOrigin,
+  webSessionTicketFromCookie,
+  type WebTicketClaims,
+  type WebTicketResult,
+} from './web-ticket.js';
+import {
   CLOSE,
   decode,
   encode,
@@ -38,7 +44,9 @@ import {
  * The relay verifies the Mac's plan-JWT + relay.offNetwork entitlement, tracks
  * presence, enforces rate limits, and passes 4401/4403 closes through from the
  * Mac unchanged (relay-origin closes are 4408/4409). The machine path verifies
- * an o8-relay ticket and server-checks web ownership. It NEVER reads a `payload`.
+ * an o8-relay ticket and server-checks web ownership. Mobile payloads stay
+ * opaque; only the account-authenticated browser surface terminator reads the
+ * web-machine HTTP control frames that cut 3a deliberately defined.
  *
  * All durations + the JWT/entitlement/APNs deps are injectable so the contract
  * test + e2e can drive it with short timers and fakes.
@@ -56,6 +64,9 @@ export interface RelayDeps {
   verifyMachineTicket: (
     token: string | null | undefined,
   ) => Promise<MachineTicketResult>;
+  verifyWebTicket: (
+    token: string | null | undefined,
+  ) => Promise<WebTicketResult>;
   authorizeWebMachine: (token: string, machineId: string) => Promise<boolean>;
   heartbeatMachine: (input: {
     machineId: string;
@@ -78,6 +89,7 @@ const DEFAULT_DEPS: RelayDeps = {
   sendApprovalAlert: async () => ({ ok: false, reason: 'apns_not_configured' }),
   apnsConfigured: () => false,
   verifyMachineTicket: async () => ({ ok: false, reason: 'invalid' }),
+  verifyWebTicket: async () => ({ ok: false, reason: 'invalid' }),
   authorizeWebMachine: async () => false,
   heartbeatMachine: async () => ({ ok: false, status: 0 }),
   now: Date.now,
@@ -409,6 +421,82 @@ export class RelayServer {
       return;
     }
 
+    this.attachWebMachineSession(ws, machineId);
+  }
+
+  async authorizeWebSurface(
+    ticket: string | null,
+    machineId: string,
+  ): Promise<
+    | { ok: true; claims: WebTicketClaims }
+    | {
+      ok: false;
+      status: 401 | 403 | 503;
+      reason: 'web_ticket_invalid' | 'machine_mismatch' | 'machine_not_owned' | 'machine_offline';
+    }
+  > {
+    const verdict = await this.deps.verifyWebTicket(ticket);
+    if (!verdict.ok) {
+      return { ok: false, status: 401, reason: 'web_ticket_invalid' };
+    }
+    if (verdict.claims.machineId !== machineId) {
+      return { ok: false, status: 403, reason: 'machine_mismatch' };
+    }
+    const machine = this.machineRouting.getMachine(machineId);
+    if (!machine) {
+      return { ok: false, status: 503, reason: 'machine_offline' };
+    }
+    if (machine.accountId !== verdict.claims.accountId) {
+      return { ok: false, status: 403, reason: 'machine_not_owned' };
+    }
+    return { ok: true, claims: verdict.claims };
+  }
+
+  verifyWebSessionTicket(ticket: string | null): Promise<WebTicketResult> {
+    return this.deps.verifyWebTicket(ticket);
+  }
+
+  async onBrowserSurfaceConnected(
+    ws: WebSocket,
+    machineId: string,
+    req: IncomingMessage,
+  ): Promise<void> {
+    if (!isAllowedBrowserSurfaceOrigin(headerValue(req.headers.origin))) {
+      safeClose(ws, 4403, 'origin_not_allowed');
+      return;
+    }
+    const ticket = webSessionTicketFromCookie(req.headers.cookie);
+    const authorized = await this.authorizeWebSurface(ticket, machineId);
+    if (!authorized.ok) {
+      const code = authorized.status === 401
+        ? 4401
+        : authorized.status === 503
+          ? 1013
+          : 4403;
+      safeClose(ws, code, authorized.reason);
+      return;
+    }
+    if (!this.attachAuthorizedWebSurface(
+      ws,
+      machineId,
+      authorized.claims.accountId,
+    )) {
+      safeClose(ws, 1013, 'machine_offline');
+    }
+  }
+
+  attachAuthorizedWebSurface(
+    ws: WebSocket,
+    machineId: string,
+    accountId: string,
+  ): boolean {
+    const machine = this.machineRouting.getMachine(machineId);
+    if (!machine || machine.accountId !== accountId) return false;
+    this.attachWebMachineSession(ws, machineId);
+    return true;
+  }
+
+  private attachWebMachineSession(ws: WebSocket, machineId: string): void {
     const sid = `m${++this.sidCounter}`;
     const now = this.deps.now();
     this.machineRouting.addWebSession(machineId, {

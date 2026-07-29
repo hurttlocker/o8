@@ -7,9 +7,11 @@ import { headersIndicateWebMachineRelay } from './web-machine-surface';
 import { MachineRelayConnector, type MachineRelayTicket } from './machine-attach';
 import { RelayServer } from '../../../services/relay/src/relay.js';
 import { attachRelayUpgrade } from '../../../services/relay/src/attach.js';
+import { createWebSurfaceApp } from '../../../services/relay/src/web-surface.js';
 
 const LOCAL_OPERATOR_TOKEN = 'local-ws-token-must-never-cross-the-relay';
 const MACHINE_ID = 'machine-full-surface';
+const WEB_SESSION_TICKET = 'signed-web-session-ticket-fixture';
 
 interface RunningServer {
   url: string;
@@ -87,10 +89,13 @@ function writeLocalPage(
   }
   if (req.url === '/_next/static/chunks/mobile.js') {
     const prefix = webMachine ? '/* web machine */' : `/* ${LOCAL_OPERATOR_TOKEN} */`;
-    const body = `${prefix}\nwindow.__mobileChunkLoaded=true;\n${'x'.repeat(320 * 1024)}`;
-    response.writeHead(200, {
+    const fullBody = `${prefix}\nwindow.__mobileChunkLoaded=true;\n${'x'.repeat(320 * 1024)}`;
+    const ranged = header(req, 'range') === 'bytes=0-1023';
+    const body = ranged ? fullBody.slice(0, 1024) : fullBody;
+    response.writeHead(ranged ? 206 : 200, {
       'accept-ranges': 'bytes',
       'cache-control': 'public, max-age=31536000, immutable',
+      ...(ranged ? { 'content-range': `bytes 0-1023/${Buffer.byteLength(fullBody)}` } : {}),
       'content-type': 'application/javascript; charset=utf-8',
       etag: '"mobile-fixture"',
     });
@@ -159,6 +164,7 @@ async function startLocalSurface(): Promise<LocalSurface> {
 async function startRelay(ownerAllowed: () => boolean): Promise<{
   running: RunningServer;
   relay: RelayServer;
+  surfaceApp: ReturnType<typeof createWebSurfaceApp>;
 }> {
   const relay = new RelayServer({
     verifyMachineTicket: async (token) => token === fixtureTicket().ticket
@@ -172,11 +178,24 @@ async function startRelay(ownerAllowed: () => boolean): Promise<{
           },
         }
       : { ok: false, reason: 'invalid' },
+    verifyWebTicket: async (token) => token === WEB_SESSION_TICKET
+      ? {
+          ok: true,
+          claims: {
+            accountId: 'account-owner',
+            machineId: MACHINE_ID,
+            exp: Math.floor(Date.now() / 1_000) + 600,
+          },
+        }
+      : { ok: false, reason: 'invalid' },
     authorizeWebMachine: async (token, machineId) => (
       ownerAllowed() && token === 'web-account-token' && machineId === MACHINE_ID
     ),
     heartbeatMachine: async () => ({ ok: true, status: 204 }),
     machineHeartbeatMs: 60_000,
+  });
+  const surfaceApp = createWebSurfaceApp(relay, {
+    maxTunnelBytes: 32 * 1024 * 1024,
   });
   const server = createServer((_req, response) => {
     response.writeHead(404);
@@ -188,7 +207,7 @@ async function startRelay(ownerAllowed: () => boolean): Promise<{
     relay.stop();
     await running.close();
   });
-  return { running, relay };
+  return { running, relay, surfaceApp };
 }
 
 async function openWebClient(relayUrl: string): Promise<WebClient> {
@@ -197,6 +216,39 @@ async function openWebClient(relayUrl: string): Promise<WebClient> {
   const socket = new WebSocket(
     `${relayUrl.replace(/^http/, 'ws')}/web/machine/${MACHINE_ID}`,
     { headers: { authorization: 'Bearer web-account-token' } },
+  );
+  socket.on('message', (raw: RawData) => {
+    messages.push(raw.toString());
+  });
+  const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+    socket.once('close', (code, reason) => {
+      resolve({ code, reason: reason.toString('utf8') });
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  cleanup.push(() => {
+    socket.terminate();
+  });
+  return { socket, messages, sent, closed };
+}
+
+async function openBrowserSurfaceClient(
+  relayUrl: string,
+  cookie: string,
+): Promise<WebClient> {
+  const messages: string[] = [];
+  const sent: string[] = [];
+  const socket = new WebSocket(
+    `${relayUrl.replace(/^http/, 'ws')}/web/${MACHINE_ID}/surface/ws`,
+    {
+      headers: {
+        cookie,
+        origin: 'https://relay.o8.run',
+      },
+    },
   );
   socket.on('message', (raw: RawData) => {
     messages.push(raw.toString());
@@ -279,6 +331,108 @@ async function requestThroughWeb(
 }
 
 describe('web-machine full-surface real path', () => {
+  it('terminates the mux into cookie-authenticated HTTP and browser WebSocket routes', async () => {
+    const local = await startLocalSurface();
+    const { running: relayServer, relay, surfaceApp } = await startRelay(() => true);
+    const connector = new MachineRelayConnector({
+      machineId: MACHINE_ID,
+      relayUrl: relayServer.url.replace(/^http/, 'ws'),
+      apiBase: local.url,
+      localWebSocketUrl: local.wsUrl,
+      operatorToken: () => LOCAL_OPERATOR_TOKEN,
+      ticketProvider: async () => fixtureTicket(),
+      reconnectBaseMs: 20,
+      reconnectCapMs: 40,
+    });
+    connector.start();
+    cleanup.push(() => connector.stop('test-cleanup'));
+    await waitFor(() => relay.stats().machines === 1);
+
+    const session = await surfaceApp.request('/web/session', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${WEB_SESSION_TICKET}`,
+        origin: 'https://o8.run',
+      },
+    });
+    expect(session.status).toBe(200);
+    expect(session.headers.get('access-control-allow-origin')).toBe('https://o8.run');
+    const cookie = session.headers.get('set-cookie')?.split(';', 1)[0] ?? '';
+    expect(cookie).toBe(`__Host-o8-web-session=${WEB_SESSION_TICKET}`);
+    expect(session.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(session.headers.get('set-cookie')).toContain('SameSite=Strict');
+
+    const deniedOrigin = await surfaceApp.request(
+      `/web/${MACHINE_ID}/surface/mobile`,
+      { headers: { cookie, origin: 'https://attacker.example' } },
+    );
+    expect(deniedOrigin.status).toBe(403);
+
+    const deniedMachine = await surfaceApp.request(
+      '/web/another-machine/surface/mobile',
+      { headers: { cookie } },
+    );
+    expect(deniedMachine.status).toBe(403);
+    expect(await deniedMachine.json()).toEqual({ error: 'machine_mismatch' });
+
+    const page = await surfaceApp.request(
+      `/web/${MACHINE_ID}/surface/mobile`,
+      { headers: { cookie } },
+    );
+    const pageBody = await page.text();
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(page.headers.get('content-security-policy')).toContain('https://o8.run');
+    expect(pageBody).toContain(
+      `/web/${MACHINE_ID}/surface/_next/static/chunks/mobile.js`,
+    );
+    expect(pageBody).toContain('__O8_WEB_MACHINE_TRANSPORT__');
+    expect(pageBody).not.toContain(WEB_SESSION_TICKET);
+    expect(pageBody).not.toContain(LOCAL_OPERATOR_TOKEN);
+
+    const asset = await surfaceApp.request(
+      `/web/${MACHINE_ID}/surface/_next/static/chunks/mobile.js`,
+      { headers: { cookie } },
+    );
+    const assetBody = Buffer.from(await asset.arrayBuffer());
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get('cache-control')).toContain('immutable');
+    expect(asset.headers.get('accept-ranges')).toBe('bytes');
+    expect(asset.headers.get('etag')).toBe('"mobile-fixture"');
+    expect(assetBody.byteLength).toBeGreaterThan(300 * 1024);
+    expect(assetBody.includes(Buffer.from(LOCAL_OPERATOR_TOKEN))).toBe(false);
+
+    const range = await surfaceApp.request(
+      `/web/${MACHINE_ID}/surface/_next/static/chunks/mobile.js`,
+      { headers: { cookie, range: 'bytes=0-1023' } },
+    );
+    expect(range.status).toBe(206);
+    expect(range.headers.get('content-range')).toMatch(/^bytes 0-1023\//);
+    expect((await range.arrayBuffer()).byteLength).toBe(1024);
+
+    const credentialExport = await surfaceApp.request(
+      `/web/${MACHINE_ID}/surface/api/panel/ws-info`,
+      { headers: { cookie } },
+    );
+    expect(credentialExport.status).toBe(502);
+    expect(
+      Buffer.from(await credentialExport.arrayBuffer())
+        .includes(Buffer.from(LOCAL_OPERATOR_TOKEN)),
+    ).toBe(false);
+
+    const browser = await openBrowserSurfaceClient(relayServer.url, cookie);
+    await waitFor(() => local.socketPaths.length >= 5);
+    browser.socket.send(JSON.stringify({ type: 'ping', source: 'browser-bridge' }));
+    await waitFor(() => records(browser.messages).some((frame) => frame.channel === 'pong'));
+    expect(browser.messages.join('')).not.toContain(LOCAL_OPERATOR_TOKEN);
+
+    connector.stop('fixture-machine-drop');
+    expect(await browser.closed).toEqual({
+      code: 1012,
+      reason: 'machine_disconnected',
+    });
+  }, 15_000);
+
   it('proxies token-free documents, large assets, and realtime through the actual relay', async () => {
     let ownsMachine = true;
     const local = await startLocalSurface();

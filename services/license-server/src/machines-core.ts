@@ -73,6 +73,11 @@ export interface MachineRouteDependencies {
       machine: MachineDevice;
       now: Date;
     }): Promise<{ ticket: string; expiresAt: number }>;
+    mintWebSession?(input: {
+      accountId: string;
+      machine: MachineDevice;
+      now: Date;
+    }): Promise<{ ticket: string; expiresAt: number }>;
     authorizeHeartbeat(
       token: string | null,
       machineId: string,
@@ -227,6 +232,31 @@ export function registerMachineRoutes(
       });
     } catch (error) {
       return internalError(c, 'relay-ticket', error);
+    }
+  });
+
+  app.post('/machines/:machineId/web-session-ticket', async (c) => {
+    try {
+      const principal = await requirePrincipal(c, dependencies);
+      if (principal instanceof Response) return principal;
+      if (!dependencies.relayTickets?.mintWebSession) {
+        return c.json({ error: 'not_supported' }, 501);
+      }
+      const machineId = c.req.param('machineId');
+      const machine = (await dependencies.store.list(principal.accountId))
+        .find((candidate) => candidate.machineId === machineId);
+      if (!machine) return c.json({ error: 'not_found' }, 404);
+      const result = await dependencies.relayTickets.mintWebSession({
+        accountId: principal.accountId,
+        machine,
+        now: dependencies.now(),
+      });
+      return c.json({
+        ticket: result.ticket,
+        expiresAt: new Date(result.expiresAt * 1000).toISOString(),
+      });
+    } catch (error) {
+      return internalError(c, 'web-session-ticket', error);
     }
   });
 

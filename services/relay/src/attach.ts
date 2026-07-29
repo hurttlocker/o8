@@ -11,12 +11,14 @@ import type { RelayServer } from './relay.js';
  *   /device/{routingId}  — a phone
  *   /machine             — an account-machine connector
  *   /web/machine/{id}    — an account-authenticated web edge
+ *   /web/{id}/surface/ws — the cookie-authenticated browser realtime edge
  * PURE (no env import) so index.ts (production) and scripts/verify-relay-e2e.ts
  * (a raw node http server) share the exact same routing.
  */
 
 const DEVICE_RE = /^\/device\/([A-Za-z0-9]{1,64})\/?$/;
 const WEB_MACHINE_RE = /^\/web\/machine\/([A-Za-z0-9_-]{1,128})\/?$/;
+const WEB_SURFACE_WS_RE = /^\/web\/([A-Za-z0-9_-]{1,128})\/surface\/ws\/?$/;
 const MAX_FRAME_BYTES = 1024 * 1024;
 
 export interface UpgradableServer {
@@ -48,6 +50,7 @@ export function attachRelayUpgrade(server: UpgradableServer, relay: RelayServer)
   const deviceWss = new WebSocketServer(wsOptions);
   const machineWss = new WebSocketServer(wsOptions);
   const webMachineWss = new WebSocketServer(wsOptions);
+  const webSurfaceWss = new WebSocketServer(wsOptions);
 
   server.on('upgrade', (req, socket, head) => {
     let pathname = '';
@@ -77,6 +80,15 @@ export function attachRelayUpgrade(server: UpgradableServer, relay: RelayServer)
       const machineId = webMachineMatch[1]!;
       webMachineWss.handleUpgrade(req, socket, head, (ws) => {
         void relay.onWebMachineConnected(ws, machineId, req);
+      });
+      return;
+    }
+
+    const webSurfaceMatch = WEB_SURFACE_WS_RE.exec(pathname);
+    if (webSurfaceMatch) {
+      const machineId = webSurfaceMatch[1]!;
+      webSurfaceWss.handleUpgrade(req, socket, head, (ws) => {
+        void relay.onBrowserSurfaceConnected(ws, machineId, req);
       });
       return;
     }

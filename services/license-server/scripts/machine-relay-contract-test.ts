@@ -13,7 +13,9 @@ import {
 import {
   authorizeMachineHeartbeat,
   mintMachineRelayTicketWith,
+  mintMachineWebSessionTicketWith,
   verifyMachineRelayTicketWith,
+  verifyMachineWebSessionTicketWith,
 } from '../src/relay-ticket.js';
 
 const ISSUER = 'o8-license';
@@ -111,6 +113,18 @@ async function main(): Promise<void> {
     issuer: ISSUER,
     now,
   });
+  const mintWebTicket = (
+    accountId: string,
+    machine: MachineDevice,
+    now = NOW,
+  ) => mintMachineWebSessionTicketWith({
+    accountId,
+    machineId: machine.machineId,
+  }, {
+    privateKeyPem,
+    issuer: ISSUER,
+    now,
+  });
 
   registerMachineRoutes(app, {
     authenticate,
@@ -119,6 +133,8 @@ async function main(): Promise<void> {
     newMachineId: () => 'unused',
     relayTickets: {
       mint: ({ accountId, machine, now }) => mintTicket(accountId, machine, now),
+      mintWebSession: ({ accountId, machine, now }) =>
+        mintWebTicket(accountId, machine, now),
       authorizeHeartbeat: (token, machineId) => authorizeMachineHeartbeat({
         token,
         machineId,
@@ -166,6 +182,73 @@ async function main(): Promise<void> {
   assert.equal(tombstoned.status, 404);
   assert.deepEqual(await tombstoned.json(), { error: 'not_found' });
   console.log('  PASS: a tombstoned machine cannot receive a relay ticket');
+
+  const webIssued = await request(
+    app,
+    'POST',
+    '/machines/machine-a/web-session-ticket',
+    'account-a',
+  );
+  assert.equal(webIssued.status, 200);
+  const webBody = await webIssued.json() as { ticket: string; expiresAt: string };
+  assert.equal(webBody.expiresAt, '2026-07-29T16:10:00.000Z');
+  assert.deepEqual(
+    await verifyMachineWebSessionTicketWith(webBody.ticket, {
+      publicKeyPem,
+      issuer: ISSUER,
+      now: NOW,
+    }),
+    {
+      ok: true,
+      claims: {
+        accountId: 'account-a',
+        machineId: 'machine-a',
+        exp: 1785341400,
+      },
+    },
+  );
+  console.log('  PASS: an active owner receives a 10-minute o8-relay-web ticket');
+
+  const crossAccountWeb = await request(
+    app,
+    'POST',
+    '/machines/machine-a/web-session-ticket',
+    'account-b',
+  );
+  assert.equal(crossAccountWeb.status, 404);
+  assert.deepEqual(await crossAccountWeb.json(), { error: 'not_found' });
+  console.log('  PASS: another account cannot mint a machine web-session ticket');
+
+  const tombstonedWeb = await request(
+    app,
+    'POST',
+    '/machines/machine-tombstone/web-session-ticket',
+    'account-a',
+  );
+  assert.equal(tombstonedWeb.status, 404);
+  console.log('  PASS: a tombstoned machine cannot receive a web-session ticket');
+
+  const wrongAudienceWeb = await verifyMachineWebSessionTicketWith(
+    issuedBody.ticket,
+    { publicKeyPem, issuer: ISSUER, now: NOW },
+  );
+  assert.deepEqual(wrongAudienceWeb, { ok: false, reason: 'wrong_audience' });
+  console.log('  PASS: a machine relay ticket is rejected at the web audience');
+
+  const expiredWebTicket = await mintWebTicket(
+    'account-a',
+    device('machine-a', 'install-a'),
+    new Date('2026-07-29T15:49:00.000Z'),
+  );
+  assert.deepEqual(
+    await verifyMachineWebSessionTicketWith(expiredWebTicket.ticket, {
+      publicKeyPem,
+      issuer: ISSUER,
+      now: NOW,
+    }),
+    { ok: false, reason: 'expired' },
+  );
+  console.log('  PASS: an expired web-session ticket is rejected');
 
   const heartbeat = await request(
     app,
