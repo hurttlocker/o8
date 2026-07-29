@@ -211,9 +211,9 @@ export function RealtimeVoiceHost() {
   const start = useCallback(() => {
     if (sessionRef.current) return;
     respondingRef.current = false;
-    let voice = 'marin';
+    let voice = DEFAULT_VOICE;
     try {
-      voice = localStorage.getItem('o8:realtime-voice') || 'marin';
+      voice = localStorage.getItem('o8:realtime-voice') || DEFAULT_VOICE;
     } catch {
       /* no localStorage in this context */
     }

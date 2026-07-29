@@ -16,7 +16,10 @@
 // and the phone-hosted Agent-mode mint (/api/mobile/symon/session) speak with the
 // identical brain. Isomorphic module — safe to import from this browser-only file
 // (it carries no `server-only` poison pill). See docs/symon-agent-mode.md.
-import { DEFAULT_INSTRUCTIONS } from '@/lib/voice/realtime-session-config';
+import {
+  DEFAULT_INSTRUCTIONS,
+  DEFAULT_VOICE,
+} from '@/lib/voice/realtime-session-config';
 import {
   startCodexBrowserRealtimeSession,
   type CodexBrowserRealtimeSession,
@@ -668,7 +671,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
           instructions: opts.instructions || DEFAULT_INSTRUCTIONS,
           audio: {
             input: { transcription: { model: 'whisper-1' } },
-            output: { voice: opts.voice || 'marin' },
+            output: { voice: opts.voice || DEFAULT_VOICE },
           },
           ...(toolDefs.length ? { tools: toolDefs, tool_choice: 'auto' } : {}),
         },
