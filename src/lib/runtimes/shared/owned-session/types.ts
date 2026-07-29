@@ -54,6 +54,8 @@ export interface OwnedRunRecord {
 
 export interface OwnedSessionRecord {
   surfaceId: string;
+  /** Lane known at spawn time, so an immediate child exit can reach its audit stream. */
+  laneId?: string;
   sessionDir: string;
   cwd: string;
   repoPath: string;
@@ -137,6 +139,7 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 export interface OwnedLaunchRequest {
   cwd: string;
   prompt: string;
+  laneId?: string;
   model?: string;
   /** Requested reasoning effort — a per-runtime no-op unless the adapter uses it. */
   effort?: ThinkingEffort;

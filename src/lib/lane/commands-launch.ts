@@ -168,7 +168,9 @@ export async function launchSession(
     const updated = getLane(command.laneId);
     return { ok: true, laneId: command.laneId, note: result.note, lane: updated ?? undefined };
   } catch (err) {
-    setLaneStatus(command.laneId, 'idle', 'system', 'launch_error');
+    if (getLane(command.laneId)?.status === 'launching') {
+      setLaneStatus(command.laneId, 'idle', 'system', 'launch_error');
+    }
     const message = err instanceof Error ? err.message : 'Launch failed.';
     return { ok: false, laneId: command.laneId, note: message };
   }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
+import { recordLaneEvent } from '@/lib/lane/events';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
@@ -168,9 +169,12 @@ export function createOwnedRunController({
     const childExit = stderrTail ? { ...outcome, stderrTail } : outcome;
 
     let finishedClean = false;
+    let exitedRun: OwnedRunRecord | null = null;
+    let laneId: string | undefined;
     await withSurfaceLock(surfaceId, async () => {
       const current = await io.findSession(surfaceId);
       if (!current) return;
+      laneId = current.laneId;
       let dirty = false;
       const finishedAt = nowIso();
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
@@ -182,12 +186,14 @@ export function createOwnedRunController({
             ? 'finished'
             : 'failed';
         if (nextOutcome === 'finished') finishedClean = true;
-        return {
+        const nextRun: OwnedRunRecord = {
           ...run,
           childExit,
           finishedAt: run.finishedAt ?? finishedAt,
           outcome: nextOutcome,
         };
+        exitedRun = nextRun;
+        return nextRun;
       };
 
       current.recentRuns = current.recentRuns.map(applyExit);
@@ -198,6 +204,25 @@ export function createOwnedRunController({
       if (dirty) await io.saveSession(current);
     });
     invalidateFleetCache();
+
+    if (laneId && exitedRun) {
+      const artifacts = await readRunArtifacts(exitedRun).catch(() => null);
+      const stderr = compactText(artifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
+      try {
+        recordLaneEvent(laneId, 'runtime_process_exit', 'system', {
+          runtime: runtimeId,
+          surfaceId,
+          runId,
+          exitCode: childExit.code,
+          signal: childExit.signal,
+          classification: childExit.classification,
+          stderr,
+          completedTurn: artifacts?.parsed.completedTurn ?? false,
+        });
+      } catch (error) {
+        console.warn(`[owned-store] Failed to record runtime_process_exit for lane ${laneId}:`, error);
+      }
+    }
 
     if (finishedClean) {
       void notifySupervisorOfCleanExit(surfaceId);

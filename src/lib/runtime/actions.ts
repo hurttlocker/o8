@@ -3,13 +3,14 @@ import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { listDeclarativeRuntimes, ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { continueOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 import { performOwnedActionWithoutInventory } from '@/lib/runtime/owned-actions';
+import { packetRequiresWorktree, packetWorktreeProvisionError } from '@/lib/runtime/packet-worktree-guard';
 import {
   buildProjectTaskBrief,
   getProjectContext,
@@ -237,32 +238,33 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
 
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
-  const supportsWorktrees = runtimeId === 'codex'
-    || runtimeId === 'claude-code'
-    || runtimeId === 'gemini'
-    || runtimeId === 'opencode'
-    || runtimeId === 'pi';
+  const supportsWorktrees = ['codex', 'claude-code', 'gemini', 'opencode', 'pi'].includes(runtimeId)
+    || listDeclarativeRuntimes().includes(runtimeId as OrchestratorRuntime);
+  const packetNeedsWorktree = packetRequiresWorktree(payload);
 
-  // A plain folder (never git-inited) can't host worktrees — and every launch
-  // died at `git rev-parse --show-toplevel` with NO surfaced error (#1551,
-  // live-hit 2026-07-12: a fresh laptop's first project folder, "hey" eaten
-  // silently, no agent could spawn at all). Degrade instead of dying: launch
-  // the runtime directly in the folder, no isolation, and say so in the note.
-  // `.git` may be a FILE in a linked worktree, so existsSync covers both.
+  // Scratch launches may degrade to a plain folder; packet launches fail closed.
   const { existsSync: launchDirHasGit } = await import('node:fs');
   const { join: joinLaunchPath } = await import('node:path');
   const repoIsGit = launchDirHasGit(joinLaunchPath(repoPath, '.git'));
+  if (packetNeedsWorktree && !supportsWorktrees) {
+    const note = `Runtime ${runtimeId} has no managed worktree integration.`;
+    throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
+  }
+  if (packetNeedsWorktree && !repoIsGit) {
+    const note = `${repoPath} is not a git repository.`;
+    throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
+  }
   if (!repoIsGit) {
     console.warn(`[runtime-launch] ${repoPath} is not a git repository — launching ${runtimeId} directly in the folder (no isolation, no branch)`);
   }
 
-  // Create a worktree when: explicitly requested via isolate flag, OR when not skipping setup.
-  // This allows dispatch to request isolation (isolate: true) while skipping env setup (skipSetup: true).
+  // Dispatch can force isolation while still skipping environment setup.
   const shouldCreateWorktree = supportsWorktrees && repoIsGit && (payload.isolate || !payload.skipSetup);
   if (shouldCreateWorktree) {
     const retryInSeconds = fetchCooldownRetrySeconds(repoPath);
     if (retryInSeconds != null) {
-      throw new Error(`Launch blocked: fetch_unreachable cooldown for ${repoPath}; retry in ${retryInSeconds}s`);
+      const note = `Launch blocked: fetch_unreachable cooldown for ${repoPath}; retry in ${retryInSeconds}s`;
+      throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
     }
   }
   const repoEntry = shouldCreateWorktree
@@ -293,9 +295,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         }
       }
     } catch (err) {
-      // Rebase-before-launch failed. Don't spawn codex into a broken tree —
-      // instead, mark any existing lane as awaiting_input so the operator
-      // sees it, and enqueue a supervisor inbox item describing the conflict.
+      // Known failures keep their existing operator-facing escalation details.
       if (err instanceof WorktreeRebaseConflictError) {
         const baseBranchForInbox = err.baseBranch;
         const conflictFiles = err.conflictFiles;
@@ -346,13 +346,8 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
           );
         }
 
-        // Scratch runs (no existingLaneId) surface rebase failures via the
-        // thrown error only — there's no lane to mark awaiting_input. The
-        // supervisor inbox item above is still enqueued so the operator sees
-        // it. Never swallow silently.
-        throw new Error(
-          `Rebase onto origin/${baseBranchForInbox} failed before launching ${runtimeId}. Resolve the conflict manually and retry.${conflictFiles.length > 0 ? ` Conflicting files: ${conflictFiles.join(', ')}` : ''}`,
-        );
+        const note = `Rebase onto origin/${baseBranchForInbox} failed before launching ${runtimeId}. Resolve the conflict manually and retry.${conflictFiles.length > 0 ? ` Conflicting files: ${conflictFiles.join(', ')}` : ''}`;
+        throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, note, 'awaiting_input');
       }
 
       if (err instanceof WorktreeOriginMissingError) {
@@ -361,13 +356,11 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
           loggedOriginMissingRepos.add(repoPath);
           console.warn(`[supervisor-inbox] Repo ${repoPath} has no origin remote; skipping inbox escalation.`);
         }
-        throw new Error(`Cannot launch ${runtimeId}: origin remote is not configured for ${repoPath}. Configure origin and retry.`);
+        const note = `Cannot launch ${runtimeId}: origin remote is not configured for ${repoPath}. Configure origin and retry.`;
+        throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, note);
       }
 
-      // Fetch unreachable + stale local ref. Don't branch from a stale base —
-      // same policy as a rebase conflict: mark the lane, surface an inbox row
-      // (kind: fetch_unreachable), and throw loudly. The operator can run
-      // `git fetch` manually, reconnect, and retry the launch.
+      // Fetch failures preserve the existing inbox escalation.
       if (err instanceof WorktreeFetchUnreachableError) {
         recordFetchUnreachable(repoPath);
         markRepoOriginConfigured(repoPath);
@@ -422,13 +415,17 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
           );
         }
 
-        throw new Error(
-          `Cannot launch ${runtimeId}: fetch origin ${baseBranchForInbox} failed and ${stalenessLabel}. Reconnect and retry.`,
-        );
+        const note = `Cannot launch ${runtimeId}: fetch origin ${baseBranchForInbox} failed and ${stalenessLabel}. Reconnect and retry.`;
+        throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, note, 'awaiting_input');
       }
 
-      throw err;
+      const note = err instanceof Error ? err.message : String(err);
+      throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, note);
     }
+  }
+  if (packetNeedsWorktree && !launchWorktree?.worktree) {
+    const note = 'Managed worktree preparation returned no worktree.';
+    throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
   }
 
   const cwd = launchWorktree?.cwd ?? repoPath;

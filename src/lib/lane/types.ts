@@ -277,6 +277,12 @@ export type LaneEventVerb =
   // base snapshot). Payload: { packetId, baseBranch, note }
   | 'worktree_refreshed'
   | 'worktree_refresh_failed'
+  // Packet dispatch refused to launch without a managed worktree.
+  // Payload: { code, runtime, packetId, laneId, repoPath, cause, note }
+  | 'worktree_provision_failed'
+  // An owned runtime child exited. Payload includes exit code/signal, stderr,
+  // and whether the runtime emitted its protocol-level result event.
+  | 'runtime_process_exit'
   // Orchestrator review verdict, append-only (#1476 lie 3). Lane events are
   // never rescored or evicted, so review-state can always recover the verdict
   // even after mission-state resets or approval-context drift.
