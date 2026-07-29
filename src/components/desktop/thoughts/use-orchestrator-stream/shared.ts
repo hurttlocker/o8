@@ -2,6 +2,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import { MODEL_IDS } from '@/lib/models';
+import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
@@ -98,6 +99,10 @@ export function getWsUrl(): string {
 
   const wsPort = port ? `:${port}` : '';
   return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
+}
+
+export function openOrchestratorWebSocket(): WebSocket | null {
+  return openSurfaceWebSocket(getWsUrl());
 }
 
 function normalizeTelemetryPath(value: string | null | undefined): string {

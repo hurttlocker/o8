@@ -34,6 +34,7 @@ import {
   type ThemePalette,
   type ResolvedTheme,
 } from './registry';
+import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 
 export type ReduceTransparency = 'on' | 'off' | 'system';
 
@@ -213,12 +214,13 @@ function readReduceTransparency(): ReduceTransparency {
 function resolveSurface(
   pref: ReduceTransparency,
   systemReduceTransparency: boolean,
+  forceSolid: boolean = false,
 ): SurfaceMode {
   // WARNING: mirrored by the pre-paint stamp script in src/app/layout.tsx (which
   // assumes systemReduceTransparency=false because the Tauri IPC wiring for
   // the OS setting doesn't exist yet). If you wire the real OS value here,
   // update the layout script too or 'system' users flash the wrong surface.
-  if (pref === 'on') return 'solid';
+  if (forceSolid || pref === 'on') return 'solid';
   if (pref === 'off') return 'glass';
   return systemReduceTransparency ? 'solid' : 'glass';
 }
@@ -428,22 +430,30 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // lands, swap this to a useState seeded by an initial Tauri call +
   // an effect subscribing to system setting changes.
   const [systemReduceTransparency] = useState(false);
+  const webMachineSurface = isWebMachineBrowserSurface();
 
   const [workspaceGlass, setWorkspaceGlassState] = useState<boolean>(() => readWorkspaceGlass());
 
   const surface = useMemo(
-    () => resolveSurface(reduceTransparency, systemReduceTransparency),
-    [reduceTransparency, systemReduceTransparency],
+    () => resolveSurface(
+      reduceTransparency,
+      systemReduceTransparency,
+      webMachineSurface,
+    ),
+    [reduceTransparency, systemReduceTransparency, webMachineSurface],
   );
 
   // All Glass has no light/dark axis (Q 2026-07-16) — while on, the resolved
   // theme is pinned to dark ink over glass regardless of the stored picks
   // (the user's palette/surface preferences survive untouched for when the
   // mode turns off).
-  const effectiveSurface = workspaceGlass ? 'glass' : surface;
+  // A browser has no native vibrancy material, so web-machine presentation
+  // ignores All Glass without changing the stored operator preference.
+  const effectiveWorkspaceGlass = workspaceGlass && !webMachineSurface;
+  const effectiveSurface = effectiveWorkspaceGlass ? 'glass' : surface;
   const palette = useMemo(
-    () => getPalette(workspaceGlass ? 'dark' : paletteId),
-    [paletteId, workspaceGlass],
+    () => getPalette(effectiveWorkspaceGlass ? 'dark' : paletteId),
+    [effectiveWorkspaceGlass, paletteId],
   );
   const resolved = useMemo(() => resolveTheme(palette, effectiveSurface), [palette, effectiveSurface]);
 
@@ -452,7 +462,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const prevWorkspaceGlassRef = useRef(false);
   useEffect(() => {
     const root = document.documentElement;
-    if (!workspaceGlass) {
+    if (!effectiveWorkspaceGlass) {
       // Exit sweep BEFORE the palette re-applies: the all-glass overrides sit
       // as inline-!important, and any key the target palette does NOT define
       // would keep its sticky transparent value forever — the 2026-07-17
@@ -471,7 +481,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }
     }
     applyThemeVars(resolved, mountedRef.current);
-    if (workspaceGlass) {
+    if (effectiveWorkspaceGlass) {
       for (const [key, value] of Object.entries(WORKSPACE_GLASS_OVERRIDES)) {
         // 'important': globals.css kills --t-bg-gradient with a stylesheet
         // !important on dark+glass (which all-glass forces) — inline-important
@@ -497,9 +507,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         .__TAURI_INTERNALS__?.invoke?.('set_canvas_material', { material: 'fullscreen' })
         ?.catch(() => {});
     }
-    prevWorkspaceGlassRef.current = workspaceGlass;
+    prevWorkspaceGlassRef.current = effectiveWorkspaceGlass;
     mountedRef.current = true;
-  }, [resolved, workspaceGlass]);
+  }, [effectiveWorkspaceGlass, resolved]);
 
   const setPalette = useCallback((id: PaletteId) => {
     setPaletteId(id);

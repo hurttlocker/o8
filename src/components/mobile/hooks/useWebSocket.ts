@@ -24,6 +24,7 @@ import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
+import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
 import type {
   MobileInboxRealtimeSnapshotPayload,
   RealtimeEventEnvelope,
@@ -84,14 +85,6 @@ function getWsUrl(): string {
   // is verified by ws-server's verifyClient before the upgrade completes.
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
   return `${wsProto}://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
-}
-
-function openRealtimeWebSocket(url: string): WebSocket | null {
-  if (typeof window === 'undefined') return null;
-  if (isWebMachineBrowserSurface()) {
-    return window.__O8_WEB_MACHINE_TRANSPORT__?.openWebSocket('/ws') ?? null;
-  }
-  return url ? new WebSocket(url) : null;
 }
 
 export function useWebSocket({
@@ -466,7 +459,7 @@ export function useWebSocket({
       if (disposedRef.current) return;
       setConnectionState((prev) => prev === 'disconnected' ? 'connecting' : 'reconnecting');
 
-      const ws = openRealtimeWebSocket(url);
+      const ws = openSurfaceWebSocket(url);
       if (!ws) {
         setConnectionState('disconnected');
         setRefreshErrorRef.current('The web-machine realtime transport is unavailable.');
