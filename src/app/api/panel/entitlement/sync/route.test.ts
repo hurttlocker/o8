@@ -109,6 +109,17 @@ describe('entitlement sync route', () => {
     expect(writeCachedEntitlementMock).not.toHaveBeenCalled();
   });
 
+  it('preserves the cached entitlement when the session credential is transiently absent', async () => {
+    const response = await post({ clerkUserId: 'user_founder' }, '');
+    const data = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(data.reason).toBe('no_session');
+    expect(clearCachedEntitlementMock).not.toHaveBeenCalled();
+    expect(clearFounderRecordMock).not.toHaveBeenCalled();
+    expect(writeCachedEntitlementMock).not.toHaveBeenCalled();
+  });
+
   it('clears stale paid cache when the active signed-in account has no license', async () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

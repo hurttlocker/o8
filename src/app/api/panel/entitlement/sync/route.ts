@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 
+import {
+  clearAuthSignOutMarker,
+  markAuthSignedOut,
+  readAuthSignedOutAt,
+} from '@/lib/auth/sign-out-marker';
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founder';
@@ -18,7 +21,6 @@ import {
   writeActiveIdentity,
   writeManagedGithubState,
 } from '@/lib/github-broker/managed';
-import { getDataDir } from '@/lib/data-dir-migration';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,23 +41,6 @@ interface SyncBody {
   /** Set by the desktop sign-in callback to retire the sign-out marker (#1483). */
   clearSignInMarker?: unknown;
 }
-
-function dataDir(): string {
-  return getDataDir();
-}
-
-function signOutMarkerPath(): string {
-  return path.join(dataDir(), 'auth-signed-out-at');
-}
-
-// The sign-out marker only guards the brief window between an explicit sign-out
-// and the next sign-in: it stops a lingering pre-sign-out session token from
-// silently re-applying a license. Past that window it has outlived its purpose.
-// Without an upper bound a marker — which the client purge path itself re-stamps
-// to "now" on every stale_session response — can keep rejecting freshly-issued
-// session tokens whose iat lands just before it, auto-signing-out a legitimate
-// user forever with zero action (#1483). Any marker older than this is ignored.
-const SIGN_OUT_MARKER_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * Refresh the managed GitHub App installation token from the license server.
@@ -134,39 +119,6 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
   }
 }
 
-function markSignedOut(): void {
-  try {
-    const filePath = signOutMarkerPath();
-    mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${Math.floor(Date.now() / 1000)}\n`, { mode: 0o600 });
-  } catch (error) {
-    console.error('[entitlement] failed to mark sign-out:', error);
-  }
-}
-
-function clearSignOutMarker(): void {
-  try {
-    rmSync(signOutMarkerPath(), { force: true });
-  } catch (error) {
-    console.error('[entitlement] failed to clear sign-out marker:', error);
-  }
-}
-
-function readSignedOutAt(): number | null {
-  try {
-    const parsed = Number(readFileSync(signOutMarkerPath(), 'utf8').trim());
-    if (!Number.isFinite(parsed) || parsed <= 0) return null;
-    // Self-expire a stale marker so it can never purge a future session.
-    if (Math.floor(Date.now() / 1000) - parsed > SIGN_OUT_MARKER_MAX_AGE_SECONDS) {
-      clearSignOutMarker();
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 async function clearSignedOutEntitlement(reason: string, status = 200) {
   clearCachedEntitlement();
   clearFounderRecord();
@@ -200,7 +152,7 @@ export async function POST(request: Request) {
       body = null;
     }
     if (body?.signedOut === true) {
-      markSignedOut();
+      markAuthSignedOut();
       return clearSignedOutEntitlement('signed_out');
     }
     // Desktop sign-in just completed a fresh ticket exchange — retire the marker
@@ -208,7 +160,7 @@ export async function POST(request: Request) {
     // stale (#1483). Single-shot: fires on every real sign-in, independent of
     // the marker's own age or the incoming token's iat.
     if (body?.clearSignInMarker === true) {
-      clearSignOutMarker();
+      clearAuthSignOutMarker();
       // A fresh sign-in must never inherit a prior user's managed GitHub token
       // (audit #2). Wipe it + the identity anchor now; the follow-up license
       // sync repopulates for the VERIFIED new user (or leaves nothing → the
@@ -237,9 +189,11 @@ export async function POST(request: Request) {
     if (!sessionToken) {
       sessionToken = request.headers.get('x-clerk-session-token')?.trim() || null;
     }
-    if (!sessionToken) return clearSignedOutEntitlement('no_session', 401);
+    if (!sessionToken) {
+      return NextResponse.json({ ok: false, reason: 'no_session' }, { status: 401 });
+    }
 
-    const signedOutAt = readSignedOutAt();
+    const signedOutAt = readAuthSignedOutAt();
     const iat = tokenIssuedAt(sessionToken);
     if (signedOutAt !== null && iat !== null && iat < signedOutAt) {
       return clearSignedOutEntitlement('stale_session', 401);
@@ -281,7 +235,7 @@ export async function POST(request: Request) {
     if (res.status === 404) {
       // A fresh authenticated session for this account is confirmed — the
       // sign-out marker has served its purpose (#1483).
-      clearSignOutMarker();
+      clearAuthSignOutMarker();
       clearCachedEntitlement();
       clearFounderRecord();
       const entitlement = await getEntitlement();
@@ -305,7 +259,7 @@ export async function POST(request: Request) {
       return clearSignedOutEntitlement('license_subject_mismatch', 409);
     }
 
-    const postFetchSignedOutAt = readSignedOutAt();
+    const postFetchSignedOutAt = readAuthSignedOutAt();
     const postFetchIat = tokenIssuedAt(sessionToken);
     if (postFetchSignedOutAt !== null && postFetchIat !== null && postFetchIat < postFetchSignedOutAt) {
       return clearSignedOutEntitlement('stale_session', 401);
@@ -329,7 +283,7 @@ export async function POST(request: Request) {
     // Verified, subject-matched license persisted for a fresh session — the
     // sign-out marker has served its purpose and must not linger to purge a
     // later reload (#1483).
-    clearSignOutMarker();
+    clearAuthSignOutMarker();
 
     // Founding Operator → stamp the local badge record; otherwise clear it.
     const founder = data.founder;
