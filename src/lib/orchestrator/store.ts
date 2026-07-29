@@ -1068,7 +1068,7 @@ export function reconcileOrchestratorMissionState(
           ?? 'Awaiting operator input';
         return next;
       }
-      if (ds === 'awaiting_orchestrator') { next.status = 'blocked'; next.blockedReason = next.recovery?.message ?? domainLane.lastEventLabel ?? 'Awaiting orchestrator'; return next; }
+      if (ds === 'awaiting_orchestrator') { next.status = 'blocked'; next.blockedReason = packet.blockedReason ?? (domainLane.lastEventLabel === 'canonical_merge_ancestry_failed' ? domainLane.lastEventLabel : next.recovery?.message) ?? domainLane.lastEventLabel ?? 'Awaiting orchestrator'; return next; }
       if (ds === 'paused' && domainLane.sessionKey) { next.status = 'idle'; return next; }
       if (ds === 'paused' && !domainLane.sessionKey) {
         if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {

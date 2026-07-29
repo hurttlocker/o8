@@ -391,7 +391,8 @@ async function dispatchPacketMerge(
     loadShared(),
     loadReviewHeadIntegrity(),
   ]);
-  const alreadyReleased = await alreadyReleasedResultForPacketId(packet.id, currentMissionState().packets);
+  const missionState = currentMissionState();
+  const alreadyReleased = await alreadyReleasedResultForPacketId(packet.id, missionState.packets);
   if (alreadyReleased) {
     return alreadyReleased;
   }
@@ -446,6 +447,7 @@ async function dispatchPacketMerge(
     // Advisory only; commands.ts re-derives authorization from durable review rows.
     orchestratorReviewed: packet.review?.approved === true,
     expectedHeadSha: input.expectedHeadSha?.trim() || carriedReviewedHeadSha || packet.review?.reviewedHeadSha?.trim() || undefined,
+    canonicalRepoPath: missionState.repoPath?.trim() || packet.workspaceTargetPath?.trim() || lane.repoPath,
     surfaceDispatcherApproved: input.actor === 'user',
     actor,
   });
@@ -574,6 +576,7 @@ async function dispatchPacketMerge(
       merged: false,
       note: result.note,
       approvalId: result.approvalId,
+      reason: result.reason,
     }, packet.review?.approved === true);
   }
 
