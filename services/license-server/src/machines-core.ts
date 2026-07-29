@@ -67,6 +67,24 @@ export interface MachineRouteDependencies {
   store: MachineStore;
   now(): Date;
   newMachineId(): string;
+  relayTickets?: {
+    mint(input: {
+      accountId: string;
+      machine: MachineDevice;
+      now: Date;
+    }): Promise<{ ticket: string; expiresAt: number }>;
+    authorizeHeartbeat(
+      token: string | null,
+      machineId: string,
+    ): Promise<
+      | { ok: true; accountId: string }
+      | {
+        ok: false;
+        status: 401 | 403;
+        reason: 'unauthorized' | 'account_link_required';
+      }
+    >;
+  };
 }
 
 interface RegisterBody {
@@ -187,16 +205,54 @@ export function registerMachineRoutes(
     }
   });
 
-  app.post('/machines/:machineId/heartbeat', async (c) => {
+  app.post('/machines/:machineId/relay-ticket', async (c) => {
     try {
       const principal = await requirePrincipal(c, dependencies);
       if (principal instanceof Response) return principal;
-      // RELAY-TICKET SEAM: this batch intentionally uses the same account
-      // credential as register/list/delete. Replace authenticate() here with
-      // machine-scoped relay-ticket verification when the signer lands.
+      if (!dependencies.relayTickets) {
+        return c.json({ error: 'not_supported' }, 501);
+      }
+      const machineId = c.req.param('machineId');
+      const machine = (await dependencies.store.list(principal.accountId))
+        .find((candidate) => candidate.machineId === machineId);
+      if (!machine) return c.json({ error: 'not_found' }, 404);
+      const result = await dependencies.relayTickets.mint({
+        accountId: principal.accountId,
+        machine,
+        now: dependencies.now(),
+      });
+      return c.json({
+        ticket: result.ticket,
+        expiresAt: new Date(result.expiresAt * 1000).toISOString(),
+      });
+    } catch (error) {
+      return internalError(c, 'relay-ticket', error);
+    }
+  });
+
+  app.post('/machines/:machineId/heartbeat', async (c) => {
+    try {
+      const machineId = c.req.param('machineId');
+      let accountId: string;
+      if (dependencies.relayTickets) {
+        const authorized = await dependencies.relayTickets.authorizeHeartbeat(
+          bearerToken(c),
+          machineId,
+        );
+        if (!authorized.ok) {
+          return authorized.reason === 'account_link_required'
+            ? c.json({ reason: 'account_link_required' }, 403)
+            : c.json({ error: 'unauthorized' }, 401);
+        }
+        accountId = authorized.accountId;
+      } else {
+        const principal = await requirePrincipal(c, dependencies);
+        if (principal instanceof Response) return principal;
+        accountId = principal.accountId;
+      }
       const updated = await dependencies.store.heartbeat(
-        principal.accountId,
-        c.req.param('machineId'),
+        accountId,
+        machineId,
         dependencies.now(),
       );
       return updated

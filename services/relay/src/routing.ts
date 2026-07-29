@@ -19,6 +19,91 @@ export interface DeviceEntry<S> {
   ready: boolean;
 }
 
+export interface MachineEntry<S> {
+  socket: S;
+  accountId: string;
+  installId: string;
+  connectedAt: number;
+}
+
+export class MachineRoutingTable<S> {
+  private machines = new Map<string, MachineEntry<S>>();
+  private machineIdsByAccount = new Map<string, Set<string>>();
+  private webSessions = new Map<string, Map<string, DeviceEntry<S>>>();
+
+  registerMachine(machineId: string, entry: MachineEntry<S>): S | null {
+    const prior = this.machines.get(machineId) ?? null;
+    if (prior && prior.accountId !== entry.accountId) {
+      this.removeAccountMachine(prior.accountId, machineId);
+    }
+    this.machines.set(machineId, entry);
+    let accountMachines = this.machineIdsByAccount.get(entry.accountId);
+    if (!accountMachines) {
+      accountMachines = new Set();
+      this.machineIdsByAccount.set(entry.accountId, accountMachines);
+    }
+    accountMachines.add(machineId);
+    return prior && prior.socket !== entry.socket ? prior.socket : null;
+  }
+
+  removeMachine(machineId: string, socket: S): boolean {
+    const current = this.machines.get(machineId);
+    if (current?.socket !== socket) return false;
+    this.machines.delete(machineId);
+    this.removeAccountMachine(current.accountId, machineId);
+    return true;
+  }
+
+  getMachine(machineId: string): MachineEntry<S> | null {
+    return this.machines.get(machineId) ?? null;
+  }
+
+  machineIdsForAccount(accountId: string): string[] {
+    return [...(this.machineIdsByAccount.get(accountId) ?? [])];
+  }
+
+  addWebSession(machineId: string, entry: DeviceEntry<S>): void {
+    let sessions = this.webSessions.get(machineId);
+    if (!sessions) {
+      sessions = new Map();
+      this.webSessions.set(machineId, sessions);
+    }
+    sessions.set(entry.sid, entry);
+  }
+
+  getWebSession(machineId: string, sid: string): DeviceEntry<S> | null {
+    return this.webSessions.get(machineId)?.get(sid) ?? null;
+  }
+
+  removeWebSession(machineId: string, sid: string): DeviceEntry<S> | null {
+    const sessions = this.webSessions.get(machineId);
+    if (!sessions) return null;
+    const entry = sessions.get(sid) ?? null;
+    sessions.delete(sid);
+    if (sessions.size === 0) this.webSessions.delete(machineId);
+    return entry;
+  }
+
+  webSessionsFor(machineId: string): DeviceEntry<S>[] {
+    return [...(this.webSessions.get(machineId)?.values() ?? [])];
+  }
+
+  readyWebSessionCount(machineId: string): number {
+    let count = 0;
+    for (const entry of this.webSessions.get(machineId)?.values() ?? []) {
+      if (entry.ready) count += 1;
+    }
+    return count;
+  }
+
+  private removeAccountMachine(accountId: string, machineId: string): void {
+    const accountMachines = this.machineIdsByAccount.get(accountId);
+    if (!accountMachines) return;
+    accountMachines.delete(machineId);
+    if (accountMachines.size === 0) this.machineIdsByAccount.delete(accountId);
+  }
+}
+
 export class RoutingTable<S> {
   private macs = new Map<string, MacEntry<S>>();
   private devices = new Map<string, Map<string, DeviceEntry<S>>>();

@@ -17,7 +17,13 @@ import { SignJWT, importPKCS8 } from 'jose';
 
 import { isPlan, relayOffNetwork, type Plan } from '../src/entitlement.js';
 import { verifyPlanTokenWith } from '../src/plan-jwt.js';
-import { RoutingTable, RateLimiter, DEFAULT_RATE_LIMITS, type DeviceEntry } from '../src/routing.js';
+import {
+  DEFAULT_RATE_LIMITS,
+  MachineRoutingTable,
+  RateLimiter,
+  RoutingTable,
+  type DeviceEntry,
+} from '../src/routing.js';
 import { CLOSE, isMacOriginCloseCode, toPayload, fromPayload, encode, decode, isMuxFrame } from '../src/protocol.js';
 
 let failures = 0;
@@ -115,6 +121,29 @@ function testRouting(): void {
   assert(rt.readyDeviceCount('r1') === 1, 'readyDeviceCount counts only ready');
   assert(rt.removeDevice('r1', 'a')?.sid === 'a', 'removeDevice returns the entry');
   assert(rt.devicesFor('r1').length === 1, 'one device left after remove');
+
+  const machines = new MachineRoutingTable<string>();
+  machines.registerMachine('machine-a', {
+    socket: 'machine-socket-a',
+    accountId: 'account-a',
+    installId: 'install-a',
+    connectedAt: now,
+  });
+  machines.registerMachine('machine-b', {
+    socket: 'machine-socket-b',
+    accountId: 'account-a',
+    installId: 'install-b',
+    connectedAt: now,
+  });
+  assert(
+    machines.machineIdsForAccount('account-a').length === 2,
+    'one account can hold simultaneous machine sockets',
+  );
+  machines.removeMachine('machine-a', 'machine-socket-a');
+  assert(
+    machines.machineIdsForAccount('account-a')[0] === 'machine-b',
+    'machine close removes the account index without disturbing sibling machines',
+  );
 }
 
 function testRateLimits(): void {

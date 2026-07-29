@@ -7,6 +7,8 @@ import { relayOffNetwork, type Plan } from './entitlement.js';
 // in tests. index.ts injects the real env-backed verify/APNs deps.
 import type { PlanTokenResult } from './plan-jwt.js';
 import type { PushResult } from './apns.js';
+import type { MachineHeartbeatResult } from './license-client.js';
+import type { MachineTicketResult } from './machine-ticket.js';
 import {
   CLOSE,
   decode,
@@ -16,6 +18,7 @@ import {
 } from './protocol.js';
 import {
   DEFAULT_RATE_LIMITS,
+  MachineRoutingTable,
   RateLimiter,
   RoutingTable,
   type DeviceEntry,
@@ -25,12 +28,17 @@ import {
 /**
  * The zero-knowledge relay concentrator (docs/relay-v1-design.md §D2–D5).
  *
- * Two socket kinds, forwarded opaquely:
+ * Existing mobile sockets, forwarded opaquely:
  *   Mac connector ──/mac──► relay ◄──/device/{routingId}── phone
+ *
+ * Parallel account-machine sockets use the same mux envelope without sharing
+ * maps or authorization decisions with mobile:
+ *   Machine ──/machine──► relay ◄──/web/machine/{machineId}── web edge
  *
  * The relay verifies the Mac's plan-JWT + relay.offNetwork entitlement, tracks
  * presence, enforces rate limits, and passes 4401/4403 closes through from the
- * Mac unchanged (relay-origin closes are 4408/4409). It NEVER reads a `payload`.
+ * Mac unchanged (relay-origin closes are 4408/4409). The machine path verifies
+ * an o8-relay ticket and server-checks web ownership. It NEVER reads a `payload`.
  *
  * All durations + the JWT/entitlement/APNs deps are injectable so the contract
  * test + e2e can drive it with short timers and fakes.
@@ -45,12 +53,21 @@ export interface RelayDeps {
     kind: string;
   }) => Promise<PushResult>;
   apnsConfigured: () => boolean;
+  verifyMachineTicket: (
+    token: string | null | undefined,
+  ) => Promise<MachineTicketResult>;
+  authorizeWebMachine: (token: string, machineId: string) => Promise<boolean>;
+  heartbeatMachine: (input: {
+    machineId: string;
+    ticket: string;
+  }) => Promise<MachineHeartbeatResult>;
   now: () => number;
   rateLimits: RateLimiterOpts;
   macOfflineHoldMs: number;
   handshakeDeadlineMs: number;
   idleSweepMs: number;
   idleMaxMs: number;
+  machineHeartbeatMs: number;
 }
 
 const DEFAULT_DEPS: RelayDeps = {
@@ -60,12 +77,16 @@ const DEFAULT_DEPS: RelayDeps = {
   relayOffNetwork,
   sendApprovalAlert: async () => ({ ok: false, reason: 'apns_not_configured' }),
   apnsConfigured: () => false,
+  verifyMachineTicket: async () => ({ ok: false, reason: 'invalid' }),
+  authorizeWebMachine: async () => false,
+  heartbeatMachine: async () => ({ ok: false, status: 0 }),
   now: Date.now,
   rateLimits: DEFAULT_RATE_LIMITS,
   macOfflineHoldMs: 60_000,
   handshakeDeadlineMs: 10_000,
   idleSweepMs: 60_000,
   idleMaxMs: 10 * 60_000,
+  machineHeartbeatMs: 60_000,
 };
 
 interface DeviceMeta {
@@ -75,14 +96,28 @@ interface DeviceMeta {
   handshakeTimer?: ReturnType<typeof setTimeout>;
 }
 
+interface MachineMeta {
+  machineId: string;
+  ticket: string;
+  heartbeatTimer?: ReturnType<typeof setInterval>;
+}
+
+interface WebMachineMeta {
+  machineId: string;
+  sid: string;
+}
+
 const P = '[relay]';
 
 export class RelayServer {
   private readonly deps: RelayDeps;
   private readonly routing = new RoutingTable<WebSocket>();
+  private readonly machineRouting = new MachineRoutingTable<WebSocket>();
   private readonly limiter: RateLimiter;
   private readonly deviceMeta = new Map<WebSocket, DeviceMeta>();
   private readonly macRouting = new Map<WebSocket, string>();
+  private readonly machineMeta = new Map<WebSocket, MachineMeta>();
+  private readonly webMachineMeta = new Map<WebSocket, WebMachineMeta>();
   private sidCounter = 0;
   private idleSweepTimer?: ReturnType<typeof setInterval>;
 
@@ -101,6 +136,9 @@ export class RelayServer {
   stop(): void {
     if (this.idleSweepTimer) clearInterval(this.idleSweepTimer);
     this.idleSweepTimer = undefined;
+    for (const meta of this.machineMeta.values()) {
+      if (meta.heartbeatTimer) clearInterval(meta.heartbeatTimer);
+    }
   }
 
   // ── Rate-limit pre-check (called by the upgrade router before accepting) ──
@@ -225,6 +263,219 @@ export class RelayServer {
       this.clearHandshake(d);
       this.phoneSend(d.socket, { t: 'presence', mac: 'down' });
       this.armHold(d);
+    }
+  }
+
+  // ── Connected machine (/machine) ──────────────────────────────────────────
+  async onMachineConnected(ws: WebSocket, req: IncomingMessage): Promise<void> {
+    const machineId = headerValue(req.headers['x-o8-machine-id']);
+    if (!machineId) {
+      safeClose(ws, 1008, 'missing_machine_id');
+      return;
+    }
+    const ticket = stripBearer(headerValue(req.headers.authorization));
+    const verdict = await this.deps.verifyMachineTicket(ticket);
+    if (!verdict.ok) {
+      safeClose(ws, CLOSE.ENTITLEMENT_LAPSED, `machine_ticket_${verdict.reason}`);
+      return;
+    }
+    if (verdict.claims.machineId !== machineId) {
+      safeClose(ws, CLOSE.ENTITLEMENT_LAPSED, 'machine_id_mismatch');
+      return;
+    }
+
+    const superseded = this.machineRouting.registerMachine(machineId, {
+      socket: ws,
+      accountId: verdict.claims.accountId,
+      installId: verdict.claims.installId,
+      connectedAt: this.deps.now(),
+    });
+    if (superseded) {
+      const priorMeta = this.machineMeta.get(superseded);
+      if (priorMeta?.heartbeatTimer) clearInterval(priorMeta.heartbeatTimer);
+      this.machineMeta.delete(superseded);
+      safeClose(superseded, 1001, 'superseded');
+    }
+
+    const meta: MachineMeta = { machineId, ticket };
+    this.machineMeta.set(ws, meta);
+    console.log(
+      `${P} /machine up machineId=${short(machineId)} account=${short(verdict.claims.accountId)}`,
+    );
+
+    for (const session of this.machineRouting.webSessionsFor(machineId)) {
+      session.ready = false;
+      this.machineSend(ws, { t: 'mux-open', sid: session.sid });
+      this.webMachineSend(session.socket, { t: 'presence', machine: 'up' });
+    }
+    this.machineSend(ws, {
+      t: 'devices',
+      count: this.machineRouting.readyWebSessionCount(machineId),
+    });
+
+    ws.on('message', (raw) => this.onMachineMessage(ws, machineId, raw));
+    ws.on('close', () => this.onMachineClosed(ws, machineId));
+    ws.on('error', () => {/* close handler does cleanup */});
+
+    void this.emitMachineHeartbeat(ws, meta);
+    meta.heartbeatTimer = setInterval(() => {
+      void this.emitMachineHeartbeat(ws, meta);
+    }, this.deps.machineHeartbeatMs);
+    meta.heartbeatTimer.unref?.();
+  }
+
+  private onMachineMessage(
+    ws: WebSocket,
+    machineId: string,
+    raw: unknown,
+  ): void {
+    const frame = decode(raw as string | Buffer);
+    if (!frame) return;
+    switch (frame.t) {
+      case 'mux': {
+        if (!isMuxFrame(frame)) return;
+        const sid = typeof frame.sid === 'string' ? frame.sid : '';
+        const session = this.machineRouting.getWebSession(machineId, sid);
+        if (!session) return;
+        session.lastActivityAt = this.deps.now();
+        const payload = typeof frame.payload === 'string' ? frame.payload : '';
+        if (payload) {
+          trySend(session.socket, Buffer.from(payload, 'base64').toString('utf8'));
+        }
+        return;
+      }
+      case 'mux-close': {
+        const sid = typeof frame.sid === 'string' ? frame.sid : '';
+        const session = this.machineRouting.getWebSession(machineId, sid);
+        if (!session) return;
+        const code = isMacOriginCloseCode(frame.code) ? frame.code : 1000;
+        const reason = typeof frame.reason === 'string' ? frame.reason : undefined;
+        safeClose(session.socket, code, reason);
+        return;
+      }
+      case 'mux-ready': {
+        const sid = typeof frame.sid === 'string' ? frame.sid : '';
+        const session = this.machineRouting.getWebSession(machineId, sid);
+        if (!session || session.ready) return;
+        session.ready = true;
+        session.lastActivityAt = this.deps.now();
+        this.machineSend(ws, {
+          t: 'devices',
+          count: this.machineRouting.readyWebSessionCount(machineId),
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private onMachineClosed(ws: WebSocket, machineId: string): void {
+    const meta = this.machineMeta.get(ws);
+    this.machineMeta.delete(ws);
+    if (meta?.heartbeatTimer) clearInterval(meta.heartbeatTimer);
+    if (!this.machineRouting.removeMachine(machineId, ws)) return;
+    console.log(`${P} /machine down machineId=${short(machineId)}`);
+    for (const session of this.machineRouting.webSessionsFor(machineId)) {
+      session.ready = false;
+      this.webMachineSend(session.socket, { t: 'presence', machine: 'down' });
+    }
+  }
+
+  private async emitMachineHeartbeat(
+    ws: WebSocket,
+    meta: MachineMeta,
+  ): Promise<void> {
+    if (this.machineRouting.getMachine(meta.machineId)?.socket !== ws) return;
+    const result = await this.deps.heartbeatMachine({
+      machineId: meta.machineId,
+      ticket: meta.ticket,
+    });
+    if (!result.ok && (result.status === 401 || result.status === 404)) {
+      safeClose(ws, CLOSE.ENTITLEMENT_LAPSED, 'machine_heartbeat_rejected');
+    }
+  }
+
+  // ── Authenticated web machine session (/web/machine/{machineId}) ──────────
+  async onWebMachineConnected(
+    ws: WebSocket,
+    machineId: string,
+    req: IncomingMessage,
+  ): Promise<void> {
+    const bearer = stripBearer(headerValue(req.headers.authorization));
+    if (!bearer || !await this.deps.authorizeWebMachine(bearer, machineId)) {
+      safeClose(ws, 1008, 'machine_not_owned');
+      return;
+    }
+
+    const sid = `m${++this.sidCounter}`;
+    const now = this.deps.now();
+    this.machineRouting.addWebSession(machineId, {
+      sid,
+      socket: ws,
+      admittedAt: now,
+      lastActivityAt: now,
+      ready: false,
+    });
+    this.webMachineMeta.set(ws, { machineId, sid });
+
+    const machine = this.machineRouting.getMachine(machineId)?.socket;
+    if (machine) {
+      this.machineSend(machine, { t: 'mux-open', sid });
+      this.webMachineSend(ws, { t: 'presence', machine: 'up' });
+    } else {
+      this.webMachineSend(ws, { t: 'presence', machine: 'down' });
+    }
+
+    ws.on('message', (raw) => this.onWebMachineMessage(ws, raw));
+    ws.on('close', () => this.onWebMachineClosed(ws));
+    ws.on('error', () => {/* close handler does cleanup */});
+  }
+
+  private onWebMachineMessage(ws: WebSocket, raw: unknown): void {
+    const meta = this.webMachineMeta.get(ws);
+    if (!meta) return;
+    const session = this.machineRouting.getWebSession(meta.machineId, meta.sid);
+    if (!session) return;
+    session.lastActivityAt = this.deps.now();
+    const machine = this.machineRouting.getMachine(meta.machineId)?.socket;
+    if (!machine) return;
+    const frame = decode(raw as string | Buffer);
+    if (isMuxFrame(frame)) {
+      this.machineSend(machine, {
+        t: 'mux',
+        sid: meta.sid,
+        seq: frame.seq,
+        payload: frame.payload,
+      });
+      return;
+    }
+    const rawString = typeof raw === 'string'
+      ? raw
+      : Buffer.isBuffer(raw)
+        ? raw.toString('utf8')
+        : String(raw);
+    this.machineSend(machine, {
+      t: 'mux',
+      sid: meta.sid,
+      seq: 0,
+      payload: Buffer.from(rawString, 'utf8').toString('base64'),
+    });
+  }
+
+  private onWebMachineClosed(ws: WebSocket): void {
+    const meta = this.webMachineMeta.get(ws);
+    if (!meta) return;
+    this.webMachineMeta.delete(ws);
+    const removed = this.machineRouting.removeWebSession(meta.machineId, meta.sid);
+    if (!removed) return;
+    const machine = this.machineRouting.getMachine(meta.machineId)?.socket;
+    if (machine) {
+      this.machineSend(machine, { t: 'mux-close', sid: meta.sid });
+      this.machineSend(machine, {
+        t: 'devices',
+        count: this.machineRouting.readyWebSessionCount(meta.machineId),
+      });
     }
   }
 
@@ -353,9 +604,27 @@ export class RelayServer {
     trySend(ws, encode(frame));
   }
 
+  private machineSend(ws: WebSocket, frame: object): void {
+    trySend(ws, encode(frame));
+  }
+
+  private webMachineSend(ws: WebSocket, frame: object): void {
+    trySend(ws, encode(frame));
+  }
+
   // ── introspection (tests / /health) ──
-  stats(): { macs: number; devices: number } {
-    return { macs: this.macRouting.size, devices: this.deviceMeta.size };
+  stats(): {
+    macs: number;
+    devices: number;
+    machines: number;
+    webMachineSessions: number;
+  } {
+    return {
+      macs: this.macRouting.size,
+      devices: this.deviceMeta.size,
+      machines: this.machineMeta.size,
+      webMachineSessions: this.webMachineMeta.size,
+    };
   }
 }
 

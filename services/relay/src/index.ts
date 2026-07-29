@@ -5,6 +5,8 @@ import { apnsConfigured, sendApprovalAlert } from './apns.js';
 import { attachRelayUpgrade, type UpgradableServer } from './attach.js';
 import { relayOffNetwork } from './entitlement.js';
 import { env } from './env.js';
+import { createLicenseServerClient } from './license-client.js';
+import { verifyMachineRelayTicketWith } from './machine-ticket.js';
 import { verifyPlanTokenWith } from './plan-jwt.js';
 import { RelayServer } from './relay.js';
 
@@ -15,11 +17,21 @@ import { RelayServer } from './relay.js';
  * env-free so they unit-test with fakes.
  */
 
+const licenseClient = createLicenseServerClient({
+  baseUrl: env.LICENSE_SERVER_BASE_URL,
+});
+
 const relay = new RelayServer({
   // Bind the pure verifier to the configured public key + issuer.
   verifyPlanToken: (token) =>
     verifyPlanTokenWith(token, { publicKeyPem: env.LICENSE_PUBLIC_KEY, issuer: env.ISSUER }),
   relayOffNetwork,
+  verifyMachineTicket: (token) => verifyMachineRelayTicketWith(token, {
+    publicKeyPem: env.LICENSE_PUBLIC_KEY,
+    issuer: env.ISSUER,
+  }),
+  authorizeWebMachine: licenseClient.authorizeWebMachine,
+  heartbeatMachine: licenseClient.heartbeatMachine,
   sendApprovalAlert,
   apnsConfigured,
 });

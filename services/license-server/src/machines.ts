@@ -15,7 +15,13 @@ import {
   type MachineRegistrationResult,
   type MachineStore,
 } from './machines-core.js';
-import { validateEntitlement } from './validate.js';
+import { env } from './env.js';
+import {
+  authorizeMachineHeartbeat,
+  mintMachineRelayTicketWith,
+  verifyMachineRelayTicketWith,
+} from './relay-ticket.js';
+import { getDerivedPublicKeyPem, validateEntitlement } from './validate.js';
 
 function isMachinePlan(value: unknown): value is MachinePlan {
   return value === 'free'
@@ -254,5 +260,25 @@ export function registerProductionMachineRoutes(app: Hono): void {
     store: postgresMachineStore,
     now: () => new Date(),
     newMachineId: () => randomUUID(),
+    relayTickets: {
+      mint: ({ accountId, machine, now }) => mintMachineRelayTicketWith({
+        accountId,
+        machineId: machine.machineId,
+        installId: machine.installId,
+      }, {
+        privateKeyPem: env.LICENSE_PRIVATE_KEY,
+        issuer: env.ISSUER,
+        now,
+      }),
+      authorizeHeartbeat: (token, machineId) => authorizeMachineHeartbeat({
+        token,
+        machineId,
+        verifyTicket: (candidate) => verifyMachineRelayTicketWith(candidate, {
+          publicKeyPem: getDerivedPublicKeyPem(),
+          issuer: env.ISSUER,
+        }),
+        authenticateAccount: authenticateMachine,
+      }),
+    },
   });
 }

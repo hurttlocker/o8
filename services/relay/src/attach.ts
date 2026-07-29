@@ -9,11 +9,14 @@ import type { RelayServer } from './relay.js';
  * Route WebSocket upgrades on ONE port to the relay concentrator by path:
  *   /mac                 — the Mac connector
  *   /device/{routingId}  — a phone
+ *   /machine             — an account-machine connector
+ *   /web/machine/{id}    — an account-authenticated web edge
  * PURE (no env import) so index.ts (production) and scripts/verify-relay-e2e.ts
  * (a raw node http server) share the exact same routing.
  */
 
 const DEVICE_RE = /^\/device\/([A-Za-z0-9]{1,64})\/?$/;
+const WEB_MACHINE_RE = /^\/web\/machine\/([A-Za-z0-9_-]{1,128})\/?$/;
 const MAX_FRAME_BYTES = 1024 * 1024;
 
 export interface UpgradableServer {
@@ -43,6 +46,8 @@ export function attachRelayUpgrade(server: UpgradableServer, relay: RelayServer)
   } as const;
   const macWss = new WebSocketServer(wsOptions);
   const deviceWss = new WebSocketServer(wsOptions);
+  const machineWss = new WebSocketServer(wsOptions);
+  const webMachineWss = new WebSocketServer(wsOptions);
 
   server.on('upgrade', (req, socket, head) => {
     let pathname = '';
@@ -56,6 +61,22 @@ export function attachRelayUpgrade(server: UpgradableServer, relay: RelayServer)
     if (pathname === '/mac') {
       macWss.handleUpgrade(req, socket, head, (ws) => {
         void relay.onMacConnected(ws, req);
+      });
+      return;
+    }
+
+    if (pathname === '/machine') {
+      machineWss.handleUpgrade(req, socket, head, (ws) => {
+        void relay.onMachineConnected(ws, req);
+      });
+      return;
+    }
+
+    const webMachineMatch = WEB_MACHINE_RE.exec(pathname);
+    if (webMachineMatch) {
+      const machineId = webMachineMatch[1]!;
+      webMachineWss.handleUpgrade(req, socket, head, (ws) => {
+        void relay.onWebMachineConnected(ws, machineId, req);
       });
       return;
     }

@@ -12,6 +12,7 @@
     "build": "tsc",
     "start": "node dist/src/index.js",
     "contract-test": "tsx scripts/contract-test.ts",
+    "machine-contract-test": "tsx scripts/machine-contract-test.ts",
     "verify-e2e": "tsx scripts/verify-relay-e2e.ts",
     "typecheck": "tsc --noEmit"
   },

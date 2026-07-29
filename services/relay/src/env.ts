@@ -7,9 +7,10 @@ import 'dotenv/config';
  * at import time so the process fails fast on Railway rather than mid-connection.
  * Optional vars get sane defaults.
  *
- * The relay is zero-knowledge: it holds only the license server's PUBLIC key (to
- * verify plan-JWTs) and (optionally) an APNs .p8 (to send generic pushes). No
- * database, no private signing key, no session keys.
+ * The relay holds only the license server's PUBLIC key (to verify plan and
+ * machine JWTs) and (optionally) an APNs .p8 (to send generic pushes). It calls
+ * the license server for web ownership and heartbeat decisions. No database,
+ * private license signing key, prompt content, or session keys live here.
  */
 
 function required(name: string): string {
@@ -69,6 +70,8 @@ function loadApns(): {
 }
 
 const DEFAULT_MAX_TUNNEL_BYTES = 32 * 1024 * 1024; // 32MB
+const DEFAULT_LICENSE_SERVER_BASE_URL =
+  'https://o8-license-server-production.up.railway.app';
 
 function loadMaxTunnelBytes(): number {
   const parsed = Number.parseInt(optional('RELAY_MAX_TUNNEL_BYTES', String(DEFAULT_MAX_TUNNEL_BYTES)), 10);
@@ -78,6 +81,10 @@ function loadMaxTunnelBytes(): number {
 export const env = {
   LICENSE_PUBLIC_KEY: loadPublicKeyPem(),
   ISSUER: optional('ISSUER', 'o8-license'),
+  LICENSE_SERVER_BASE_URL: optional(
+    'LICENSE_SERVER_BASE_URL',
+    DEFAULT_LICENSE_SERVER_BASE_URL,
+  ).replace(/\/+$/, ''),
   APNS: loadApns(),
   MAX_TUNNEL_BYTES: loadMaxTunnelBytes(),
   PORT: Number.parseInt(optional('PORT', '8080'), 10),
