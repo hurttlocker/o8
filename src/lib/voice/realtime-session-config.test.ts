@@ -150,7 +150,7 @@ describe('realtime-session-config — shared assembler', () => {
   it('exposes the expected shared constants', () => {
     expect(REALTIME_MODEL).toBe('gpt-realtime-2.1-mini');
     expect(REALTIME_FLAGSHIP_MODEL).toBe('gpt-realtime-2.1');
-    expect(DEFAULT_VOICE).toBe('marin');
+    expect(DEFAULT_VOICE).toBe('cedar');
     expect(REALTIME_INPUT_TRANSCRIPTION_MODEL).toBe('whisper-1');
     expect(REALTIME_TOKEN_TTL_SECONDS).toBe(600);
     expect(CODEX_REALTIME_VERSION).toBe('v2');

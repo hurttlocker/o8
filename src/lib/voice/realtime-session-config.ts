@@ -60,7 +60,9 @@ export function selectPhoneRealtimeModel(input: {
     model: variant === 'flagship' ? REALTIME_FLAGSHIP_MODEL : REALTIME_MODEL,
   };
 }
-export const DEFAULT_VOICE = 'marin';
+// Cedar gives Symon a grounded male voice by default. A voice explicitly saved
+// in the desktop selector still wins; this only changes fresh/default sessions.
+export const DEFAULT_VOICE = 'cedar';
 /** Input transcription model the desk session applies via `session.update`. */
 export const REALTIME_INPUT_TRANSCRIPTION_MODEL = 'whisper-1';
 export const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';

@@ -18,6 +18,7 @@ import {
 import { prefBool, prefStr, prefNum, prefVoiceLibrary, type VoicePreset, type TabProps } from '../helpers';
 import { ttsSpeak, ttsStop } from '@/lib/tauri/bridge';
 import { startRealtimeSession, type RealtimeStatus, type RealtimeSessionHandle } from '@/lib/voice/realtime-client';
+import { DEFAULT_VOICE } from '@/lib/voice/realtime-session-config';
 import { useChatgptVoiceCapability } from '@/lib/voice/use-chatgpt-voice-capability';
 
 const INPUT_BASE: CSSProperties = {
@@ -41,8 +42,8 @@ const MODEL_OPTS = [
 ];
 // OpenAI realtime voices (gpt-realtime) — distinct from the ElevenLabs voices above.
 const REALTIME_VOICE_OPTS = [
+  { value: 'cedar', label: 'Cedar (default)' },
   { value: 'marin', label: 'Marin' },
-  { value: 'cedar', label: 'Cedar' },
   { value: 'alloy', label: 'Alloy' },
   { value: 'ash', label: 'Ash' },
   { value: 'ballad', label: 'Ballad' },
@@ -234,7 +235,7 @@ function RealtimeSection() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const [voice, setVoice] = useState('marin');
+  const [voice, setVoice] = useState(DEFAULT_VOICE);
   const [convStatus, setConvStatus] = useState<RealtimeStatus>('idle');
   const [convError, setConvError] = useState<string | null>(null);
   const sessionRef = useRef<RealtimeSessionHandle | null>(null);
