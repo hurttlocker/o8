@@ -6,6 +6,7 @@ export const RELAY_WEB_ORIGIN = 'https://relay.o8.run';
 export const ALLOWED_WEB_ORIGINS = new Set([
   'https://o8.run',
   'https://www.o8.run',
+  'https://app.o8.run',
 ]);
 
 export interface WebTicketClaims {
