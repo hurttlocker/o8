@@ -512,14 +512,17 @@ describe('machine relay attach real path', () => {
     supervisor.stop();
   });
 
-  it('detaches the active machine promptly when the cached account credential disappears', async () => {
+  it('keeps an authenticated attach through a transient credential-read miss and recovery', async () => {
     let credential: string | null = 'account-token';
-    const start = vi.fn();
-    const stop = vi.fn();
+    const audit = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const relay = await startRelay((socket) => {
+      socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+    });
     const supervisor = new MachineAttachSupervisor({
       reconcileIntervalMs: 60_000,
       readEnabled: () => true,
       readCredential: () => credential,
+      readSignedOutAt: () => null,
       readInstallId: () => 'install_signed_in',
       listRegisteredMachines: async () => [{
         machineId: 'machine_signed_in',
@@ -528,15 +531,67 @@ describe('machine relay attach real path', () => {
         platform: 'darwin',
         appVersion: '0.1.0',
       }],
-      createConnector: () => ({ start, stop }),
+      createConnector: (machine) => new MachineRelayConnector({
+        machineId: machine.machineId,
+        relayUrl: relay.url,
+        ticketProvider: async () => ticket(machine.machineId),
+      }),
     });
 
     supervisor.start();
-    await waitFor(() => start.mock.calls.length === 1);
+    await waitFor(() => relay.connections.length === 1);
     credential = null;
     await supervisor.reconcile();
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(stop).toHaveBeenCalledWith('signed-out');
+    expect(relay.connections).toHaveLength(1);
+    expect(relay.server.clients.size).toBe(1);
+    expect(audit).toHaveBeenCalledWith(
+      '[connect] credential-read miss (transient), keeping attach',
+    );
+
+    credential = 'account-token';
+    await supervisor.reconcile();
+    expect(relay.connections).toHaveLength(1);
+
+    supervisor.stop();
+  });
+
+  it('detaches an authenticated attach when the explicit sign-out marker is durable', async () => {
+    let signedOutAt: number | null = null;
+    const audit = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const relay = await startRelay((socket) => {
+      socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+    });
+    const supervisor = new MachineAttachSupervisor({
+      reconcileIntervalMs: 60_000,
+      readEnabled: () => true,
+      readCredential: () => 'account-token',
+      readSignedOutAt: () => signedOutAt,
+      readInstallId: () => 'install_durable_signout',
+      listRegisteredMachines: async () => [{
+        machineId: 'machine_durable_signout',
+        installId: 'install_durable_signout',
+        name: 'Durable Sign-out Mac',
+        platform: 'darwin',
+        appVersion: '0.1.0',
+      }],
+      createConnector: (machine) => new MachineRelayConnector({
+        machineId: machine.machineId,
+        relayUrl: relay.url,
+        ticketProvider: async () => ticket(machine.machineId),
+      }),
+    });
+
+    supervisor.start();
+    await waitFor(() => relay.connections.length === 1);
+    signedOutAt = Date.now();
+    await supervisor.reconcile();
+    await waitFor(() => relay.server.clients.size === 0);
+
+    expect(audit).toHaveBeenCalledWith(
+      '[connect] signed-out (durable), detaching',
+    );
     supervisor.stop();
   });
 

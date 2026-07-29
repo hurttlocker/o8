@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { readAuthSignedOutAt } from '@/lib/auth/sign-out-marker';
 import { readConnectAttachSetting } from '@/lib/connect/attach-settings';
 import {
   issueMachineRelayTicket,
@@ -27,6 +28,7 @@ export interface MachineAttachSupervisorConfig {
   reconcileIntervalMs?: number;
   readEnabled?: () => boolean;
   readCredential?: () => string | null;
+  readSignedOutAt?: () => number | null;
   readInstallId?: () => string;
   listRegisteredMachines?: (token: string) => Promise<MachineDevice[]>;
   createConnector?: (
@@ -82,15 +84,30 @@ export class MachineAttachSupervisor {
         return;
       }
 
+      const signedOutAt = this.config.readSignedOutAt?.()
+        ?? readAuthSignedOutAt();
+      if (signedOutAt !== null) {
+        if (this.connector) {
+          console.log(`${P} signed-out (durable), detaching`);
+        }
+        this.stopConnector('signed-out-durable');
+        this.noteIdle('signed-out-durable');
+        return;
+      }
+
       const token = this.config.readCredential?.()
         ?? readCachedEntitlement()?.licenseKey?.trim()
         ?? null;
       if (!token) {
-        this.stopConnector('signed-out');
-        this.noteIdle('signed-out');
+        if (this.connector) {
+          this.noteTransientCredentialMiss();
+        } else {
+          this.noteIdle('credential-unavailable');
+        }
         return;
       }
       if (this.connector && this.connectorCredential === token) {
+        this.lastIdleReason = null;
         this.connector.resume?.();
         return;
       }
@@ -131,6 +148,13 @@ export class MachineAttachSupervisor {
     if (this.lastIdleReason === reason) return;
     this.lastIdleReason = reason;
     console.log(`${P} attach idle reason=${reason}`);
+  }
+
+  private noteTransientCredentialMiss(): void {
+    const reason = 'credential-read miss (transient), keeping attach';
+    if (this.lastIdleReason === reason) return;
+    this.lastIdleReason = reason;
+    console.log(`${P} ${reason}`);
   }
 }
 
