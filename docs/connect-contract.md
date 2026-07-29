@@ -243,10 +243,10 @@ An offline machine stays selectable for inspection but cannot accept a prompt; t
 
 ## Open decisions
 
-These product or security choices are outside the approved phase 1a brief and must be decided before the corresponding server work lands:
+These product or security choices are outside the approved phase 1a brief. Status as of 2026-07-29:
 
-1. Paid and team device caps. Only the free cap of three is approved.
-2. Heartbeat cadence and the timeout after which a machine is shown offline.
-3. Whether disconnect hard-deletes the row or retains an audit tombstone. If tombstones are retained, list and cap queries must exclude them.
-4. Relay-ticket signing key ownership and ticket lifetime.
-5. Whether a later CLI release should launch the existing desktop sign-in UI automatically when no cached account credential exists. Phase 1a deliberately asks the operator to use the current sign-in surface rather than creating a new auth path.
+1. **RULED (operator, 2026-07-29): device caps are free 3 / pro 10 / team 25.** Store the cap per plan on the server; the transactional enforcement and `409` body apply identically at every tier.
+2. Heartbeat cadence and offline timeout — proposed default pending phase-1b review: 60s cadence, offline after 3 missed beats (180s).
+3. Disconnect semantics — proposed default pending phase-1b review: retain an audit tombstone; list and cap queries exclude tombstoned rows.
+4. Relay-ticket signing key ownership and ticket lifetime — proposed default pending phase-1b review: license server owns the signing key; 10-minute ticket lifetime.
+5. Auto-launching the desktop sign-in UI from the CLI — deferred; phase 1b keeps the phase 1a behavior (operator uses the existing sign-in surface).
