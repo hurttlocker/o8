@@ -880,27 +880,6 @@ export function useOrchestratorStream(
   }, [connected]);
 
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
-    if (!repoPathRef.current) {
-      // No workspace selected — the orchestrator has nothing to act on. Surface
-      // a guiding notice instead of silently dropping the message: the caller
-      // already cleared the composer, so a bare return makes the message vanish
-      // (the "I typed and nothing happened" fresh-user trap). De-duped so
-      // repeated sends don't stack identical notices.
-      const at = Date.now();
-      setMessages((prev) => (
-        prev.some((m) => m.id.startsWith('orch-no-repo'))
-          ? prev
-          : [...prev, {
-              id: `orch-no-repo-${at}`,
-              role: 'system',
-              text: 'No repo selected yet — the orchestrator works inside a repo. Add one (the “Add a repo” button above, or the project chip below the composer), then send again.',
-              timestamp: at,
-              timestampLabel: formatTimestampLabel(at),
-            }]
-      ));
-      return null;
-    }
-
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
     const thinkingEffort = options?.thinkingEffort;
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;

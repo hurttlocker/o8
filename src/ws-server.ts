@@ -114,6 +114,10 @@ import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchest
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { buildBackendSwitchCarryPrelude } from './lib/orchestrator/backend-switch-carry';
 import { resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import {
+  resolveOrchestratorMessageRepoPath,
+  resolveOrchestratorRepoPath,
+} from './lib/orchestrator/repo-path';
 import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
@@ -830,18 +834,6 @@ async function parkSelfReviewStallForOrchestrator(
       'The lane is awaiting orchestrator attention. Its work was preserved and was not archived.',
     ].join('\n'),
   );
-}
-
-function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
-  const trimmed = repoPath?.trim();
-  if (!trimmed) return null;
-  const home = process.env.HOME ?? homedir();
-  const expanded = trimmed === '~'
-    ? home
-    : trimmed.startsWith('~/') && home
-      ? join(home, trimmed.slice(2))
-      : trimmed;
-  return resolve(expanded);
 }
 
 // ── Types ──
@@ -4021,7 +4013,7 @@ function handleOrchestratorUnsubscribe(client: ClientState, msg: Record<string, 
 }
 
 async function handleOrchestratorSubscribe(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
 
   const requestedBackendId = resolveMsgBackendId(msg);
@@ -4205,7 +4197,7 @@ function sendOrchestratorInterruptAck(client: ClientState, input: {
 }
 
 async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
 
@@ -4283,7 +4275,7 @@ async function handleOrchestratorSendMsgOnce(
   msg: Record<string, unknown>,
   correlationId: string | undefined,
 ) {
-  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
   // The transcript persists the operator's OWN words. `message` may carry
@@ -4952,7 +4944,7 @@ async function handleOrchestratorSendMsgOnce(
 // status to idle the moment they send this message, so the composer unlocks
 // without waiting for the server round-trip.
 function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
   const requestedBackendId = resolveMsgBackendId(msg);
@@ -5006,6 +4998,7 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
 }
 
 function handleOrchestratorUndoSend(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const threadId = resolveMsgThreadId(msg);
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const userMessageId = typeof msg.userMessageId === 'string' ? msg.userMessageId.trim() : '';
@@ -5034,7 +5027,7 @@ function handleOrchestratorUndoSend(client: ClientState, msg: Record<string, unk
     channel: 'orchestrator',
     event: 'undo-ack',
     data: {
-      repoPath: typeof msg.repoPath === 'string' ? msg.repoPath : null,
+      repoPath,
       threadId,
       userMessageId,
       ...orchestratorCommandAckCorrelation(correlationId),
@@ -5043,7 +5036,7 @@ function handleOrchestratorUndoSend(client: ClientState, msg: Record<string, unk
 }
 
 async function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
 
   // Status for the requested backend (#1075) + openclaw agent. The default
@@ -6397,7 +6390,7 @@ const httpServer = createServer((req, res) => {
           registered?: unknown;
           noticeId?: string;
         };
-        const repoPath = normalizeOrchestratorRepoPath(typeof body.repoPath === 'string' ? body.repoPath : null);
+        const repoPath = resolveOrchestratorRepoPath(typeof body.repoPath === 'string' ? body.repoPath : null);
         if (!repoPath) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'repoPath required' }));

@@ -207,3 +207,18 @@
 ## Deviations
 
 - None.
+
+## Orchestrator home mode (#1629)
+
+- Home mode uses `~` only in the desktop client and on the wire; server entry points resolve it to `os.homedir()` before deriving session identity or writing durable thread state.
+
+## Deviations
+
+- Compaction and session reset are HTTP entry points in the current codebase, not WebSocket verbs, so they share the same resolver helper at their route boundaries.
+
+## Verification
+
+- `NODE_ENV=test npm test` passed: 433 files and 2,650 tests; one file and one test skipped.
+- `npx tsc --noEmit`, focused home-mode tests, scoped ESLint, and `npm run rule-check -- --base=main` passed.
+- Stripping the home resolver, client sentinel, and preflight carve-out produced seven expected focused-test failures; restoring them returned the focused suite to green.
+- Browser/UI smoke was intentionally not run per the packet sandbox guidance.

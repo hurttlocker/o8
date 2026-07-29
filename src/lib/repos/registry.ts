@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
 import { readJsonFile, writeJsonFile } from '@/lib/fs/json';
 import type {
   RepoRegistryEntry,
@@ -264,6 +265,9 @@ async function resolveRepoRoot(inputPath: string) {
 }
 
 async function inspectLocalRepo(localPath: string): Promise<ValidatedRepoCandidate> {
+  if (isOrchestratorHomePath(localPath)) {
+    throw new Error('Home mode is not a registered repository.');
+  }
   const { localPath: repoRoot, isGitRepo } = await resolveRepoRoot(localPath);
   const [remoteUrl, defaultBranch, setup] = await Promise.all([
     isGitRepo ? gitValue(repoRoot, ['remote', 'get-url', 'origin']) : null,

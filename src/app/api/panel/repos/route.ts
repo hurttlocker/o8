@@ -18,6 +18,7 @@ import { removeRepoFromPool } from '@/lib/repos/remove';
 import { enrichRepoReadiness, enrichRepoReadinessList, invalidateRepoReadiness } from '@/lib/repos/readiness';
 import { repointRepoPathReferences } from '@/lib/repos/path-repoint';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
+import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
 import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
 import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
 import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
@@ -208,6 +209,9 @@ export async function POST(request: Request) {
         if (!('localPath' in body) || !body.localPath?.trim()) {
           return NextResponse.json({ error: 'localPath is required.' }, { status: 400 });
         }
+        if (isOrchestratorHomePath(body.localPath)) {
+          return NextResponse.json({ error: 'Home mode is not a registered repository.' }, { status: 400 });
+        }
         const repo = await enrichRepoReadiness(await addRepo(body.localPath));
         // Auto-scan skeleton for newly added repo + start change polling
         triggerScan(repo.localPath);
@@ -241,6 +245,9 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: 'localPath must be a Git repository folder.' }, { status: 400 });
         }
         if ('localPath' in body && body.localPath !== undefined) {
+          if (isOrchestratorHomePath(body.localPath)) {
+            return NextResponse.json({ error: 'Home mode is not a registered repository.' }, { status: 400 });
+          }
           try {
             assertOrchestratorRepoPath(body.localPath);
           } catch (error) {
