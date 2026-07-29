@@ -54,6 +54,7 @@ if (process.argv[2] === '--verify-native-bundle') {
   }
 }
 
+
 // The authoring toolchain stays pinned to Node 22 via package.json + .nvmrc.
 // Runtime ABI compatibility is independent of this guard: tauri-export now
 // downloads and gates the Node 22 + 24 better-sqlite3 prebuilds explicitly.
@@ -78,6 +79,17 @@ if (process.platform === 'darwin') {
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const tag = `v${version}`;
+
+// Manual community-announce path: preview prints, announce posts. For backfill
+// (a release that shipped before the webhook existed) or a re-run after a
+// Discord hiccup. The full ship flow calls announceRelease() automatically.
+if (process.argv[2] === '--announce-preview' || process.argv[2] === '--announce') {
+  console.log(composeReleaseAnnouncement());
+  if (process.argv[2] === '--announce') {
+    await announceRelease();
+  }
+  process.exit(0);
+}
 
 try {
   const headTag = execFileSync('git', ['describe', '--tags', '--exact-match', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -309,6 +321,14 @@ try {
       console.error(`[release] re-run later with: npm run publish:fixed`);
     }
   }
+
+  // Community #releases announce rides the mirror for the same reason: the
+  // mirror is what makes the update installable. Non-fatal, same as #fixed.
+  try {
+    await announceRelease();
+  } catch (err) {
+    console.error(`[release] #releases announce failed (release is fine):`, err?.message ?? err);
+  }
 } catch (err) {
   console.error(`[release-mirror] failed to mirror ${tag} to ${PUBLIC_MIRROR}:`, err?.message ?? err);
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
@@ -327,3 +347,76 @@ try {
 
 console.log(`[release] the installed o8.app will pick up the update on next launch`);
 console.log(`[release] (or within 30 min via the UpdateBanner poll).`);
+
+/** env wins; else the gitignored o8.release.json — never a literal in source. */
+function resolveReleasesWebhook() {
+  const fromEnv = process.env.O8_RELEASES_WEBHOOK_URL?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const cfg = JSON.parse(readFileSync(join(root, 'o8.release.json'), 'utf8'));
+    const url = typeof cfg.releasesWebhookUrl === 'string' ? cfg.releasesWebhookUrl.trim() : '';
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bullets are the release range's feat/perf/design subjects — the same class
+ * the public changelog ships — scrubbed against the blocklist parsed out of
+ * sync-public-changelog.sh so there is no third hand-maintained term list.
+ * A subject that trips a term is dropped, never rewritten. When the sync
+ * script retires (repo public), the blocklist is empty and subjects post as-is.
+ */
+function composeReleaseAnnouncement() {
+  let blocklist = [];
+  try {
+    const sync = readFileSync(join(root, 'scripts/sync-public-changelog.sh'), 'utf8');
+    const inner = sync.match(/^BLOCKLIST=\((.*)\)/m)?.[1] ?? '';
+    blocklist = [...inner.matchAll(/"([^"]+)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
+  } catch {}
+  let subjects = [];
+  try {
+    subjects = execFileSync('git', ['log', '--format=%s', '--no-merges', releaseRange(tag)], { encoding: 'utf8' })
+      .split('\n')
+      .filter((s) => /^(feat|perf|design)(\(.*\))?:/.test(s));
+  } catch {}
+  const bullets = subjects
+    .map((s) => s
+      .replace(/^(feat|perf|design)(\([^)]*\))?:\s*/, '')
+      .replace(/\s*\(#\d+\)/g, '')
+      .replace(/\s*#\d+/g, '')
+      // A trailing parenthetical in a subject is internal context
+      // ("(t3-connect answer)", codenames) — never community-facing.
+      .replace(/\s*\([^)]*\)\s*$/, '')
+      .trim())
+    .filter((s) => s && !blocklist.some((term) => s.toLowerCase().includes(term.toLowerCase())))
+    .slice(0, 6)
+    .map((s) => `- ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
+  const date = new Date().toISOString().slice(0, 10);
+  return [
+    `**o8 ${tag}** — ${date}`,
+    '',
+    ...(bullets.length ? bullets : ['- Fixes and maintenance.']),
+    '',
+    `Update: relaunch o8 (auto-updates within 30 min), or grab it fresh: https://github.com/${PUBLIC_MIRROR}/releases/tag/${tag}`,
+  ].join('\n');
+}
+
+async function announceRelease() {
+  const webhookUrl = resolveReleasesWebhook();
+  if (!webhookUrl) {
+    console.log('[release] no #releases webhook configured — skipping community announce');
+    return;
+  }
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'o8', content: composeReleaseAnnouncement() }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Discord returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 180)}` : ''}`);
+  }
+  console.log('[release] announced in community #releases');
+}
