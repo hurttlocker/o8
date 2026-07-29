@@ -36,7 +36,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const DRY_RUN = process.argv.includes('--dry-run');
-const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1511754310575460672';
+const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1531943963295219752';
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 20; // 2000 messages — far past anything we'd need to backfill
 
