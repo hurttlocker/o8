@@ -28,9 +28,15 @@ export interface RegisterMachineResponse {
   devices: MachineDevice[];
 }
 
+export interface MachineRelayTicket {
+  ticket: string;
+  expiresAt: string;
+}
+
 export type MachineRegistryErrorCode =
   | 'auth_required'
   | 'device_cap'
+  | 'not_registered'
   | 'unsupported'
   | 'invalid_response'
   | 'network_error'
@@ -101,6 +107,7 @@ async function request(
   path: string,
   init: RequestInit,
   options: MachineRegistryClientOptions,
+  behavior: { unsupportedOnNotFound?: boolean } = {},
 ): Promise<{ response: Response; payload: unknown } | MachineRegistryResult<never>> {
   const token = options.token.trim();
   if (!token) {
@@ -127,7 +134,10 @@ async function request(
       signal: AbortSignal.timeout(timeoutMs),
     });
     const payload = await readJson(response);
-    if (response.status === 404 || response.status === 501) {
+    if (
+      response.status === 501
+      || (response.status === 404 && behavior.unsupportedOnNotFound !== false)
+    ) {
       return {
         ok: false,
         error: {
@@ -261,4 +271,53 @@ export async function deleteMachine(
   if ('ok' in result) return result;
   if (!result.response.ok) return genericFailure(result.response, result.payload);
   return { ok: true, data: null };
+}
+
+export async function issueMachineRelayTicket(
+  machineId: string,
+  options: MachineRegistryClientOptions,
+): Promise<MachineRegistryResult<MachineRelayTicket>> {
+  const result = await request(
+    `/machines/${encodeURIComponent(machineId)}/relay-ticket`,
+    { method: 'POST' },
+    options,
+    { unsupportedOnNotFound: false },
+  );
+  if ('ok' in result) return result;
+  if (result.response.status === 404) {
+    return {
+      ok: false,
+      error: {
+        code: 'not_registered',
+        status: 404,
+        message: 'This o8 installation is not registered as a connected machine.',
+      },
+    };
+  }
+  if (!result.response.ok) return genericFailure(result.response, result.payload);
+
+  const record = asRecord(result.payload);
+  if (
+    !record
+    || typeof record.ticket !== 'string'
+    || !record.ticket.trim()
+    || typeof record.expiresAt !== 'string'
+    || !Number.isFinite(Date.parse(record.expiresAt))
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: 'invalid_response',
+        status: result.response.status,
+        message: 'The machine registry returned an invalid relay ticket response.',
+      },
+    };
+  }
+  return {
+    ok: true,
+    data: {
+      ticket: record.ticket,
+      expiresAt: record.expiresAt,
+    },
+  };
 }

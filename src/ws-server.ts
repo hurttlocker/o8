@@ -193,6 +193,10 @@ import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
 import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
 import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
+import {
+  startMachineAttachSupervisor,
+  stopMachineAttachSupervisor,
+} from './lib/connect/machine-attach-supervisor';
 import { getServerIdentity } from './lib/mobile/e2ee-identity';
 import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
@@ -7427,6 +7431,7 @@ async function recoverFromPortInUse(): Promise<void> {
         console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
         wsWatchdog.start();
         startRelayConnectorIfEnabled();
+        startMachineAttachSupervisor();
       });
     }, 500);
   } catch (error) {
@@ -7605,6 +7610,7 @@ async function bootstrapWsServer() {
     // to the relay and bridges relayed phones into THIS ws-server. A failure here
     // NEVER affects the LAN path — the call is self-guarded and returns null.
     startRelayConnectorIfEnabled();
+    startMachineAttachSupervisor();
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
@@ -8099,6 +8105,7 @@ function shutdown(signal: string) {
   stopDocWatcherLoop?.();
   stopDocWatcherLoop = null;
   stopRelayConnector();
+  stopMachineAttachSupervisor();
   stopWorktreeReaper();
   stopLaneZombieReaper();
   stopDashSessionGc();

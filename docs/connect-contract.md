@@ -239,6 +239,15 @@ The prompt-launch path must:
 4. Forward the prompt to the selected machine's existing local orchestrator API through the relay.
 5. Return the existing thread/turn identity so the website can show progress without inventing a second orchestration model.
 
+The Cut 2 desktop mux carries the existing generic `http-req` frames and
+replays them through the local operator gate. Phase 3 can therefore use
+`GET /api/panel/repos` for repository discovery,
+`POST /api/orchestrator/spawn-prompt` for prompt submission, and
+`GET /api/orchestrator/lane-events` plus
+`GET /api/mobile/orchestrator/threads` for progress and thread summaries. The
+machine connector replaces any web-supplied authorization with the local
+operator token before replay, so these routes do not gain a second auth path.
+
 An offline machine stays selectable for inspection but cannot accept a prompt; the website must show the server-derived last-seen state and a clear offline result.
 
 ## Open decisions

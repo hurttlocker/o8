@@ -11,6 +11,7 @@ import {
   type MachineRegistryClientOptions,
   type MachineRegistryError,
 } from '@/lib/connect/machine-registry';
+import { writeConnectAttachEnabled } from '@/lib/connect/attach-settings';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
 
@@ -63,6 +64,16 @@ function registryFailure(error: MachineRegistryError) {
 
 function currentMachine(devices: MachineDevice[], installId: string): MachineDevice | null {
   return devices.find((device) => device.installId === installId) ?? null;
+}
+
+function disableAttachAfterDisconnect(): void {
+  try {
+    writeConnectAttachEnabled(false);
+  } catch (error) {
+    console.warn(
+      `[connect] could not persist attach-off after disconnect: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -130,6 +141,7 @@ export async function DELETE(request: Request) {
     if (!listed.ok) return registryFailure(listed.error);
     const machine = currentMachine(listed.data, installId);
     if (!machine) {
+      disableAttachAfterDisconnect();
       return NextResponse.json({
         ok: true,
         machineId: null,
@@ -140,6 +152,7 @@ export async function DELETE(request: Request) {
 
     const deleted = await deleteMachine(machine.machineId, options);
     if (!deleted.ok) return registryFailure(deleted.error);
+    disableAttachAfterDisconnect();
     return NextResponse.json({
       ok: true,
       machineId: machine.machineId,
