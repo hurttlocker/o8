@@ -55,7 +55,12 @@ interface ToolResultEvent {
   toolCallId?: string;
 }
 
-type StreamPayload = ContentEvent | ThinkingEvent | ToolUseEvent | ToolResultEvent;
+type StreamErrorEvent = {
+  type: 'error';
+  text: string;
+};
+
+type StreamPayload = ContentEvent | ThinkingEvent | ToolUseEvent | ToolResultEvent | StreamErrorEvent;
 
 export async function readMobileProxyError(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { error?: unknown } | null;
@@ -74,6 +79,14 @@ function normalizeStreamPayload(payload: unknown): StreamPayload | null {
 
   if (payload.type === 'thinking' && typeof payload.text === 'string') {
     return { type: 'thinking', text: payload.text };
+  }
+
+  // The proxy emits the same reason under `message` and `text`; dropping the event
+  // turned every runtime failure into a bare "No response received."
+  if (payload.type === 'error') {
+    const text = readString(payload.message) ?? readString(payload.text);
+    if (!text) return null;
+    return { type: 'error', text };
   }
 
   if (payload.type === 'tool_use') {
@@ -358,10 +371,16 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
         let thinkingText = '';
         let contentText = '';
         let sawContent = false;
+        let streamError: string | null = null;
         let nextToolCallIndex = 0;
         const toolCalls: MobileChatToolCall[] = [];
 
         const applyUpdate = (update: StreamPayload) => {
+          if (update.type === 'error') {
+            streamError = update.text;
+            return false;
+          }
+
           if (update.type === 'thinking') {
             if (!update.text) return false;
             thinkingText += update.text;
@@ -403,6 +422,11 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
         for (const update of parsed.updates) {
           if (!applyUpdate(update)) continue;
           yield { content: buildAssistantSnapshot(thinkingText, toolCalls, contentText) };
+        }
+
+        if (streamError) {
+          yield createAssistantError(streamError, streamError);
+          return;
         }
 
         if (!sawContent && toolCalls.length === 0) {

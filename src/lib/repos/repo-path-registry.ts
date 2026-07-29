@@ -17,7 +17,7 @@ type RepoRegistryReadResult =
   | { ok: true; repos: RegisteredRepoPathEntry[] }
   | { ok: false; message: string };
 
-type RepoRegistryResolveResult =
+export type RepoRegistryResolveResult =
   | { ok: true; repo: RegisteredRepoPathEntry; repoRoot: string }
   | { ok: false; message: string; status: number };
 
@@ -140,4 +140,40 @@ export async function resolveRepoPathFromRegistry(requestedPath: string): Promis
     repo,
     repoRoot: normalizedRequestedPath,
   };
+}
+
+function lastOpenedMs(repo: RegisteredRepoPathEntry): number {
+  const raw = typeof repo.lastOpenedAt === 'string' ? Date.parse(repo.lastOpenedAt) : NaN;
+  return Number.isFinite(raw) ? raw : 0;
+}
+
+/**
+ * Resolve the "Current project" selection — surfaces that offer it (mobile repo picker,
+ * web-machine console) send no repoPath at all, so the server has to name one. Falling
+ * back to `process.cwd()` silently drops CLI runtimes outside a git repo, where they
+ * refuse to run and exit with no output.
+ */
+export async function resolveCurrentProjectRepo(): Promise<RepoRegistryResolveResult> {
+  const registry = await readRepoPathRegistry();
+  if (!registry.ok) {
+    return { ok: false, message: registry.message, status: 500 };
+  }
+
+  const present = registry.repos.filter((repo) => existsSync(repo.path));
+  if (present.length === 0) {
+    return {
+      ok: false,
+      message: registry.repos.length === 0
+        ? `No repository is registered on this desk — add one in o8, or pick a repo instead of "Current project".`
+        : `No registered repository exists on disk. Check ${REPO_REGISTRY_DISPLAY_PATH}.`,
+      status: 400,
+    };
+  }
+
+  const newest = present.reduce(
+    (best, repo) => (lastOpenedMs(repo) > lastOpenedMs(best) ? repo : best),
+    present[0],
+  );
+
+  return { ok: true, repo: newest, repoRoot: newest.path };
 }
