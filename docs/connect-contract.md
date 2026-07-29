@@ -1,0 +1,252 @@
+# o8 connect contract
+
+This document is the implementation contract for one-account, multi-machine o8 connectivity. Phase 1a is the o8 client in this repository. Phase 1b adds the license-server registry and relay support. Phase 2 adds the web machine switcher and remote prompt launch.
+
+## Product boundary
+
+- The free plan may have at most three connected machines.
+- A machine is the stable o8 install identified by `getOrCreateInstallId()`, not a repository, thread, hostname, browser, or mobile pairing.
+- The registry is account-scoped. A machine registered on one account must never appear in another account's list.
+- Registration uses the existing o8 account and entitlement credentials. It must not introduce a separate user account or authentication flow.
+- Phase 1a does not claim that the machine is remotely reachable. Registry membership and relay presence are separate states.
+
+## Phase 1a client behavior
+
+`o8 connect` calls the local operator-gated `/api/panel/connect` route. The route reuses the existing desktop authentication artifacts in this order:
+
+1. The existing `x-clerk-session-token` transport, when the desktop caller supplies it.
+2. The signed license token already cached by entitlement sync.
+
+The local ws-token authenticates the CLI to the local o8 app and is never forwarded to the license server. A dispatched worker token cannot reach this panel route because it is absent from the middleware worker capability list.
+
+If neither account credential exists, the command tells the operator to sign in through the existing desktop flow and retry. Phase 1a does not create a second CLI-only device flow.
+
+The machine identity sent to the registry is:
+
+```ts
+{
+  installId: getOrCreateInstallId(),
+  name: hostname(),
+  platform: platform(),
+  appVersion: packageJson.version
+}
+```
+
+`o8 connect --status` lists the account's machines and identifies the current machine by matching `installId`. `o8 disconnect` looks up that same current install and deletes its registry row. Disconnect is a successful no-op when the current install is not registered.
+
+## License-server API
+
+The base URL is the existing `proxyBaseUrl()` value used by managed inference and entitlement sync. Every endpoint accepts:
+
+```http
+Authorization: Bearer <clerk-session-or-signed-license-token>
+Accept: application/json
+```
+
+The server must resolve the bearer to one account:
+
+- Verify a Clerk session with the same Clerk/JWKS path already used by account entitlement endpoints.
+- Verify a signed license token with the existing license signing contract.
+- A license whose subject is an account subject resolves directly to that account.
+- An install-scoped license resolves through the existing install-to-account link created by `/account/link-install`.
+- An unlinked install token must fail with `403` and `{ "reason": "account_link_required" }`; it must not create an ownerless machine record.
+
+### Device representation
+
+All list and conflict responses use this shape:
+
+```json
+{
+  "machineId": "machine_01...",
+  "installId": "stable-install-id",
+  "name": "Studio Mac",
+  "platform": "darwin",
+  "appVersion": "0.1.631",
+  "createdAt": "2026-07-29T10:00:00.000Z",
+  "lastSeenAt": "2026-07-29T10:00:00.000Z"
+}
+```
+
+`machineId` is the server-generated public identifier. The server never exposes its internal account key.
+
+### Register a machine
+
+```http
+POST /machines/register
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "installId": "stable-install-id",
+  "name": "Studio Mac",
+  "platform": "darwin",
+  "appVersion": "0.1.631"
+}
+```
+
+Success is `200`:
+
+```json
+{
+  "machineId": "machine_01...",
+  "deviceCap": 3,
+  "devices": [
+    {
+      "machineId": "machine_01...",
+      "installId": "stable-install-id",
+      "name": "Studio Mac",
+      "platform": "darwin",
+      "appVersion": "0.1.631",
+      "createdAt": "2026-07-29T10:00:00.000Z",
+      "lastSeenAt": "2026-07-29T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+Registration is an idempotent upsert on `(accountId, installId)`. Re-registering an existing install updates its name, platform, app version, and last-seen time without consuming another device slot or changing its `machineId`.
+
+The free-plan cap response is `409`:
+
+```json
+{
+  "reason": "device_cap",
+  "deviceCap": 3,
+  "devices": [
+    {
+      "machineId": "machine_01...",
+      "installId": "stable-install-id",
+      "name": "Studio Mac",
+      "platform": "darwin",
+      "appVersion": "0.1.631",
+      "createdAt": "2026-07-29T10:00:00.000Z",
+      "lastSeenAt": "2026-07-29T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+Cap enforcement must be transactional. The server first checks for the existing `(accountId, installId)` row, then locks or serializes the account's active-device count before inserting a new row. Two concurrent fourth-device registrations must not both succeed.
+
+Other responses:
+
+- `400` for an invalid body.
+- `401` for a missing, expired, or invalid bearer.
+- `403` with `reason: "account_link_required"` when an install-scoped token is valid but not linked to an account.
+- `404` or `501` while the registry endpoint is not deployed. Phase 1a renders both as “The o8 license server does not support machine registry yet.”
+
+### List machines
+
+```http
+GET /machines
+```
+
+Success is `200` with a JSON array of device representations:
+
+```json
+[
+  {
+    "machineId": "machine_01...",
+    "installId": "stable-install-id",
+    "name": "Studio Mac",
+    "platform": "darwin",
+    "appVersion": "0.1.631",
+    "createdAt": "2026-07-29T10:00:00.000Z",
+    "lastSeenAt": "2026-07-29T10:00:00.000Z"
+  }
+]
+```
+
+An account with no registered machines receives `200` and `[]`.
+
+### Disconnect a machine
+
+```http
+DELETE /machines/:machineId
+```
+
+Success is `204` with no response body. The endpoint is account-scoped and idempotent: deleting an absent machine owned by the authenticated account also returns `204`. A caller can never delete a machine owned by another account.
+
+## Phase 1b server work
+
+The license server needs a machine table with these logical fields:
+
+```text
+machine_id       server-generated public id, primary key
+account_id       authenticated owner, required
+install_id       stable o8 install id, required
+name             last advertised hostname/default name, required
+platform         last advertised platform, required
+app_version      last advertised o8 version, required
+created_at       first successful registration time, required
+last_seen_at     most recent authenticated registration or heartbeat, required
+```
+
+Add a unique constraint on `(account_id, install_id)` and an index supporting account-scoped list and active-count queries. All reads, updates, and deletes must include the authenticated `account_id`; knowing a `machineId` is not authorization.
+
+The server ticket includes:
+
+1. Implement the three endpoints and response shapes above.
+2. Resolve both existing Clerk session and signed license bearers to the same account identity.
+3. Enforce the free-plan cap of three transactionally, with idempotent re-registration.
+4. Add authenticated last-seen heartbeats:
+
+   ```http
+   POST /machines/:machineId/heartbeat
+   Authorization: Bearer <machine-scoped-relay-ticket>
+   ```
+
+   Success is `204`. The server derives the account and machine from the verified ticket, ignores client-supplied timestamps, and updates `last_seen_at` to server time.
+
+5. Add contract tests for cross-account isolation, concurrent cap enforcement, idempotent registration, heartbeat ownership, expired credentials, and the exact `409` body.
+
+## Relay seam
+
+The current relay cannot establish the required machine-scoped session without server changes. The Mac connector authenticates to `/mac` with the cached plan JWT and advertises only `x-o8-routing-id`. The relay stores one Mac socket per routing ID, has no `machineId` or account-machine membership, and currently gates off-network relay behind the paid `relay.offNetwork` entitlement. Wiring the phase 1a CLI to that socket would falsely report multi-machine remote reachability.
+
+Phase 1b must add the following relay contract:
+
+1. The license server issues a short-lived machine-scoped relay ticket for an authenticated, registered machine:
+
+   ```http
+   POST /machines/:machineId/relay-ticket
+   Authorization: Bearer <clerk-session-or-signed-license-token>
+   ```
+
+   The signed ticket contains `accountId`, `machineId`, `installId`, `aud: "o8-relay"`, and an expiry. Ticket issuance checks that the machine belongs to the authenticated account.
+
+2. The Mac relay handshake sends the relay ticket and `x-o8-machine-id`. The relay verifies the ticket signature, audience, expiry, and header/claim equality before accepting the socket.
+3. The relay indexes live Mac sockets by `machineId` and account, permits simultaneous sockets for different machines on the same account, and keeps at most one live socket for a given `machineId`.
+4. Existing routing-ID mobile sessions remain isolated from this new account-machine routing path. The new path must not weaken the current pairing or per-device bearer checks.
+5. The relay emits authenticated heartbeats to the license-server heartbeat endpoint and maintains online/offline presence for the web switcher. Client timestamps are never authoritative.
+6. The free plan is explicitly authorized for the connect channel up to its three registered machines. This must be a separate entitlement decision from the existing paid mobile `relay.offNetwork` flag.
+7. A web relay session may address only a `machineId` returned for its authenticated account. Both the web edge and relay enforce that ownership check.
+
+No relay client or relay-server code is part of phase 1a because none of those invariants exist in the current protocol.
+
+## Phase 2 web machine switcher
+
+The authenticated o8 website reads `GET /machines` with the existing Clerk session and shows each registered machine with its name, platform, app version, online state, and last-seen time. The selected machine ID scopes every remote request.
+
+The prompt-launch path must:
+
+1. Select a machine owned by the signed-in account.
+2. Fetch that machine's reachable repositories through the authenticated machine relay session.
+3. Let the operator select a repository and submit a prompt.
+4. Forward the prompt to the selected machine's existing local orchestrator API through the relay.
+5. Return the existing thread/turn identity so the website can show progress without inventing a second orchestration model.
+
+An offline machine stays selectable for inspection but cannot accept a prompt; the website must show the server-derived last-seen state and a clear offline result.
+
+## Open decisions
+
+These product or security choices are outside the approved phase 1a brief and must be decided before the corresponding server work lands:
+
+1. Paid and team device caps. Only the free cap of three is approved.
+2. Heartbeat cadence and the timeout after which a machine is shown offline.
+3. Whether disconnect hard-deletes the row or retains an audit tombstone. If tombstones are retained, list and cap queries must exclude them.
+4. Relay-ticket signing key ownership and ticket lifetime.
+5. Whether a later CLI release should launch the existing desktop sign-in UI automatically when no cached account credential exists. Phase 1a deliberately asks the operator to use the current sign-in surface rather than creating a new auth path.

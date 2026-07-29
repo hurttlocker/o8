@@ -19,6 +19,7 @@
 import { runAsk } from './commands/ask.js';
 import { runApp } from './commands/app.js';
 import { runBrowser } from './commands/browser.js';
+import { runConnect } from './commands/connect.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
 import { runInbox } from './commands/inbox.js';
@@ -125,6 +126,8 @@ commands:
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
+  connect [--status]   register this signed-in machine, or list connected machines
+  disconnect           remove this machine from the operator's connected devices
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   run stop <runId>     stop a managed run from o8 run --list
@@ -212,6 +215,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runDoctor(args.mode, args.rest);
     case 'status':
       return runStatus(args.mode);
+    case 'connect':
+      return runConnect(args.mode, 'connect', secondary ? [secondary, ...args.rest] : args.rest);
+    case 'disconnect':
+      return runConnect(args.mode, 'disconnect', secondary ? [secondary, ...args.rest] : args.rest);
     case 'run':
       return runRun(args.mode, args.rest);
     case 'ask':
