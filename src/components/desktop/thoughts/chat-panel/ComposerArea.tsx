@@ -12,6 +12,8 @@ import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDe
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
 import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
 import { registerComposerCenter } from '../../composer-center-registry';
+import { PromptStashRow } from '../PromptStashRow';
+import { stashPrompt, type PromptStashContext } from '@/lib/orchestrator/prompt-stash';
 
 interface ComposerAreaProps {
   activeComposer?: boolean;
@@ -73,6 +75,7 @@ interface ComposerAreaProps {
   /** ⌘⏎ or Return while busy routes through the host send buffer. */
   onSteer?: () => void;
   sendBufferStatus?: React.ReactNode;
+  promptStash?: PromptStashContext & { onRestore: (text: string) => void };
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -127,6 +130,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   composerLeadingExtras,
   onSteer,
   sendBufferStatus,
+  promptStash,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -315,6 +319,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       // fades behind it. (2026-07-02)
       background: 'transparent',
     }}>
+      {promptStash ? <PromptStashRow onRestore={promptStash.onRestore} /> : null}
       {isOrchestratorMode ? (
         <ComposerStatusBar
           displayWaiting={displayWaiting}
@@ -527,6 +532,26 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
             onKeyDown={(event) => {
+              if (
+                promptStash
+                && event.key.toLowerCase() === 's'
+                && event.metaKey
+                && event.shiftKey
+                && !event.ctrlKey
+                && !event.altKey
+                && input.trim().length > 0
+              ) {
+                event.preventDefault();
+                const entry = stashPrompt({
+                  text: input,
+                  repoPath: promptStash.repoPath,
+                  threadId: promptStash.threadId,
+                });
+                if (!entry) return;
+                updateInput('');
+                event.currentTarget.style.height = 'auto';
+                return;
+              }
               if (slashSuggestions.length > 0) {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault();
