@@ -14,7 +14,29 @@
  * 3. localStorage — persisted from an earlier pairing.
  */
 
+import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
+
 const STORAGE_KEY = 'o8:mobile-ws-token';
+
+function scrubHashToken(): void {
+  try {
+    const hash = window.location.hash.startsWith('#')
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+    const params = new URLSearchParams(hash);
+    if (!params.has('tk')) return;
+    params.delete('tk');
+    const remainingHash = params.toString();
+    const cleanedHash = remainingHash ? `#${remainingHash}` : '';
+    window.history.replaceState(
+      window.history.state,
+      '',
+      window.location.pathname + window.location.search + cleanedHash,
+    );
+  } catch {
+    // A malformed fragment cannot grant web-machine access.
+  }
+}
 
 function captureHashToken(): string | null {
   try {
@@ -46,6 +68,10 @@ function captureHashToken(): string | null {
 
 export function getMobileWsToken(): string {
   if (typeof window === 'undefined' || typeof document === 'undefined') return '';
+  if (isWebMachineBrowserSurface()) {
+    scrubHashToken();
+    return '';
+  }
   const fromHash = captureHashToken();
   if (fromHash) return fromHash;
   const fromMeta = document.querySelector('meta[name="ws-token"]')?.getAttribute('content');

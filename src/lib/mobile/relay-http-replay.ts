@@ -6,6 +6,9 @@ import {
   type HttpReqFrame,
   type RelayHttpRequestRegistry,
 } from './relay-connector-protocol';
+import {
+  O8_WEB_MACHINE_SURFACE,
+} from '@/lib/connect/web-machine-surface';
 
 export interface RelayHttpReplayOptions {
   sid: string;
@@ -22,6 +25,8 @@ export interface RelayHttpReplayOptions {
    * replaces any authorization sent by the remote web client.
    */
   authorizationOverride?: string;
+  relaySurface?: typeof O8_WEB_MACHINE_SURFACE;
+  blockedResponseValues?: readonly string[];
   fetchImpl?: typeof fetch;
 }
 
@@ -35,7 +40,9 @@ export async function replayRelayHttpRequest(options: RelayHttpReplayOptions): P
   const rid = typeof req.rid === 'string' && req.rid ? req.rid : null;
   if (!rid) return;
 
-  const plan = buildHttpReplay(req, options.apiBase);
+  const plan = buildHttpReplay(req, options.apiBase, {
+    relaySurface: options.relaySurface,
+  });
   if (!plan.ok) {
     options.send({ t: 'http-res', rid, status: plan.status, error: plan.error, bodyB64: '' });
     return;
@@ -59,6 +66,17 @@ export async function replayRelayHttpRequest(options: RelayHttpReplayOptions): P
     });
     const buffer = Buffer.from(await response.arrayBuffer());
     if (controller.signal.aborted || !options.isStreamActive()) return;
+    if (containsBlockedResponseValue(buffer, options.blockedResponseValues)) {
+      options.send({
+        t: 'http-res',
+        rid,
+        status: 502,
+        error: 'local_credential_exposure_blocked',
+        bodyB64: '',
+        last: true,
+      });
+      return;
+    }
     if (buffer.length > options.maxTunnelBytes) {
       options.send({
         t: 'http-res',
@@ -75,7 +93,7 @@ export async function replayRelayHttpRequest(options: RelayHttpReplayOptions): P
       t: 'http-res',
       rid,
       status: response.status,
-      headers: subsetResponseHeaders(response.headers),
+      headers: subsetResponseHeaders(response.headers, buffer.length),
       bodyB64: chunks[0] ?? '',
       last: chunks.length <= 1,
     });
@@ -114,11 +132,31 @@ export async function replayRelayHttpRequest(options: RelayHttpReplayOptions): P
   }
 }
 
-function subsetResponseHeaders(headers: Headers): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const key of ['content-type', 'etag', 'cache-control', 'content-language']) {
+function subsetResponseHeaders(headers: Headers, decodedLength: number): Record<string, string> {
+  const result: Record<string, string> = {
+    'content-length': String(decodedLength),
+  };
+  for (const key of [
+    'accept-ranges',
+    'cache-control',
+    'content-language',
+    'content-range',
+    'content-type',
+    'etag',
+    'last-modified',
+    'vary',
+  ]) {
     const value = headers.get(key);
     if (value) result[key] = value;
   }
   return result;
+}
+
+function containsBlockedResponseValue(
+  body: Buffer,
+  blockedValues: readonly string[] | undefined,
+): boolean {
+  return blockedValues?.some((value) => (
+    value.length > 0 && body.includes(Buffer.from(value, 'utf8'))
+  )) ?? false;
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import { mobileFontFamily } from './mobile-approvals-shared';
 
 type MobileAccessState = 'checking' | 'paired' | 'unpaired';
@@ -12,7 +13,14 @@ export function MobileAccessBoundary({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     queueMicrotask(() => {
-      if (!cancelled) setState(getMobileWsToken() ? 'paired' : 'unpaired');
+      if (!cancelled) {
+        const token = getMobileWsToken();
+        setState(
+          isWebMachineBrowserSurface() || token
+            ? 'paired'
+            : 'unpaired',
+        );
+      }
     });
     return () => {
       cancelled = true;

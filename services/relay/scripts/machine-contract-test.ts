@@ -66,6 +66,7 @@ async function main(): Promise<void> {
   const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const heartbeatRequests: Array<{ path: string; authorization: string }> = [];
+  let ownerAllowed = true;
 
   const licenseClient = createLicenseServerClient({
     baseUrl: 'https://license.test',
@@ -73,9 +74,11 @@ async function main(): Promise<void> {
       const url = new URL(String(input));
       const authorization = new Headers(init?.headers).get('authorization') ?? '';
       if (init?.method === 'GET' && url.pathname === '/machines') {
-        const devices = authorization === 'Bearer web-account-a'
+        const devices = authorization === 'Bearer web-account-a' && ownerAllowed
           ? [{ machineId: 'machine-a' }]
-          : [{ machineId: 'machine-b' }];
+          : authorization === 'Bearer web-account-b'
+            ? [{ machineId: 'machine-b' }]
+            : [];
         return Response.json(devices);
       }
       if (init?.method === 'POST' && url.pathname === '/machines/machine-a/heartbeat') {
@@ -177,7 +180,43 @@ async function main(): Promise<void> {
   console.log('  PASS: server-verified ownership admits the web machine session');
 
   owner.finish();
+  assert.equal(
+    machine.sent.some((frame) => frame.includes('"mux-close"')),
+    true,
+  );
+  assert.equal(relay.stats().webMachineSessions, 0);
+  console.log('  PASS: closing the web edge tears down its machine mux stream');
+
+  const reconnect = new FakeSocket();
+  await relay.onWebMachineConnected(
+    socket(reconnect),
+    'machine-a',
+    request({ authorization: 'Bearer web-account-a' }),
+  );
+  assert.equal(reconnect.closed, null);
+  assert.equal(relay.stats().webMachineSessions, 1);
+
   machine.finish();
+  assert.deepEqual(reconnect.closed, { code: 1012, reason: 'machine_disconnected' });
+  assert.equal(
+    reconnect.sent.some((frame) => frame.includes('"machine":"down"')),
+    true,
+  );
+  reconnect.finish();
+  assert.equal(relay.stats().webMachineSessions, 0);
+  console.log('  PASS: a machine drop closes every web stream after presence-down');
+
+  ownerAllowed = false;
+  const staleOwner = new FakeSocket();
+  await relay.onWebMachineConnected(
+    socket(staleOwner),
+    'machine-a',
+    request({ authorization: 'Bearer web-account-a' }),
+  );
+  assert.equal(staleOwner.closed?.reason, 'machine_not_owned');
+  assert.equal(relay.stats().webMachineSessions, 0);
+  console.log('  PASS: every reconnect rechecks current server-side ownership');
+
   relay.stop();
 
   console.log('\n[relay machine contract-test] OK\n');

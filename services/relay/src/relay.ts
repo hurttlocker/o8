@@ -379,6 +379,7 @@ export class RelayServer {
     for (const session of this.machineRouting.webSessionsFor(machineId)) {
       session.ready = false;
       this.webMachineSend(session.socket, { t: 'presence', machine: 'down' });
+      safeClose(session.socket, 1012, 'machine_disconnected');
     }
   }
 

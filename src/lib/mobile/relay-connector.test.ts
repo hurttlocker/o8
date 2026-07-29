@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 
 import {
+  O8_RELAY_SURFACE_HEADER,
+  O8_WEB_MACHINE_SURFACE,
+} from '@/lib/connect/web-machine-surface';
+import {
   base58Encode,
   buildHttpReplay,
   chunkBase64,
@@ -161,6 +165,18 @@ describe('buildHttpReplay — non-loopback marker + Bearer (v1.1 change 1)', () 
     const r = buildHttpReplay({ path: '/api/x', headers: { cookie: 'secret', 'content-type': 'application/json' } }, base);
     expect(r.ok && r.headers['cookie']).toBeUndefined();
     expect(r.ok && r.headers['content-type']).toBe('application/json');
+  });
+
+  it('marks only explicit web-machine replays and leaves the phone path unchanged', () => {
+    const phone = buildHttpReplay({ path: '/mobile' }, base);
+    const web = buildHttpReplay(
+      { path: '/mobile' },
+      base,
+      { relaySurface: O8_WEB_MACHINE_SURFACE },
+    );
+
+    expect(phone.ok && phone.headers[O8_RELAY_SURFACE_HEADER]).toBeUndefined();
+    expect(web.ok && web.headers[O8_RELAY_SURFACE_HEADER]).toBe(O8_WEB_MACHINE_SURFACE);
   });
 });
 
