@@ -3577,7 +3577,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.630"
+version = "0.1.631"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -6266,6 +6266,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "image 0.25.10",
  "jni",
  "libc",
  "log",
