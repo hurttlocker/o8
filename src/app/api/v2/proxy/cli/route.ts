@@ -26,6 +26,28 @@ interface CliRequestBody {
   repoPath?: string;
 }
 
+/** How much runtime stderr rides along in a silent-exit explanation. */
+const STDERR_TAIL_CHARS = 600;
+
+/**
+ * Explain a runtime that closed without answering. The common cause is a cwd the CLI
+ * refuses to run in ("Not inside a trusted directory"), which is invisible without the
+ * stderr tail.
+ */
+function describeSilentExit(input: {
+  label: string;
+  code: number | null;
+  cwd: string;
+  stderrTail: string;
+  producedOutput: boolean;
+}): string {
+  const exit = typeof input.code === 'number' ? `exit code ${input.code}` : 'no exit code';
+  const head = input.producedOutput
+    ? `${input.label} failed partway through (${exit}) in ${input.cwd}.`
+    : `${input.label} exited without a response (${exit}) in ${input.cwd}.`;
+  return input.stderrTail.trim() ? `${head}\n${input.stderrTail.trim()}` : head;
+}
+
 /** Map CLI model id suffix to the --model flag value */
 const CLAUDE_MODEL_MAP: Record<string, string> = {
   opus: 'opus',
@@ -96,8 +118,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No user message found' }, { status: 400 });
     }
 
-    // Resolve repo path for cwd — validate against registry to prevent directory traversal
-    let cwd = process.cwd();
+    // An explicit repoPath is untrusted input: validate it against the registry before
+    // anything else runs (traversal guard, asserted by the cold-start route contract).
+    let cwd: string | null = null;
     if (repoPath?.trim()) {
       const { resolveRepoPathFromRegistry } = await import('@/lib/repos/repo-path-registry');
       const resolved = await resolveRepoPathFromRegistry(repoPath.trim());
@@ -187,16 +210,47 @@ export async function POST(request: Request) {
       }, { status: 503 });
     }
 
+    // No repoPath at all is the "Current project" selection, not a licence to run in
+    // process.cwd(): CLI runtimes refuse to start outside a trusted git repo and exit
+    // without a word. Resolved AFTER the CLI check so a cold-start machine still hears
+    // "runtime is not installed" first.
+    if (!cwd) {
+      const { resolveCurrentProjectRepo } = await import('@/lib/repos/repo-path-registry');
+      const resolved = await resolveCurrentProjectRepo();
+      if (!resolved.ok) {
+        return NextResponse.json({
+          error: `[repo] ${resolved.message}`,
+          code: 'repo_unavailable',
+        }, { status: resolved.status });
+      }
+      cwd = resolved.repoRoot;
+    }
+    const repoRoot = cwd;
+
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
         const child = spawn(cmd, args, {
-          cwd,
+          cwd: repoRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
           env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         });
 
         let buffer = '';
+        let emitted = 0;
+        let stderrTail = '';
+
+        const emit = (event: Record<string, unknown>) => {
+          emitted += 1;
+          controller.enqueue(encoder.encode(sse(event)));
+        };
+
+        // `message` and `text` carry the same string: consumers of this stream read one
+        // or the other (mobile chat + durable send read `message`, the workspace chat
+        // pane reads `text`), and an error nobody can render is the same as no error.
+        const emitError = (reason: string) => {
+          controller.enqueue(encoder.encode(sse({ type: 'error', message: reason, text: reason })));
+        };
 
         child.stdout.on('data', (chunk: Buffer) => {
           buffer += chunk.toString('utf-8');
@@ -209,7 +263,7 @@ export async function POST(request: Request) {
               const parsed = JSON.parse(line);
               const events = normalizeCliEvent(runtime, parsed);
               for (const event of events) {
-                controller.enqueue(encoder.encode(sse(event)));
+                emit(event);
               }
             } catch {
               // Not JSON, skip
@@ -221,26 +275,38 @@ export async function POST(request: Request) {
           const text = chunk.toString('utf-8').trim();
           if (text && !text.includes('DeprecationWarning')) {
             console.error(`[cli-proxy] ${runtime} stderr:`, text);
+            stderrTail = `${stderrTail}${stderrTail ? '\n' : ''}${text}`.slice(-STDERR_TAIL_CHARS);
           }
         });
 
-        child.on('close', () => {
+        child.on('close', (code) => {
           // Flush remaining buffer
           if (buffer.trim()) {
             try {
               const parsed = JSON.parse(buffer);
               const events = normalizeCliEvent(runtime, parsed);
               for (const event of events) {
-                controller.enqueue(encoder.encode(sse(event)));
+                emit(event);
               }
             } catch { /* ignore */ }
+          }
+          // A silent exit used to close the stream with a bare `done`, which every
+          // surface renders as "No response received." — say what actually happened.
+          if (emitted === 0 || (typeof code === 'number' && code !== 0)) {
+            emitError(describeSilentExit({
+              label: cliSpec.humanLabel,
+              code,
+              cwd: repoRoot,
+              stderrTail,
+              producedOutput: emitted > 0,
+            }));
           }
           controller.enqueue(encoder.encode(sse({ type: 'done' })));
           controller.close();
         });
 
         child.on('error', (err) => {
-          controller.enqueue(encoder.encode(sse({ type: 'error', message: err.message })));
+          emitError(err.message);
           controller.close();
         });
       },
