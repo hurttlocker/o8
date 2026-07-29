@@ -222,3 +222,12 @@
 - `npx tsc --noEmit`, focused home-mode tests, scoped ESLint, and `npm run rule-check -- --base=main` passed.
 - Stripping the home resolver, client sentinel, and preflight carve-out produced seven expected focused-test failures; restoring them returned the focused suite to green.
 - Browser/UI smoke was intentionally not run per the packet sandbox guidance.
+
+## Docs: add qoder runtime to runtime-adapter-contract.md
+
+- Updated runtime count from "thirteen / Twelve dispatchable" to "fourteen / Thirteen dispatchable" to match the catalog (14 entries, 13 dispatchable, antigravity discovery-only).
+- Added `qoder` to the declarative runtime list after `qwen`, matching catalog order.
+
+## Deviations
+
+- None.
