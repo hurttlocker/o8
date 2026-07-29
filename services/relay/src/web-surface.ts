@@ -6,6 +6,7 @@ import type { WebSocket } from 'ws';
 
 import type { RelayServer } from './relay.js';
 import {
+  ALLOWED_WEB_ORIGINS,
   isAllowedWebOrigin,
   webSessionCookie,
   webSessionTicketFromCookie,
@@ -201,7 +202,7 @@ export function registerWebSurfaceRoutes(
       headers.set('content-length', String(Buffer.byteLength(rewritten)));
       headers.set(
         'content-security-policy',
-        "frame-ancestors https://o8.run https://www.o8.run",
+        `frame-ancestors ${[...ALLOWED_WEB_ORIGINS].join(' ')}`,
       );
       return new Response(c.req.method === 'HEAD' ? null : rewritten, {
         status: response.status,
