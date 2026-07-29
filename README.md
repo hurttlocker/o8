@@ -103,7 +103,7 @@ o8 is built like every pixel matters, because you stare at a control room all da
 - [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control plane, headless).
 - [`CLAUDE.md`](./CLAUDE.md) — the canonical agent/contributor brief: architecture, conventions, critical rules.
 
-Community: <!-- TODO(launch): Discord invite --> · Built in public by [@marquisehurtt](https://x.com/marquisehurtt) <!-- TODO(launch): confirm handle for launch -->
+Community: [Discord](https://discord.gg/gH3UbbTJ7k) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt) <!-- TODO(launch): confirm handle for launch -->
 
 ## License
 
