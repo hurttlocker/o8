@@ -8,8 +8,18 @@ const SCRIPT_BY_SOURCE: Record<ApiBearerBootstrapProps['source'], string> = {
       if (window.__o8ApiBearerInstalled) return;
       window.__o8ApiBearerInstalled = true;
       var nativeFetch = window.fetch.bind(window);
+      var webMachine = document.querySelector('meta[name="o8-auth-mode"]')?.getAttribute('content') === 'web-machine';
       window.fetch = function (input, init) {
         try {
+          // Served through a machine relay: there is no local origin to reach and no
+          // token in this page by design — ride the tunnel the connector installed.
+          if (webMachine) {
+            var transport = window.__O8_WEB_MACHINE_TRANSPORT__;
+            if (transport && typeof transport.fetch === 'function') {
+              return transport.fetch(input, init);
+            }
+            return nativeFetch(input, init);
+          }
           var token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') || '';
           var url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
           if (token && url.origin === window.location.origin && url.pathname.indexOf('/api/') === 0) {
