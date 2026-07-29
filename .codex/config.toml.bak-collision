@@ -1,0 +1,6 @@
+[mcp_servers.o8]
+command = "/usr/local/opt/node@22/bin/node"
+args = ["/Applications/o8.app/Contents/Resources/server/operator-mcp-server.mjs"]
+
+[mcp_servers.o8.env]
+O8_API_BASE = "http://127.0.0.1:3001"

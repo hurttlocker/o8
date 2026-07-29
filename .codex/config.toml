@@ -1,0 +1,9 @@
+# Commented out 2026-07-11: this stdio 'o8' entry merges with the global http 'o8' entry
+# in ~/.codex/config.toml when codex runs from this repo, producing an invalid server
+# (command + url) that prevents codex from booting entirely. See o8 issue filed same day.
+# [mcp_servers.o8]
+# command = "/usr/local/opt/node@22/bin/node"
+# args = ["/Applications/o8.app/Contents/Resources/server/operator-mcp-server.mjs"]
+
+# [mcp_servers.o8.env]
+# O8_API_BASE = "http://127.0.0.1:3001"
