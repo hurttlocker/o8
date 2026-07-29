@@ -106,7 +106,6 @@ import {
 } from './history-transcript';
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
-
 function isRuntimeSessionKey(sessionKey: string): boolean {
   return sessionKey.startsWith('claude-code:')
     || sessionKey.startsWith('codex:')
@@ -2500,6 +2499,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         workspaceTargets={workspaceTargets}
         selectedRepoPath={resolvedRepoPath}
         onSelectRepoPath={handleSelectComposerRepoPath}
+        promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
       />
       {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
       {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {
