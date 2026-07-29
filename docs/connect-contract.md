@@ -296,6 +296,105 @@ ownership check before the relay assigns a `sid`.
 
 The authenticated o8 website reads `GET /machines` with the existing Clerk session and shows each registered machine with its name, platform, app version, online state, and last-seen time. The selected machine ID scopes every remote request.
 
+### Browser session ticket
+
+The website exchanges its existing account credential for a 10-minute
+machine-specific browser ticket:
+
+```http
+POST /machines/:machineId/web-session-ticket
+Authorization: Bearer <clerk-session-or-signed-license-token>
+```
+
+The license server performs the same active, account-scoped machine lookup used
+for machine relay-ticket issuance. A machine owned by another account or an
+audit tombstone receives `404 { "error": "not_found" }`. Success is:
+
+```json
+{
+  "ticket": "<Ed25519 JWT>",
+  "expiresAt": "2026-07-29T16:10:00.000Z"
+}
+```
+
+The existing license signing key signs the JWT with issuer `o8-license`,
+audience `o8-relay-web`, and claims `accountId`, `machineId`, `iat`, and `exp`.
+It contains no Clerk credential, local operator token, install ID, repository,
+or prompt content.
+
+### Relay browser bootstrap
+
+The o8 website installs that ticket as an HttpOnly relay cookie before mounting
+the machine iframe:
+
+```http
+POST https://relay.o8.run/web/session
+Origin: https://o8.run
+Authorization: Bearer <o8-relay-web ticket>
+```
+
+`https://www.o8.run` is also accepted. No other CORS origin is allowed. The
+relay verifies the ticket and confirms that its claimed account owns the
+currently attached machine socket, then returns:
+
+```http
+200 OK
+Access-Control-Allow-Origin: https://o8.run
+Access-Control-Allow-Credentials: true
+Set-Cookie: __Host-o8-web-session=<ticket>; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict
+Content-Type: application/json
+
+{"machineId":"machine_01...","expiresAt":"2026-07-29T16:10:00.000Z"}
+```
+
+The website calls this endpoint with `credentials: "include"` and repeats the
+license mint plus relay bootstrap before expiry. Every mint and bootstrap
+rechecks current ownership. The iframe URL carries only the public machine ID;
+neither the Clerk token nor the web-session ticket appears in a query parameter,
+fragment, DOM-readable cookie, or iframe URL. This cookie works for the o8.run
+iframe because `relay.o8.run` is same-site while remaining a distinct origin.
+
+### Relay-terminated surface
+
+After bootstrap, the website mounts:
+
+```text
+https://relay.o8.run/web/:machineId/surface/mobile
+```
+
+Every method under
+`https://relay.o8.run/web/:machineId/surface/*` requires the HttpOnly cookie.
+The relay verifies audience, signature, expiry, and ticket-machine equality,
+then compares the ticket account to the live machine socket account. The suffix
+after `/surface` becomes the local path in the existing cut 3a
+`http-req`/`http-res-part` mux. Request bodies and response bodies retain the
+existing 32 MiB ceiling and 256 KiB encoded response chunks. Content type,
+content length, cache validators, cache control, language, and range headers
+survive the translation.
+
+HTML root asset URLs and CSS root URLs are scoped under the same surface prefix.
+The relay injects `window.__O8_WEB_MACHINE_TRANSPORT__` into token-free HTML:
+same-origin fetch/XHR calls map back through the scoped HTTP route, while
+`openWebSocket('/ws')` opens:
+
+```text
+wss://relay.o8.run/web/:machineId/surface/ws
+```
+
+That browser-facing WebSocket requires the same cookie and an exact allowed
+browser origin, then attaches one existing machine mux `sid`. Its frames remain
+the raw cut 3a `/ws` application frames. A machine drop sends presence-down and
+closes the browser socket with `1012 machine_disconnected`; HTTP streams fail
+closed at the same point. The existing `/mac`, `/device/:routingId`, `/machine`,
+and account-token `/web/machine/:machineId` paths are unchanged.
+
+Surface CORS responses are emitted only for `https://o8.run` and
+`https://www.o8.run`. HTML sets `frame-ancestors` to those two origins. A ticket
+for machine A receives `403 machine_mismatch` when presented to machine B. The
+desktop's cut 3a token-free render marker, `#tk=` scrubbing, server-side
+Authorization override, response byte scan, and realtime byte scan remain the
+credential boundary; the relay never receives or forwards the local ws-token.
+
 The prompt-launch path must:
 
 1. Select a machine owned by the signed-in account.
