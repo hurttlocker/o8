@@ -20,6 +20,7 @@ const DEFAULT_RECONCILE_INTERVAL_MS = 2_000;
 interface ConnectorHandle {
   start(): void;
   stop(reason?: string): void;
+  resume?(): void;
 }
 
 export interface MachineAttachSupervisorConfig {
@@ -89,7 +90,10 @@ export class MachineAttachSupervisor {
         this.noteIdle('signed-out');
         return;
       }
-      if (this.connector && this.connectorCredential === token) return;
+      if (this.connector && this.connectorCredential === token) {
+        this.connector.resume?.();
+        return;
+      }
       this.stopConnector('credential-changed');
 
       const machines = await (

@@ -22,6 +22,7 @@ type RelayHarness = {
   url: string;
   server: WebSocketServer;
   connections: ConnectionRecord[];
+  connectionTimes: number[];
 };
 
 const harnesses: RelayHarness[] = [];
@@ -29,11 +30,20 @@ const temporaryDirectories: string[] = [];
 
 async function startRelay(
   onConnection?: (socket: WebSocket, index: number) => void,
+  options: { autoPong?: boolean } = {},
 ): Promise<RelayHarness> {
   const connections: ConnectionRecord[] = [];
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  const connectionTimes: number[] = [];
+  const server = new WebSocketServer({
+    host: '127.0.0.1',
+    port: 0,
+    ...(options.autoPong === undefined
+      ? {}
+      : { autoPong: options.autoPong }),
+  });
   await new Promise<void>((resolve) => server.once('listening', resolve));
   server.on('connection', (socket, request) => {
+    connectionTimes.push(Date.now());
     connections.push({
       path: request.url ?? '',
       authorization: request.headers.authorization,
@@ -47,6 +57,7 @@ async function startRelay(
     url: `ws://127.0.0.1:${address.port}`,
     server,
     connections,
+    connectionTimes,
   };
   harnesses.push(harness);
   return harness;
@@ -221,6 +232,114 @@ describe('machine relay attach real path', () => {
     connector.stop('test-complete');
   });
 
+  it('supervisor re-establishes after two quick relay drops within the capped ladder interval', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    let secondDropAt = 0;
+    const relay = await startRelay((socket, index) => {
+      if (index === 0) {
+        socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+        setTimeout(() => socket.close(1012, 'first-restart'), 10);
+        return;
+      }
+      if (index === 1) {
+        setTimeout(() => {
+          secondDropAt = Date.now();
+          socket.close(1012, 'second-restart');
+        }, 10);
+        return;
+      }
+      socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+    });
+    let issued = 0;
+    const supervisor = new MachineAttachSupervisor({
+      reconcileIntervalMs: 20,
+      readEnabled: () => true,
+      readCredential: () => 'account-token',
+      readInstallId: () => 'install_double_drop',
+      listRegisteredMachines: async () => [{
+        machineId: 'machine_double_drop',
+        installId: 'install_double_drop',
+        name: 'Double Drop Mac',
+        platform: 'darwin',
+        appVersion: '0.1.0',
+      }],
+      createConnector: (machine) => new MachineRelayConnector({
+        machineId: machine.machineId,
+        relayUrl: relay.url,
+        ticketProvider: async () => ticket(machine.machineId, ++issued),
+        reconnectBaseMs: 300,
+        reconnectCapMs: 600,
+      }),
+    });
+
+    supervisor.start();
+    await waitFor(() => relay.connections.length >= 3);
+
+    const thirdAttachAt = relay.connectionTimes[2] ?? Number.POSITIVE_INFINITY;
+    expect(secondDropAt).toBeGreaterThan(0);
+    expect(thirdAttachAt - secondDropAt).toBeLessThanOrEqual(450);
+    expect(issued).toBeGreaterThanOrEqual(3);
+
+    supervisor.stop();
+  });
+
+  it('keeps an otherwise idle machine socket alive beyond 15 simulated minutes', async () => {
+    let pings = 0;
+    const relay = await startRelay((socket) => {
+      socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+      socket.on('ping', () => {
+        pings++;
+      });
+    });
+    const connector = new MachineRelayConnector({
+      machineId: 'machine_keepalive',
+      relayUrl: relay.url,
+      ticketProvider: async () => ticket('machine_keepalive'),
+      // Each 5 ms test tick represents the production 30-second cadence.
+      keepAliveIntervalMs: 5,
+      pongTimeoutMs: 20,
+      reconnectBaseMs: 20,
+      reconnectCapMs: 40,
+    });
+
+    connector.start();
+    await waitFor(() => pings >= 31, 1_000);
+
+    expect(pings).toBeGreaterThanOrEqual(31);
+    expect(relay.connections).toHaveLength(1);
+    expect(relay.server.clients.size).toBe(1);
+
+    connector.stop('test-complete');
+  });
+
+  it('treats a missing keepalive pong as a drop and reconnects', async () => {
+    let pings = 0;
+    const relay = await startRelay((socket) => {
+      socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+      socket.on('ping', () => {
+        pings++;
+      });
+    }, { autoPong: false });
+    let issued = 0;
+    const connector = new MachineRelayConnector({
+      machineId: 'machine_no_pong',
+      relayUrl: relay.url,
+      ticketProvider: async () => ticket('machine_no_pong', ++issued),
+      keepAliveIntervalMs: 10,
+      pongTimeoutMs: 5,
+      reconnectBaseMs: 10,
+      reconnectCapMs: 20,
+    });
+
+    connector.start();
+    await waitFor(() => relay.connections.length >= 2);
+
+    expect(pings).toBeGreaterThanOrEqual(1);
+    expect(issued).toBeGreaterThanOrEqual(2);
+
+    connector.stop('test-complete');
+  });
+
   it('bridges each web-machine stream to the local realtime socket and tears it down', async () => {
     let localReceived = '';
     let relayedReply = '';
@@ -312,6 +431,50 @@ describe('machine relay attach real path', () => {
     connector.stop('test-complete');
   });
 
+  it('keeps the authenticated socket serving when a ticket rotation candidate fails', async () => {
+    const authenticatedSockets: WebSocket[] = [];
+    let rotationRejected = false;
+    let muxReady = false;
+    const localWebSocket = await startRelay();
+    const relay = await startRelay((socket, index) => {
+      if (index === 0) {
+        authenticatedSockets.push(socket);
+        socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+        socket.on('message', (raw) => {
+          if (parseFrame(raw).t === 'mux-ready') muxReady = true;
+        });
+        return;
+      }
+      rotationRejected = true;
+      socket.close(4409, 'rotation-ticket-rejected');
+    });
+    let issued = 0;
+    const connector = new MachineRelayConnector({
+      machineId: 'machine_rotation_failure',
+      relayUrl: relay.url,
+      localWebSocketUrl: `${localWebSocket.url}/ws`,
+      operatorToken: () => 'local-operator-token',
+      ticketProvider: async () => ticket('machine_rotation_failure', ++issued),
+      refreshIntervalMs: 40,
+      expiryLeadMs: 0,
+      reconnectBaseMs: 1_000,
+      reconnectCapMs: 1_000,
+      keepAliveIntervalMs: 60_000,
+    });
+
+    connector.start();
+    await waitFor(() => rotationRejected);
+    const activeSocket = authenticatedSockets[0];
+    activeSocket?.send(JSON.stringify({ t: 'mux-open', sid: 'still-active' }));
+    await waitFor(() => muxReady);
+
+    expect(relay.connections).toHaveLength(2);
+    expect(activeSocket?.readyState).toBe(WebSocket.OPEN);
+    expect(localWebSocket.connections).toHaveLength(1);
+
+    connector.stop('test-complete');
+  });
+
   it('defaults OFF and the supervisor opens no relay socket without operator opt-in', async () => {
     const relay = await startRelay();
     const dataDir = mkdtempSync(path.join(tmpdir(), 'o8-connect-off-'));
@@ -374,6 +537,33 @@ describe('machine relay attach real path', () => {
     await supervisor.reconcile();
 
     expect(stop).toHaveBeenCalledWith('signed-out');
+    supervisor.stop();
+  });
+
+  it('asks an enabled existing connector to resume on each supervisor tick', async () => {
+    const start = vi.fn();
+    const stop = vi.fn();
+    const resume = vi.fn();
+    const supervisor = new MachineAttachSupervisor({
+      reconcileIntervalMs: 60_000,
+      readEnabled: () => true,
+      readCredential: () => 'account-token',
+      readInstallId: () => 'install_resume',
+      listRegisteredMachines: async () => [{
+        machineId: 'machine_resume',
+        installId: 'install_resume',
+        name: 'Resume Mac',
+        platform: 'darwin',
+        appVersion: '0.1.0',
+      }],
+      createConnector: () => ({ start, stop, resume }),
+    });
+
+    supervisor.start();
+    await waitFor(() => start.mock.calls.length === 1);
+    await supervisor.reconcile();
+
+    expect(resume).toHaveBeenCalledOnce();
     supervisor.stop();
   });
 });

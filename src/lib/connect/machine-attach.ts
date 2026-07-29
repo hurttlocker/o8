@@ -20,6 +20,8 @@ const P = '[connect]';
 const DEFAULT_HTTP_TIMEOUT_MS = 55_000;
 const DEFAULT_REFRESH_INTERVAL_MS = 8 * 60 * 1_000;
 const DEFAULT_EXPIRY_LEAD_MS = 2 * 60 * 1_000;
+const DEFAULT_KEEP_ALIVE_INTERVAL_MS = 30_000;
+const DEFAULT_PONG_TIMEOUT_MS = 10_000;
 const MACHINE_HANDSHAKE_TIMEOUT_MS = 10_000;
 
 export type { MachineRelayTicket } from './machine-registry';
@@ -46,8 +48,11 @@ export interface MachineRelayConnectorConfig {
   httpRequestTimeoutMs?: number;
   reconnectBaseMs?: number;
   reconnectCapMs?: number;
+  reconnectRandom?: () => number;
   refreshIntervalMs?: number;
   expiryLeadMs?: number;
+  keepAliveIntervalMs?: number;
+  pongTimeoutMs?: number;
   now?: () => number;
 }
 
@@ -67,9 +72,14 @@ export class MachineRelayConnector {
   private readonly httpRequestTimeoutMs: number;
   private readonly refreshIntervalMs: number;
   private readonly expiryLeadMs: number;
+  private readonly keepAliveIntervalMs: number;
+  private readonly pongTimeoutMs: number;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private candidateTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private connecting = false;
   private stopped = true;
 
   constructor(private readonly config: MachineRelayConnectorConfig) {
@@ -91,16 +101,46 @@ export class MachineRelayConnector {
       config.expiryLeadMs,
       DEFAULT_EXPIRY_LEAD_MS,
     );
+    this.keepAliveIntervalMs = positiveInteger(
+      config.keepAliveIntervalMs,
+      DEFAULT_KEEP_ALIVE_INTERVAL_MS,
+    );
+    this.pongTimeoutMs = positiveInteger(
+      config.pongTimeoutMs,
+      DEFAULT_PONG_TIMEOUT_MS,
+    );
     this.reconnect = new RelayReconnectPolicy(
       positiveInteger(config.reconnectBaseMs, 1_000),
       positiveInteger(config.reconnectCapMs, 30_000),
+      8,
+      config.reconnectRandom,
     );
   }
 
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.reconnect.reset();
     void this.connect('attach');
+  }
+
+  /**
+   * Supervisor/network-tick recovery seam. A healthy connector is untouched;
+   * a connector with no live socket, candidate, or retry timer re-enters the
+   * same infinite ladder instead of requiring a desktop relaunch.
+   */
+  resume(): void {
+    if (
+      this.stopped
+      || this.connecting
+      || this.activeSocket
+      || this.candidateSocket
+      || this.reconnectTimer
+    ) {
+      return;
+    }
+    console.log(`${P} retry-resume machineId=${shortId(this.config.machineId)}`);
+    this.scheduleRetry(false);
   }
 
   stop(reason = 'operator-disabled'): void {
@@ -118,61 +158,68 @@ export class MachineRelayConnector {
   }
 
   private async connect(reason: ConnectReason): Promise<void> {
-    if (this.stopped || this.candidateSocket) return;
-
-    let ticket: MachineRelayTicket;
+    if (this.stopped || this.connecting || this.candidateSocket) return;
+    this.connecting = true;
     try {
-      ticket = await this.config.ticketProvider();
-      if (!ticket.ticket.trim() || !Number.isFinite(Date.parse(ticket.expiresAt))) {
-        throw new Error('invalid relay ticket response');
-      }
-    } catch (error) {
-      console.warn(
-        `${P} ${reason} ticket failed machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
-      );
-      this.scheduleRetry(Boolean(this.activeSocket));
-      return;
-    }
-    if (this.stopped) return;
-
-    let socket: WebSocket;
-    try {
-      socket = new WebSocket(`${this.relayUrl}/machine`, {
-        headers: {
-          authorization: `Bearer ${ticket.ticket}`,
-          'x-o8-machine-id': this.config.machineId,
-        },
-      });
-    } catch (error) {
-      console.warn(
-        `${P} ${reason} dial failed machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
-      );
-      this.scheduleRetry(Boolean(this.activeSocket));
-      return;
-    }
-
-    this.candidateSocket = socket;
-    socket.on('open', () => {
-      if (this.stopped || socket !== this.candidateSocket) {
-        closeSocket(socket, 'stale candidate');
+      let ticket: MachineRelayTicket;
+      try {
+        ticket = await this.config.ticketProvider();
+        if (!ticket.ticket.trim() || !Number.isFinite(Date.parse(ticket.expiresAt))) {
+          throw new Error('invalid relay ticket response');
+        }
+      } catch (error) {
+        console.warn(
+          `${P} ${reason} ticket failed machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
+        );
+        this.scheduleRetry(Boolean(this.activeSocket));
         return;
       }
-      this.armCandidateTimeout(socket);
-    });
-    socket.on('message', (raw) => {
-      if (socket === this.candidateSocket) {
-        this.promoteSocket(socket, ticket, reason);
+      if (this.stopped) return;
+
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(`${this.relayUrl}/machine`, {
+          headers: {
+            authorization: `Bearer ${ticket.ticket}`,
+            'x-o8-machine-id': this.config.machineId,
+          },
+        });
+      } catch (error) {
+        console.warn(
+          `${P} ${reason} dial failed machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
+        );
+        this.scheduleRetry(Boolean(this.activeSocket));
+        return;
       }
-      if (socket === this.activeSocket) this.onRelayMessage(raw);
-    });
-    socket.on('close', (code, rawReason) => {
-      this.onSocketClose(socket, code, rawReason.toString('utf8'));
-    });
-    socket.on('error', (error) => {
-      console.warn(
-        `${P} socket error machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
-      );
-    });
+
+      this.candidateSocket = socket;
+      socket.on('open', () => {
+        if (this.stopped || socket !== this.candidateSocket) {
+          closeSocket(socket, 'stale candidate');
+          return;
+        }
+        this.armCandidateTimeout(socket);
+      });
+      socket.on('message', (raw) => {
+        if (socket === this.candidateSocket) {
+          this.promoteSocket(socket, ticket, reason);
+        }
+        if (socket === this.activeSocket) this.onRelayMessage(raw);
+      });
+      socket.on('close', (code, rawReason) => {
+        this.onSocketClose(socket, code, rawReason.toString('utf8'));
+      });
+      socket.on('pong', () => {
+        this.onKeepAlivePong(socket);
+      });
+      socket.on('error', (error) => {
+        console.warn(
+          `${P} socket error machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
+        );
+      });
+    } finally {
+      this.connecting = false;
+    }
   }
 
   private promoteSocket(
@@ -190,6 +237,7 @@ export class MachineRelayConnector {
     this.clearCandidateTimeout();
     this.reconnect.reset();
     this.scheduleTicketRefresh(ticket.expiresAt);
+    this.startKeepAlive(socket);
 
     if (reason === 'ticket-refresh') {
       console.log(`${P} ticket-refresh machineId=${shortId(this.config.machineId)} status=attached`);
@@ -213,6 +261,7 @@ export class MachineRelayConnector {
     }
     if (socket !== this.activeSocket) return;
 
+    this.clearKeepAlive();
     this.activeSocket = null;
     if (this.stopped) return;
     console.log(
@@ -462,8 +511,64 @@ export class MachineRelayConnector {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.clearCandidateTimeout();
+    this.clearKeepAlive();
     this.reconnectTimer = null;
     this.refreshTimer = null;
+  }
+
+  private startKeepAlive(socket: WebSocket): void {
+    this.clearKeepAlive();
+    this.keepAliveTimer = setInterval(() => {
+      if (
+        this.stopped
+        || socket !== this.activeSocket
+        || socket.readyState !== WebSocket.OPEN
+        || this.pongTimer
+      ) {
+        return;
+      }
+      try {
+        socket.ping();
+      } catch (error) {
+        console.warn(
+          `${P} keepalive ping failed machineId=${shortId(this.config.machineId)}: ${errorMessage(error)}`,
+        );
+        this.terminateUnresponsiveSocket(socket);
+        return;
+      }
+      this.pongTimer = setTimeout(() => {
+        this.pongTimer = null;
+        if (this.stopped || socket !== this.activeSocket) return;
+        console.warn(
+          `${P} keepalive timeout machineId=${shortId(this.config.machineId)}`,
+        );
+        this.terminateUnresponsiveSocket(socket);
+      }, this.pongTimeoutMs);
+      this.pongTimer.unref?.();
+    }, this.keepAliveIntervalMs);
+    this.keepAliveTimer.unref?.();
+  }
+
+  private onKeepAlivePong(socket: WebSocket): void {
+    if (socket !== this.activeSocket || !this.pongTimer) return;
+    clearTimeout(this.pongTimer);
+    this.pongTimer = null;
+  }
+
+  private terminateUnresponsiveSocket(socket: WebSocket): void {
+    if (socket !== this.activeSocket) return;
+    try {
+      socket.terminate();
+    } catch {
+      closeSocket(socket, 'machine keepalive failed');
+    }
+  }
+
+  private clearKeepAlive(): void {
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+    if (this.pongTimer) clearTimeout(this.pongTimer);
+    this.keepAliveTimer = null;
+    this.pongTimer = null;
   }
 
   private armCandidateTimeout(socket: WebSocket): void {
