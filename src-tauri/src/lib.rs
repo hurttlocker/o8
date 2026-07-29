@@ -1041,13 +1041,13 @@ fn classify_port_listener(port: u16) -> PortListener {
 // ── Child process log capture ──
 //
 // The bundled Next.js server and WS server each get their own log file
-// under `~/.cortex-ide/logs/`. On each boot the previous log is rotated to
+// under `~/.o8/logs/`. On each boot the previous log is rotated to
 // `<name>.prev` so we always have the last two runs available for
 // post-mortem. Without this, silent production failures (like the hung
 // Next.js loop from 2026-04-11) are impossible to diagnose because stderr
 // is discarded and there are no devtools in release builds.
 //
-/// Open a truncating log file at `~/.cortex-ide/logs/<name>`, rotating any
+/// Open a truncating log file at `~/.o8/logs/<name>`, rotating any
 /// prior run to `<name>.prev` first. Returns `None` if the filesystem is
 /// unwritable (we prefer to keep the app bootable rather than failing loud).
 /// Directory for Node's V8 compile cache (Node 22+).
@@ -1199,6 +1199,47 @@ fn child_stdio(file: Option<&std::fs::File>) -> std::process::Stdio {
         },
         None => std::process::Stdio::null(),
     }
+}
+
+/// Tee one ws-server stream to its dedicated rotated log and tauri-plugin-log.
+///
+/// The dedicated file keeps full sidecar post-mortems, while the Tauri logger
+/// makes `[connect]` audit lines visible in the packaged app's canonical
+/// `~/Library/Logs/ai.o8.desktop/o8.log` without requiring a second log hunt.
+fn capture_ws_server_stream<R>(
+    stream: Option<R>,
+    file: Option<std::fs::File>,
+    stream_name: &'static str,
+    level: log::Level,
+) where
+    R: std::io::Read + Send + 'static,
+{
+    let Some(stream) = stream else {
+        return;
+    };
+    std::thread::spawn(move || {
+        use std::io::{BufRead, Write};
+
+        let mut file = file;
+        for result in std::io::BufReader::new(stream).lines() {
+            match result {
+                Ok(line) => {
+                    if let Some(output) = file.as_mut() {
+                        let _ = writeln!(output, "{}", line);
+                    }
+                    log::log!(level, "[ws-server:{}] {}", stream_name, line);
+                }
+                Err(error) => {
+                    log::warn!(
+                        "[ws-server:{}] output capture failed: {}",
+                        stream_name,
+                        error
+                    );
+                    break;
+                }
+            }
+        }
+    });
 }
 
 fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
@@ -1365,12 +1406,24 @@ fn spawn_bundled_ws_server(
             ws_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
         }
         match ws_cmd
-            .stdout(child_stdio(ws_log))
-            .stderr(child_stdio(ws_log))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
         {
-            Ok(child) => {
+            Ok(mut child) => {
                 let pid = child.id();
+                capture_ws_server_stream(
+                    child.stdout.take(),
+                    ws_log.and_then(|file| file.try_clone().ok()),
+                    "stdout",
+                    log::Level::Info,
+                );
+                capture_ws_server_stream(
+                    child.stderr.take(),
+                    ws_log.and_then(|file| file.try_clone().ok()),
+                    "stderr",
+                    log::Level::Warn,
+                );
                 log::info!("WS server started (pid: {})", pid);
                 sidecar_lifecycle::register_child(pid);
             }
