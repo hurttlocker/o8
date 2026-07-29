@@ -23,6 +23,7 @@ import { formatStreamingPreview } from '../utils';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
+import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import type {
   MobileInboxRealtimeSnapshotPayload,
   RealtimeEventEnvelope,
@@ -66,6 +67,7 @@ const PING_INTERVAL = 20_000;
 
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
+  if (isWebMachineBrowserSurface()) return '';
   const { hostname, protocol } = window.location;
   // Auth token — prevents random network clients from connecting
   const token = getMobileWsToken();
@@ -82,6 +84,14 @@ function getWsUrl(): string {
   // is verified by ws-server's verifyClient before the upgrade completes.
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
   return `${wsProto}://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
+}
+
+function openRealtimeWebSocket(url: string): WebSocket | null {
+  if (typeof window === 'undefined') return null;
+  if (isWebMachineBrowserSurface()) {
+    return window.__O8_WEB_MACHINE_TRANSPORT__?.openWebSocket('/ws') ?? null;
+  }
+  return url ? new WebSocket(url) : null;
 }
 
 export function useWebSocket({
@@ -259,7 +269,7 @@ export function useWebSocket({
   useEffect(() => {
     disposedRef.current = false;
     const url = getWsUrl();
-    if (!url) return;
+    if (!url && !isWebMachineBrowserSurface()) return;
 
     function handleMessage(event: MessageEvent) {
       let msg: Record<string, unknown>;
@@ -456,7 +466,12 @@ export function useWebSocket({
       if (disposedRef.current) return;
       setConnectionState((prev) => prev === 'disconnected' ? 'connecting' : 'reconnecting');
 
-      const ws = new WebSocket(url);
+      const ws = openRealtimeWebSocket(url);
+      if (!ws) {
+        setConnectionState('disconnected');
+        setRefreshErrorRef.current('The web-machine realtime transport is unavailable.');
+        return;
+      }
 
       ws.onopen = () => {
         if (disposedRef.current) { ws.close(); return; }

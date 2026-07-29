@@ -27,8 +27,30 @@ const SCRIPT_BY_SOURCE: Record<ApiBearerBootstrapProps['source'], string> = {
       if (window.__o8ApiBearerInstalled) return;
       window.__o8ApiBearerInstalled = true;
       var nativeFetch = window.fetch.bind(window);
+      var webMachine = document.querySelector('meta[name="o8-auth-mode"]')?.getAttribute('content') === 'web-machine';
+      if (webMachine) {
+        try {
+          var params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+          if (params.has('tk')) {
+            params.delete('tk');
+            var cleaned = params.toString();
+            window.history.replaceState(
+              window.history.state,
+              '',
+              window.location.pathname + window.location.search + (cleaned ? '#' + cleaned : '')
+            );
+          }
+        } catch (error) {}
+      }
       window.fetch = function (input, init) {
         try {
+          if (webMachine) {
+            var transport = window.__O8_WEB_MACHINE_TRANSPORT__;
+            if (transport && typeof transport.fetch === 'function') {
+              return transport.fetch(input, init);
+            }
+            return nativeFetch(input, init);
+          }
           var match = window.location.hash.match(/[#&]tk=([^&]+)/);
           var token = match && match[1] ? decodeURIComponent(match[1]) : '';
           if (!token) token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') || '';

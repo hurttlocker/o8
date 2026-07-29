@@ -227,6 +227,71 @@ Phase 1b must add the following relay contract:
 
 No relay client or relay-server code is part of phase 1a because none of those invariants exist in the current protocol.
 
+## Cut 3a full-surface web-machine transport
+
+The account-authenticated `/web/machine/:machineId` socket is one virtual browser
+session. The relay allocates one `sid` for it and sends `mux-open` to the
+registered machine. The desktop opens one loopback `/ws` connection for that
+`sid`, using the local operator token only on the loopback URL. After the local
+socket opens, the desktop returns `mux-ready`.
+
+The web edge uses that single session in two ways:
+
+1. HTTP requests use the existing
+   `http-req { rid, method, path, headers, bodyB64 }` control frame. Documents,
+   Next.js chunks, CSS, fonts, images, and API responses all return through
+   `http-res` plus ordered `http-res-part` frames. Response bodies are base64,
+   split at 256 KiB of encoded data per frame, and include the decoded
+   `content-length` plus the safe content, cache, range, and validator headers.
+2. Every non-HTTP frame is a raw `/ws` application frame. The desktop forwards
+   it unchanged to the loopback realtime socket, and returns each loopback frame
+   unchanged on the web session. This mirrors the phone connector's inner
+   realtime shape without sharing its routing map, device credential, E2EE
+   handshake, or `/mac` code path.
+
+The browser host exposes this session to the loaded mobile application as
+`window.__O8_WEB_MACHINE_TRANSPORT__`: `fetch` maps same-origin page/API requests
+to HTTP control frames, while `openWebSocket('/ws')` maps the mobile realtime
+hook to raw frames on the same session. The web host owns the authenticated
+account handshake; browser code never supplies an account ID.
+
+### Local credential exclusion
+
+A web-machine replay stamps all of these headers:
+
+```http
+x-o8-client-addr: o8-relay-forward
+x-o8-relay-forward: 1
+x-o8-relay-surface: web-machine
+```
+
+The packaged loopback HTTP wrapper deletes any incoming
+`x-o8-relay-surface`, then restores `web-machine` only when the request came
+from a loopback socket carrying the relay-forward trigger. Page rendering
+requires all three canonical facts before emitting the safe
+`<meta name="o8-auth-mode" content="web-machine">` marker. Such a response
+must not contain the local `ws-token` meta value.
+
+On that safe browser surface, `#tk=` is scrubbed without being read or stored,
+the paired-phone localStorage credential is ignored, API fetches use the web
+machine transport, and `/ws` never falls back to a direct local URL. The local
+operator token exists only in the desktop's server-side HTTP Authorization
+override and loopback WebSocket URL; no relay frame or remote document contains
+it. As a final fail-closed boundary, the machine replay scans each decoded local
+response for the exact operator token and returns
+`502 local_credential_exposure_blocked` with an empty body if any page, asset,
+credential-export endpoint, or reflected response contains it.
+Outbound loopback realtime frames receive the same exact-value check; a match
+closes that web stream with `4403 local_credential_exposure_blocked`.
+
+Closing the web session sends `mux-close` and closes its loopback HTTP/realtime
+state. Dropping the active machine socket without a replacement closes its
+local streams and every attached web session with
+`1012 machine_disconnected`. Ticket refresh supersedes the machine socket
+in-place and reopens the existing `sid` on the replacement. Any browser
+reconnect creates a new web session and repeats the server-side account
+ownership check before the relay assigns a `sid`.
+
 ## Phase 2 web machine switcher
 
 The authenticated o8 website reads `GET /machines` with the existing Clerk session and shows each registered machine with its name, platform, app version, online state, and last-seen time. The selected machine ID scopes every remote request.

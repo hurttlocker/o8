@@ -7,6 +7,11 @@ import { ApiBearerBootstrap } from '@/components/security/ApiBearerBootstrap';
 import { headers } from 'next/headers';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import {
+  headersIndicateWebMachineRelay,
+  O8_AUTH_MODE_META,
+  O8_WEB_MACHINE_SURFACE,
+} from '@/lib/connect/web-machine-surface';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -37,12 +42,17 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   // src/lib/panel/ws-port-client.ts for the reader.
   const { wsPort } = resolvePortInfo();
   const requestHeaders = await headers();
-  const isLocal = headersIndicateLoopback((name) => requestHeaders.get(name));
+  const isWebMachine = headersIndicateWebMachineRelay((name) => requestHeaders.get(name));
+  const isLocal = !isWebMachine
+    && headersIndicateLoopback((name) => requestHeaders.get(name));
   const operatorToken = isLocal ? getOrCreateWsToken() : '';
 
   return (
     <html lang="en" style={{ background: '#1C1C1E' }} suppressHydrationWarning>
       <head>
+        {isWebMachine
+          ? <meta name={O8_AUTH_MODE_META} content={O8_WEB_MACHINE_SURFACE} />
+          : null}
         {operatorToken ? <meta name="ws-token" content={operatorToken} /> : null}
         {/* Pre-paint theme stamp — mirrors ThemeProvider's persisted-theme
             resolution (src/lib/theme/context.tsx: readPaletteId /

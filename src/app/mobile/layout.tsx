@@ -4,6 +4,11 @@ import type { ReactNode } from 'react';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { ApiBearerBootstrap } from '@/components/security/ApiBearerBootstrap';
+import {
+  headersIndicateWebMachineRelay,
+  O8_AUTH_MODE_META,
+  O8_WEB_MACHINE_SURFACE,
+} from '@/lib/connect/web-machine-surface';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,10 +27,12 @@ export async function generateMetadata(): Promise<Metadata> {
   // LAN clients get the token from the pairing QR / #tk= link instead
   // (see getMobileWsToken in @/lib/mobile/ws-token-client).
   const h = await headers();
-  const isLocal = headersIndicateLoopback((name) => h.get(name));
+  const isWebMachine = headersIndicateWebMachineRelay((name) => h.get(name));
+  const isLocal = !isWebMachine && headersIndicateLoopback((name) => h.get(name));
   return {
     other: {
       ...(isLocal ? { 'ws-token': getOrCreateWsToken() } : {}),
+      ...(isWebMachine ? { [O8_AUTH_MODE_META]: O8_WEB_MACHINE_SURFACE } : {}),
       'apple-mobile-web-app-capable': 'yes',
       'apple-mobile-web-app-status-bar-style': 'black-translucent',
     },

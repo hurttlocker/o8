@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 
 import { resolveFlags } from '@/lib/entitlement/flags';
 import type { Plan } from '@/lib/entitlement/types';
+import {
+  O8_RELAY_FORWARD_HEADER,
+  O8_RELAY_FORWARD_MARKER,
+  O8_RELAY_SURFACE_HEADER,
+  O8_WEB_MACHINE_SURFACE,
+} from '@/lib/connect/web-machine-surface';
 
 /**
  * Relay connector — PURE protocol helpers (no server-only, no sqlite, no ws), so
@@ -12,7 +18,7 @@ import type { Plan } from '@/lib/entitlement/types';
 /** Non-loopback socket-truth marker — mirrors the scripts/tauri-export.mjs wrapper
  *  branch (x-o8-relay-forward:1 → this value) so the gate treats a forwarded
  *  request as REMOTE (Bearer required), never loopback-trusted (v1.1 change 1). */
-export const RELAY_FORWARD_MARKER = 'o8-relay-forward';
+export const RELAY_FORWARD_MARKER = O8_RELAY_FORWARD_MARKER;
 export const DEFAULT_RELAY_URL = 'wss://relay.o8.run';
 /** ≤256KB post-base64 chunks for large tunnel responses (docs R6). */
 export const MAX_HTTP_CHUNK_CHARS = 256 * 1024;
@@ -171,6 +177,8 @@ const FORWARDABLE_HEADERS = new Set([
   'accept-language',
   'if-none-match',
   'if-modified-since',
+  'if-range',
+  'range',
   'x-o8-mobile-surface',
 ]);
 
@@ -183,7 +191,11 @@ export type ReplayPlan =
  * only), stamps the NON-loopback marker + the prod-wrapper trigger + the phone's
  * Bearer so src/middleware.ts gates it exactly like a LAN phone (v1.1 change 1).
  */
-export function buildHttpReplay(req: HttpReqFrame, apiBase: string): ReplayPlan {
+export function buildHttpReplay(
+  req: HttpReqFrame,
+  apiBase: string,
+  options: { relaySurface?: typeof O8_WEB_MACHINE_SURFACE } = {},
+): ReplayPlan {
   const path = typeof req.path === 'string' ? req.path : '';
   // Local absolute path only — never a full URL, protocol-relative, or traversal.
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\') || path.includes('..')) {
@@ -202,7 +214,10 @@ export function buildHttpReplay(req: HttpReqFrame, apiBase: string): ReplayPlan 
   // v1.1 change 1: socket-truth marker (dev) + wrapper trigger (prod). Both make
   // the gate treat this as REMOTE — a loopback-trusted tunnel is forbidden.
   headers['x-o8-client-addr'] = RELAY_FORWARD_MARKER;
-  headers['x-o8-relay-forward'] = '1';
+  headers[O8_RELAY_FORWARD_HEADER] = '1';
+  if (options.relaySurface === O8_WEB_MACHINE_SURFACE) {
+    headers[O8_RELAY_SURFACE_HEADER] = O8_WEB_MACHINE_SURFACE;
+  }
   const body =
     typeof req.bodyB64 === 'string' && req.bodyB64 && method !== 'GET' && method !== 'HEAD'
       ? Buffer.from(req.bodyB64, 'base64')

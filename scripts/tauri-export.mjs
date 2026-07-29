@@ -445,6 +445,8 @@ function stampClientAddr(server) {
     try {
       const peer = req.socket?.remoteAddress || '';
       const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
+      const requestedRelaySurface = req.headers['x-o8-relay-surface'];
+      delete req.headers['x-o8-relay-surface'];
       // The o8 relay connector (a same-host loopback process) forwards a remote
       // phone's request and sets x-o8-relay-forward so the auth gate treats it as
       // REMOTE (Bearer required), never loopback-trusted (relay-v1 change 1).
@@ -453,6 +455,9 @@ function stampClientAddr(server) {
       // See src/lib/mobile/relay-connector.ts (RELAY_FORWARD_MARKER).
       if (loopbackPeer && req.headers['x-o8-relay-forward'] === '1') {
         req.headers['x-o8-client-addr'] = 'o8-relay-forward';
+        if (requestedRelaySurface === 'web-machine') {
+          req.headers['x-o8-relay-surface'] = 'web-machine';
+        }
       } else {
         req.headers['x-o8-client-addr'] = peer;
       }

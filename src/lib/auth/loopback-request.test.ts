@@ -6,6 +6,13 @@ import {
   isLoopbackAddress,
   isLoopbackHostname,
 } from './loopback-request';
+import {
+  headersIndicateWebMachineRelay,
+  O8_RELAY_FORWARD_HEADER,
+  O8_RELAY_FORWARD_MARKER,
+  O8_RELAY_SURFACE_HEADER,
+  O8_WEB_MACHINE_SURFACE,
+} from '@/lib/connect/web-machine-surface';
 
 describe('isLoopbackAddress', () => {
   it('accepts IPv4 loopback', () => {
@@ -71,5 +78,31 @@ describe('headersIndicateLoopback', () => {
     expect(headersIndicateLoopback(headerGetter({ host: '[::1]:3001' }))).toBe(true);
     expect(headersIndicateLoopback(headerGetter({ host: '192.168.1.50:3001' }))).toBe(false);
     expect(headersIndicateLoopback(headerGetter({}))).toBe(false);
+  });
+});
+
+describe('headersIndicateWebMachineRelay', () => {
+  const headerGetter = (entries: Record<string, string>) =>
+    (name: string) => entries[name.toLowerCase()] ?? null;
+  const relayHeaders: Record<string, string> = {
+    [O8_CLIENT_ADDR_HEADER]: O8_RELAY_FORWARD_MARKER,
+    [O8_RELAY_FORWARD_HEADER]: '1',
+    [O8_RELAY_SURFACE_HEADER]: O8_WEB_MACHINE_SURFACE,
+  };
+
+  it('requires every server-canonicalized web-machine marker', () => {
+    expect(headersIndicateWebMachineRelay(headerGetter(relayHeaders))).toBe(true);
+    for (const key of Object.keys(relayHeaders)) {
+      const missing = { ...relayHeaders };
+      delete missing[key];
+      expect(headersIndicateWebMachineRelay(headerGetter(missing))).toBe(false);
+    }
+  });
+
+  it('rejects a web-machine surface marker on an ordinary loopback request', () => {
+    expect(headersIndicateWebMachineRelay(headerGetter({
+      [O8_CLIENT_ADDR_HEADER]: '127.0.0.1',
+      [O8_RELAY_SURFACE_HEADER]: O8_WEB_MACHINE_SURFACE,
+    }))).toBe(false);
   });
 });
