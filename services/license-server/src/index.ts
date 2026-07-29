@@ -24,6 +24,7 @@ import { handleAccountLicense } from './account-license.js';
 import { handleGithubAppToken } from './github-app.js';
 import { handleLinkInstall } from './account-link.js';
 import { runGithubBackfill } from './identity.js';
+import { registerProductionMachineRoutes } from './machines.js';
 import { BoundedRateLimiter, clientAddress } from './rate-limit.js';
 
 const app = new Hono();
@@ -185,6 +186,7 @@ app.post('/issue-free', handleIssueFree);
 //    the app. 503 until CLERK_ISSUER is configured. ─────────────────────────
 app.post('/account/license', handleAccountLicense);
 app.post('/account/link-install', handleLinkInstall);
+registerProductionMachineRoutes(app);
 
 // ── Managed GitHub App token mint — the desktop asks for a short-lived
 //    installation token for the PUBLIC "o8" GitHub App. Same Clerk-session

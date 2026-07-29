@@ -1,9 +1,11 @@
 import {
+  index,
   integer,
   jsonb,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -208,3 +210,26 @@ export const installLinks = pgTable('install_links', {
 });
 
 export type InstallLink = typeof installLinks.$inferSelect;
+
+/**
+ * machines — account-scoped o8 desktop installs registered by `o8 connect`.
+ * A disconnect retains the row as an audit tombstone; every active list and
+ * cap query filters `disconnected_at IS NULL`.
+ */
+export const machines = pgTable('machines', {
+  machineId: text('machine_id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  installId: text('install_id').notNull(),
+  name: text('name').notNull(),
+  platform: text('platform').notNull(),
+  appVersion: text('app_version').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('machines_account_install_unique').on(table.accountId, table.installId),
+  index('machines_account_active_idx').on(table.accountId, table.disconnectedAt),
+]);
+
+export type Machine = typeof machines.$inferSelect;
+export type NewMachine = typeof machines.$inferInsert;

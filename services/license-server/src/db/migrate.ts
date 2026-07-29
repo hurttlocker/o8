@@ -17,6 +17,21 @@ import { env } from '../env.js';
  */
 const ADDITIVE_STATEMENTS: string[] = [
   `alter table if exists install_links add column if not exists github_login text`,
+  `create table if not exists machines (
+    machine_id text primary key,
+    account_id text not null,
+    install_id text not null,
+    name text not null,
+    platform text not null,
+    app_version text not null,
+    created_at timestamp with time zone not null default now(),
+    last_seen_at timestamp with time zone not null default now(),
+    disconnected_at timestamp with time zone
+  )`,
+  `create unique index if not exists machines_account_install_unique
+    on machines (account_id, install_id)`,
+  `create index if not exists machines_account_active_idx
+    on machines (account_id, disconnected_at)`,
 ];
 
 export async function runStartupMigrations(): Promise<void> {
