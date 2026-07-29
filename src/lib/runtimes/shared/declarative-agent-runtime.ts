@@ -124,6 +124,7 @@ export function createDeclarativeAgentRuntime(
       const result = await store.launch({
         cwd: opts.cwd,
         prompt: opts.prompt,
+        laneId: opts.laneId,
         model: opts.model,
         effort: opts.effort,
       });

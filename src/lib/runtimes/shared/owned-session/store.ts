@@ -124,6 +124,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
+      laneId: request.laneId?.trim() || undefined,
       sessionDir,
       cwd: repoPath,
       repoPath,
