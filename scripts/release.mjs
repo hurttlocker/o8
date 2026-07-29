@@ -31,6 +31,7 @@ import { verifyNativeBundle } from './native-bundle.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
+const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const root = process.cwd();
 
 function runNativeGate(serverRoot) {
@@ -61,6 +62,17 @@ if (nodeMajor !== 22) {
   console.error(`[release] FATAL: builds must run on Node 22 LTS (current: ${process.version})`);
   console.error(`[release] Run \`nvm use\` (reads .nvmrc) then retry npm run ship.`);
   process.exit(1);
+}
+
+// `npm run ship` detaches stale DMGs before this script. Garbage-collect their
+// LaunchServices claims before publishing so dead o8:// handlers do not accrue.
+if (process.platform === 'darwin') {
+  try {
+    execFileSync(LSREGISTER, ['-gc'], { stdio: 'ignore' });
+    console.log('[release] garbage-collected stale LaunchServices registrations');
+  } catch (error) {
+    console.warn(`[release] LaunchServices garbage collection skipped: ${error?.message ?? error}`);
+  }
 }
 
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));

@@ -37,6 +37,8 @@ mod window_restore;
 #[cfg(target_os = "macos")]
 mod entitlement;
 mod telemetry;
+#[cfg(target_os = "macos")]
+mod url_scheme_handler;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -5851,6 +5853,8 @@ pub fn run() {
         .setup(move |app| {
             log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
             boot_trace("setup() entered (plugins INITIALISED)");
+            #[cfg(target_os = "macos")]
+            url_scheme_handler::reassert_o8_scheme_handler();
             let boot_identity = boot_identity.clone();
             // Nudge the user to move o8 to /Applications when it's running
             // translocated / from a DMG — otherwise dictation paste, Accessibility,
