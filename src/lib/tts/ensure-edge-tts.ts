@@ -5,9 +5,9 @@
  *
  * Without the package, /api/tts exits non-zero and the client TTS engine
  * silently falls back to the browser SpeechSynthesis voice (Siri on macOS) —
- * the "stupid-ass computer voice" a fresh machine / downloader hears instead of
- * the male voice. Sydney's laptop hit exactly this: edge-tts was never in her
- * python; the iMac happened to have it, so the bug was invisible here.
+ * the generic system voice a fresh machine hears instead of the intended male
+ * voice. The dependency can be present on one development machine and absent
+ * on another, which can hide the failure during local testing.
  *
  * Runs once per server process on the first TTS request: checks
  * `python3 -c "import edge_tts"`; if missing, pip-installs in the background

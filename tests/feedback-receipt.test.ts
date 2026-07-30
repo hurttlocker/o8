@@ -71,10 +71,10 @@ describe('matchReceipts — the local join', () => {
     // still has the raw text they typed — that is what a receipt should echo.
     const out = matchReceipts(
       [entry('A7F3K2', 'Diff panel crashes when opening file')],
-      [{ id: 'A7F3K2', ts: NOW, title: 'the diff panel shits itself when I open my client repo' }],
+      [{ id: 'A7F3K2', ts: NOW, title: 'the diff panel crashes when I open my client repo' }],
       new Set(),
     );
-    expect(out[0].title).toBe('the diff panel shits itself when I open my client repo');
+    expect(out[0].title).toBe('the diff panel crashes when I open my client repo');
   });
 
   it('falls back to the public title when the local ledger has no text', () => {

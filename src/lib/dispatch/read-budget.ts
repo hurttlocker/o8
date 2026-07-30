@@ -23,10 +23,10 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
  * substring match, see {@link resolveModelTier}).
  */
 export type ModelTier =
-  | 'codex-strong'    // GPT-5.4 xhigh, Opus — reads spontaneously, minimal budget needed
-  | 'claude-mid'      // Sonnet, Opus 4.6 — moderate scaffolding helps
-  | 'weak'            // Haiku, Gemini Flash, GPT-4o-mini, opencode/gpt-5-nano
-  | 'unknown';        // Fallback — treat like claude-mid
+  | 'codex-strong'    // Self-directed reading — minimal explicit budget needed
+  | 'claude-mid'      // Guided reading — moderate scaffolding helps
+  | 'weak'            // Scaffolded reading — explicit reads and planning help
+  | 'unknown';        // Fallback — use the guided-reading preset
 
 interface BudgetPreset {
   minToolCalls: number;

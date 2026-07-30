@@ -65,7 +65,7 @@ The reporter's **prose** is the part that used to leak: it was republished verba
 The model is the polish, never the guard — if OpenRouter is down we publish the redacted text, **never the raw text**. `buildManifest` redacts unconditionally on the way out as a final gate, so raw prose physically cannot reach the manifest even if an upstream path forgets.
 
 ```
-raw    (private):  "the diff panel shits itself when I open /Users/bob/clients/acme-secret"
+raw    (private):  "the diff panel crashes when I open /Users/bob/clients/acme-secret"
 public (#fixed):   "Diff panel crashes when opening file"
 ```
 

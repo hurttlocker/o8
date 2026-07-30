@@ -392,7 +392,7 @@ export function buildRuleCheckFailureMessage(result: RuleCheckResult): string {
   sections.push(
     'Fix each violation, re-verify locally (`npm run rule-check`), then report completion again.',
     '',
-    'The platform enforces these rules mechanically because multi-constraint holding is where weaker models drop rules — CLAUDE.md invariants are not optional.',
+    'The platform enforces these rules mechanically because some runtimes benefit from explicit reinforcement when holding multiple constraints — CLAUDE.md invariants are not optional.',
   );
 
   return sections.join('\n');

@@ -1,12 +1,11 @@
 /**
  * Polish prompt for dictation cleanup.
  *
- * Adapted from Symon's `polish.rs` build_prompt(). The killer insight is
- * the adaptive-punctuation block + the OUTPUT COVERAGE guard that stops
- * Gemini Flash Lite from silently summarizing long dictations. The
- * CodeEditor-branch verbatim sits in here too, since o8's whole surface
- * is dev work — the polished output should preserve technical tokens,
- * file paths in backticks, exact case for symbols, etc.
+ * Adapted from Symon's `polish.rs` build_prompt(). The adaptive-punctuation
+ * block and OUTPUT COVERAGE guard prevent long dictations from being silently
+ * summarized. The CodeEditor branch remains verbatim because o8 is a developer
+ * surface, so polished output must preserve technical tokens, file paths in
+ * backticks, and exact symbol casing.
  */
 
 export type DictationSurface = 'orchestrator' | 'chat' | 'terminal' | 'general';
