@@ -4,7 +4,7 @@ Last updated: 2026-05-25
 
 ## Scope
 
-Make the native Expo app in `/Users/marquisehurtt/o8-mobile` and the desktop o8 app in `/Users/marquisehurtt/cortex-ide` share one built-in o8/Claude orchestrator chat identity.
+Make the native Expo app in `~/o8-mobile` and the desktop o8 app in `~/o8` share one built-in o8/Claude orchestrator chat identity.
 
 OpenClaw is explicitly out of scope for this plan. Treat OpenClaw as beta-side work and do not add OpenClaw-specific behavior here.
 
@@ -53,7 +53,7 @@ Desktop and mobile should use the same orchestrator conversation:
 
    ```json
    {
-     "repoPath": "/Users/marquisehurtt/cortex-ide",
+     "repoPath": "/workspace/o8",
      "title": "New conversation",
      "runtime": "claude-code"
    }
@@ -65,7 +65,7 @@ Desktop and mobile should use the same orchestrator conversation:
    {
      "thread": {
        "id": "thoughts-...",
-       "repoPath": "/Users/marquisehurtt/cortex-ide",
+       "repoPath": "/workspace/o8",
        "title": "New conversation",
        "runtime": "claude-code",
        "status": "idle",
@@ -87,7 +87,7 @@ Desktop and mobile should use the same orchestrator conversation:
 
 4. Update `o8-mobile` to use desktop-owned ids.
 
-   In `/Users/marquisehurtt/o8-mobile`:
+   In `~/o8-mobile`:
 
    - Add a client helper such as `createOrchestratorThread(config, input)` in `src/o8/orchestrator.ts`.
    - Update new-chat flow to call the desktop endpoint.
@@ -117,12 +117,12 @@ Desktop and mobile should use the same orchestrator conversation:
    - Mobile-created chat appears on desktop with the same `thoughts-*` id.
    - Mobile send writes to the same desktop chat-history file.
    - Desktop continuation is visible on mobile after reload/refetch.
-   - `repoPath` remains `/Users/marquisehurtt/cortex-ide` for cortex work.
+   - `repoPath` remains the desktop repository's canonical absolute path.
    - No OpenClaw-specific route or backend is used.
 
 ## Files To Inspect First
 
-Desktop repo: `/Users/marquisehurtt/cortex-ide`
+Desktop repo: `~/o8`
 
 - `src/app/api/mobile/orchestrator/threads/route.ts`
 - `src/app/api/v2/chat-history/route.ts`
@@ -132,7 +132,7 @@ Desktop repo: `/Users/marquisehurtt/cortex-ide`
 - `src/components/desktop/workspace-terminal/OrchestratorTab.tsx`
 - `src/components/desktop/workspace-terminal/terminal-tab-handlers.ts`
 
-Mobile repo: `/Users/marquisehurtt/o8-mobile`
+Mobile repo: `~/o8-mobile`
 
 - `src/o8/orchestrator.ts`
 - `src/o8/ws.ts`
@@ -155,7 +155,7 @@ curl -fsS -H "Authorization: Bearer $TOKEN" \
 Mobile app:
 
 ```bash
-cd /Users/marquisehurtt/o8-mobile
+cd ~/o8-mobile
 npx tsc --noEmit
 bun run lint
 bun start -- --dev-client --host lan --port 8081
@@ -165,15 +165,15 @@ bun run sim:list
 Desktop app:
 
 ```bash
-cd /Users/marquisehurtt/cortex-ide
+cd ~/o8
 npm run lint
 npm run typecheck
 ```
 
 ## Resume Prompt For Agent After Compaction
 
-You are in `/Users/marquisehurtt/cortex-ide`. Continue the mobile/desktop orchestrator chat parity work described in `docs/mobile-desktop-chat-parity-plan.md`. The goal is to make the built-in o8/Claude orchestrator share exact chat identity between desktop and `/Users/marquisehurtt/o8-mobile`: same `thoughts-*` id, same `repoPath`, same `~/.o8/chat-history/<threadId>.json`, same transcript, and visible on both clients. Do not work on OpenClaw in this plan.
+You are in `~/o8`. Continue the mobile/desktop orchestrator chat parity work described in `docs/mobile-desktop-chat-parity-plan.md`. The goal is to make the built-in o8/Claude orchestrator share exact chat identity between desktop and `~/o8-mobile`: same `thoughts-*` id, same `repoPath`, same `~/.o8/chat-history/<threadId>.json`, same transcript, and visible on both clients. Do not work on OpenClaw in this plan.
 
-Start by implementing the desktop side in `cortex-ide`: extract shared chat-history/thread helpers if useful, add `POST /api/mobile/orchestrator/threads` so desktop mints canonical `thoughts-*` ids and writes metadata-only placeholder records, then add a reveal/open contract so mobile-created threads can be opened or focused in the desktop orchestrator tab. After desktop works, update `/Users/marquisehurtt/o8-mobile` so mobile no longer creates `thoughts-...-mobile` ids locally and instead calls the desktop creation endpoint before navigating to `/chat`.
+Start by implementing the desktop side in `o8`: extract shared chat-history/thread helpers if useful, add `POST /api/mobile/orchestrator/threads` so desktop mints canonical `thoughts-*` ids and writes metadata-only placeholder records, then add a reveal/open contract so mobile-created threads can be opened or focused in the desktop orchestrator tab. After desktop works, update `~/o8-mobile` so mobile no longer creates `thoughts-...-mobile` ids locally and instead calls the desktop creation endpoint before navigating to `/chat`.
 
 Use the currently running surfaces when available: desktop backend `localhost:3010`, WS `localhost:3002`, mobile serve-sim `http://localhost:8081/.sim`. Verify with real API calls and at least one desktop-started and one mobile-started chat. Run typecheck/lint in each repo you modify. Keep commits scoped per repo.

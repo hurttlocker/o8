@@ -45,7 +45,7 @@ const outcomeRow: TypedRow = {
   },
   fields: {
     id: 'sub-846-fix-session-panel-decompose',
-    repoPath: '/Users/marquisehurtt/cortex-ide',
+    repoPath: '/workspace/o8',
     branch: 'fix/session-panel-decompose',
     runtime: 'codex',
     outcome: 'completed',

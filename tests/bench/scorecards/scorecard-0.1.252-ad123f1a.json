@@ -62,7 +62,7 @@
     "memory": {
       "automatable": true,
       "status": "ok",
-      "sourceResults": "/Users/marquisehurtt/cortex-ide/tests/qa-eval/three-way-results-2026-06-02T04-22-05-434Z.json",
+      "sourceResults": "tests/qa-eval/three-way-results-2026-06-02T04-22-05-434Z.json",
       "metrics": {
         "overall_full_accuracy": {
           "value": 0.6860526315789474,

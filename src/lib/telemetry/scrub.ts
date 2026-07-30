@@ -13,7 +13,7 @@
 /**
  * Collapse the identity-bearing home segment of a POSIX path to an ellipsis,
  * keeping the rest so a stack trace stays debuggable:
- *   /Users/marquisehurtt/o8/src/x.ts → /Users/…/o8/src/x.ts
+ *   /Users/example/o8/src/x.ts → /Users/…/o8/src/x.ts
  *   /home/deploy/app/server.js       → /home/…/app/server.js
  * The username is the PII; the trailing path is safe + useful.
  */

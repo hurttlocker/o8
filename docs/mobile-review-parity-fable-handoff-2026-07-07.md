@@ -1,7 +1,7 @@
 # Mobile Review Parity Handoff for Fable
 
 Date: 2026-07-07  
-Repos: desktop `/Users/marquisehurtt/o8`, mobile `/Users/marquisehurtt/o8-mobile`
+Repos: desktop `~/o8`, mobile `~/o8-mobile`
 
 ## Goal
 

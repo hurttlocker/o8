@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn collapses_macos_home_username_keeps_path() {
         assert_eq!(
-            scrub_paths("/Users/marquisehurtt/o8/src/x.rs"),
+            scrub_paths("/Users/example/o8/src/x.rs"),
             "/Users/…/o8/src/x.rs"
         );
     }

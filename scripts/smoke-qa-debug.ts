@@ -4,7 +4,7 @@ import { retrieveAll, unionMerge } from '../src/lib/cortex/qa/retrieve';
 
 async function main() {
   const question = process.argv[2] ?? 'What is the maximum file line count allowed before decomposing a file in this repo?';
-  const repoPath = '/Users/marquisehurtt/o8';
+  const repoPath = process.cwd();
   const c = await classifyQuestion(question);
   console.log('class:', c.class, '| variants:', JSON.stringify(c.bm25Variants));
   const results = await retrieveAll({ question, repoPath, projectId: undefined, bm25Variants: c.bm25Variants, questionClass: c.class });

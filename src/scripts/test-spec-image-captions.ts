@@ -1,7 +1,7 @@
 /**
  * test-spec-image-captions — sanity-check the spec image captioning pipeline.
  *
- * Reads /Users/marquisehurtt/o8/o8.md (which has real screenshot refs),
+ * Reads o8.md from the current repository (which has real screenshot refs),
  * runs the captioning logic, and prints each image path + its resolved caption.
  *
  * Run: npx tsx src/scripts/test-spec-image-captions.ts
@@ -12,7 +12,7 @@ import { dirname, isAbsolute, resolve as pathResolve } from 'node:path';
 
 import { captionImagesInSpec } from '@/lib/cortex/spec-image-captions';
 
-const SPEC_PATH = '/Users/marquisehurtt/o8/o8.md';
+const SPEC_PATH = pathResolve(process.cwd(), 'o8.md');
 const IMAGE_REGEX = /!\[([^\]]*)\]\(([^)]+)\)\n\*\*\[image:\s*([^\]]+)\]\*\*/g;
 
 async function main(): Promise<void> {
