@@ -164,11 +164,20 @@ fn generate_master_key() -> String {
     base64_encode_url(&bytes)
 }
 
+fn require_main_window(window: &tauri::Window) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("command not authorized".to_string())
+    }
+}
+
 /// Retrieve the master encryption key from the Keychain.
 /// Returns Err("keychain-miss") if the entry does not exist.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn master_key_get() -> Result<String, String> {
+fn master_key_get(window: tauri::Window) -> Result<String, String> {
+    require_main_window(&window)?;
     keychain_find_password().ok_or_else(|| "keychain-miss".to_string())
 }
 
@@ -176,7 +185,8 @@ fn master_key_get() -> Result<String, String> {
 /// Idempotent — multiple calls return the same key.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn master_key_ensure() -> Result<String, String> {
+fn master_key_ensure(window: tauri::Window) -> Result<String, String> {
+    require_main_window(&window)?;
     if env_flag_enabled("O8_PRESHIP_GATE") {
         return Err("preship-gate-keychain-disabled".to_string());
     }
@@ -4425,6 +4435,7 @@ fn dock_set_hit_rect(x: f64, y: f64, w: f64, h: f64) {
 #[cfg(target_os = "macos")]
 #[tauri::command(rename_all = "camelCase")]
 fn browser_view_open(
+    window: tauri::Window,
     app: tauri::AppHandle,
     url: String,
     x: f64,
@@ -4433,6 +4444,7 @@ fn browser_view_open(
     h: f64,
     init_script: Option<String>,
 ) -> Result<(), String> {
+    require_main_window(&window)?;
     browser_view::open(&app, &url, x, y, w, h, init_script.as_deref())
 }
 
@@ -4440,14 +4452,28 @@ fn browser_view_open(
 /// (panel ResizeObserver / window move+resize). CSS logical px in.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_set_rect(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) {
+fn browser_view_set_rect(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    require_main_window(&window)?;
     browser_view::set_rect(&app, x, y, w, h);
+    Ok(())
 }
 
 /// Navigate the browser-view child window to a new URL (URL bar / tab / reload).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_navigate(app: tauri::AppHandle, url: String) -> Result<(), String> {
+fn browser_view_navigate(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<(), String> {
+    require_main_window(&window)?;
     browser_view::navigate(&app, &url)
 }
 
@@ -4458,8 +4484,13 @@ fn browser_view_navigate(app: tauri::AppHandle, url: String) -> Result<(), Strin
 /// Returns `false` so the caller falls back to the iframe path when native is off.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_eval(app: tauri::AppHandle, js: String) -> bool {
-    browser_view::eval(&app, &js)
+fn browser_view_eval(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+    js: String,
+) -> Result<bool, String> {
+    require_main_window(&window)?;
+    Ok(browser_view::eval(&app, &js))
 }
 
 /// Eval `js` into the browser-view and RETURN its JSON result (the host pulling a
@@ -4469,10 +4500,12 @@ fn browser_view_eval(app: tauri::AppHandle, js: String) -> bool {
 #[cfg(target_os = "macos")]
 #[tauri::command(rename_all = "camelCase")]
 async fn browser_view_eval_result(
+    window: tauri::Window,
     app: tauri::AppHandle,
     js: String,
     timeout_ms: Option<u64>,
 ) -> Result<String, String> {
+    require_main_window(&window)?;
     browser_view::eval_result(&app, js, timeout_ms.unwrap_or(8000)).await
 }
 
@@ -4484,30 +4517,43 @@ async fn browser_view_eval_result(
 /// Recording isn't granted.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_capture(app: tauri::AppHandle) -> Option<String> {
-    agent::screen::capture_window(&app, browser_view::BROWSER_VIEW_LABEL)
+fn browser_view_capture(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    require_main_window(&window)?;
+    Ok(agent::screen::capture_window(
+        &app,
+        browser_view::BROWSER_VIEW_LABEL,
+    ))
 }
 
 /// Close + destroy the browser-view child window (Browser tab closed / teardown).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_close(app: tauri::AppHandle) {
+fn browser_view_close(window: tauri::Window, app: tauri::AppHandle) -> Result<(), String> {
+    require_main_window(&window)?;
     browser_view::close(&app);
+    Ok(())
 }
 
 /// Hide the browser-view child window without destroying it (tab not visible,
 /// panel collapsed, occlusion snapshot-swap).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_hide(app: tauri::AppHandle) {
+fn browser_view_hide(window: tauri::Window, app: tauri::AppHandle) -> Result<(), String> {
+    require_main_window(&window)?;
     browser_view::hide(&app);
+    Ok(())
 }
 
 /// Show the browser-view child window again and re-apply its last rect.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn browser_view_show(app: tauri::AppHandle) {
+fn browser_view_show(window: tauri::Window, app: tauri::AppHandle) -> Result<(), String> {
+    require_main_window(&window)?;
     browser_view::show(&app);
+    Ok(())
 }
 
 /// Open the standalone Voice settings window (Symon parity). Double-tapping the
@@ -4978,8 +5024,13 @@ fn agent_task_status() -> Option<serde_json::Value> {
 /// Returns the markdown scoreboard (also written to ~/.o8/agent-eval-latest.md).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-async fn agent_eval(app: tauri::AppHandle, models: Option<Vec<String>>) -> String {
-    agent::eval::run_eval(app, models.unwrap_or_default()).await
+async fn agent_eval(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+    models: Option<Vec<String>>,
+) -> Result<String, String> {
+    require_main_window(&window)?;
+    Ok(agent::eval::run_eval(app, models.unwrap_or_default()).await)
 }
 
 /// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
@@ -4987,8 +5038,10 @@ async fn agent_eval(app: tauri::AppHandle, models: Option<Vec<String>>) -> Strin
 /// without the global Fn hotkey. macOS only.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn o8_debug_paste(text: String) {
+fn o8_debug_paste(window: tauri::Window, text: String) -> Result<(), String> {
+    require_main_window(&window)?;
     paste::paste_text(&text);
+    Ok(())
 }
 
 /// Dock-route morph instrumentation. The `/dictation-pill` route runs in a
@@ -5085,8 +5138,12 @@ mod dock_route_tests {
 /// None on failure so the feedback flow degrades to a manual paste. macOS only.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn capture_app_window(app: tauri::AppHandle) -> Option<String> {
-    agent::screen::capture_window(&app, "main")
+fn capture_app_window(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    require_main_window(&window)?;
+    Ok(agent::screen::capture_window(&app, "main"))
 }
 
 /// TEMP/debug: morph the always-on screen dock pill into a sample "listening"
