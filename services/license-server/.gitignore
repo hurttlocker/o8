@@ -1,8 +1,0 @@
-node_modules
-dist
-.env
-.env.local
-*.pem
-*.key
-npm-debug.log*
-.DS_Store
