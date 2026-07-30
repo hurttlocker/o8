@@ -5,9 +5,11 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 
 import { headersIndicateWebMachineRelay } from './web-machine-surface';
 import { MachineRelayConnector, type MachineRelayTicket } from './machine-attach';
-import { RelayServer } from '../../../services/relay/src/relay.js';
-import { attachRelayUpgrade } from '../../../services/relay/src/attach.js';
-import { createWebSurfaceApp } from '../../../services/relay/src/web-surface.js';
+import {
+  attachRelayUpgrade,
+  createWebSurfaceApp,
+  RelayServer,
+} from '../../../tests/fixtures/reference-relay';
 
 const LOCAL_OPERATOR_TOKEN = 'local-ws-token-must-never-cross-the-relay';
 const MACHINE_ID = 'machine-full-surface';
