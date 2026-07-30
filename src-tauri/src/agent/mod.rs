@@ -2,9 +2,10 @@
 //!
 //! A distinct voice agent (NOT the orchestrator): a fast OpenRouter brain runs a
 //! ~10-turn function-calling loop over native macOS tools, gated by a SafetyClass
-//! confirm card in the dock, then speaks the result. Lifted from the acquired
-//! aqua/Symon app and de-Symonized onto o8's `~/.o8` data dir + dock event
-//! plumbing. macOS-only (gated at the `mod agent;` declaration in lib.rs).
+//! confirm card in the dock, then speaks the result. This code originated in the
+//! aqua/Symon application, which o8's operator acquired and owns outright, and
+//! was adapted to o8's `~/.o8` data dir and dock event plumbing. macOS-only
+//! (gated at the `mod agent;` declaration in lib.rs).
 //!
 //! Threading: `agent_run` (a SYNC Tauri command) spawns a worker thread that
 //! builds its own current-thread tokio runtime and `block_on`s `run_agent` —
