@@ -57,8 +57,8 @@ This prints **two** PEM blocks:
 1. **PRIVATE key (PKCS8)** → Railway env var `LICENSE_PRIVATE_KEY`. Secret. Lives
    only on the server. Never commit it.
 2. **PUBLIC key (SPKI)** → paste into the desktop app at
-   `src/lib/entitlement/license.ts`, replacing the `PLACEHOLDER_DEV_PUBLIC_KEY_PEM`
-   constant (the `TODO(M5)` placeholder). Safe to commit — it only verifies.
+   `src/lib/entitlement/license.ts`, replacing the value of
+   `LICENSE_PUBLIC_KEY_PEM`. Safe to commit — it only verifies.
    You can also override it at runtime on the desktop via `O8_LICENSE_PUBKEY`.
 
 After swapping the public key, ship a desktop build so users get the new

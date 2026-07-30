@@ -4,9 +4,8 @@
  *
  *   - PRIVATE key (PKCS8 PEM)  -> set as Railway env var LICENSE_PRIVATE_KEY
  *   - PUBLIC key  (SPKI PEM)   -> paste into the desktop app at
- *                                 src/lib/entitlement/license.ts, replacing the
- *                                 PLACEHOLDER_DEV_PUBLIC_KEY_PEM constant
- *                                 (the TODO(M5) placeholder).
+ *                                 src/lib/entitlement/license.ts as the value
+ *                                 of LICENSE_PUBLIC_KEY_PEM.
  *
  * The desktop verifier imports the public key via importSPKI(pem, 'EdDSA') and
  * the server signs with importPKCS8(privateKey, 'EdDSA'). As long as this pair
@@ -37,8 +36,8 @@ console.log('');
 console.log(line);
 console.log('');
 console.log('2) PUBLIC KEY  ->  Desktop app:  src/lib/entitlement/license.ts');
-console.log('   Replace the PLACEHOLDER_DEV_PUBLIC_KEY_PEM constant (the TODO(M5) value)');
-console.log('   with the block below. This is safe to commit — it only VERIFIES tokens.');
+console.log('   Replace the LICENSE_PUBLIC_KEY_PEM value with the block below.');
+console.log('   This is safe to commit — it only VERIFIES tokens.');
 console.log('');
 console.log(publicPem);
 console.log('');

@@ -23,7 +23,7 @@ import { useMobileUrlPushListener } from './url-push-listener';
 //
 // In landscape it lays out two panes:
 //   left  — `children` (the existing mobile chat shell, mounted as-is)
-//   right — dev-host preview placeholder (real iframe ships in #781)
+//   right — dev-host preview iframe
 //
 // A 6px draggable handle separates them. Ratio is clamped to 0.25–0.75 and
 // persisted to localStorage so it survives rotations and reloads.
@@ -34,7 +34,6 @@ import { useMobileUrlPushListener } from './url-push-listener';
 //   - PWA topbar stays solid — we do NOT touch the topbar; the existing
 //     mobile shell paints it from inside `children`
 //   - system UI for chrome text
-//   - Phosphor SVG drawn inline for the placeholder icon
 //   - File ceiling 800 lines (this file is well under)
 
 const RATIO_STORAGE_KEY = 'o8:mobile-split:ratio';
@@ -42,7 +41,6 @@ const RATIO_MIN = 0.25;
 const RATIO_MAX = 0.75;
 const RATIO_DEFAULT = 0.5;
 const HANDLE_HOT_ZONE = 6; // px — visual is centered inside this zone
-const FONT_STACK = 'var(--font-sans-system)';
 
 function clampRatio(value: number): number {
   if (!Number.isFinite(value)) return RATIO_DEFAULT;
@@ -284,113 +282,6 @@ function SplitLayout({ children }: { children: ReactNode }) {
       </div>
       <div style={rightPaneStyle}>
         <DevHostFrame />
-      </div>
-    </div>
-  );
-}
-
-// TODO(#781): replace this placeholder with `<DevHostFrame />` (parallel
-// agent owns `src/components/mobile-split-shell/DevHostFrame.tsx` plus the
-// LAN-host API route at `src/app/api/panel/lan-host/route.ts`). The frame
-// will render an iframe pointed at the focused workspace's dev port; until
-// it lands we ship a clean empty state so the right pane never looks broken.
-function DevHostPlaceholder() {
-  const containerStyle: CSSProperties = {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    justifyContent: 'flex-start',
-    padding: 'calc(env(safe-area-inset-top, 0px) + 24px) 28px 28px 28px',
-    fontFamily: FONT_STACK,
-    color: 'var(--t-text, #FAF5F0)',
-  };
-
-  const headerStyle: CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    paddingBottom: 18,
-    borderBottom: '1px solid var(--t-border, rgba(255,248,240,0.08))',
-  };
-
-  const eyebrowStyle: CSSProperties = {
-    fontSize: 11,
-    fontWeight: 600,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-    color: 'var(--t-text-muted, rgba(255,248,240,0.52))',
-  };
-
-  const headingStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 18,
-    fontWeight: 600,
-    letterSpacing: '-0.01em',
-    color: 'var(--t-text, #FAF5F0)',
-  };
-
-  const bodyStyle: CSSProperties = {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    paddingTop: 24,
-    paddingBottom: 24,
-    textAlign: 'center',
-  };
-
-  const iconWrapStyle: CSSProperties = {
-    width: 56,
-    height: 56,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    background: 'var(--t-bg-card, rgba(46,42,38,0.4))',
-    border: '1px solid var(--t-border, rgba(255,248,240,0.08))',
-    color: 'var(--t-text-muted, rgba(255,248,240,0.62))',
-  };
-
-  const hintStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 13,
-    lineHeight: 1.5,
-    maxWidth: 320,
-    color: 'var(--t-text-muted, rgba(255,248,240,0.62))',
-  };
-
-  return (
-    <div style={containerStyle}>
-      <div style={headerStyle}>
-        <span style={eyebrowStyle}>Preview</span>
-        <h2 style={headingStyle}>Dev host preview</h2>
-      </div>
-      <div style={bodyStyle}>
-        <span style={iconWrapStyle} aria-hidden="true">
-          {/* Phosphor "Browsers" — drawn inline to avoid React icon shim. */}
-          <svg
-            viewBox="0 0 256 256"
-            width="28"
-            height="28"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="14"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="32" y="56" width="160" height="120" rx="8" />
-            <line x1="32" y1="88" x2="192" y2="88" />
-            <path d="M64 200h152a8 8 0 0 0 8-8V104" />
-          </svg>
-        </span>
-        <p style={hintStyle}>
-          Coming soon — the dev host preview ships next. Rotate back to portrait for full chat.
-        </p>
       </div>
     </div>
   );

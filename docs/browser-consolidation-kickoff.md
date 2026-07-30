@@ -154,10 +154,8 @@ STAGE 6 — Audit + sweep.
 - `npx tsc --noEmit` BEFORE EVERY commit. `npm test` (vitest) at the end.
 - Commit per stage with EXPLICIT pathspec (git add <specific files>; NEVER `git add -A` — the
   tree has pre-existing dirty files like o8.md / src-tauri/Cargo.lock — leave them untouched).
-  Prefix refactor:/feat:/fix:. Trailers required:
-    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-    Claude-Session: <your session url>
-  No backticks or $ inside double-quoted -m (use single quotes or multiple -m).
+  Prefix refactor:/feat:/fix:. No backticks or $ inside double-quoted -m (use single quotes or
+  multiple -m).
 - `git push origin main` after each stage (rebase if origin advanced — other agents commit
   concurrently). DO NOT SHIP (no `npm run ship`, no `npm version`).
 

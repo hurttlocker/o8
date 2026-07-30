@@ -81,7 +81,7 @@ Gate the whole native-webview path behind an operator setting (default OFF until
 ## Constraints (CLAUDE.md — non-negotiable)
 - Inline styles only (no CSS classes/shorthand), theme tokens (`var(--t-*)`), `as React.CSSProperties` for vendor props.
 - `npx tsc --noEmit` before every commit; `npm test` at the end. Rust: `cargo build` (and `cargo test --lib` from `src-tauri/`).
-- Commit per stage, EXPLICIT pathspec (the tree has pre-existing dirty files — `o8.md` etc.; leave them). Trailers: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` + the session `Claude-Session:` line. No backticks/$ in double-quoted `-m`.
+- Commit per stage with an EXPLICIT pathspec (the tree has pre-existing dirty files — `o8.md` etc.; leave them). No backticks/$ in double-quoted `-m`.
 - `git push origin main` per stage. **DO NOT SHIP** unless told (Rust changes need `npm run ship` to reach the installed app — the operator decides when).
 - This needs a **ship + dogfood** to verify (the native webview only exists in a built app, not `next dev`). The operator daily-drives `/Applications/o8.app`; coordinate ship timing.
 
