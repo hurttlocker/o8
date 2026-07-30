@@ -47,7 +47,7 @@ Desktop (o8.app)
 
 **Step 0 — finish the license loop (hard prereq).** Run `gen-keys`; put the **private** key on Railway, swap the **real public key** into desktop `src/lib/entitlement/license.ts` (still the placeholder), ship a build. Until this, no plan token verifies. (Plan §6; memory `m5_deploy_state`.)
 
-**Step 1 — proxy service (Railway).** Extend `services/license-server` (or a sibling): `POST /v1/inference` (OpenRouter-compatible passthrough) + `POST /v1/embeddings`. Validate the plan token → check the per-account meter → forward to OpenRouter/Gemini with our key → log usage to Postgres → `402` when over cap. Our keys as Railway env only.
+**Step 1 — proxy service (Railway).** Extend the private `o8-license-server` (or a sibling): `POST /v1/inference` (OpenRouter-compatible passthrough) + `POST /v1/embeddings`. Validate the plan token → check the per-account meter → forward to OpenRouter/Gemini with our key → log usage to Postgres → `402` when over cap. Our keys as Railway env only.
 
 **Step 2 — desktop resolver integration.** In `src/lib/cortex/qa/llm/byok-keys.ts` (`resolveOpenRouterKey`) + the Gemini key lookups, add the proxy tier: no local key AND plan token present → return a proxy client. Gate on the entitlement (`proxy.inference` flag). This auto-lights the **Brain speed tier, dictation, embeddings, and the default chat path** — no per-feature work.
 
@@ -60,7 +60,7 @@ Desktop (o8.app)
 **Step 6 — pricing + checkout.** With Step-5 data: confirm/adjust $19, wire Stripe checkout (license server already mints), flip the Billing tab's "Coming Soon" rows → live, and (per plan §7 cleanup) fix the FTUX setup-detect + dictation 503 copy that still point at the hidden BYOK tab.
 
 ## Already built — reuse, don't rebuild
-- **License server** on Railway (Stripe → EdDSA mint, beta-invite module) — extend it. (`services/license-server/`)
+- **License server** on Railway (Stripe → EdDSA mint, beta-invite module) — extend the private `o8-license-server`.
 - **Entitlement** flags + store + verifier (desktop) — repurpose a flag → `proxy.inference`. (`src/lib/entitlement/`)
 - **`/api/v2/proxy/llm`** already enforces a per-user budget for non-free plans (the metering *seam*) — but only fires on authenticated non-loopback requests. The hosted proxy is that authenticated path.
 - **`byok-keys.ts`** resolver chain — the single insertion point for Step 2.
@@ -72,4 +72,4 @@ Desktop (o8.app)
 - Final pricing — **do the math after Step 5** (operator's call, real COGS data).
 
 ---
-*Inputs verified 2026-06-16: classifier 5-tier fallback (`cortex/qa/classifier.ts`), key resolvers (`cortex/qa/llm/byok-keys.ts`), Symon TTS gate (`src-tauri/src/tts/mod.rs`), entitlement stack (`src/lib/entitlement/`), license server (`services/license-server/`).*
+*Inputs verified 2026-06-16: classifier 5-tier fallback (`cortex/qa/classifier.ts`), key resolvers (`cortex/qa/llm/byok-keys.ts`), Symon TTS gate (`src-tauri/src/tts/mod.rs`), entitlement stack (`src/lib/entitlement/`), and the private `o8-license-server`.*

@@ -27,7 +27,7 @@ the whole flow. Today they share the **development** instance; the cutover moves
 |---|---|---|---|
 | **o8-site** (o8.run) | Vercel project `o8-site` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` | `proxy.ts:16-17`, `app/layout.tsx:92`, and the ticket **minter** `app/desktop/sign-in/ticket/route.ts` (the only place the secret is used) |
 | **o8 desktop** | signed build (`npm run ship`) | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (publishable only) | baked into the build at `src/components/auth/O8AuthProvider.tsx:11`; consumed client-side by the ticket handler `src/components/auth/DesktopAuthCallbackHandler.tsx` |
-| **license-server** | Railway | `CLERK_ISSUER` (JWKS issuer URL) | `services/license-server/src/env.ts:103-107` → `clerk-verify.ts:16-32` (verifies desktop session tokens against the instance JWKS) |
+| **license-server** | Railway | `CLERK_ISSUER` (JWKS issuer URL) | the private `o8-license-server` Clerk verifier validates desktop session tokens against the instance JWKS |
 
 **The `o8://` handoff, end to end** — the site **mints** a one-time Clerk sign-in ticket with
 the **secret** key (`app/desktop/sign-in/ticket/route.ts` → `signInTokens.createSignInToken`),
@@ -87,9 +87,9 @@ token minted after the site flips can already be verified.
 
 1. **license-server (Railway) — set `CLERK_ISSUER` first.**
    Set `CLERK_ISSUER=https://clerk.o8.run` (the production Frontend API / issuer, exact value
-   from Part A step 5). Redeploy. Verified by `services/license-server/src/clerk-verify.ts`
-   (`createRemoteJWKSet(new URL('/.well-known/jwks.json', env.CLERK_ISSUER))`,
-   `jwtVerify(token, keySet, { issuer: env.CLERK_ISSUER })`). Until this matches the
+   from Part A step 5). Redeploy. The `o8-license-server` Clerk verifier uses
+   `createRemoteJWKSet(new URL('/.well-known/jwks.json', env.CLERK_ISSUER))` and
+   `jwtVerify(token, keySet, { issuer: env.CLERK_ISSUER })`. Until this matches the
    instance minting the tokens, license verification 503s / rejects.
 
 2. **o8-site (Vercel project `o8-site`) — swap both keys.**
@@ -130,7 +130,7 @@ token minted after the site flips can already be verified.
 - [ ] A desktop session token **verifies** against the license-server (no 503 from
       `account-license.ts`), i.e. `CLERK_ISSUER` matches the instance that minted the token.
 - [ ] Stripe checkout still carries `clerkUserId` in metadata and binds to the same account
-      (`services/license-server/src/stripe-webhook.ts`, `src/lib/db/users.ts` `findOrCreateByClerk`).
+      (the private `o8-license-server` Stripe webhook and `src/lib/db/users.ts` `findOrCreateByClerk`).
 
 ### Known / expected
 
@@ -159,7 +159,7 @@ token minted after the site flips can already be verified.
 - `src/lib/auth/current-user.ts:5-6`, `src/app/api/panel/entitlement/sync/route.ts:11-12`, `src/lib/chat/gateway-client.ts:40-43` — server-side Clerk gates.
 - `.env.example:64-69` — Clerk section (`CLERK_SECRET_KEY` marked "o8-site / Vercel only").
 
-**license-server (`~/o8/services/license-server`)**
+**license-server (private `o8-license-server` deployment repo)**
 - `src/env.ts:103-107` — `CLERK_ISSUER`.
 - `src/clerk-verify.ts:16-32` — JWKS verification against `CLERK_ISSUER`.
 - `src/account-license.ts:8,25-30` — 503 when `CLERK_ISSUER` unset / mismatched.

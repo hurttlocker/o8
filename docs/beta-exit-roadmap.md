@@ -116,7 +116,7 @@ both directions within ~3s, confirm-gated tool pops the Mac dock card.
 - Evidence: `~/o8-mobile` near feature-parity native (chat/fleet/approvals/diffs/activity/
   terminal/symon-voice/pairing), 10 commits today on Relay v1. Desktop relay connector
   (`src/lib/mobile/relay-connector.ts`, db39127f) already wired into ws-server bootstrap;
-  standalone `services/relay/` Railway service + cross-repo E2E matrix in flight 2026-07-08.
+  standalone private `o8-relay` Railway service + cross-repo E2E matrix in flight 2026-07-08.
 
 ## The proof gate (parallel, non-engineering)
 - [ ] Fresh-machine walkdown: DMG → sign-in → badge → first merge on the clean Intel MacBook

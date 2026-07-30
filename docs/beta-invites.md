@@ -31,14 +31,14 @@ the "desktop real now" half of the build.
 Cross-machine redemption is wired end to end (extends the M5 license-server,
 Railway + Postgres). What remains is the deploy.
 
-### Central service (`services/license-server`, Hono + Drizzle)
+### Central service (private `o8-license-server`, Hono + Drizzle)
 
-- `invites` table (`services/license-server/src/db/schema.ts`): `code` (PK), `owner`, `accent`,
+- `invites` table: `code` (PK), `owner`, `accent`,
   `position`, `status` (`sent | redeemed`), `redeemed_by`, timestamps.
-- `services/license-server/src/invites.ts`: `registerInvite` (idempotent per owner; rejects a code
-  another owner already holds → desktop regenerates), `resolveInvite`,
-  `redeemInvite` (one-time, captures the invitee email).
-- Routes (`services/license-server/src/index.ts`): `POST /invites/register` (scoped
+- `registerInvite` is idempotent per owner and rejects a code another owner
+  already holds, causing the desktop to regenerate it. `resolveInvite` and
+  `redeemInvite` handle lookup and one-time redemption with the invitee email.
+- Routes: `POST /invites/register` (scoped
   `INVITE_REGISTER_TOKEN` bearer, 503 when unset), `GET /invites/:code`
   (public resolve), `POST /invites/redeem` (public, one-time).
 

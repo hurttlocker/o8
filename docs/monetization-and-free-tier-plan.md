@@ -33,7 +33,7 @@ This line is also the COGS guarantee: because the paid boundary is *defined* as 
 
 **Implication: the free launch is low-risk.** There are no gates to remove — you ship what you have. The work is (a) one cosmetic fix, (b) one COGS confirmation, (c) building the *first paid lever* when you're ready. Nothing blocks downloads today.
 
-*Key files:* `src/lib/entitlement/{flags,store,license,context,Gate,UpgradePrompt}.ts(x)`, `src/app/api/panel/entitlement/route.ts`, `src/components/desktop/settings/BillingTab.tsx`, `services/license-server/`.
+*Key files:* `src/lib/entitlement/{flags,store,license,context,Gate,UpgradePrompt}.ts(x)`, `src/app/api/panel/entitlement/route.ts`, `src/components/desktop/settings/BillingTab.tsx`, and the private `o8-license-server`.
 
 ---
 
@@ -111,7 +111,7 @@ One product wearing two faces: **"we host the inference key, metered, behind you
 
 **Pricing:** the built `$19 solo / $29 team` was scoped to gate *zero-marginal-cost flags*. The proxy has **real COGS**, so it needs either a fair-use cap or metering. The license server only does **flat subscription** today (no usage metering). **Recommendation:** launch the proxy as a **flat plan with a fair-use cap** tuned to COGS; treat **premium ElevenLabs voice** as a higher tier or give it its own character budget (it's the one cost that can run away).
 
-*Key files:* `src/app/api/v2/proxy/llm/route.ts`, `src/lib/cortex/qa/llm/{openrouter-adapter,brain-spend,byok-keys}.ts`, `src-tauri/src/{agent,stt,tts}/`, `services/license-server/`.
+*Key files:* `src/app/api/v2/proxy/llm/route.ts`, `src/lib/cortex/qa/llm/{openrouter-adapter,brain-spend,byok-keys}.ts`, `src-tauri/src/{agent,stt,tts}/`, and the private `o8-license-server`.
 
 ### 5.2 Symon paid (brain + premium voice/STT)
 
@@ -238,7 +238,7 @@ Deduped from all six domain maps. My recommendation in **bold**.
 | **OpenRouter** | `OPENROUTER_API_KEY` | Brain OpenRouter tier, dictation Whisper + polish, Symon OpenRouter brain | login shell (`~/.zshenv`) + `~/.o8/.env.local` (encrypted BYOK) | openrouter.ai/keys — top up credits |
 | **Google / Gemini** | `GEMINI_API_KEY` (+ `GOOGLE_AI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`) | Brain embeddings, "operator" default chat, Symon Gemini brain/polish/ask | login shell (`~/.zshenv`) | aistudio.google.com / Cloud console billing |
 | **ElevenLabs** *(Symon premium voice — experimental)* | `ELEVENLABS_API_KEY` | Pitch-preserving premium voice (Symon TTS); **per-character** billing | `~/.o8/dictation.json` (not shell today; currently unset) | elevenlabs.io |
-| **Stripe** *(license server on Railway)* | `STRIPE_SECRET_KEY`, webhook secret, price IDs | Mints paid licenses (the proxy SKU, later) | Railway env (`services/license-server`) | dashboard.stripe.com |
+| **Stripe** *(license server on Railway)* | `STRIPE_SECRET_KEY`, webhook secret, price IDs | Mints paid licenses (the proxy SKU, later) | Railway env (`o8-license-server`) | dashboard.stripe.com |
 
 ### Optional / BYO-only — no funding unless used
 | Account | Env var | Notes |
@@ -285,7 +285,7 @@ It is **not** a feature key — the entitlement flags carry no moat-gating (see 
 ### 11.2 Deliverable — usage-analytics dashboard (o8 front-end)
 A founder/operator view answering **how many users, what they're using, how they're using it.** It lives on the **o8 front-end** as an operator-only surface, fed by an aggregate read API on the license server — the only place with cross-user data (the desktop app only knows itself).
 
-- **Server** (`services/license-server`): a new aggregate/admin read endpoint (Bearer `ADMIN_TOKEN`) over `proxy_usage` + accounts → user counts, DAU/WAU, per-`kind` spend, top surfaces. Plus a lightweight **product-event ingest** (`POST /v1/telemetry`: account `sub`, event name, coarse props) so usage beyond raw inference is visible.
+- **Server** (`o8-license-server`): a new aggregate/admin read endpoint (Bearer `ADMIN_TOKEN`) over `proxy_usage` + accounts → user counts, DAU/WAU, per-`kind` spend, top surfaces. Plus a lightweight **product-event ingest** (`POST /v1/telemetry`: account `sub`, event name, coarse props) so usage beyond raw inference is visible.
 - **Desktop emit**: a thin telemetry client that posts coarse events (surface opened, dispatch started, Brain asked, merge approved) with the account token — opt-out-able, no payload content.
 - **Front-end**: an operator-gated analytics surface in o8 (count cards + per-surface usage + spend), reading the aggregate API. Not shown to normal users.
 

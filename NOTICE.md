@@ -82,7 +82,7 @@ notice above is reproduced here for that purpose.
 - License text: <https://www.apache.org/licenses/LICENSE-2.0>
 - Use in o8: sanitizing rendered HTML
 
-## TweetNaCl, TweetNaCl-util, and Postgres.js
+## TweetNaCl and TweetNaCl-util
 
 - Package and version: `tweetnacl` 1.0.3
   - Authors: TweetNaCl-js contributors
@@ -90,12 +90,8 @@ notice above is reproduced here for that purpose.
 - Package and version: `tweetnacl-util` 0.15.1
   - Authors: TweetNaCl-js contributors
   - Upstream: <https://github.com/dchest/tweetnacl-util-js>
-- Package and version: `postgres` 3.4.9
-  - Author and copyright holder: Rasmus Porsager
-  - Upstream: <https://github.com/porsager/postgres>
-- License for all three works: The Unlicense
-- Use in o8: end-to-end encryption helpers and the license-server PostgreSQL
-  client
+- License for both works: The Unlicense
+- Use in o8: end-to-end encryption helpers
 
 The Unlicense dedication reproduced from these packages:
 

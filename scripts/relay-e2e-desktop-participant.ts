@@ -12,7 +12,8 @@
  * from the REAL ~/.o8/e2ee-identity.key (the key the phone pinned at pairing), so an
  * already-paired phone derives the same routingId and completes the handshake.
  *
- * Run:  O8_RELAY_URL=ws://127.0.0.1:8787 npx tsx services/relay/scripts/e2e-desktop-participant.ts
+ * Start the local relay from the private `o8-relay` repo, then run from this repo:
+ *   O8_RELAY_URL=ws://127.0.0.1:8787 npx tsx scripts/relay-e2e-desktop-participant.ts
  * Stop: Ctrl-C.  Env override O8_E2E_PLAN=founder|pro|team to test other tiers.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
