@@ -69,3 +69,6 @@ src-tauri/sidecars/speech-local/.build/
 scratch/
 .tmp-owned-push-*/
 *.local.md
+
+# Generated QA-eval result dumps (contain internal project data — never commit)
+tests/qa-eval/three-way-results-*.json
