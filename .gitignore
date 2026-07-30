@@ -76,3 +76,7 @@ scratch/
 
 # Generated QA-eval result dumps (contain internal project data — never commit)
 tests/qa-eval/three-way-results-*.json
+
+# Private services live in their own repos (o8-license-server, o8-relay).
+# Local working copies may remain on a maintainer machine — never re-add them.
+services/
