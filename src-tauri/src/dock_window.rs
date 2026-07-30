@@ -18,7 +18,8 @@
 //!     material would gray out the light pill).
 //!   - setLevel(25): one above the menu bar (level 24) so it hangs over the
 //!     true top of the screen.
-//!   - top-center anchor: x centered, y = screen origin_y (flush to top edge).
+//!   - primary-screen top-center anchor: x centered, y = screen origin_y
+//!     (flush to top edge).
 //!   - NONACTIVATING: the window must never become key / steal focus from the
 //!     app the user is dictating into. Tauri windows are plain NSWindows (not
 //!     NSPanels) so `canBecomeKey` can't be overridden without subclassing; the
@@ -36,6 +37,8 @@ pub const DOCK_LABEL: &str = "dock";
 /// clicks at the top of the screen.
 #[cfg(target_os = "macos")]
 static HIT_RECT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+#[cfg(target_os = "macos")]
+static EXPANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Logical size of the dock window. The pill content centers inside this; the
 /// React layer keeps the dead-zone tight (pointer-events: none on the wrapper).
@@ -80,6 +83,7 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
     if app.get_webview_window(DOCK_LABEL).is_some() {
         return;
     }
+    EXPANDED.store(false, std::sync::atomic::Ordering::Release);
 
     // In dev-bridge mode (O8_DEV_FRONTEND_URL set), load the dock from the dev
     // Next server too — otherwise it would load the BUNDLED frontend off
@@ -133,7 +137,7 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
     };
 
     apply_macos_recipe(&window);
-    reposition(&window);
+    resize_and_reposition(&window);
     // CLICK-THROUGH by default. The window frame is a 520-wide strip at the
     // top of the screen — far larger than the painted pill — and macOS routes
     // every click in a window's frame to that window regardless of pixel
@@ -154,17 +158,17 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
 
 /// Re-assert the always-on dock pill. The window is created visible at boot and
 /// stays up, so this is no longer a "show from hidden" — it re-anchors (the
-/// active monitor may have changed), re-applies the recipe, and re-orders it
-/// front WITHOUT making it key, so the app the user is dictating into keeps
-/// focus. Safe to call on system Fn-down (belt-and-suspenders re-assert) and
-/// from `o8_debug_show_dock`.
+/// primary monitor geometry may have changed), re-applies the recipe, and
+/// re-orders it front WITHOUT making it key, so the app the user is dictating
+/// into keeps focus. Safe to call on system Fn-down (belt-and-suspenders
+/// re-assert) and from `o8_debug_show_dock`.
 #[cfg(target_os = "macos")]
 pub fn show(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(window) = app.get_webview_window(DOCK_LABEL) else {
         return;
     };
-    reposition(&window);
+    resize_and_reposition(&window);
     apply_macos_recipe(&window);
     order_front_nonactivating(&window);
 }
@@ -183,13 +187,8 @@ pub fn set_expanded(app: &tauri::AppHandle, expanded: bool) {
     let Some(window) = app.get_webview_window(DOCK_LABEL) else {
         return;
     };
-    let height = if expanded {
-        DOCK_EXPANDED_HEIGHT
-    } else {
-        DOCK_HEIGHT
-    };
-    let _ = window.set_size(tauri::LogicalSize::new(DOCK_WIDTH, height));
-    reposition(&window);
+    EXPANDED.store(expanded, std::sync::atomic::Ordering::Release);
+    resize_and_reposition(&window);
     order_front_nonactivating(&window);
 }
 
@@ -338,64 +337,67 @@ fn order_front_nonactivating(window: &tauri::WebviewWindow) {
     });
 }
 
-/// Top-center anchor the dock window on the active monitor (falls back to the
-/// primary). Logical coordinates, mirroring aqua's `resize_and_reposition`
-/// notch branch: x centered, y = monitor origin_y (flush to the very top edge,
-/// no inset) so the idle capsule's square top edge meets the screen top edge.
+/// Size and top-center anchor the dock window on the PRIMARY monitor.
+///
+/// AppKit screen frames and window content sizes are both logical points, so
+/// the complete geometry is applied directly in that unit. This avoids the
+/// scale-aware Tauri resize path that can re-convert an overlay straddling 2x
+/// and 1x displays. The desired height comes from state rather than the current
+/// physical frame, making repeated monitor events idempotent.
 #[cfg(target_os = "macos")]
-fn reposition(window: &tauri::WebviewWindow) {
-    // Runs on the main thread: the notch read touches AppKit (NSScreen), and
-    // `reposition` can be reached off-main via the Fn-down re-assert.
+fn resize_and_reposition(window: &tauri::WebviewWindow) {
     let win = window.clone();
     let _ = window.run_on_main_thread(move || {
-        let monitor = win
-            .current_monitor()
-            .ok()
-            .flatten()
-            .or_else(|| win.primary_monitor().ok().flatten());
-        let Some(monitor) = monitor else {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::NSScreen;
+
+        let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        let scale = monitor.scale_factor();
-        let origin_x = monitor.position().x as f64 / scale;
-        let origin_y = monitor.position().y as f64 / scale;
-        let logical_w = monitor.size().width as f64 / scale;
-        // Notch-aware anchor. On notched MacBooks (2021+ Pro, 2022+ Air) the
-        // camera notch sits dead-center at the top — exactly where this pill
-        // anchors. `NSScreen.safeAreaInsets.top` is the notch height, and it is
-        // 0 on every non-notched display — so this offset is a NO-OP everywhere
-        // except notched machines, where it tucks the pill just below the notch
-        // (+ a small gap). Fail-safe: any read failure → 0 → flush-top as before.
-        let notch = notch_inset(&win);
+        let screens = NSScreen::screens(mtm);
+        let Some(primary) = screens.firstObject() else {
+            return;
+        };
+        let primary_rect = primary.frame();
+        let primary_top = primary_rect.origin.y + primary_rect.size.height;
+        let logical_screens = screens
+            .iter()
+            .enumerate()
+            .map(|(index, screen)| {
+                let rect = screen.frame();
+                let backing = screen.convertRectToBacking(objc2_foundation::NSRect::new(
+                    objc2_foundation::NSPoint::new(0.0, 0.0),
+                    objc2_foundation::NSSize::new(1.0, 1.0),
+                ));
+                crate::overlay_geometry::LogicalScreen {
+                    x: rect.origin.x,
+                    y: primary_top - (rect.origin.y + rect.size.height),
+                    width: rect.size.width,
+                    height: rect.size.height,
+                    scale_factor: backing.size.width,
+                    is_primary: index == 0,
+                }
+            })
+            .collect::<Vec<_>>();
+        let notch = primary.safeAreaInsets().top;
         let gap = if notch > 0.0 { 4.0 } else { 0.0 };
-        let x = origin_x + (logical_w - DOCK_WIDTH) / 2.0;
-        let y = origin_y + DOCK_TOP_INSET + notch + gap;
-        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
-    });
-}
-
-/// Notch height for the window's current screen (macOS 12+ notched displays).
-/// Returns 0.0 on every non-notched Mac and on any failure. MUST be called on
-/// the main thread (AppKit).
-#[cfg(target_os = "macos")]
-fn notch_inset(window: &tauri::WebviewWindow) -> f64 {
-    use objc2_app_kit::NSWindow;
-    let Ok(ptr) = window.ns_window() else {
-        return 0.0;
-    };
-    let ptr = ptr as *mut NSWindow;
-    if ptr.is_null() {
-        return 0.0;
-    }
-    // Safety: called on the main thread; Tauri guarantees a live NSWindow for
-    // the window's lifetime.
-    unsafe {
-        let ns_window = &*ptr;
-        match ns_window.screen() {
-            Some(screen) => screen.safeAreaInsets().top,
-            None => 0.0,
+        let height = if EXPANDED.load(std::sync::atomic::Ordering::Acquire) {
+            DOCK_EXPANDED_HEIGHT
+        } else {
+            DOCK_HEIGHT
+        };
+        let Some(frame) = crate::overlay_geometry::primary_top_center(
+            &logical_screens,
+            DOCK_WIDTH,
+            height,
+            DOCK_TOP_INSET + notch + gap,
+        ) else {
+            return;
+        };
+        if !crate::overlay_geometry::set_frame_points(&win, frame, primary_top) {
+            log::warn!("[dock-window] failed to apply native point geometry");
         }
-    }
+    });
 }
 
 // ── Non-macOS no-ops ──

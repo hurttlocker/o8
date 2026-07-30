@@ -19,6 +19,7 @@ mod launch_updater;
 mod live_dictation;
 mod mac_perms;
 mod models;
+mod overlay_geometry;
 mod paste;
 mod point_overlay;
 #[cfg(target_os = "macos")]

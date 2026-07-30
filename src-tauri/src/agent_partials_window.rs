@@ -279,7 +279,13 @@ fn reposition(
         } else {
             (PARTIALS_WIDTH, PARTIALS_HEIGHT)
         };
-        let _ = win.set_size(tauri::LogicalSize::new(frame_width, frame_height));
+        if !crate::overlay_geometry::set_content_size_points(
+            &win,
+            frame_width,
+            frame_height,
+        ) {
+            log::warn!("[agent-partials] failed to apply native point size");
+        }
 
         if surface == crate::live_dictation::PartialsSurface::Caret {
             if let Some(caret) = anchor {
