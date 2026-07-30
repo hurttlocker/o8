@@ -1,0 +1,92 @@
+name: Bug report
+description: Report a reproducible problem with o8
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include enough detail to reproduce the problem. Remove tokens, keys, repository contents, and other sensitive data from logs.
+  - type: input
+    id: o8-version
+    attributes:
+      label: o8 version
+      description: Find this in the app's About screen or status bar.
+      placeholder: "0.1.639"
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: "15.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Mac chip
+      description: Current releases are x86_64 and run under Rosetta on Apple Silicon.
+      options:
+        - Intel
+        - Apple Silicon
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Agent runtime and CLI version
+      description: Name every runtime involved and include the output of its version command.
+      placeholder: "Codex CLI 0.42.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: fresh-data-dir
+    attributes:
+      label: Does it reproduce with a fresh data directory?
+      description: "Test with: CORTEX_IDE_DATA_DIR=$(mktemp -d)"
+      options:
+        - "Yes"
+        - "No"
+        - Unable to test
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start from app launch or a fresh data directory and list the smallest reliable sequence.
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the smallest useful excerpt and remove secrets or private repository content.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I removed credentials and private data from this report.
+          required: true

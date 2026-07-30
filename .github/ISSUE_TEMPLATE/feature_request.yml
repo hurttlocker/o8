@@ -1,0 +1,41 @@
+name: Feature request
+description: Describe a problem the existing product cannot solve
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the workflow that is blocked. Proposed implementations are useful only after the problem is clear.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Describe the outcome and who needs it.
+    validations:
+      required: true
+  - type: textarea
+    id: attempts
+    attributes:
+      label: What have you tried?
+      description: Include current o8 paths, runtime features, or workarounds you evaluated.
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: Why does the existing path not work?
+      description: Be specific about the missing capability or constraint.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed direction
+      description: Optional. Describe the smallest change that would solve the problem.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and documentation for this request.
+          required: true
