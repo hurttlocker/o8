@@ -1,23 +1,21 @@
-/**
- * POST /api/cortex/reingest
- *
- * Re-runs spec ingestion for a single connected repo — the same pass that
- * fires automatically at repo connect (`scheduleSpecIngest` in
- * `lib/repos/registry.ts`). It re-reads the repo's root docs
- * (README / CLAUDE / AGENTS / DESIGN / THEME + docs/*.md) and rewrites them
- * into the Engineering Brain's directive citations. Surfaced by the
- * "Reindex" action in Settings → Indexing.
- *
- * Body: { repoPath: string }  — absolute path of a connected repo.
- *
- * Response:
- *   { ok: true, result: SpecIngestResult }   // scanned/written/deleted counts
- *   { ok: false, error: string }             // unknown repo / ingest failure
- *
- * Gating: `/api/cortex/*` is default-deny in `src/middleware.ts` (loopback
- * origin + ws-token). No allowlist entry — this route is gated like its
- * siblings, and route-coverage.test.ts classifies it `gated` by default.
- */
+// POST /api/cortex/reingest
+//
+// Re-runs spec ingestion for a single connected repo — the same pass that
+// fires automatically at repo connect (`scheduleSpecIngest` in
+// `lib/repos/registry.ts`). It re-reads the repo's root docs
+// (README / CLAUDE / AGENTS / DESIGN / THEME + docs/**/*.md) and rewrites them
+// into the Engineering Brain's directive citations. Surfaced by the
+// "Reindex" action in Settings → Indexing.
+//
+// Body: { repoPath: string }  — absolute path of a connected repo.
+//
+// Response:
+//   { ok: true, result: SpecIngestResult }   // scanned/written/deleted counts
+//   { ok: false, error: string }             // unknown repo / ingest failure
+//
+// Gating: `/api/cortex/*` is default-deny in `src/middleware.ts` (loopback
+// origin + ws-token). No allowlist entry — this route is gated like its
+// siblings, and route-coverage.test.ts classifies it `gated` by default.
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
