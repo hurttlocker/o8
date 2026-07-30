@@ -138,17 +138,26 @@ describe('workflow policy — every workflow is classified from the filesystem',
     }
   });
 
-  it('forbids checkout in pull_request_target workflows', () => {
+  it('keeps pull_request_target workflows metadata-only', () => {
     const violations = workflowFiles.flatMap((file) => {
       if (!triggerNames(file.workflow).has('pull_request_target')) return [];
-      return usesReferences(file)
+      const checkoutViolations = usesReferences(file)
         .filter(({ uses }) => /^actions\/checkout(?:@|\/|$)/i.test(uses))
         .map(({ location, uses }) => `${location}: ${uses}`);
+      const runViolations = jobsIn(file).flatMap(([jobName, job]) => {
+        const steps = Array.isArray(job.steps) ? job.steps : [];
+        return steps.flatMap((step, index) => (
+          isRecord(step) && typeof step.run === 'string'
+            ? [`${file.name}.jobs.${jobName}.steps[${index}].run`]
+            : []
+        ));
+      });
+      return [...checkoutViolations, ...runViolations];
     });
 
     expect(
       violations,
-      'pull_request_target runs with the base repository token and secrets; checkout can expose them to untrusted fork code. Use pull_request for workflows that need PR code.',
+      'pull_request_target runs with secrets against the base repository; checking out or running pull request-controlled content can exfiltrate them.',
     ).toEqual([]);
   });
 
