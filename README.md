@@ -1,5 +1,7 @@
 # o8
 
+[![CI](https://github.com/hurttlocker/o8/actions/workflows/ci.yml/badge.svg)](https://github.com/hurttlocker/o8/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/hurttlocker/o8)](https://github.com/hurttlocker/o8/releases) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gH3UbbTJ7k)
+
 o8 is an open-source desktop control plane for AI coding agents.
 
 [Download the latest signed macOS build](https://github.com/hurttlocker/o8/releases) · [Build from source](#quickstart)
@@ -22,7 +24,7 @@ Coding agents got good. Managing them didn't. Run more than one and your day bec
 
 o8's answer:
 
-- **Any runtime, one contract.** 12 agent CLIs behind one adapter interface. Orchestrate with the model you trust, dispatch work to whichever is best (or cheapest) for the job. Swap vendors without changing how you work.
+- **Any runtime, one contract.** 13 agent CLIs behind one adapter interface. Orchestrate with the model you trust, dispatch work to whichever is best (or cheapest) for the job. Swap vendors without changing how you work.
 - **Governance is the product.** Every worker runs in an isolated worktree. Every diff gets reviewed — by you, or by an orchestrator model you've delegated to — before it touches your branch. Every approval, rejection, escalation, and merge is recorded.
 - **Memory that compounds.** An organizational-memory layer (Cortex) turns session outcomes into durable directives, and an **Engineering Brain** answers questions about your repo and your fleet's history with citations — "what did the agents ship yesterday?" is a query, not an archaeology dig.
 - **Operate from anywhere.** A paired iPhone app and mobile web surface: watch the fleet, steer a session, approve a merge from wherever you are.
@@ -32,7 +34,7 @@ o8's answer:
 | Orchestrate or work | Workers (dispatchable) |
 |---|---|
 | Claude Code · Codex | Gemini CLI · opencode · Cursor CLI · Grok CLI · pi |
-| | Aider · Goose · Kimi Code · OpenHands · Qwen Code |
+| | Aider · Goose · Kimi Code · OpenHands · Qwen Code · Qoder |
 
 A first-run picker discovers what's installed and lets you choose your orchestrator + workers. No vendor pin — Codex is a default, not a requirement. Adding a runtime is a small, documented patch ([`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md)) — community adapters welcome.
 
