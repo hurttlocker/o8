@@ -4,7 +4,7 @@
  * The protocol logic, lifted out of the ws-server so it's unit-testable without a
  * socket. ws-server owns the I/O (send the hello, hold per-connection state,
  * wrap/unwrap frames); this owns the crypto decisions. Mirrors the mobile client
- * exactly — same transcripts + KDF as docs/mobile-e2ee.md / e2ee-crypto.ts.
+ * exactly — same transcripts + KDF as docs/internals/mobile-e2ee.md / e2ee-crypto.ts.
  */
 
 import nacl from 'tweetnacl';

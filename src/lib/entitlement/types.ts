@@ -11,8 +11,7 @@ export type Plan = 'free' | 'pro' | 'team' | 'founder';
 /**
  * Cost/reach entitlement levers — NOT feature gates.
  *
- * The model is "monetize cost, not capability"
- * (docs/monetization-and-free-tier-plan.md §1, §6, §11): every moat —
+ * The model is "monetize cost, not capability": every moat —
  * governance, the Engineering Brain, multi-repo fleet, mobile-on-LAN, local
  * voice — is FREE and ungated, so it is intentionally NOT represented here.
  * These flags track only the paid cost/reach levers. Access is additionally
@@ -49,8 +48,7 @@ export interface EntitlementState {
  * Founding Operator display metadata. Client-safe (pure, no I/O) so both the
  * server founder record (founder.ts) and the client context (context.tsx) share
  * one shape. Cosmetic — the entitlement is the signed `plan: 'founder'`; this
- * only carries the "Founding Operator #N" badge + pricing tier. There is no
- * credit block or locked rate (dropped per docs/founding-operator-tier.md).
+ * only carries the "Founding Operator #N" badge + pricing tier.
  */
 export interface FounderInfo {
   operatorNumber: number;

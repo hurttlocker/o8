@@ -6,7 +6,7 @@
  * THIRD-PARTY VENDORED CODE — kept byte-identical to upstream so we can
  * re-sync cleanly. Do NOT edit the logic here. o8-side adaptation
  * (addressing docs by repoPath -> <repoPath>/o8.md) lives in the callers
- * (API/CLI/MCP), per docs/roughdraft-ingestion-blueprint.md §3.1.
+ * (API/CLI/MCP) through one canonical parser.
  * Intentionally exempt from the 800-line file ceiling: it is a frozen
  * vendored dependency, not evolving o8 code.
  */

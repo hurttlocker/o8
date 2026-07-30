@@ -67,7 +67,7 @@ export interface OrchestratorTurnOptions {
   threadId?: string | null;
   /**
    * openclaw agent id for the turn — openclaw backend only, ignored by codex /
-   * claude. Omitted → the backend's default agent. See docs/openclaw-integration.md.
+   * claude. Omitted → the backend's default agent. See docs/internals/openclaw-integration.md.
    */
   agent?: string;
   /** Aborts the in-flight turn — the backend SIGTERMs its subprocess. */

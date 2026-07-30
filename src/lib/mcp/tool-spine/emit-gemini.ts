@@ -3,7 +3,7 @@
  *
  * The Gemini runtime had no MCP injection. This ships it. Schema verified
  * against the installed Gemini CLI + `google-gemini/gemini-cli`
- * docs/tools/mcp-server.md (2026-06): top key `mcpServers`; stdio is implied by
+ * Gemini CLI's MCP server documentation: top key `mcpServers`; stdio is implied by
  * `command` (NO `type` field) with optional `args`/`env`; the streamable-HTTP
  * URL field is `httpUrl` (NOT `url` — `url` is the SSE field), with `headers`.
  * o8's operator server is streamable-HTTP-or-stdio, so it maps to `httpUrl`/

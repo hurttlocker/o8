@@ -1,6 +1,6 @@
 /**
  * Pending-result registry for the native browser-view secure channel
- * (docs/native-browser-webview-spec.md, Stage 4).
+ * (docs/internals/native-browser-webview-spec.md, Stage 4).
  *
  * The browser-view page is untrusted and has NO Tauri IPC bridge (see
  * `native_browser_view_security`), so an eval result can't come back via

@@ -173,7 +173,7 @@ export function useWorkspaceTerminalController(
   // conversational surface. The tab data stays persisted for when it flips on.
   const experimentalChat = useExperimentalChatFlag();
   // Same alpha pattern for the fleet-canvas tab — hidden (data preserved)
-  // unless experimentalCanvas is on. See docs/canvas-mode-plan.md.
+  // unless experimentalCanvas is on.
   const experimentalCanvas = useExperimentalCanvasFlag();
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => {

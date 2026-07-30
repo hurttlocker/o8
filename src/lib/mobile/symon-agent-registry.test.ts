@@ -1,5 +1,5 @@
 /**
- * activeAgentSession registry (docs/symon-agent-mode.md §"Session registry" +
+ * activeAgentSession registry (docs/internals/symon-agent-mode.md §"Session registry" +
  * §"Mutual exclusion"). Covers last-start-wins, terminal-status clearing, the
  * 10-min stale sweep, and the cross-process disk mirror the Next GET reads.
  */

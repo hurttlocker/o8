@@ -1,6 +1,6 @@
 /**
  * fleet-canvas-store — per-scope card position persistence for the
- * fleet-canvas tab (docs/canvas-mode-plan.md).
+ * fleet-canvas tab.
  *
  * Key shape: `o8:fleet-canvas:pos:<scope>` → { [packetId]: { x, y } }.
  * Scope is the repo path the canvas tab is pinned to (or 'fleet' for the

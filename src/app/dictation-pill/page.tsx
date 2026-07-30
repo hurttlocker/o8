@@ -5,7 +5,7 @@
  *
  * This route is the body of a SECOND, always-on-top, transparent Tauri window
  * labeled `dock` (NEVER `main` — see the label-discipline note in
- * `docs/symon-systemwide-fold.md`). The Rust side creates that window after the
+ * system-wide dictation surface. The Rust side creates that window after the
  * bundled Next server is confirmed up, navigates it here, and applies the
  * top-center / level-25 / clearColor / nonactivating recipe. This page only
  * has to:

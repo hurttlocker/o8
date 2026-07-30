@@ -643,7 +643,7 @@ compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts',
 // ── Compile MCP servers ──
 // Ships alongside the bundled Next.js backend so the packaged Tauri app
 // can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
-// a source checkout. See docs/cortex-v2-dogfood-report-2026-04-09.md.
+// a source checkout.
 compileServerBundle('operator-mcp-server-main', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
 compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts', NATIVE_EXTERNALS);
 compilePureNodeBundle('operator-mcp-proxy', 'src/lib/mcp/operator-mcp-proxy.ts');

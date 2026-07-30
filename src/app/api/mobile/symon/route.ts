@@ -64,7 +64,7 @@ function bridgeError(error: unknown, verb: string) {
 }
 
 /**
- * Additive Agent-mode field (docs/symon-agent-mode.md §GET). Reads the disk
+ * Additive Agent-mode field (docs/internals/symon-agent-mode.md §GET). Reads the disk
  * mirror of the process-local activeAgentSession registry that the ws-server
  * owns — null unless a phone-hosted Agent session is live. Never affects the
  * existing Remote-mode `ready`/`status` shape.

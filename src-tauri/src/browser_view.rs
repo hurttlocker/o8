@@ -6,7 +6,7 @@
 //! window* of `main` (`addChildWindow:ordered:`) so it tracks the app as it moves.
 //!
 //! Why a native child window instead of an iframe/proxy (see
-//! `docs/native-browser-webview-spec.md`):
+//! `docs/internals/native-browser-webview-spec.md`):
 //!   - A native top-level webview renders origin-sensitive auth apps (Clerk)
 //!     **smoothly** — real origin, first-party storage, no WebKit cross-origin
 //!     iframe storage partitioning, no proxy origin rewrite.

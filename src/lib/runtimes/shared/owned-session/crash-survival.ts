@@ -12,7 +12,7 @@
  * fall back to the legacy ws-server PTY bridge (gets the raw-terminal tab back,
  * loses crash-survival). NOTE: this covers DISPATCHED AGENT WORKERS only —
  * interactive terminals + the orchestrator's in-flight turn are separate (see
- * docs/daemon-crash-survival.md, teardown #6, and #1297).
+ * docs/operations/daemon-crash-survival.md).
  */
 export function crashSurvivableWorkersEnabled(): boolean {
   const raw = process.env.O8_CRASH_SURVIVABLE_WORKERS?.trim().toLowerCase();

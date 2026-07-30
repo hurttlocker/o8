@@ -16,7 +16,7 @@ import {
 
 /**
  * #5 mobile E2EE — full handshake round-trip, simulating BOTH sides with the
- * canonical helpers. This is the executable proof that `docs/mobile-e2ee.md` is
+ * canonical helpers. This is the executable proof that `docs/internals/mobile-e2ee.md` is
  * internally consistent and the reference the o8-mobile engineer reproduces.
  */
 describe('#5 mobile E2EE handshake', () => {

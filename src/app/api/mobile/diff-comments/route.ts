@@ -1,7 +1,7 @@
 /**
  * List inline diff comments for an agent session (Orca teardown #9). The phone
  * fetches these to render line markers; the desktop review surface reads them
- * too. Gated like the rest of /api/mobile/*. Contract: docs/mobile-diff-comments.md.
+ * too. Gated like the rest of /api/mobile/*. Contract: docs/internals/mobile-diff-comments.md.
  */
 
 export const dynamic = 'force-dynamic';

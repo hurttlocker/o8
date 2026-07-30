@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Shipping runtime pattern (v1):** Claude Code orchestrates, Codex works. Specifically — Claude Code running as an interactive **REPL** spawn (subscription-billed; **not** `claude -p` print mode, which was retired in epic #1066 because it billed against the Agent SDK pool) is the orchestrator; Codex GPT-5.5 xhigh is the worker that runs in isolated worktrees. Gemini, opencode, Cursor, and Grok Build adapters are wired in code for runtime expansion; Codex remains the primary dispatch path. All six runtimes route through a universal CLI-based adapter interface (`src/lib/runtimes/`), with separate desktop and mobile surfaces.
 
-See `docs/o8-product-brief.md` for the full product vision, monetization, and Karpathy alignment.
+See `docs/user/o8-product-brief.md` for the public product overview.
 
 ## Commands
 
@@ -97,7 +97,7 @@ Seven adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
 
-**Adding another runtime is a 6-file patch.** See [`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md) for the exact recipe. Short version:
+**Adding another runtime is a 6-file patch.** See [`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md) for the exact recipe. Short version:
 1. `src/lib/<runtime>/owned.ts` — adapter + owned-session store
 2. `src/lib/runtimes/<runtime>.ts` — `AgentRuntime` implementation
 3. `src/lib/runtimes/<runtime>-cost-parser.ts` — telemetry parser
@@ -340,7 +340,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 ## Critical Rules
 
-> **Vocabulary** — see [`docs/vocabulary.md`](./docs/vocabulary.md) for the canonical glossary of `runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`. MCP tool names and DB columns are frozen for stability; UI labels may diverge from them — divergences are documented in that file.
+> **Vocabulary** — see [`docs/user/vocabulary.md`](./docs/user/vocabulary.md) for the canonical glossary of `runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`. MCP tool names and DB columns are frozen for stability; UI labels may diverge from them — divergences are documented in that file.
 
 ### NEVER
 - **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
@@ -480,7 +480,7 @@ For exact token values and row/typography geometry, **always** read [`hurttlocke
 |---|---|---|---|
 | **Claude Code REPL** | Toggle ON / backend = claude (Opus 4.8) | **Claude Max subscription pool** (same pool `claude` in Terminal uses — NOT the metered Agent SDK pool) | `lane/orchestrator-backends/claude.ts` → `lane/orchestrator-session.ts` — Claude REPL spawn (interactive `--input-format stream-json`, *not* `claude -p`; `assertNoPrintFlag` hard-blocks `-p`/`--print` so billing can't regress to the Agent SDK pool, #1066) |
 | **Codex GPT-5.5 xhigh** | Toggle OFF / backend = codex (default) | ChatGPT Plus / Codex sub (no Anthropic draw) | `lane/orchestrator-backends/codex.ts` → `lane/codex-orchestrator-session.ts` — `codex exec --json -c model=gpt-5.5 -c model_reasoning_effort=xhigh`, maps `thread.started` / `item.completed` / `turn.completed` JSON stream into `OrchestratorEvent` contract |
-| **openclaw** | Mobile-first / governed copies | Sub-billed via openclaw | `lane/orchestrator-backends/openclaw.ts` — spawns `openclaw --profile o8 agent --json` once per turn. Critical: dispatches Codex workers **through the o8 operator MCP** (`o8__dispatch_mission`), not openclaw's native `sessions_spawn` — that tool is `tools.deny`-stripped on the governed `o8` profile, per the structural fix for #1075 (orchestrator-runtime ≠ worker-runtime). Streaming limitation: openclaw `agent --json` returns one final JSON blob, so no live tool/thinking deltas. See `docs/openclaw-integration.md`. |
+| **openclaw** | Mobile-first / governed copies | Sub-billed via openclaw | `lane/orchestrator-backends/openclaw.ts` — spawns `openclaw --profile o8 agent --json` once per turn. Critical: dispatches Codex workers **through the o8 operator MCP** (`o8__dispatch_mission`), not openclaw's native `sessions_spawn` — that tool is `tools.deny`-stripped on the governed `o8` profile, per the structural fix for #1075 (orchestrator-runtime ≠ worker-runtime). Streaming limitation: openclaw `agent --json` returns one final JSON blob, so no live tool/thinking deltas. See `docs/internals/openclaw-integration.md`. |
 | **Hermes / ACP** | backend = hermes (or generic `acp`) | Provider configured in Hermes (`hermes setup` — the operator's keys, never o8's) | `lane/orchestrator-backends/acp.ts` — a generic Agent-Client-Protocol backend; Hermes runs against a GOVERNED profile (`hermes-profile.ts`, isolated HOME) that denies its native work toolsets (`delegation` = native spawn, etc.) so it can only dispatch through o8 (#1075). |
 | **Collide (MoA)** | backend = collide | Claude Max + Codex sub — ~2× the Claude draw (2 Claude + 1 Codex turn) | `lane/orchestrator-backends/moa.ts` — Mixture-of-Agents: Claude + Codex propose independently (read-only: `toolProfile:'propose'` + `permissionMode:'plan'`, the `proposer-lockout.ts` guard runs live), then Claude aggregates + does the work on the main thread. "The upgraded Claude." Cap-degrade ladder never auto-meters (#1066). |
 
@@ -492,7 +492,7 @@ The orchestrator (whichever backend) can EITHER direct-execute in the repo — f
 
 Dispatched agents inside packet worktrees have the `o8` CLI on `$PATH` (symlinked to `/usr/local/bin/o8` after first o8.app run). See [`AGENTS.md`](./AGENTS.md) for the full command list — `packet info`, `packet scope`, `packet heartbeat`, `packet report --event progress`, `lane touches`, `cortex observe`. Orchestrator instructions in `src/lib/lane/orchestrator.md` reference these so the orchestrator doesn't duplicate the agent's lookups.
 
-**CLI-as-control-plane symmetry (Orca teardown #2):** the `o8` binary is symmetric with the MCP operator tools — the same control-plane verbs reach the same gated `/api/orchestrator/*` + `/api/panel/approvals` routes from either surface, so a human operator (headless) and a self-orchestrating agent both drive the fleet from one binary. Beyond the lookup verbs above: `o8 mission create|dispatch|status|wait|tail` (fan out + track sub-work), `o8 packet reset|retry|rerun|steer|merge-preview|approve-merge` (recovery + the layer-1→4 escalation chain), and `o8 inbox list|approve|reject` (the governance queue). **Governance is gated on context, not verb:** a worker-context `o8 packet approve-merge` does NOT merge — it raises an operator approval card (returns `pending_operator_approval`) that lands in `o8 inbox`; a human operator call merges directly. Full plan + stages: [`docs/cli-control-plane-symmetry.md`](./docs/cli-control-plane-symmetry.md).
+**CLI-as-control-plane symmetry:** the `o8` binary is symmetric with the MCP operator tools — the same control-plane verbs reach the same gated `/api/orchestrator/*` + `/api/panel/approvals` routes from either surface, so a human operator (headless) and a self-orchestrating agent both drive the fleet from one binary. Beyond the lookup verbs above: `o8 mission create|dispatch|status|wait|tail` (fan out + track sub-work), `o8 packet reset|retry|rerun|steer|merge-preview|approve-merge` (recovery + the layer-1→4 escalation chain), and `o8 inbox list|approve|reject` (the governance queue). **Governance is gated on context, not verb:** a worker-context `o8 packet approve-merge` does NOT merge — it raises an operator approval card (returns `pending_operator_approval`) that lands in `o8 inbox`; a human operator call merges directly. [`AGENTS.md`](./AGENTS.md) is the command-surface reference.
 
 ### MCP surface for orchestrators
 
@@ -569,18 +569,11 @@ Using subagents saves main context and runs cheaper models on tasks that don't n
 
 ## Documentation
 
-`docs/` contains architecture, strategy, and design decisions. Key ones:
-- `docs/o8-product-brief.md` — **Start here.** Product vision, moats, monetization, v1 scope
-- `docs/company-thesis.md` — Company thesis and competitive positioning
-- `docs/v1-build-plan.md` — Karpathy thread mapped to exact product requirements
-- `docs/canonical-workflow.md` — Full product workflow
-- `docs/system-architecture.md` — Mermaid diagram of the full system
-- `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
-- `docs/performance-architecture-principles.md` — Render speed, bootstrap, streaming
-- `docs/api.md` — Comprehensive `/api/*` route reference (closes #927)
-- `docs/loopback-api.md` — API auth gate: socket-truth header, loopback tiers, token delivery, rules for new routes
-- `docs/openclaw-integration.md` — openclaw orchestrator backend integration details + v1 streaming limitations
-- `docs/vocabulary.md` — Canonical glossary (`runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`). MCP tool names + DB columns frozen; UI label divergences documented inline.
+[`docs/README.md`](./docs/README.md) is the documentation index. The tree is split by reader:
+
+- `docs/user/` — product behavior and operator workflows.
+- `docs/internals/` — architecture, contracts, and extension points.
+- `docs/operations/` — verification, deployment, and recovery runbooks.
 
 <!-- Last reviewed: 2026-05-28 (staleness fix after the 97-file cleanup wave — corrected: no test files (was fact-backed.test.ts), UpdateBanner→UpdateCard, de-duped the webview-tools section (stale "7 tools" → 12) + added Theming cross-ref. Verified still-accurate against source: 26 API families, 74 lib domains, TILE_LAYOUT_VERSION 4, all 20 Key Files, Opus 4.7 orchestrator model, tab kinds, /api/v2/chat, spec-ingest.ts.) -->
-<!-- Last reviewed: 2026-05-26 (full staleness pass + closed-issues sweep — runtime model, layout diagram, theme system, design constants → hurttlocker.md, Cortex v2 rewrite + Engineering Brain + spec-ingest feedback loop, WS channels, port resolution, middleware GATED_PREFIXES, webview tools 7→12, OrchestratorHistorySidebar removal, DB tables, API families 10→26, lib domains 13→74, three orchestrator backends incl. openclaw, ReviewPanel + TurnSummaryCard + ChatActionCard, cortex_ask MCP tool, recovering lane state, docs/api.md + docs/openclaw-integration.md) -->
+<!-- Last reviewed: 2026-05-26 (full staleness pass + closed-issues sweep — runtime model, layout diagram, theme system, design constants → hurttlocker.md, Cortex v2 rewrite + Engineering Brain + spec-ingest feedback loop, WS channels, port resolution, middleware GATED_PREFIXES, webview tools 7→12, OrchestratorHistorySidebar removal, DB tables, API families 10→26, lib domains 13→74, three orchestrator backends incl. openclaw, ReviewPanel + TurnSummaryCard + ChatActionCard, cortex_ask MCP tool, recovering lane state, docs/internals/api.md + docs/internals/openclaw-integration.md) -->

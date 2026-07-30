@@ -1,5 +1,5 @@
 /**
- * Tool-relay correlation + timeout logic (docs/symon-agent-mode.md §"Tool relay
+ * Tool-relay correlation + timeout logic (docs/internals/symon-agent-mode.md §"Tool relay
  * semantics"). The relay MUST tolerate parallel calls and correlate strictly by
  * sessionId + callId; unknown results are dropped, not mis-attributed.
  */

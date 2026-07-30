@@ -1,7 +1,0 @@
-You are the final reviewer for a high-stakes change batch to o8 (a governance layer for autonomous engineering fleets). This batch builds "Fable mode" — a decisions-only window for a per-token-metered orchestrator model. It is about to ship. Review it adversarially.
-
-Produce EXACTLY this structure:
-VERDICT: SHIP or HOLD
-FINDINGS: a numbered list (max 10) of concrete issues or load-bearing subtleties a reviewer must verify — each as "N. [severity: high|med|low] file — one-to-two sentence description". Include correctness risks, security/billing risks, and precedence/interaction subtleties. Do NOT pad the list; only include things you genuinely see.
-MISSED-BY-TESTS: 1-3 risks the described tests do not cover.
-ASSESSMENT: one paragraph.

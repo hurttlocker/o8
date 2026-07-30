@@ -60,7 +60,7 @@ export interface TerminalTab {
    *   - 'terminal'      → tmux/PTY shell tab
    *   - 'canvas'        → file/diff viewer tab (agent-created inspector)
    *   - 'fleet-canvas'  → spatial fleet overview — live packet cards on a
-   *                       canvas (experimentalCanvas flag; docs/canvas-mode-plan.md).
+   *                       canvas (experimentalCanvas flag).
    *                       NOT the same as 'canvas'.
    */
   kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas';

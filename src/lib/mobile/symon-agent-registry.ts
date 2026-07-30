@@ -2,7 +2,7 @@
  * Symon Agent Mode — the single `activeAgentSession` registry.
  *
  * The desktop keeps EXACTLY ONE phone-hosted agent session at a time
- * (docs/symon-agent-mode.md §"Session registry"). This module is the
+ * (docs/internals/symon-agent-mode.md §"Session registry"). This module is the
  * process-local, re-derivable-from-status-events source of truth for it.
  *
  * Two consumers, two processes:

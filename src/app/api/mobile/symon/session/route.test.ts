@@ -1,7 +1,7 @@
 /**
  * Real-path mint test (reachability doctrine — drives the ACTUAL POST handler).
  *
- * The live app isn't reachable from a worktree, so per docs/symon-agent-mode.md
+ * The live app isn't reachable from a worktree, so per docs/internals/symon-agent-mode.md
  * §Verification this evidences the mint assembly with the upstream OpenAI fetch +
  * the webview eval bridge mocked: the token body carries the SAME config the desk
  * session uses (instructions + tools + transcription), the desk session is

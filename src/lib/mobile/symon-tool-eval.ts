@@ -2,7 +2,7 @@
  * Symon Agent Mode — webview eval builders for the tool relay
  * (`/api/mobile/symon/tool`). Extracted from the route module: Next.js route
  * files may only export route handlers/config, so shared-with-tests helpers
- * live here (docs/symon-agent-mode.md §POST /api/mobile/symon/tool).
+ * live here (docs/internals/symon-agent-mode.md §POST /api/mobile/symon/tool).
  */
 
 /**

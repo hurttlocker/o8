@@ -31,7 +31,7 @@ You are running as a **worker** in that pipeline. A Claude orchestrator designed
 
 ## Architecture touchpoints (skim before editing)
 
-- **Runtime adapters** live in `src/lib/runtimes/` with shared primitives under `src/lib/runtimes/shared/` (cli-resolver, owned-session-store, turn-dispatcher, cost-parser-registry). Adding a new runtime is a 6-file patch — see `docs/runtime-adapter-contract.md`.
+- **Runtime adapters** live in `src/lib/runtimes/` with shared primitives under `src/lib/runtimes/shared/` (cli-resolver, owned-session-store, turn-dispatcher, cost-parser-registry). Adding a new runtime is a 6-file patch — see `docs/internals/runtime-adapter-contract.md`.
 - **Orchestrator types** — `src/lib/orchestrator/types.ts:3` has the canonical `OrchestratorRuntime` union. `src/lib/orchestrator/runtime-capabilities.ts` has the `ORCHESTRATOR_RUNTIMES` map keyed by runtime id. UI reads from the map instead of branching on strings.
 - **Desktop UI** lives in `src/components/desktop/`. Mobile UI lives in `src/components/mobile/` and is **completely separate** — no shared components. Don't cross the streams.
 - **API security** — `src/middleware.ts` gates dangerous prefixes (`/api/panel/`, `/api/orchestrator/`, `/api/runtime/`, etc.) on loopback origin + ws-token. Never add a new state-mutating route without going through the gate.

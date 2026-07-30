@@ -18,7 +18,7 @@ import type { EntitlementFlags, Plan } from './types';
  *             perk wired separately (use-founder-status + the experimental
  *             hooks), not a cost/reach lever, so it isn't here.
  *
- * relay.offNetwork follows the public relay contract in docs/connect-contract.md.
+ * relay.offNetwork follows the public relay contract in docs/internals/connect-contract.md.
  * Entitlement is "all paid tiers" in principle; today only 'founder' is a live
  * paid tier (the $19 'pro'/$29 'team' tiers aren't sold yet), so it reads as
  * founders-only in practice but flips on automatically the moment pro/team launch

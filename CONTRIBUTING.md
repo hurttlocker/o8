@@ -6,7 +6,7 @@ o8 is maintained by one person, and review capacity is limited. Small, focused c
 
 - Bug fixes with a clear reproduction.
 - Reliability and performance improvements with evidence.
-- New runtime adapters that follow the six-file recipe in [`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md).
+- New runtime adapters that follow the six-file recipe in [`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md).
 
 ## What we do not accept
 

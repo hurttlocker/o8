@@ -1,6 +1,6 @@
 /**
  * Injectable in-page agent for the NATIVE browser-view child window
- * (docs/native-browser-webview-spec.md, Stage 2).
+ * (docs/internals/native-browser-webview-spec.md, Stage 2).
  *
  * Unlike `page-agent.ts` — which runs in o8's OWN window and reaches INTO an
  * `iframe[data-o8-browser]` via `contentDocument` — this agent is injected

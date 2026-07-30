@@ -643,7 +643,7 @@ async function main(): Promise<void> {
 
   const sessionDoc = path.resolve(
     process.cwd(),
-    'docs/research/cortex-autoresearch/sessions',
+    'artifacts/research/cortex-autoresearch/sessions',
     `${runId}.md`,
   );
   writeSessionReport(sessionDoc, runId, loops, selectedModel, runningCost);

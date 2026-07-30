@@ -35,7 +35,7 @@ import {
 /**
  * Symon Agent Mode — ephemeral-token mint for the PHONE-hosted session.
  *
- * docs/symon-agent-mode.md §POST /api/mobile/symon/session. Mints an OpenAI
+ * docs/internals/symon-agent-mode.md §POST /api/mobile/symon/session. Mints an OpenAI
  * Realtime client token carrying the SAME session config the desk-mic session
  * uses — model + voice + instructions + a workspace-appropriate tool set — so the phone
  * (a dumb pipe) opens WebRTC straight to OpenAI with Symon's whole brain baked

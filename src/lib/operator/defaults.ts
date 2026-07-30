@@ -173,7 +173,7 @@ export interface OperatorDefaults {
   experimentalChat: boolean;
   /**
    * Off by default. The `fleet-canvas` workspace tab — live packet cards on
-   * a spatial canvas (docs/canvas-mode-plan.md). Flag ON surfaces a Canvas
+   * a spatial canvas. Flag ON surfaces a Canvas
    * row in the New-tab picker; flag OFF hides the row AND any existing
    * fleet-canvas tabs (mirrors `experimentalChat`: tab data stays persisted
    * for when it flips back on).

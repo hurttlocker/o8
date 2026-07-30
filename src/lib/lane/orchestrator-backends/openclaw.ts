@@ -16,7 +16,7 @@
  * Streaming: openclaw's `agent --json` returns a single final JSON blob
  * (`{ payloads, meta }`), not an incremental event log — so this backend emits
  * the assistant text + a `done` event, with no live tool/thinking deltas. A
- * documented v1 limitation; see docs/openclaw-integration.md.
+ * documented v1 limitation; see docs/internals/openclaw-integration.md.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -160,7 +160,7 @@ function sanitizeAgentId(agentId: string): string {
 /**
  * Session name is keyed per repo + agent — the same repo orchestrated by two
  * different openclaw agents is two independent sessions (separate transcripts,
- * separate `--session-id`). See docs/openclaw-integration.md.
+ * separate `--session-id`). See docs/internals/openclaw-integration.md.
  */
 export function openclawOrchestratorSessionName(repoPath: string, agentId: string): string {
   return `o8-openclaw-orchestrator-${repoHash(normalizeRepoPath(repoPath))}-${sanitizeAgentId(agentId)}`;

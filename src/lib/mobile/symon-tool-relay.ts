@@ -5,7 +5,7 @@
  * executes it and returns a `symon-tool-result`. The model can PARALLEL-call, so
  * the relay must tolerate concurrent calls and correlate strictly by the
  * `(sessionId, callId)` pair
- * (docs/symon-agent-mode.md §"Tool relay semantics"). This module is the pure,
+ * (docs/internals/symon-agent-mode.md §"Tool relay semantics"). This module is the pure,
  * unit-testable core of that bookkeeping — no WS, no fetch, no clock of its own.
  */
 

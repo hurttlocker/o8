@@ -20,7 +20,7 @@ import { buildToolEval, buildToolInterruptEval } from '@/lib/mobile/symon-tool-e
 /**
  * Symon Agent Mode — INTERNAL tool-relay target (ws-server → Next; same gate).
  *
- * docs/symon-agent-mode.md §POST /api/mobile/symon/tool. NOT called by the phone
+ * docs/internals/symon-agent-mode.md §POST /api/mobile/symon/tool. NOT called by the phone
  * — the ws-server `symon` channel forwards a phone `symon-tool-call` here, and we
  * execute it through the EXACT same dispatcher + SafetyClass gate the desk
  * session's tool calls run through (`realtime_invoke_tool`), then return

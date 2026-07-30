@@ -3238,7 +3238,7 @@ function handleClientMessage(client: ClientState, raw: string) {
   }
 }
 
-// ── Symon Agent Mode channel handlers (docs/symon-agent-mode.md) ──
+// ── Symon Agent Mode channel handlers (docs/internals/symon-agent-mode.md) ──
 //
 // The PHONE hosts the WebRTC voice session; every tool STILL executes here on the
 // Mac. This process owns the socket pushes + the one activeAgentSession registry
@@ -7605,7 +7605,7 @@ async function bootstrapWsServer() {
     // Begin event-loop lag sampling (#1498 follow-up).
     wsWatchdog.start();
 
-    // o8 Relay v1 — off-network connector (docs/relay-v1-design.md). Fully
+    // Off-network connector (docs/internals/connect-contract.md). Fully
     // isolated + gated (entitlement + operator toggle + license token); dials OUT
     // to the relay and bridges relayed phones into THIS ws-server. A failure here
     // NEVER affects the LAN path — the call is self-guarded and returns null.

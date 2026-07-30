@@ -1,8 +1,7 @@
 /**
  * Founder-status hook — true when the signed-in account is a Founding Operator.
  *
- * Founders get the early-access perk ("experimental is always on for you,
- * forever" — docs/founding-operator-tier.md), so the experimental* operator
+ * Founders get the early-access perk, so the experimental* operator
  * flags OR-in this signal. Kept as a standalone module-cached fetch (mirroring
  * the use-experimental-*.ts hooks) rather than reading EntitlementContext, so it
  * works on every surface — including the canvas tree, which isn't wrapped by
