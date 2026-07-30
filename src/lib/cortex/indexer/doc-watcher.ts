@@ -27,6 +27,7 @@ import { existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path';
 
 import { distillDocChunkBatch } from '@/lib/cortex/indexer/doc-distill';
+import { isWhitelistedDocPath } from '@/lib/cortex/indexer/doc-whitelist';
 import { getDb, getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -52,8 +53,6 @@ const SKIP_DIRECTORIES = new Set([
   'out',
   'target',
 ]);
-
-const TOP_LEVEL_NAMED_FILES = new Set(['CLAUDE.md', 'AGENTS.md', 'DESIGN.md']);
 
 // ── Repo registry ─────────────────────────────────────────────────────────────
 
@@ -86,15 +85,7 @@ function loadRegisteredRepos(): RegisteredRepo[] {
 
 // ── Whitelist ─────────────────────────────────────────────────────────────────
 
-function isWhitelisted(relPath: string): boolean {
-  const base = relPath.split(sep).pop() ?? relPath;
-  const segments = relPath.split(sep);
-  const depth = segments.length - 1;
-  if (TOP_LEVEL_NAMED_FILES.has(base)) return true;
-  if (base === 'README.md' && depth === 0) return true;
-  if (segments[0] === 'docs' && depth === 1 && /\.md$/i.test(base)) return true;
-  return false;
-}
+export const isWhitelisted = isWhitelistedDocPath;
 
 function pathHasWorktreeSegment(p: string): boolean {
   const segs = p.split(sep);
