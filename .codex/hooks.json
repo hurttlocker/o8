@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/claude-code-pretool-hook.js\"",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/dist/hooks/claude-code-pretool-hook.js\"",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/post-edit-typecheck.js\"",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/dist/hooks/post-edit-typecheck.js\"",
             "timeout": 35
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/completion-gate.js\"",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/dist/hooks/completion-gate.js\"",
             "timeout": 50
           }
         ]

@@ -91,7 +91,7 @@ Settings → MCP → Install. o8 exposes its operator tools — `create_mission`
 
 Optional paid services (coming after launch) are the things that run on **our** servers: managed inference for the no-setup path, hosted voice, remote access without network config. Convenience, never capability. If you never pay, you have the whole product.
 
-A capped **Founders Edition** — supporter badge, name in these credits, permanent founder pricing on future services — is available at launch. <!-- TODO(launch): founders link -->
+A capped **Founders Edition** — supporter badge, name in these credits, permanent founder pricing on future services — is available at launch.
 
 ## Design
 
@@ -103,7 +103,7 @@ o8 is built like every pixel matters, because you stare at a control room all da
 - [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control plane, headless).
 - [`CLAUDE.md`](./CLAUDE.md) — the canonical agent/contributor brief: architecture, conventions, critical rules.
 
-Community: [Discord](https://discord.gg/gH3UbbTJ7k) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt) <!-- TODO(launch): confirm handle for launch -->
+Community: [Discord](https://discord.gg/gH3UbbTJ7k) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 
 ## Third-party code
 
