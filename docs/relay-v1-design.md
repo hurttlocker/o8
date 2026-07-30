@@ -67,7 +67,7 @@ Mac connector ──outbound wss──► relay.o8.run ◄──wss── phone
 
 ### D8. What Phase B builds (scoped)
 
-1. `services/relay/` (Hono+ws, Railway config, /health, rate limits, APNs sender, control-frame vocabulary above).
+1. The private `o8-relay` service (Hono+ws, Railway config, /health, rate limits, APNs sender, control-frame vocabulary above).
 2. Desktop connector (`src/lib/mobile/relay-connector.ts` + settings toggle): outbound dial, JWT presentation, socket bridging with the remote marker, `push-req` on blocked approvals, LAN unaffected when relay is down.
 3. Mobile leg (mobile agent, against §Wire contract): config gains `relayRoutingId` derived from the pinned key; transport switch (direct on LAN, relay+http-over-frames off-network); presence/4408/4409 UX.
 4. **approvalId punchlist (desktop half):** the handler already resolves approvalId-first (`action/route.ts:364-368`); Phase B hardens it — when `approvalId` is present it is authoritative and session fallback is skipped entirely; stale-`sessionKey`-cannot-mistarget proven by a contract test; sessionKey-only addressing kept for old clients.

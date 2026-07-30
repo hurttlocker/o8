@@ -97,14 +97,6 @@ jobs:
       - name: Audit root dependencies
         run: npm audit --audit-level=high
         continue-on-error: true
-      - name: Audit license-server dependencies
-        run: npm audit --audit-level=high
-        working-directory: services/license-server
-        continue-on-error: true
-      - name: Audit relay dependencies
-        run: npm audit --audit-level=high
-        working-directory: services/relay
-        continue-on-error: true
       - name: Audit Rust dependencies
         uses: rustsec/audit-check@v2.0.0
         with:
