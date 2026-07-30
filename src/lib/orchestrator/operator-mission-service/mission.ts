@@ -258,7 +258,7 @@ export async function createMission(input: CreateMissionInput) {
   // recommender would have picked next to the operator's actual choice. We
   // never override the user's selection — this is observability so we can see
   // whether the heuristic agrees with current operator behavior.
-  void logDispatchRoutingRecommendations(persisted.packets, missionId).catch((error) => {
+  await logDispatchRoutingRecommendations(persisted.packets, missionId).catch((error) => {
     console.warn(
       '[dispatch-routing] recommendation logging failed:',
       error instanceof Error ? error.message : error,
