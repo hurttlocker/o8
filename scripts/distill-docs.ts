@@ -1,10 +1,10 @@
 /**
  * Engineering Brain — Phase 2b: docs distillation (#915 north star follow-up).
  *
- * Walks every repo registered in `~/.o8/repos.json`, picks a small whitelist of
- * markdown files (CLAUDE.md / README.md root / AGENTS.md / DESIGN.md /
- * docs/*.md), semantically chunks them by heading, and batches N chunks per
- * Claude Sonnet call to extract structured facts into the `facts` table.
+ * Walks every repo registered in `~/.o8/repos.json`, selects CLAUDE.md, root
+ * README.md, AGENTS.md, DESIGN.md, and markdown at any depth under docs/, then
+ * chunks them by heading and batches N chunks per Claude Sonnet call to extract
+ * structured facts into the `facts` table.
  *
  * Why batched: the comment indexer (`scripts/indexer-run.ts`) burns ~2.2s of
  * CLI bootstrap per item. Packing 8 chunks per prompt amortizes that cost,
@@ -31,11 +31,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type Database from 'better-sqlite3';
 
 import { getDb, getSqlite } from '@/lib/db';
 import { distillDocChunkBatch, type DocChunkInput } from '@/lib/cortex/indexer/doc-distill';
+import { isWhitelistedDocPath } from '@/lib/cortex/indexer/doc-whitelist';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,12 +60,6 @@ const SKIP_DIRECTORIES = new Set([
   'build',
   'out',
   'target',
-]);
-
-const TOP_LEVEL_NAMED_FILES = new Set([
-  'CLAUDE.md',
-  'AGENTS.md',
-  'DESIGN.md',
 ]);
 
 // ── Args ─────────────────────────────────────────────────────────────────────
@@ -214,22 +210,12 @@ function isMarkdown(name: string): boolean {
  *   - AGENTS.md (any depth)
  *   - DESIGN.md (any depth)
  *   - README.md (root only, depth 0)
- *   - docs/<single-segment>.md (one level deep, no nested)
+ *   - markdown files at any depth under docs/
  *
  * Returning true here means "in scope before user --include/--exclude
  * overrides apply".
  */
-function defaultWhitelist(relPath: string): boolean {
-  const base = path.basename(relPath);
-  const segments = relPath.split(path.sep);
-  const depth = segments.length - 1; // 0 for root file
-
-  if (TOP_LEVEL_NAMED_FILES.has(base)) return true;
-  if (base === 'README.md' && depth === 0) return true;
-  if (segments[0] === 'docs' && depth === 1 && isMarkdown(base)) return true;
-
-  return false;
-}
+export const defaultWhitelist = isWhitelistedDocPath;
 
 /**
  * Walk a repo recursively yielding markdown files that match the default
@@ -957,7 +943,12 @@ function summarize(s: RunSummary): void {
   console.log('────────────────────────────────────────────────────────────');
 }
 
-main().catch((err) => {
-  console.error('[distill-docs] FAIL', err);
-  process.exit(1);
-});
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
+  main().catch((err) => {
+    console.error('[distill-docs] FAIL', err);
+    process.exit(1);
+  });
+}
