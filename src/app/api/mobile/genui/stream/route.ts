@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
  *
  * The mobile app's `@openuidev/react-lang` stream layer speaks the vanilla
  * OpenAI `/chat/completions` SSE dialect; none of our internal LLM surfaces
- * do. This route is the adapter: it accepts `{ model?, messages, stream? }`
+ * do. This route is the adapter: it accepts `{ model?, effort?, messages, stream? }`
  * and emits `chat.completion.chunk` SSE frames (or a full `chat.completion`
  * JSON body when `stream: false`).
  *
@@ -46,6 +46,7 @@ interface ChatMessage {
 
 interface GenUiRequestBody {
   model?: unknown;
+  effort?: unknown;
   messages?: unknown;
   stream?: unknown;
   max_tokens?: unknown;
@@ -193,7 +194,7 @@ export async function POST(req: NextRequest) {
   if (!prompt) return jsonError('messages contained no text content.', 400);
 
   const state = await getAskRuntimeState();
-  const routeSelection = resolveMobileAskRoute(body.model, state.readiness);
+  const routeSelection = resolveMobileAskRoute(body.model, state.readiness, body.effort);
   if (routeSelection.kind === 'managed') {
     return managedFallback(
       routeSelection.fallback
@@ -211,6 +212,7 @@ export async function POST(req: NextRequest) {
         const text = await askClaudeWarm(prompt, {
           binary,
           model: routeSelection.cliModel,
+          effort: routeSelection.effort,
           timeoutMs: CLI_TIMEOUT_MS,
         });
         return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text));
@@ -227,6 +229,7 @@ export async function POST(req: NextRequest) {
         askClaudeWarm(prompt, {
           binary,
           model: routeSelection.cliModel,
+          effort: routeSelection.effort,
           timeoutMs: CLI_TIMEOUT_MS,
           onDelta: (text) => {
             try {
@@ -260,7 +263,7 @@ export async function POST(req: NextRequest) {
       text = await callCodex(prompt, {
         binary,
         model: routeSelection.cliModel,
-        reasoningEffort: routeSelection.reasoningEffort,
+        reasoningEffort: routeSelection.effort,
         timeoutMs: CLI_TIMEOUT_MS,
       });
     } catch (error) {
