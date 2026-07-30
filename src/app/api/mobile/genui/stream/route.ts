@@ -15,21 +15,24 @@ export const dynamic = 'force-dynamic';
  * on the device. The phone only presents the ws-token (this route is gated by
  * the default-deny middleware like the rest of /api/mobile):
  *
- *   - Text requests use the warm Claude REPL pool (subscription-billed, same
- *     pool as the Brain's CLI tiers — never `-p`/`--print`, see #1124).
+ *   - Text requests can use the warm Claude REPL pool or Codex CLI, based on
+ *     the allow-listed mobile model id and authenticated desktop readiness.
  *   - Image requests return an explicit pre-stream fallback signal so the
  *     phone can preserve the image and use managed Ask.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import { askClaudeWarm } from '@/lib/claude-code/warm-repl-pool';
+import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
-import { MODEL_IDS, RAW_MODEL_IDS } from '@/lib/models';
-
-const execFileAsync = promisify(execFile);
+import {
+  buildMobileAskModelCatalog,
+  resolveMobileAskRoute,
+  type MobileAskReadiness,
+} from '@/lib/mobile/ask-model-routing';
+import { MODEL_IDS } from '@/lib/models';
+import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
 
 const CLI_TIMEOUT_MS = 120_000;
 // Spend guardrail for the hosted tier: a generated screen is a few hundred
@@ -53,6 +56,10 @@ function jsonError(message: string, status: number, headers?: HeadersInit) {
     { error: { message, type: 'invalid_request_error' } },
     { status, headers },
   );
+}
+
+function managedFallback(message: string) {
+  return jsonError(message, 409, { 'X-O8-Ask-Fallback': 'managed' });
 }
 
 /** OpenAI content can be a string or an array of typed parts — flatten to text. */
@@ -97,45 +104,31 @@ function flattenMessages(messages: ChatMessage[]): string {
   return [...system, turns.join('\n\n')].filter(Boolean).join('\n\n');
 }
 
-// ── Claude binary resolution (mirrors haiku-adapter / sonnet-adapter) ────────
-
-let cachedClaudeBin: string | null | undefined;
-
-async function resolveClaudeBin(): Promise<string | null> {
-  if (cachedClaudeBin !== undefined) return cachedClaudeBin;
-  for (const envKey of ['O8_CLAUDE_CODE_BIN', 'CLAUDE_BIN']) {
-    const val = process.env[envKey];
-    if (val) {
-      cachedClaudeBin = val;
-      return cachedClaudeBin;
-    }
-  }
-  try {
-    const { stdout } = await execFileAsync('which', ['claude'], { timeout: 3_000 });
-    const found = stdout.trim();
-    if (found) {
-      cachedClaudeBin = found;
-      return cachedClaudeBin;
-    }
-  } catch { /* fall through to login shell */ }
-  // Finder-launched Tauri apps miss nvm/volta PATH entries — probe a login shell.
-  try {
-    const { stdout } = await execFileAsync('/bin/zsh', ['-lic', 'command -v claude'], { timeout: 8_000 });
-    const found = stdout.trim().split('\n').pop()?.trim() || '';
-    cachedClaudeBin = found || null;
-  } catch {
-    cachedClaudeBin = null;
-  }
-  return cachedClaudeBin;
-}
-
 // ── Model routing ─────────────────────────────────────────────────────────────
 
-function resolveCliModel(model: string): string | null {
-  if (model === '' || model === 'haiku' || model === 'default') return MODEL_IDS.claudeHaikuQaDefault;
-  if (model === 'sonnet') return RAW_MODEL_IDS.anthropicClaudeSonnet5;
-  if (model.startsWith('claude-')) return model;
-  return null;
+interface AskRuntimeState {
+  readiness: MobileAskReadiness;
+  claudeBinary?: string;
+  codexBinary?: string;
+}
+
+async function getAskRuntimeState(): Promise<AskRuntimeState> {
+  try {
+    const snapshot = await getRuntimeAuthSnapshot();
+    const claude = snapshot.statuses.claude;
+    const codex = snapshot.statuses.codex;
+    return {
+      readiness: {
+        claude: claude.installed && claude.authenticated,
+        codex: codex.installed && codex.authenticated,
+      },
+      claudeBinary: claude.binaryPath,
+      codexBinary: codex.binaryPath,
+    };
+  } catch (error) {
+    console.error('[genui] failed to detect local Ask runtimes:', error instanceof Error ? error.message : 'unknown');
+    return { readiness: { claude: false, codex: false } };
+  }
 }
 
 // ── SSE plumbing ─────────────────────────────────────────────────────────────
@@ -171,6 +164,13 @@ function completionBody(id: string, created: number, model: string, text: string
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
+export async function GET() {
+  const state = await getAskRuntimeState();
+  return NextResponse.json(buildMobileAskModelCatalog(state.readiness), {
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
+}
+
 export async function POST(req: NextRequest) {
   let body: GenUiRequestBody;
   try {
@@ -184,61 +184,65 @@ export async function POST(req: NextRequest) {
   }
   const messages = body.messages as ChatMessage[];
   if (messagesContainImages(messages)) {
-    return jsonError(
-      'Image requests use managed Ask.',
-      409,
-      { 'X-O8-Ask-Fallback': 'managed' },
-    );
+    return managedFallback('Image requests use managed Ask.');
   }
-  // Compatibility fields are accepted, but the paired desktop chooses its own
-  // subscription-backed model instead of trusting a phone-supplied model id.
-  const requestedModel = '';
   const wantStream = body.stream !== false;
   const id = `genui-${Date.now().toString(36)}`;
   const created = Math.floor(Date.now() / 1000);
+  const prompt = flattenMessages(messages);
+  if (!prompt) return jsonError('messages contained no text content.', 400);
 
-  const cliModel = resolveCliModel(requestedModel);
-  if (cliModel) {
-    const binary = await resolveClaudeBin();
-    if (!binary) {
-      return jsonError('claude CLI not found — the subscription tier needs Claude Code installed on the desktop.', 503);
-    }
-    const prompt = flattenMessages(messages);
-    if (!prompt) return jsonError('messages contained no text content.', 400);
+  const state = await getAskRuntimeState();
+  const routeSelection = resolveMobileAskRoute(body.model, state.readiness);
+  if (routeSelection.kind === 'managed') {
+    return managedFallback(
+      routeSelection.fallback
+        ? 'The selected local Ask model is unavailable; use managed Ask.'
+        : 'Managed Ask was selected.',
+    );
+  }
+
+  if (routeSelection.kind === 'claude') {
+    const binary = state.claudeBinary;
+    if (!binary) return managedFallback('Claude Code is unavailable; use managed Ask.');
 
     if (!wantStream) {
       try {
-        const text = await askClaudeWarm(prompt, { binary, model: cliModel, timeoutMs: CLI_TIMEOUT_MS });
-        return NextResponse.json(completionBody(id, created, cliModel, text));
+        const text = await askClaudeWarm(prompt, {
+          binary,
+          model: routeSelection.cliModel,
+          timeoutMs: CLI_TIMEOUT_MS,
+        });
+        return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text));
       } catch (error) {
-        console.error('[genui] cli completion failed:', error instanceof Error ? error.message : 'unknown');
-        return jsonError('Generation failed on the CLI tier.', 502);
+        console.error('[genui] Claude completion failed:', error instanceof Error ? error.message : 'unknown');
+        return jsonError('Generation failed on the Claude CLI tier.', 502);
       }
     }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode(chunkFrame(id, created, cliModel, { role: 'assistant', content: '' }, null)));
+        controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, { role: 'assistant', content: '' }, null)));
         askClaudeWarm(prompt, {
           binary,
-          model: cliModel,
+          model: routeSelection.cliModel,
           timeoutMs: CLI_TIMEOUT_MS,
           onDelta: (text) => {
             try {
-              controller.enqueue(encoder.encode(chunkFrame(id, created, cliModel, { content: text }, null)));
+              controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, { content: text }, null)));
             } catch { /* client went away mid-stream */ }
           },
         })
           .then(() => {
-            controller.enqueue(encoder.encode(chunkFrame(id, created, cliModel, {}, 'stop')));
+            controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, {}, 'stop')));
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             controller.close();
           })
           .catch((error) => {
-            console.error('[genui] cli stream failed:', error instanceof Error ? error.message : 'unknown');
+            console.error('[genui] Claude stream failed:', error instanceof Error ? error.message : 'unknown');
             try {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: 'Generation failed on the CLI tier.' } })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: 'Generation failed on the Claude CLI tier.' } })}\n\n`));
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
             } catch { /* already closed */ }
@@ -248,14 +252,44 @@ export async function POST(req: NextRequest) {
     return new Response(stream, { headers: sseHeaders() });
   }
 
+  if (routeSelection.kind === 'codex') {
+    const binary = state.codexBinary;
+    if (!binary) return managedFallback('Codex is unavailable; use managed Ask.');
+    let text: string;
+    try {
+      text = await callCodex(prompt, {
+        binary,
+        model: routeSelection.cliModel,
+        reasoningEffort: routeSelection.reasoningEffort,
+        timeoutMs: CLI_TIMEOUT_MS,
+      });
+    } catch (error) {
+      console.error('[genui] Codex completion failed:', error instanceof Error ? error.message : 'unknown');
+      return jsonError('Generation failed on the Codex CLI tier.', 502);
+    }
+    if (!wantStream) {
+      return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text));
+    }
+    const encoder = new TextEncoder();
+    const synthesized = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, { role: 'assistant', content: text }, null)));
+        controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, {}, 'stop')));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    return new Response(synthesized, { headers: sseHeaders() });
+  }
+
   // Hosted tier — managed plan proxy (founder fast path) → local → BYO OpenRouter.
-  const route = await resolveOpenRouterRoute();
-  if (!route) {
+  const hostedRoute = await resolveOpenRouterRoute();
+  if (!hostedRoute) {
     return jsonError('No hosted inference available — add an OpenRouter key or an active plan, or use the default CLI tier.', 503);
   }
   const requestedMax = typeof body.max_tokens === 'number' && Number.isFinite(body.max_tokens) ? body.max_tokens : HOSTED_MAX_TOKENS;
   const upstreamBody = {
-    model: route.model ?? requestedModel,
+    model: hostedRoute.model ?? MODEL_IDS.mobileOpenAiDefault,
     messages: messages.map((m) => ({ role: m.role, content: contentToText(m.content) })),
     stream: wantStream,
     max_tokens: Math.min(Math.max(1, requestedMax), HOSTED_MAX_TOKENS),
@@ -263,9 +297,9 @@ export async function POST(req: NextRequest) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(route.url, {
+    upstream = await fetch(hostedRoute.url, {
       method: 'POST',
-      headers: route.headers,
+      headers: hostedRoute.headers,
       body: JSON.stringify(upstreamBody),
     });
   } catch (error) {
@@ -275,7 +309,7 @@ export async function POST(req: NextRequest) {
 
   if (!upstream.ok) {
     const detail = await upstream.text().catch(() => '');
-    console.error(`[genui] hosted upstream ${upstream.status} via ${route.via}: ${detail.slice(0, 300)}`);
+    console.error(`[genui] hosted upstream ${upstream.status} via ${hostedRoute.via}: ${detail.slice(0, 300)}`);
     return jsonError(`Hosted inference failed upstream (${upstream.status}).`, 502);
   }
 

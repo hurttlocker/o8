@@ -103,6 +103,10 @@ export function resetCodexProviderCache(): void {
 export interface CallCodexOptions {
   /** Model to pass to `codex exec -m`. Default: gpt-5.5 (post-SDK-pricing pivot, epic #1044). */
   model?: string;
+  /** Explicit resolved binary, used when the caller already ran auth detection. */
+  binary?: string;
+  /** Optional Codex config effort passed as `-c model_reasoning_effort=...`. */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
   /** CLI invocation timeout. Default 30s — Codex bootstrap is ~15s. */
   timeoutMs?: number;
 }
@@ -128,6 +132,24 @@ function resolveCodexQaModel(explicit?: string): string {
   return CODEX_DEFAULT_MODEL;
 }
 
+export function buildCodexQaArgs(options: {
+  model: string;
+  outputFile: string;
+  reasoningEffort?: CallCodexOptions['reasoningEffort'];
+}): string[] {
+  return [
+    'exec',
+    '--skip-git-repo-check',
+    '--output-last-message', options.outputFile,
+    // Local models expand to `--oss --local-provider … --model`; cloud models to
+    // `--model <name>` (equivalent to the historical `-m`).
+    ...codexModelArgs(options.model),
+    ...(options.reasoningEffort
+      ? ['-c', `model_reasoning_effort=${options.reasoningEffort}`]
+      : []),
+  ];
+}
+
 /**
  * Call Codex via the CLI with `prompt` on stdin and read the final answer
  * from a tmpfile written by `--output-last-message`.
@@ -145,7 +167,7 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
   const timeoutMs = opts.timeoutMs ?? 30_000;
   const model = resolveCodexQaModel(opts.model);
 
-  const codexBin = await resolveCodexBin();
+  const codexBin = opts.binary ?? await resolveCodexBin();
   if (!codexBin) {
     throw new Error('[qa][codex] codex CLI not found on PATH or login shell');
   }
@@ -157,14 +179,11 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
     `o8-codex-qa-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`,
   );
 
-  const cliArgs = [
-    'exec',
-    '--skip-git-repo-check',
-    '--output-last-message', tmpFile,
-    // Local models expand to `--oss --local-provider … --model`; cloud models to
-    // `--model <name>` (equivalent to the historical `-m`).
-    ...codexModelArgs(model),
-  ];
+  const cliArgs = buildCodexQaArgs({
+    model,
+    outputFile: tmpFile,
+    reasoningEffort: opts.reasoningEffort,
+  });
 
   // tmpdir cwd so no project .codex/ config bleeds in.
   const cwd = os.tmpdir();
