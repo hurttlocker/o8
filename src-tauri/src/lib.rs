@@ -33,6 +33,7 @@ mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
 mod window_restore;
+mod window_state_sanitizer;
 // Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
 // (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
 #[cfg(target_os = "macos")]
@@ -2940,9 +2941,12 @@ fn notify_review_ready(
     Ok(())
 }
 
-// Drop only malformed saved window-state before tauri-plugin-window-state reads it.
-// Geometry that is merely stale is clamped after restore, once Tauri can see monitors.
+// Heal saved window state before tauri-plugin-window-state reads it. Symon's
+// derived-geometry overlays must never enter the plugin's physical-pixel
+// persistence round trip; malformed state keeps the existing discard behavior.
 fn sanitize_window_state() {
+    use window_state_sanitizer::SanitizedWindowState;
+
     let Some(home) = std::env::var_os("HOME") else {
         return;
     };
@@ -2951,13 +2955,19 @@ fn sanitize_window_state() {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return;
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        let _ = std::fs::remove_file(&path);
-        return;
-    };
-    if json.get("main").is_none() {
-        eprintln!("[o8] discarding malformed window state with no main window");
-        let _ = std::fs::remove_file(&path);
+    match window_state_sanitizer::sanitize_window_state_json(&content) {
+        SanitizedWindowState::Unchanged => {}
+        SanitizedWindowState::Rewrite(cleaned) => {
+            if let Err(error) = std::fs::write(&path, cleaned) {
+                eprintln!("[o8] failed to sanitize saved window state: {error}");
+            } else {
+                eprintln!("[o8] removed derived overlays from saved window state");
+            }
+        }
+        SanitizedWindowState::Discard => {
+            eprintln!("[o8] discarding malformed saved window state");
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 
@@ -5747,9 +5757,12 @@ pub fn run() {
         // restore. (The voice-settings glass window is created decorations(false)
         // but the plugin was restoring decorations=true saved from an earlier
         // build, re-adding the native title bar over the glass chrome.)
+        // Derived Symon overlays are denylisted because their frames come from
+        // live monitor geometry; persisting physical pixels corrupts them.
         use tauri_plugin_window_state::StateFlags;
         builder = builder.plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_denylist(window_state_sanitizer::DERIVED_OVERLAY_WINDOW_LABELS)
                 .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
                 .build(),
         );
