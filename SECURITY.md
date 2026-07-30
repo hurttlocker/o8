@@ -1,5 +1,11 @@
 # Security
 
+## Pre-launch security review
+
+o8's surface was adversarially reviewed before the repository was made public. Twenty findings were identified and fixed; the public summary — classes, severities, and how each was resolved — is [issue #1643](https://github.com/hurttlocker/o8/issues/1643).
+
+Root-cause write-ups for those findings are retained privately rather than published. Every one is fixed in current releases, but signed builds of earlier versions remain downloadable, and a published exploit chain would apply to anyone still running one. The redaction protects those users; it does not indicate an unresolved issue. Accepted residual risks are tracked as open issues rather than carried silently.
+
 ## Supported platform and secret storage
 
 o8's supported production platform is macOS. Provider voice secrets saved through the app are stored in the macOS Keychain. The current Windows and Linux paths fall back to a plaintext `dictation.json` file; the writer enforces mode `0600` on Unix platforms, but this is not equivalent to a platform credential store. Windows and Linux builds are unsupported today for storing provider voice secrets.
