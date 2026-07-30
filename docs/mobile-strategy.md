@@ -2,7 +2,7 @@
 
 > Superseded framing, 2026-05-24: active mobile product planning now lives in
 > the native o8-mobile repo at
-> `/Users/marquisehurtt/o8-mobile/docs/mobile-ui-pattern-notes.md`. Use that
+> `~/o8-mobile/docs/mobile-ui-pattern-notes.md`. Use that
 > file for implementation targeting. This document is useful as older strategy
 > context, but new mobile UX work should not be scoped as a dashboard/web app.
 

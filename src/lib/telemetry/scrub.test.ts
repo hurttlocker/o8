@@ -12,7 +12,7 @@ import {
 
 describe('scrub — paths', () => {
   it('collapses the macOS home username but keeps the trailing path', () => {
-    expect(scrubPaths('/Users/marquisehurtt/o8/src/x.ts')).toBe('/Users/…/o8/src/x.ts');
+    expect(scrubPaths('/Users/example/o8/src/x.ts')).toBe('/Users/…/o8/src/x.ts');
   });
 
   it('collapses linux /home usernames too', () => {

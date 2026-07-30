@@ -18,9 +18,11 @@
  * warm hit (the proc is already idle when askClaudeWarm takes it).
  */
 import { performance } from 'node:perf_hooks';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { askClaudeWarm, prewarmClaudeRepl, resetWarmReplPool } from '@/lib/claude-code/warm-repl-pool';
 
-const CLAUDE_BIN = process.env.O8_CLAUDE_BIN || '/Users/marquisehurtt/.local/bin/claude';
+const CLAUDE_BIN = process.env.O8_CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
 const HAIKU = 'claude-haiku-4-5-20251001';
 const SONNET = 'claude-sonnet-5';
 const FLASH = 'google/gemini-2.5-flash-lite';

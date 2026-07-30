@@ -24,7 +24,7 @@ const SEARCH_TOOL_NAME = 'search_graph';
  * #854 — `trace_path` requires a `project` parameter; the binary does NOT
  * auto-detect from `cwd`. The binary names projects as the absolute path
  * with the leading slash stripped and remaining slashes replaced with
- * hyphens, e.g. `/Users/marquisehurtt/UGC` → `Users-marquisehurtt-UGC`.
+ * hyphens, e.g. `/Users/example/UGC` → `Users-example-UGC`.
  * Confirmed against `cli list_projects` on a freshly indexed repo.
  *
  * Windows paths (drive letter + backslashes) are normalized to slashes

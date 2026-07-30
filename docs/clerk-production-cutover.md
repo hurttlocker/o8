@@ -151,7 +151,7 @@ token minted after the site flips can already be verified.
 
 ## Touchpoint reference (no code changes — env only)
 
-**o8 desktop (`/Users/marquisehurtt/o8`)**
+**o8 desktop (`~/o8`)**
 - `src/components/auth/O8AuthProvider.tsx:11` — bakes `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`; `:147` `<ClerkProvider publishableKey=…>`.
 - `src/middleware.ts:282-298` — reads pub + secret keys; wraps `clerkMiddleware` only when both present (desktop is publishable-only, so the bare loopback gate runs and Clerk works client-side via the ticket flow).
 - `src/lib/auth/start-desktop-sign-in.ts:14-17,38` — opens `NEXT_PUBLIC_O8_SIGN_IN_URL` (default `https://o8.run/desktop/sign-in`) with `redirect_uri=o8://auth/callback` + CSRF `state`.
@@ -159,13 +159,13 @@ token minted after the site flips can already be verified.
 - `src/lib/auth/current-user.ts:5-6`, `src/app/api/panel/entitlement/sync/route.ts:11-12`, `src/lib/chat/gateway-client.ts:40-43` — server-side Clerk gates.
 - `.env.example:64-69` — Clerk section (`CLERK_SECRET_KEY` marked "o8-site / Vercel only").
 
-**license-server (`/Users/marquisehurtt/o8/services/license-server`)**
+**license-server (`~/o8/services/license-server`)**
 - `src/env.ts:103-107` — `CLERK_ISSUER`.
 - `src/clerk-verify.ts:16-32` — JWKS verification against `CLERK_ISSUER`.
 - `src/account-license.ts:8,25-30` — 503 when `CLERK_ISSUER` unset / mismatched.
 - `GO-LIVE.md:8,27` — already flags "Clerk production instance keys".
 
-**o8-site (`/Users/marquisehurtt/o8-site`, Vercel project `o8-site`)**
+**o8-site (`~/o8-site`, Vercel project `o8-site`)**
 - `.env.example:4-7` — `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` (placeholders, currently `pk_test_`/`sk_test_`); comment: "Same Clerk instance as the o8 desktop app."
 - `proxy.ts:16-20` — `clerkMiddleware` gated on both keys present.
 - `app/layout.tsx:92-93` — `<ClerkProvider>` when pub key set.

@@ -9,12 +9,12 @@ zero prior context and points at every file the audit surfaced.
 ```
 You are executing a planned, greenlit refactor of o8's embedded-browser stack. o8 is a
 Next.js 16 + Tauri v2 desktop app — the governance layer for autonomous AI coding agents.
-Repo: /Users/marquisehurtt/o8.
+Repo: $HOME/o8.
 
 BEFORE TOUCHING CODE, read in order:
-1. /Users/marquisehurtt/o8/CLAUDE.md   — hard rules (inline styles only, no CSS classes,
+1. $HOME/o8/CLAUDE.md   — hard rules (inline styles only, no CSS classes,
    theme tokens, tsc before commit, explicit-pathspec commits, etc.)
-2. /Users/marquisehurtt/o8/docs/orca-teardown.md  — the plan; section "1. Agent + human
+2. $HOME/o8/docs/orca-teardown.md  — the plan; section "1. Agent + human
    browser…" holds the locked decisions + the 6 stages. This prompt expands it.
 
 ## MISSION

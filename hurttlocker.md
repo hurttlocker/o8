@@ -1,14 +1,14 @@
-# Hurttlocker — locked theme spec
+# o8 locked theme specification
 
-This is the operator's **canonical style and font spec** for o8, captured after the 2026-05-25 sidebar polish pass. When the next-level theming work begins from scratch, **start here.** Every value below is locked — verified by eye against the [`/preview/typography`](src/app/preview/typography/page.tsx) lab, then dialed and shipped.
+This is the **canonical style and font specification** for o8. Start here before changing typography, iconography, row geometry, spacing, or theme behavior. Every value below is locked because it has been verified in the [`/preview/typography`](src/app/preview/typography/page.tsx) lab and on the rendered desktop surface.
 
-If a future surface disagrees with these tokens, the new surface should match these tokens — not the other way around — unless the operator explicitly relaxes the lock.
+If a future surface disagrees with these tokens, the new surface should match the specification unless the specification itself is deliberately revised.
 
 ---
 
 ## Font family
 
-System stack, no webfont. Decided after the Plus Jakarta Sans pass was rolled back: the macOS SF Pro / SF Pro Display hinting + the lighter weights we use look better than any imported font we tested.
+System stack, no webfont. macOS SF Pro / SF Pro Display hinting renders the light weights used here more clearly than the imported fonts tested against it.
 
 ```css
 font-family: var(--font-sans-system);
@@ -21,7 +21,7 @@ font-family: var(--font-sans-system);
 
 ## Typography tokens (locked — GLOBAL, every surface)
 
-**This table is canonical for every chrome surface in o8 and any project we build going forward.** If the surface has text, it should land in one of these rows or read as a deliberate exception. Locked 2026-05-27 after the o8-panel + popover + workspace-tab sweep brought the entire app into spec.
+**This table is canonical for every chrome surface in o8.** If a surface has text, it should land in one of these rows or read as a deliberate exception. The values have been verified across the o8 panel, popovers, workspace tabs, and list surfaces.
 
 | Role | Size | Weight | Letter-spacing | Line-height | Notes |
 |---|---|---|---|---|---|
@@ -42,9 +42,9 @@ font-family: var(--font-sans-system);
 These are bugs, not choices:
 
 1. **`fontWeight: 500/520/540/560/600/650/700/750/800` anywhere on chrome.** Cap is 500 (used only for inline `<strong>`). Tab pills, popover headers, row titles, section labels, badges — all 300. Active state never bumps weight.
-2. **Hard-coded `'Inter'` (or any webfont).** Always system stack via `var(--font-sans-system)`. The PROSE constant in `O8SpecEditor` was the last holdout — fixed 2026-05-27. SF Pro's variable axis renders 300 as a true thin where Inter renders it as 400-equivalent on macOS.
+2. **Hard-coded `'Inter'` (or any webfont).** Always use the system stack via `var(--font-sans-system)`. SF Pro's variable axis renders 300 as a true thin where Inter renders it as 400-equivalent on macOS.
 
-The numbers above are not negotiable. They came out of a long visual tuning session against a Claude desktop reference, then got committed across every list surface in [`src/components/desktop/`](src/components/desktop/).
+The numbers above are not starting suggestions. They are the result of visual comparison and tuning across every list surface in [`src/components/desktop/`](src/components/desktop/).
 
 ### Where each token lives in code
 
@@ -61,32 +61,32 @@ The numbers above are not negotiable. They came out of a long visual tuning sess
 
 ## Iconography rule
 
-Lists are **text-first**. Leading icons (runtime glyphs, chat stars, etc.) were stripped from every chat-history row, agent row, and spawned-agent row on 2026-05-25.
+Lists are **text-first**. Chat-history rows, agent rows, and spawned-agent rows omit decorative leading icons such as runtime glyphs and chat stars.
 
 What's left: a single **6 px colored status dot** in `ExtraAgentRowView` (green=running, orange=reviewing/waiting, gray=idle, red=failed). That's the only leading affordance. Everything else is just text.
 
-Hover reveals delete / archive / context-menu actions — never default-visible. Pattern is cribbed from Claude desktop: progressive disclosure keeps the list dense but visually clean.
+Hover reveals delete, archive, and context-menu actions; they are never default-visible. Progressive disclosure keeps the list dense without hiding the primary label.
 
 ---
 
 ## Section-label alignment
 
-Antigravity-pass column system (locked 2026-05-26 · verified panel-relative 2026-06-11):
+The column system is locked and measured panel-relative:
 
-All X values are **panel-relative** — measured from the floating card's left edge, not the window (the card sits at a small window offset that varies). Verified intact 2026-06-11 with computed styles on the live app.
+All X values are **panel-relative** — measured from the floating card's left edge, not the window, because the card's window offset can vary. Verify the values with computed styles on the live app.
 
 - **Icon column (x=12, ish):** top-nav row icons (Play / Search / Automations / Delivery), repo folder glyphs, GroupHeader chevrons + folder glyphs. All sit with their left edge at the same paddingLeft (10–12 px depending on row type). Project identity rings (6px, `MiniProjectsMenu`) center on this column too.
-- **Text column (x=37):** chat-row titles, spawned-agent titles, packet titles, top-nav text, **project names** (joined 2026-06-11 — they sat at 31 since the projects menu landed). Different row types compute different paddingLeft values because their leading icon column widths differ — but they all land at the same text X (37 px). Tweaking any leading geometry means re-doing the paddingLeft math.
-- **Repo child rows (x=44):** sub-repo rows under an expanded project indent one clear step (+7) in from the parent text column (2026-06-11).
+- **Text column (x=37):** chat-row titles, spawned-agent titles, packet titles, top-nav text, and project names. Different row types compute different paddingLeft values because their leading icon column widths differ, but they all land at the same text X (37 px). Tweaking any leading geometry means re-doing the paddingLeft math.
+- **Repo child rows (x=44):** sub-repo rows under an expanded project indent one clear step (+7) in from the parent text column.
 - **Section labels (x=29):** RepoGroupLabel / GroupHeader headers sit between the icon and text columns — `paddingLeft 12 + 11 px chevron-or-folder slot + 6 px gap = 29`. Less indent than rows, more indent than nothing — the headers visually "own" the rows below.
 
 ---
 
-## Right-rail alignment (locked 2026-05-26 · re-snapped 2026-06-11)
+## Right-rail alignment
 
-Operator demands **pixel-perfect alignment** on the right edge of the agent panel. Anything that isn't on the column reads as misaligned to him — there is no "close enough."
+The right edge of the agent panel requires **pixel-perfect optical alignment**. A one-pixel step is visible in a dense rail, so approximate alignment is not sufficient.
 
-**2026-06-11 re-snap:** the top-nav trailing glyphs changed from chevrons to disclosure glyphs (Lucide `Menu` 13px on New session, Iconoir `MenuScale` 12px on Projects) and had drifted 1–2px left of the optical column. Re-measured from rendered pixels at 4×, corrected with per-glyph `translateX` in `MiniAgentPanelAction` (`menu` → 9px, `filter` → 8px). The absolute X values below are from the spec-era panel; the panel is now a floating card and resizable, so the LOCK is the *relationships*, verified as deltas against the ring.
+The top-nav trailing disclosure glyphs use Lucide `Menu` at 13px for New session and Iconoir `MenuScale` at 12px for Projects. Their differing ink bounds require per-glyph `translateX` corrections in `MiniAgentPanelAction` (`menu` → 9px, `filter` → 8px). Because the panel is a floating, resizable card, the locked values are the *relationships*, verified as deltas against the ring, rather than absolute window coordinates.
 
 The right rail has three locked vertical columns (relationships, ring = reference):
 
@@ -98,7 +98,7 @@ The right rail has three locked vertical columns (relationships, ring = referenc
 
 ### Why the optical column beats the math
 
-Each glyph's visible ink ends a different distance inside its SVG bounding box (FilterList ~1.5px, Lucide Menu ~1px, MenuScale ~0.5px). Aligning bounding boxes makes the INK read misaligned. Land the ink, not the box. Operator's eye picks up a 1px step at one glance — don't trust the math, screenshot at 4× and measure the rendered pixel.
+Each glyph's visible ink ends a different distance inside its SVG bounding box (FilterList ~1.5px, Lucide Menu ~1px, MenuScale ~0.5px). Aligning bounding boxes makes the ink read misaligned. Land the ink, not the box: screenshot at 4× and measure the rendered pixel.
 
 ### How to verify after any change
 
@@ -168,7 +168,7 @@ These are theme tokens — they swap by `ThemeProvider`. The values below are re
 | `--t-panel` | translucent white | List container background |
 | `--t-panel-hover` | slight tint | Extra row hover variant |
 
-**Hard rule from `CLAUDE.md` reinforced here:** never hard-code `rgba(255, 255, 255, 0.xx)` on a surface that needs to theme — it collapses to a light-gray blob in midnight. Always reach for a `var(--t-*)` token.
+**Hard rule from `AGENTS.md` reinforced here:** never hard-code `rgba(255, 255, 255, 0.xx)` on a surface that needs to theme — it collapses to a light-gray blob in midnight. Always reach for a `var(--t-*)` token.
 
 ---
 
@@ -182,14 +182,14 @@ background: transparent;  /* default */
 background: var(--t-hover);  /* subtle gray bg */
 ```
 
-No border accents, no scale transforms, no shadow growth on hover. The background swap is the only feedback. The Claude reference proved this is enough.
+No border accents, no scale transforms, no shadow growth on hover. The background swap is the only feedback; it is sufficient at this row density.
 
 ---
 
 ## Reference: typography lab page
 
 The live tuner at [`/preview/typography`](src/app/preview/typography/page.tsx) has:
-- 4 presets (Current / Thinner / Claude-like / Cursor-dense)
+- 4 presets (Current / Thinner / Reference / Dense)
 - Sliders for every property in the locked spec
 - Live render of "Today / May 22 / May 20 / Older" sections with 9 sample rows
 - Computed CSS box at the bottom that updates with the current values
@@ -199,18 +199,18 @@ The live tuner at [`/preview/typography`](src/app/preview/typography/page.tsx) h
 - Adjusting line-height for density vs breathing room (current value 1.25 is the dialed-in target)
 - Comparing a future redesign against the locked baseline
 
-**Don't ship from this page** — values land in component files only after the operator visually confirms.
+**Don't ship from this page** — values land in component files only after verification on the rendered application surface.
 
 ---
 
-## Icon vocabulary (locked 2026-05-25)
+## Icon vocabulary
 
-The visual style for chrome icons is decided. Two icon libraries are wired into the app via raw-SVG shims (the Tauri webview can't render `lucide-react` or `@tabler/icons-react` as React components — same bug for both — so each shim imports the icon's `__iconNode` data array and renders inline `<svg>` via `createElement`).
+The visual style for chrome icons is locked. Two icon libraries are wired into the app via raw-SVG shims (the Tauri webview can't render `lucide-react` or `@tabler/icons-react` as React components — same bug for both — so each shim imports the icon's `__iconNode` data array and renders inline `<svg>` via `createElement`).
 
 | Library | Shim file | Use for |
 |---|---|---|
 | **Lucide** (~1,500 icons) | `src/components/desktop/lucide-shims.tsx` | Default chrome icon set. Most app surfaces (nav, toolbars, buttons, menus). |
-| **Tabler** (~5,400 icons) | `src/components/desktop/tabler-shims.tsx` | Operator-locked picks where Tabler's glyph design wins. Currently: **Terminal**, **GitBranch**. |
+| **Tabler** (~5,400 icons) | `src/components/desktop/tabler-shims.tsx` | Locked picks where Tabler's glyph design wins. Currently: **Terminal**, **GitBranch**. |
 | **Iconoir** (~1,600 icons) | not yet shimmed | Sidekick for spots where Lucide reads too neutral and Tabler too geometric. Wire on demand. |
 | **Isocons** (1,000+ isometric, CC BY 4.0) | not yet integrated | Decorative / hero / empty-state illustrations only. Never chrome. Attribution required when used. |
 
@@ -272,11 +272,11 @@ Reusable interaction techniques every agent should reach for when building a UI 
 
 3. **Fade scrollable list EDGES, don't hard-cut.** Content dissolves at top/bottom via `mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)` (+ the `-webkit-` twin, `mask-size: 100% 100%`, `mask-repeat: no-repeat`). Only on lists that actually overflow. See **"Mask gradient (scroll fade)"** above for the pinned-header 16/32 variant. Canonical: inline `scrollFadeY` in `src/app/preview/canvas-glass/ui.ts`; the dashboard's `cortex-scroll-fade-y` class (`globals.css`) adds a scroll-timeline dynamic variant that fades only the edge you're scrolled away from.
 
-4. **Reduce backdrop blur while scrolling fast.** Heavy `backdrop-filter` blur during motion kills perceived smoothness + spikes GPU (it re-samples every frame). Scale it via a var multiplier — `blur(calc(var(--frost) * var(--frost-scale, 1)))` — set `--frost-scale ≈ 0.4` on scroll → `1` on settle (debounce ~140ms), **per-surface** (find the `[data-glass-surface]` ancestor), never global, never hardcode the blur value (keep the operator's slider as truth). Invisible at rest — pair with tip 3 for the visible fade. Canonical: `useScrollBlurFade` in `src/app/preview/canvas-glass/use-scroll-blur-fade.ts`.
+4. **Reduce backdrop blur while scrolling fast.** Heavy `backdrop-filter` blur during motion kills perceived smoothness + spikes GPU (it re-samples every frame). Scale it via a var multiplier — `blur(calc(var(--frost) * var(--frost-scale, 1)))` — set `--frost-scale ≈ 0.4` on scroll → `1` on settle (debounce ~140ms), **per-surface** (find the `[data-glass-surface]` ancestor), never global, never hardcode the blur value (keep the theme control as truth). Invisible at rest — pair with tip 3 for the visible fade. Canonical: `useScrollBlurFade` in `src/app/preview/canvas-glass/use-scroll-blur-fade.ts`.
 
 ---
 
-## Canvas card chrome (locked 2026-06-20)
+## Canvas card chrome
 
 Every floating card on the glass canvas (`/preview/canvas-glass`) — chat, browser, terminal, diff, file, o8.md/spec, brain, agent, markdown, image, video — shares **one** chrome vocabulary. Before this lock each card hand-rolled its own header sizes (titles 8–9.5px, ✕ 7.7px, icons 11–16px) and none matched. Worse: cards live inside the canvas `zoom` layer (the "100%" step is `--cnv-zoom: 0.7`), so an authored `11.5px` title paints at **~8px** on screen — that's why canvas chrome read tiny and "jumbled" even when the numbers looked reasonable.
 
@@ -296,15 +296,15 @@ Every floating card on the glass canvas (`/preview/canvas-glass`) — chat, brow
 - **Two render paths, both land at the same on-screen size.** In-layer cards scale via CSS `zoom`; the o8.md/spec card renders *out* of the zoom layer (`screenMap`) and scales its chrome by `* s` (s = zoom) instead — so **gate `chromeFloorScale` off when `screenMap` is set** (it reads `--cnv-zoom` and would double-scale). Both paths render the ✕ at an identical box (verified: 15.4px at 100%).
 - **The dock is the 1:1 reference, not a canvas card.** `chrome.tsx` `DockGlyphButton`/`SpawnGlyphButton` and `dock.tsx` render at device 1:1 (outside the zoom layer) — their sizes are the on-screen target the tokens were tuned to match. Don't pull them into the zoom-layer token system. `DockTab` is shared by both the dock (1:1) and the in-layer chat card; it takes an optional `size` (default 14 = dock truth) so the chat card can opt up to `CHROME.titleSize` without touching the dock.
 - **Header layout: title/tabs LEFT, actions RIGHT, one row.** The chat card's two tabs (orchestrator title + Cortex) sit left, the title tab truncating via flex `minWidth: 0` + ellipsis (`DockTab truncate`) as the card narrows; the dock+✕ cluster sits **inline** at the right end behind a reserved flex spacer — never absolute in the corner. The old absolute-corner cluster collided with the right tab AND the NE resize zone, and the long title clipped to a bare "...". Shell cards keep a single **centered** title (they carry no second tab) with the cluster top-right; their titles are short enough not to collide.
-- **Zoom ladder is 130 / 115 / 100 / 85 / 70** (`--cnv-zoom` 0.91 / 0.805 / 0.7 / 0.595 / 0.49). "100%" = 0.7 is the home/fit anchor: the default state and the loupe **Fit** both resolve the `label === 100` step, **not** `zoomSteps[0]` (which is 130% after the zoom-in steps were prepended). 115/130 let the operator zoom IN — cards + text get bigger, not just smaller. The loupe −/+ step the array monotonically (index 0 = most-in); zoom-out bottoms at 70%.
+- **Zoom ladder is 130 / 115 / 100 / 85 / 70** (`--cnv-zoom` 0.91 / 0.805 / 0.7 / 0.595 / 0.49). "100%" = 0.7 is the home/fit anchor: the default state and the loupe **Fit** both resolve the `label === 100` step, **not** `zoomSteps[0]` (which is 130% after the zoom-in steps were prepended). 115/130 allow zooming in so cards and text get bigger, not just smaller. The loupe −/+ step the array monotonically (index 0 = most-in); zoom-out bottoms at 70%.
 
-Shipped in #1259 (commits `0dfc1ab1` tokens+shell+chat, `d464bd53` browser, `3213cd7c` media, `af6a00c9` this spec, `866e4ced` header redesign, `c50d72b7` zoom-IN). Verify after any change in the running app — measure `getBoundingClientRect().height` of each card's ✕ at `--cnv-zoom` 0.49, 0.7, and 0.91; it must match across kinds at each level (15.4px at 100%, 20px at 130%).
+Verify after any change in the running app: measure `getBoundingClientRect().height` of each card's ✕ at `--cnv-zoom` 0.49, 0.7, and 0.91. It must match across kinds at each level (15.4px at 100%, 20px at 130%).
 
 ---
 
-## Open items for next-level theming
+## Design-system extension checklist
 
-This file captures what got *locked*. The roadmap below is what's *open* — the work that comes next when theme v2 starts from scratch.
+The locked foundation leaves several useful extensions. Treat these as compatibility checks when evolving the design system:
 
 1. **Tab-header chat metadata** — when a chat opens in the workspace, the tab header should show chat title + active model + runtime. The sidebar lost its icons because that info should land here instead. Audit existing tab-header surface; either extend it or build new.
 2. **Composer-footer model display** — bottom of the composer should always show the current model name (runtime · model · thinking effort). May partially exist via the existing mode chip; verify before adding.
@@ -315,42 +315,42 @@ This file captures what got *locked*. The roadmap below is what's *open* — the
 
 ---
 
-## Sidebar float — LOCKED 2026-07-17 (floating inset card, solid surfaces)
+## Sidebar float — LOCKED (floating inset card, solid surfaces)
 
-Locked 2026-07-17 (supersedes the 2026-07-16 flush dock). In **solid** surfaces the left sidebar is a floating inset card. Glass surfaces keep the transparent-chrome treatment (chrome paints nothing) — this section is solid-only.
+In **solid** surfaces the left sidebar is a floating inset card. Glass surfaces keep the transparent-chrome treatment (chrome paints nothing) — this section is solid-only.
 
 - **Float air**: 4px window-backdrop gap on **left, top, and bottom**; 5px on the right (workspace side). The card never touches a window edge.
 - **Corners**: 14px radius on **all four** corners.
 - **Hairline**: `1px solid var(--t-divider-subtle)` on the card. Load-bearing — card tone ≈ backdrop tone, so the hairline is what makes the float read. Keep the contrast **very faint** — do NOT darken the backdrop or whiten the card to chase stronger separation.
 - **One continuous tone**: the header strip (traffic lights + toggle) renders INSIDE the card with `background: transparent` and **no bottom hairline** (`LeftHeaderStrip inCard` prop). No chrome band, no seam — the card is one surface from lights to account row.
-- **No drop shadow** (2026-07-13 ruling still applies — elevation on true overlays only).
+- **No drop shadow** — elevation is reserved for true overlays.
 - Implementation: `dashboard/page.tsx` sidebar column (conditional padding on `effectiveGlassSurface`), `shell/LeftHeaderStrip.tsx` (`inCard`), `shell/ColumnHeaderStrip.tsx` (style spread wins).
 
 ---
 
-## ALL GLASS — LOCKED 2026-07-17 (one-material mode, locked by eye)
+## ALL GLASS — LOCKED (one-material mode)
 
 All Glass is a MODE, not a playground: one recipe, zero user adjusters, permanent (Apple liquid-glass reference). Implementation: `src/lib/theme/context.tsx` WORKSPACE_GLASS_OVERRIDES + the workspace-glass effect.
 
 - **One material**: every in-flow surface transparent (workspace, panels, chrome, canvas, terminal, timeline). Native vibrancy IS the background; text sits directly on glass.
-- **Material**: `FullScreenUI` (display-capture bake-off winner — melts the desktop into structureless color; Sheet was flat, per-OS chrome material was grey murk). Asserted on mode entry; per-OS chrome material restored on exit.
-- **THE veil** (the one painted thing, window-wide): `linear-gradient(180deg, rgba(10,12,18,0.78) 0%, rgba(10,12,18,0.44) 55%, rgba(10,12,18,0.06) 100%)` — dark where ink lives, opens to bloom at the bottom. **Paints on `body`** — every in-flow div is vibrancy-passthrough (background force-erased `!important`), body is the only surface between the passthrough tree and the material. Red-flash-proven.
+- **Material**: `FullScreenUI`, which reduces the desktop to structureless color; Sheet reads flat and the per-OS chrome material reads gray. Assert it on mode entry and restore the per-OS chrome material on exit.
+- **Window veil** (the one painted thing, window-wide): `linear-gradient(180deg, rgba(10,12,18,0.78) 0%, rgba(10,12,18,0.44) 55%, rgba(10,12,18,0.06) 100%)` — dark where ink lives, opens to bloom at the bottom. **Paints on `body`** — every in-flow div is vibrancy-passthrough (background force-erased `!important`), so body must remain the only surface between the passthrough tree and the material.
 - **Faint white breaths** are the only fills: inputs/search/kbd 6%, secondary buttons 7%, glass-elevated 5%, hover/card stay at their 4–5% palette values.
-- **Ink is WHITE on the glass** (locked 2026-07-17 — composer text is white in this mode): `--t-chat-surface-text` #fff, `-secondary` white 78%, `-muted` white 62%, `--t-text-muted` white 66%, `--t-text-faint` white 50%. The dark palette's slate inks (#5f6b7a / #8b95a3) read muddy on vibrancy — never let them leak into this mode.
+- **Ink is WHITE on the glass**, including composer text: `--t-chat-surface-text` #fff, `-secondary` white 78%, `-muted` white 62%, `--t-text-muted` white 66%, `--t-text-faint` white 50%. The dark palette's slate inks (#5f6b7a / #8b95a3) read muddy on vibrancy — never let them leak into this mode.
 - **Stacked overlays keep dark frost** (`--t-panel-solid` untouched): popovers/menus/drawers sit over app content and CSS backdrop-blur is dead in Tauri — transparent overlays would be text-on-text. This is the deliberate divergence from Apple (their overlays are separate OS windows with real blur).
-- **Exit sweep**: overrides apply with inline-`important` (a globals.css `!important` kills the gradient otherwise) and are force-removed BEFORE the target palette repaints on exit — the residue class that broke every other mode on 07-17 must never return.
-- **Dev-loop law**: theme-contract edits need a hard reload (HMR does not re-run the theme effect), and never judge glass through window captures (they kill live backdrop sampling — display captures only).
+- **Exit sweep**: overrides apply with inline-`important` (a globals.css `!important` kills the gradient otherwise) and are force-removed BEFORE the target palette repaints on exit. No mode-specific override may survive the transition.
+- **Verification**: theme-contract edits need a hard reload (HMR does not re-run the theme effect), and glass must be judged through display captures because window captures disable live backdrop sampling.
 
-## Composer clusters + "+" switcher — LOCKED 2026-07-17
+## Composer clusters + "+" switcher — LOCKED
 
 - **Left cluster = intent**: `+` (attach & mode switcher) · mode chip · mic. **Right cluster = runtime**: context meter · model · thinking · send. Nothing crosses sides.
-- **Modes** (the + menu's top section): Solo / Multitask / Mixture of Agents — locked semantics: Solo = the orchestrator dispatches NOTHING (works with its own tools); Multitask = dispatches parallel worker packets; MoA = plans with both frontier models (flips the Collide backend, synced both ways with any other MoA control) then dispatches. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
+- **Modes** (the + menu's top section): Solo / Multitask / Mixture of Agents — locked semantics: Solo = the orchestrator dispatches nothing and works with its own tools; Multitask = dispatches parallel worker packets; MoA = coordinates multiple independent planning passes before dispatch. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
 - **Chip**: always visible beside `+`; Solo renders faint (default stays quiet), active modes render accent; click reopens the switcher; title = mode description.
 - **Placeholder teaches the mode** — rewritten per mode, no extra chrome.
 - **The model picker is models + thinking ONLY** — its Mode section is deleted; never reintroduce intent controls there.
 - **Popover recipe** (the locked composer-menu style): 240px drawer, flat single-line rows 26px (radius 7, 12.5px label, check right), ONE faint caption line (fixed height, hover-follows) instead of per-row sublabels, flat rows for actions — never bordered input-bubbles.
 
-## Free theme trio — LOCKED 2026-07-17 (ships with free/OSS)
+## Free theme trio — LOCKED (ships with free/OSS)
 
 Light / Dark / Glass mean the SAME thing on both surfaces (IDE + Canvas).
 
@@ -360,8 +360,8 @@ Light / Dark / Glass mean the SAME thing on both surfaces (IDE + Canvas).
 
 ---
 
-## Why this file exists
+## Using this specification
 
-Locked starting 2026-05-25, after the chat-row typography pass, to hold the values theme v2 must respect.
+This document holds the values that future theme work must respect.
 
-This is the seed. When theme v2 begins, the rule is: **respect every locked value above, then layer new tokens around them.** Don't re-dial without the operator visually confirming.
+Respect every locked value above, then layer new tokens around them. Re-dial only after validating the proposed change in the specimen pages and on the rendered application surface.

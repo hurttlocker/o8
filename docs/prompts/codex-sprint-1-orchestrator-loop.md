@@ -1,7 +1,7 @@
 # Codex Sprint 1: Close the Orchestrator Loop
 
 **Model**: GPT-5.4 xhigh reasoning
-**Repo**: `/Users/marquisehurtt/cortex-ide`
+**Repo**: `~/o8`
 **Branch**: `main` (all work on main, no feature branches)
 
 ---

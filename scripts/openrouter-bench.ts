@@ -17,7 +17,7 @@ import { OPENROUTER_BENCH_SYSTEM_PROMPT_V1 } from '../src/lib/prompts/v1/cortex-
 // 1-fact lookup — mirrors a real Q&A factual_accuracy case (which directive
 // owns the 800-line ceiling for cortex-ide?).
 const ONE_FACT_USER = `Question: What is the file-size ceiling enforced for the cortex-ide repo?
-Repo: /Users/marquisehurtt/cortex-ide
+Repo: /workspace/o8
 
 Available rows:
 [
@@ -43,7 +43,7 @@ Available rows:
 
 // 5-fact spec — multi-fact enumeration (Class A worst case for chatty models).
 const FIVE_FACT_USER = `Question: What are the latency-budget rules in the o8 performance directive — list every limit.
-Repo: /Users/marquisehurtt/cortex-ide
+Repo: /workspace/o8
 
 Available rows:
 [
