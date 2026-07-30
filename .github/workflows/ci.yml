@@ -15,6 +15,9 @@ on:
     - cron: '17 9 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -84,6 +87,10 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - name: Review dependency changes
@@ -98,7 +105,7 @@ jobs:
         run: npm audit --audit-level=high
         continue-on-error: true
       - name: Audit Rust dependencies
-        uses: rustsec/audit-check@v2.0.0
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
