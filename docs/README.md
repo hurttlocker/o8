@@ -57,3 +57,5 @@ For maintainers who build, verify, release, recover, or harden o8.
 | [Crash survival](operations/daemon-crash-survival.md) | How worker processes and transcripts recover after app or server failure. |
 | [Project hardening](operations/project-hardening.md) | The multi-repo project contract, retrieval scope, locks, and expected invariants. |
 | [Substrate evaluation gate](operations/substrate-eval-gate.md) | The thresholds and sustainment checks for memory and retrieval quality. |
+
+Questions or problems? [Open an issue](https://github.com/hurttlocker/o8/issues) — the bug template asks for the details that make reports actionable.
