@@ -15,6 +15,10 @@ coverage/
 *.log
 *.tsbuildinfo
 *.png
+# ...but launch/brand assets are committed on purpose (README hero, icons)
+!assets/**/*.png
+!docs/**/*.png
+!.github/**/*.png
 artifacts/research/
 .playwright-mcp/
 
