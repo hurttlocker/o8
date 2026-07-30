@@ -3,10 +3,12 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { FlipFluid } from './flip-fluid';
 
-// 1:1 recreation of the ReactBits "Liquid ASCII" effect — a FLIP/PIC fluid
-// (see ./flip-fluid.ts) rendered to a grid of ASCII glyphs whose weight tracks
-// local fluid density. The cursor is a moving obstacle; when idle, gentle waves
-// keep the surface alive. Reusable as a background or loading screen.
+// Independent FLIP/PIC fluid implementation based on Matthias Müller's public
+// "How to write a FLIP water simulator" tutorial (Ten Minute Physics):
+// https://matthiasmueller.info/tenMinutePhysics/
+// The simulation is rendered as ASCII glyphs whose weight tracks local fluid
+// density. The cursor is a moving obstacle; when idle, gentle waves keep the
+// surface alive. Reusable as a background or loading screen.
 
 export interface LiquidAsciiProps {
   width?: string | number;

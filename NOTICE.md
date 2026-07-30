@@ -4,6 +4,21 @@ o8 includes third-party packages and adaptations whose authors retain their
 copyrights. Those works remain subject to their own licenses; the o8 MIT
 license does not replace or narrow those terms.
 
+## Algorithms and techniques
+
+### FLIP/PIC fluid simulation
+
+- Author: Matthias Müller
+- Tutorial: "How to write a FLIP water simulator" (Ten Minute Physics)
+- Source: <https://matthiasmueller.info/tenMinutePhysics/>
+- Use in o8: the independently implemented solver in
+  `src/app/preview/effects/flip-fluid.ts`, rendered as ASCII glyphs by
+  `src/app/preview/effects/LiquidAscii.tsx`
+
+The credit is for Müller's publicly published FLIP/PIC algorithm and
+educational explanation. The o8 implementation was written independently; no
+React Bits source code or implementation was used.
+
 ## Lisse Core and Lisse React
 
 - Packages and versions: `@lisse/core` 0.4.0 and `@lisse/react` 0.4.0
