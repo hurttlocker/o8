@@ -1005,9 +1005,14 @@ describe('requireApproval merge governance through the real command path', () =>
 
     expect(result).toMatchObject({
       ok: false,
-      note: 'Merge refused: No durable approved AI review exists.',
+      note: 'Merge refused: No durable approved AI review exists. Operator approval required.',
     });
+    expect(result.approvalId).toBeTruthy();
     expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
-    expect(listApprovalsForContext({ laneId: lane.id })).toHaveLength(0);
+    expect(listApprovalsForContext({ laneId: lane.id })).toContainEqual(expect.objectContaining({
+      id: result.approvalId,
+      status: 'pending',
+      policyRuleId: 'lane-merge',
+    }));
   }, 30_000);
 });

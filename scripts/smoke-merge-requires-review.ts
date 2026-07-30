@@ -427,7 +427,9 @@ async function main(): Promise<void> {
   console.log('smoke-merge-requires-review passed: 8/8 cases');
 }
 
-void main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+void main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });

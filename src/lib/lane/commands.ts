@@ -678,11 +678,18 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // authorize an unreviewed orchestrator/agent merge. The explicit user
       // actor path remains governed by the separate operator-trust contract.
       if (actor !== 'user' && !durableReview.approved) {
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `Merge refused: ${durableReview.reason}`,
-        };
+        return createLaneActionApproval(lane, actor, {
+          verb: 'merge',
+          commitMessage: command.commitMessage,
+          expectedHeadSha: command.expectedHeadSha,
+          reviewSummary: command.reviewSummary,
+          title: 'Review required before merge',
+          description: `This merge has no durable approval for the current worktree HEAD. ${durableReview.reason} Operator approval is required to continue.`,
+          summary: `Review required: ${lane.branch} → ${lane.baseBranch}`,
+          risk: 'high',
+          policyRuleId: 'lane-merge',
+          note: `Merge refused: ${durableReview.reason} Operator approval required.`,
+        });
       }
       let hasApprovedReview = actor === 'user' ? true : durableReview.approved;
       let surfaceReasons: string[] = [];
