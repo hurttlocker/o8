@@ -1,5 +1,5 @@
 /**
- * Config-parity guard (docs/symon-agent-mode.md §"config parity is a hard
+ * Config-parity guard (docs/internals/symon-agent-mode.md §"config parity is a hard
  * requirement"). The desk mint and the Agent-mode mint MUST assemble the session
  * from this one source — this suite locks the assembler so a future edit can't
  * silently diverge the two surfaces, and pins the desk shape byte-for-byte so the

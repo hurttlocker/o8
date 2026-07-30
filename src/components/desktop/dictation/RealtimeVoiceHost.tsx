@@ -318,7 +318,7 @@ export function RealtimeVoiceHost() {
   //     Symon's whole brain into the phone's ephemeral token (config parity);
   //   • __o8SymonAgent.confirms/pendingConfirmations — structured dock gates.
   // We publish here (not from a raw eval) because bare-specifier dynamic imports
-  // don't resolve inside an eval string. See docs/symon-agent-mode.md.
+  // don't resolve inside an eval string. See docs/internals/symon-agent-mode.md.
   useEffect(() => {
     if (!isTauri()) return;
     let alive = true;

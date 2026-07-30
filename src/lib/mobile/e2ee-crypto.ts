@@ -1,7 +1,7 @@
 /**
  * Mobile E2EE — the canonical crypto operations (platform teardown #5).
  *
- * This module is the executable half of `docs/mobile-e2ee.md`. The o8-mobile
+ * This module is the executable half of `docs/internals/mobile-e2ee.md`. The o8-mobile
  * (Expo) client mirrors these EXACT operations with the same `tweetnacl`
  * primitives — so the transcript strings, the key-derivation, and the frame
  * format here are a wire contract, not an implementation detail. Change them in

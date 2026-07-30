@@ -178,7 +178,7 @@ const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
  * EVERYTHING else under /api/* is DENIED by default (see the gate below) — there
  * is no fail-open "ungated family" any more. To expose a new route publicly, add
  * it to ALLOWLIST_READ_ONLY (GET) or, for a self-authenticating external caller,
- * here — never by omission. Full per-family rationale: docs/loopback-api.md.
+ * here — never by omission. Full per-family rationale: docs/internals/loopback-api.md.
  */
 const SELF_AUTH_PREFIXES = ['/api/worker/', '/api/cloud/', '/api/github/webhook'];
 

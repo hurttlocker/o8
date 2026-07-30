@@ -328,7 +328,7 @@ fn copy_dir_recursive(src: &str, dst: &str) -> std::io::Result<()> {
 //
 // Pin: bump `CODEBASE_MEMORY_VERSION` and the matching `CODEBASE_MEMORY_CHECKSUMS`
 // entries to upgrade. SHA-256 values come from the upstream release
-// `checksums.txt` for that tag. See `docs/codebase-memory-build.md`.
+// `checksums.txt` for that tag. See `docs/internals/codebase-memory-build.md`.
 
 // 0.9.0 bump (2026-07-09): upstream DELETED the v0.6.0 release assets — every
 // fresh install's download 404'd forever, and the Settings→MCP readiness gate

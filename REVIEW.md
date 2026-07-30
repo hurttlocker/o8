@@ -70,4 +70,4 @@ Key architectural decisions:
 - Separate desktop and mobile codebases by design
 - SQLite via better-sqlite3 + Drizzle ORM
 
-See `CLAUDE.md` for full project rules and `docs/o8-product-brief.md` for product context.
+See `CLAUDE.md` for full project rules and `docs/user/o8-product-brief.md` for product context.

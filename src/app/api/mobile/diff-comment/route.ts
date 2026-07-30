@@ -2,7 +2,7 @@
  * Create an inline diff comment (platform teardown #9). The phone anchors a note to
  * a file + line of an agent session's diff. Gated like the rest of /api/mobile/*
  * (a paired phone's per-device token or the loopback desktop). Contract:
- * docs/mobile-diff-comments.md.
+ * docs/internals/mobile-diff-comments.md.
  */
 
 export const dynamic = 'force-dynamic';

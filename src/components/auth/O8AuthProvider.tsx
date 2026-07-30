@@ -292,7 +292,7 @@ type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['ini
  *    Clerk instance keeps its session in a cross-site cookie that macOS WKWebView
  *    won't return to the 127.0.0.1 webview origin — so the standard cookie flow
  *    flashes the session in then drops it. (Root-fixed 2026-07-05; see
- *    docs/onboarding-auth-unification.md.)
+ *    the desktop sign-in flow.)
  *  - Web / mobile → standard cookie mode (same-origin with the real o8.run domain).
  * Until the native engine resolves, the app boots account-less (DISABLED_STATE),
  * never blocking startup.

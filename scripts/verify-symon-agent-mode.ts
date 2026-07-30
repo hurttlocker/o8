@@ -4,7 +4,7 @@
  *   npx tsx scripts/verify-symon-agent-mode.ts
  *
  * The live o8 app is not reachable from a worktree (the tool relay needs the
- * webview eval bridge), so — exactly as docs/symon-agent-mode.md §Verification
+ * webview eval bridge), so — exactly as docs/internals/symon-agent-mode.md §Verification
  * allows — this spins up the REAL ws-server locally pointed at a STUB tool route
  * and drives the channel a phone would:
  *

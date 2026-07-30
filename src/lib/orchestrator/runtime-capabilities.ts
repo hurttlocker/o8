@@ -1,4 +1,4 @@
-// Capability map for orchestrator runtime adapters. See docs/runtime-adapter-contract.md.
+// Capability map for orchestrator runtime adapters. See docs/internals/runtime-adapter-contract.md.
 import { MODEL_IDS } from '@/lib/models';
 
 export type DeclarativeParserProfile = 'text' | 'openhands-ndjson' | 'qwen-stream-json';

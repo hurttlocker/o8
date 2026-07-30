@@ -12,7 +12,7 @@
  * than silently corrupting o8.md.
  *
  * The metadata-attribute grammar + close-delimiter set are part of the RFM
- * spec (not copyrightable expression); see docs/roughdraft-ingestion-blueprint.md §1.
+ * spec (not copyrightable expression); the vendored grammar lives in rfm.ts.
  */
 
 import { extractRoughdraftReviewIndex } from './rfm';

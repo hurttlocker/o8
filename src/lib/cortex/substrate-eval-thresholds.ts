@@ -1,5 +1,5 @@
 /**
- * Threshold values referenced by `docs/substrate-eval-gate.md`. Surfaced as
+ * Threshold values referenced by `docs/operations/substrate-eval-gate.md`. Surfaced as
  * an importable constant so the UI can display the same numbers, the route
  * can hold the runtime check, and the doc can't drift silently from either.
  *

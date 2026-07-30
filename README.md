@@ -34,7 +34,7 @@ o8's answer:
 | Claude Code · Codex | Gemini CLI · opencode · Cursor CLI · Grok CLI · pi |
 | | Aider · Goose · Kimi Code · OpenHands · Qwen Code |
 
-A first-run picker discovers what's installed and lets you choose your orchestrator + workers. No vendor pin — Codex is a default, not a requirement. Adding a runtime is a small, documented patch ([`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md)) — community adapters welcome.
+A first-run picker discovers what's installed and lets you choose your orchestrator + workers. No vendor pin — Codex is a default, not a requirement. Adding a runtime is a small, documented patch ([`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md)) — community adapters welcome.
 
 ## How a mission runs
 
@@ -105,7 +105,7 @@ o8 is built like every pixel matters, because you stare at a control room all da
 
 ## More
 
-- [`docs/`](./docs/) — product brief, system architecture, runtime adapter contract, API reference, vocabulary.
+- **Documentation:** [`docs/README.md`](./docs/README.md) — user guides, engineering internals, and operating runbooks.
 - [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control plane, headless).
 - [`CLAUDE.md`](./CLAUDE.md) — the canonical agent/contributor brief: architecture, conventions, critical rules.
 

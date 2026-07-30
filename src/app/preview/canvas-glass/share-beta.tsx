@@ -18,7 +18,7 @@
  * (generated + persisted in local SQLite), and Copy persists via POST
  * /api/invites/sent. A static FALLBACK set renders instantly + survives an API
  * hiccup. Cross-machine redemption + the o8.run landing are the central phase
- * (docs/beta-invites.md).
+ * for hosted invite registration when that optional service is configured.
  *
  * Modeled on WelcomeModal (same scrim / spring / two-pane / ✕ / Esc). Inline
  * styles only; the panes use HARD dark/light values (like WelcomeModal) so the

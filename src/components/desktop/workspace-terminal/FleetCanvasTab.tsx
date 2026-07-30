@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * FleetCanvasTab — the fleet-canvas workspace tab (docs/canvas-mode-plan.md).
+ * FleetCanvasTab — the fleet-canvas workspace tab.
  *
  * Live packet-objects as calm glass cards on a solid paper canvas: arrange
  * freely (drag persists per scope via fleet-canvas-store), status reads at a

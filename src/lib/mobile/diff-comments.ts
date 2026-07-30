@@ -7,7 +7,7 @@
  * the unified-diff hunk headers (mobile-side parse); the desktop stores the
  * anchor + text verbatim and exposes them to the review/iterate flow.
  *
- * Anchor contract (matches the mobile side — see docs/mobile-diff-comments.md):
+ * Anchor contract (matches the mobile side — see docs/internals/mobile-diff-comments.md):
  *   { sessionKey, path, lineNumber, side: 'old' | 'new', text }
  */
 

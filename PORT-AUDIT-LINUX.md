@@ -1,6 +1,6 @@
 # Linux Port Structural Audit
 
-Scope: greenfield Linux blockers and structural seams beyond `docs/remote-and-cross-platform.md` and `docs/desktop-app-strategy.md`.
+Scope: greenfield Linux blockers and structural seams in the current o8 implementation.
 
 ## Executive Top 10 Greenfield Findings
 

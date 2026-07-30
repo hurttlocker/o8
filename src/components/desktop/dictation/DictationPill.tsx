@@ -106,7 +106,7 @@ interface DictationPillViewProps {
    * The screen dock window (`/dictation-pill`) is ALWAYS-ON and must paint
    * something at all times, morphing idle → recording → polishing → success →
    * idle. The IN-WINDOW pill does NOT pass this — its idle-hides behavior is
-   * unchanged. See `docs/symon-systemwide-fold.md`.
+   * unchanged.
    */
   persistentIdle?: boolean;
 }

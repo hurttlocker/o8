@@ -15,7 +15,7 @@
 // Symon's persona lives in the shared session-config module so the desk session
 // and the phone-hosted Agent-mode mint (/api/mobile/symon/session) speak with the
 // identical brain. Isomorphic module — safe to import from this browser-only file
-// (it carries no `server-only` poison pill). See docs/symon-agent-mode.md.
+// (it carries no `server-only` poison pill). See docs/internals/symon-agent-mode.md.
 import {
   DEFAULT_INSTRUCTIONS,
   DEFAULT_VOICE,

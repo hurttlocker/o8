@@ -362,9 +362,8 @@ function ensureArtifactsTable(sqlite: Database.Database): void {
 
 /**
  * #beta-referral — the operator's founding beta invites. See schema.ts
- * `betaInvites` for field semantics. Redemption + the public o8.run/i/<code>
- * landing are the central phase (docs/beta-invites.md); this table is the
- * local generation + sent/redeemed ledger.
+ * `betaInvites` for field semantics. This table is the local generation +
+ * sent/redeemed ledger; hosted redemption is optional.
  */
 function ensureBetaInvitesTable(sqlite: Database.Database): void {
   sqlite.exec(`

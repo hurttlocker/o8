@@ -3,8 +3,8 @@ import 'server-only';
 /**
  * Realtime voice (Symon S2S) access resolution — Track B gating (2026-06-19).
  *
- * Encodes o8's "monetize cost, not capability" model (src/lib/entitlement,
- * docs/monetization-and-free-tier-plan.md) for the realtime voice-to-voice
+ * Encodes o8's "monetize cost, not capability" model (src/lib/entitlement)
+ * for the realtime voice-to-voice
  * agent. Realtime is NOT a capability paywall — it resolves to one of three
  * paths:
  *

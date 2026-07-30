@@ -2,7 +2,7 @@
 
 /**
  * NativeBrowserSurface — the placeholder + position-sync layer for the native
- * browser-view child window (docs/native-browser-webview-spec.md, Stage 3).
+ * browser-view child window (docs/internals/native-browser-webview-spec.md, Stage 3).
  *
  * When the operator flag is on, O8BrowserPane renders THIS instead of the iframe
  * for a tab with a URL. It paints a transparent placeholder where the page

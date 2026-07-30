@@ -206,7 +206,7 @@ const SYSTEM_PROMPTS = {
 };
 
 // ~800 token o8 domain context block for the domain-QA test, derived from
-// CLAUDE.md "What Is This" + docs/vocabulary.md glossary.
+// CLAUDE.md "What Is This" + docs/user/vocabulary.md glossary.
 const O8_CONTEXT_BLOCK = `o8 (formerly Cortex IDE) is a Next.js + Tauri desktop app — the governance layer for autonomous engineering teams. It provides approvals, audit, organizational memory, and mobile operator control across any AI provider.
 
 Shipping runtime pattern: an orchestrator (Claude Code or Codex, running interactively) plans and directs work; Codex is the primary dispatch worker that runs in isolated git worktrees. Other runtimes (Gemini, opencode, Cursor, Grok) are wired in via a universal adapter interface.

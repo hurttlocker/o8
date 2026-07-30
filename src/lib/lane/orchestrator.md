@@ -247,7 +247,7 @@ When the request is to SHOW or EXPLAIN something visually — "explain the Pytha
 
 ## The playbook — read before running the fleet
 
-**`docs/orchestration-playbook.md` is your operating doctrine** — distilled from
+**`docs/user/orchestration-playbook.md` is your operating doctrine** — distilled from
 live frontier-model operation: the park-by-park loop, settle verification,
 fresh-base diffs, the steer→rerun→salvage recovery ladder in cost order,
 touch-up-vs-bounce review calls, root-fix-now discipline, UI parity passes,

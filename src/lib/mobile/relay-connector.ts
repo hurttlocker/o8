@@ -32,7 +32,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
  * o8 Relay connector — the Mac-side outbound leg of the public relay contract
- * documented in docs/connect-contract.md.
+ * documented in docs/internals/connect-contract.md.
  *
  * The Mac dials OUT to the relay (no inbound ports). For each relayed phone the
  * connector TERMINATES the Mac-side tunnel — it must, because v1.1 requires it to
@@ -59,7 +59,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
  * gated cross-network conformance path with the real mobile client — it cannot
  * be exercised in-repo. The contract-critical PURE logic
  * (relay-connector-protocol.ts) is unit-tested; the relay half is validated
- * against the public relay wire contract in docs/connect-contract.md.
+ * against the public relay wire contract in docs/internals/connect-contract.md.
  */
 
 const P = '[relay]';

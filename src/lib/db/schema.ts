@@ -539,8 +539,8 @@ export const reviewQueue = sqliteTable('review_queue', {
 
 // ══════════════════════════════════════════════════════════════════
 //  Beta Founding Invites — the operator's set of share-able beta passes
-//  (#beta-referral). Generated + persisted locally; redemption + the public
-//  o8.run/i/<code> landing are the central phase (see docs/beta-invites.md).
+//  (#beta-referral). Generated + persisted locally; hosted redemption is
+//  optional.
 // ══════════════════════════════════════════════════════════════════
 
 export const betaInvites = sqliteTable('beta_invites', {

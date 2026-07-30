@@ -240,7 +240,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   /** URLs that blank out when proxied (auth-gated SPAs) — drive them in the
    *  engine's real Chrome instead, where they render + stay grabbable. */
   const [engineUrls, setEngineUrls] = useState<Set<string>>(() => new Set());
-  /** Native browser-view path (docs/native-browser-webview-spec.md). Operator
+  /** Native browser-view path (docs/internals/native-browser-webview-spec.md). Operator
    *  setting `nativeBrowserView` (default ON, Settings → Operator Defaults);
    *  only in Tauri — the native child window can't exist in the web/dev preview,
    *  where the iframe is the default. When on, the native surface renders ANY url

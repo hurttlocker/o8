@@ -1,6 +1,6 @@
 // Voice Operator — the UI-agnostic intent contract.
 // Shared vocabulary for desktop (and later mobile + CLI/MCP via harness epic #1204).
-// No deps, no I/O — just the types. See docs/voice-operator-vision.md.
+// No deps, no I/O — just the shared voice-intent types.
 
 /**
  * The canonical conductor verb set. Voice speaks these; the headless CLI + MCP

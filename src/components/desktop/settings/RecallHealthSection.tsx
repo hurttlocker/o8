@@ -7,7 +7,7 @@
  * evaluate a swap?" without guessing.
  *
  * The thresholds rendered here are the same ones written in
- * `docs/substrate-eval-gate.md`. The endpoint at
+ * `docs/operations/substrate-eval-gate.md`. The endpoint at
  * `/api/cortex/diagnostics` returns both for parity.
  *
  * Issues-style rows: uppercase mono label on the left, value + helper on
@@ -200,7 +200,7 @@ export function RecallHealthSection() {
       <GroupFootnote>
         Read-only instrumentation. See{' '}
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>
-          docs/substrate-eval-gate.md
+          docs/operations/substrate-eval-gate.md
         </span>{' '}
         for the threshold definitions and decision procedure.
       </GroupFootnote>

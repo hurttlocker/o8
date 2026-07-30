@@ -5,7 +5,7 @@
  * instructions / input-transcription / OpenAI client_secrets body shape) used by
  * BOTH the desk-mic mint (`/api/voice/realtime/session` + `/sdp`) and the
  * phone-hosted Agent-mode mint (`/api/mobile/symon/session`). The contract
- * (docs/symon-agent-mode.md) makes config parity a hard requirement: the phone
+ * (docs/internals/symon-agent-mode.md) makes config parity a hard requirement: the phone
  * session must carry the SAME config the desk session uses, assembled from this
  * module — never a copy-paste snapshot.
  *

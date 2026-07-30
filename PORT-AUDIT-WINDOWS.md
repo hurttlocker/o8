@@ -1,6 +1,6 @@
 # Windows Port Structural Audit
 
-Scope: greenfield structural Windows risks in the o8 main repo beyond the inception baseline in `docs/remote-and-cross-platform.md` and `docs/desktop-app-strategy.md`. Static audit only.
+Scope: greenfield structural Windows risks in the current o8 implementation. Static audit only.
 
 ## Executive Top 10 Greenfield Findings
 
