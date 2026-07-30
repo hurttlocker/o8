@@ -25,6 +25,7 @@ export const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 export const REALTIME_FLAGSHIP_MODEL = 'gpt-realtime-2.1';
 export type PhoneCodeModelVariant = 'mini' | 'flagship';
 export type PhoneCodeModelExperiment = PhoneCodeModelVariant | 'ab';
+export type PhoneRealtimeExperience = 'repository-catch-up';
 
 function stableBucket(value: string): number {
   let hash = 2166136261;
@@ -35,13 +36,17 @@ function stableBucket(value: string): number {
   return hash >>> 0;
 }
 
-/** Life is pinned to mini; Code can opt into a server-owned flagship experiment. */
+/** Ordinary Life uses mini; catch-up uses flagship; Code can run an experiment. */
 export function selectPhoneRealtimeModel(input: {
   workspaceMode: 'o8' | 'code';
   experiment?: string | null;
   bucketKey: string;
   operatorOverride?: string | null;
+  experience?: PhoneRealtimeExperience | null;
 }): { model: string; variant: PhoneCodeModelVariant } {
+  if (input.experience === 'repository-catch-up') {
+    return { model: REALTIME_FLAGSHIP_MODEL, variant: 'flagship' };
+  }
   if (input.workspaceMode !== 'code') {
     return { model: REALTIME_MODEL, variant: 'mini' };
   }

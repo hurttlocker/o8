@@ -29,9 +29,10 @@ The phone is a **dumb pipe** for tools: it never executes anything.
 
 Mints an ephemeral OpenAI Realtime client token carrying the shared voice,
 persona, and live Mac tool schemas used by the desk-mic session. The workspace
-then selects both the phone catalog and model: Life and legacy `{}` receive the
-complete live bridge catalog on mini, while Code receives the explicit bounded
-pack below and can participate in the server-owned mini/flagship experiment.
+then selects both the phone catalog and model: ordinary Life and legacy `{}`
+receive the complete live bridge catalog on mini, the repository catch-up launch
+uses flagship, and Code receives the explicit bounded pack below and can
+participate in the server-owned mini/flagship experiment.
 Desktop mints remain unchanged. All schemas still come from the Rust-supplied
 live catalog that reaches the webview; the server filters those schemas by name
 rather than maintaining copy-pasted tool definitions.
@@ -40,6 +41,7 @@ Request body (all fields optional; legacy `{}` remains valid):
 ```json
 {
   "workspaceMode": "code",
+  "launchKind": "repository-catch-up",
   "currentRoute": "/symon",
   "sourceRoute": "/chat",
   "repoPath": "/absolute/repository/path",
@@ -57,6 +59,10 @@ Request body (all fields optional; legacy `{}` remains valid):
   "activeSurface": "symon"
 }
 ```
+
+`launchKind` accepts only `"repository-catch-up"`. It is a server-owned routing
+discriminator for the Home briefing, not model evidence; the phone sends the
+observed Git payload separately after WebRTC is live.
 
 This is bounded workspace context, not a second persona or a free-form prompt. The
 server accepts only the `"o8"` and `"code"` workspace modes; route-shaped
@@ -139,6 +145,7 @@ Success `200`:
     "expiresAt": 1783490000000,
     "model": "gpt-realtime-2.1-mini",
     "modelVariant": "mini",
+    "billingSource": "chatgpt-subscription",
     "voice": "<same voice>",
     "baseUrl": "https://api.openai.com/v1/realtime",
     "scopeVersion": 1
@@ -160,7 +167,16 @@ issue time, and scope version. The phone refuses to open WebRTC unless a Code
 mint returns version 1 and the exact requested path. Repo changes therefore
 tear down and remint the session instead of editing instructions in place.
 
-Life is always `gpt-realtime-2.1-mini`. Code reads
+The mint first reads the standard Codex ChatGPT-OAuth credential and uses its
+access token to request the short-lived Realtime client secret. This path is
+reported as `billingSource:"chatgpt-subscription"` and does not resolve or send a
+Platform API key. Ordinary sessions retain the existing BYOK fallback, reported
+as `billingSource:"openai-api-key"`, for users without ChatGPT OAuth. Repository
+catch-up fails closed when OAuth is unavailable so it can never spend Platform
+credits.
+
+Ordinary Life uses `gpt-realtime-2.1-mini`; repository catch-up uses
+`gpt-realtime-2.1`. Code reads
 `O8_SYMON_CODE_REALTIME_EXPERIMENT=mini|flagship|ab`; `ab` assigns a stable
 subject-and-repo bucket. An authenticated operator-only test may override one
 Code mint with `x-o8-symon-code-model: mini|flagship`. The flagship is
@@ -175,6 +191,7 @@ Errors (typed, structured, never thrown):
 | 401 | `unauthorized` | missing/bad Bearer (middleware) |
 | 403 | `locked` | entitlement does not include S2S (same rule as the desk mint) |
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
+| 501 | `subscription_unavailable` | repository catch-up requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
 | 502 | `mint_failed` | upstream OpenAI session-mint failure (body includes `detail`) |
 | 503 | `desktop_unavailable` | webview/eval bridge unreachable, or the live catalog is missing a required Code tool |
 

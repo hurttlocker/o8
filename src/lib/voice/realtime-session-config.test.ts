@@ -166,6 +166,17 @@ describe('realtime-session-config — shared assembler', () => {
     })).toEqual({ model: REALTIME_MODEL, variant: 'mini' });
   });
 
+  it('uses flagship for the grounded repository catch-up experience', () => {
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'o8',
+      experience: 'repository-catch-up',
+      bucketKey: 'device-1',
+    })).toEqual({
+      model: REALTIME_FLAGSHIP_MODEL,
+      variant: 'flagship',
+    });
+  });
+
   it('supports explicit Code variants and a stable A/B bucket', () => {
     expect(selectPhoneRealtimeModel({
       workspaceMode: 'code',

@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
   resolveRequestPrincipal: vi.fn(),
   resolveDeviceByToken: vi.fn(),
+  resolveChatGPTRealtimeCredential: vi.fn(),
   resolveOpenAIKey: vi.fn(),
   resolveRealtimeAccess: vi.fn(),
   findRepoByLocalPath: vi.fn(),
@@ -28,6 +29,9 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
   },
 }));
 vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({ resolveOpenAIKey: h.resolveOpenAIKey }));
+vi.mock('@/lib/voice/chatgpt-realtime-credential', () => ({
+  resolveChatGPTRealtimeCredential: h.resolveChatGPTRealtimeCredential,
+}));
 vi.mock('@/lib/voice/realtime-access', () => ({ resolveRealtimeAccess: h.resolveRealtimeAccess }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
 vi.mock('@/lib/mobile/device-registry', () => ({ resolveDeviceByToken: h.resolveDeviceByToken }));
@@ -81,12 +85,14 @@ beforeEach(() => {
   h.evalJs.mockReset();
   h.resolveRequestPrincipal.mockReset();
   h.resolveDeviceByToken.mockReset();
+  h.resolveChatGPTRealtimeCredential.mockReset();
   h.resolveOpenAIKey.mockReset();
   h.resolveRealtimeAccess.mockReset();
   h.findRepoByLocalPath.mockReset();
   h.persistSymonScopeGrant.mockReset();
   delete (globalThis as { __o8BrowserAgentClient?: unknown }).__o8BrowserAgentClient;
   h.resolveRequestPrincipal.mockReturnValue('operator');
+  h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
   h.resolveOpenAIKey.mockResolvedValue('sk-test-key');
   h.resolveRealtimeAccess.mockResolvedValue({ mode: 'byok', available: true, reason: 'byok' });
   h.resolveDeviceByToken.mockReturnValue(null);
@@ -118,6 +124,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(json.session.sessionId).toMatch(/^sym-/);
     expect(json.session.clientSecret).toBe('ek_test_secret');
     expect(json.session.model).toBe('gpt-realtime-2.1-mini');
+    expect(json.session.billingSource).toBe('openai-api-key');
     expect(json.session.voice).toBe('marin');
     expect(json.session.baseUrl).toBe('https://api.openai.com/v1/realtime');
     expect(json.session.expiresAt).toBe(1_783_490_000 * 1000); // seconds → ms
@@ -156,6 +163,76 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.tool_choice).toBe('auto');
     expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
     expect(sentBody.session.audio.output.voice).toBe('marin');
+  });
+
+  it('200: prefers ChatGPT subscription OAuth and never resolves a metered API key', async () => {
+    h.resolveChatGPTRealtimeCredential.mockResolvedValue({
+      accessToken: 'oauth-subscription-token',
+      accountId: 'acct-founder',
+      expiresAt: Date.now() + 60_000,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_subscription', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.billingSource).toBe('chatgpt-subscription');
+    expect(json.session.model).toBe('gpt-realtime-2.1-mini');
+    expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      Authorization: 'Bearer oauth-subscription-token',
+    });
+  });
+
+  it('200: repository catch-up uses subscription OAuth and the flagship voice model', async () => {
+    h.resolveChatGPTRealtimeCredential.mockResolvedValue({
+      accessToken: 'oauth-subscription-token',
+      accountId: 'acct-founder',
+      expiresAt: Date.now() + 60_000,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_subscription', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'o8',
+      launchKind: 'repository-catch-up',
+    })));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.billingSource).toBe('chatgpt-subscription');
+    expect(json.session.model).toBe('gpt-realtime-2.1');
+    expect(json.session.modelVariant).toBe('flagship');
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentBody.session.model).toBe('gpt-realtime-2.1');
+    expect(sentBody.session.instructions).toContain(
+      '"launchKind":"repository-catch-up"',
+    );
+  });
+
+  it('501: repository catch-up never falls through to metered BYOK credits', async () => {
+    h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
+    h.resolveOpenAIKey.mockResolvedValue('sk-must-not-be-used');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'o8',
+      launchKind: 'repository-catch-up',
+    })));
+
+    expect(res.status).toBe(501);
+    expect((await res.json()).error).toBe('subscription_unavailable');
+    expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('200 + preempted:"desk" when a desk-mic session was live (stopped first)', async () => {

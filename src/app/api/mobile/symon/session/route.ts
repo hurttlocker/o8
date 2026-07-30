@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveChatGPTRealtimeCredential } from '@/lib/voice/chatgpt-realtime-credential';
 import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
 import {
   persistSymonScopeGrant,
@@ -67,6 +68,7 @@ const PROMPT_CONTROL_PATTERN =
 
 interface PhoneWorkspaceContext {
   workspaceMode?: 'o8' | 'code';
+  launchKind?: 'repository-catch-up';
   currentRoute?: string;
   sourceRoute?: string;
   repoPath?: string;
@@ -182,6 +184,10 @@ async function readPhoneWorkspaceContext(request: NextRequest): Promise<PhoneWor
       workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code'
         ? record.workspaceMode
         : undefined,
+      launchKind:
+        record.launchKind === 'repository-catch-up'
+          ? record.launchKind
+          : undefined,
       currentRoute: safeRoute(record.currentRoute),
       sourceRoute: safeRoute(record.sourceRoute),
       repoPath,
@@ -379,18 +385,43 @@ export async function POST(request: NextRequest) {
   }
   const workspaceContext = resolvedScope.context;
 
-  // Access gating — mirrors the desk mint exactly (realtime-access.ts).
-  const byokKey = await resolveOpenAIKey();
-  const access = await resolveRealtimeAccess(Boolean(byokKey));
-  if (access.mode === 'locked') {
-    return NextResponse.json({ ok: false, error: 'locked', detail: access.reason }, { status: 403 });
+  // Subscription voice wins whenever the standard Codex ChatGPT-OAuth session
+  // is present. This is the proven #1616 path: the OAuth bearer mints the same
+  // short-lived Realtime client secret as BYOK, so the phone keeps the existing
+  // WebRTC + o8 tool/approval plane without spending Platform API credits.
+  const chatgptCredential = await resolveChatGPTRealtimeCredential();
+  const requiresSubscription =
+    workspaceContext.launchKind === 'repository-catch-up';
+  let realtimeBearer: string;
+  let billingSource: 'chatgpt-subscription' | 'openai-api-key';
+  if (chatgptCredential) {
+    realtimeBearer = chatgptCredential.accessToken;
+    billingSource = 'chatgpt-subscription';
+  } else {
+    if (requiresSubscription) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'subscription_unavailable',
+          detail:
+            'Repository catch-up voice requires a current ChatGPT OAuth login. Run `codex login` on the Mac and choose ChatGPT.',
+        },
+        { status: 501 },
+      );
+    }
+    // Preserve BYOK for users without a ChatGPT subscription, but never use it
+    // for the founder catch-up experiment above.
+    const byokKey = await resolveOpenAIKey();
+    const access = await resolveRealtimeAccess(Boolean(byokKey));
+    if (access.mode === 'locked') {
+      return NextResponse.json({ ok: false, error: 'locked', detail: access.reason }, { status: 403 });
+    }
+    if (access.mode === 'managed' || !byokKey) {
+      return NextResponse.json({ ok: false, error: 'no_key', detail: access.reason }, { status: 501 });
+    }
+    realtimeBearer = byokKey;
+    billingSource = 'openai-api-key';
   }
-  if (access.mode === 'managed') {
-    // Entitled, but the managed realtime proxy isn't wired and no BYOK key is
-    // present — realtime cannot run without a key in v1.
-    return NextResponse.json({ ok: false, error: 'no_key', detail: access.reason }, { status: 501 });
-  }
-  // byok mode ⇒ byokKey is non-null here.
 
   // Reach the webview: preempt a live desk session + pull the tool schemas.
   let bridge: BridgeResult;
@@ -419,6 +450,7 @@ export async function POST(request: NextRequest) {
     experiment: process.env.O8_SYMON_CODE_REALTIME_EXPERIMENT,
     bucketKey: `${subject.subject}:${subject.deviceId ?? 'operator'}:${resolvedScope.repoId ?? 'life'}`,
     operatorOverride: requestedModelVariant,
+    experience: workspaceContext.launchKind,
   });
   const model = modelSelection.model;
   const voice = bridge.voice;
@@ -437,12 +469,15 @@ export async function POST(request: NextRequest) {
   }
 
   // Mint the ephemeral token carrying the shared brain/config. Code gets its
-  // bounded phone pack; Life keeps the complete live bridge catalog. Plain
-  // fetch on the operator's BYOK key — the raw key never leaves the Mac.
+  // bounded phone pack; Life keeps the complete live bridge catalog. The raw
+  // subscription bearer or BYOK key never leaves the Mac.
   try {
     const mint = await fetch(CLIENT_SECRETS_URL, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${byokKey}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${realtimeBearer}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(
         buildClientSecretsBody(
           {
@@ -508,7 +543,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `${LOG} minted ${sessionId} (model=${model} voice=${voice} tools=${phoneBridgeTools.length}` +
+      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${phoneBridgeTools.length}` +
         `${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 
@@ -521,6 +556,7 @@ export async function POST(request: NextRequest) {
         expiresAt,
         model,
         modelVariant: modelSelection.variant,
+        billingSource,
         voice,
         baseUrl: REALTIME_BASE_URL,
         scopeVersion: SYMON_SCOPE_VERSION,
