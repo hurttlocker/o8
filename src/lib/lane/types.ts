@@ -277,6 +277,9 @@ export type LaneEventVerb =
   // base snapshot). Payload: { packetId, baseBranch, note }
   | 'worktree_refreshed'
   | 'worktree_refresh_failed'
+  // Discard could not prove its preserved branch exists. Payload:
+  // { code, reason, packetId, branch, ref, note, gcRisk }
+  | 'branch_preservation_failed'
   // Packet dispatch refused to launch without a managed worktree.
   // Payload: { code, runtime, packetId, laneId, repoPath, cause, note }
   | 'worktree_provision_failed'

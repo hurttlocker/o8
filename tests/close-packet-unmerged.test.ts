@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -17,7 +18,7 @@ writeFileSync(join(dataDir, 'ws-token'), `${wsToken}\n`, 'utf-8');
 const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
 const { getDb, closeDb } = await import('@/lib/db');
 const { sessionOutcomes } = await import('@/lib/db/schema');
-const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
@@ -128,6 +129,146 @@ describe('close_packet_unmerged real path (#1570)', () => {
       outcome: 'adopted_elsewhere',
       summary: expect.stringContaining('Implemented in o8-mobile.'),
       mergedClean: false,
+    });
+  });
+
+  it('never reports a preserved branch when the production ref postcondition fails (#1631)', async () => {
+    const packetId = 'pkt-preservation-postcondition';
+    const branch = 'issue/preservation-postcondition';
+    const repoPath = mkdtempSync(join(dataDir, 'preservation-repo-'));
+    const worktreePath = join(dataDir, 'preservation-source');
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+    git(repoPath, 'init', '--initial-branch=main');
+    git(repoPath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-m', 'init');
+    git(dataDir, 'clone', repoPath, worktreePath);
+    git(worktreePath, 'checkout', '-b', branch);
+    writeFileSync(join(worktreePath, 'preserved.ts'), 'export const preserved = true;\n');
+    git(worktreePath, 'add', 'preserved.ts');
+    git(worktreePath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '-m', 'work to preserve');
+
+    const lane = createLane({
+      repoPath,
+      worktreePath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'Preservation postcondition real path',
+      packetId,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-preservation-postcondition',
+      repoPath,
+      runtime: 'codex',
+      packets: [{
+        id: packetId,
+        referenceLabel: '#1631',
+        title: 'Prove preservation ref exists',
+        summary: 'Discard must not claim a missing branch.',
+        workspaceTargetPath: repoPath,
+        branchTarget: branch,
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'held',
+        releaseState: 'pending',
+        status: 'awaiting_review',
+        blockedReason: null,
+        lane: {
+          tileId: lane.id,
+          tabId: lane.id,
+          repoPath,
+          runtime: 'codex',
+          laneId: lane.id,
+        },
+        review: null,
+      } as OrchestratorPacket],
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Sabotage the real git seam after a successful fetch: delete the fetched
+    // ref before returning success. Old code trusted that exit code and emitted
+    // a false preservedBranch; the production show-ref postcondition must catch it.
+    const realGit = execFileSync('/usr/bin/which', ['git'], {
+      encoding: 'utf-8',
+    }).trim();
+    const fakeBin = mkdtempSync(join(dataDir, 'fake-git-'));
+    const fakeGit = join(fakeBin, 'git');
+    writeFileSync(fakeGit, `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+const realGit = ${JSON.stringify(realGit)};
+const args = process.argv.slice(2);
+const run = spawnSync(realGit, args, { cwd: process.cwd(), encoding: 'utf-8' });
+if (run.stdout) process.stdout.write(run.stdout);
+if (run.stderr) process.stderr.write(run.stderr);
+if ((run.status ?? 1) === 0 && args[0] === 'fetch') {
+  const refspec = args.at(-1) ?? '';
+  const separator = refspec.indexOf(':');
+  const ref = separator >= 0 ? refspec.slice(separator + 1) : '';
+  if (ref.startsWith('refs/heads/')) {
+    const deleted = spawnSync(realGit, ['update-ref', '-d', ref], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    if ((deleted.status ?? 1) !== 0) {
+      if (deleted.stderr) process.stderr.write(deleted.stderr);
+      process.exit(deleted.status ?? 1);
+    }
+  }
+}
+process.exit(run.status ?? 1);
+`);
+    chmodSync(fakeGit, 0o755);
+
+    const originalPath = process.env.PATH;
+    let response: Response;
+    try {
+      process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+      response = await closeRoute.POST(operatorRequest({
+        packetId,
+        disposition: 'wontfix',
+      }));
+    } finally {
+      process.env.PATH = originalPath;
+    }
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      ok: true,
+      result: {
+        preservedBranch: null,
+        preservationFailure: {
+          code: 'branch_preservation_failed',
+          reason: 'ref_verification_failed',
+          branch,
+          ref: `refs/heads/${branch}`,
+        },
+        note: expect.stringContaining('Preservation FAILED'),
+      },
+    });
+    expect(() => git(repoPath, 'show-ref', '--verify', `refs/heads/${branch}`)).toThrow();
+
+    const failureEvent = getLaneEvents(lane.id)
+      .find((event) => event.verb === 'branch_preservation_failed');
+    expect(failureEvent).toMatchObject({
+      actor: 'system',
+      payload: {
+        code: 'branch_preservation_failed',
+        reason: 'ref_verification_failed',
+        packetId,
+        branch,
+        ref: `refs/heads/${branch}`,
+        gcRisk: true,
+        note: expect.stringContaining('dangling Git objects'),
+      },
     });
   });
 });

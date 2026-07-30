@@ -24,6 +24,14 @@ export const CLOSE_UNMERGED_DISPOSITIONS = [
 
 export type CloseUnmergedDisposition = typeof CLOSE_UNMERGED_DISPOSITIONS[number];
 
+export type BranchPreservationFailure = {
+  code: 'branch_preservation_failed';
+  reason: 'ref_write_failed' | 'ref_verification_failed';
+  branch: string;
+  ref: string;
+  message: string;
+};
+
 export type CloseUnmergedResult =
   | {
     ok: true;
@@ -35,6 +43,7 @@ export type CloseUnmergedResult =
       packetId: string;
       worktreeRemoved: boolean;
       preservedBranch: string | null;
+      preservationFailure: BranchPreservationFailure | null;
       note: string;
     };
   }
@@ -66,10 +75,14 @@ export function closeUnmergedOutcomeNote(input: {
   disposition: CloseUnmergedDisposition;
   note?: string | null;
   preservedBranch?: string | null;
+  preservationFailure?: BranchPreservationFailure | null;
 }): string {
   const details = input.note?.trim();
   const preserved = input.preservedBranch
     ? ` Work preserved on branch ${input.preservedBranch}.`
     : '';
-  return `Closed unmerged — ${closeUnmergedDispositionLabel(input.disposition)}.${preserved}${details ? ` ${details}` : ''}`;
+  const preservationFailed = input.preservationFailure
+    ? ` Preservation FAILED (${input.preservationFailure.reason}): commits may only remain as dangling Git objects and are at risk of garbage collection.`
+    : '';
+  return `Closed unmerged — ${closeUnmergedDispositionLabel(input.disposition)}.${preserved}${preservationFailed}${details ? ` ${details}` : ''}`;
 }

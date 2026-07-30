@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dispatch } from '@/lib/lane/commands';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket, updateLane } from '@/lib/lane/registry';
 import { archiveLaneSessions } from '@/lib/lane/reap-sessions';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
@@ -15,6 +16,7 @@ import {
   isCloseUnmergedDisposition,
   closeUnmergedDispositionLabel,
   closeUnmergedOutcomeNote,
+  type BranchPreservationFailure,
   type CloseUnmergedDisposition,
   type CloseUnmergedResult,
 } from './close-unmerged-shared';
@@ -28,6 +30,10 @@ export {
   closeUnmergedOutcomeNote,
 };
 export type { CloseUnmergedDisposition, CloseUnmergedResult };
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 const execFileAsync = promisify(execFile);
 const CLOSEABLE_LANE_STATUSES = new Set([
@@ -85,15 +91,53 @@ export async function closePacketUnmerged(input: {
 
   try {
     let preservedBranch: string | null = null;
+    let preservationFailure: BranchPreservationFailure | null = null;
     if (lane.worktreePath && lane.branch && lane.repoPath) {
+      const preservedRef = `refs/heads/${lane.branch}`;
       try {
         await execFileAsync('git', ['fetch', lane.worktreePath, `${lane.branch}:refs/heads/${lane.branch}`], {
           cwd: lane.repoPath,
           timeout: 30_000,
         });
-        preservedBranch = lane.branch;
+        try {
+          await execFileAsync('git', ['show-ref', '--verify', preservedRef], {
+            cwd: lane.repoPath,
+            timeout: 10_000,
+          });
+          preservedBranch = lane.branch;
+        } catch (verifyError) {
+          preservationFailure = {
+            code: 'branch_preservation_failed',
+            reason: 'ref_verification_failed',
+            branch: lane.branch,
+            ref: preservedRef,
+            message: errorMessage(verifyError),
+          };
+        }
       } catch (preserveError) {
-        console.warn(`[discard-packet] branch preservation failed for lane ${lane.id} (${lane.branch}):`, preserveError);
+        preservationFailure = {
+          code: 'branch_preservation_failed',
+          reason: 'ref_write_failed',
+          branch: lane.branch,
+          ref: preservedRef,
+          message: errorMessage(preserveError),
+        };
+      }
+      if (preservationFailure) {
+        const note = `Preservation FAILED for ${preservationFailure.ref}; commits may only remain as dangling Git objects and are at risk of garbage collection.`;
+        console.error(
+          `[discard-packet] ${note} lane=${lane.id} reason=${preservationFailure.reason}`,
+          preservationFailure.message,
+        );
+        recordLaneEvent(lane.id, 'branch_preservation_failed', 'system', {
+          code: preservationFailure.code,
+          reason: preservationFailure.reason,
+          packetId: input.packetId,
+          branch: preservationFailure.branch,
+          ref: preservationFailure.ref,
+          note,
+          gcRisk: true,
+        });
       }
     }
 
@@ -101,6 +145,7 @@ export async function closePacketUnmerged(input: {
       disposition: rawDisposition,
       note,
       preservedBranch,
+      preservationFailure,
     });
     const archived = await dispatch({ verb: 'archive', laneId: lane.id, actor: 'user' });
     if (!archived.ok) {
@@ -165,6 +210,7 @@ export async function closePacketUnmerged(input: {
         packetId: input.packetId,
         worktreeRemoved,
         preservedBranch,
+        preservationFailure,
         note: `${outcomeNote}${worktreeRemoved ? ' Worktree removed.' : ''}`,
       },
     };
