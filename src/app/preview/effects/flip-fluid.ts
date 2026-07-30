@@ -1,10 +1,9 @@
-// FLIP / PIC fluid solver — a faithful port of Matthias Müller's
-// "How to write a FLIP water simulator" (Ten Minute Physics), adapted to a
-// unit grid (h = 1, one sim cell per rendered ASCII character) and a cursor
-// that acts as a moving obstacle.
+// FLIP/PIC fluid solver independently implemented from Matthias Müller's public
+// "How to write a FLIP water simulator" tutorial (Ten Minute Physics):
+// https://matthiasmueller.info/tenMinutePhysics/
 //
-// The ReactBits "Liquid ASCII" component is a render of exactly this solver,
-// so matching the algorithm + default parameters is what gives us 1:1 parity.
+// The algorithm is adapted to a unit grid (h = 1, one simulation cell per
+// rendered ASCII character) with a cursor that acts as a moving obstacle.
 // Rendering (sim cell density -> ASCII glyph) lives in the React component;
 // this file is pure simulation, no DOM, no React.
 
