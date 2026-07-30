@@ -20,19 +20,19 @@ import 'server-only';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlementSync } from '@/lib/entitlement/store';
+import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
 import {
   resolveLocalChatModelSync,
   resolveLocalInferenceBaseUrlSync,
 } from '@/lib/operator/defaults';
 
-const DEFAULT_PROXY_BASE = 'https://o8-license-server-production.up.railway.app';
 const LOCAL_LIVENESS_TTL_MS = 30_000;
 const LOCAL_LIVENESS_TIMEOUT_MS = 1_500;
 
-/** Base URL of the managed-inference proxy (the license server). Overridable. */
+/** Base URL of the hosted o8 API. Overridable. */
 export function proxyBaseUrl(): string {
   const raw = process.env.O8_PROXY_URL?.trim();
-  return (raw || DEFAULT_PROXY_BASE).replace(/\/+$/, '');
+  return (raw || DEFAULT_O8_API_BASE_URL).replace(/\/+$/, '');
 }
 
 export interface InferenceRoute {

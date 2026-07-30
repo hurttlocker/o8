@@ -23,6 +23,7 @@ import { readCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { resolveFlags } from '@/lib/entitlement/flags';
 import type { Plan } from '@/lib/entitlement/types';
+import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
 import {
   resetLocalInferenceProbeCacheForTests,
   resolveEmbedRoute,
@@ -98,7 +99,7 @@ describe('inference-route', () => {
       setEnt({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('proxy');
-      expect(route?.url).toContain('/v1/inference');
+      expect(route?.url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/inference`);
       expect(route?.headers.Authorization).toBe('Bearer aaa.bbb.ccc');
       // No OpenRouter analytics headers on the proxy path.
       expect(route?.headers['HTTP-Referer']).toBeUndefined();

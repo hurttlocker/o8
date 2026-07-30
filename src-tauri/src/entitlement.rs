@@ -8,7 +8,7 @@
 //!
 //! Resolution order mirrors the TS `inference-route.ts`:
 //!   local key  → direct (founder / BYOK; unchanged)
-//!   plan token → proxy  (Railway `/v1/*` with the JWT as Bearer)
+//!   plan token → proxy  (hosted `/v1/*` with the JWT as Bearer)
 //!   neither    → None   (caller surfaces "add a key / sign in")
 //!
 //! The plan token is the `licenseKey` field of `~/.o8/entitlement.json`, written
@@ -16,9 +16,9 @@
 
 use std::path::PathBuf;
 
-/// Default managed-inference proxy (the o8 license server). Overridable via
+/// Default hosted o8 API. Overridable via
 /// `O8_PROXY_URL` (matches the TS resolver default in `inference-route.ts`).
-const DEFAULT_PROXY_BASE: &str = "https://o8-license-server-production.up.railway.app";
+const DEFAULT_O8_API_BASE_URL: &str = "https://api.o8.run";
 
 /// Canonical o8 data dir (`~/.o8`, overridable). Mirrors `stt::keys::o8_data_dir`
 /// — kept local so this module stays dependency-free.
@@ -37,7 +37,7 @@ fn o8_data_dir() -> PathBuf {
 pub fn proxy_base_url() -> String {
     let raw = std::env::var("O8_PROXY_URL").unwrap_or_default();
     let base = if raw.trim().is_empty() {
-        DEFAULT_PROXY_BASE
+        DEFAULT_O8_API_BASE_URL
     } else {
         raw.trim()
     };
