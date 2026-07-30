@@ -1,35 +1,33 @@
-/**
- * Engineering Brain — Phase 2a substrate seed (#915 north star follow-up).
- *
- * Promotes already-structured rows into the `facts` table WITHOUT LLM
- * distillation. The four sources here are short, declarative, and curated
- * enough that they're already fact-shaped — the composer LLM layers on top
- * at query time. Cost: zero LLM calls, runs in seconds vs the 25-min comment
- * drain.
- *
- * Sources promoted:
- *   - directives_fts        → kind='directive'  (rule statements)
- *   - session_outcomes      → kind='process'    (what happened, what shipped)
- *   - github_pull_requests  → kind='decision'   (title + body)
- *   - github_issues         → kind='decision'   (title + body)
- *
- * Skipped (handled elsewhere or Phase 2b):
- *   - github_comments  → indexer-run.ts (LLM distill, comment prose is messy)
- *   - docs/*.md        → Phase 2b (LLM distillation of long-form prose)
- *
- * Idempotent via the `idx_facts_fingerprint` unique index — re-running this
- * script never duplicates rows. Source-update detection: the default path is
- * INSERT OR REPLACE on fingerprint, but only when the source's current
- * authority/state would produce a stricter (newer) row than the existing
- * fact. We approximate "newer" via fact `created_at` — if the existing
- * fact's created_at is older than now (always true) AND the source's
- * `updated_at`/`merged_at`/`closed_at` is newer than the fact, we replace.
- * Pass `--force` to bypass the freshness check (used for migrations).
- *
- * Usage:
- *   npx tsx scripts/seed-facts-from-structured.ts            # default (freshness-checked replace)
- *   npx tsx scripts/seed-facts-from-structured.ts --force    # rebuild every row
- */
+// Engineering Brain — Phase 2a substrate seed (#915 north star follow-up).
+//
+// Promotes already-structured rows into the `facts` table WITHOUT LLM
+// distillation. The four sources here are short, declarative, and curated
+// enough that they're already fact-shaped — the composer LLM layers on top
+// at query time. Cost: zero LLM calls, runs in seconds vs the 25-min comment
+// drain.
+//
+// Sources promoted:
+//   - directives_fts        → kind='directive'  (rule statements)
+//   - session_outcomes      → kind='process'    (what happened, what shipped)
+//   - github_pull_requests  → kind='decision'   (title + body)
+//   - github_issues         → kind='decision'   (title + body)
+//
+// Skipped (handled elsewhere or Phase 2b):
+//   - github_comments  → indexer-run.ts (LLM distill, comment prose is messy)
+//   - docs/**/*.md     → Phase 2b (LLM distillation of long-form prose)
+//
+// Idempotent via the `idx_facts_fingerprint` unique index — re-running this
+// script never duplicates rows. Source-update detection: the default path is
+// INSERT OR REPLACE on fingerprint, but only when the source's current
+// authority/state would produce a stricter (newer) row than the existing
+// fact. We approximate "newer" via fact `created_at` — if the existing
+// fact's created_at is older than now (always true) AND the source's
+// `updated_at`/`merged_at`/`closed_at` is newer than the fact, we replace.
+// Pass `--force` to bypass the freshness check (used for migrations).
+//
+// Usage:
+//   npx tsx scripts/seed-facts-from-structured.ts            # default (freshness-checked replace)
+//   npx tsx scripts/seed-facts-from-structured.ts --force    # rebuild every row
 
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
