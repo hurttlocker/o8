@@ -1642,8 +1642,9 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
     }
 }
 
-/// Canvas verbs Symon can drive — the enum the `/api/canvas/intent` route accepts
-/// (kept in lockstep with `docs/symon-port/canvas-intent-bus.md`).
+/// Canvas verbs Symon can drive — the caller-side copy of the public
+/// `/api/canvas/intent` request contract. Keep this list in lockstep with the
+/// route's accepted verb enum.
 const CANVAS_VERBS: &[&str] = &[
     "enter",
     "send-prompt",

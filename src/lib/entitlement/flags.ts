@@ -5,10 +5,10 @@ import type { EntitlementFlags, Plan } from './types';
  *
  * Pure function, no I/O. NOTE: these are NOT feature gates. Every moat —
  * governance, the Engineering Brain, multi-repo fleet, mobile-on-LAN, local
- * voice — is FREE and ungated (docs/monetization-and-free-tier-plan.md §1, §6,
- * §11), so it isn't here. This only maps a Plan to the paid cost/reach levers;
- * real access is additionally enforced at call time by the account token + the
- * server-side spend cap, never by a flag alone.
+ * voice — is FREE and ungated by the public entitlement contract, so it isn't
+ * here. This only maps a Plan to the paid cost/reach levers; real access is
+ * additionally enforced at call time by the account token + the server-side
+ * spend cap, never by a flag alone.
  *
  *  - free:    no paid levers (BYO / local / the proxy's free taste-allowance).
  *  - pro:     managed-inference proxy.
@@ -18,19 +18,18 @@ import type { EntitlementFlags, Plan } from './types';
  *             perk wired separately (use-founder-status + the experimental
  *             hooks), not a cost/reach lever, so it isn't here.
  *
- * relay.offNetwork SHIPPED 2026-07-08 (o8 Relay v1, docs/relay-v1-design.md). Q
- * ruling: entitlement is "all paid tiers" in principle; today only 'founder' is a
- * live paid tier (the $19 'pro'/$29 'team' tiers aren't sold yet), so it reads as
+ * relay.offNetwork follows the public relay contract in docs/connect-contract.md.
+ * Entitlement is "all paid tiers" in principle; today only 'founder' is a live
+ * paid tier (the $19 'pro'/$29 'team' tiers aren't sold yet), so it reads as
  * founders-only in practice but flips on automatically the moment pro/team launch
  * ("future paid → true at launch", zero code change). free → false.
  *
- *   ⚠️ TWIN-MAP DRIFT HAZARD — this flag is derived in THREE places that MUST agree
- *   or off-network silently half-works:
- *     1. src/lib/entitlement/flags.ts          (this file — desktop)
- *     2. o8-mobile/src/o8/entitlement.ts       (mobile client — mobile agent flips)
- *     3. services/relay/src/entitlement.ts     (the relay's own copy)
- *   The durable fix (license server embeds flags in the JWT so all three collapse)
- *   is tracked as follow-up. Until then, change all three in lockstep.
+ *   ⚠️ PROTOCOL DRIFT HAZARD — `relay.offNetwork` is part of the versioned
+ *   entitlement contract consumed by the desktop, mobile client, and hosted
+ *   relay. All three must resolve the same plan-to-flag mapping or off-network
+ *   silently half-works. Until signed tokens carry the resolved flags, any
+ *   contract version that changes this mapping must update every consumer in
+ *   lockstep.
  *
  * cloud.runners isn't built yet → false for every plan until that lever ships.
  */

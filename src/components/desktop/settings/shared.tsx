@@ -34,7 +34,7 @@ export interface GitHubBrokerStatus {
   tokenReady: boolean;
   authSource: 'github-app' | 'local-gh' | 'none';
   note: string;
-  /** True when auth comes from the managed public "o8" App (license-server minted). */
+  /** True when auth comes from the managed public "o8" App via the hosted o8 account service. */
   managed?: boolean;
   /** Install page for the managed App, when known and not yet installed. */
   managedInstallUrl?: string | null;

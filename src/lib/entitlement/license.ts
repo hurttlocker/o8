@@ -69,7 +69,7 @@ export interface VerifyLicenseOptions {
   now?: number;
   /**
    * Offline-grace mode. When true, a validly-signed-but-expired license is
-   * still accepted up to `graceDays` past `exp` (so a Railway outage never
+   * still accepted up to `graceDays` past `exp` (so a hosted-service outage never
    * bricks a paying user who holds a previously-valid token).
    */
   offlineGrace?: boolean;
@@ -81,9 +81,9 @@ export interface VerifyLicenseOptions {
  * The license-signing PUBLIC key (Ed25519 SPKI).
  *
  * This key only VERIFIES license tokens, so it is safe to ship. The matching
- * PRIVATE key lives ONLY on the Railway license server (env LICENSE_PRIVATE_KEY)
- * and is NEVER baked into this app. Tokens minted by that server validate
- * against this key (proven by services/license-server/scripts/contract-test.ts).
+ * PRIVATE key stays in the hosted o8 account service and is NEVER baked into
+ * this app. Under the signed-token contract, every issued token must validate
+ * against this key and carry a supported plan plus a standard expiration.
  * For dev/testing, override via the O8_LICENSE_PUBKEY env var (PEM SPKI), which
  * takes precedence over this constant.
  */

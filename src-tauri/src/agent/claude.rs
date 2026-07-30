@@ -1,8 +1,8 @@
 //! Symon voice-agent tool-calling loop — CLAUDE brain, "text-planner" protocol.
 //!
-//! The second brain (epic: `docs/symon-port/two-tier-brain-epic.md`). Selected
-//! when the configured model id starts with `claude` (e.g. `claude-sonnet-4-6`),
-//! and the async escalation target for Gemini's `escalate(target:"claude_brain")`.
+//! This is the secondary text-planner brain. It is selected when the configured
+//! model id starts with `claude` (e.g. `claude-sonnet-4-6`) and is the async
+//! escalation target for Gemini's `escalate(target:"claude_brain")`.
 //!
 //! ## Why "text-planner" and not native tool-use
 //! Live fixtures (`claude` 2.1.179, 2026-06-16) proved Claude Code OWNS tool

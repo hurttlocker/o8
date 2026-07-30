@@ -6,9 +6,9 @@
  * by row-level provenance instead of opaque vector hits.
  *
  * Locked-architecture rules from #915:
- *   - NO vectors. The prior open-source-Cortex died on silent embedding
- *     fallbacks (see `docs/research/clawmark-vs-cortex-audit.md`); BM25 either
- *     returns ranked tokens or nothing — no silent-degradation mode.
+ *   - NO vectors. The prior retrieval pipeline silently accepted embedding
+ *     failures as empty results; BM25 either returns ranked tokens or nothing
+ *     — no silent-degradation mode.
  *   - Every fact gets a row id (`rowId` + `table`) so contradictions can be
  *     resolved against the originating row, not a free-text blob.
  */

@@ -7,9 +7,10 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/invites/redeem { code, redeemedBy? } — LOCAL-ONLY redeem stub.
  *
- * Central phase pending (docs/beta-invites.md): a real invitee redeems on the
- * central service, not here, because the code row only exists on the inviter's
- * install. This resolves same-install codes so the contract is wired + testable.
+ * The public invite API contract redeems cross-machine passes through
+ * `POST /invites/redeem` on the hosted service, not here, because the code row
+ * only exists on the inviter's install. This resolves same-install codes so
+ * the local contract remains wired and testable.
  */
 export async function POST(request: Request) {
   let body: unknown;

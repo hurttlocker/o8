@@ -5,9 +5,10 @@
  * unique code with a stable colorway + serial position. This module is the
  * LOCAL generation + sent/redeemed ledger (SQLite, `beta_invites`). It's the
  * "desktop real now" half of the build: codes are real, persisted, and
- * tracked. Cross-machine redemption + the public o8.run/i/<code> landing are
- * the central phase — see docs/beta-invites.md. `redeemInvite` is a local stub
- * that only resolves codes generated on THIS install.
+ * tracked. The public invite API contract registers shared passes with
+ * `POST /invites/register` and redeems them with `POST /invites/redeem`.
+ * `redeemInvite` is a local stub that only resolves codes generated on THIS
+ * install.
  */
 
 import { and, asc, desc, eq, ne } from 'drizzle-orm';
@@ -90,11 +91,11 @@ export function markSent(code: string): InviteRow | null {
 }
 
 /**
- * LOCAL-ONLY redeem stub (central phase pending — docs/beta-invites.md). A real
- * referral validates on a central service: the inviter generates a code on THIS
- * machine; the invitee redeems on theirs, where this row doesn't exist. Until
- * then this only resolves codes minted on the same install — enough to wire +
- * test the contract, not a true cross-user claim.
+ * LOCAL-ONLY redeem stub. The hosted invite API validates a real referral:
+ * the inviter generates a code on THIS machine, then the invitee redeems on
+ * theirs, where this row doesn't exist. Until then this only resolves codes
+ * minted on the same install — enough to wire and test the local contract,
+ * not a true cross-user claim.
  */
 export function redeemInvite(code: string, redeemedBy: string): { ok: boolean; reason?: string; invite?: InviteRow } {
   const d = db();
@@ -110,10 +111,10 @@ export function redeemInvite(code: string, redeemedBy: string): { ok: boolean; r
 }
 
 /**
- * Central sync (#beta-referral central phase — docs/beta-invites.md). When the
- * operator's build sets O8_INVITE_SERVICE_URL + O8_INVITE_REGISTER_TOKEN, a
- * shared code is registered with the central service on send so it's redeemable
- * cross-machine. No-op (local-only) when unconfigured.
+ * Hosted invite API registration. When the operator's build sets
+ * O8_INVITE_SERVICE_URL + O8_INVITE_REGISTER_TOKEN, a shared code is registered
+ * with `POST /invites/register` on send so it's redeemable cross-machine.
+ * No-op (local-only) when unconfigured.
  */
 function centralConfig(): { url: string; token: string } | null {
   const url = process.env.O8_INVITE_SERVICE_URL?.trim();
