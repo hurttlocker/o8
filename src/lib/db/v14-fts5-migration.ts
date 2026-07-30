@@ -13,11 +13,10 @@
  *
  * Plus `qa_eval_runs` for the eval harness (later sub-issue).
  *
- * Why no vectors: prior open-source Cortex died on silent embedding
- * fallbacks (88/501 real, 413 silent zero-vectors — see
- * `docs/research/clawmark-vs-cortex-audit.md`). BM25 has no silent-failure
- * mode: it returns ranked tokens or nothing. Indexed-on-write via SQLite
- * triggers, sub-200ms p95, no async embedding worker.
+ * Why no vectors: the prior retrieval pipeline silently degraded 413 of 501
+ * rows to zero vectors, leaving only 88 real embeddings. BM25 has no
+ * silent-failure mode: it returns ranked tokens or nothing. Indexed-on-write
+ * via SQLite triggers, sub-200ms p95, no async embedding worker.
  *
  * Boot guard: `pragma compile_options` must include `ENABLE_FTS5`. better-
  * sqlite3 ships it on every supported platform, but we still verify and

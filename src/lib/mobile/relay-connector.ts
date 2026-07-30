@@ -31,7 +31,8 @@ import { RelayReconnectPolicy } from './relay-reconnect';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
- * o8 Relay connector — the Mac-side outbound leg (docs/relay-v1-design.md §D8.2).
+ * o8 Relay connector — the Mac-side outbound leg of the public relay contract
+ * documented in docs/connect-contract.md.
  *
  * The Mac dials OUT to the relay (no inbound ports). For each relayed phone the
  * connector TERMINATES the Mac-side tunnel — it must, because v1.1 requires it to
@@ -55,9 +56,10 @@ import { getDataDir } from '@/lib/data-dir-migration';
  * relay is down the Mac just isn't reachable off-network; LAN is unaffected.
  *
  * NOTE: the live E2EE-channel bridge + real-phone interop is validated by the
- * Q-gated cross-network e2e (docs §D8.5) with the real mobile client — it cannot be
- * exercised in-repo. The contract-critical PURE logic (relay-connector-protocol.ts)
- * is unit-tested; the relay half is proven by services/relay's verify-relay-e2e.
+ * gated cross-network conformance path with the real mobile client — it cannot
+ * be exercised in-repo. The contract-critical PURE logic
+ * (relay-connector-protocol.ts) is unit-tested; the relay half is validated
+ * against the public relay wire contract in docs/connect-contract.md.
  */
 
 const P = '[relay]';

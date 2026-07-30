@@ -29,6 +29,5 @@ Cut for the ~10-plan cap, not because they're wrong (impact × confidence ranked
 - **CDP attached-browser 2s refresh** (ws-server.ts:2699) and **desktop transcript virtualization** (`ChatMessageList.tsx:182`) — MED perf, rows already well-memoized; below the line.
 - **ws-server.ts god-file carve-up** (5902 lines, 48 importers) — real, but L-effort and collides with 005/006; stage after those land.
 - **MCP defineTool registry** and **settings-tab scaffold hook** — medium payoff refactors; queue behind 008.
-- **Stale March docs + docs/research artifacts sweep** — S-effort hygiene; do opportunistically (move superseded plans to docs/archive/, delete one-off run artifacts).
 - **Root-dir PNG litter** — already gitignored, untracked local files only (~13MB); `rm *.png` at leisure, no repo impact.
 - **Product-track items** (onboarding single-GitHub-auth phase ②, #1342 permissions concierge, canvas intent-bus verbs #1246/#1422, e2e-in-CI decision, founding-checklist B-4/D switches) — build-next candidates, not code-improvement plans; belong on the product backlog, sequenced after the reliability trio.

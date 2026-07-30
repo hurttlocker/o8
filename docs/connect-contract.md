@@ -1,6 +1,6 @@
 # o8 connect contract
 
-This document is the implementation contract for one-account, multi-machine o8 connectivity. Phase 1a is the o8 client in this repository. Phase 1b adds the license-server registry and relay support. Phase 2 adds the web machine switcher and remote prompt launch.
+This document is the implementation contract for one-account, multi-machine o8 connectivity. Phase 1a is the o8 client in this repository. Phase 1b adds the hosted account registry and relay protocol. Phase 2 adds the web machine switcher and remote prompt launch.
 
 ## Product boundary
 
@@ -34,7 +34,7 @@ The machine identity sent to the registry is:
 
 `o8 connect --status` lists the account's machines and identifies the current machine by matching `installId`. `o8 disconnect` looks up that same current install and deletes its registry row. Disconnect is a successful no-op when the current install is not registered.
 
-## License-server API
+## Hosted account-service API
 
 The base URL is the existing `proxyBaseUrl()` value used by managed inference and entitlement sync. Every endpoint accepts:
 
@@ -209,7 +209,7 @@ The current relay cannot establish the required machine-scoped session without s
 
 Phase 1b must add the following relay contract:
 
-1. The license server issues a short-lived machine-scoped relay ticket for an authenticated, registered machine:
+1. The hosted account service issues a short-lived machine-scoped relay ticket for an authenticated, registered machine:
 
    ```http
    POST /machines/:machineId/relay-ticket
@@ -221,7 +221,7 @@ Phase 1b must add the following relay contract:
 2. The Mac relay handshake sends the relay ticket and `x-o8-machine-id`. The relay verifies the ticket signature, audience, expiry, and header/claim equality before accepting the socket.
 3. The relay indexes live Mac sockets by `machineId` and account, permits simultaneous sockets for different machines on the same account, and keeps at most one live socket for a given `machineId`.
 4. Existing routing-ID mobile sessions remain isolated from this new account-machine routing path. The new path must not weaken the current pairing or per-device bearer checks.
-5. The relay emits authenticated heartbeats to the license-server heartbeat endpoint and maintains online/offline presence for the web switcher. Client timestamps are never authoritative.
+5. The relay emits authenticated heartbeats to the hosted account service's heartbeat endpoint and maintains online/offline presence for the web switcher. Client timestamps are never authoritative.
 6. The free plan is explicitly authorized for the connect channel up to its three registered machines. This must be a separate entitlement decision from the existing paid mobile `relay.offNetwork` flag.
 7. A web relay session may address only a `machineId` returned for its authenticated account. Both the web edge and relay enforce that ownership check.
 
@@ -306,7 +306,7 @@ POST /machines/:machineId/web-session-ticket
 Authorization: Bearer <clerk-session-or-signed-license-token>
 ```
 
-The license server performs the same active, account-scoped machine lookup used
+The hosted account service performs the same active, account-scoped machine lookup used
 for machine relay-ticket issuance. A machine owned by another account or an
 audit tombstone receives `404 { "error": "not_found" }`. Success is:
 

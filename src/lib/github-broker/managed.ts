@@ -42,7 +42,7 @@ export interface ManagedGithubState {
   expiresAt?: string;
   installationId?: number;
   accountLogin?: string;
-  /** The license-server-verified Clerk subject this token belongs to. */
+  /** The hosted o8 account service-verified Clerk subject this token belongs to. */
   ownerClerkUserId?: string;
   /** Where "Install the o8 GitHub App" should send the user (from the server). */
   installUrl?: string;
