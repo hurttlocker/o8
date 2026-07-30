@@ -65,7 +65,10 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Serial vitest needs the headroom: parallel workers on the 4-core hosted
+    # runner reproduce the #1633 load flake (13 spurious failures on the
+    # first-ever CI run; same files pass 58/58 serially).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -78,7 +81,7 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
-      - run: npm test
+      - run: npm test -- --no-file-parallelism
 
   # Launch posture: surface high-severity dependency findings without making
   # the first OSS PRs unmergeable. Remove continue-on-error once the remaining
@@ -93,8 +96,10 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+      # The dependency-review API is Advanced-Security-gated on private repos
+      # (live 403, first CI run 2026-07-30). Self-arms at the public flip.
       - name: Review dependency changes
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !github.event.repository.private
         uses: actions/dependency-review-action@v4
       - uses: actions/setup-node@v4
         with:
