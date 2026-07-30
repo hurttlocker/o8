@@ -1,10 +1,14 @@
 # o8
 
+o8 is an open-source desktop control plane for AI coding agents.
+
+[Download the latest signed macOS build](https://github.com/hurttlocker/o8/releases) · [Build from source](#quickstart)
+
+<!-- hero -->
+
 **Run a fleet of coding agents. Approve what ships.**
 
-<!-- TODO(launch): hero screenshot — glass theme, orchestrator mid-mission, review diff open. This image is the launch. -->
-
-o8 is an open-source operator console for AI coding agents — a native desktop app where **any agent CLI you already pay for** (Claude Code, Codex, Gemini, Aider, Goose, and eight more) does real engineering work in **isolated git worktrees**, and **nothing merges without your approval**.
+Any agent CLI you already pay for — Claude Code, Codex, Gemini, Aider, Goose, and eight more — can do real engineering work in isolated git worktrees, and nothing merges without your approval.
 
 The labs each ship their own agent and hope you live inside it. o8 is the neutral cockpit above all of them: one surface to dispatch, watch, review, and ship — with an audit trail for every decision. It runs on your machine, against your own subscriptions and keys. Free, MIT, complete.
 
@@ -33,6 +37,8 @@ o8's answer:
 A first-run picker discovers what's installed and lets you choose your orchestrator + workers. No vendor pin — Codex is a default, not a requirement. Adding a runtime is a small, documented patch ([`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md)) — community adapters welcome.
 
 ## How a mission runs
+
+A mission is a goal. Each packet is a scoped unit of work, and each lane is the worker session that carries a packet through execution and review.
 
 ```
    you (or your orchestrator)
@@ -77,7 +83,7 @@ Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aide
 
 ### Phone
 
-- **iOS app:** free on TestFlight <!-- TODO(launch): TestFlight link --> (App Store pending review). Pair by QR in seconds.
+- **iOS app:** Pair by QR in seconds.
 - **Any phone:** the mobile web surface ships in this repo — pair any device on your network through the browser, no app needed.
 - **Build your own:** the pairing protocol and WebSocket surface are open in this repo. Third-party clients are welcome.
 
