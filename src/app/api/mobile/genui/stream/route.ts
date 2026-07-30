@@ -11,16 +11,14 @@ export const dynamic = 'force-dynamic';
  * and emits `chat.completion.chunk` SSE frames (or a full `chat.completion`
  * JSON body when `stream: false`).
  *
- * Two inference tiers, picked by the `model` field — no keys on the device,
- * ever; the phone only ever presents the ws-token (this route is gated by
+ * The server owns model routing — no keys or authoritative model selector live
+ * on the device. The phone only presents the ws-token (this route is gated by
  * the default-deny middleware like the rest of /api/mobile):
  *
- *   - `haiku` (default) / `sonnet` / any `claude-*` id → the warm Claude REPL
- *     pool (subscription-billed, same pool as the Brain's CLI tiers — never
- *     `-p`/`--print`, see #1124). Zero marginal cost; the prototyping tier.
- *   - anything else (e.g. `google/gemma-3-27b-it`) → resolveOpenRouterRoute's
- *     existing ladder: managed plan proxy (founder fast path) → live local
- *     endpoint → BYO OpenRouter key. Hard-capped max_tokens below.
+ *   - Text requests use the warm Claude REPL pool (subscription-billed, same
+ *     pool as the Brain's CLI tiers — never `-p`/`--print`, see #1124).
+ *   - Image requests return an explicit pre-stream fallback signal so the
+ *     phone can preserve the image and use managed Ask.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -50,8 +48,11 @@ interface GenUiRequestBody {
   max_tokens?: unknown;
 }
 
-function jsonError(message: string, status: number) {
-  return NextResponse.json({ error: { message, type: 'invalid_request_error' } }, { status });
+function jsonError(message: string, status: number, headers?: HeadersInit) {
+  return NextResponse.json(
+    { error: { message, type: 'invalid_request_error' } },
+    { status, headers },
+  );
 }
 
 /** OpenAI content can be a string or an array of typed parts — flatten to text. */
@@ -65,6 +66,16 @@ function contentToText(content: unknown): string {
       .join('');
   }
   return '';
+}
+
+function messagesContainImages(messages: ChatMessage[]): boolean {
+  return messages.some((message) =>
+    Array.isArray(message.content)
+    && message.content.some((part) =>
+      Boolean(part)
+      && typeof part === 'object'
+      && (part as { type?: unknown }).type === 'image_url'),
+  );
 }
 
 /**
@@ -172,7 +183,16 @@ export async function POST(req: NextRequest) {
     return jsonError('messages array is required.', 400);
   }
   const messages = body.messages as ChatMessage[];
-  const requestedModel = typeof body.model === 'string' ? body.model.trim() : '';
+  if (messagesContainImages(messages)) {
+    return jsonError(
+      'Image requests use managed Ask.',
+      409,
+      { 'X-O8-Ask-Fallback': 'managed' },
+    );
+  }
+  // Compatibility fields are accepted, but the paired desktop chooses its own
+  // subscription-backed model instead of trusting a phone-supplied model id.
+  const requestedModel = '';
   const wantStream = body.stream !== false;
   const id = `genui-${Date.now().toString(36)}`;
   const created = Math.floor(Date.now() / 1000);
