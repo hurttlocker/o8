@@ -8,8 +8,10 @@ export const dynamic = 'force-dynamic';
  * Returns `{ events: MobileActivityEvent[] }`, newest-first, capped at ~40.
  *
  * Primary data source: recent git commits across every repo in o8's registry
- * (`~/.o8/repos.json`, via `listRepos()`). One bounded `git log` per repo —
- * merge commits (>1 parent) become `kind: "merge"`, everything else `commit`.
+ * (`~/.o8/repos.json`, via `listRepos()`). One bounded, read-only
+ * `git log --all --source` per repo observes commits reachable from every
+ * local ref — merge commits (>1 parent) become `kind: "merge"`, everything
+ * else `commit`.
  *
  * Bonus data source: orchestrator packet lifecycle. `syncOrchestratorControlPlaneState`
  * is read once and each packet contributes a single event (keyed off its
@@ -105,19 +107,14 @@ async function resolveRepoTargets(): Promise<RepoTarget[]> {
   return [{ localPath: cwd, name: path.basename(cwd) }];
 }
 
-/** Resolve the current branch of a repo, or null if it cannot be determined. */
-async function resolveBranch(repoRoot: string): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'],
-      { timeout: 5_000, maxBuffer: 64 * 1024 },
-    );
-    const branch = stdout.trim();
-    return branch && branch !== 'HEAD' ? branch : null;
-  } catch {
-    return null;
-  }
+/** Keep Git's source ref truthful while making common refs readable on mobile. */
+function displayObservedRef(sourceRef: string): string | undefined {
+  const ref = sourceRef.trim();
+  if (!ref) return undefined;
+  if (ref.startsWith('refs/heads/')) return ref.slice('refs/heads/'.length);
+  if (ref.startsWith('refs/remotes/')) return ref.slice('refs/remotes/'.length);
+  if (ref.startsWith('refs/tags/')) return `tag:${ref.slice('refs/tags/'.length)}`;
+  return ref;
 }
 
 /**
@@ -137,10 +134,12 @@ async function collectRepoCommits(
         '-C',
         repo.localPath,
         'log',
+        '--all',
+        '--source',
         `--max-count=${COMMITS_PER_REPO}`,
         '--date=iso-strict',
-        // record-sep, full hash, parent hashes, subject, committer date
-        `--format=${RECORD_SEP}%H${FIELD_SEP}%P${FIELD_SEP}%s${FIELD_SEP}%cI`,
+        // record-sep, full hash, source ref, parents, author, subject, date
+        `--format=${RECORD_SEP}%H${FIELD_SEP}%S${FIELD_SEP}%P${FIELD_SEP}%an${FIELD_SEP}%s${FIELD_SEP}%cI`,
       ],
       { timeout: 10_000, maxBuffer: 1024 * 1024 },
     );
@@ -149,14 +148,19 @@ async function collectRepoCommits(
     return [];
   }
 
-  const branch = await resolveBranch(repo.localPath);
-
   return stdout
     .split(RECORD_SEP)
     .map((chunk) => chunk.trim())
     .filter(Boolean)
     .map((chunk): MobileActivityEvent | null => {
-      const [sha = '', parents = '', subject = '', dateIso = ''] = chunk.split(FIELD_SEP);
+      const [
+        sha = '',
+        sourceRef = '',
+        parents = '',
+        author = '',
+        subject = '',
+        dateIso = '',
+      ] = chunk.split(FIELD_SEP);
       if (!sha) return null;
 
       const timestamp = Date.parse(dateIso);
@@ -164,12 +168,17 @@ async function collectRepoCommits(
 
       const shortHash = sha.slice(0, 7);
       const isMerge = parents.trim().split(/\s+/).filter(Boolean).length > 1;
+      const observedRef = displayObservedRef(sourceRef);
 
       return {
         id: `commit:${sha}`,
+        source: 'git',
+        commitSha: sha,
+        author: author.trim() || undefined,
+        observedRef,
         kind: isMerge ? 'merge' : 'commit',
         title: subject.trim() || '(no commit message)',
-        detail: branch ? `${branch} · ${shortHash}` : shortHash,
+        detail: observedRef ? `${observedRef} · ${shortHash}` : shortHash,
         previewUrl: previewUrlForRepo(repo.name, previewContext),
         repo: repo.name,
         timestamp,
@@ -248,6 +257,7 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
 
         return {
           id: `packet:${packet.id}`,
+          source: 'orchestrator',
           kind,
           title: title.slice(0, 160),
           detail: kind === 'huddle' ? 'Huddling — aligned its plan, awaiting orchestrator' : detail,

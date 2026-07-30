@@ -493,6 +493,21 @@ export interface MobileActivityEvent {
   /** Stable id — `commit:<sha>` for commits, `packet:<id>` for packet events. */
   id: string;
   /**
+   * Additive provenance for clients that distinguish observed repository work
+   * from activity initiated through o8's control plane. Older clients can
+   * ignore this field.
+   */
+  source?: 'git' | 'orchestrator';
+  /** Full commit SHA when source === 'git'. */
+  commitSha?: string;
+  /** Git author display name when source === 'git'. */
+  author?: string;
+  /**
+   * Ref through which Git surfaced the commit, e.g. `main`,
+   * `agent/mobile-activity`, or `origin/main`.
+   */
+  observedRef?: string;
+  /**
    *   - `commit`          — a non-merge git commit.
    *   - `merge`           — a git merge commit (>1 parent) or a released packet.
    *   - `dispatched`      — a packet that is launching / running.
