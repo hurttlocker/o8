@@ -105,6 +105,10 @@ o8 is built like every pixel matters, because you stare at a control room all da
 
 Community: [Discord](https://discord.gg/gH3UbbTJ7k) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt) <!-- TODO(launch): confirm handle for launch -->
 
+## Third-party code
+
+o8 builds on open-source libraries and adapted works. See [`NOTICE.md`](./NOTICE.md) for their authors, upstream sources, and license terms.
+
 ## License
 
 MIT © Rainwater. The o8 name and logo are trademarks of Rainwater.
