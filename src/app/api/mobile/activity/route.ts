@@ -9,9 +9,10 @@ export const dynamic = 'force-dynamic';
  *
  * Primary data source: recent git commits across every repo in o8's registry
  * (`~/.o8/repos.json`, via `listRepos()`). One bounded, read-only
- * `git log --all --source` per repo observes commits reachable from every
- * local ref — merge commits (>1 parent) become `kind: "merge"`, everything
- * else `commit`.
+ * `git log --all --source --numstat` per repo observes commits reachable from
+ * every local ref, with exact aggregate diffstats and a bounded file-path
+ * sample — merge commits (>1 parent) become `kind: "merge"`, everything else
+ * `commit`.
  *
  * Bonus data source: orchestrator packet lifecycle. `syncOrchestratorControlPlaneState`
  * is read once and each packet contributes a single event (keyed off its
@@ -42,6 +43,10 @@ const execFileAsync = promisify(execFile);
 const MAX_EVENTS = 40;
 /** Commits pulled per repo before the global newest-first cap is applied. */
 const COMMITS_PER_REPO = 20;
+/** File paths retained on each commit event; aggregate stats still cover all files. */
+const RELATED_FILES_PER_COMMIT = 8;
+/** Bound concurrent Git children without silently omitting registered repos. */
+const REPO_GIT_CONCURRENCY = 4;
 
 const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' };
 
@@ -51,7 +56,11 @@ const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' };
 const RECORD_SEP = '';
 const FIELD_SEP = '';
 
+const STAT_SEP = '\u001d';
+
 interface RepoTarget {
+  /** Stable registry id. Missing only for the process.cwd() fallback. */
+  id?: string;
   /** Absolute repo root. */
   localPath: string;
   /** Short repo name, e.g. "o8". */
@@ -96,6 +105,7 @@ async function resolveRepoTargets(): Promise<RepoTarget[]> {
     const repos = await listRepos();
     if (repos.length > 0) {
       return repos.map((repo) => ({
+        id: repo.id,
         localPath: repo.localPath,
         name: repo.name || path.basename(repo.localPath),
       }));
@@ -115,6 +125,43 @@ function displayObservedRef(sourceRef: string): string | undefined {
   if (ref.startsWith('refs/remotes/')) return ref.slice('refs/remotes/'.length);
   if (ref.startsWith('refs/tags/')) return `tag:${ref.slice('refs/tags/'.length)}`;
   return ref;
+}
+
+function numstatCount(value: string | undefined): number {
+  if (!value || value === '-') return 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function parseCommitEvidence(rawStats: string): Pick<
+  MobileActivityEvent,
+  'filesChanged' | 'additions' | 'deletions' | 'relatedFiles' | 'relatedFilesTruncated'
+> {
+  let filesChanged = 0;
+  let additions = 0;
+  let deletions = 0;
+  const relatedFiles: string[] = [];
+
+  for (const rawLine of rawStats.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const [additionsRaw, deletionsRaw, ...pathParts] = line.split('\t');
+    const filePath = pathParts.join('\t').trim();
+    if (!filePath || additionsRaw === undefined || deletionsRaw === undefined) continue;
+
+    filesChanged += 1;
+    additions += numstatCount(additionsRaw);
+    deletions += numstatCount(deletionsRaw);
+    if (relatedFiles.length < RELATED_FILES_PER_COMMIT) relatedFiles.push(filePath);
+  }
+
+  return {
+    filesChanged,
+    additions,
+    deletions,
+    relatedFiles,
+    relatedFilesTruncated: filesChanged > relatedFiles.length,
+  };
 }
 
 /**
@@ -138,10 +185,17 @@ async function collectRepoCommits(
         '--source',
         `--max-count=${COMMITS_PER_REPO}`,
         '--date=iso-strict',
-        // record-sep, full hash, source ref, parents, author, subject, date
-        `--format=${RECORD_SEP}%H${FIELD_SEP}%S${FIELD_SEP}%P${FIELD_SEP}%an${FIELD_SEP}%s${FIELD_SEP}%cI`,
+        // Header fields end at stat-sep; numstat rows follow until next record.
+        `--format=${RECORD_SEP}%H${FIELD_SEP}%S${FIELD_SEP}%P${FIELD_SEP}%an${FIELD_SEP}%s${FIELD_SEP}%cI${STAT_SEP}`,
+        '--numstat',
+        '--find-renames',
+        '--diff-merges=first-parent',
       ],
-      { timeout: 10_000, maxBuffer: 1024 * 1024 },
+      {
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, LC_ALL: 'C' },
+      },
     );
     stdout = result.stdout;
   } catch {
@@ -153,6 +207,7 @@ async function collectRepoCommits(
     .map((chunk) => chunk.trim())
     .filter(Boolean)
     .map((chunk): MobileActivityEvent | null => {
+      const [rawHeader = '', rawStats = ''] = chunk.split(STAT_SEP);
       const [
         sha = '',
         sourceRef = '',
@@ -160,7 +215,7 @@ async function collectRepoCommits(
         author = '',
         subject = '',
         dateIso = '',
-      ] = chunk.split(FIELD_SEP);
+      ] = rawHeader.split(FIELD_SEP);
       if (!sha) return null;
 
       const timestamp = Date.parse(dateIso);
@@ -169,10 +224,12 @@ async function collectRepoCommits(
       const shortHash = sha.slice(0, 7);
       const isMerge = parents.trim().split(/\s+/).filter(Boolean).length > 1;
       const observedRef = displayObservedRef(sourceRef);
+      const evidence = parseCommitEvidence(rawStats);
 
       return {
         id: `commit:${sha}`,
         source: 'git',
+        repoId: repo.id,
         commitSha: sha,
         author: author.trim() || undefined,
         observedRef,
@@ -181,10 +238,38 @@ async function collectRepoCommits(
         detail: observedRef ? `${observedRef} · ${shortHash}` : shortHash,
         previewUrl: previewUrlForRepo(repo.name, previewContext),
         repo: repo.name,
+        ...evidence,
         timestamp,
       };
     })
     .filter((event): event is MobileActivityEvent => event !== null);
+}
+
+async function collectRepoEvents(
+  repos: RepoTarget[],
+  previewContext: PreviewContext,
+): Promise<MobileActivityEvent[][]> {
+  const results = Array.from(
+    { length: repos.length },
+    () => [] as MobileActivityEvent[],
+  );
+  let nextIndex = 0;
+
+  const workers = Array.from(
+    { length: Math.min(REPO_GIT_CONCURRENCY, repos.length) },
+    async () => {
+      while (nextIndex < repos.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const repo = repos[index];
+        results[index] = repo
+          ? await collectRepoCommits(repo, previewContext)
+          : [];
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 /**
@@ -283,16 +368,16 @@ export async function GET(request: Request) {
     const repos = await resolveRepoTargets();
     const previewContext = previewContextFromRequest(request);
 
-    // Commits across all repos run in parallel; one failing repo cannot sink
-    // the feed (allSettled + per-repo try/catch inside collectRepoCommits).
+    // Git work is four-way bounded; one failing repo cannot sink the feed
+    // because collectRepoCommits degrades that repo to an empty result.
     const [commitResults, packetEvents] = await Promise.all([
-      Promise.allSettled(repos.map((repo) => collectRepoCommits(repo, previewContext))),
+      collectRepoEvents(repos, previewContext),
       collectPacketEvents(previewContext),
     ]);
 
     const events: MobileActivityEvent[] = [];
     for (const result of commitResults) {
-      if (result.status === 'fulfilled') events.push(...result.value);
+      events.push(...result);
     }
     events.push(...packetEvents);
 

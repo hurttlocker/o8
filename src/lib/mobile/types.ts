@@ -498,6 +498,8 @@ export interface MobileActivityEvent {
    * ignore this field.
    */
   source?: 'git' | 'orchestrator';
+  /** Stable tracked-repository id when the event came from the repo registry. */
+  repoId?: string;
   /** Full commit SHA when source === 'git'. */
   commitSha?: string;
   /** Git author display name when source === 'git'. */
@@ -507,6 +509,16 @@ export interface MobileActivityEvent {
    * `agent/mobile-activity`, or `origin/main`.
    */
   observedRef?: string;
+  /** Exact aggregate file count reported by Git for this commit. */
+  filesChanged?: number;
+  /** Exact text-line additions reported by Git; binary files contribute zero. */
+  additions?: number;
+  /** Exact text-line deletions reported by Git; binary files contribute zero. */
+  deletions?: number;
+  /** Bounded sample of Git-reported paths touched by this commit. */
+  relatedFiles?: string[];
+  /** True when relatedFiles omits paths beyond its server-side cap. */
+  relatedFilesTruncated?: boolean;
   /**
    *   - `commit`          — a non-merge git commit.
    *   - `merge`           — a git merge commit (>1 parent) or a released packet.
