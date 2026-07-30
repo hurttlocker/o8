@@ -144,12 +144,13 @@ describe('orchestrator thread history persistence', () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Alpha' });
     const filePath = history.safeOrchestratorHistoryPath(thread.id);
+    const cachedAtSeconds = Math.floor(statSync(filePath).mtimeMs / 1000) - 1;
+    utimesSync(filePath, cachedAtSeconds, cachedAtSeconds);
 
     expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Alpha');
-    const originalStat = statSync(filePath);
     const raw = readFileSync(filePath, 'utf-8');
     writeFileSync(filePath, raw.replace('"Alpha"', '"Bravo"'));
-    utimesSync(filePath, originalStat.atimeMs / 1000, originalStat.mtimeMs / 1000);
+    utimesSync(filePath, cachedAtSeconds, cachedAtSeconds);
 
     expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Alpha');
     writeFileSync(filePath, raw.replace('"Alpha"', '"Charlie"'));

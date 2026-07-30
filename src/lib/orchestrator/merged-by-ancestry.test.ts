@@ -26,6 +26,13 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'o8-test',
+      GIT_AUTHOR_EMAIL: 'o8@example.test',
+      GIT_COMMITTER_NAME: 'o8-test',
+      GIT_COMMITTER_EMAIL: 'o8@example.test',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 }

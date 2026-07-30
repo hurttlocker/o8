@@ -24,6 +24,10 @@ vi.mock('@/lib/runtime/actions', () => ({
   }),
 }));
 
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
+  assertRuntimeDispatchable: vi.fn(async () => undefined),
+}));
+
 function createTempRepo() {
   const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-mission-registry-repo-'));
   tempDirs.push(repoPath);

@@ -25,6 +25,10 @@ vi.mock('@/lib/runtime/actions', () => ({
   }),
 }));
 
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
+  assertRuntimeDispatchable: vi.fn(async () => undefined),
+}));
+
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { readDispatchHaltState, setDispatchHaltState } = await import('@/lib/orchestrator/dispatch-halt');

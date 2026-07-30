@@ -31,6 +31,7 @@ import { join } from 'node:path';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 import { hermesAddArgs, openclawSetPayload } from '@/lib/mcp/external-client-args';
+import { resolveShell } from '@/lib/process/resolve-shell';
 
 const execFileAsync = promisify(execFile);
 
@@ -61,7 +62,7 @@ function resolveCli(name: string): string | null {
   // Login-shell probe — picks up ~/.zshrc / ~/.profile additions that
   // Finder-launched apps don't inherit.
   try {
-    const shell = process.env.SHELL || '/bin/zsh';
+    const shell = resolveShell();
     const out = execFileSync(shell, ['-lc', `command -v ${name}`], {
       encoding: 'utf-8',
     }).trim();

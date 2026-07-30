@@ -16,6 +16,7 @@ import { safeJoinReal } from '@/lib/fs/safe-path';
 import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
 import { resolveTerminalWorkingDirectory } from '@/lib/llm/terminal-working-directory';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { resolveShell } from '@/lib/process/resolve-shell';
 export { canonicalizeTerminalToolArgs, terminalApprovalSummary } from '@/lib/llm/terminal-working-directory';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
@@ -592,7 +593,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
       cwd: workDir,
       maxBuffer: 1024 * 1024, // 1MB buffer
       env: { ...terminalToolEnv(), FORCE_COLOR: '0', NO_COLOR: '1' }, // no ANSI or inherited credentials
-      shell: '/bin/zsh',
+      shell: resolveShell(),
     });
 
     let result = output.trim();
