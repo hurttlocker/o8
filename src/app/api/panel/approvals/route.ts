@@ -40,6 +40,19 @@ function mergeDecisionNotes(...notes: Array<string | null | undefined>) {
 }
 
 /**
+ * A stored `diff` preview averages ~12KB per approval, so a broad list of a real
+ * machine's history carries megabytes of diffs nothing on screen reads — measured
+ * 2026-07-29: `?status=all` returned 7.9MB across 468 rows, 5.6MB of it diffs, and four
+ * separate pollers request it during a single dashboard boot. List callers render
+ * summaries; the diff belongs to the surface that opens one approval. Context queries
+ * (packetId / laneId) keep it, since those ARE the detail lookups, and any caller can ask
+ * for it explicitly with `include=diff`.
+ */
+function stripDiffPreviews<T extends { diff?: unknown }>(approvals: T[]): T[] {
+  return approvals.map(({ diff: _diff, ...rest }) => rest as T);
+}
+
+/**
  * GET /api/panel/approvals — list pending approvals from the shared queue.
  */
 export async function GET(request: NextRequest) {
@@ -48,12 +61,16 @@ export async function GET(request: NextRequest) {
   const laneId = request.nextUrl.searchParams.get('laneId')?.trim() || undefined;
   const statusParam = request.nextUrl.searchParams.get('status')?.trim() || 'pending';
   const status = statusParam === 'all' ? 'all' : 'pending';
-  const approvals = (packetId || laneId)
+  const isContextQuery = Boolean(packetId || laneId);
+  const includeDiff = request.nextUrl.searchParams.get('include')?.trim() === 'diff';
+  const approvals = isContextQuery
     ? listApprovalsForContext({ packetId, laneId, sessionKey })
       .filter((approval) => status === 'all' || approval.status === status)
     : listApprovals({ status, sessionKey });
 
-  return NextResponse.json({ approvals }, {
+  return NextResponse.json({
+    approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
+  }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
 }
