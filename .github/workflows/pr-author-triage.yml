@@ -1,0 +1,86 @@
+name: PR author triage
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+concurrency:
+  group: pr-author-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label external authors
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const association = context.payload.pull_request.author_association;
+            const trusted = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const firstTime = new Set(['FIRST_TIMER', 'FIRST_TIME_CONTRIBUTOR']);
+            const definitions = [
+              {
+                name: 'triage/external-author',
+                color: 'D4C5F9',
+                description: 'Pull request from an author without repository collaboration access',
+              },
+              {
+                name: 'triage/first-time-author',
+                color: 'C5DEF5',
+                description: 'First pull request from this author',
+              },
+            ];
+
+            for (const label of definitions) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description,
+                });
+              }
+            }
+
+            const desired = new Set();
+            if (!trusted.has(association)) desired.add('triage/external-author');
+            if (firstTime.has(association)) desired.add('triage/first-time-author');
+
+            const current = new Set(
+              context.payload.pull_request.labels.map((label) => label.name),
+            );
+            for (const label of definitions) {
+              if (desired.has(label.name)) {
+                if (!current.has(label.name)) {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.payload.pull_request.number,
+                    labels: [label.name],
+                  });
+                }
+              } else if (current.has(label.name)) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  name: label.name,
+                }).catch((error) => {
+                  if (error.status !== 404) throw error;
+                });
+              }
+            }

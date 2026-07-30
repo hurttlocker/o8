@@ -1,0 +1,77 @@
+name: PR size
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label by diff size
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const labels = [
+              { name: 'size/XS', max: 9, color: '3CBF00' },
+              { name: 'size/S', max: 49, color: '5DCE58' },
+              { name: 'size/M', max: 249, color: 'FBCA04' },
+              { name: 'size/L', max: 999, color: 'D93F0B' },
+              { name: 'size/XL', max: Number.POSITIVE_INFINITY, color: 'B60205' },
+            ];
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const changes = files.reduce((total, file) => total + file.changes, 0);
+            const selected = labels.find((label) => changes <= label.max);
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: `Pull request with ${label.name.slice(5)} diff size`,
+                });
+              }
+            }
+
+            const current = context.payload.pull_request.labels.map((label) => label.name);
+            for (const name of current.filter((name) => name.startsWith('size/') && name !== selected.name)) {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name,
+              }).catch((error) => {
+                if (error.status !== 404) throw error;
+              });
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: [selected.name],
+            });
