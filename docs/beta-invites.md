@@ -68,7 +68,7 @@ follow-up.
    `DATABASE_URL=… npm run db:push`). Smoke:
    `curl $URL/invites/o8_0123456789abcdefABCDEF` →
    `{"valid":false,"reason":"not_found"}` (404).
-2. **Vercel (o8-site):** set `INVITE_SERVICE_URL=https://<railway-url>`;
+2. **Vercel (o8-site):** set `INVITE_SERVICE_URL=https://api.o8.run`;
    `git push` (auto-deploys to o8.run).
 3. **Desktop:** set `O8_INVITE_SERVICE_URL` + `O8_INVITE_REGISTER_TOKEN`
    (matching step 1) in the build env; `npm run ship`.

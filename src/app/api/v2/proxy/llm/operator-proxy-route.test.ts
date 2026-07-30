@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
+
 // Report BCJBBJ: on a packaged install the free o8 model died with a raw
 // "set OPENROUTER_API_KEY…" error because the operator route only read
 // process.env. A signed-in founder is entitled to o8-managed inference (the
@@ -50,7 +52,7 @@ describe('operator managed-proxy endpoint override', () => {
     const res = await streamOpenRouterFallback({
       apiKey: 'UNUSED-should-not-appear',
       endpoint: {
-        url: 'https://o8-license-server-production.up.railway.app/v1/inference',
+        url: `${DEFAULT_O8_API_BASE_URL}/v1/inference`,
         headers: { Authorization: 'Bearer plan.token.jwt' },
       },
       messages: [{ role: 'user', content: 'hey' }],
@@ -61,7 +63,7 @@ describe('operator managed-proxy endpoint override', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0];
-    expect(url).toBe('https://o8-license-server-production.up.railway.app/v1/inference');
+    expect(url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/inference`);
     const headers = (init as { headers: Record<string, string> }).headers;
     expect(headers.Authorization).toBe('Bearer plan.token.jwt');
     // The raw OpenRouter key must NOT leak into the proxy request.
