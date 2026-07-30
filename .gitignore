@@ -80,3 +80,8 @@ tests/qa-eval/three-way-results-*.json
 # Private services live in their own repos (o8-license-server, o8-relay).
 # Local working copies may remain on a maintainer machine — never re-add them.
 services/
+
+# Private knowledge the Engineering Brain ingests locally but the public repo never sees.
+# spec-ingest walks the filesystem (not git), so these stay searchable by the Brain
+# while remaining untracked. Do NOT remove this ignore or force-add these files.
+docs/private/
