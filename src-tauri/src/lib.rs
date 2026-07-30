@@ -5033,9 +5033,9 @@ async fn agent_eval(
     Ok(agent::eval::run_eval(app, models.unwrap_or_default()).await)
 }
 
-/// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
-/// currently-focused 3rd-party app, so paste-into-frontmost is verifiable
-/// without the global Fn hotkey. macOS only.
+/// Compatibility fallback for legacy desktop shells: paste dictation text into
+/// the currently focused app when the web layer has no in-app insertion target.
+/// Invocation is restricted to the main window. macOS only.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn o8_debug_paste(window: tauri::Window, text: String) -> Result<(), String> {
