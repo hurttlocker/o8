@@ -3,18 +3,19 @@
 /**
  * DictationPill — the on-screen voice HUD.
  *
- * This is a React/inline-style port of Symon's (aqua-color) dictation
- * overlay — the glass pill, the colorful EQ wave-bar, the live partial
- * transcript tail (lead/fresh word split + blinking cursor), the audio
- * level meter, and the squiggle "polishing" loader. The look (colors,
- * gradients, geometry, motion) is lifted as-is from Symon's Svelte
+ * This React/inline-style implementation originated in the aqua/Symon
+ * application, which o8's operator acquired and owns outright. It adapts the
+ * original dictation overlay to o8: the glass pill, the colorful EQ wave-bar,
+ * the live partial transcript tail (lead/fresh word split + blinking cursor),
+ * the audio level meter, and the squiggle "polishing" loader. Its visual design
+ * (colors, gradients, geometry, and motion) comes from these owned Svelte
  * components:
  *   - Pill.svelte            (container shape + per-state glow + layers)
  *   - SymonPillWaveform.svelte (centered-bulge gaussian EQ canvas)
  *   - SquiggleLoader.svelte   (dash-animated wave path)
  *
  * NOTE (operator directive): the literal color values below mirror Symon's
- * palette verbatim and are a documented TEMPORARY exception to the
+ * palette exactly and are a documented TEMPORARY exception to the
  * "theme tokens, never raw rgba" rule. We reconcile to var(--t-*) later.
  * Keeping the literals here is how we preserve Symon's exact LOOK while
  * obeying the inline-styles-only rule (no CSS classes).
@@ -60,7 +61,7 @@ const WEIGHTS = (() => {
 const EQ_EMPHASIS_HOT = 1;
 const EQ_EMPHASIS_COOL = 0.86;
 
-// ── Symon notch idle sliver (verbatim from NotchSurface.svelte `.ndock--idle`) ──
+// ── Symon notch idle sliver (from the owned NotchSurface.svelte `.ndock--idle`) ──
 // The compact always-on idle capsule the screen dock paints at the top of the
 // screen when nothing is happening: a 128×16 brand-gradient sliver. Literal
 // Symon colors (documented temporary exception, see file header).
@@ -113,7 +114,7 @@ interface DictationPillViewProps {
 interface AnchorPos { left: number; bottom: number }
 
 /**
- * SymonWaveCanvas — the centered-bulge gaussian EQ, ported 1:1 from
+ * SymonWaveCanvas — the centered-bulge gaussian EQ, adapted from the owned
  * SymonPillWaveform.svelte. Drives off the live audio level + an ambient
  * shimmer so it's never dead-flat while listening.
  */
@@ -248,8 +249,8 @@ function SymonWaveCanvas({
 }
 
 /**
- * SquiggleLoader — ported from SquiggleLoader.svelte. Dash-animated wave
- * path stroked with the Symon brand gradient. Used for transcribing/polishing.
+ * SquiggleLoader — adapted from the owned SquiggleLoader.svelte. Dash-animated
+ * wave path stroked with the Symon brand gradient. Used for transcribing/polishing.
  */
 const SQUIGGLE_PATH =
   'M8 28C32 22 48 14 72 14C96 14 108 34 132 34C156 34 170 12 198 12C230 12 238 38 272 38C304 38 316 18 344 18C372 18 388 28 408 28';
@@ -351,7 +352,7 @@ export function DictationPillView({ snapshot, onCancel, hideCancel, persistentId
 
   const label = useMemo(() => stateLabel(state, error), [state, error]);
 
-  // ── Per-state glow / border tint (verbatim from Pill.svelte) ──
+  // ── Per-state glow / border tint (from the owned Pill.svelte) ──
   const glow = isError
     ? { border: '#ef4444', shadow: '0 0 0 1px rgba(239, 68, 68, 0.18), 0 16px 40px rgba(239, 68, 68, 0.22)' }
     : isSuccess

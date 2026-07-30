@@ -1,12 +1,14 @@
 //! Clipboard + simulated paste for o8.
 //!
-//! Lifted wholesale from aqua/Symon and de-Symonized. Captures the frontmost
-//! app before dictation starts, then reactivates it and pastes on Fn release.
+//! This code originated in the aqua/Symon application, which o8's operator
+//! acquired and owns outright. It captures the frontmost app before dictation
+//! starts, then reactivates it and pastes on Fn release.
 
 // Several helpers (read_selected_text_via_accessibility, simulate_cmd_c,
-// read_clipboard_text, activate_frontmost_app, …) are part of the verbatim
-// lift but not all wired into a caller in P0-P2. Keep them so the module stays
-// faithful to the source; allow dead_code rather than deleting public API.
+// read_clipboard_text, activate_frontmost_app, …) remain from the acquired
+// aqua/Symon implementation but are not all wired into a caller in P0-P2. Keep
+// them so the module's public API remains intact; allow dead_code rather than
+// deleting it.
 #![allow(dead_code)]
 
 use std::process::Command;
@@ -1457,8 +1459,8 @@ fn wait_for_chord_release() {
 /// Read the user's current text selection (voice P4 "say" / speak-selection).
 /// Strategy 1: Accessibility `AXSelectedText` (no clipboard touch). Strategy 2:
 /// synthesize Cmd+C, poll the clipboard ≤180ms (10ms cadence), read it, then
-/// restore the user's original clipboard. Ported from aqua/Symon
-/// `reading.rs::grab_selection` — the 180ms/10ms/accept-rule are verbatim.
+/// restore the user's original clipboard. Adapted from the owned aqua/Symon
+/// `reading.rs::grab_selection`; the 180ms/10ms/accept-rule values are unchanged.
 #[cfg(target_os = "macos")]
 /// Read the frontmost terminal's VISIBLE text tail via AX — the "read what
 /// Claude just said" path. In a Claude Code TUI, mouse reporting eats
