@@ -3,7 +3,9 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import { count, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 
+import { MANAGED_ASK_MAX_BODY_BYTES } from './ask-policy.js';
 import { db } from './db/client.js';
 import { runStartupMigrations } from './db/migrate.js';
 import { entitlementEvents, founders, subscriptions } from './db/schema.js';
@@ -17,7 +19,7 @@ import {
   registerInvite,
   resolveInvite,
 } from './invites.js';
-import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
+import { handleAsk, handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
 import { handleAnalytics, handleSiteEvent, handleTelemetry } from './analytics.js';
 import { handleIssueFree } from './free-issue.js';
 import { handleAccountLicense } from './account-license.js';
@@ -169,6 +171,14 @@ app.post('/validate-entitlement', async (c) => {
 
 // ── Managed-inference proxy (Step 1) — plan-token auth + per-account cap ──────
 app.post('/v1/inference', handleInference);
+app.post(
+  '/v1/ask',
+  bodyLimit({
+    maxSize: MANAGED_ASK_MAX_BODY_BYTES,
+    onError: (c) => c.json({ error: 'Ask request is too large' }, 413),
+  }),
+  handleAsk,
+);
 app.post('/v1/embeddings', handleEmbeddings);
 app.post('/v1/gemini', handleGeminiGenerate);
 app.post('/v1/transcribe', handleTranscribe);

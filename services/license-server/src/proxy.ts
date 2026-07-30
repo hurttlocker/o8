@@ -6,6 +6,14 @@ import type { Context } from 'hono';
 import { db } from './db/client.js';
 import { proxyUsage } from './db/schema.js';
 import { env } from './env.js';
+import {
+  MANAGED_ASK_MAX_BODY_BYTES,
+  MANAGED_ASK_MAX_TOKENS,
+  applyInferencePlanPolicy,
+  managedAskModels,
+  sanitizeManagedAskRequest,
+  shouldTryNextManagedAskModel,
+} from './ask-policy.js';
 import type { Plan } from './mint.js';
 import { validateEntitlement } from './validate.js';
 
@@ -271,6 +279,7 @@ export async function handleInference(c: Context): Promise<Response> {
   } catch {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
+  body = applyInferencePlanPolicy(plan, body);
 
   // Always ask OpenRouter to report the call's cost so we meter exact dollars.
   body.usage = { include: true };
@@ -315,6 +324,115 @@ export async function handleInference(c: Context): Promise<Response> {
 
   // Streaming: pass the SSE through unchanged, meter the final usage chunk.
   if (!upstream.body) return c.json({ error: 'upstream returned no stream' }, 502);
+  const metered = meterStream(upstream.body, (cost, model, pt, ct) => {
+    void recordUsage({
+      sub,
+      plan,
+      kind: 'inference',
+      model,
+      costMicroUsd: usdToMicro(cost),
+      promptTokens: pt,
+      completionTokens: ct,
+    });
+  });
+  return new Response(metered, {
+    status: upstream.status,
+    headers: {
+      'Content-Type': upstream.headers.get('content-type') ?? 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+  });
+}
+
+/** POST /v1/ask — bounded consumer chat with server-owned free-model routing. */
+export async function handleAsk(c: Context): Promise<Response> {
+  const auth = await authPlan(c);
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status);
+  const { plan, sub } = auth;
+
+  if (!env.OPENROUTER_API_KEY) {
+    return c.json({ error: 'Ask upstream not configured' }, 503);
+  }
+
+  const spent = await todaySpendMicroUsd(sub);
+  const cap = DAILY_CAP_MICRO_USD[plan];
+  if (spent >= cap) return overCap(c, plan, spent, cap);
+
+  const contentLength = Number(c.req.header('content-length') ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MANAGED_ASK_MAX_BODY_BYTES) {
+    return c.json({ error: 'Ask request is too large' }, 413);
+  }
+
+  let rawBody: unknown;
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+  const parsed = sanitizeManagedAskRequest(rawBody);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+  const { messages, stream, hasImages } = parsed.request;
+  const models = managedAskModels(hasImages);
+  let upstream: Response | null = null;
+
+  for (const [index, model] of models.entries()) {
+    try {
+      const candidate = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+          'HTTP-Referer': 'https://o8.run',
+          'X-Title': 'o8 Ask',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream,
+          max_tokens: MANAGED_ASK_MAX_TOKENS,
+          usage: { include: true },
+          ...(stream ? { stream_options: { include_usage: true } } : {}),
+        }),
+      });
+      upstream = candidate;
+      if (
+        candidate.ok
+        || !shouldTryNextManagedAskModel(candidate.status)
+        || index === models.length - 1
+      ) {
+        break;
+      }
+      await candidate.text().catch(() => undefined);
+    } catch {
+      if (index === models.length - 1) {
+        return c.json({ error: 'Ask upstream unavailable' }, 502);
+      }
+    }
+  }
+
+  if (!upstream) return c.json({ error: 'Ask upstream unavailable' }, 502);
+  if (!upstream.ok) return forwardUpstreamError(upstream);
+
+  if (!stream) {
+    const json = (await upstream.json()) as {
+      model?: string;
+      usage?: { cost?: number; prompt_tokens?: number; completion_tokens?: number };
+    };
+    const cost = typeof json.usage?.cost === 'number' ? json.usage.cost : 0;
+    await recordUsage({
+      sub,
+      plan,
+      kind: 'inference',
+      model: json.model,
+      costMicroUsd: usdToMicro(cost),
+      promptTokens: json.usage?.prompt_tokens,
+      completionTokens: json.usage?.completion_tokens,
+    });
+    return c.json(json);
+  }
+
+  if (!upstream.body) return c.json({ error: 'Ask upstream returned no stream' }, 502);
   const metered = meterStream(upstream.body, (cost, model, pt, ct) => {
     void recordUsage({
       sub,

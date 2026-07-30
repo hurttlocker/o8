@@ -16,6 +16,7 @@
     "identity-test": "tsx scripts/identity-resolution-test.ts",
     "machines-test": "tsx scripts/machines-contract-test.ts",
     "machine-relay-test": "tsx scripts/machine-relay-contract-test.ts",
+    "ask-policy-test": "tsx scripts/ask-policy-test.ts",
     "db:push": "drizzle-kit push",
     "typecheck": "tsc --noEmit"
   },
