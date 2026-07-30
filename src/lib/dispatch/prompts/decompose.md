@@ -2,9 +2,9 @@ Decompose `{{targetFile}}` ({{lineCount}} lines) into smaller modules, each unde
 
 ## Context
 
-The file crossed the {{ceiling}}-line ceiling after merge `{{postMergeSha}}` (diff vs parent confirmed new lines were added). The governance pipeline caught this and enqueued you because the orchestrator should not have to babysit ceiling debt. You are running as a LOW-PRIORITY backup net — the merge that triggered this scan is already landed.
+The file crossed the {{ceiling}}-line ceiling after merge `{{postMergeSha}}` (diff vs parent confirmed new lines were added). The governance pipeline caught this and enqueued a LOW-PRIORITY maintenance packet because the merge that triggered this scan is already landed.
 
-On stronger tiers (Codex xhigh, Claude Opus 4.6+) the orchestrator typically decomposes during review and this scan finds nothing. On weaker tiers (gemini-flash, opencode-nano, Haiku) this packet IS the primary enforcement. Treat every run as the only thing standing between main and unmaintainable sprawl.
+Runtimes with proactive structural-review behavior typically decompose during review, so this scan finds nothing. For runtimes that benefit from explicit decomposition instructions, this packet IS the primary enforcement. Treat every run as the only thing standing between main and unmaintainable sprawl.
 
 ## Approach
 

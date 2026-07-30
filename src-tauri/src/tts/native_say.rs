@@ -19,13 +19,11 @@ fn preferred_male_voice() -> Option<&'static str> {
     use std::sync::OnceLock;
     static VOICE: OnceLock<Option<&'static str>> = OnceLock::new();
     *VOICE.get_or_init(|| {
-        // en-US male first (matches Steffan's accent), then en-GB male.
-        // NEVER Fred: it's the ancient robotic voice ("Stephen Hawking",
-        // report S9KT8H) yet it's pre-installed on every Mac while the good
-        // voices are downloads — with Fred in this list, a fresh laptop
-        // always landed on it. No candidate installed → return None and the
-        // caller omits -v entirely, so `say` uses the SYSTEM default voice
-        // (the user's own setting — natural, never the robot).
+        // Prefer en-US male voices, then en-GB male voices. Exclude Fred because
+        // it is a legacy robotic voice installed by default; including it causes
+        // fresh systems to select it before higher-quality downloadable voices.
+        // If no candidate is installed, return None so the caller omits -v and
+        // `say` uses the user's system-default voice.
         const CANDIDATES: &[&str] = &["Alex", "Aaron", "Tom", "Daniel", "Arthur", "Oliver", "Evan", "Nathan"];
         let listing = std::process::Command::new("say")
             .args(["-v", "?"])
