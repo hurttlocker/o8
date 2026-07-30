@@ -3,7 +3,7 @@
 **Status:** canonical build plan · 2026-06-07 · **internal** (exclude from the OSS mirror — see M7). Pairs with `docs/monetization-tiers.md` (the Free/Pro matrix).
 
 ## Architecture (the load-bearing insight)
-o8 ships as a signed `.dmg` — a runtime `if(plan==='pro')` protects nothing (untar the `.app`, read the JS). So **the moats must be PHYSICALLY ABSENT from the public OSS artifact**, not flag-hidden. Open-core resolves to: **one private monorepo (source of truth) + a scripted, allowlist-driven public mirror** (`hurttlocker/o8`) that copies only free-core paths. Pro dirs are never listed → never mirrored. Extends the existing `sync-changelog.yml` one-way push.
+o8 ships as a signed `.dmg` — a runtime `if(plan==='pro')` protects nothing (untar the `.app`, read the JS). So **the moats must be PHYSICALLY ABSENT from the public OSS artifact**, not flag-hidden. Open-core resolves to: **one private monorepo (source of truth) + a scripted, allowlist-driven public mirror** (`hurttlocker/o8`) that copies only free-core paths. Pro dirs are never listed → never mirrored.
 
 **Entitlement = dual-layer:** Layer 1 (truth) — a verifier in the OSS core checks a signed license JWT against a public key baked into source (same trust model as the Tauri updater; private key on Railway). Layer 2 (UX) — a client `EntitlementProvider` + `<Gate flag fallback={<UpgradePrompt/>}>`. In the OSS build the Pro modules are absent → dynamic import throws → falls back to free. **Server-gate the genuinely-valuable surfaces** (team, license validation, future cloud) — a cracked client can't fake those.
 

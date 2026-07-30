@@ -334,17 +334,6 @@ try {
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
 }
 
-// Public changelog sync — LOCAL is the primary path since 2026-07-11: the
-// Actions push-trigger burned billed minutes on a dead token, so the ship
-// flow owns it now. Non-fatal: a failed sync never blocks a release.
-try {
-  execFileSync('bash', ['scripts/sync-public-changelog.sh'], { stdio: 'inherit' });
-  console.log('[release] public changelog synced (local path)');
-} catch (err) {
-  console.error('[release] changelog sync failed (non-fatal):', err?.message ?? err);
-  console.error('[release] re-run manually: bash scripts/sync-public-changelog.sh');
-}
-
 console.log(`[release] the installed o8.app will pick up the update on next launch`);
 console.log(`[release] (or within 30 min via the UpdateBanner poll).`);
 
@@ -362,19 +351,11 @@ function resolveReleasesWebhook() {
 }
 
 /**
- * Bullets are the release range's feat/perf/design subjects — the same class
- * the public changelog ships — scrubbed against the blocklist parsed out of
- * sync-public-changelog.sh so there is no third hand-maintained term list.
- * A subject that trips a term is dropped, never rewritten. When the sync
- * script retires (repo public), the blocklist is empty and subjects post as-is.
+ * Bullets are the release range's public feat/perf/design subjects. A trailing
+ * parenthetical is stripped because commit-local context does not belong in a
+ * community announcement.
  */
 function composeReleaseAnnouncement() {
-  let blocklist = [];
-  try {
-    const sync = readFileSync(join(root, 'scripts/sync-public-changelog.sh'), 'utf8');
-    const inner = sync.match(/^BLOCKLIST=\((.*)\)/m)?.[1] ?? '';
-    blocklist = [...inner.matchAll(/"([^"]+)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
-  } catch {}
   let subjects = [];
   try {
     subjects = execFileSync('git', ['log', '--format=%s', '--no-merges', releaseRange(tag)], { encoding: 'utf8' })
@@ -390,7 +371,7 @@ function composeReleaseAnnouncement() {
       // ("(t3-connect answer)", codenames) — never community-facing.
       .replace(/\s*\([^)]*\)\s*$/, '')
       .trim())
-    .filter((s) => s && !blocklist.some((term) => s.toLowerCase().includes(term.toLowerCase())))
+    .filter(Boolean)
     .slice(0, 6)
     .map((s) => `- ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
   const date = new Date().toISOString().slice(0, 10);

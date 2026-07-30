@@ -594,9 +594,8 @@ and the agent annotates it, the reverse of the Roughdraft line above):
   3. The **format/spec** (CriticMarkup grammar, attribute names) is not copyrightable as
      such — implementing the same wire format is fine; the attribution above covers the
      copied implementation.
-  4. Public-changelog safety (CLAUDE.md): "roughdraft" is an external OSS name; if any
-     internal codename is introduced around this work, add it to the sync-changelog
-     blocklist. "roughdraft"/"CriticMarkup"/"RFM" themselves are public and fine.
+  4. Public release-note safety (CLAUDE.md): "roughdraft", "CriticMarkup", and "RFM"
+     are external OSS names and are safe to use in public attribution.
 
 ---
 
