@@ -658,7 +658,7 @@ function DashboardInner() {
   // mode the card paints --t-bg and lets the chrome flip own transparency +
   // light ink (matches the right O8Panel); in solid mode it keeps the opaque
   // --t-panel-solid paper + floating shadow with the normal base-token ink.
-  const { surface: themeSurface, setPalette, setReduceTransparency } = useTheme();
+  const { surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
   // Mount gate for surface-dependent INLINE styles. SSR can't read the client's
   // localStorage surface preference, so it always renders the 'solid' default;
@@ -4510,11 +4510,25 @@ function DashboardInner() {
           // the Settings toggle — loopback webview passes the gate).
           const { key, value } = (event.payload as { key?: string; value?: string });
           if (key === 'theme' && (value === 'dark' || value === 'light')) {
-            setPalette(value);
-            toast(`Theme set to ${value}.`, 'success');
+            // #1649: All Glass pins dark-over-glass — applying a palette under
+            // it while toasting success is a lie. Leave the mode, then apply.
+            if (workspaceGlass) {
+              setWorkspaceGlass(false);
+              setPalette(value);
+              toast(`Left All glass — theme set to ${value}.`, 'success');
+            } else {
+              setPalette(value);
+              toast(`Theme set to ${value}.`, 'success');
+            }
           } else if (key === 'surface' && (value === 'glass' || value === 'solid')) {
-            setReduceTransparency(value === 'solid' ? 'on' : 'off');
-            toast(`Surface set to ${value}.`, 'success');
+            if (workspaceGlass && value === 'solid') {
+              setWorkspaceGlass(false);
+              setReduceTransparency('on');
+              toast('Left All glass — surface set to solid.', 'success');
+            } else {
+              setReduceTransparency(value === 'solid' ? 'on' : 'off');
+              toast(`Surface set to ${value}.`, 'success');
+            }
           } else if (key === 'canvas_mode' && (value === 'on' || value === 'off')) {
             fetch('/api/panel/operator-defaults', {
               method: 'POST',
@@ -4559,7 +4573,7 @@ function DashboardInner() {
       disposed = true;
       if (unlisten) { try { unlisten(); } catch { /* noop */ } }
     };
-  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser, setThoughtsDraftInjection, setPalette, setReduceTransparency]);
+  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser, setThoughtsDraftInjection, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass]);
 
   // ── Voice P3: ⌘⇧, global shortcut → open the settings overlay ──
   // The Rust global-shortcut handler emits `o8:open-settings` (o8 settings is an

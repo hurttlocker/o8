@@ -498,7 +498,7 @@ export function SettingsQuickDrawer({
   const [helpOpen, setHelpOpen] = useState(false);
   const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
   const auth = useO8Auth();
-  const { paletteId, setPalette, surface, setReduceTransparency } = useTheme();
+  const { paletteId, setPalette, surface, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
   // CLI token telemetry is Founders-mode content (epic #1450) — visibility
   // only; the /api/panel/cli-usage route stays gated the same either way.
   const { founder, plan } = useEntitlement();
@@ -652,7 +652,7 @@ export function SettingsQuickDrawer({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 30, paddingLeft: 7, paddingRight: 7 }}>
             <IconFrame><ThemeContrastGlyph /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Appearance</span>
-            <AppearanceControl paletteId={paletteId} setPalette={setPalette} surface={surface} setReduceTransparency={setReduceTransparency} />
+            <AppearanceControl paletteId={paletteId} setPalette={setPalette} surface={surface} setReduceTransparency={setReduceTransparency} allGlass={workspaceGlass} onLeaveAllGlass={() => setWorkspaceGlass(false)} />
           </div>
 
           {foundersMode ? (

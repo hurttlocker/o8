@@ -270,11 +270,17 @@ export function AppearanceTab() {
               key={p.id}
               palette={p}
               active={paletteId === p.id}
-              onSelect={() => setPalette(p.id)}
+              onSelect={() => {
+                // #1649: a pick while All glass is on must not silently no-op —
+                // picking a palette IS the intent to use palettes, so it leaves
+                // the mode and applies in one click.
+                if (workspaceGlass) setWorkspaceGlass(false);
+                setPalette(p.id);
+              }}
             />
           ))}
         </div>
-        {workspaceGlass ? <GroupFootnote>{GLASS_LOCK_HINT}</GroupFootnote> : null}
+        {workspaceGlass ? <GroupFootnote>Locked by All glass — picking a palette turns All glass off and applies it</GroupFootnote> : null}
         {foundersMode ? (
           <GroupFootnote>More founders themes are on the way — they land here first.</GroupFootnote>
         ) : null}

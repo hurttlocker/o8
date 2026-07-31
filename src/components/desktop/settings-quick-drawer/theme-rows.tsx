@@ -72,30 +72,47 @@ export function GlassGlyph({ size = 13 }: { size?: number }) {
  * preference: glass = reduceTransparency 'off' (vibrancy chrome), off =
  * 'on' (opaque/solid chrome, the accessibility path). Palette flips never
  * touch the latch state — the two axes stay independent.
+ *
+ * While All Glass is active both axes are pinned by the mode (dark ink over
+ * glass, no light/dark). A control that accepts a click and changes nothing
+ * is the silent-failure class (#1649), so the pill renders visibly locked —
+ * dimmed, neither palette active, latch pinned on — and every click is the
+ * one-click path OUT: leave All Glass, then apply the pick.
  */
 export function AppearanceControl({
   paletteId,
   setPalette,
   surface,
   setReduceTransparency,
+  allGlass = false,
+  onLeaveAllGlass,
 }: {
   paletteId: PaletteId;
   setPalette: (id: PaletteId) => void;
   surface: SurfaceMode;
   setReduceTransparency: (v: ReduceTransparency) => void;
+  allGlass?: boolean;
+  onLeaveAllGlass?: () => void;
 }) {
-  const glassOn = surface === 'glass';
+  const glassOn = allGlass || surface === 'glass';
+  const pickPalette = (id: PaletteId) => {
+    if (allGlass) onLeaveAllGlass?.();
+    setPalette(id);
+  };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 8, background: SUBTLE_BG, flexShrink: 0 }}>
+    <div
+      title={allGlass ? 'Locked by All glass — any pick leaves All glass and applies' : undefined}
+      style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 8, background: SUBTLE_BG, flexShrink: 0, opacity: allGlass ? 0.45 : 1, transition: 'opacity 160ms' }}
+    >
       <SegmentButton
-        active={paletteId === 'light'}
-        onPick={() => setPalette('light')}
+        active={!allGlass && paletteId === 'light'}
+        onPick={() => pickPalette('light')}
         label="Light"
         glyph={<ThemeGlyphSun />}
       />
       <SegmentButton
-        active={paletteId === 'dark'}
-        onPick={() => setPalette('dark')}
+        active={!allGlass && paletteId === 'dark'}
+        onPick={() => pickPalette('dark')}
         label="Dark"
         glyph={<ThemeGlyphMoon />}
       />
@@ -103,9 +120,15 @@ export function AppearanceControl({
       <button
         type="button"
         aria-pressed={glassOn}
-        aria-label={glassOn ? 'Glass surface on' : 'Glass surface off'}
-        title={glassOn ? 'Glass surface — on' : 'Glass surface — off'}
-        onClick={() => setReduceTransparency(glassOn ? 'on' : 'off')}
+        aria-label={allGlass ? 'Glass pinned by All glass' : glassOn ? 'Glass surface on' : 'Glass surface off'}
+        title={allGlass ? 'Glass pinned by All glass — click to leave All glass' : glassOn ? 'Glass surface — on' : 'Glass surface — off'}
+        onClick={() => {
+          if (allGlass) {
+            onLeaveAllGlass?.();
+            return;
+          }
+          setReduceTransparency(glassOn ? 'on' : 'off');
+        }}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
