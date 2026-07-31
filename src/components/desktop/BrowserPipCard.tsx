@@ -27,18 +27,42 @@ import { isTauri } from '@/lib/tauri/bridge';
 export const BROWSER_PIP_EVENT = 'o8:browser-pip';
 
 const FONT = 'var(--font-sans-system)';
-const CARD_WIDTH = 300;
-const FRAME_HEIGHT = 470;
 const OPEN_DWELL_MS = 240;
 const CLOSE_GRACE_MS = 200;
-/** Fallback iframe renders at a real phone viewport, scaled to the card. */
-const MOBILE_VIEWPORT_WIDTH = 390;
+const ORIENTATION_KEY = 'o8:browser-pip-orientation';
+
+/**
+ * Two card shapes (operator ask 2026-07-31): TALL is a phone — the page
+ * renders at a real 390px viewport so sites show their MOBILE layout; WIDE
+ * is a desktop-style letterbox at a 1280px viewport. In Tauri the native
+ * window's viewport is simply the card box, so tall reads mobile naturally;
+ * the wide box is still narrow enough that heavy sites may keep tablet
+ * breakpoints — the iframe fallback is the exact-viewport path.
+ */
+const SHAPES = {
+  tall: { width: 300, frameHeight: 470, viewport: 390 },
+  wide: { width: 440, frameHeight: 264, viewport: 1280 },
+} as const;
+type PipOrientation = keyof typeof SHAPES;
 
 function PopOutGlyph() {
   return (
     <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
       <path d="M15 3h6v6M10 14L21 3" />
+    </svg>
+  );
+}
+
+/** Rotation toggle — shows the shape you would SWITCH TO. */
+function OrientationGlyph({ next }: { next: PipOrientation }) {
+  return next === 'tall' ? (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
+      <rect x="7" y="3" width="10" height="18" rx="2" />
+    </svg>
+  ) : (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="7" width="18" height="10" rx="2" />
     </svg>
   );
 }
@@ -58,6 +82,17 @@ export function BrowserPipCard({
   const [inTauri] = useState<boolean>(() => isTauri());
   const nativeEnabled = useNativeBrowserViewFlag() && inTauri;
   const [visible, setVisible] = useState(false);
+  const [orientation, setOrientation] = useState<PipOrientation>(() => {
+    if (typeof window === 'undefined') return 'tall';
+    try { return window.localStorage.getItem(ORIENTATION_KEY) === 'wide' ? 'wide' : 'tall'; } catch { return 'tall'; }
+  });
+  const toggleOrientation = useCallback(() => {
+    setOrientation((current) => {
+      const next: PipOrientation = current === 'tall' ? 'wide' : 'tall';
+      try { window.localStorage.setItem(ORIENTATION_KEY, next); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const cardHoverRef = useRef(false);
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
@@ -97,7 +132,8 @@ export function BrowserPipCard({
 
   const tab = tabs[0] ?? null;
   const show = active && visible && Boolean(tab);
-  const iframeScale = CARD_WIDTH / MOBILE_VIEWPORT_WIDTH;
+  const shape = SHAPES[orientation];
+  const iframeScale = shape.width / shape.viewport;
 
   return (
     <AnimatePresence>
@@ -120,7 +156,7 @@ export function BrowserPipCard({
             position: 'fixed',
             top: 52,
             right: 16,
-            width: CARD_WIDTH,
+            width: shape.width,
             zIndex: 1000,
             display: 'flex',
             flexDirection: 'column',
@@ -152,6 +188,27 @@ export function BrowserPipCard({
             >
               {tab.title || tab.host || tab.url}
             </span>
+            <button
+              type="button"
+              aria-label={orientation === 'tall' ? 'Switch to desktop-style view' : 'Switch to mobile-style view'}
+              title={orientation === 'tall' ? 'Desktop-style view' : 'Mobile-style view'}
+              onClick={toggleOrientation}
+              style={{
+                flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 24,
+                height: 24,
+                borderWidth: 0,
+                borderRadius: 6,
+                background: 'transparent',
+                color: 'var(--t-text-faint)',
+                cursor: 'pointer',
+              }}
+            >
+              <OrientationGlyph next={orientation === 'tall' ? 'wide' : 'tall'} />
+            </button>
             <button
               type="button"
               aria-label="Open in Browser tab"
@@ -198,7 +255,7 @@ export function BrowserPipCard({
               ×
             </button>
           </div>
-          <div style={{ position: 'relative', height: FRAME_HEIGHT, overflow: 'hidden', background: 'var(--t-canvas-bg)' }}>
+          <div style={{ position: 'relative', height: shape.frameHeight, overflow: 'hidden', background: 'var(--t-canvas-bg)' }}>
             {nativeEnabled ? (
               <NativeBrowserSurface url={tab.url} />
             ) : (
@@ -208,8 +265,8 @@ export function BrowserPipCard({
                   title="Browser preview"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   style={{
-                    width: MOBILE_VIEWPORT_WIDTH,
-                    height: FRAME_HEIGHT / iframeScale,
+                    width: shape.viewport,
+                    height: shape.frameHeight / iframeScale,
                     borderWidth: 0,
                     transform: `scale(${iframeScale})`,
                     transformOrigin: '0 0',
