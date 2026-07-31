@@ -15,7 +15,7 @@ import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
 import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
 import { assertPublicHttpUrl } from '@/lib/network/safe-url';
-import { BROWSER_NETWORK_CONTEXT_OPTIONS, installBrowserNetworkPolicy } from '@/lib/browser-engine/network-policy';
+import { BROWSER_NETWORK_CONTEXT_OPTIONS, installBrowserNetworkPolicy, installCaptureNetworkPolicy } from '@/lib/browser-engine/network-policy';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -102,6 +102,9 @@ class BrowserEngine {
   private browserPromise: Promise<Browser> | null = null;
   private sessions = new Map<string, EngineSession>();
   private reaper: ReturnType<typeof setInterval> | null = null;
+  /** In-flight one-shot captures — holds the shared browser open so a reap
+   *  triggered by one capture can't close it under the next (#1648). */
+  private activeCaptures = 0;
 
   private async browser(): Promise<Browser> {
     if (!this.browserPromise) {
@@ -170,8 +173,13 @@ class BrowserEngine {
       this.sessions.delete(scope);
       await session.context.close().catch(() => undefined);
     }
-    if (this.sessions.size === 0 && this.browserPromise) {
-      const browser = await this.browserPromise.catch(() => null);
+    if (this.sessions.size === 0 && this.activeCaptures === 0 && this.browserPromise) {
+      const promise = this.browserPromise;
+      const browser = await promise.catch(() => null);
+      // Re-check after the await: a capture can grab this same browser during
+      // the suspension, and closing it then kills the capture mid-flight
+      // (#1648 smoke caught exactly this interleaving).
+      if (this.sessions.size !== 0 || this.activeCaptures !== 0 || this.browserPromise !== promise) return;
       this.browserPromise = null;
       await browser?.close().catch(() => undefined);
       if (this.reaper) {
@@ -286,6 +294,61 @@ class BrowserEngine {
       { sel: selector, needle: text ?? null },
     ).catch(() => false);
     return found ? { ok: true, found: selector, surface: 'engine' } : { ok: false, pending: true };
+  }
+
+  /**
+   * One-shot proof capture for `o8 packet capture` (#1648) — replaces the
+   * external dev-browser spawn so a fresh machine needs nothing on PATH
+   * beyond Chrome. Runs in its OWN context with the capture egress policy
+   * (loopback allowed — the target is the agent's own dev server) and never
+   * touches the scoped sessions above. Interaction steps are best-effort by
+   * design: a missed hover shouldn't kill the proof shot.
+   */
+  async capture(opts: {
+    url: string;
+    waitFor?: string | null;
+    hover?: string | null;
+    click?: string | null;
+    clip?: string | null;
+    settleMs?: number;
+    fullPage?: boolean;
+  }): Promise<{ ok: true; pngBase64: string; width: number | null; height: number | null; url: string } | { ok: false; error: string }> {
+    const waitMs = 10_000;
+    let context: BrowserContext | null = null;
+    this.activeCaptures += 1;
+    try {
+      const browser = await this.browser();
+      context = await browser.newContext({ viewport: VIEWPORT, ...BROWSER_NETWORK_CONTEXT_OPTIONS });
+      await installCaptureNetworkPolicy(context);
+      const page = await context.newPage();
+      page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+      await page.goto(opts.url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      if (opts.waitFor) {
+        await page.waitForSelector(opts.waitFor, { state: 'visible', timeout: waitMs });
+        await page.locator(opts.waitFor).first().scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
+      }
+      if (opts.hover) await page.hover(opts.hover, { timeout: waitMs }).catch(() => undefined);
+      if (opts.click) await page.click(opts.click, { timeout: waitMs }).catch(() => undefined);
+      if (opts.settleMs && opts.settleMs > 0) await page.waitForTimeout(Math.min(10_000, opts.settleMs));
+      let shot: Buffer;
+      if (opts.clip) {
+        const target = page.locator(opts.clip).first();
+        await target.scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
+        shot = await target.screenshot({ type: 'png' });
+      } else {
+        shot = await page.screenshot({ type: 'png', fullPage: Boolean(opts.fullPage) });
+      }
+      const vp = page.viewportSize();
+      return { ok: true, pngBase64: shot.toString('base64'), width: vp?.width ?? null, height: vp?.height ?? null, url: page.url() };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'capture failed' };
+    } finally {
+      await context?.close().catch(() => undefined);
+      this.activeCaptures -= 1;
+      // A capture may be the only engine use this process ever sees — let the
+      // idle reaper logic decide whether the shared browser should live on.
+      void this.reapIdle();
+    }
   }
 
   /** Live-view frame for the canvas card — jpeg keeps polling cheap. */
