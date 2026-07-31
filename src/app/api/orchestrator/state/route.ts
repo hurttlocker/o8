@@ -7,6 +7,7 @@ import {
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { findLaneByPacket } from '@/lib/lane/registry';
+import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import type {
   OrchestratorMissionState,
@@ -215,6 +216,17 @@ export async function PATCH(req: NextRequest) {
       return buildErrorResponse('packetId and a non-empty updates object are required.', 400);
     }
 
+    const statusRejection = packetStatusWriteRejection(updates);
+    if (statusRejection) {
+      return NextResponse.json(
+        { error: statusRejection },
+        {
+          status: 422,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        },
+      );
+    }
+
     const FORBIDDEN_FIELDS = new Set(['id', 'missionId']);
     const { state: mission, result } = await withLockedState((current) => {
       const packet = current.packets.find((p) => p.id === packetId);
@@ -228,7 +240,7 @@ export async function PATCH(req: NextRequest) {
     });
 
     if (!result.found) return buildErrorResponse(`Packet ${packetId} not found.`, 404);
-    if ((typeof updates.archivedAt === 'string' && updates.archivedAt.trim()) || updates.status === 'archived') {
+    if (typeof updates.archivedAt === 'string' && updates.archivedAt.trim()) {
       autoResolveMergedPacketVerificationIncidents({ packetId, event: 'packet_archived' });
     }
 

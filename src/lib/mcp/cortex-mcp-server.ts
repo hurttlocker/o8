@@ -43,6 +43,7 @@ import {
   suggestProjects,
 } from '../projects/suggest';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -225,7 +226,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_update_packet',
     description:
-      'Update a single work packet by ID. Can change status, queue state, title, summary, or branch target.',
+      'Update mutable metadata on a single work packet by ID. Status is lane-derived; status writes are rejected with the correct lifecycle verb.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,10 +240,6 @@ const TOOLS: McpTool[] = [
           properties: {
             title: { type: 'string' },
             summary: { type: 'string' },
-            status: {
-              type: 'string',
-              enum: ['draft', 'queued', 'launching', 'idle', 'running', 'awaiting_review', 'blocked', 'released', 'archived'],
-            },
             queueState: { type: 'string', enum: ['draft', 'queued', 'held'] },
             branchTarget: { type: 'string' },
             blockedReason: { type: 'string' },
@@ -601,6 +598,7 @@ async function apiFetch(path: string, options?: RequestInit): Promise<unknown> {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${WS_TOKEN}`,
       ...(options?.headers ?? {}),
     },
   });
@@ -777,6 +775,8 @@ async function handleUpdatePacket(args: Record<string, unknown>): Promise<McpToo
     const updates = (args.updates ?? {}) as Record<string, unknown>;
     if (!packetId) return textResult('packetId is required', true);
 
+    const statusRejection = packetStatusWriteRejection(updates);
+    if (statusRejection) return jsonResult({ ok: false, error: statusRejection }, true);
     // Apply the delta atomically server-side — PATCH does the read-modify-write
     // inside the control-plane lock, so concurrent packet edits aren't reverted.
     const result = await apiFetch('/api/orchestrator/state', {
