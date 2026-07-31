@@ -40,7 +40,9 @@ pub mod undo;
 pub mod web_localization;
 pub mod worker_pulse;
 
-pub(crate) use execution::{execute_cascaded_tool_call, execute_realtime_tool_call};
+pub(crate) use execution::{
+    execute_cascaded_tool_call, execute_realtime_tool_call, execute_text_tool_call,
+};
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -1007,11 +1009,23 @@ pub fn decline_all_confirms() -> usize {
 // for a one-shot "stop everything" (the natural meaning of "interrupt him").
 
 static CANCEL_FLAGS: Mutex<Vec<(String, Arc<AtomicBool>)>> = Mutex::new(Vec::new());
+static PENDING_EXACT_CANCELS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Register a fresh cancel flag for `task_id` and hand back the shared handle
 /// for the TaskCtx. Replaces any stale entry for the same id.
 fn register_cancel(task_id: &str) -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
+    let was_pre_cancelled = {
+        let mut pending = PENDING_EXACT_CANCELS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let matched = pending.iter().any(|id| id == task_id);
+        pending.retain(|id| id != task_id);
+        matched
+    };
+    if was_pre_cancelled {
+        flag.store(true, Ordering::SeqCst);
+    }
     let mut flags = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
     flags.retain(|(id, _)| id != task_id);
     flags.push((task_id.to_string(), flag.clone()));
@@ -1022,6 +1036,28 @@ fn register_cancel(task_id: &str) -> Arc<AtomicBool> {
 fn unregister_cancel(task_id: &str) {
     let mut flags = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
     flags.retain(|(id, _)| id != task_id);
+    let mut pending = PENDING_EXACT_CANCELS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pending.retain(|id| id != task_id);
+}
+
+fn cancel_task(task_id: &str) -> bool {
+    let flags = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((_, flag)) = flags.iter().find(|(id, _)| id == task_id) {
+        flag.store(true, Ordering::SeqCst);
+        return true;
+    }
+    drop(flags);
+    let mut pending = PENDING_EXACT_CANCELS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pending.retain(|id| id != task_id);
+    pending.push(task_id.to_string());
+    if pending.len() > 128 {
+        pending.remove(0);
+    }
+    true
 }
 
 /// Raise the cancel flag on every running task. Returns how many were live —
@@ -1397,6 +1433,138 @@ pub(super) fn emit_confirm_dismissed(app: &tauri::AppHandle, task_id: &str, conf
 /// speak it → notify. Called inside a worker thread's current-thread runtime.
 pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, String> {
     run_agent_inner(app, prompt, None, None, None).await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymonTextPlannerInfo {
+    available: bool,
+    engine: Option<&'static str>,
+    model: Option<&'static str>,
+    effort: Option<&'static str>,
+    tools: Vec<Value>,
+    detail: Option<&'static str>,
+}
+
+#[derive(serde::Serialize)]
+pub struct SymonTextTurnResult {
+    status: &'static str,
+    text: String,
+}
+
+fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
+    fn valid(value: &str) -> bool {
+        !value.is_empty()
+            && value.len() <= 160
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
+    }
+    if !valid(session_id) || !valid(turn_id) {
+        return Err("invalid Symon text session or turn id".to_string());
+    }
+    Ok(format!("symon-text:{session_id}:{turn_id}"))
+}
+
+pub fn symon_text_planner_info() -> SymonTextPlannerInfo {
+    match planner_route::resolve() {
+        planner_route::PlannerRouting::Selected(selection) => SymonTextPlannerInfo {
+            available: true,
+            engine: Some(match selection.provider {
+                planner_route::PlannerProvider::Claude => "claude",
+                planner_route::PlannerProvider::Codex => "codex",
+            }),
+            model: Some(selection.model),
+            effort: Some(selection.effort),
+            tools: tools::enabled_tools(),
+            detail: None,
+        },
+        planner_route::PlannerRouting::Unavailable { message } => SymonTextPlannerInfo {
+            available: false,
+            engine: None,
+            model: None,
+            effort: None,
+            tools: Vec::new(),
+            detail: Some(message),
+        },
+    }
+}
+
+pub async fn run_symon_text_turn(
+    app: tauri::AppHandle,
+    session_id: String,
+    turn_id: String,
+    prompt: String,
+) -> Result<SymonTextTurnResult, String> {
+    let prompt = prompt.trim().to_string();
+    if prompt.is_empty() || prompt.len() > 40_000 {
+        return Err("invalid Symon text prompt".to_string());
+    }
+    let task_id = text_task_id(&session_id, &turn_id)?;
+    let selection = match planner_route::resolve() {
+        planner_route::PlannerRouting::Selected(selection) => selection,
+        planner_route::PlannerRouting::Unavailable { message } => return Err(message.to_string()),
+    };
+    let cancel = register_cancel(&task_id);
+    let ctx = TaskCtx {
+        task_id: task_id.clone(),
+        utterance: prompt.clone(),
+        ledger_session_id: Some(session_id.clone()),
+        app: Some(app),
+        screen: None,
+        spatial: false,
+        crop_png_base64: None,
+        edit: None,
+        cancel,
+    };
+    let correlation = ConfirmCorrelation {
+        session_id,
+        call_id: turn_id,
+    };
+    let result = match selection.provider {
+        planner_route::PlannerProvider::Claude => {
+            claude::run_phone_text_loop_with_binary(
+                &selection.binary,
+                selection.model,
+                &prompt,
+                &ctx,
+                correlation,
+            )
+            .await
+        }
+        planner_route::PlannerProvider::Codex => {
+            codex::run_phone_text_loop(
+                &selection.binary,
+                selection.model,
+                selection.effort,
+                &prompt,
+                &ctx,
+                correlation,
+            )
+            .await
+        }
+    };
+    let interrupted = ctx.is_cancelled();
+    unregister_cancel(&task_id);
+    if interrupted {
+        return Ok(SymonTextTurnResult {
+            status: "interrupted",
+            text: String::new(),
+        });
+    }
+    result.map(|value| SymonTextTurnResult {
+        status: "done",
+        text: value.result_text,
+    })
+}
+
+pub fn interrupt_symon_text_turn(session_id: &str, turn_id: &str) -> bool {
+    let Ok(task_id) = text_task_id(session_id, turn_id) else {
+        return false;
+    };
+    let active = cancel_task(&task_id);
+    let _ = preempt_confirm_for_task(&task_id);
+    active
 }
 
 /// True when the resolved brain can accept inline images. Direct Gemini and the
@@ -2293,5 +2461,14 @@ mod confirm_registry_tests {
             "symon_execute_plan",
             &json!({ "spokenReadback": "model-authored authority" }),
         ));
+    }
+
+    #[test]
+    fn exact_text_interrupt_survives_arriving_before_task_registration() {
+        let task_id = text_task_id("session-pre-cancel", "turn-pre-cancel").unwrap();
+        assert!(cancel_task(&task_id));
+        let flag = register_cancel(&task_id);
+        assert!(flag.load(Ordering::SeqCst));
+        unregister_cancel(&task_id);
     }
 }

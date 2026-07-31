@@ -32,7 +32,7 @@
 //! spawn (`--tools ""`), not just discouraged by the planner contract, so a
 //! contract-ignoring turn still has nothing to execute.
 
-use super::{tools, LoopResult, TaskCtx};
+use super::{tools, ConfirmCorrelation, LoopResult, TaskCtx};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -474,6 +474,19 @@ pub async fn run_loop_with_binary(
     run_text_planner_loop(session, model, intent, ctx, "claude").await
 }
 
+pub async fn run_phone_text_loop_with_binary(
+    bin: &str,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    correlation: ConfirmCorrelation,
+) -> Result<LoopResult, String> {
+    let mcp_cfg = ensure_empty_mcp_config()?;
+    let session = super::claude_pool::acquire(bin, model, &mcp_cfg)
+        .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
+    run_text_planner_loop_correlated(session, model, intent, ctx, "claude", correlation).await
+}
+
 pub(crate) trait TextPlannerSession: Send + 'static {
     fn send_planner_turn(
         &mut self,
@@ -493,11 +506,33 @@ impl TextPlannerSession for ClaudeSession {
 }
 
 pub(crate) async fn run_text_planner_loop<S: TextPlannerSession>(
+    session: S,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    provider: &'static str,
+) -> Result<LoopResult, String> {
+    run_text_planner_loop_inner(session, model, intent, ctx, provider, None).await
+}
+
+pub(crate) async fn run_text_planner_loop_correlated<S: TextPlannerSession>(
+    session: S,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    provider: &'static str,
+    correlation: ConfirmCorrelation,
+) -> Result<LoopResult, String> {
+    run_text_planner_loop_inner(session, model, intent, ctx, provider, Some(correlation)).await
+}
+
+async fn run_text_planner_loop_inner<S: TextPlannerSession>(
     mut session: S,
     model: &str,
     intent: &str,
     ctx: &TaskCtx,
     provider: &'static str,
+    correlation: Option<ConfirmCorrelation>,
 ) -> Result<LoopResult, String> {
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut brain_sources: Vec<Value> = Vec::new();
@@ -508,7 +543,7 @@ pub(crate) async fn run_text_planner_loop<S: TextPlannerSession>(
     // with an immediate filler rather than leaving the live mic silent.
     // Background escalation tasks (`claude-task-*`) already had a front ack, so
     // they stay quiet here. #1252.
-    if !ctx.task_id.starts_with("claude-task") {
+    if correlation.is_none() && !ctx.task_id.starts_with("claude-task") {
         super::speak_filler_now();
         spoke_filler = true;
     }
@@ -602,13 +637,17 @@ pub(crate) async fn run_text_planner_loop<S: TextPlannerSession>(
             );
         }
 
-        let tool_result: Value = super::execute_cascaded_tool_call(
-            ctx,
-            &tool_name,
-            tool_args.clone(),
-            &mut spoke_filler,
-        )
-        .await;
+        let tool_result: Value = if let Some(correlation) = correlation.clone() {
+            super::execute_text_tool_call(ctx, &tool_name, tool_args.clone(), correlation).await
+        } else {
+            super::execute_cascaded_tool_call(
+                ctx,
+                &tool_name,
+                tool_args.clone(),
+                &mut spoke_filler,
+            )
+            .await
+        };
 
         tool_call_log.push(json!({
             "tool": tool_name,

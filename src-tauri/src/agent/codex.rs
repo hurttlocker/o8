@@ -1,6 +1,6 @@
 //! Symon voice-agent text planner backed by the Codex subscription CLI.
 
-use super::{claude::TextPlannerSession, LoopResult, TaskCtx};
+use super::{claude::TextPlannerSession, ConfirmCorrelation, LoopResult, TaskCtx};
 use base64::Engine;
 use serde_json::Value;
 use std::process::Command;
@@ -160,6 +160,25 @@ pub async fn run_loop(
         intent,
         ctx,
         "codex",
+    )
+    .await
+}
+
+pub async fn run_phone_text_loop(
+    binary: &str,
+    model: &str,
+    effort: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    correlation: ConfirmCorrelation,
+) -> Result<LoopResult, String> {
+    super::claude::run_text_planner_loop_correlated(
+        CodexSession::new(binary, model, effort),
+        model,
+        intent,
+        ctx,
+        "codex",
+        correlation,
     )
     .await
 }

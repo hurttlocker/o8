@@ -236,6 +236,15 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(200);
   });
 
+  it('passes the Symon text-session mint with the operator bearer', () => {
+    expect(panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/text-session', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001', authorization: `Bearer ${TEST_TOKEN}` },
+      }),
+    ).status).toBe(200);
+  });
+
   it('gates /api/mobile/symon/tool (internal ws-server → Next tool relay) against LAN', () => {
     // Not phone-facing; the ws-server reaches it over loopback with the ws-token.
     const res = panelGateMiddleware(
@@ -390,6 +399,7 @@ describe('panelGateMiddleware — per-device capability scope', () => {
 
   it('allows the mobile API family', () => {
     expect(deviceRequest('/api/mobile/inbox').status).toBe(200);
+    expect(deviceRequest('/api/mobile/symon/text-session', 'POST').status).toBe(200);
   });
 
   it('allows the explicit mobile approval capability', () => {
@@ -450,6 +460,7 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     ['/api/mobile/devices/revoke', 'POST'],
     ['/api/mobile/push-url', 'POST'],
     ['/api/mobile/symon/tool', 'POST'],
+    ['/api/mobile/symon/text-turn', 'POST'],
     ['/api/mobile/ws-token', 'GET'],
     ['/api/mobile/some-future-route', 'POST'],
   ])('denies operator/internal mobile routes to a paired device: %s', (pathname, method) => {

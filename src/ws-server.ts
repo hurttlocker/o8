@@ -78,6 +78,7 @@ import {
   SymonConfirmationTracker,
   ToolCallTracker,
   confirmationOutcomeFromResolution,
+  parseSymonPendingConfirmation,
   symonToolTimeoutMs,
   type CompletedToolCall,
   type PendingToolCall,
@@ -88,6 +89,14 @@ import {
   type SymonProtocolVersion,
   type SymonToolRelayResult,
 } from '@/lib/mobile/symon-tool-relay';
+import {
+  appendSymonTextTranscript,
+  dropSymonTextSession,
+  formatSymonTextPlannerPrompt,
+  loadSymonTextSession,
+  type SymonTextSessionRecord,
+} from '@/lib/mobile/symon-text-session-store';
+import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
@@ -3224,6 +3233,12 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'symon-tool-call':
       void handleSymonToolCall(client, msg);
       break;
+    case 'symon-text-turn':
+      handleSymonTextTurn(client, msg);
+      break;
+    case 'symon-text-interrupt':
+      void handleSymonTextInterrupt(client, msg);
+      break;
     case 'symon-confirm-decision':
       void handleSymonConfirmDecision(client, msg);
       break;
@@ -3253,8 +3268,19 @@ type SymonSessionRoute = {
   protocolVersion: SymonProtocolVersion;
 };
 
+type SymonConfirmationRoute = Pick<SymonSessionRoute, 'clientId' | 'protocolVersion'>;
+type SymonTextTurnState = {
+  clientId: string;
+  sessionId: string;
+  turnId: string;
+  terminal: boolean;
+};
+
 /** sessionId → socket, immutable scope, and negotiated additive protocol. */
 const symonSessions = new Map<string, SymonSessionRoute>();
+const symonTextOwners = new Map<string, string>();
+const symonTextTurns = new Map<string, SymonTextTurnState>();
+const symonTextChains = new Map<string, Promise<unknown>>();
 /** In-flight + replayable tool calls, correlated by sessionId + callId. */
 const symonToolTracker = new ToolCallTracker();
 /** Confirmation decisions/tombstones, keyed by sessionId + callId + confirmationId. */
@@ -3339,6 +3365,178 @@ function pushSymonActionComplete(clientId: string, action: SymonActionComplete):
   const client = clients.get(clientId);
   if (!client) return;
   send(client, { channel: 'symon', type: 'symon-action-complete', ...action });
+}
+
+function symonTextClientMatches(record: SymonTextSessionRecord, client: ClientState): boolean {
+  return record.subject === client.authKind
+    && (record.subject === 'operator' || record.deviceId === client.deviceId);
+}
+
+function textTurnKey(sessionId: string, turnId: string): string {
+  return JSON.stringify([sessionId, turnId]);
+}
+
+function pushSymonTextDone(
+  turn: SymonTextTurnState,
+  status: 'done' | 'failed' | 'interrupted',
+  detail?: string,
+): void {
+  if (turn.terminal) return;
+  turn.terminal = true;
+  const client = clients.get(turn.clientId);
+  if (client) {
+    send(client, {
+      channel: 'symon',
+      type: 'symon-text-done',
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      status,
+      ...(detail ? { detail } : {}),
+    });
+  }
+  setTimeout(() => symonTextTurns.delete(textTurnKey(turn.sessionId, turn.turnId)), 5 * 60_000).unref();
+}
+
+async function interruptSymonTextNative(sessionId: string, turnId: string): Promise<boolean> {
+  try {
+    const response = await fetchNextJson<{ ok?: boolean; active?: boolean }>('/api/mobile/symon/text-turn', {
+      method: 'DELETE',
+      body: { sessionId, turnId },
+      timeoutMs: 8_000,
+    });
+    return response.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+type SymonTextRelayResult = {
+  state?: 'pending' | 'done' | 'needs_confirmation' | 'error' | 'call_mismatch';
+  result?: { status?: 'done' | 'interrupted'; text?: string };
+  confirmation?: unknown;
+  detail?: string;
+  error?: string;
+};
+
+async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise<void> {
+  const initial = loadSymonTextSession(turn.sessionId);
+  if (!initial || turn.terminal) {
+    pushSymonTextDone(turn, 'failed', 'Text session expired.');
+    return;
+  }
+  const prompt = formatSymonTextPlannerPrompt(initial, text);
+  if (!appendSymonTextTranscript(turn.sessionId, [{ role: 'user', text }])) {
+    pushSymonTextDone(turn, 'failed', 'Text session expired.');
+    return;
+  }
+  const client = clients.get(turn.clientId);
+  if (client) {
+    send(client, {
+      channel: 'symon',
+      type: 'symon-text-status',
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      status: 'thinking',
+    });
+  }
+  const deadline = Date.now() + 5 * 60_000;
+  const mirroredConfirmations = new Set<string>();
+  while (!turn.terminal && Date.now() < deadline) {
+    let outcome: SymonTextRelayResult;
+    try {
+      outcome = await fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
+        method: 'POST',
+        body: { sessionId: turn.sessionId, turnId: turn.turnId, prompt },
+        timeoutMs: 8_000,
+      });
+    } catch (error) {
+      pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
+      return;
+    }
+    if (outcome.state === 'pending') continue;
+    if (outcome.state === 'needs_confirmation') {
+      const rawTool = outcome.confirmation && typeof outcome.confirmation === 'object'
+        ? (outcome.confirmation as Record<string, unknown>).tool
+        : null;
+      const confirmation = typeof rawTool === 'string'
+        ? parseSymonPendingConfirmation(outcome.confirmation, {
+          sessionId: turn.sessionId,
+          callId: turn.turnId,
+          tool: rawTool,
+        })
+        : null;
+      if (!confirmation) {
+        pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
+        return;
+      }
+      if (!mirroredConfirmations.has(confirmation.confirmationId)) {
+        if (!symonConfirmationTracker.register(confirmation, Date.now())) {
+          pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+          return;
+        }
+        mirroredConfirmations.add(confirmation.confirmationId);
+        pushSymonConfirmRequired(turn.clientId, confirmation);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      continue;
+    }
+    if (outcome.state === 'done' && outcome.result?.status === 'interrupted') {
+      pushSymonTextDone(turn, 'interrupted');
+      return;
+    }
+    if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
+      const answer = outcome.result.text;
+      appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
+      const owner = clients.get(turn.clientId);
+      if (owner && answer) {
+        send(owner, {
+          channel: 'symon',
+          type: 'symon-text-delta',
+          sessionId: turn.sessionId,
+          turnId: turn.turnId,
+          delta: answer,
+        });
+      }
+      pushSymonTextDone(turn, 'done');
+      return;
+    }
+    pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
+    return;
+  }
+  if (!turn.terminal) {
+    await interruptSymonTextNative(turn.sessionId, turn.turnId);
+    pushSymonTextDone(turn, 'failed', 'Planner turn timed out.');
+  }
+}
+
+function handleSymonTextTurn(client: ClientState, msg: Record<string, unknown>): void {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const turnId = typeof msg.turnId === 'string' ? msg.turnId : '';
+  const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 8_000) : '';
+  if (!sessionId || !turnId || !text || sessionId.length > 160 || turnId.length > 160) return;
+  const record = loadSymonTextSession(sessionId);
+  if (!record || !symonTextClientMatches(record, client)) {
+    const rejected: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
+    pushSymonTextDone(rejected, 'failed', 'Text session is missing, stale, or belongs to another client.');
+    return;
+  }
+  const key = textTurnKey(sessionId, turnId);
+  if (symonTextTurns.has(key)) return;
+  const turn: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
+  symonTextTurns.set(key, turn);
+  symonTextOwners.set(sessionId, client.id);
+  void chainOnKey(symonTextChains, sessionId, () => runSymonTextTurn(turn, text));
+}
+
+async function handleSymonTextInterrupt(client: ClientState, msg: Record<string, unknown>): Promise<void> {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const turnId = typeof msg.turnId === 'string' ? msg.turnId : '';
+  const record = loadSymonTextSession(sessionId);
+  if (!record || !symonTextClientMatches(record, client)) return;
+  const turn = symonTextTurns.get(textTurnKey(sessionId, turnId));
+  if (!turn || turn.clientId !== client.id || turn.terminal) return;
+  await interruptSymonTextNative(sessionId, turnId);
+  pushSymonTextDone(turn, 'interrupted');
 }
 
 async function interruptSymonTool(call: PendingToolCall): Promise<boolean> {
@@ -3462,6 +3660,17 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
 function handleSymonStop(client: ClientState, msg: Record<string, unknown>): void {
   const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
   if (!sessionId) return;
+  const textSession = loadSymonTextSession(sessionId);
+  if (textSession && symonTextClientMatches(textSession, client)) {
+    for (const turn of symonTextTurns.values()) {
+      if (turn.sessionId !== sessionId || turn.terminal) continue;
+      void interruptSymonTextNative(turn.sessionId, turn.turnId);
+      pushSymonTextDone(turn, 'interrupted');
+    }
+    symonTextOwners.delete(sessionId);
+    dropSymonTextSession(sessionId);
+    return;
+  }
   const grant = activeSymonGrant(client, sessionId);
   if (!grant) {
     console.warn(`[symon-agent] rejected ungranted stop for ${sessionId}`);
@@ -3670,7 +3879,7 @@ async function settleSymonConfirmation(input: {
   allow: boolean;
   forcedOutcome?: 'expired' | 'preempted';
   resume: boolean;
-  settleRoute?: SymonSessionRoute;
+  settleRoute?: SymonConfirmationRoute;
 }): Promise<boolean> {
   const response = await resolveSymonConfirmation(
     input.confirmation,
@@ -3743,6 +3952,36 @@ async function handleSymonConfirmDecision(client: ClientState, msg: Record<strin
   const clientMutationId = typeof msg.clientMutationId === 'string' ? msg.clientMutationId : '';
   const allow = typeof msg.allow === 'boolean' ? msg.allow : null;
   if (!sessionId || !callId || !confirmationId || !clientMutationId || allow === null) return;
+
+  const textSession = loadSymonTextSession(sessionId);
+  const textOwner = symonTextOwners.get(sessionId);
+  if (textSession && textOwner === client.id && symonTextClientMatches(textSession, client)) {
+    const claim = symonConfirmationTracker.claim({
+      sessionId,
+      callId,
+      confirmationId,
+      allow,
+      clientMutationId,
+      now: Date.now(),
+    });
+    if (claim.kind === 'missing') return;
+    if (claim.kind === 'in_flight') {
+      pushSymonConfirmSettled(client.id, claim.confirmation, 'duplicate');
+      return;
+    }
+    if (claim.kind === 'replay') {
+      pushSymonConfirmSettled(client.id, claim.confirmation, 'duplicate', claim.outcome);
+      return;
+    }
+    await settleSymonConfirmationWithRetry({
+      confirmation: claim.confirmation,
+      allow: claim.allow,
+      forcedOutcome: claim.forcedOutcome,
+      resume: false,
+      settleRoute: { clientId: client.id, protocolVersion: 2 },
+    });
+    return;
+  }
 
   const route = symonSessions.get(sessionId);
   const grant = activeSymonGrant(client, sessionId);
@@ -3916,6 +4155,15 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
 
 /** Disconnect cleanup — drop any symon sessions this socket owned. */
 function cleanupSymonForClient(clientId: string): void {
+  for (const [sessionId, ownerId] of Array.from(symonTextOwners.entries())) {
+    if (ownerId !== clientId) continue;
+    symonTextOwners.delete(sessionId);
+    for (const turn of symonTextTurns.values()) {
+      if (turn.sessionId !== sessionId || turn.terminal) continue;
+      void interruptSymonTextNative(turn.sessionId, turn.turnId);
+      pushSymonTextDone(turn, 'interrupted');
+    }
+  }
   let changed = false;
   for (const [sid, route] of Array.from(symonSessions.entries())) {
     if (route.clientId !== clientId) continue;
@@ -3952,11 +4200,13 @@ function sweepStaleSymon(): void {
     void timeoutSymonToolCall(call);
   }
   for (const confirmation of symonConfirmationTracker.expire(Date.now())) {
+    const textOwner = symonTextOwners.get(confirmation.sessionId);
     void settleSymonConfirmationWithRetry({
       confirmation,
       allow: false,
       forcedOutcome: 'expired',
       resume: currentSymonOwner(confirmation.sessionId) !== null,
+      ...(textOwner ? { settleRoute: { clientId: textOwner, protocolVersion: 2 as const } } : {}),
     });
   }
 }

@@ -369,6 +369,41 @@ pub(crate) async fn execute_realtime_tool_call(
     .await
 }
 
+/// Execute a phone text-planner action without voice output, retaining the
+/// same confirmation, ledger, undo, and native dispatcher as every Symon path.
+pub(crate) async fn execute_text_tool_call(
+    ctx: &TaskCtx,
+    tool_name: &str,
+    args: Value,
+    correlation: ConfirmCorrelation,
+) -> Value {
+    if tool_name == plan::PLAN_TOOL_NAME {
+        return plan::execute_plan(
+            ctx,
+            args,
+            plan::PlanSurface::Realtime,
+            false,
+            Some(correlation),
+            "phone_text",
+            Some(&ctx.utterance),
+            None,
+        )
+        .await;
+    }
+    execute_tracked_tool_call(
+        ctx,
+        tool_name,
+        args,
+        false,
+        Some(correlation),
+        "phone_text",
+        Some(&ctx.utterance),
+        None,
+        None,
+    )
+    .await
+}
+
 /// Execute one exact, native-approved plan step through the same action-ledger,
 /// confirmation, undo, and dispatch seam as an ordinary provider tool call.
 /// The grant is an opaque Rust value created only after the plan card resolves;

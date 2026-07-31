@@ -4848,6 +4848,29 @@ fn agent_run(app: tauri::AppHandle, prompt: String) {
     agent::spawn_agent(app, prompt);
 }
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_text_planner_info() -> agent::SymonTextPlannerInfo {
+    agent::symon_text_planner_info()
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn symon_text_run_turn(
+    app: tauri::AppHandle,
+    session_id: String,
+    turn_id: String,
+    prompt: String,
+) -> Result<agent::SymonTextTurnResult, String> {
+    agent::run_symon_text_turn(app, session_id, turn_id, prompt).await
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_text_interrupt(session_id: String, turn_id: String) -> bool {
+    agent::interrupt_symon_text_turn(&session_id, &turn_id)
+}
+
 /// Resolve a pending agent confirm card (Allow / Cancel).
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -5919,6 +5942,12 @@ pub fn run() {
             ask_question,
             #[cfg(target_os = "macos")]
             agent_run,
+            #[cfg(target_os = "macos")]
+            symon_text_planner_info,
+            #[cfg(target_os = "macos")]
+            symon_text_run_turn,
+            #[cfg(target_os = "macos")]
+            symon_text_interrupt,
             #[cfg(target_os = "macos")]
             agent_confirm,
             #[cfg(target_os = "macos")]
