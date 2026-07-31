@@ -6,11 +6,13 @@ const CONTEXT_BODY_MAX_CHARS = 4_096;
 const CURRENT_ROUTE_MAX_CHARS = 160;
 const REPO_PATH_MAX_CHARS = 512;
 const ACTIVE_SURFACE_MAX_CHARS = 64;
+const MODEL_ID_MAX_CHARS = 64;
 const DISPLAY_LABEL_PATTERN = /^[A-Za-z0-9 .,_@+()/#&':-]+$/;
 const PROMPT_CONTROL_PATTERN =
   /(?:ignore|disregard|override|reveal|repeat|follow)\b.{0,32}\b(?:instructions?|prompt|system|developer|assistant)|(?:system|developer|assistant)\s*:/i;
 
 export interface SymonAgentContext {
+  model?: string;
   workspaceMode?: 'o8' | 'code';
   launchKind?: 'repository-catch-up';
   currentRoute?: string;
@@ -106,6 +108,9 @@ export async function readSymonAgentContext(request: Request): Promise<SymonAgen
     const threadId = safeIdentifier(record.threadId, 160);
     const agentId = safeIdentifier(record.agentId, 128);
     return {
+      model: typeof record.model === 'string' && record.model.length <= MODEL_ID_MAX_CHARS
+        ? record.model
+        : undefined,
       workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code' ? record.workspaceMode : undefined,
       launchKind: record.launchKind === 'repository-catch-up' ? record.launchKind : undefined,
       currentRoute: safeRoute(record.currentRoute),

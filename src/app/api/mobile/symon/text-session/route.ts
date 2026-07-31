@@ -5,9 +5,17 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import {
+  normalizeMobileAskModelId,
+  resolveMobileAskRoute,
+} from '@/lib/mobile/ask-model-routing';
 import { readSymonAgentContext, resolveSymonAgentScope } from '@/lib/mobile/symon-agent-context';
-import { buildSymonTextPlannerInfoEval } from '@/lib/mobile/symon-text-eval';
+import {
+  buildSymonTextPlannerInfoEval,
+  type SymonTextPlannerSelection,
+} from '@/lib/mobile/symon-text-eval';
 import { createSymonTextSession } from '@/lib/mobile/symon-text-session-store';
+import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
 
 const POLL_INTERVAL_MS = 100;
 const BRIDGE_TIMEOUT_MS = 5_000;
@@ -36,8 +44,8 @@ interface PlannerInfo {
   detail?: string;
 }
 
-async function readPlannerInfo(): Promise<PlannerInfo> {
-  const code = buildSymonTextPlannerInfoEval();
+async function readPlannerInfo(selection?: SymonTextPlannerSelection): Promise<PlannerInfo> {
+  const code = buildSymonTextPlannerInfoEval(selection);
   const deadline = Date.now() + BRIDGE_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const { result } = await webviewClient().evalJs(code);
@@ -48,6 +56,28 @@ async function readPlannerInfo(): Promise<PlannerInfo> {
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error('Symon text planner bridge timed out.');
+}
+
+async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlannerSelection | null> {
+  const requestedModel = normalizeMobileAskModelId(value);
+  if (requestedModel === 'auto') return null;
+  try {
+    const snapshot = await getRuntimeAuthSnapshot();
+    const claude = snapshot.statuses.claude;
+    const codex = snapshot.statuses.codex;
+    const route = resolveMobileAskRoute(requestedModel, {
+      claude: claude.installed && claude.authenticated,
+      codex: codex.installed && codex.authenticated,
+    });
+    if (route.kind === 'managed') return null;
+    return {
+      engine: route.kind,
+      model: route.cliModel,
+      effort: route.effort,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -81,9 +111,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const requestedPlanner = await resolveRequestedPlanner(context.model);
   let info: PlannerInfo;
   try {
-    info = await readPlannerInfo();
+    info = await readPlannerInfo(requestedPlanner ?? undefined);
+    if (requestedPlanner && !info.available) {
+      info = await readPlannerInfo();
+    }
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },

@@ -1466,8 +1466,21 @@ fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
     Ok(format!("symon-text:{session_id}:{turn_id}"))
 }
 
-pub fn symon_text_planner_info() -> SymonTextPlannerInfo {
-    match planner_route::resolve() {
+pub fn symon_text_planner_info(
+    engine: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> SymonTextPlannerInfo {
+    let routing = match (engine, model, effort) {
+        (Some(engine), Some(model), Some(effort)) => {
+            planner_route::resolve_bound(engine, model, effort)
+        }
+        (None, None, None) => planner_route::resolve(),
+        _ => planner_route::PlannerRouting::Unavailable {
+            message: "incomplete Symon planner selection",
+        },
+    };
+    match routing {
         planner_route::PlannerRouting::Selected(selection) => SymonTextPlannerInfo {
             available: true,
             engine: Some(match selection.provider {
@@ -1495,13 +1508,16 @@ pub async fn run_symon_text_turn(
     session_id: String,
     turn_id: String,
     prompt: String,
+    engine: String,
+    model: String,
+    effort: String,
 ) -> Result<SymonTextTurnResult, String> {
     let prompt = prompt.trim().to_string();
     if prompt.is_empty() || prompt.len() > 40_000 {
         return Err("invalid Symon text prompt".to_string());
     }
     let task_id = text_task_id(&session_id, &turn_id)?;
-    let selection = match planner_route::resolve() {
+    let selection = match planner_route::resolve_bound(&engine, &model, &effort) {
         planner_route::PlannerRouting::Selected(selection) => selection,
         planner_route::PlannerRouting::Unavailable { message } => return Err(message.to_string()),
     };

@@ -1,25 +1,50 @@
-export function buildSymonTextPlannerInfoEval(): string {
+export interface SymonTextPlannerSelection {
+  engine: 'claude' | 'codex';
+  model: string;
+  effort: string;
+}
+
+export function buildSymonTextPlannerInfoEval(selection?: SymonTextPlannerSelection): string {
+  const requested = JSON.stringify(selection ?? null);
   return `(() => {
     const A = window.__o8SymonAgent;
     if (!A || !A.text || typeof A.text.plannerInfo !== 'function') return JSON.stringify({ state: 'no_bridge' });
-    const store = (window.__o8SymonTextPlannerInfo = window.__o8SymonTextPlannerInfo || { done: false });
+    const requested = ${requested};
+    const stores = (window.__o8SymonTextPlannerInfo = window.__o8SymonTextPlannerInfo || {});
+    const key = JSON.stringify(requested);
+    const store = (stores[key] = stores[key] || { done: false });
     if (!store.started) {
       store.started = true;
-      Promise.resolve().then(() => A.text.plannerInfo()).then((info) => {
+      Promise.resolve().then(() => A.text.plannerInfo(requested || undefined)).then((info) => {
         Object.assign(store, { done: true, info });
       }).catch((error) => {
         Object.assign(store, { done: true, error: String((error && error.message) || error) });
       });
     }
-    if (store.error) return JSON.stringify({ state: 'error', detail: store.error });
-    return store.done ? JSON.stringify({ state: 'done', info: store.info }) : JSON.stringify({ state: 'pending' });
+    if (store.error) {
+      const detail = store.error;
+      delete stores[key];
+      return JSON.stringify({ state: 'error', detail });
+    }
+    if (store.done) {
+      const info = store.info;
+      delete stores[key];
+      return JSON.stringify({ state: 'done', info });
+    }
+    return JSON.stringify({ state: 'pending' });
   })()`;
 }
 
-export function buildSymonTextTurnEval(sessionId: string, turnId: string, prompt: string): string {
+export function buildSymonTextTurnEval(
+  sessionId: string,
+  turnId: string,
+  prompt: string,
+  planner: SymonTextPlannerSelection,
+): string {
   const session = JSON.stringify(sessionId);
   const turn = JSON.stringify(turnId);
   const content = JSON.stringify(prompt);
+  const selection = JSON.stringify(planner);
   return `(() => {
     const A = window.__o8SymonAgent;
     if (!A || !A.text || typeof A.text.runTurn !== 'function') return JSON.stringify({ state: 'no_bridge' });
@@ -30,7 +55,7 @@ export function buildSymonTextTurnEval(sessionId: string, turnId: string, prompt
     let slot = calls[key];
     if (!slot) {
       slot = calls[key] = { startedAt: Date.now(), lastTouched: Date.now(), done: false, textTurn: true };
-      Promise.resolve().then(() => A.text.runTurn(${content}, sessionId, callId)).then((result) => {
+      Promise.resolve().then(() => A.text.runTurn(${content}, sessionId, callId, ${selection})).then((result) => {
         Object.assign(slot, { done: true, completedAt: Date.now(), result });
       }).catch((error) => {
         Object.assign(slot, { done: true, completedAt: Date.now(), error: String((error && error.message) || error) });

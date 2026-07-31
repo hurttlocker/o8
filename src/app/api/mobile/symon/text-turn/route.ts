@@ -4,7 +4,11 @@ export const runtime = 'nodejs';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
-import { buildSymonTextInterruptEval, buildSymonTextTurnEval } from '@/lib/mobile/symon-text-eval';
+import {
+  buildSymonTextInterruptEval,
+  buildSymonTextTurnEval,
+  type SymonTextPlannerSelection,
+} from '@/lib/mobile/symon-text-eval';
 
 const POLL_INTERVAL_MS = 150;
 const POLL_WINDOW_MS = 3_000;
@@ -37,11 +41,20 @@ export async function POST(request: NextRequest) {
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
   const turnId = typeof body?.turnId === 'string' ? body.turnId : '';
   const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
-  if (!sessionId || !turnId || !prompt) {
+  const planner = body?.planner && typeof body.planner === 'object' && !Array.isArray(body.planner)
+    ? body.planner as Record<string, unknown>
+    : null;
+  const selection: SymonTextPlannerSelection | null = planner
+    && (planner.engine === 'claude' || planner.engine === 'codex')
+    && typeof planner.model === 'string'
+    && typeof planner.effort === 'string'
+    ? { engine: planner.engine, model: planner.model, effort: planner.effort }
+    : null;
+  if (!sessionId || !turnId || !prompt || !selection) {
     return NextResponse.json({ ok: false, state: 'error', error: 'bad_request' }, { status: 400 });
   }
   try {
-    const result = await pollEval(buildSymonTextTurnEval(sessionId, turnId, prompt));
+    const result = await pollEval(buildSymonTextTurnEval(sessionId, turnId, prompt, selection));
     return NextResponse.json({ ok: result.state !== 'error', ...result });
   } catch (error) {
     return NextResponse.json({

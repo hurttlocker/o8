@@ -4850,8 +4850,12 @@ fn agent_run(app: tauri::AppHandle, prompt: String) {
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn symon_text_planner_info() -> agent::SymonTextPlannerInfo {
-    agent::symon_text_planner_info()
+fn symon_text_planner_info(
+    engine: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+) -> agent::SymonTextPlannerInfo {
+    agent::symon_text_planner_info(engine.as_deref(), model.as_deref(), effort.as_deref())
 }
 
 #[cfg(target_os = "macos")]
@@ -4861,8 +4865,11 @@ async fn symon_text_run_turn(
     session_id: String,
     turn_id: String,
     prompt: String,
+    engine: String,
+    model: String,
+    effort: String,
 ) -> Result<agent::SymonTextTurnResult, String> {
-    agent::run_symon_text_turn(app, session_id, turn_id, prompt).await
+    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort).await
 }
 
 #[cfg(target_os = "macos")]

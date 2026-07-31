@@ -3446,7 +3446,16 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     try {
       outcome = await fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
         method: 'POST',
-        body: { sessionId: turn.sessionId, turnId: turn.turnId, prompt },
+        body: {
+          sessionId: turn.sessionId,
+          turnId: turn.turnId,
+          prompt,
+          planner: {
+            engine: initial.engine,
+            model: initial.model,
+            effort: initial.effort,
+          },
+        },
         timeoutMs: 8_000,
       });
     } catch (error) {

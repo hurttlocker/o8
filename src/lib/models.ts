@@ -3,6 +3,7 @@
 export const RAW_MODEL_IDS = {
   anthropicClaudeFable5: 'claude-fable-5',
   anthropicClaudeFable5OneMillion: 'claude-fable-5[1m]',
+  anthropicClaudeOpus5: 'claude-opus-5',
   anthropicClaudeOpus48: 'claude-opus-4-8',
   anthropicClaudeOpus47: 'claude-opus-4-7',
   anthropicClaudeOpus46: 'claude-opus-4-6',

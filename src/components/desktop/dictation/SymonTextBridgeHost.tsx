@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
+import type { SymonTextPlannerSelection } from '@/lib/mobile/symon-text-eval';
 
 interface SymonTextPlannerInfo {
   available: boolean;
@@ -18,8 +19,13 @@ interface SymonTextTurnResult {
 }
 
 interface SymonTextBridge {
-  plannerInfo: () => Promise<SymonTextPlannerInfo>;
-  runTurn: (prompt: string, sessionId: string, turnId: string) => Promise<SymonTextTurnResult>;
+  plannerInfo: (selection?: SymonTextPlannerSelection) => Promise<SymonTextPlannerInfo>;
+  runTurn: (
+    prompt: string,
+    sessionId: string,
+    turnId: string,
+    planner: SymonTextPlannerSelection,
+  ) => Promise<SymonTextTurnResult>;
   interruptTurn: (sessionId: string, turnId: string) => Promise<boolean>;
 }
 
@@ -38,11 +44,18 @@ export function SymonTextBridgeHost() {
     void import('@tauri-apps/api/core').then(({ invoke }) => {
       if (!alive) return;
       bridge = {
-        plannerInfo: () => invoke<SymonTextPlannerInfo>('symon_text_planner_info'),
-        runTurn: (prompt, sessionId, turnId) => invoke<SymonTextTurnResult>('symon_text_run_turn', {
+        plannerInfo: (selection) => invoke<SymonTextPlannerInfo>('symon_text_planner_info', selection ? {
+          engine: selection.engine,
+          model: selection.model,
+          effort: selection.effort,
+        } : {}),
+        runTurn: (prompt, sessionId, turnId, planner) => invoke<SymonTextTurnResult>('symon_text_run_turn', {
           prompt,
           sessionId,
           turnId,
+          engine: planner.engine,
+          model: planner.model,
+          effort: planner.effort,
         }),
         interruptTurn: (sessionId, turnId) => invoke<boolean>('symon_text_interrupt', {
           sessionId,

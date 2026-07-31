@@ -6,22 +6,57 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const plannerInfo = {
+const testState = vi.hoisted(() => ({
+  claudeInstalled: true,
+  claudeAuthenticated: true,
+  codexInstalled: true,
+  codexAuthenticated: true,
+  evalCalls: [] as string[],
+}));
+
+const defaultPlannerInfo = {
   available: true,
-  engine: 'codex',
-  model: 'gpt-5.6-sol',
-  effort: 'medium',
+  engine: 'claude',
+  model: 'claude-opus-4-8',
+  effort: 'high',
   tools: [{ name: 'o8_status', parameters: { type: 'object', properties: {} } }],
 };
 
 vi.mock('@/lib/mcp/o8-webview-client', () => ({
   O8WebviewClient: class {
-    async evalJs() {
-      return { result: JSON.stringify({ state: 'done', info: plannerInfo }) };
+    async evalJs(code: string) {
+      testState.evalCalls.push(code);
+      if (code.includes('A.text.plannerInfo')) {
+        const info = code.includes('gpt-5.6-sol')
+          ? { ...defaultPlannerInfo, engine: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }
+          : defaultPlannerInfo;
+        return { result: JSON.stringify({ state: 'done', info }) };
+      }
+      return {
+        result: JSON.stringify({
+          state: 'done',
+          result: { status: 'done', text: 'The desktop planner answered.' },
+        }),
+      };
     }
   },
+}));
+
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
+  getRuntimeAuthSnapshot: async () => ({
+    statuses: {
+      claude: {
+        installed: testState.claudeInstalled,
+        authenticated: testState.claudeAuthenticated,
+      },
+      codex: {
+        installed: testState.codexInstalled,
+        authenticated: testState.codexAuthenticated,
+      },
+    },
+  }),
 }));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-symon-text-wire-'));
@@ -66,6 +101,7 @@ beforeAll(async () => {
   wsPort = await freePort();
 
   const { POST: mintTextSession } = await import('@/app/api/mobile/symon/text-session/route');
+  const { POST: runTextTurn } = await import('@/app/api/mobile/symon/text-turn/route');
   apiServer = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${apiPort}`);
     const chunks: Buffer[] = [];
@@ -82,12 +118,13 @@ beforeAll(async () => {
       return;
     }
     if (url.pathname === '/api/mobile/symon/text-turn' && request.method === 'POST') {
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({
-        ok: true,
-        state: 'done',
-        result: { status: 'done', text: 'The desktop planner answered.' },
+      const routeResponse = await runTextTurn(new NextRequest(url, {
+        method: 'POST',
+        headers: request.headers as HeadersInit,
+        body,
       }));
+      response.writeHead(routeResponse.status, Object.fromEntries(routeResponse.headers.entries()));
+      response.end(Buffer.from(await routeResponse.arrayBuffer()));
       return;
     }
     response.writeHead(404);
@@ -123,16 +160,34 @@ afterAll(async () => {
   delete process.env.CORTEX_IDE_DATA_DIR;
 });
 
+beforeEach(() => {
+  testState.claudeInstalled = true;
+  testState.claudeAuthenticated = true;
+  testState.codexInstalled = true;
+  testState.codexAuthenticated = true;
+  testState.evalCalls.length = 0;
+});
+
+async function mint(model?: string) {
+  const response = await fetch(`http://127.0.0.1:${apiPort}/api/mobile/symon/text-session`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspaceMode: 'o8', currentRoute: '/mobile/ask', ...(model ? { model } : {}) }),
+  });
+  return {
+    response,
+    body: await response.json() as {
+      session: { sessionId: string; model: string; effort: string; engine: string };
+    },
+  };
+}
+
 describe('Symon text-first say loop wire', () => {
-  it('mints with the bearer and carries a flat text turn through the real ws-server', async () => {
-    const mint = await fetch(`http://127.0.0.1:${apiPort}/api/mobile/symon/text-session`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspaceMode: 'o8', currentRoute: '/mobile/ask' }),
-    });
-    const minted = await mint.json() as { session: { sessionId: string; model: string; effort: string; engine: string } };
-    expect(mint.status).toBe(200);
-    expect(minted.session).toMatchObject({ model: 'gpt-5.6-sol', effort: 'medium', engine: 'codex' });
+  it('binds an available public model override through mint and the real ws spawn seam', async () => {
+    const { response, body: minted } = await mint('codex-sol-xhigh');
+    expect(response.status).toBe(200);
+    expect(minted.session).toMatchObject({ model: 'gpt-5.6-sol', effort: 'xhigh', engine: 'codex' });
+    testState.evalCalls.length = 0;
 
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
     await once(socket, 'open');
@@ -180,5 +235,36 @@ describe('Symon text-first say loop wire', () => {
       type: 'symon-text-done',
       status: 'done',
     }));
+    const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
+    expect(spawnEval).toContain('"engine":"codex"');
+    expect(spawnEval).toContain('"model":"gpt-5.6-sol"');
+    expect(spawnEval).toContain('"effort":"xhigh"');
+  });
+
+  it('falls back to the live default for omitted, unknown, and unavailable selections', async () => {
+    const omitted = await mint();
+    expect(omitted.response.status).toBe(200);
+    expect(omitted.body.session).toMatchObject({
+      engine: 'claude',
+      model: 'claude-opus-4-8',
+      effort: 'high',
+    });
+
+    const unknown = await mint('gpt-5.6-sol');
+    expect(unknown.response.status).toBe(200);
+    expect(unknown.body.session).toMatchObject({
+      engine: 'claude',
+      model: 'claude-opus-4-8',
+      effort: 'high',
+    });
+
+    testState.codexAuthenticated = false;
+    const unavailable = await mint('codex-sol-xhigh');
+    expect(unavailable.response.status).toBe(200);
+    expect(unavailable.body.session).toMatchObject({
+      engine: 'claude',
+      model: 'claude-opus-4-8',
+      effort: 'high',
+    });
   });
 });
