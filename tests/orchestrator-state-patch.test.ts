@@ -113,6 +113,8 @@ interface RpcResponse {
 }
 
 interface CapturedRequest {
+  method: string | undefined;
+  path: string | undefined;
   authorization: string | undefined;
   body: {
     packetId?: string;
@@ -176,6 +178,11 @@ describe('cortex_update_packet real MCP process', () => {
   it('rejects status locally and authenticates supported PATCH requests with the ws-token', { timeout: 20_000 }, async () => {
     const captured: CapturedRequest[] = [];
     const server = createServer((request, response) => {
+      if (request.method !== 'PATCH' || request.url !== '/api/orchestrator/state') {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
       let raw = '';
       request.setEncoding('utf8');
       request.on('data', (chunk: string) => {
@@ -184,6 +191,8 @@ describe('cortex_update_packet real MCP process', () => {
       request.on('end', () => {
         const body = JSON.parse(raw || '{}') as CapturedRequest['body'];
         captured.push({
+          method: request.method,
+          path: request.url,
           authorization: request.headers.authorization,
           body,
         });
@@ -200,6 +209,12 @@ describe('cortex_update_packet real MCP process', () => {
       });
     });
     const port = await listen(server);
+    // The running desktop discovers web servers by probing every listening
+    // localhost port with GET /. Keep that ambient request from contaminating
+    // this PATCH-only fixture, and make the shared-run race deterministic.
+    await fetch(`http://127.0.0.1:${port}/`, {
+      headers: { 'user-agent': 'o8-port-probe' },
+    });
     const child = spawn('npx', ['tsx', 'src/lib/mcp/cortex-mcp-server.ts'], {
       cwd: process.cwd(),
       env: {
@@ -231,6 +246,8 @@ describe('cortex_update_packet real MCP process', () => {
       expect(updated.result?.isError).not.toBe(true);
       expect(captured).toHaveLength(1);
       expect(captured[0]).toEqual({
+        method: 'PATCH',
+        path: '/api/orchestrator/state',
         authorization: `Bearer ${WS_TOKEN}`,
         body: {
           packetId: 'pkt-mcp-summary',
