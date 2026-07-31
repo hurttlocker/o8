@@ -137,6 +137,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "term_list" => SafetyClass::ReadOnly,
         "term_read" => SafetyClass::ReadOnly,
         "term_send" => SafetyClass::Reversible,
+        "agent_turn" => SafetyClass::Reversible,
+        "agent_turn_result" => SafetyClass::ReadOnly,
         "term_interrupt" => SafetyClass::Reversible,
         "term_key" => SafetyClass::Reversible,
         "term_new" => SafetyClass::Reversible,
@@ -253,6 +255,7 @@ pub fn requires_individual_plan_confirmation(tool_name: &str) -> bool {
             "o8_browser_act"
                 | "terminal_send"
                 | "term_send"
+                | "agent_turn"
                 | "term_interrupt"
                 | "term_key"
                 | "term_new"
@@ -292,6 +295,7 @@ mod tests {
         assert!(!is_plan_control_tool("mac_reminders_create"));
         assert!(!is_plan_control_tool("mac_shortcuts_run"));
         assert!(requires_individual_plan_confirmation("term_send"));
+        assert!(requires_individual_plan_confirmation("agent_turn"));
         assert!(requires_individual_plan_confirmation("terminal_send"));
         assert!(requires_individual_plan_confirmation("o8_browser_act"));
         assert!(requires_individual_plan_confirmation("mac_shortcuts_run"));

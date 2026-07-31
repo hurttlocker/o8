@@ -35,6 +35,7 @@ import { useProjects, type ProjectRecord } from '@/components/desktop/repo-regis
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
+import { BrowserPipCard } from '@/components/desktop/BrowserPipCard';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
@@ -5784,6 +5785,15 @@ function DashboardInner() {
 
       {/* Failed New-session spawns surface here — never silent (D3YPBP). */}
       <SpawnErrorToast message={spawnErrorMessage} onDismiss={() => setSpawnErrorMessage(null)} />
+
+      {/* Floating browser PIP (Codex borrow) — only when no side panel is
+          open; triggered by hovering browser tool clusters in the transcript.
+          Scope key MUST match the O8Panel browserStateKey above. */}
+      <BrowserPipCard
+        active={!showRightPanelColumn}
+        scopeKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
+        onOpenBrowser={() => handleOpenO8Panel({ tab: 'browser' })}
+      />
 
     </div>
     </DictationHost>

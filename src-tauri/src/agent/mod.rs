@@ -13,6 +13,7 @@
 //! registry of oneshot senders so the SYNC `agent_confirm` command can resolve
 //! the loop's `await` from a different thread.
 
+pub mod agent_turn;
 pub mod claude;
 pub mod claude_pool;
 pub mod codex;
@@ -1176,6 +1177,11 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
         "term_send" => format!(
             "Send “{}” to {}",
             s("command"),
+            short_term_title(&s("title"))
+        ),
+        "agent_turn" => format!(
+            "Send “{}” to {}",
+            s("prompt"),
             short_term_title(&s("title"))
         ),
         "term_interrupt" => format!("Interrupt {}", short_term_title(&s("title"))),
@@ -2425,6 +2431,18 @@ mod confirm_registry_tests {
                 None,
             ),
             "Send “npm test” to the o8 terminal “cortex-dash”"
+        );
+        assert_eq!(
+            confirm_summary(
+                "agent_turn",
+                &json!({
+                    "id": "t:42:1",
+                    "title": "o8 — Claude Code",
+                    "prompt": "Run the focused tests",
+                }),
+                None,
+            ),
+            "Send “Run the focused tests” to “o8 — Claude Code”"
         );
     }
 

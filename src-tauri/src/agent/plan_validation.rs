@@ -283,7 +283,9 @@ fn redacted_step_summary(tool: &str, args: &Value, schema: &Value) -> String {
         "mac_shortcuts_run" => {
             format!("Run Shortcut{}", quoted("name").unwrap_or_default())
         }
-        "term_send" | "terminal_send" => "Send a command to the selected terminal".to_string(),
+        "term_send" | "terminal_send" | "agent_turn" => {
+            "Send a command to the selected terminal".to_string()
+        }
         "o8_browser_act" => "Act on the current browser page".to_string(),
         "gh_issue_create" => format!("Create GitHub issue{}", quoted("title").unwrap_or_default()),
         "mac_weather" => "Check the weather".to_string(),
@@ -424,6 +426,7 @@ mod tests {
             plan_args(vec![
                 json!({ "tool": "mac_mail_draft", "args": { "to": "a@example.com", "subject": "Hello", "body": "secret body" } }),
                 json!({ "tool": "term_send", "args": { "id": "t:1", "command": "secret command", "title": "shell" } }),
+                json!({ "tool": "agent_turn", "args": { "id": "t:2", "title": "Claude", "prompt": "secret agent prompt" } }),
             ]),
             PlanSurface::Cascaded,
         )
@@ -431,6 +434,7 @@ mod tests {
         let readback = spoken_plan_readback(&plan.steps);
         assert!(!readback.contains("secret body"));
         assert!(!readback.contains("secret command"));
+        assert!(!readback.contains("secret agent prompt"));
         assert!(readback.contains("Draft email “Hello”"));
     }
 }

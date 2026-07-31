@@ -256,6 +256,7 @@ pub fn recent_exchanges(max_age_secs: i64, limit: usize) -> Vec<(String, String)
         "SELECT intent_text, result_text FROM agent_tasks
          WHERE status = 'done' AND finished_at >= ?1
            AND result_text IS NOT NULL AND result_text != ''
+           AND COALESCE(model_used, '') != 'claude-code-transcript'
          ORDER BY created_at DESC LIMIT ?2",
     ) else {
         return Vec::new();
@@ -276,6 +277,30 @@ pub fn latest_task() -> Option<serde_json::Value> {
         "SELECT id, status, intent_text, result_text, model_used, created_at, finished_at
          FROM agent_tasks ORDER BY created_at DESC LIMIT 1",
         [],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "status": row.get::<_, String>(1)?,
+                "intent": row.get::<_, String>(2)?,
+                "result": row.get::<_, Option<String>>(3)?,
+                "model": row.get::<_, Option<String>>(4)?,
+                "createdAt": row.get::<_, i64>(5)?,
+                "finishedAt": row.get::<_, Option<i64>>(6)?,
+            }))
+        },
+    )
+    .ok()
+}
+
+/// One task by exact id. `agent_turn_result` uses this existing persisted seam
+/// so a complete Claude reply remains available after the 600-character phone
+/// report-back has been spoken.
+pub fn task_by_id(id: &str) -> Option<serde_json::Value> {
+    let conn = open_db().ok()?;
+    conn.query_row(
+        "SELECT id, status, intent_text, result_text, model_used, created_at, finished_at
+         FROM agent_tasks WHERE id = ?1",
+        params![id],
         |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, String>(0)?,

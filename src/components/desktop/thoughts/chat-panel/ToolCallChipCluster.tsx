@@ -9,6 +9,7 @@ import {
 import { ShimmerLine, TurnChevron } from './turn-line';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
+import { BROWSER_PIP_EVENT } from '@/components/desktop/BrowserPipCard';
 
 function stringifyValue(value: unknown): string {
   if (value === undefined || value === null) return '';
@@ -207,6 +208,23 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // Browser PIP trigger (Codex borrow): a cluster containing browser work is
+  // the hover target — the whole cluster, not a tiny pill, per the reference
+  // pattern. The BrowserPipCard host owns dwell/grace timing and gating.
+  const hasBrowserWork = useMemo(
+    () => toolCalls.some((tool) => (tool.name ?? '').toLowerCase().includes('browser')),
+    [toolCalls],
+  );
+  const broadcastPipHover = (hovering: boolean) => {
+    if (!hasBrowserWork || typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(BROWSER_PIP_EVENT, { detail: { hovering } }));
+  };
+  useEffect(() => () => {
+    // Unmount with the pointer still inside would strand the card open.
+    if (hasBrowserWork && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(BROWSER_PIP_EVENT, { detail: { hovering: false } }));
+    }
+  }, [hasBrowserWork]);
   const selectedTool = useMemo(() => {
     if (!expandedToolId) return null;
     return toolCalls.find((tool, index) => toolKey(tool, index) === expandedToolId) ?? null;
@@ -277,6 +295,8 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
   return (
     <div
       ref={rootRef}
+      onMouseEnter={() => broadcastPipHover(true)}
+      onMouseLeave={() => broadcastPipHover(false)}
       style={{
         display: 'flex',
         flexDirection: 'column',

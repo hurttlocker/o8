@@ -491,6 +491,9 @@ mod tests {
         assert!(crate::agent::safety::requires_individual_plan_confirmation(
             "term_send"
         ));
+        assert!(crate::agent::safety::requires_individual_plan_confirmation(
+            "agent_turn"
+        ));
         assert_eq!(
             plan_confirmation_route(true, true, false),
             PlanConfirmationRoute::Individual,

@@ -26,6 +26,8 @@
 
 use super::run_osascript_jxa;
 use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::process::Command;
 
 /// Embed a Rust string as a safe JS string literal.
 fn js_str(s: &str) -> String {
@@ -123,6 +125,11 @@ pub async fn list(_args: Value) -> Result<Value, String> {
 enum Target {
     Terminal { win_id: i64, tab: i64 },
     ITerm { guid: String },
+}
+
+pub(crate) struct ClaudeTerminal {
+    pub cwd: PathBuf,
+    pub busy: bool,
 }
 
 fn parse_token(id: &str) -> Result<Target, String> {
@@ -302,6 +309,135 @@ async fn run_in_target(
     Ok(parsed.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string())
 }
 
+/// Resolve a foreign terminal to the Claude Code process attached to its tty.
+/// Transcript watching needs the process cwd because Terminal/iTerm titles are
+/// user-facing labels and are not an authoritative path source.
+pub(crate) fn claude_terminal(id: &str) -> Result<ClaudeTerminal, String> {
+    let target = parse_token(id)?;
+    let body = match target {
+        Target::Terminal { win_id, tab } => format!(
+            r#"
+            const term = Application("Terminal");
+            const w = term.windows().find(w => w.id() === {win_id});
+            if (!w) throw new Error("no Terminal window with that id — call term_list again");
+            const tabs = w.tabs();
+            const t = tabs[{tab_ix}] || tabs[0];
+            JSON.stringify({{ tty: String(t.tty() || ""), busy: !!t.busy() }});
+        "#,
+            win_id = win_id,
+            tab_ix = tab - 1,
+        ),
+        Target::ITerm { guid } => format!(
+            r#"
+            if (!appRunning("iTerm")) throw new Error("iTerm isn't running");
+            const hit = itermFind({guid});
+            if (!hit) throw new Error("no iTerm session with that id — call term_list again");
+            JSON.stringify({{ tty: tryStr(hit.s, ["tty"]), busy: sbusy(hit.s) }});
+        "#,
+            guid = js_str(&guid),
+        ),
+    };
+    let out = run_osascript_jxa(&format!("{}{}", JS_PRELUDE, body)).map_err(spoken_err)?;
+    let parsed: Value = serde_json::from_str(&out)
+        .map_err(|error| format!("couldn't resolve that terminal: {error}"))?;
+    let tty = parsed.get("tty").and_then(Value::as_str).unwrap_or("").trim();
+    if tty.is_empty() {
+        return Err(
+            "That terminal did not expose a tty, so I can't match its Claude transcript.".into(),
+        );
+    }
+    let cwd = claude_cwd_for_tty(tty)?;
+    Ok(ClaudeTerminal {
+        cwd,
+        busy: parsed.get("busy").and_then(Value::as_bool).unwrap_or(false),
+    })
+}
+
+/// Lightweight terminal busy probe used only to corroborate transcript-based
+/// turn completion. `None` means the terminal disappeared or stopped exposing
+/// the flag; transcript state remains the primary completion signal.
+pub(crate) fn busy_state(id: &str) -> Option<bool> {
+    let target = parse_token(id).ok()?;
+    let body = match target {
+        Target::Terminal { win_id, tab } => format!(
+            r#"
+            const term = Application("Terminal");
+            const w = term.windows().find(w => w.id() === {win_id});
+            if (!w) throw new Error("terminal closed");
+            const tabs = w.tabs();
+            const t = tabs[{tab_ix}] || tabs[0];
+            JSON.stringify({{ busy: !!t.busy() }});
+        "#,
+            win_id = win_id,
+            tab_ix = tab - 1,
+        ),
+        Target::ITerm { guid } => format!(
+            r#"
+            if (!appRunning("iTerm")) throw new Error("terminal closed");
+            const hit = itermFind({guid});
+            if (!hit) throw new Error("terminal closed");
+            JSON.stringify({{ busy: sbusy(hit.s) }});
+        "#,
+            guid = js_str(&guid),
+        ),
+    };
+    let out = run_osascript_jxa(&format!("{}{}", JS_PRELUDE, body)).ok()?;
+    serde_json::from_str::<Value>(&out).ok()?.get("busy")?.as_bool()
+}
+
+pub(crate) async fn send_prompt(id: &str, prompt: &str) -> Result<String, String> {
+    let target = parse_token(id)?;
+    run_in_target(target, &js_str(prompt), true, "sent").await
+}
+
+fn claude_cwd_for_tty(tty: &str) -> Result<PathBuf, String> {
+    let tty_name = tty.trim_start_matches("/dev/");
+    let output = Command::new("/bin/ps")
+        .args(["-t", tty_name, "-o", "pid=,pgid=,stat=,comm="])
+        .output()
+        .map_err(|error| format!("couldn't inspect that terminal's processes: {error}"))?;
+    if !output.status.success() {
+        return Err("I couldn't inspect the selected terminal's processes.".into());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let Some(pid) = claude_pid_from_ps(&stdout) else {
+        return Err("That terminal is not running a Claude Code session.".into());
+    };
+    let output = Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .output()
+        .map_err(|error| format!("couldn't resolve Claude's working directory: {error}"))?;
+    let cwd = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix('n'))
+        .filter(|path| path.starts_with('/'))
+        .map(PathBuf::from)
+        .ok_or("I found Claude Code, but couldn't resolve its working directory.".to_string())?;
+    Ok(cwd)
+}
+
+fn claude_pid_from_ps(stdout: &str) -> Option<u32> {
+    let mut claude_pids = Vec::new();
+    for line in stdout.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(pid) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let _pgid = fields.next();
+        let stat = fields.next().unwrap_or("");
+        let command = fields.next().unwrap_or("");
+        let is_claude = std::path::Path::new(command)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("claude");
+        if is_claude {
+            claude_pids.push((!stat.contains('+'), pid));
+        }
+    }
+    claude_pids.sort_unstable();
+    claude_pids.first().map(|(_, pid)| *pid)
+}
+
 /// `term_new` — open a fresh terminal window, optionally cd somewhere and start
 /// a command. Prefers iTerm when it's running, else Terminal (always installed).
 pub async fn new(args: Value) -> Result<Value, String> {
@@ -391,5 +527,17 @@ fn spoken_err(e: String) -> String {
         "Neither Terminal nor iTerm is running right now.".to_string()
     } else {
         e
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::claude_pid_from_ps;
+
+    #[test]
+    fn claude_process_resolution_prefers_the_foreground_tty_process() {
+        let processes = "100 100 S /bin/zsh\n200 200 S /usr/local/bin/claude\n300 300 S+ /opt/homebrew/bin/claude\n";
+        assert_eq!(claude_pid_from_ps(processes), Some(300));
+        assert_eq!(claude_pid_from_ps("100 100 S+ /bin/zsh\n"), None);
     }
 }

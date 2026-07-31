@@ -40,6 +40,8 @@ const MAX_TURNS: usize = 10;
 /// Per-turn ceiling. A real model hang is rare; on timeout the turn errors and
 /// the loop surfaces a failure rather than hanging the task forever.
 const TURN_TIMEOUT_SECS: u64 = 150;
+const MODEL_UNAVAILABLE_ERROR_PREFIX: &str = "claude model unavailable: ";
+const FIRST_TURN_MODEL_UNAVAILABLE_PREFIX: &str = "claude first turn model unavailable: ";
 
 /// The planner protocol, prepended to the tool schema. Kept blunt: Claude
 /// follows strong format instructions well, and "JSON only, no built-in tools"
@@ -263,12 +265,11 @@ impl ClaudeSession {
             "--model",
             model,
         ];
-        // Opus runs at full reasoning power (Q ruling 2026-07-15: "let me feel
-        // it at full power; if it's slow when we ship we adjust"). Sonnet paths
-        // (Smart Compose) keep the CLI default for latency. Effort is a pure
-        // function of the model, so the model-keyed warm pool stays coherent —
-        // a warm Opus proc is always a high-effort proc.
-        if model.starts_with("claude-opus") {
+        // Symon's Fable and Opus brain lanes run at full reasoning power.
+        // Sonnet paths (Smart Compose) keep the CLI default for latency. Effort
+        // is a pure function of the model, so the model-keyed warm pool stays
+        // coherent.
+        if model.starts_with("claude-opus") || model == crate::models::CLAUDE_FABLE_5 {
             args.extend_from_slice(&["--effort", "high"]);
         }
         let mut child = Command::new(bin)
@@ -347,6 +348,10 @@ impl ClaudeSession {
             let Ok(ev) = serde_json::from_str::<Value>(trimmed) else {
                 continue;
             };
+            if claude_event_indicates_model_unavailable(&ev) {
+                let detail = claude_event_text(&ev).unwrap_or("selected model is unavailable");
+                return Err(format!("{MODEL_UNAVAILABLE_ERROR_PREFIX}{detail}"));
+            }
             match ev.get("type").and_then(|t| t.as_str()) {
                 Some("result") => {
                     answer = ev
@@ -380,6 +385,55 @@ impl ClaudeSession {
         }
         Ok(answer)
     }
+}
+
+fn claude_event_text(event: &Value) -> Option<&str> {
+    event
+        .get("result")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            event
+                .pointer("/message/content")
+                .and_then(Value::as_array)
+                .and_then(|blocks| {
+                    blocks.iter().find_map(|block| {
+                        (block.get("type").and_then(Value::as_str) == Some("text"))
+                            .then(|| block.get("text").and_then(Value::as_str))
+                            .flatten()
+                    })
+                })
+        })
+}
+
+fn claude_event_indicates_model_unavailable(event: &Value) -> bool {
+    if matches!(
+        event.get("error").and_then(Value::as_str),
+        Some("model_not_found" | "model_unavailable" | "model_not_available_for_org")
+    ) {
+        return true;
+    }
+    if event.get("is_error").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    if event.get("api_error_status").and_then(Value::as_u64) == Some(404) {
+        return true;
+    }
+    let detail = claude_event_text(event)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    detail.contains("model not found")
+        || detail.contains("model is not available")
+        || detail.contains("model may not exist")
+        || detail.contains("may not have access to it")
+}
+
+fn is_model_unavailable_error(error: &str) -> bool {
+    error.starts_with(MODEL_UNAVAILABLE_ERROR_PREFIX)
+}
+
+fn should_retry_with_claude_fallback(model: &str, error: &str) -> bool {
+    model == crate::models::CLAUDE_FABLE_5
+        && error.starts_with(FIRST_TURN_MODEL_UNAVAILABLE_PREFIX)
 }
 
 impl Drop for ClaudeSession {
@@ -462,16 +516,7 @@ pub async fn run_loop_with_binary(
     ctx: &TaskCtx,
 ) -> Result<LoopResult, String> {
     let mcp_cfg = ensure_empty_mcp_config()?;
-
-    // ONE live session for the whole task (#1252 speed pass): turn 1 sends the
-    // full planner prompt (system + tool schema + screen), follow-ups send ONLY
-    // the tool result — the model keeps its context, so no per-turn re-boot and
-    // no growing-transcript re-prefill. The pool hands back a warm proc that was
-    // pre-booted on the Option keydown, so even turn 1 skips the CLI bootstrap.
-    let session = super::claude_pool::acquire(bin, model, &mcp_cfg)
-        .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
-
-    run_text_planner_loop(session, model, intent, ctx, "claude").await
+    run_loop_with_fallback(bin, model, intent, ctx, &mcp_cfg, None).await
 }
 
 pub async fn run_phone_text_loop_with_binary(
@@ -482,9 +527,73 @@ pub async fn run_phone_text_loop_with_binary(
     correlation: ConfirmCorrelation,
 ) -> Result<LoopResult, String> {
     let mcp_cfg = ensure_empty_mcp_config()?;
-    let session = super::claude_pool::acquire(bin, model, &mcp_cfg)
+    run_loop_with_fallback(bin, model, intent, ctx, &mcp_cfg, Some(correlation)).await
+}
+
+async fn run_loop_once(
+    bin: &str,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    mcp_cfg: &str,
+    correlation: Option<ConfirmCorrelation>,
+) -> Result<LoopResult, String> {
+    // ONE live session for the whole task (#1252 speed pass): turn 1 sends the
+    // full planner prompt (system + tool schema + screen), follow-ups send only
+    // the tool result. The pool normally hands back the proc pre-booted on the
+    // Option keydown, so turn 1 skips the CLI bootstrap.
+    let session = super::claude_pool::acquire(bin, model, mcp_cfg)
         .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
-    run_text_planner_loop_correlated(session, model, intent, ctx, "claude", correlation).await
+    match correlation {
+        Some(correlation) => {
+            run_text_planner_loop_correlated(
+                session,
+                model,
+                intent,
+                ctx,
+                "claude",
+                correlation,
+            )
+            .await
+        }
+        None => run_text_planner_loop(session, model, intent, ctx, "claude").await,
+    }
+}
+
+async fn run_loop_with_fallback(
+    bin: &str,
+    requested_model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    mcp_cfg: &str,
+    correlation: Option<ConfirmCorrelation>,
+) -> Result<LoopResult, String> {
+    let model = super::planner_route::effective_claude_model(requested_model);
+    let first = run_loop_once(bin, model, intent, ctx, mcp_cfg, correlation.clone()).await;
+    let Err(error) = first else {
+        return first;
+    };
+    if !should_retry_with_claude_fallback(model, &error) {
+        return Err(error);
+    }
+    let Some(fallback) = super::planner_route::claude_fallback_selection(bin, model) else {
+        return Err(error);
+    };
+    super::planner_route::remember_claude_fable_unavailable();
+    log::warn!(
+        "[symon-agent] {model} unavailable; retrying once with {} / {}",
+        fallback.model,
+        fallback.effort
+    );
+    run_loop_once(
+        &fallback.binary,
+        fallback.model,
+        intent,
+        ctx,
+        mcp_cfg,
+        correlation,
+    )
+    .await
 }
 
 pub(crate) trait TextPlannerSession: Send + 'static {
@@ -560,7 +669,7 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
     let action_intent = looks_like_action_request(intent);
     let mut nudged_premature_done = false;
 
-    for _turn in 0..MAX_TURNS {
+    for turn in 0..MAX_TURNS {
         // User interrupted (Escape / tap-to-stop) — stop before the next turn.
         // run_agent_inner sees the cancel flag and goes quiet.
         if ctx.is_cancelled() {
@@ -584,7 +693,12 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
         .map_err(|_| format!("{provider} turn timed out"))?
         .map_err(|e| format!("{provider} turn join error: {e}"))?;
         session = joined.0;
-        let raw = joined.1?;
+        let raw = match joined.1 {
+            Err(error) if turn == 0 && is_model_unavailable_error(&error) => {
+                return Err(format!("{FIRST_TURN_MODEL_UNAVAILABLE_PREFIX}{error}"));
+            }
+            result => result?,
+        };
 
         let Some(action) = extract_action(&raw) else {
             // Not parseable as an action — take the reply as the final answer
@@ -721,6 +835,37 @@ mod tests {
     fn extract_action_plain_json() {
         let a = extract_action(r#"{"tool":"mac_weather","args":{}}"#).unwrap();
         assert_eq!(a.get("tool").unwrap(), "mac_weather");
+    }
+
+    #[test]
+    fn claude_model_not_found_event_selects_first_turn_fallback() {
+        let event = json!({
+            "type": "assistant",
+            "error": "model_not_found",
+            "message": {
+                "content": [{
+                    "type": "text",
+                    "text": "The selected model may not exist or you may not have access to it."
+                }]
+            }
+        });
+        assert!(claude_event_indicates_model_unavailable(&event));
+        let error = format!(
+            "{FIRST_TURN_MODEL_UNAVAILABLE_PREFIX}{MODEL_UNAVAILABLE_ERROR_PREFIX}{}",
+            claude_event_text(&event).unwrap()
+        );
+        assert!(should_retry_with_claude_fallback(
+            crate::models::CLAUDE_FABLE_5,
+            &error
+        ));
+        assert!(!should_retry_with_claude_fallback(
+            crate::models::CLAUDE_OPUS_4_8,
+            &error
+        ));
+        assert!(!should_retry_with_claude_fallback(
+            crate::models::CLAUDE_FABLE_5,
+            MODEL_UNAVAILABLE_ERROR_PREFIX
+        ));
     }
 
     #[test]
