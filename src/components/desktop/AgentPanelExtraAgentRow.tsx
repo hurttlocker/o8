@@ -228,7 +228,10 @@ export function ExtraAgentRowView({
       <span
         style={{
           flex: 1,
-          minWidth: 0,
+          // Title keeps a readable floor — the trailing outcome label shrinks
+          // first (see maxWidth below). Without this, "Finished — no changes"
+          // crushed titles to 5 chars at sidebar width (rig finding 2026-07-31).
+          minWidth: 90,
           fontSize: 13.5,
           fontWeight: 300,
           color: recede ? 'var(--t-text-muted)' : 'var(--t-text)',
@@ -272,7 +275,11 @@ export function ExtraAgentRowView({
       {row.outcome ? (
         <span
           style={{
-            flexShrink: 0,
+            flexShrink: 1,
+            minWidth: 0,
+            maxWidth: 120,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
             color: row.outcome === 'merged'
               ? 'var(--t-terminal-ansi-bright-green, #16a34a)'
               : 'var(--t-text-muted)',

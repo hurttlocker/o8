@@ -20,11 +20,15 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
 
 export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
+  // 'human' rides the warm rejected accent, NOT the slate review tone — rank 3
+  // ("agent blocked on you") washed in gray reads as a hover state and vanishes
+  // next to finished rows (rig finding 2026-07-31). Slate stays for review:
+  // quieter is correct one rank down. Hierarchy: red > orange > slate > green.
   const accent = band === 'failed'
     ? AGENT_STATUS_ACCENT.failed
-    : band === 'rejected'
+    : band === 'rejected' || band === 'human'
       ? AGENT_STATUS_ACCENT.rejected
-      : band === 'human' || band === 'review'
+      : band === 'review'
         ? AGENT_STATUS_ACCENT.review
         : band === 'merged'
           ? AGENT_STATUS_ACCENT.merged

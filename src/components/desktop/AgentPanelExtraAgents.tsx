@@ -25,6 +25,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
 import { AGENT_STATUS_ACCENT } from '@/components/desktop/AgentStatusDot';
 import {
@@ -432,11 +433,13 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   }, [readStateVersion, rows]);
   const needsYouCount = rankedRows.filter((entry) => entry.rank > 0).length;
   const highestBand = rankedRows.find((entry) => entry.rank > 0)?.band ?? null;
+  // Tone ladder mirrors attentionWashStyle — 'human' is warm like rejected,
+  // never slate, so the header count always matches the loudest wash below it.
   const countTone = highestBand === 'failed'
     ? AGENT_STATUS_ACCENT.failed
-    : highestBand === 'rejected'
+    : highestBand === 'rejected' || highestBand === 'human'
       ? AGENT_STATUS_ACCENT.rejected
-      : highestBand === 'human' || highestBand === 'review'
+      : highestBand === 'review'
         ? AGENT_STATUS_ACCENT.review
         : highestBand === 'merged'
           ? AGENT_STATUS_ACCENT.merged
@@ -480,9 +483,16 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
         collapsed={collapsed}
         onToggle={toggleCollapsed}
       />
+      {/* layout="position" springs a row to its new slot when a band change
+          re-sorts the list — without it, a working row that flips to needs-you
+          teleports (rig finding 2026-07-31). Position-only: rows never resize. */}
       {!collapsed ? rankedRows.map(({ row, band }) => (
-        <ExtraAgentRowView
+        <motion.div
           key={row.key}
+          layout="position"
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        >
+        <ExtraAgentRowView
           row={row}
           band={band}
           repoLabel={showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
@@ -497,6 +507,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
             setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
           }}
         />
+        </motion.div>
       )) : null}
       {actionMenu ? (
         <ExtraAgentActionMenu
