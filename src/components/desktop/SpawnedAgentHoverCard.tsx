@@ -22,7 +22,7 @@ interface HoverTranscript {
 const CARD_WIDTH = 348;
 const CARD_HEIGHT_ESTIMATE = 242;
 
-function resolveHoverPosition(anchorRect: DOMRect) {
+export function resolveHoverPosition(anchorRect: DOMRect) {
   const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
   const margin = 14;
@@ -37,7 +37,7 @@ function resolveHoverPosition(anchorRect: DOMRect) {
   return { left, top };
 }
 
-function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
+export function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
       <div
@@ -243,6 +243,10 @@ export function SpawnedAgentHoverCard({
       <div style={{ display: 'grid', gap: 7 }}>
         <MetaRow label="Elapsed" value={formatSpawnedAgentElapsed(row.lastActivityAt, now)} />
         <MetaRow label="Branch" value={row.subtitle || row.repoPath || 'No branch reported'} />
+        {row.repoPath ? (
+          <MetaRow label="Repo" value={row.repoPath.split('/').filter(Boolean).at(-1) ?? row.repoPath} />
+        ) : null}
+        {row.prNumber ? <MetaRow label="PR" value={`#${row.prNumber}`} /> : null}
         {transcript.lastActivity ? <MetaRow label="Activity" value={transcript.lastActivity} /> : null}
       </div>
 

@@ -26,6 +26,9 @@ export interface ExtraAgentRow {
   outcome: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null;
   outcomeNote: string | null;
   lastEventLabel: string | null;
+  /** Open PR for this lane, surfaced in the hover card (T3 keeps it in-row —
+   *  too cramped; ours lives one hover away). */
+  prNumber?: number | null;
   /** Latest review verdict was a rejection — drives the 'rejected' dot so the
    *  sidebar agrees with the decision banner (which reads the same verdict).
    *  Detachment-proof: derived from durable approvals, not the lane status. */
@@ -126,6 +129,7 @@ export function ExtraAgentRowView({
   onRetryPacket,
   band,
   repoLabel,
+  link,
 }: {
   row: ExtraAgentRow;
   active: boolean;
@@ -138,6 +142,10 @@ export function ExtraAgentRowView({
   onRetryPacket?: (row: ExtraAgentRow) => void;
   band: AttentionBand;
   repoLabel?: string | null;
+  /** Fleet reveal (orchestrator thread hovered): 'linked' = this agent belongs
+   *  to the hovered thread (full ink + lit), 'dimmed' = it doesn't (faint ink,
+   *  wash suppressed). null/undefined = no link active. */
+  link?: 'linked' | 'dimmed' | null;
 }) {
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
@@ -145,8 +153,29 @@ export function ExtraAgentRowView({
   const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
   const canInteract = canFocus || canRetry;
   const [hovered, setHovered] = useState(false);
-  const recede = shouldRecede({ band, active, hovered });
-  const washStyle = attentionWashStyle(band);
+  const recede = link === 'linked'
+    ? false
+    : link === 'dimmed'
+      ? true
+      : shouldRecede({ band, active, hovered });
+  // Linked rows with no band wash (in-flight/settled) still get the neutral
+  // hover-layer fill so the whole fleet visibly lights up; dimmed rows drop
+  // their wash entirely — attention lives with the hovered thread's agents.
+  const bandWash = attentionWashStyle(band);
+  const washStyle = link === 'dimmed'
+    ? null
+    : link === 'linked'
+      ? bandWash ?? {
+        position: 'absolute' as const,
+        top: 2,
+        right: 6,
+        bottom: 2,
+        left: 6,
+        borderRadius: 8,
+        background: 'var(--t-hover)',
+        zIndex: 0,
+      }
+      : bandWash;
   const handleClick = useCallback(() => {
     if (onFocusRow) {
       onFocusRow(row);
@@ -234,8 +263,11 @@ export function ExtraAgentRowView({
           minWidth: 90,
           fontSize: 13.5,
           fontWeight: 300,
-          color: recede ? 'var(--t-text-muted)' : 'var(--t-text)',
+          color: link === 'dimmed'
+            ? 'var(--t-text-faint)'
+            : recede ? 'var(--t-text-muted)' : 'var(--t-text)',
           letterSpacing: '-0.1px',
+          transition: 'color 140ms ease',
           lineHeight: 1.25,
           overflow: 'hidden',
           textOverflow: 'ellipsis',

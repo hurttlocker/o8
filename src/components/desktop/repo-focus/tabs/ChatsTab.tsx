@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
+import { OrchestratorHoverCard } from '@/components/desktop/OrchestratorHoverCard';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import { clearLastOrchestratorThreadForId } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { canCreateOrchestratorForRepo } from '../../agent-panel-repo-selection';
@@ -39,6 +41,7 @@ import {
   deriveShowRepoSuffix,
   deriveSweptThreads,
   repoSuffix,
+  SIDEBAR_HOVER_THREAD_EVENT,
 } from './chats/sections';
 import { markVisited } from './chats/read-state';
 import type {
@@ -437,20 +440,60 @@ export function ChatsTab({
   const toggleGroup = (key: HistoryGroupKey) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
-  const renderHistoryRow = (item: ChatHistoryItem, archived = false) => (
-    <HistoryChatRow
-      key={item.tabId}
-      item={item}
-      compact={compact}
-      disabled={!onOpenHistoryChat}
-      active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-      tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(historyPacketsByTabId.get(item.tabId))}
-      repoLabel={showRepoSuffix ? repoSuffix(item) : null}
-      ownedCount={archived ? 0 : ownedPacketsByThread.get(item.tabId)?.length ?? 0}
-      onOpen={() => openHistoryItem(item)}
-      onOpenMenu={(event) => setHistoryActionMenu({ item, archived, x: event.clientX, y: event.clientY })}
-    />
-  );
+
+  // Fleet reveal: hovering a thread that owns live packets lights those rows
+  // in the Agents section (SIDEBAR_HOVER_THREAD_EVENT) immediately, and opens
+  // the orchestrator hover card on dwell. The card's own hover keeps both
+  // alive so the pointer can travel onto it.
+  const [threadHover, setThreadHover] = useState<{ item: ChatHistoryItem; rect: DOMRect } | null>(null);
+  const threadHoverOpenRef = useRef<number | null>(null);
+  const threadHoverCloseRef = useRef<number | null>(null);
+  const broadcastThreadLink = useCallback((packetIds: string[] | null) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(SIDEBAR_HOVER_THREAD_EVENT, { detail: { packetIds } }));
+  }, []);
+  const clearThreadHoverTimers = useCallback(() => {
+    if (threadHoverOpenRef.current) window.clearTimeout(threadHoverOpenRef.current);
+    if (threadHoverCloseRef.current) window.clearTimeout(threadHoverCloseRef.current);
+    threadHoverOpenRef.current = null;
+    threadHoverCloseRef.current = null;
+  }, []);
+  const handleThreadHover = useCallback((item: ChatHistoryItem, packetIds: string[], rect: DOMRect | null) => {
+    clearThreadHoverTimers();
+    if (rect) {
+      broadcastThreadLink(packetIds);
+      threadHoverOpenRef.current = window.setTimeout(() => setThreadHover({ item, rect }), 240);
+    } else {
+      broadcastThreadLink(null);
+      threadHoverCloseRef.current = window.setTimeout(() => setThreadHover(null), 160);
+    }
+  }, [broadcastThreadLink, clearThreadHoverTimers]);
+  useEffect(() => () => {
+    // Never leave the Agents section stuck dimmed if this tab unmounts mid-hover.
+    clearThreadHoverTimers();
+    broadcastThreadLink(null);
+  }, [broadcastThreadLink, clearThreadHoverTimers]);
+
+  const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
+    const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
+    return (
+      <HistoryChatRow
+        key={item.tabId}
+        item={item}
+        compact={compact}
+        disabled={!onOpenHistoryChat}
+        active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+        tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(historyPacketsByTabId.get(item.tabId))}
+        repoLabel={showRepoSuffix ? repoSuffix(item) : null}
+        ownedCount={owned.length}
+        onHoverChange={owned.length > 0
+          ? (rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)
+          : undefined}
+        onOpen={() => openHistoryItem(item)}
+        onOpenMenu={(event) => setHistoryActionMenu({ item, archived, x: event.clientX, y: event.clientY })}
+      />
+    );
+  };
 
   if (hideWhenEmpty && (!hasContent || loading)) return null;
 
@@ -657,6 +700,25 @@ export function ChatsTab({
           }}
           onDelete={() => deleteHistoryItem(historyActionMenu.item)}
           onRename={(title) => { void renameHistoryItem(historyActionMenu.item, title); }}
+        />
+      ) : null}
+      {threadHover ? (
+        <OrchestratorHoverCard
+          title={threadHover.item.title}
+          repoLabel={repoSuffix(threadHover.item)}
+          backendLabel={threadHover.item.backend
+            ? orchestratorBackendDisplayLabel({ backend: threadHover.item.backend, agent: threadHover.item.agent })
+            : null}
+          packets={ownedPacketsByThread.get(threadHover.item.tabId) ?? []}
+          anchorRect={threadHover.rect}
+          onMouseEnter={() => {
+            clearThreadHoverTimers();
+            broadcastThreadLink((ownedPacketsByThread.get(threadHover.item.tabId) ?? []).map((packet) => packet.id));
+          }}
+          onMouseLeave={() => {
+            broadcastThreadLink(null);
+            setThreadHover(null);
+          }}
         />
       ) : null}
     </div>

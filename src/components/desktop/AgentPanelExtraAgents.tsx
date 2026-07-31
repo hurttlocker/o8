@@ -47,6 +47,7 @@ import {
   deriveShowRepoSuffix,
   isCompletionUnread,
   repoSuffix,
+  SIDEBAR_HOVER_THREAD_EVENT,
 } from './repo-focus/tabs/chats/sections';
 import { getLastVisited, markVisited } from './repo-focus/tabs/chats/read-state';
 
@@ -68,6 +69,7 @@ export interface LaneSummary {
   ownership: LaneOwnership;
   lastEventAt: string | null;
   lastEventLabel: string | null;
+  prNumber?: number | null;
 }
 
 type AgentStatus = 'idle' | 'running' | 'blocked' | 'waiting' | 'reviewing' | 'failed' | 'completed';
@@ -161,6 +163,7 @@ function buildRows(
       outcome: lane.outcome ?? null,
       outcomeNote: lane.outcomeNote ?? null,
       lastEventLabel: lane.lastEventLabel,
+      prNumber: lane.prNumber ?? null,
       rejected: lane.packetId ? rejectedPacketIds.has(lane.packetId) : false,
     });
   }
@@ -456,6 +459,18 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
     return () => window.removeEventListener(FOCUS_LANE_EVENT, onFocus);
   }, []);
 
+  // Fleet reveal: a hovered orchestrator thread broadcasts its packet ids;
+  // those rows light up, everything else dims (see ExtraAgentRowView's link).
+  const [linkedPacketIds, setLinkedPacketIds] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    const onHoverThread = (event: Event) => {
+      const detail = (event as CustomEvent<{ packetIds?: string[] | null }>).detail;
+      setLinkedPacketIds(detail?.packetIds?.length ? new Set(detail.packetIds) : null);
+    };
+    window.addEventListener(SIDEBAR_HOVER_THREAD_EVENT, onHoverThread);
+    return () => window.removeEventListener(SIDEBAR_HOVER_THREAD_EVENT, onHoverThread);
+  }, []);
+
   useEffect(() => {
     if (!activeSessionKey) return;
     const activeRow = rows.find((row) => row.sessionKey === activeSessionKey);
@@ -495,6 +510,9 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
         <ExtraAgentRowView
           row={row}
           band={band}
+          link={linkedPacketIds
+            ? (row.packetId && linkedPacketIds.has(row.packetId) ? 'linked' : 'dimmed')
+            : null}
           repoLabel={showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
           active={Boolean(activeSessionKey && row.sessionKey === activeSessionKey)}
           busy={busy}

@@ -3,6 +3,13 @@ import { CONVERSATIONS_GROUP_KEY, historyRepoGroupLabel } from './helpers';
 import type { RepoFocusRepo } from '../../types';
 import type { ArchivedLaneRow, ChatHistoryItem, RepoHistoryGroup } from './types';
 
+/**
+ * Cross-section hover link: hovering an orchestrator thread row broadcasts its
+ * owned packet ids so the Agents section can light them up and dim the rest.
+ * detail: { packetIds: string[] | null } — null clears the link.
+ */
+export const SIDEBAR_HOVER_THREAD_EVENT = 'o8:sidebar-hover-thread';
+
 export type AttentionBand =
   | 'failed'
   | 'rejected'

@@ -19,12 +19,12 @@ import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
 
-export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
-  // 'human' rides the warm rejected accent, NOT the slate review tone — rank 3
-  // ("agent blocked on you") washed in gray reads as a hover state and vanishes
-  // next to finished rows (rig finding 2026-07-31). Slate stays for review:
-  // quieter is correct one rank down. Hierarchy: red > orange > slate > green.
-  const accent = band === 'failed'
+// 'human' rides the warm rejected accent, NOT the slate review tone — rank 3
+// ("agent blocked on you") washed in gray reads as a hover state and vanishes
+// next to finished rows (rig finding 2026-07-31). Slate stays for review:
+// quieter is correct one rank down. Hierarchy: red > orange > slate > green.
+export function attentionAccent(band: AttentionBand): string | null {
+  return band === 'failed'
     ? AGENT_STATUS_ACCENT.failed
     : band === 'rejected' || band === 'human'
       ? AGENT_STATUS_ACCENT.rejected
@@ -33,6 +33,10 @@ export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
         : band === 'merged'
           ? AGENT_STATUS_ACCENT.merged
           : null;
+}
+
+export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
+  const accent = attentionAccent(band);
   if (!accent) return null;
   return {
     position: 'absolute',
@@ -223,6 +227,7 @@ export function HistoryChatRow({
   repoLabel,
   recede = false,
   washBand,
+  onHoverChange,
 }: {
   item: ChatHistoryItem;
   active: boolean;
@@ -236,6 +241,9 @@ export function HistoryChatRow({
   repoLabel?: string | null;
   recede?: boolean;
   washBand?: AttentionBand | null;
+  /** Fleet-reveal hook: rect on enter, null on leave. Wired only for threads
+   *  that own live packets — see ChatsTab. */
+  onHoverChange?: (rect: DOMRect | null) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   // Drag-to-split (Claude Code parity): a pointerdown that travels past the
@@ -297,8 +305,14 @@ export function HistoryChatRow({
         onOpen();
       }}
       onPointerDown={handleDragPointerDown}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={(event) => {
+        setHovered(true);
+        onHoverChange?.(event.currentTarget.getBoundingClientRect());
+      }}
+      onMouseLeave={() => {
+        setHovered(false);
+        onHoverChange?.(null);
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         onOpenMenu?.(event);
