@@ -29,6 +29,7 @@
 import {
   PUBLIC_STATUSES,
   STATUSES,
+  ledgerPath,
   readLedger,
   readPublished,
   readStatus,
@@ -36,7 +37,7 @@ import {
 } from './lib/fixed-reports.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { publicTitle } from './lib/sanitize-title.mjs';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -78,32 +79,68 @@ async function mirrorToDiscord(report, { status, note }) {
   const headers = { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' };
   const api = 'https://discord.com/api/v10';
 
+  const parts = [];
+  if (status) parts.push(`**${status}**`);
+  if (note) parts.push(note);
+  const content = parts.join(' — ').slice(0, 1900);
+
   // Reuse the report's thread if it has one; otherwise start it FROM the message,
   // so the thread reads as a reply to the report rather than a loose post.
+  // Anchors can die permanently (10008 Unknown Message — the 2026-07-29 server
+  // move orphaned every pre-move report), so a dead anchor falls back to a
+  // standalone channel post and gets cleared in the ledger instead of failing
+  // the mirror forever.
   let threadId = null;
+  let anchorDead = false;
   const existing = await fetch(`${api}/channels/${CHANNEL_ID}/messages/${report.messageId}`, { headers });
   if (existing.ok) {
     const message = await existing.json();
     threadId = message.thread?.id ?? null;
+  } else if (existing.status === 404) {
+    anchorDead = true;
   }
 
-  if (!threadId) {
+  if (!threadId && !anchorDead) {
     const created = await fetch(`${api}/channels/${CHANNEL_ID}/messages/${report.messageId}/threads`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ name: `${report.id} · ${report.title}`.slice(0, 100), auto_archive_duration: 10080 }),
     });
-    if (!created.ok) return { ok: false, why: `thread create HTTP ${created.status}` };
-    threadId = (await created.json()).id;
+    if (created.ok) {
+      threadId = (await created.json()).id;
+    } else {
+      const detail = await created.json().catch(() => null);
+      if (detail?.code === 10008) {
+        anchorDead = true;
+      } else {
+        const reason = detail ? ` (${detail.code ?? '?'} ${detail.message ?? ''})`.trimEnd() : '';
+        return { ok: false, why: `thread create HTTP ${created.status}${reason}` };
+      }
+    }
   }
 
-  const parts = [];
-  if (status) parts.push(`**${status}**`);
-  if (note) parts.push(note);
+  if (anchorDead) {
+    const posted = await fetch(`${api}/channels/${CHANNEL_ID}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ content: `**${report.id} · ${report.title}**`.slice(0, 200) + ` — ${content}`.slice(0, 1700) }),
+    });
+    if (!posted.ok) return { ok: false, why: `fallback post HTTP ${posted.status} (anchor purged)` };
+    // Clear the dead anchor with the ledger's own append-only last-write-wins
+    // convention (see sync-reports.mjs enrich pass) so future mirrors skip
+    // straight to the fallback instead of re-probing a purged message.
+    try {
+      appendFileSync(ledgerPath(), `${JSON.stringify({ ...report, messageId: undefined })}\n`, 'utf8');
+    } catch {
+      // Ledger heal is cosmetic; the mirrored note is what matters.
+    }
+    return { ok: true, fallback: true };
+  }
+
   const posted = await fetch(`${api}/channels/${threadId}/messages`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ content: parts.join(' — ').slice(0, 1900) }),
+    body: JSON.stringify({ content }),
   });
   return posted.ok ? { ok: true, threadId } : { ok: false, why: `post HTTP ${posted.status}` };
 }
@@ -230,7 +267,7 @@ async function annotate(id, { status, note }) {
 
   const mirrored = await mirrorToDiscord(report, { status, note });
   console.log(mirrored.ok
-    ? `  ${DIM}mirrored to the report's thread${RESET}`
+    ? `  ${DIM}${mirrored.fallback ? 'mirrored as a standalone post (original report message was purged)' : "mirrored to the report's thread"}${RESET}`
     : `  ${DIM}not mirrored to Discord (${mirrored.why}) — recorded locally${RESET}`);
 
   if (status && PUBLIC_STATUSES.has(status)) {
