@@ -483,6 +483,17 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     // must stop the moment the operator toggles the mode off.
     let designArmed = false;
 
+    // A lit Design brush must never sit over a page with no draw layer
+    // (live-hit 2026-07-31, report 2B8A88): every abandoned arm path closes
+    // the mode so the toggle visibly snaps off instead of failing silently.
+    // Only the visible (arming) instance ever reaches these paths, so the
+    // hidden twin cannot kill a mode its sibling is still arming.
+    const bailDesignMode = (reason: string) => {
+      designArmed = false;
+      console.warn(`[native-browser] design mode arm failed: ${reason}`);
+      window.dispatchEvent(new CustomEvent('o8:design-mode-request', { detail: { action: 'close' } }));
+    };
+
     const onDesignMode = (event: Event) => {
       const active = (event as CustomEvent<{ active?: boolean }>).detail?.active === true;
       if (!active) {
@@ -498,7 +509,10 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       void armDrawMode().then(async (resp) => {
         if (!designArmed) return;
         if (resp?.ok) { startPolling(); return; }
-        if (!String(resp?.error ?? '').includes('not installed')) return;
+        if (!String(resp?.error ?? '').includes('not installed')) {
+          bailDesignMode(String(resp?.error ?? 'arm rejected'));
+          return;
+        }
         // The agent source injects at WINDOW CREATION, so a window that
         // predates the draw layer (or any code update — page CSP blocks
         // eval-based re-injection) can never learn drawmode in place.
@@ -508,7 +522,10 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         // never registers the init script. Settle after close, reopen with
         // the CURRENT source, then poll-arm until the fresh page answers.
         const rect = computeRect();
-        if (!rect) return;
+        if (!rect) {
+          bailDesignMode('no visible rect to recreate the browser window in');
+          return;
+        }
         await browserViewClose();
         await new Promise((resolve) => window.setTimeout(resolve, 450));
         if (!designArmed) return;
@@ -522,13 +539,18 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
             if (retry?.ok) { startPolling(); return; }
             attempts += 1;
             if (attempts < 24) window.setTimeout(tryArm, 500);
+            else bailDesignMode('draw layer never answered after window recreate (24 tries)');
           }).catch(() => {
             attempts += 1;
-            if (designArmed && attempts < 24) window.setTimeout(tryArm, 500);
+            if (!designArmed) return;
+            if (attempts < 24) window.setTimeout(tryArm, 500);
+            else bailDesignMode('draw layer arm kept erroring after window recreate (24 tries)');
           });
         };
         window.setTimeout(tryArm, 800);
-      }).catch(() => {});
+      }).catch((error) => {
+        if (designArmed) bailDesignMode(error instanceof Error ? error.message : 'arm request failed');
+      });
     };
     window.addEventListener('o8:design-mode', onDesignMode);
     return () => {
