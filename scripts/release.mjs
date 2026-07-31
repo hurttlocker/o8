@@ -31,6 +31,9 @@ import { verifyNativeBundle } from './native-bundle.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
+// The real source repo. EMPTY until hurttlocker/o8 is public — see composeReleaseAnnouncement().
+// Q 2026-07-31: "they need to point to the real repo because it will be public soon."
+const SOURCE_REPO = process.env.O8_SOURCE_REPO || '';
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const root = process.cwd();
 
@@ -375,12 +378,21 @@ function composeReleaseAnnouncement() {
     .slice(0, 6)
     .map((s) => `- ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
   const date = new Date().toISOString().slice(0, 10);
+  // SOURCE_REPO is the real code repo, linked ALONGSIDE the release mirror once it goes public.
+  // Deliberately empty today: hurttlocker/o8 is still PRIVATE (verified via `gh repo view`
+  // 2026-07-31), and linking it now sends the whole server to a 404. Flip this to 'hurttlocker/o8'
+  // the day the repo flips — that is the only edit needed.
+  const sourceLine = SOURCE_REPO
+    ? `Source: https://github.com/${SOURCE_REPO}`
+    : null;
   return [
+    '@everyone',
     `**o8 ${tag}** — ${date}`,
     '',
     ...(bullets.length ? bullets : ['- Fixes and maintenance.']),
     '',
     `Update: relaunch o8 (auto-updates within 30 min), or grab it fresh: https://github.com/${PUBLIC_MIRROR}/releases/tag/${tag}`,
+    ...(sourceLine ? [sourceLine] : []),
   ].join('\n');
 }
 
@@ -393,7 +405,13 @@ async function announceRelease() {
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'o8', content: composeReleaseAnnouncement() }),
+    // allowed_mentions is REQUIRED for the ping to land: a webhook can contain the literal
+    // "@everyone" and Discord will render it as inert text unless "everyone" is parsed here.
+    body: JSON.stringify({
+      username: 'o8',
+      content: composeReleaseAnnouncement(),
+      allowed_mentions: { parse: ['everyone'] },
+    }),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
