@@ -104,9 +104,10 @@ impl CodexSession {
             "tools.image_generation=false".to_string(),
             "--ignore-user-config".to_string(),
         ]);
-        if self.thread_id.is_none() {
-            args.push("--skip-git-repo-check".to_string());
-        }
+        // Every planner process runs from the system temp directory. The first
+        // process starts the Codex thread, while later tool-result turns use
+        // `exec resume`; both commands enforce repository trust independently.
+        args.push("--skip-git-repo-check".to_string());
         if let Some(path) = &image_path {
             args.extend(["--image".to_string(), path.to_string_lossy().to_string()]);
         }
@@ -187,6 +188,9 @@ pub async fn run_phone_text_loop(
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     #[test]
     fn parses_codex_thread_and_agent_message() {
         let mut session = CodexSession::new("/mock/codex", "gpt-5.6-sol", "medium");
@@ -198,5 +202,64 @@ mod tests {
             .unwrap();
         assert_eq!(session.thread_id.as_deref(), Some("thread-1"));
         assert_eq!(answer, r#"{"done":true,"say":"Ready."}"#);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_text_session_trusts_temp_workdir_on_initial_and_resumed_turns() {
+        let fixture_dir = std::env::temp_dir().join(format!(
+            "o8-codex-planner-args-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&fixture_dir).unwrap();
+        let capture_path = fixture_dir.join("args.txt");
+        let binary_path = fixture_dir.join("codex-fixture");
+        let script = format!(
+            r#"#!/bin/sh
+has_skip=0
+for arg in "$@"; do
+  printf '%s\n' "$arg" >> '{}'
+  if [ "$arg" = "--skip-git-repo-check" ]; then has_skip=1; fi
+done
+printf '%s\n' '__END__' >> '{}'
+if [ "$has_skip" -ne 1 ]; then
+  printf '%s\n' 'Not inside a trusted directory and --skip-git-repo-check was not specified.' >&2
+  exit 1
+fi
+printf '%s\n' '{{"type":"thread.started","thread_id":"thread-1"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":"{{\"done\":true,\"say\":\"Ready.\"}}"}}}}'
+"#,
+            capture_path.display(),
+            capture_path.display()
+        );
+        std::fs::write(&binary_path, script).unwrap();
+        std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut session = CodexSession::new(binary_path.to_str().unwrap(), "gpt-5.6-sol", "xhigh");
+        session.send_turn("First user turn", None).unwrap();
+        session.send_turn("Tool result follow-up", None).unwrap();
+
+        let captured = std::fs::read_to_string(&capture_path).unwrap();
+        let invocations = captured
+            .split("__END__\n")
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(invocations.len(), 2);
+        assert!(invocations[0]
+            .lines()
+            .any(|arg| arg == "--skip-git-repo-check"));
+        assert_eq!(
+            invocations[1].lines().take(3).collect::<Vec<_>>(),
+            ["exec", "resume", "thread-1",]
+        );
+        assert!(invocations[1]
+            .lines()
+            .any(|arg| arg == "--skip-git-repo-check"));
+
+        std::fs::remove_dir_all(fixture_dir).unwrap();
     }
 }
