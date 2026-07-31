@@ -24,6 +24,7 @@ import { ReviewPanel } from './review/ReviewPanel';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { TargetsPanel } from './o8-panel/TargetsPanel';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
+import { WorkspaceBrowserPreview } from './o8-panel/WorkspaceBrowserPreview';
 import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
 import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
@@ -789,6 +790,12 @@ export function O8Panel({
             style={{ flex: 1 }}
           />
         </div>
+        <WorkspaceBrowserPreview
+          active={activeTab === 'workspace'}
+          suppressed={utilityShellActive && renderedUtilityTabs.includes('browser')}
+          browserScopeKey={browserStateKey}
+          onOpenBrowser={() => onActiveTabChange?.('browser')}
+        />
         {allRepos ? (
           <ProjectChangesOverview repos={registeredRepos} onPickRepo={(path) => onRepoPathChange?.(path)} />
         ) : (
