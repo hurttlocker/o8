@@ -37,12 +37,14 @@ export async function fetchWorkerBranch(
     }).catch(() => {});
     await rm(tempWorktreePath, { recursive: true, force: true });
 
-    await execFileAsync('git', ['fetch', 'origin', remoteBranch], {
+    // --end-of-options: a branch name can never be parsed as a flag, even if
+    // the upstream validator ever regresses (#1644 defense-in-depth).
+    await execFileAsync('git', ['fetch', '--end-of-options', 'origin', remoteBranch], {
       cwd: repoPath,
       maxBuffer: 4 * 1024 * 1024,
       timeout: 60_000,
     });
-    const resolvedBaseRef = (await execFileAsync('git', ['rev-parse', '--verify', baseRef], {
+    const resolvedBaseRef = (await execFileAsync('git', ['rev-parse', '--verify', '--end-of-options', baseRef], {
       cwd: repoPath,
       maxBuffer: 1024 * 1024,
       timeout: 15_000,

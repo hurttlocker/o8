@@ -52,10 +52,25 @@ export async function GET(request: NextRequest) {
   try {
     // redirect:'manual' — never follow a redirect server-side. A followed
     // redirect escapes the localhost allow-list (→ metadata/external/own-API
-    // SSRF). On a 3xx we hand the iframe the DIRECT url so the browser follows
-    // it in its own context (matching the Clerk fallback below).
+    // SSRF). On a 3xx, revalidate the resolved Location (#1644): a target
+    // that passes the same localhost/own-port gate stays INSIDE the proxy
+    // (document remains same-origin + grabbable); anything else hands the
+    // iframe the DIRECT original url so the browser follows it in its own
+    // context (matching the Clerk fallback below).
     const upstream = await fetch(url, { redirect: 'manual', headers: { accept: 'text/html,*/*' } });
     if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get('location');
+      let resolved: string | null = null;
+      try {
+        resolved = location ? new URL(location, url).toString() : null;
+      } catch {
+        resolved = null;
+      }
+      if (resolved && LOCAL_TARGET.test(resolved) && !targetsOwnPort(resolved)) {
+        const proxied = new URL('/api/browser/proxy', request.nextUrl.origin);
+        proxied.searchParams.set('url', resolved);
+        return NextResponse.redirect(proxied, 302);
+      }
       return NextResponse.redirect(url, 302);
     }
     // Origin-sensitive auth frameworks (Clerk, etc.) break when proxied to a
