@@ -99,7 +99,7 @@ Only `workspaceMode: "code"` filters Mac-executed tools. Its exact catalog is:
 `o8_status`, `o8_needs_me`, `o8_review_diff`, `o8_dispatch`, `o8_delegate`,
 `o8_packet_wait`, `o8_packet_steer`, `o8_agent_task`, `o8_packet_rerun`,
 `o8_packet_reset`, `o8_stop_agent`, `o8_approve_item`, `o8_reject_item`,
-`git_status`, `git_log`, `symon_ledger_recent`, and `symon_ledger_undo`.
+`git_status`, `git_log`, `repo_commit_diff`, `symon_ledger_recent`, and `symon_ledger_undo`.
 
 The phone-local `render_surface` tool is appended after that pack and never
 relayed to the Mac. Mail, media, browser, shell, file, and every other desktop or

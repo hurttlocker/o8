@@ -196,6 +196,7 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // GitHub + local git (Tier-3) — all read-only.
         "git_status" => SafetyClass::ReadOnly,
         "git_log" => SafetyClass::ReadOnly,
+        "repo_commit_diff" => SafetyClass::ReadOnly,
         "gh_pr_list" => SafetyClass::ReadOnly,
         "gh_issue_list" => SafetyClass::ReadOnly,
         // Reading the ledger is observational. Its undo executes a persisted

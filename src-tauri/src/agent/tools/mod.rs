@@ -969,6 +969,19 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "repo_commit_diff",
+            "description": "Inspect a tracked repository commit's actual patch, optionally for one file. Use after catch-up subjects/diffstats when the operator asks to review the code, and cite specific file paths in your review.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repoPath": { "type": "string", "description": "Exact tracked repository path." },
+                    "sha": { "type": "string", "description": "Commit object id or unambiguous hexadecimal prefix." },
+                    "file": { "type": "string", "description": "Optional repository-relative file path for one patch." }
+                },
+                "required": ["repoPath", "sha"]
+            }
+        }),
+        json!({
             "name": "gh_pr_list",
             "description": "List open pull requests for a repo (number, title, state, author) via the GitHub CLI. Use for 'any open PRs on o8?'.",
             "parameters": {
@@ -1219,6 +1232,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "mac_music_now_playing" => mac_music::now_playing(args).await,
         "git_status" => o8_bridge::git_status(args).await,
         "git_log" => o8_bridge::git_log(args).await,
+        "repo_commit_diff" => git_github::repo_commit_diff(args).await,
         "gh_pr_list" => git_github::pr_list(args).await,
         "gh_issue_list" => git_github::issue_list(args).await,
         "symon_ledger_recent" => {

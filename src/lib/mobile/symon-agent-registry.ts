@@ -78,6 +78,7 @@ const REPO_ARGUMENT_TOOLS = new Set([
   'o8_stop_agent',
   'git_status',
   'git_log',
+  'repo_commit_diff',
 ]);
 
 const STABLE_TARGET_TOOLS = new Set([

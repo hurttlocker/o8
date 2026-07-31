@@ -161,6 +161,7 @@ export const PHONE_CODE_TOOL_NAMES = [
   'o8_reject_item',
   'git_status',
   'git_log',
+  'repo_commit_diff',
   'symon_ledger_recent',
   'symon_ledger_undo',
 ] as const;
