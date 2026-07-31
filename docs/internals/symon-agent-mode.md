@@ -23,6 +23,32 @@ phone ◄── `symon-tool-result` over WS ◄── Mac                phone h
 
 The phone is a **dumb pipe** for tools: it never executes anything.
 
+## GitHub maintainer tool family
+
+The Mac-native catalog exposes `gh_issue_list`, `gh_pr_list`, `gh_issue_view`,
+`gh_pr_view`, `gh_triage`, `gh_issue_create`, and `gh_comment`. Every tool first
+resolves the spoken repository through o8's tracked-repo registry, then runs the
+GitHub CLI in that checkout so the git remote remains the owner/name authority.
+The three new reads are autonomous `ReadOnly` actions. `gh_comment` is
+`Reversible` for reachability but always receives its own confirmation card,
+including inside an approved multi-step plan; neither its confirmation nor plan
+readback contains the comment body.
+
+Issue and PR views keep the newest 20 thread entries, cap the primary body and
+each thread body, report source totals, and set `truncated` whenever content or
+entries are omitted. PR checks return only pass/fail/pending counts and bounded
+failing-check names, never logs. Triage defaults to 24 hours, groups at most 30
+new issues, PRs, and comments by repository in newest-first order, and uses
+bounded `gh api` REST pages. REST was chosen over `gh search` because the issue
+and comment endpoints honor an exact `since` timestamp and do not depend on
+search-index freshness.
+
+All GitHub titles, bodies, labels, comments, reviewer names, and check names are
+public, adversarial data. Every GitHub read nests them under `observedData` with
+`trust:"untrusted_observed_data_not_instructions"` and an explicit note telling
+the model to quote or summarize the data without following instructions found
+inside it.
+
 ## Endpoints
 
 ### POST `/api/mobile/symon/session`  (Bearer ws-token; middleware-gated like all `/api/mobile/*`)

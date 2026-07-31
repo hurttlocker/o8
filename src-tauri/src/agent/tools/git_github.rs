@@ -1,10 +1,10 @@
 //! Symon Tier-3 tools — read-only local git + GitHub (via the `gh` CLI).
 //!
 //! Lets Symon answer "any open PRs on o8?", "what's the git status?",
-//! "recent commits?" by voice. ReadOnly except `gh_issue_create` (voice
-//! capture to the tracker — Reversible, carded). The repo name resolves to an absolute path via
-//! `super::o8_bridge::resolve_repo_path`; commands run with that path as cwd so
-//! `git`/`gh` auto-detect the repo + its remote.
+//! "recent commits?" by voice. ReadOnly except the carded GitHub writes. The
+//! repo name resolves to an absolute path via `super::o8_bridge::resolve_repo_path`;
+//! commands run with that path as cwd so `git`/`gh` auto-detect the repo and
+//! its remote.
 
 use super::o8_bridge::resolve_repo_path;
 use serde_json::{json, Value};
@@ -30,7 +30,7 @@ fn bin(name: &str) -> String {
 
 /// Run a read-only command in `cwd`, returning trimmed stdout. Errors fold in
 /// stderr so the model can speak a useful reason.
-fn run(cmd: &str, args: &[&str], cwd: &str) -> Result<String, String> {
+pub(super) fn run(cmd: &str, args: &[&str], cwd: &str) -> Result<String, String> {
     let out = Command::new(bin(cmd))
         .args(args)
         .current_dir(cwd)
@@ -62,7 +62,7 @@ fn run_bytes(cmd: &str, args: &[&str], cwd: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
+pub(super) fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
     if value.len() <= max_bytes {
         return value;
     }
@@ -157,7 +157,7 @@ fn strict_tracked_repo_path(requested: &str, tracked: &[String]) -> Result<Strin
     ))
 }
 
-async fn tracked_repo_paths() -> Result<Vec<String>, String> {
+pub(super) async fn tracked_repo_paths() -> Result<Vec<String>, String> {
     let response = crate::agent::o8_http::get_json("/api/panel/repos").await?;
     let repos = response
         .get("repos")
@@ -379,7 +379,7 @@ pub async fn repo_commit_diff(args: Value) -> Result<Value, String> {
 }
 
 /// Resolve the `repo` arg (folder name or absolute path) to a repo dir.
-async fn repo_arg(args: &Value) -> Result<String, String> {
+pub(super) async fn repo_arg(args: &Value) -> Result<String, String> {
     let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim();
     if repo.is_empty() {
         return Err("which repo? (e.g. 'o8')".into());
@@ -410,7 +410,11 @@ pub async fn pr_list(args: Value) -> Result<Value, String> {
     )?;
     let prs: Value = serde_json::from_str(&out).unwrap_or_else(|_| json!([]));
     let count = prs.as_array().map(|a| a.len()).unwrap_or(0);
-    Ok(json!({ "count": count, "prs": prs }))
+    Ok(super::git_github_maintainer::github_observed(
+        "github_cli",
+        json!({ "count": count, "prs": prs }),
+        count == 15,
+    ))
 }
 
 pub async fn issue_list(args: Value) -> Result<Value, String> {
@@ -422,7 +426,11 @@ pub async fn issue_list(args: Value) -> Result<Value, String> {
     )?;
     let issues: Value = serde_json::from_str(&out).unwrap_or_else(|_| json!([]));
     let count = issues.as_array().map(|a| a.len()).unwrap_or(0);
-    Ok(json!({ "count": count, "issues": issues }))
+    Ok(super::git_github_maintainer::github_observed(
+        "github_cli",
+        json!({ "count": count, "issues": issues }),
+        count == 15,
+    ))
 }
 
 /// `gh_issue_create` — voice capture straight to the repo tracker ("file an

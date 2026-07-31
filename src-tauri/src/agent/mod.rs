@@ -854,7 +854,7 @@ fn requires_confirmation_for_call(
     class: safety::SafetyClass,
     reversible_silent_consent: bool,
 ) -> bool {
-    tool_name == "symon_ledger_undo"
+    matches!(tool_name, "symon_ledger_undo" | "gh_issue_create" | "gh_comment")
         || safety::requires_confirmation(class, reversible_silent_consent)
 }
 
@@ -1221,6 +1221,12 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
             )
         }
         "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),
+        "gh_comment" => format!(
+            "Post a comment on {} #{} in {}",
+            s("kind"),
+            args.get("number").and_then(Value::as_u64).unwrap_or(0),
+            s("repo")
+        ),
         "o8_add_repo" => {
             let project = s("project");
             if project.is_empty() {
@@ -2136,12 +2142,34 @@ mod confirm_registry_tests {
     static TEST_CONFIRM_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn ledger_undo_never_inherits_blanket_reversible_consent() {
+    fn individually_carded_tools_never_inherit_blanket_reversible_consent() {
         assert!(requires_confirmation_for_call(
             "symon_ledger_undo",
             safety::SafetyClass::Reversible,
             true,
         ));
+        assert!(requires_confirmation_for_call(
+            "gh_issue_create",
+            safety::SafetyClass::Reversible,
+            true,
+        ));
+        assert!(requires_confirmation_for_call(
+            "gh_comment",
+            safety::SafetyClass::Reversible,
+            true,
+        ));
+        let comment_summary = confirm_summary(
+            "gh_comment",
+            &json!({
+                "repo": "o8",
+                "kind": "issue",
+                "number": 52,
+                "body": "secret GitHub body",
+            }),
+            None,
+        );
+        assert_eq!(comment_summary, "Post a comment on issue #52 in o8");
+        assert!(!comment_summary.contains("secret GitHub body"));
         assert!(!requires_confirmation_for_call(
             "mac_reminders_create",
             safety::SafetyClass::Reversible,

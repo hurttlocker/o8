@@ -163,8 +163,10 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "o8_packet_wait" => SafetyClass::ReadOnly,
         // Drafts only — the user presses send, so the draft IS the gate.
         "o8_orchestrator_draft" => SafetyClass::ReadOnly,
-        // Writes to the public tracker → carded.
-        "gh_issue_create" => SafetyClass::Reversible,
+        // Writes to the public tracker → carded. GitHub comments can contain
+        // arbitrary operator-authored text and retain an individual card even
+        // inside an approved plan.
+        "gh_issue_create" | "gh_comment" => SafetyClass::Reversible,
         // Day-one assistant basics. Weather only reads public APIs; volume
         // mutates no data and the opposite nudge undoes it instantly (same
         // reasoning as Music playback below).
@@ -201,6 +203,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "repo_commit_diff" => SafetyClass::ReadOnly,
         "gh_pr_list" => SafetyClass::ReadOnly,
         "gh_issue_list" => SafetyClass::ReadOnly,
+        "gh_issue_view" => SafetyClass::ReadOnly,
+        "gh_pr_view" => SafetyClass::ReadOnly,
+        "gh_triage" => SafetyClass::ReadOnly,
         // Reading the ledger is observational. Its undo executes a persisted
         // inverse and always receives a fresh confirmation card.
         "symon_ledger_recent" => SafetyClass::ReadOnly,
@@ -259,6 +264,8 @@ pub fn requires_individual_plan_confirmation(tool_name: &str) -> bool {
                 | "term_interrupt"
                 | "term_key"
                 | "term_new"
+                | "gh_issue_create"
+                | "gh_comment"
         )
 }
 
@@ -298,6 +305,8 @@ mod tests {
         assert!(requires_individual_plan_confirmation("agent_turn"));
         assert!(requires_individual_plan_confirmation("terminal_send"));
         assert!(requires_individual_plan_confirmation("o8_browser_act"));
+        assert!(requires_individual_plan_confirmation("gh_issue_create"));
+        assert!(requires_individual_plan_confirmation("gh_comment"));
         assert!(requires_individual_plan_confirmation("mac_shortcuts_run"));
         assert!(!requires_individual_plan_confirmation("mac_reminders_create"));
     }

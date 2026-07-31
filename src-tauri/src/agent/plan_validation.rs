@@ -288,6 +288,12 @@ fn redacted_step_summary(tool: &str, args: &Value, schema: &Value) -> String {
         }
         "o8_browser_act" => "Act on the current browser page".to_string(),
         "gh_issue_create" => format!("Create GitHub issue{}", quoted("title").unwrap_or_default()),
+        "gh_comment" => format!(
+            "Comment on GitHub {} #{} in{}",
+            safe_arg(args, "kind").unwrap_or_else(|| "item".to_string()),
+            args.get("number").and_then(Value::as_u64).unwrap_or(0),
+            quoted("repo").unwrap_or_else(|| " the requested repo".to_string()),
+        ),
         "mac_weather" => "Check the weather".to_string(),
         "mac_music_play" => "Start the requested music".to_string(),
         "mac_music_pause" => "Pause music".to_string(),
@@ -427,6 +433,7 @@ mod tests {
                 json!({ "tool": "mac_mail_draft", "args": { "to": "a@example.com", "subject": "Hello", "body": "secret body" } }),
                 json!({ "tool": "term_send", "args": { "id": "t:1", "command": "secret command", "title": "shell" } }),
                 json!({ "tool": "agent_turn", "args": { "id": "t:2", "title": "Claude", "prompt": "secret agent prompt" } }),
+                json!({ "tool": "gh_comment", "args": { "repo": "o8", "kind": "issue", "number": 52, "body": "secret GitHub body" } }),
             ]),
             PlanSurface::Cascaded,
         )
@@ -435,6 +442,8 @@ mod tests {
         assert!(!readback.contains("secret body"));
         assert!(!readback.contains("secret command"));
         assert!(!readback.contains("secret agent prompt"));
+        assert!(!readback.contains("secret GitHub body"));
         assert!(readback.contains("Draft email “Hello”"));
+        assert!(readback.contains("Comment on GitHub issue #52 in “o8”"));
     }
 }
