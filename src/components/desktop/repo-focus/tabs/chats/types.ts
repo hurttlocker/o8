@@ -53,12 +53,8 @@ export interface ChatsTabProps {
   groupMode?: 'sections' | 'flat';
   showKindInMeta?: boolean;
   packets?: OrchestratorPacket[];
-  /** Optional slot rendered between the active chats list and the Archived
-   *  section so callers can interleave related content (e.g. the Spawned
-   *  agents section) without it being pushed below Archived. The function
-   *  form receives the packet ids ChatsTab nested under visible orchestrator
-   *  threads this render, so the slot can avoid double-listing them. */
-  slotBeforeArchived?: ReactNode | ((ctx: { nestedPacketIds: ReadonlySet<string> }) => ReactNode);
+  /** Flat Agents section rendered between Chats and Archived. */
+  agentsSection?: ReactNode;
   /** When set (mini variant, repo grouping), each repo group header gets a
    *  hover-revealed [+] that spawns a fresh orchestrator session scoped to
    *  that repo — Cursor's contextual New Agent pattern. */

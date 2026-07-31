@@ -25,12 +25,14 @@ export function SectionLabel({
   label,
   compact = false,
   count,
+  countTone,
   collapsed,
   onToggle,
 }: {
   label: string;
   compact?: boolean;
   count?: number;
+  countTone?: string;
   collapsed?: boolean;
   onToggle?: () => void;
 }) {
@@ -58,8 +60,8 @@ export function SectionLabel({
               fontSize: compact ? 9 : 9.5,
               lineHeight: '12px',
               letterSpacing: 0,
-              color: 'var(--t-text-faint)',
-              fontWeight: 500,
+              color: countTone ?? 'var(--t-text-faint)',
+              fontWeight: 300,
             }}
           >
             {count}
@@ -97,8 +99,8 @@ export function SectionLabel({
             fontSize: compact ? 9 : 9.5,
             lineHeight: '12px',
             letterSpacing: 0,
-            color: 'var(--t-text-faint)',
-            fontWeight: 500,
+            color: countTone ?? 'var(--t-text-faint)',
+            fontWeight: 300,
           }}
         >
           {count}

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { CheckCircle2, ChevronDown, ChevronRight } from '../../../lucide-shims';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { CheckCircle2 } from '../../../lucide-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
 import { HISTORY_ROW_TONES } from './constants';
@@ -10,14 +10,37 @@ import {
   historySection,
   isAutomationSession,
   packetRepoLabel,
-  packetStateTone,
   packetTimestamp,
 } from './helpers';
-import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { AGENT_STATUS_ACCENT, AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
+import type { AttentionBand } from './sections';
 import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
+
+export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
+  const accent = band === 'failed'
+    ? AGENT_STATUS_ACCENT.failed
+    : band === 'rejected'
+      ? AGENT_STATUS_ACCENT.rejected
+      : band === 'human' || band === 'review'
+        ? AGENT_STATUS_ACCENT.review
+        : band === 'merged'
+          ? AGENT_STATUS_ACCENT.merged
+          : null;
+  if (!accent) return null;
+  return {
+    position: 'absolute',
+    top: 2,
+    right: 6,
+    bottom: 2,
+    left: 6,
+    borderRadius: 8,
+    background: `color-mix(in srgb, ${accent} 10%, transparent)`,
+    zIndex: 0,
+  };
+}
 
 export function ArchivedLaneCompactRow({
   lane,
@@ -123,7 +146,7 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         textAlign: 'left',
         fontFamily: REPO_FOCUS_FONT,
         paddingTop: compact ? 2 : 5,
-        paddingRight: compact ? 12 : 14,
+        paddingRight: 12,
         paddingBottom: compact ? 2 : 5,
         // Align with HistoryChatRow's chat-text X (37) so merged packets
         // and active chats sit on the same vertical column.
@@ -193,8 +216,9 @@ export function HistoryChatRow({
   onOpen,
   onOpenMenu,
   ownedCount = 0,
-  ownedExpanded = true,
-  onToggleOwned,
+  repoLabel,
+  recede = false,
+  washBand,
 }: {
   item: ChatHistoryItem;
   active: boolean;
@@ -203,11 +227,11 @@ export function HistoryChatRow({
   tone?: HistoryRowTone | null;
   onOpen: () => void;
   onOpenMenu?: (event: MouseEvent<HTMLDivElement>) => void;
-  /** Workers this orchestrator thread spawned (ownership nesting, Q ruling
-   *  2026-07-12: variant A structure + variant B's count-as-collapse). */
+  /** Static count only; worker rows live in the flat Agents section. */
   ownedCount?: number;
-  ownedExpanded?: boolean;
-  onToggleOwned?: () => void;
+  repoLabel?: string | null;
+  recede?: boolean;
+  washBand?: AttentionBand | null;
 }) {
   const [hovered, setHovered] = useState(false);
   // Drag-to-split (Claude Code parity): a pointerdown that travels past the
@@ -312,18 +336,21 @@ export function HistoryChatRow({
           lighter var(--t-hover) fill so sibling states stay cohesive. Inset
           so the fill never touches the rail edges; text X stays exactly 37
           (the hurttlocker indent is untouched — this layer is behind it). */}
-      {(active || hovered) ? (
+      {(active || hovered || washBand) ? (
         <span
           aria-hidden
           style={{
-            position: 'absolute',
-            top: 2,
-            bottom: 2,
-            left: 6,
-            right: 6,
-            borderRadius: compact ? 8 : 10,
-            background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
-            zIndex: 0,
+            ...(attentionWashStyle(washBand ?? 'neutral') ?? {}),
+            ...(active || hovered ? {
+              position: 'absolute',
+              top: 2,
+              right: 6,
+              bottom: 2,
+              left: 6,
+              borderRadius: 8,
+              background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
+              zIndex: 0,
+            } : {}),
           }}
         />
       ) : null}
@@ -352,12 +379,26 @@ export function HistoryChatRow({
             lineHeight: 1.25,
             fontWeight: 300,
             letterSpacing: '-0.1px',
+            color: recede && !active && !hovered ? 'var(--t-text-muted)' : 'var(--t-text)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
         >
           {item.title}
+          {repoLabel ? (
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 9.5,
+                fontWeight: 260,
+                letterSpacing: '-0.4px',
+                color: active || hovered ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+              }}
+            >
+              {repoLabel}
+            </span>
+          ) : null}
         </span>
         {metaParts.length > 0 && !compact ? (
           <span
@@ -402,150 +443,21 @@ export function HistoryChatRow({
           position: 'relative',
         }}
       >
-        {/* Variant-B affordance: faint "N agents" count doubles as the
-            per-thread collapse toggle for the nested worker rows below.
-            stopPropagation — the row itself opens the chat. */}
-        {compact && ownedCount > 0 && onToggleOwned ? (
+        {compact && ownedCount > 0 ? (
           <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={ownedExpanded}
-            title={`${ownedExpanded ? 'Hide' : 'Show'} ${ownedCount} spawned ${ownedCount === 1 ? 'agent' : 'agents'}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleOwned();
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' && event.key !== ' ') return;
-              event.preventDefault();
-              event.stopPropagation();
-              onToggleOwned();
-            }}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 2,
-              cursor: 'pointer',
               color: 'var(--t-text-faint)',
-              outline: 'none',
             }}
           >
             <span>{ownedCount} {ownedCount === 1 ? 'agent' : 'agents'}</span>
-            {ownedExpanded ? <ChevronDown size={9} strokeWidth={2} /> : <ChevronRight size={9} strokeWidth={2} />}
           </span>
         ) : null}
         {compact ? (
           <span>{formatElapsedAgo(item.modifiedAt)}</span>
         ) : null}
       </span>
-    </div>
-  );
-}
-
-/**
- * OwnedWorkerRow — a worker packet nested under the orchestrator thread that
- * spawned it (linkage: packet.orchestratorThreadId === thread tabId). Variant
- * A of the ownership mockup (Q 2026-07-12): +7 indent from the parent text
- * column, smaller dimmer title, same 6px status-dot vocabulary — ownership
- * reads spatially, zero clicks. Click focuses the worker's lane via the same
- * event the Spawned-agents section dispatches.
- */
-export function OwnedWorkerRow({ packet }: { packet: OrchestratorPacket }) {
-  const [hovered, setHovered] = useState(false);
-  const tone = packetStateTone(packet);
-  const dotState: AgentDotState =
-    tone?.key === 'running' ? 'running'
-      : tone?.key === 'review' ? 'review'
-        : tone?.key === 'merged' ? 'merged'
-          : tone?.key === 'failed' ? 'failed'
-            : 'idle';
-  const timestamp = packetTimestamp(packet);
-  const focusLane = () => {
-    if (typeof window === 'undefined') return;
-    window.dispatchEvent(new CustomEvent('o8:focus-spawned-agent-lane', {
-      detail: {
-        packetId: packet.id,
-        sessionKey: packet.lane?.sessionKey ?? null,
-        laneId: packet.lane?.laneId ?? null,
-        title: packet.title,
-      },
-    }));
-  };
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={focusLane}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        focusLane();
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        width: '100%',
-        minHeight: 26,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: 'var(--t-text-muted)',
-        cursor: 'pointer',
-        textAlign: 'left',
-        outline: 'none',
-        fontFamily: REPO_FOCUS_FONT,
-        paddingTop: 4,
-        paddingRight: 12,
-        paddingBottom: 4,
-        // Parent thread title sits at x=37; workers nest exactly +7 (the
-        // locked repo-child indent step). Dot centers in the gutter beside.
-        paddingLeft: 44,
-        position: 'relative',
-        transition: 'background 180ms ease',
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          position: 'absolute',
-          left: 21,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          display: 'inline-flex',
-          alignItems: 'center',
-        }}
-      >
-        <AgentStatusDot state={dotState} />
-      </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 12,
-          lineHeight: 1.25,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {packet.title}
-      </span>
-      {timestamp ? (
-        <span
-          style={{
-            flexShrink: 0,
-            color: 'var(--t-text-faint)',
-            fontSize: 9.5,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-          }}
-        >
-          {formatElapsedAgo(timestamp)}
-        </span>
-      ) : null}
     </div>
   );
 }

@@ -5,7 +5,6 @@ import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import { clearLastOrchestratorThreadForId } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { canCreateOrchestratorForRepo } from '../../agent-panel-repo-selection';
 import {
-  normalizeRepoPath,
   packetBelongsToRepo,
   packetVisualState,
   REPO_FOCUS_FONT,
@@ -16,14 +15,11 @@ import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
   CONVERSATIONS_GROUP_KEY,
-  deriveNestedPacketIds,
   historyBelongsToRepo,
   historyRepoContext,
-  historyRepoGroupLabel,
   historySection,
   isAutomationSession,
   packetSortTime,
-  packetCanNestUnderHistory,
   packetStateTone,
   pickHistoryPacket,
   sessionBelongsToRepo,
@@ -33,17 +29,24 @@ import {
   ArchivedLaneCompactRow,
   HistoryChatRow,
   MergedPacketRow,
-  OwnedWorkerRow,
 } from './chats/HistoryRows';
 import { HistoryActionMenu } from './chats/Menus';
 import { RepoGroupLabel, SectionLabel } from './chats/shared';
+import {
+  deriveArchivedLanes,
+  deriveHistoryDateGroups,
+  deriveHistoryRepoGroups,
+  deriveShowRepoSuffix,
+  deriveSweptThreads,
+  repoSuffix,
+} from './chats/sections';
+import { markVisited } from './chats/read-state';
 import type {
   ArchivedLaneRow,
   ChatHistoryItem,
   ChatsTabProps,
   HistoryActionMenuState,
   HistoryGroupKey,
-  RepoHistoryGroup,
 } from './chats/types';
 
 export function ChatsTab({
@@ -61,25 +64,21 @@ export function ChatsTab({
   showLiveSessions = true,
   groupMode = 'sections',
   packets = [],
-  slotBeforeArchived,
+  agentsSection,
   onCreateOrchestratorForRepo,
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
-  const [archivedLanesExpanded, setArchivedLanesExpanded] = useState<Set<string>>(() => new Set());
+  const [showAllChats, setShowAllChats] = useState(false);
 
   // Group-by mode for the left-rail chat list (mini / flat variant).
   // Three modes, persisted to localStorage. Borrowed from Claude's
-  // sidebar pattern in the operator's reference video — the ⚙ filter
+  // sidebar pattern in the operator's reference video — the filter
   // icon on a group header opens a Group by / Sort by popover.
   type ChatGroupBy = 'repo' | 'date' | 'flat';
   const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
-  // Default to repo grouping — operator ruling 2026-07-12 (Cursor sidebar
-  // siphon): sessions order by repo, each repo is a collapsible drawer.
-  // Users who explicitly picked 'date'/'flat' via the picker keep their
-  // choice via the localStorage hydration below.
-  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupBy>('repo');
+  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupBy>('flat');
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
@@ -116,33 +115,6 @@ export function ChatsTab({
       else next.add(key);
       if (typeof window !== 'undefined') {
         try { window.localStorage.setItem(REPO_COLLAPSED_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-      }
-      return next;
-    });
-  }, []);
-  // Ownership nesting (Q ruling 2026-07-12, variant A+B): workers render
-  // under the orchestrator thread that spawned them, with a per-thread
-  // collapse (default expanded) remembered across reloads.
-  const OWNED_COLLAPSED_KEY = 'o8:owned-workers-collapsed';
-  const [ownedCollapsedThreads, setOwnedCollapsedThreads] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = window.localStorage.getItem(OWNED_COLLAPSED_KEY);
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as unknown;
-      if (Array.isArray(parsed)) {
-        setOwnedCollapsedThreads(new Set(parsed.filter((key): key is string => typeof key === 'string')));
-      }
-    } catch { /* ignore */ }
-  }, []);
-  const toggleOwnedThread = useCallback((threadId: string) => {
-    setOwnedCollapsedThreads((current) => {
-      const next = new Set(current);
-      if (next.has(threadId)) next.delete(threadId);
-      else next.add(threadId);
-      if (typeof window !== 'undefined') {
-        try { window.localStorage.setItem(OWNED_COLLAPSED_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
       }
       return next;
     });
@@ -203,6 +175,17 @@ export function ChatsTab({
     window.addEventListener('o8:chat-history-updated', handler as EventListener);
     return () => window.removeEventListener('o8:chat-history-updated', handler as EventListener);
   }, [fetchHistory]);
+
+  useEffect(() => {
+    const activeThreadId = (activeSessionKey ?? '').replace(/^llm-chat:/, '');
+    if (!historyItems.some((item) => item.tabId === activeThreadId)) return;
+    markVisited(`thread:${activeThreadId}`);
+  }, [activeSessionKey, historyItems]);
+
+  const openHistoryItem = useCallback((item: ChatHistoryItem) => {
+    markVisited(`thread:${item.tabId}`);
+    onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item));
+  }, [onOpenHistoryChat]);
 
   // Archived agent sessions (Codex / lanes table) — only fetched in the
   // compact left-rail variant where they render inline under each repo.
@@ -305,8 +288,6 @@ export function ChatsTab({
   const targetRepos = useMemo(() => (
     selectedRepo ? [selectedRepo] : repos
   ), [repos, selectedRepo]);
-  // Group key → registered repo, for the repo-header [+] spawn. Keys match
-  // flatHistoryRepoGroups (repo.name lowercased via historyRepoGroupLabel).
   const repoByGroupKey = useMemo(() => {
     const map = new Map<string, (typeof targetRepos)[number]>();
     for (const repo of targetRepos) map.set(repo.name.toLowerCase(), repo);
@@ -332,6 +313,14 @@ export function ChatsTab({
       .slice()
       .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
   ), [allowedSections, visibleHistory]);
+  const livePacketThreadIds = useMemo(() => new Set(visiblePackets
+    .filter((packet) => packetVisualState(packet) !== 'merged' && packet.status !== 'archived')
+    .map((packet) => packet.orchestratorThreadId?.trim())
+    .filter((threadId): threadId is string => Boolean(threadId))), [visiblePackets]);
+  const sweptThreads = useMemo(() => deriveSweptThreads(visibleFlatHistory, {
+    activeSessionKey,
+    liveThreadIds: livePacketThreadIds,
+  }), [activeSessionKey, livePacketThreadIds, visibleFlatHistory]);
   const visibleChatHistory = useMemo(() => (
     visibleHistory.filter((item) => historySection(item) === 'chat')
   ), [visibleHistory]);
@@ -380,156 +369,37 @@ export function ChatsTab({
   const shownSessions = showLiveSessions ? visibleSessions : visibleSessions.filter(isAutomationSession);
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
-  const flatHistoryItems = useMemo(() => {
-    // Sort by effective modifiedAt desc (mtime OR most-recent click,
-    // whichever is later) so clicked chats bubble to the top of the
-    // Today bucket immediately. This makes the time-grouped sidebar
-    // feel like ChatGPT: open a chat → it pops to top.
-    const sorted = [...visibleFlatHistory].sort((a, b) => (
+  const sortedChatItems = useMemo(() => (
+    [...sweptThreads.chats].sort((a, b) => (
       effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a)
-    ));
-    if (!Number.isFinite(remainingHistorySlots)) return sorted;
-    return sorted.slice(0, Math.max(0, remainingHistorySlots));
-  }, [effectiveModifiedAtMs, remainingHistorySlots, visibleFlatHistory]);
-  const flatHistoryRepoGroups = useMemo<RepoHistoryGroup[]>(() => {
-    const groups = new Map<string, RepoHistoryGroup>();
-    for (const item of flatHistoryItems) {
-      const rawLabel = historyRepoGroupLabel(item, targetRepos);
-      const isConversational = rawLabel === CONVERSATIONS_GROUP_KEY;
-      const key = isConversational ? CONVERSATIONS_GROUP_KEY : rawLabel.toLowerCase();
-      const label = isConversational ? 'Conversations' : rawLabel;
-      const existing = groups.get(key);
-      if (existing) {
-        existing.items.push(item);
-      } else {
-        groups.set(key, { key, label, items: [item] });
-      }
-    }
-    // Cursor-parity (mini variant): every registered repo gets a header
-    // even with zero sessions — the drawer is the repo's home, and the
-    // hover [+] needs somewhere to live before the first session exists.
-    // Empty repos append after the ones with history, alphabetically.
-    if (variant === 'mini') {
-      const emptyRepos = targetRepos
-        .filter((repo) => !groups.has(repo.name.toLowerCase()))
-        .sort((a, b) => a.name.localeCompare(b.name));
-      for (const repo of emptyRepos) {
-        groups.set(repo.name.toLowerCase(), { key: repo.name.toLowerCase(), label: repo.name, items: [] });
-      }
-    }
-    // Conversations bucket — free-floating chats not tied to a registered
-    // repo — sorts to the bottom, Antigravity-style.
-    return [...groups.values()].sort((a, b) => {
-      if (a.key === CONVERSATIONS_GROUP_KEY) return 1;
-      if (b.key === CONVERSATIONS_GROUP_KEY) return -1;
-      return 0;
-    });
-  }, [flatHistoryItems, targetRepos, variant]);
-
-  // Date-bucket grouping — ChatGPT/Claude-desktop pattern:
-  // Today / Yesterday / Previous 7 Days / Previous 30 Days / Older.
-  // Used when chatGroupBy === 'date'. Same shape as repo groups so the
-  // render loop can stay generic.
-  const flatHistoryDateGroups = useMemo<RepoHistoryGroup[]>(() => {
-    const today: ChatHistoryItem[] = [];
-    const yesterday: ChatHistoryItem[] = [];
-    const prev7: ChatHistoryItem[] = [];
-    const prev30: ChatHistoryItem[] = [];
-    const older: ChatHistoryItem[] = [];
-
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
-    const startOfPrev7 = startOfToday - 7 * 24 * 60 * 60 * 1000;
-    const startOfPrev30 = startOfToday - 30 * 24 * 60 * 60 * 1000;
-
-    for (const item of flatHistoryItems) {
-      // Use effective time (max of mtime + click time) so a fresh click
-      // promotes the item into the Today bucket.
-      const ts = effectiveModifiedAtMs(item);
-      if (!ts) {
-        older.push(item);
-        continue;
-      }
-      if (ts >= startOfToday) today.push(item);
-      else if (ts >= startOfYesterday) yesterday.push(item);
-      else if (ts >= startOfPrev7) prev7.push(item);
-      else if (ts >= startOfPrev30) prev30.push(item);
-      else older.push(item);
-    }
-    const groups: RepoHistoryGroup[] = [];
-    if (today.length > 0) groups.push({ key: 'today', label: 'Today', items: today });
-    if (yesterday.length > 0) groups.push({ key: 'yesterday', label: 'Yesterday', items: yesterday });
-    if (prev7.length > 0) groups.push({ key: 'prev-7', label: 'Previous 7 days', items: prev7 });
-    if (prev30.length > 0) groups.push({ key: 'prev-30', label: 'Previous 30 days', items: prev30 });
-    if (older.length > 0) groups.push({ key: 'older', label: 'Older', items: older });
-    return groups;
-  }, [flatHistoryItems, effectiveModifiedAtMs]);
-
-  // Group archived lanes by the same repo-label key used by
-  // flatHistoryRepoGroups so we can render them inline under each repo.
-  const archivedLanesByRepoKey = useMemo(() => {
-    const map = new Map<string, ArchivedLaneRow[]>();
-    if (variant !== 'mini' || archivedLanes.length === 0) return map;
-    const repoNameByPath = new Map<string, string>();
-    for (const repo of targetRepos) {
-      repoNameByPath.set(normalizeRepoPath(repo.localPath), repo.name);
-    }
-    // #1292 — the multiply mints many archived lanes per task (one per
-    // reset / redispatch / supervisor-relaunch), and the history list showed
-    // every one (e.g. "Add #943" ×4, "lab notes" ×7). Collapse to a single
-    // row per (repo, task), keeping the RICHEST sibling: one that still has a
-    // sessionKey (→ a reviewable transcript) wins over an anonymized/empty
-    // ghost, then most-recent breaks ties. So the kept row is the useful one.
-    const byTaskKey = new Map<string, ArchivedLaneRow>();
-    for (const lane of archivedLanes) {
-      const repoName = repoNameByPath.get(normalizeRepoPath(lane.repoPath));
-      if (!repoName) continue;
-      const taskKey = `${repoName.toLowerCase()} ${(lane.label ?? lane.branch ?? lane.id).replace(/\s*\(retry \d+\)\s*$/i, '').trim().toLowerCase()}`;
-      const existing = byTaskKey.get(taskKey);
-      if (!existing) {
-        byTaskKey.set(taskKey, lane);
-        continue;
-      }
-      const existingHasSession = Boolean(existing.sessionKey);
-      const laneHasSession = Boolean(lane.sessionKey);
-      if (existingHasSession !== laneHasSession) {
-        if (laneHasSession) byTaskKey.set(taskKey, lane);
-      } else if (Date.parse(lane.updatedAt ?? '') > Date.parse(existing.updatedAt ?? '')) {
-        byTaskKey.set(taskKey, lane);
-      }
-    }
-    for (const lane of byTaskKey.values()) {
-      const repoName = repoNameByPath.get(normalizeRepoPath(lane.repoPath));
-      if (!repoName) continue;
-      const key = repoName.toLowerCase();
-      const bucket = map.get(key);
-      if (bucket) bucket.push(lane);
-      else map.set(key, [lane]);
-    }
-    for (const lanes of map.values()) {
-      lanes.sort((a, b) => Date.parse(b.updatedAt ?? '') - Date.parse(a.updatedAt ?? ''));
-    }
-    return map;
-  }, [archivedLanes, targetRepos, variant]);
-
-  // Flat archived-lane list for the non-repo grouping modes (flat / date),
-  // which have no per-repo bucket to hang archived lanes under. Lets those
-  // views show the same Archived section the repo view renders per-repo, so
-  // no grouping filter silently hides threads. 2026-05-30.
-  const flatArchivedLanes = useMemo(
-    () => [...archivedLanesByRepoKey.values()].flat(),
-    [archivedLanesByRepoKey],
+    ))
+  ), [effectiveModifiedAtMs, sweptThreads.chats]);
+  const chatCap = compact && !showAllChats ? 12 : Number.POSITIVE_INFINITY;
+  const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
+  const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
+  const cappedChatCount = Math.min(sortedChatItems.length, historyCap);
+  const hiddenChatCount = Math.max(0, cappedChatCount - flatHistoryItems.length);
+  const flatHistoryRepoGroups = useMemo(
+    () => deriveHistoryRepoGroups(flatHistoryItems, targetRepos),
+    [flatHistoryItems, targetRepos],
   );
+  const flatHistoryDateGroups = useMemo(
+    () => deriveHistoryDateGroups(flatHistoryItems),
+    [flatHistoryItems],
+  );
+  const showRepoSuffix = deriveShowRepoSuffix([...visibleHistory, ...visibleArchivedHistory]);
 
-  const toggleArchivedLanes = useCallback((repoKey: string) => {
-    setArchivedLanesExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(repoKey)) next.delete(repoKey);
-      else next.add(repoKey);
-      return next;
-    });
-  }, []);
+  const flatArchivedLanes = useMemo(
+    () => deriveArchivedLanes(archivedLanes, targetRepos.map((repo) => repo.localPath)),
+    [archivedLanes, targetRepos],
+  );
+  const combinedArchivedHistory = useMemo(() => {
+    const byId = new Map<string, ChatHistoryItem>();
+    for (const item of [...visibleArchivedHistory, ...sweptThreads.swept]) {
+      if (allowedSections.has(historySection(item))) byId.set(item.tabId, item);
+    }
+    return [...byId.values()].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  }, [allowedSections, sweptThreads.swept, visibleArchivedHistory]);
   const historyGroups = useMemo(() => {
     const sourceGroups = [
       { key: 'orchestrator' as const, label: 'Orchestrator', items: visibleOrchestratorHistory },
@@ -558,26 +428,29 @@ export function ChatsTab({
     return groups.filter((group) => group.items.length > 0);
   }, [allowedSections, remainingHistorySlots, sectionLabel, visibleChatHistory, visibleOrchestratorHistory]);
   const showMergedPackets = groupMode === 'sections' && !compact && visibleMergedPackets.length > 0;
-  const showArchivedHistory = groupMode === 'sections' && !compact && visibleArchivedHistory.length > 0;
-  // Repo drawers count as content when empty: a fresh repo still shows its header and scoped action.
-  const showRepoDrawers = compact && groupMode === 'flat' && chatGroupBy === 'repo' && flatHistoryRepoGroups.length > 0;
-  // Packets nested under a visible thread row stay out of the bottom Spawned-agents section.
-  // Workers whose thread isn't in the rail (archived thread, other repo,
-  // external CLI spawn with no thread) keep their bottom-section home.
-  const nestedPacketIds = useMemo<ReadonlySet<string>>(() => {
-    return deriveNestedPacketIds(flatHistoryItems, ownedPacketsByThread, targetRepos, showRepoDrawers);
-  }, [flatHistoryItems, ownedPacketsByThread, showRepoDrawers, targetRepos]);
-  const resolvedSlotBeforeArchived = typeof slotBeforeArchived === 'function'
-    ? slotBeforeArchived({ nestedPacketIds })
-    : slotBeforeArchived;
+  const showArchivedHistory = combinedArchivedHistory.length > 0 || flatArchivedLanes.length > 0;
   const hasContent = displayedSessions.length > 0 || (
     groupMode === 'flat'
       ? flatHistoryItems.length > 0
       : historyGroups.some((group) => group.items.length > 0)
-  ) || showRepoDrawers || showMergedPackets || showArchivedHistory;
+  ) || Boolean(agentsSection) || showMergedPackets || showArchivedHistory;
   const toggleGroup = (key: HistoryGroupKey) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+  const renderHistoryRow = (item: ChatHistoryItem, archived = false) => (
+    <HistoryChatRow
+      key={item.tabId}
+      item={item}
+      compact={compact}
+      disabled={!onOpenHistoryChat}
+      active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+      tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(historyPacketsByTabId.get(item.tabId))}
+      repoLabel={showRepoSuffix ? repoSuffix(item) : null}
+      ownedCount={archived ? 0 : ownedPacketsByThread.get(item.tabId)?.length ?? 0}
+      onOpen={() => openHistoryItem(item)}
+      onOpenMenu={(event) => setHistoryActionMenu({ item, archived, x: event.clientX, y: event.clientY })}
+    />
+  );
 
   if (hideWhenEmpty && (!hasContent || loading)) return null;
 
@@ -606,29 +479,17 @@ export function ChatsTab({
         ))
       ) : null}
 
-      {groupMode === 'flat' && (flatHistoryItems.length > 0 || showRepoDrawers) ? (
+      {groupMode === 'flat' && flatHistoryItems.length > 0 ? (
         <div>
           {compact ? (
             <>
+              <SectionLabel label="Chats" compact />
               {chatGroupBy === 'flat' ? (
                 <>
-                  {/* No group header in flat mode — render the picker as
-                      its own thin row aligned right. */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, paddingRight: 10, paddingBottom: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 0, paddingRight: 10, paddingBottom: 2 }}>
                     <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
                   </div>
-                  {flatHistoryItems.map((item) => (
-                    <HistoryChatRow
-                      key={item.tabId}
-                      item={item}
-                      compact={compact}
-                      disabled={!onOpenHistoryChat}
-                      active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                      tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
-                      onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
-                      onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-                    />
-                  ))}
+                  {flatHistoryItems.map((item) => renderHistoryRow(item))}
                 </>
               ) : chatGroupBy === 'date' ? (
                 flatHistoryDateGroups.map((group, index) => (
@@ -637,25 +498,11 @@ export function ChatsTab({
                       label={group.label}
                       trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
                     />
-                    {group.items.map((item) => (
-                      <HistoryChatRow
-                        key={item.tabId}
-                        item={item}
-                        compact={compact}
-                        disabled={!onOpenHistoryChat}
-                        active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                        tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
-                        onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
-                        onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-                      />
-                    ))}
+                    {group.items.map((item) => renderHistoryRow(item))}
                   </div>
                 ))
               ) : (
                 flatHistoryRepoGroups.map((group, index) => {
-                  const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
-                  const archivedExpanded = archivedLanesExpanded.has(group.key);
-                  const isLast = index === flatHistoryRepoGroups.length - 1;
                   const isConversations = group.key === CONVERSATIONS_GROUP_KEY;
                   const groupCollapsed = collapsedRepoGroups.has(group.key);
                   const groupRepo = isConversations ? undefined : repoByGroupKey.get(group.key);
@@ -674,106 +521,35 @@ export function ChatsTab({
                         trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
                       />
                       {groupRepoMissing ? <MissingRepoRailNotice summary={groupRepo.readiness?.summary ?? ''} /> : null}
-                      {groupCollapsed ? null : (
-                        <>
-                          {group.items.map((item) => {
-                            const ownedPackets = (ownedPacketsByThread.get(item.tabId) ?? [])
-                              .filter((packet) => packetCanNestUnderHistory(item, packet, targetRepos));
-                            const ownedExpanded = !ownedCollapsedThreads.has(item.tabId);
-                            return (
-                              <div key={item.tabId}>
-                                <HistoryChatRow
-                                  item={item}
-                                  compact={compact}
-                                  disabled={!onOpenHistoryChat}
-                                  active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                                  tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
-                                  onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
-                                  onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-                                  ownedCount={ownedPackets.length}
-                                  ownedExpanded={ownedExpanded}
-                                  onToggleOwned={ownedPackets.length > 0 ? () => toggleOwnedThread(item.tabId) : undefined}
-                                />
-                                {ownedExpanded ? ownedPackets.map((packet) => (
-                                  <OwnedWorkerRow key={packet.id} packet={packet} />
-                                )) : null}
-                              </div>
-                            );
-                          })}
-                          {/* A fresh repo keeps its scoped empty state until its first session appears. */}
-                          {group.items.length === 0 && !isConversations && !groupRepoMissing ? (
-                            <div
-                              style={{
-                                paddingTop: 3,
-                                paddingRight: 12,
-                                paddingBottom: 5,
-                                paddingLeft: 37,
-                                fontSize: 11,
-                                lineHeight: '15px',
-                                fontWeight: 300,
-                                color: 'var(--t-text-faint)',
-                                fontFamily: REPO_FOCUS_FONT,
-                              }}
-                            >
-                              No sessions yet
-                            </div>
-                          ) : null}
-                          {/* Slot renders inside the LAST repo group, after
-                              the chats but BEFORE this repo's inline Archived
-                              section — the operator's hierarchy is chats →
-                              spawned → archived. */}
-                          {isLast ? resolvedSlotBeforeArchived : null}
-                          {repoArchivedLanes.length > 0 ? (
-                            <>
-                              <SectionLabel
-                                label="Archived"
-                                compact={compact}
-                                collapsed={!archivedExpanded}
-                                onToggle={() => toggleArchivedLanes(group.key)}
-                              />
-                              {archivedExpanded ? repoArchivedLanes.map((lane) => (
-                                <ArchivedLaneCompactRow
-                                  key={lane.id}
-                                  lane={lane}
-                                  onSelectSession={onSelectSession}
-                                />
-                              )) : null}
-                            </>
-                          ) : null}
-                        </>
-                      )}
-                      {/* Spawned agents stay "down there" even when the last
-                          repo's drawer is minimized. */}
-                      {groupCollapsed && isLast ? resolvedSlotBeforeArchived : null}
+                      {groupCollapsed ? null : group.items.map((item) => renderHistoryRow(item))}
                     </div>
                   );
                 })
               )}
-              {/* Parity trailer (2026-05-30): flat + date modes surface the
-                  same Spawned agents + Archived sections the repo mode renders
-                  inline above, so every grouping filter exposes the complete
-                  thread set — no chats hidden by the grouping choice. */}
-              {chatGroupBy !== 'repo' ? (
-                <>
-                  {resolvedSlotBeforeArchived}
-                  {flatArchivedLanes.length > 0 ? (
-                    <>
-                      <SectionLabel
-                        label="Archived"
-                        compact={compact}
-                        collapsed={collapsedGroups.archived}
-                        onToggle={() => toggleGroup('archived')}
-                      />
-                      {collapsedGroups.archived ? null : flatArchivedLanes.map((lane) => (
-                        <ArchivedLaneCompactRow
-                          key={lane.id}
-                          lane={lane}
-                          onSelectSession={onSelectSession}
-                        />
-                      ))}
-                    </>
-                  ) : null}
-                </>
+              {hiddenChatCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllChats(true)}
+                  style={{
+                    width: '100%',
+                    minHeight: 25,
+                    borderWidth: 0,
+                    background: 'transparent',
+                    color: 'var(--t-text-faint)',
+                    cursor: 'pointer',
+                    paddingTop: 4,
+                    paddingRight: 12,
+                    paddingBottom: 4,
+                    paddingLeft: 37,
+                    textAlign: 'left',
+                    fontFamily: REPO_FOCUS_FONT,
+                    fontSize: 9.5,
+                    fontWeight: 260,
+                    letterSpacing: '-0.4px',
+                  }}
+                >
+                  Show {hiddenChatCount} more
+                </button>
               ) : null}
             </>
           ) : (
@@ -784,18 +560,7 @@ export function ChatsTab({
                   compact={compact}
                 />
               ) : null}
-              {flatHistoryItems.map((item) => (
-                <HistoryChatRow
-                  key={item.tabId}
-                  item={item}
-                  compact={compact}
-                  disabled={!onOpenHistoryChat}
-                  active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                  tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
-                  onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
-                  onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-                />
-              ))}
+              {flatHistoryItems.map((item) => renderHistoryRow(item))}
             </>
           )}
         </div>
@@ -828,30 +593,12 @@ export function ChatsTab({
             onToggle={() => toggleGroup(group.key)}
           />
           {collapsedGroups[group.key] ? null : (
-            group.items.map((item) => (
-              <HistoryChatRow
-                key={item.tabId}
-                item={item}
-                compact={compact}
-                disabled={!onOpenHistoryChat}
-                active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                tone={packetStateTone(historyPacketsByTabId.get(item.tabId))}
-                onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
-                onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-              />
-            ))
+            group.items.map((item) => renderHistoryRow(item))
           )}
         </div>
       )) : null}
 
-      {/* Non-compact repo view appends Spawned agents after the chat sections.
-          Compact modes render it inline instead: repo mode in the last repo
-          group, flat/date modes in the parity trailer above — so every grouping
-          filter surfaces the same complete thread set. */}
-      {chatGroupBy === 'repo'
-        && !(compact && flatHistoryRepoGroups.length > 0)
-        ? resolvedSlotBeforeArchived
-        : null}
+      {agentsSection}
 
       {showArchivedHistory ? (
         <div>
@@ -862,18 +609,16 @@ export function ChatsTab({
             onToggle={() => toggleGroup('archived')}
           />
           {collapsedGroups.archived ? null : (
-            visibleArchivedHistory.slice(0, 12).map((item) => (
-              <HistoryChatRow
-                key={item.tabId}
-                item={item}
-                compact={compact}
-                disabled={!onOpenHistoryChat}
-                active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                tone={HISTORY_ROW_TONES.neutral}
-                onOpen={() => { onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
-                onOpenMenu={(event) => setHistoryActionMenu({ item, archived: true, x: event.clientX, y: event.clientY })}
-              />
-            ))
+            <>
+              {combinedArchivedHistory.slice(0, 12).map((item) => renderHistoryRow(item, Boolean(item.archivedAt)))}
+              {flatArchivedLanes.map((lane) => (
+                <ArchivedLaneCompactRow
+                  key={lane.id}
+                  lane={lane}
+                  onSelectSession={onSelectSession}
+                />
+              ))}
+            </>
           )}
         </div>
       ) : null}

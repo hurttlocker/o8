@@ -479,15 +479,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             showKindInMeta
             onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
-            // Spawned agents lands between the active chats and the
-            // Archived section per operator's hierarchy: chats →
-            // spawned → archived. Workers already nested under a visible
-            // orchestrator thread are excluded so nothing lists twice.
-            slotBeforeArchived={({ nestedPacketIds }) => (
+            // Agents is a flat sibling between Chats and Archived. Worker
+            // packets never nest under their originating chat row.
+            agentsSection={(
               <AgentPanelExtraAgents
                 activeSessionKey={activeSessionKey}
                 onSelectSession={onSelectSession}
-                hidePacketIds={nestedPacketIds}
               />
             )}
           />

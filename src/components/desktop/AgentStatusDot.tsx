@@ -84,11 +84,12 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
 // distinguishable from a declined review at a glance). Same Gravity mark,
 // color = severity. Keep in sync with the /preview/motion Status-vocabulary
 // board + repo-focus packetStatusColor.
-const ACCENT: Record<'running' | 'review' | 'rejected' | 'failed', string> = {
+export const AGENT_STATUS_ACCENT: Record<Exclude<AgentDotState, 'idle'>, string> = {
   running: 'var(--t-accent)',
   review: '#94a3b8',
   rejected: '#F97316',
   failed: '#FF3B30',
+  merged: 'var(--t-success)',
 };
 
 /**
@@ -128,7 +129,6 @@ function FamilyMark({
 
 export function AgentStatusDot({
   state,
-  startedAt: _startedAt,
   color,
   label,
 }: {
@@ -148,31 +148,31 @@ export function AgentStatusDot({
 
   // running → "Breathe" (anti-phase sine, center vs ring).
   if (state === 'running') {
-    return <FamilyMark variant="fam-working" famColor={color ?? ACCENT.running} dotLabel={dotLabel} />;
+    return <FamilyMark variant="fam-working" famColor={color ?? AGENT_STATUS_ACCENT.running} dotLabel={dotLabel} />;
   }
 
   // review → "Hold-blink" (grid dim, center lit, rare blink-off — "your turn").
   if (state === 'review') {
-    return <FamilyMark variant="fam-review" famColor={color ?? ACCENT.review} dotLabel={dotLabel} />;
+    return <FamilyMark variant="fam-review" famColor={color ?? AGENT_STATUS_ACCENT.review} dotLabel={dotLabel} />;
   }
 
   // rejected + failed → "Gravity", one mark, color = severity (amber vs red).
   if (state === 'rejected') {
-    return <FamilyMark variant="fam-stopped" famColor={color ?? ACCENT.rejected} dotLabel={dotLabel} />;
+    return <FamilyMark variant="fam-stopped" famColor={color ?? AGENT_STATUS_ACCENT.rejected} dotLabel={dotLabel} />;
   }
   if (state === 'failed') {
-    return <FamilyMark variant="fam-stopped" famColor={color ?? ACCENT.failed} dotLabel={dotLabel} />;
+    return <FamilyMark variant="fam-stopped" famColor={color ?? AGENT_STATUS_ACCENT.failed} dotLabel={dotLabel} />;
   }
 
   // merged → "Settle" (staggered pop-in, holds most of the cycle).
   if (state === 'merged') {
-    return <FamilyMark variant="fam-merged" famColor={color ?? 'var(--t-success)'} dotLabel={dotLabel} />;
+    return <FamilyMark variant="fam-merged" famColor={color ?? AGENT_STATUS_ACCENT.merged} dotLabel={dotLabel} />;
   }
 
   // idle → "Drift" (one faint spark wanders the perimeter over 12s, per-instance
   // desync so idle walls never pulse in lockstep). The family is complete on one
   // canvas — every state now lives on the shared 3×3 grid.
-  return <FamilyMark variant="fam-idle" famColor={color ?? 'var(--t-text-faint, #94a3b8)'} dotLabel={dotLabel} shift={famShift} />;
+  return <FamilyMark variant="fam-idle" famColor={color ?? 'var(--t-text-faint)'} dotLabel={dotLabel} shift={famShift} />;
 }
 
 function defaultDotLabel(state: AgentDotState): string {

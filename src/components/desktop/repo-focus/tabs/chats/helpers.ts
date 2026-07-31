@@ -86,38 +86,6 @@ export function historyBelongsToRepo(item: ChatHistoryItem, repo: RepoFocusRepo)
   return Boolean(historyRemote && repoRemote && historyRemote === repoRemote);
 }
 
-/** A worker may nest under its spawning thread only when both belong to the
- * same repo. Missions can explicitly dispatch into another repo; nesting those
- * packets under the orchestrator's repo hides their real rail group. */
-export function packetCanNestUnderHistory(
-  item: ChatHistoryItem,
-  packet: OrchestratorPacket,
-  repos: RepoFocusRepo[],
-): boolean {
-  const matchedHistoryRepo = repos.find((repo) => historyBelongsToRepo(item, repo));
-  if (matchedHistoryRepo) return packetBelongsToRepo(packet, matchedHistoryRepo.localPath);
-  const historyPath = normalizeRepoPath(item.repoPath);
-  return Boolean(historyPath && packetBelongsToRepo(packet, historyPath));
-}
-
-export function deriveNestedPacketIds(
-  items: ChatHistoryItem[],
-  packetsByThread: ReadonlyMap<string, readonly OrchestratorPacket[]>,
-  repos: RepoFocusRepo[],
-  enabled: boolean,
-): ReadonlySet<string> {
-  const ids = new Set<string>();
-  if (!enabled) return ids;
-  for (const item of items) {
-    const owned = packetsByThread.get(item.tabId);
-    if (!owned) continue;
-    for (const packet of owned) {
-      if (packetCanNestUnderHistory(item, packet, repos)) ids.add(packet.id);
-    }
-  }
-  return ids;
-}
-
 export function sessionBelongsToRepo(session: IdeWorkspaceSession, repo: RepoFocusRepo): boolean {
   if (repoOwnsCandidate(repo.localPath, session.workspace)) return true;
   if (repoOwnsCandidate(repo.localPath, session.runtimeSurface?.cwd)) return true;

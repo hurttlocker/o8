@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
-import { formatElapsedAgo, shimmerTextStyle } from './repo-focus/tabs/chats/helpers';
+import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
+import { attentionWashStyle } from './repo-focus/tabs/chats/HistoryRows';
+import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
 
 export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
@@ -61,6 +63,7 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
         letterSpacing: '0.06em',
         color: 'var(--t-text-muted)',
         fontFamily: FONT,
+        position: 'relative',
       }}
     >
       {origin}
@@ -121,6 +124,8 @@ export function ExtraAgentRowView({
   onCloseHoverCard,
   busy,
   onRetryPacket,
+  band,
+  repoLabel,
 }: {
   row: ExtraAgentRow;
   active: boolean;
@@ -131,6 +136,8 @@ export function ExtraAgentRowView({
   onCloseHoverCard?: () => void;
   busy: boolean;
   onRetryPacket?: (row: ExtraAgentRow) => void;
+  band: AttentionBand;
+  repoLabel?: string | null;
 }) {
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
@@ -138,6 +145,8 @@ export function ExtraAgentRowView({
   const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
   const canInteract = canFocus || canRetry;
   const [hovered, setHovered] = useState(false);
+  const recede = shouldRecede({ band, active, hovered });
+  const washStyle = attentionWashStyle(band);
   const handleClick = useCallback(() => {
     if (onFocusRow) {
       onFocusRow(row);
@@ -159,7 +168,7 @@ export function ExtraAgentRowView({
       title={canFocus ? `Focus ${row.name}` : row.name}
       style={{
         width: '100%',
-        minHeight: 28,
+        minHeight: 31,
         paddingTop: 5,
         paddingBottom: 5,
         paddingLeft: 37,
@@ -174,24 +183,40 @@ export function ExtraAgentRowView({
         gap: 9,
         textAlign: 'left',
         cursor: canInteract ? 'pointer' : 'default',
-        opacity: row.status === 'archived' ? 0.58 : 1,
         fontFamily: FONT,
         // Anchor for the left-gutter status dot below — same treatment as
         // HistoryRow/CompactSessionRow (Q ruling 2026-07-12: status icons
         // sit LEFT of every sidebar row, like Claude's panel).
         position: 'relative',
+        isolation: 'isolate',
       }}
       onMouseEnter={(event) => {
         setHovered(true);
         onOpenHoverCard?.(row, event.currentTarget.getBoundingClientRect());
-        if (canInteract && !active) event.currentTarget.style.background = 'var(--t-panel-hover)';
       }}
-      onMouseLeave={(event) => {
+      onMouseLeave={() => {
         setHovered(false);
         onCloseHoverCard?.();
-        event.currentTarget.style.background = 'transparent';
       }}
     >
+      {(active || hovered || washStyle) ? (
+        <span
+          aria-hidden
+          style={{
+            ...(washStyle ?? {}),
+            ...(active || hovered ? {
+              position: 'absolute',
+              top: 2,
+              right: 6,
+              bottom: 2,
+              left: 6,
+              borderRadius: 8,
+              background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
+              zIndex: 0,
+            } : {}),
+          }}
+        />
+      ) : null}
       {/* Status dot in the absolute left gutter — matches HistoryRows so the
           whole sidebar reads one vocabulary: state left, metadata right. */}
       <span
@@ -201,19 +226,18 @@ export function ExtraAgentRowView({
         <AgentStatusDot state={dotState} label={dotLabel} />
       </span>
       <span
-        className={active ? 'o8-text-shimmer' : undefined}
         style={{
           flex: 1,
           minWidth: 0,
           fontSize: 13.5,
           fontWeight: 300,
-          color: 'var(--t-text)',
+          color: recede ? 'var(--t-text-muted)' : 'var(--t-text)',
           letterSpacing: '-0.1px',
           lineHeight: 1.25,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          ...(active ? shimmerTextStyle('var(--t-text)') : {}),
+          position: 'relative',
         }}
       >
         {row.name}
@@ -230,6 +254,19 @@ export function ExtraAgentRowView({
             {row.subtitle}
           </span>
         ) : null}
+        {repoLabel ? (
+          <span
+            style={{
+              marginLeft: 6,
+              fontSize: 9.5,
+              color: 'var(--t-text-faint)',
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
+            }}
+          >
+            {repoLabel}
+          </span>
+        ) : null}
       </span>
       <OriginChip origin={row.origin} />
       {row.outcome ? (
@@ -243,6 +280,7 @@ export function ExtraAgentRowView({
             fontWeight: 300,
             letterSpacing: '-0.3px',
             whiteSpace: 'nowrap',
+            position: 'relative',
           }}
         >
           {row.outcome === 'merged'
@@ -285,6 +323,7 @@ export function ExtraAgentRowView({
             pointerEvents: hovered ? 'auto' : 'none',
             transition: 'opacity 120ms ease, background 120ms ease, color 120ms ease',
             flexShrink: 0,
+            position: 'relative',
           }}
           onMouseEnter={(event) => {
             if (busy) return;
@@ -310,6 +349,7 @@ export function ExtraAgentRowView({
             fontSize: 9.5,
             fontWeight: 260,
             letterSpacing: '-0.4px',
+            position: 'relative',
           }}
         >
           {formatElapsedAgo(new Date(row.lastActivityAt).toISOString())}
