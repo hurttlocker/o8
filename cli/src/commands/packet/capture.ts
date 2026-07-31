@@ -111,7 +111,12 @@ async function captureViaDevBrowser(args: CaptureArgs): Promise<DevBrowserCaptur
   return new Promise<DevBrowserCapture>((resolve, reject) => {
     let proc;
     try {
-      proc = spawn('dev-browser', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+      // Headless, and on an ISOLATED daemon instance: --headless relaunches the
+      // daemon-managed browser when the existing one is headed, so without the
+      // dedicated --browser name a packet capture would tear down the
+      // operator's own visible dev-browser session (report J4FHM2 — workers
+      // popping a headed browser outside the o8 app).
+      proc = spawn('dev-browser', ['--headless', '--browser', 'o8-capture'], { stdio: ['pipe', 'pipe', 'pipe'] });
     } catch {
       reject(new CliError('dev_browser_missing', 'dev-browser not found on PATH.', EXIT.NOT_FOUND, 'Visual capture needs the dev-browser CLI. Install it or run capture on a machine where it is available.'));
       return;

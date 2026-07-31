@@ -482,6 +482,11 @@ export function createOwnedRunController({
       PATH: pathWithNodeRuntime(),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
+      // Workers must never pop an OS browser: dev servers (CRA, storybook)
+      // auto-open via BROWSER, and `o8 run` mirrors this env into its pane
+      // (report J4FHM2). 'none' is the CRA disable convention; tools that
+      // treat BROWSER as a launch binary fail to exec it, same net effect.
+      BROWSER: 'none',
       O8_WORKER_TOKEN: getOrCreateLocalWorkerToken(),
       ...sandboxEnvExtra,
     };
