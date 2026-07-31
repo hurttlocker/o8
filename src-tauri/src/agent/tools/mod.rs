@@ -970,12 +970,12 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "repo_commit_diff",
-            "description": "Inspect a tracked repository commit's actual patch, optionally for one file. Use after catch-up subjects/diffstats when the operator asks to review the code, and cite specific file paths in your review.",
+            "description": "Inspect a tracked repository commit's actual patch, optionally for one file. Use after catch-up subjects/diffstats when the operator asks to review the code, and cite specific file paths in your review. Cite only file paths and contents present in this tool's result. If the result is an error or empty, say so.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "repoPath": { "type": "string", "description": "Exact tracked repository path." },
-                    "sha": { "type": "string", "description": "Commit object id or unambiguous hexadecimal prefix." },
+                    "sha": { "type": "string", "description": "Commit ref: hex object id, HEAD, HEAD~N, HEAD^, branch, or tag." },
                     "file": { "type": "string", "description": "Optional repository-relative file path for one patch." }
                 },
                 "required": ["repoPath", "sha"]

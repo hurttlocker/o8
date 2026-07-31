@@ -219,13 +219,11 @@ async fn execute_tracked_tool_call(
                 dispatch_args["__symonCallId"] = json!(value);
             }
         }
-        match tools::dispatch_tool_call(tool_name, dispatch_args, ctx).await {
-            Ok(output) => output,
-            Err(error) => {
-                log::warn!("[symon-agent] tool {tool_name} error: {error}");
-                json!({ "error": error })
-            }
+        let dispatched = tools::dispatch_tool_call(tool_name, dispatch_args, ctx).await;
+        if let Err(error) = &dispatched {
+            log::warn!("[symon-agent] tool {tool_name} error: {error}");
         }
+        dispatch_result_payload(dispatched)
     };
 
     let outcome = action_outcome(&result);
@@ -256,6 +254,19 @@ async fn execute_tracked_tool_call(
     }
     strip_internal_result_fields(&mut result);
     result
+}
+
+pub(crate) fn dispatch_result_payload(result: Result<Value, String>) -> Value {
+    match result {
+        Ok(output) => output,
+        Err(error) => serde_json::from_str::<Value>(&error)
+            .ok()
+            .filter(|value| {
+                value.get("error").and_then(Value::as_str).is_some()
+                    && value.get("detail").and_then(Value::as_str).is_some()
+            })
+            .unwrap_or_else(|| json!({ "error": error })),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -504,5 +515,20 @@ mod tests {
         strip_internal_result_fields(&mut result);
         assert_eq!(result["reminder_id"], "public-stable-id");
         assert!(result.get("_ledger_fingerprint").is_none());
+    }
+
+    #[test]
+    fn text_loop_preserves_a_structured_tool_err_in_the_next_planner_turn() {
+        let dispatched = dispatch_result_payload(Err(json!({
+            "error": "invalid_ref",
+            "detail": "The requested ref was rejected",
+        })
+        .to_string()));
+        let next = crate::agent::claude::text_tool_result_message("repo_commit_diff", &dispatched);
+        assert_eq!(dispatched["error"], "invalid_ref");
+        assert_eq!(dispatched["detail"], "The requested ref was rejected");
+        assert!(next.contains("\"error\":\"invalid_ref\""));
+        assert!(next.contains("\"detail\":\"The requested ref was rejected\""));
+        assert!(!next.contains("{\\\"error\\\""));
     }
 }

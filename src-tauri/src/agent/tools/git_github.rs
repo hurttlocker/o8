@@ -73,18 +73,34 @@ fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
     &value[..end]
 }
 
-fn validate_sha(sha: &str) -> Result<&str, String> {
-    let sha = sha.trim();
-    if !(4..=64).contains(&sha.len()) || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("repo_commit_diff requires a 4-64 character hexadecimal commit sha".into());
-    }
-    Ok(sha)
+fn commit_diff_error(code: &str, detail: impl Into<String>) -> Value {
+    json!({ "error": code, "detail": detail.into() })
 }
 
-fn validate_file(file: &str) -> Result<&str, String> {
+fn validate_ref(reference: &str) -> Result<&str, Value> {
+    let reference = reference.trim();
+    if reference.is_empty()
+        || reference.len() > 128
+        || reference.starts_with('-')
+        || !reference.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'~' | b'^' | b'-')
+        })
+    {
+        return Err(commit_diff_error(
+            "invalid_ref",
+            "repo_commit_diff ref must be 1-128 characters using only letters, numbers, . _ / ~ ^ and -, and must not start with -",
+        ));
+    }
+    Ok(reference)
+}
+
+fn validate_file(file: &str) -> Result<&str, Value> {
     let file = file.trim();
     if file.is_empty() || file.len() > 1_024 {
-        return Err("repo_commit_diff file must be a non-empty relative path".into());
+        return Err(commit_diff_error(
+            "repo_not_tracked",
+            "repo_commit_diff file must be a non-empty relative path within the tracked repository",
+        ));
     }
     let path = Path::new(file);
     if path.is_absolute()
@@ -92,12 +108,15 @@ fn validate_file(file: &str) -> Result<&str, String> {
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
     {
-        return Err("repo_commit_diff file must stay within the tracked repository".into());
+        return Err(commit_diff_error(
+            "repo_not_tracked",
+            "repo_commit_diff file must stay within the tracked repository",
+        ));
     }
     Ok(file)
 }
 
-fn strict_tracked_repo_path(requested: &str, tracked: &[String]) -> Result<String, String> {
+fn strict_tracked_repo_path(requested: &str, tracked: &[String]) -> Result<String, Value> {
     let requested = requested.trim();
     let requested_path = PathBuf::from(requested);
     if requested.is_empty()
@@ -106,41 +125,52 @@ fn strict_tracked_repo_path(requested: &str, tracked: &[String]) -> Result<Strin
             .components()
             .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
     {
-        return Err("repo_commit_diff requires an exact tracked repository path".into());
+        return Err(commit_diff_error(
+            "repo_not_tracked",
+            "repo_commit_diff requires an exact tracked repository path",
+        ));
     }
-    let requested_canonical = requested_path
-        .canonicalize()
-        .map_err(|_| format!("repo_commit_diff repoPath does not resolve: '{requested}'"))?;
+    let requested_canonical = requested_path.canonicalize().map_err(|_| {
+        commit_diff_error(
+            "repo_not_tracked",
+            format!("repo_commit_diff repoPath does not resolve: '{requested}'"),
+        )
+    })?;
     for tracked_path in tracked {
         let tracked_path = PathBuf::from(tracked_path);
         if requested_path != tracked_path {
             continue;
         }
-        let tracked_canonical = tracked_path
-            .canonicalize()
-            .map_err(|_| "The tracked repository path no longer resolves".to_string())?;
+        let tracked_canonical = tracked_path.canonicalize().map_err(|_| {
+            commit_diff_error(
+                "repo_not_tracked",
+                "The tracked repository path no longer resolves",
+            )
+        })?;
         if requested_canonical == tracked_canonical && requested_canonical.is_dir() {
             return Ok(requested_canonical.to_string_lossy().to_string());
         }
     }
-    Err(format!(
-        "repo_commit_diff refused untracked repository path '{requested}'"
+    Err(commit_diff_error(
+        "repo_not_tracked",
+        format!("repo_commit_diff refused untracked repository path '{requested}'"),
     ))
 }
 
 async fn tracked_repo_paths() -> Result<Vec<String>, String> {
     let response = crate::agent::o8_http::get_json("/api/panel/repos").await?;
-    Ok(response
+    let repos = response
         .get("repos")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
+        .ok_or_else(|| "Repository registry returned an invalid response".to_string())?;
+    Ok(repos
+        .iter()
         .filter_map(|repo| repo.get("localPath").and_then(Value::as_str))
         .map(str::to_string)
         .collect())
 }
 
-fn commit_files(repo: &str, sha: &str) -> Result<Vec<String>, String> {
+fn commit_files(repo: &str, reference: &str) -> Result<Vec<String>, Value> {
     let bytes = run_bytes(
         "git",
         &[
@@ -150,11 +180,17 @@ fn commit_files(repo: &str, sha: &str) -> Result<Vec<String>, String> {
             "--name-only",
             "-r",
             "-z",
-            sha,
+            reference,
             "--",
         ],
         repo,
-    )?;
+    )
+    .map_err(|error| {
+        commit_diff_error(
+            "sha_not_found",
+            format!("repo_commit_diff could not inspect {reference}: {error}"),
+        )
+    })?;
     Ok(bytes
         .split(|byte| *byte == 0)
         .filter(|name| !name.is_empty())
@@ -182,7 +218,7 @@ fn bounded_single_file_patch(patch: &str, file: &str) -> (String, bool) {
     (format!("{}{}", utf8_prefix(patch, available), marker), true)
 }
 
-fn whole_commit_patch(repo: &str, sha: &str) -> Result<(String, bool, usize), String> {
+fn whole_commit_patch(repo: &str, reference: &str) -> Result<(String, bool, usize), Value> {
     let metadata = run(
         "git",
         &[
@@ -191,11 +227,23 @@ fn whole_commit_patch(repo: &str, sha: &str) -> Result<(String, bool, usize), St
             "--no-ext-diff",
             "--format=fuller",
             "--no-patch",
-            sha,
+            reference,
         ],
         repo,
-    )?;
-    let files = commit_files(repo, sha)?;
+    )
+    .map_err(|error| {
+        commit_diff_error(
+            "sha_not_found",
+            format!("repo_commit_diff could not show {reference}: {error}"),
+        )
+    })?;
+    let files = commit_files(repo, reference)?;
+    if files.is_empty() {
+        return Err(commit_diff_error(
+            "empty_result",
+            format!("Commit {reference} contains no patch"),
+        ));
+    }
     let mut output = bounded_metadata(&metadata);
     if !output.is_empty() {
         output.push('\n');
@@ -208,12 +256,18 @@ fn whole_commit_patch(repo: &str, sha: &str) -> Result<(String, bool, usize), St
                 "--no-color",
                 "--no-ext-diff",
                 "--format=",
-                sha,
+                reference,
                 "--",
                 file,
             ],
             repo,
-        )?;
+        )
+        .map_err(|error| {
+            commit_diff_error(
+                "sha_not_found",
+                format!("repo_commit_diff could not show {reference}: {error}"),
+            )
+        })?;
         let separator = if output.ends_with('\n') { "" } else { "\n" };
         if output.len() + separator.len() + patch.len() <= COMMIT_DIFF_BODY_CAP_BYTES {
             output.push_str(separator);
@@ -237,26 +291,42 @@ fn whole_commit_patch(repo: &str, sha: &str) -> Result<(String, bool, usize), St
         debug_assert!(output.len() < COMMIT_DIFF_OUTPUT_CAP_BYTES);
         return Ok((output, true, omitted));
     }
+    if !output.contains("diff --git ") {
+        return Err(commit_diff_error(
+            "empty_result",
+            format!("Commit {reference} contains no patch"),
+        ));
+    }
     Ok((output, false, 0))
 }
 
-fn repo_commit_diff_in_tracked_set(args: Value, tracked: &[String]) -> Result<Value, String> {
+fn repo_commit_diff_in_tracked_set(args: Value, tracked: &[String]) -> Result<Value, Value> {
     let repo_path = args
         .get("repoPath")
         .and_then(Value::as_str)
-        .ok_or_else(|| "repo_commit_diff requires repoPath".to_string())?;
+        .ok_or_else(|| {
+            commit_diff_error(
+                "repo_not_tracked",
+                "repo_commit_diff requires an exact tracked repoPath",
+            )
+        })?;
     let repo = strict_tracked_repo_path(repo_path, tracked)?;
-    let sha = validate_sha(
+    let reference = validate_ref(
         args.get("sha")
             .and_then(Value::as_str)
-            .ok_or_else(|| "repo_commit_diff requires sha".to_string())?,
+            .ok_or_else(|| commit_diff_error("invalid_ref", "repo_commit_diff requires sha"))?,
     )?;
     run(
         "git",
-        &["rev-parse", "--verify", &format!("{sha}^{{commit}}")],
+        &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
         &repo,
     )
-    .map_err(|error| format!("repo_commit_diff could not resolve commit {sha}: {error}"))?;
+    .map_err(|error| {
+        commit_diff_error(
+            "sha_not_found",
+            format!("repo_commit_diff could not resolve commit {reference}: {error}"),
+        )
+    })?;
 
     if let Some(file) = args.get("file").and_then(Value::as_str) {
         let file = validate_file(file)?;
@@ -267,15 +337,22 @@ fn repo_commit_diff_in_tracked_set(args: Value, tracked: &[String]) -> Result<Va
                 "--no-color",
                 "--no-ext-diff",
                 "--format=fuller",
-                sha,
+                reference,
                 "--",
                 file,
             ],
             &repo,
-        )?;
+        )
+        .map_err(|error| {
+            commit_diff_error(
+                "sha_not_found",
+                format!("repo_commit_diff could not show {reference}: {error}"),
+            )
+        })?;
         if !patch.contains("diff --git ") {
-            return Err(format!(
-                "Commit {sha} does not contain a patch for '{file}'"
+            return Err(commit_diff_error(
+                "empty_result",
+                format!("Commit {reference} does not contain a patch for '{file}'"),
             ));
         }
         let (patch, truncated) = bounded_single_file_patch(&patch, file);
@@ -283,14 +360,22 @@ fn repo_commit_diff_in_tracked_set(args: Value, tracked: &[String]) -> Result<Va
         return Ok(json!({ "patch": patch, "truncated": truncated, "omittedFiles": 0 }));
     }
 
-    let (patch, truncated, omitted_files) = whole_commit_patch(&repo, sha)?;
+    let (patch, truncated, omitted_files) = whole_commit_patch(&repo, reference)?;
     debug_assert!(patch.len() < COMMIT_DIFF_OUTPUT_CAP_BYTES);
     Ok(json!({ "patch": patch, "truncated": truncated, "omittedFiles": omitted_files }))
 }
 
+fn repo_commit_diff_with_registry(
+    args: Value,
+    registry: Result<Vec<String>, String>,
+) -> Result<Value, String> {
+    let tracked = registry
+        .map_err(|detail| commit_diff_error("repo_registry_unavailable", detail).to_string())?;
+    repo_commit_diff_in_tracked_set(args, &tracked).map_err(|error| error.to_string())
+}
+
 pub async fn repo_commit_diff(args: Value) -> Result<Value, String> {
-    let tracked = tracked_repo_paths().await?;
-    repo_commit_diff_in_tracked_set(args, &tracked)
+    repo_commit_diff_with_registry(args, tracked_repo_paths().await)
 }
 
 /// Resolve the `repo` arg (folder name or absolute path) to a repo dir.
@@ -467,6 +552,21 @@ mod tests {
             .expect("patch string")
     }
 
+    fn surfaced_result(args: Value, registry: Result<Vec<String>, String>) -> Value {
+        crate::agent::execution::dispatch_result_payload(repo_commit_diff_with_registry(
+            args, registry,
+        ))
+    }
+
+    fn assert_error_shape(result: &Value, code: &str) {
+        assert_eq!(result.get("error").and_then(Value::as_str), Some(code));
+        assert!(result
+            .get("detail")
+            .and_then(Value::as_str)
+            .is_some_and(|detail| !detail.is_empty()));
+        assert_eq!(result.as_object().map(|object| object.len()), Some(2));
+    }
+
     #[test]
     fn commit_diff_caps_multi_file_output_with_both_truncation_markers() {
         let repo = fixture_repo();
@@ -499,47 +599,108 @@ mod tests {
     }
 
     #[test]
+    fn commit_diff_accepts_head_and_first_parent_symbolic_refs() {
+        let repo = fixture_repo();
+        let tracked = vec![repo.root.to_string_lossy().to_string()];
+        let head = repo_commit_diff_in_tracked_set(
+            json!({ "repoPath": tracked[0], "sha": "HEAD" }),
+            &tracked,
+        )
+        .unwrap();
+        assert!(patch(&head).contains("large synthetic change"));
+
+        let parent = repo_commit_diff_in_tracked_set(
+            json!({ "repoPath": tracked[0], "sha": "HEAD~1" }),
+            &tracked,
+        )
+        .unwrap();
+        assert!(patch(&parent).contains("baseline"));
+    }
+
+    #[test]
     fn commit_diff_rejects_paths_outside_the_exact_tracked_set() {
         let repo = fixture_repo();
         let outside = repo.root.with_extension("outside");
         fs::create_dir_all(&outside).unwrap();
         let tracked = vec![repo.root.to_string_lossy().to_string()];
-        let error = repo_commit_diff_in_tracked_set(
+        let error = surfaced_result(
             json!({ "repoPath": outside, "sha": repo.sha }),
-            &tracked,
-        )
-        .unwrap_err();
+            Ok(tracked.clone()),
+        );
         let _ = fs::remove_dir_all(&outside);
-        assert!(error.contains("untracked repository path"));
+        assert_error_shape(&error, "repo_not_tracked");
 
         fs::create_dir_all(repo.root.join("nested")).unwrap();
         let traversal = format!("{}/nested/..", repo.root.to_string_lossy());
-        let error = repo_commit_diff_in_tracked_set(
+        let error = surfaced_result(
             json!({ "repoPath": traversal, "sha": repo.sha }),
-            &tracked,
-        )
-        .unwrap_err();
-        assert!(error.contains("exact tracked repository path"));
+            Ok(tracked),
+        );
+        assert_error_shape(&error, "repo_not_tracked");
     }
 
     #[test]
-    fn commit_diff_rejects_non_hexadecimal_sha_input() {
+    fn commit_diff_rejects_leading_dash_and_invalid_ref_characters() {
         let repo = fixture_repo();
         let tracked = vec![repo.root.to_string_lossy().to_string()];
-        let error = repo_commit_diff_in_tracked_set(
-            json!({ "repoPath": tracked[0], "sha": "HEAD; rm -rf nope" }),
-            &tracked,
-        )
-        .unwrap_err();
-        assert!(error.contains("hexadecimal commit sha"));
+        for reference in ["-HEAD", "HEAD;rm"] {
+            let error = surfaced_result(
+                json!({ "repoPath": tracked[0], "sha": reference }),
+                Ok(tracked.clone()),
+            );
+            assert_error_shape(&error, "invalid_ref");
+        }
+    }
+
+    #[test]
+    fn commit_diff_surfaces_every_failure_code_with_detail() {
+        let repo = fixture_repo();
+        let tracked = vec![repo.root.to_string_lossy().to_string()];
+
+        let not_found = surfaced_result(
+            json!({ "repoPath": tracked[0], "sha": "missing-ref" }),
+            Ok(tracked.clone()),
+        );
+        assert_error_shape(&not_found, "sha_not_found");
+
+        let empty = surfaced_result(
+            json!({ "repoPath": tracked[0], "sha": "HEAD", "file": "not-in-commit.ts" }),
+            Ok(tracked.clone()),
+        );
+        assert_error_shape(&empty, "empty_result");
+
+        let unavailable = surfaced_result(
+            json!({ "repoPath": tracked[0], "sha": "HEAD" }),
+            Err("repository service offline".to_string()),
+        );
+        assert_error_shape(&unavailable, "repo_registry_unavailable");
+
+        let outside = surfaced_result(
+            json!({ "repoPath": repo.root.with_extension("outside"), "sha": "HEAD" }),
+            Ok(tracked),
+        );
+        assert_error_shape(&outside, "repo_not_tracked");
+
+        let invalid = surfaced_result(
+            json!({ "repoPath": repo.root, "sha": "-HEAD" }),
+            Ok(vec![repo.root.to_string_lossy().to_string()]),
+        );
+        assert_error_shape(&invalid, "invalid_ref");
     }
 
     #[test]
     fn commit_diff_is_enabled_and_never_requires_confirmation() {
         let enabled = super::super::enabled_tools();
-        assert!(enabled
+        let tool = enabled
             .iter()
-            .any(|tool| { tool.get("name").and_then(Value::as_str) == Some("repo_commit_diff") }));
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some("repo_commit_diff"))
+            .expect("repo_commit_diff is enabled");
+        assert!(tool
+            .get("description")
+            .and_then(Value::as_str)
+            .is_some_and(|description| description.contains(
+                "Cite only file paths and contents present in this tool's result. If the result is an error or empty, say so."
+            )));
         let class = crate::agent::safety::tool_safety_class("repo_commit_diff");
         assert_eq!(class, crate::agent::safety::SafetyClass::ReadOnly);
         assert!(!crate::agent::safety::requires_confirmation(class, false));

@@ -673,14 +673,7 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
         // Feed ONLY the result back — the live session still holds the system
         // prompt, the tool schema, and every prior turn, so this is all the model
         // needs for the next action (no transcript re-send → smaller prefill).
-        let result_str =
-            serde_json::to_string(&tool_result).unwrap_or_else(|_| "{}".to_string());
-        next_message = format!(
-            "[SYSTEM] You called `{tool_name}`. It returned:\n{result_str}\n\n\
-             Now respond with your NEXT action as a single JSON object — a tool \
-             call, or {{\"done\": true, \"say\": \"...\"}} when the request is \
-             fully handled."
-        );
+        next_message = text_tool_result_message(&tool_name, &tool_result);
     }
 
     if result_text.is_empty() {
@@ -693,6 +686,16 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
         tool_calls_json: Value::Array(tool_call_log).to_string(),
         brain_sources,
     })
+}
+
+pub(crate) fn text_tool_result_message(tool_name: &str, tool_result: &Value) -> String {
+    let result_str = serde_json::to_string(tool_result).unwrap_or_else(|_| "{}".to_string());
+    format!(
+        "[SYSTEM] You called `{tool_name}`. It returned:\n{result_str}\n\n\
+         Now respond with your NEXT action as a single JSON object — a tool \
+         call, or {{\"done\": true, \"say\": \"...\"}} when the request is \
+         fully handled."
+    )
 }
 
 /// One subscription-billed, tool-free Claude turn for Smart Compose. The
