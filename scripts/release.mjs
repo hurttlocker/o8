@@ -34,6 +34,12 @@ const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
 // The real source repo. EMPTY until hurttlocker/o8 is public — see composeReleaseAnnouncement().
 // Q 2026-07-31: "they need to point to the real repo because it will be public soon."
 const SOURCE_REPO = process.env.O8_SOURCE_REPO || '';
+// Q 2026-07-31: "ping on big ships or necessary updates" — o8 ships ~2x/day, and an @everyone on
+// every one of those is the fastest way to train a server to mute the channel. Matches the promo
+// pipeline's BIG_SHIP_BULLETS so "big" means the same thing in both places.
+const PING_MIN_BULLETS = Number(process.env.O8_PING_MIN_BULLETS || 4);
+// A release nobody can skip pings regardless of size: security, a forced/breaking update, data loss.
+const PING_ALWAYS_RE = /\b(security|vulnerabilit|CVE|breaking change|breaking:|data loss|corrupt|hotfix|urgent|must update|required update)\b/i;
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const root = process.cwd();
 
@@ -87,7 +93,9 @@ const tag = `v${version}`;
 // (a release that shipped before the webhook existed) or a re-run after a
 // Discord hiccup. The full ship flow calls announceRelease() automatically.
 if (process.argv[2] === '--announce-preview' || process.argv[2] === '--announce') {
-  console.log(composeReleaseAnnouncement());
+  const preview = composeReleaseAnnouncement();
+  console.log(preview.content);
+  console.log(`\n[preview] ${preview.ping ? '@everyone WILL ping' : 'no ping'} — ${preview.reason}`);
   if (process.argv[2] === '--announce') {
     await announceRelease();
   }
@@ -359,6 +367,11 @@ function resolveReleasesWebhook() {
  * community announcement.
  */
 function composeReleaseAnnouncement() {
+  let allSubjects = [];
+  try {
+    allSubjects = execFileSync('git', ['log', '--format=%s', '--no-merges', releaseRange(tag)], { encoding: 'utf8' })
+      .split('\n').filter(Boolean);
+  } catch {}
   let subjects = [];
   try {
     subjects = execFileSync('git', ['log', '--format=%s', '--no-merges', releaseRange(tag)], { encoding: 'utf8' })
@@ -385,8 +398,11 @@ function composeReleaseAnnouncement() {
   const sourceLine = SOURCE_REPO
     ? `Source: https://github.com/${SOURCE_REPO}`
     : null;
-  return [
-    '@everyone',
+  // Ping only when it earns it: a big ship, or something nobody can safely skip.
+  const necessary = allSubjects.some((x) => PING_ALWAYS_RE.test(x));
+  const ping = necessary || bullets.length >= PING_MIN_BULLETS;
+  const content = [
+    ...(ping ? ['@everyone'] : []),
     `**o8 ${tag}** — ${date}`,
     '',
     ...(bullets.length ? bullets : ['- Fixes and maintenance.']),
@@ -394,6 +410,7 @@ function composeReleaseAnnouncement() {
     `Update: relaunch o8 (auto-updates within 30 min), or grab it fresh: https://github.com/${PUBLIC_MIRROR}/releases/tag/${tag}`,
     ...(sourceLine ? [sourceLine] : []),
   ].join('\n');
+  return { content, ping, reason: necessary ? 'necessary update' : (ping ? `big ship (${bullets.length} bullets)` : `small ship (${bullets.length} bullets)`) };
 }
 
 async function announceRelease() {
@@ -402,20 +419,22 @@ async function announceRelease() {
     console.log('[release] no #releases webhook configured — skipping community announce');
     return;
   }
+  const { content, ping, reason } = composeReleaseAnnouncement();
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // allowed_mentions is REQUIRED for the ping to land: a webhook can contain the literal
-    // "@everyone" and Discord will render it as inert text unless "everyone" is parsed here.
+    // "@everyone" and Discord renders it as inert text unless "everyone" is parsed here.
+    // It is also what SUPPRESSES the ping on a small ship — parse: [] means nothing notifies.
     body: JSON.stringify({
       username: 'o8',
-      content: composeReleaseAnnouncement(),
-      allowed_mentions: { parse: ['everyone'] },
+      content,
+      allowed_mentions: { parse: ping ? ['everyone'] : [] },
     }),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     throw new Error(`Discord returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 180)}` : ''}`);
   }
-  console.log('[release] announced in community #releases');
+  console.log(`[release] announced in community #releases (${ping ? '@everyone' : 'no ping'} — ${reason})`);
 }
