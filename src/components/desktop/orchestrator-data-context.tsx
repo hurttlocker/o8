@@ -20,6 +20,8 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { FleetAgent, ThoughtsCardProps } from './thoughts/types';
 
 export interface OrchestratorDataValue {
+  /** Active desktop project identity carried into newly-created threads. */
+  activeProjectId?: string | null;
   agents: FleetAgent[];
   missionState: ThoughtsCardProps['missionState'];
   workspaceTargets: ThoughtsCardProps['workspaceTargets'];
@@ -79,6 +81,7 @@ interface OrchestratorDataProviderProps extends OrchestratorDataValue {
 
 export function OrchestratorDataProvider({
   children,
+  activeProjectId,
   agents,
   missionState,
   workspaceTargets,
@@ -112,6 +115,7 @@ export function OrchestratorDataProvider({
   // field they depend on genuinely changed.
   const value = useMemo<OrchestratorDataValue>(
     () => ({
+      activeProjectId,
       agents,
       missionState,
       workspaceTargets,
@@ -131,6 +135,7 @@ export function OrchestratorDataProvider({
       projectContextRailVisible,
     }),
     [
+      activeProjectId,
       agents,
       missionState,
       workspaceTargets,

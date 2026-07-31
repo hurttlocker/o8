@@ -6,6 +6,7 @@ import type {
 export interface MobileOrchestratorRoute {
   repoPath: string;
   threadId: string;
+  projectId: string | null;
   backend: MobileOrchestratorBackend | null;
   agent: string | null;
 }
@@ -21,6 +22,7 @@ export function mobileOrchestratorRouteFromThread(
   return {
     repoPath,
     threadId,
+    projectId: thread?.projectId?.trim() || null,
     backend: thread?.backend ?? null,
     agent: thread?.agent?.trim() || null,
   };
@@ -31,6 +33,7 @@ export function mobileOrchestratorRouteKey(route: MobileOrchestratorRoute | null
   return [
     route.repoPath,
     route.threadId,
+    route.projectId ?? '',
     route.backend ?? '',
     route.agent ?? '',
   ].join('\u001f');
@@ -82,6 +85,7 @@ export function buildMobileOrchestratorSend(
   return {
     type: 'orchestrator-send',
     ...routeFields(route),
+    ...(route.projectId ? { projectId: route.projectId } : {}),
     message,
     permissionMode: 'full',
     ...(clientMutationId ? { clientMutationId } : {}),

@@ -5302,6 +5302,7 @@ function DashboardInner() {
             }}
           >
           <OrchestratorDataProvider
+            activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
             agents={parsedAgents}
             missionState={thoughtsMissionState}
             workspaceTargets={orchestratorWorkspaceTargets}
@@ -5442,6 +5443,7 @@ function DashboardInner() {
                   >
                     <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
                       <OrchestratorDataProvider
+                        activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
                         missionState={thoughtsMissionState}
                         workspaceTargets={orchestratorWorkspaceTargets}
@@ -5502,6 +5504,7 @@ function DashboardInner() {
                   >
                     <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
                       <OrchestratorDataProvider
+                        activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
                         missionState={thoughtsMissionState}
                         workspaceTargets={orchestratorWorkspaceTargets}

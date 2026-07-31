@@ -70,6 +70,7 @@ const thread: MobileOrchestratorThread = {
   status: 'ready',
   lastMessageAt: new Date(0).toISOString(),
   messageCount: 0,
+  projectId: null,
   backend: 'codex',
   agent: null,
 };

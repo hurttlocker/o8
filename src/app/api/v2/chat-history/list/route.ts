@@ -36,6 +36,7 @@ interface ChatHistoryEntry {
   pinned: boolean;
   planText?: string | null;
   firstUserMessage?: string | null;
+  projectId: string | null;
   repoName?: string | null;
   repoPath?: string | null;
   repoBranch?: string | null;
@@ -197,6 +198,7 @@ export async function GET(request: NextRequest) {
           pinned: data.pinned === true,
           planText: typeof data.planText === 'string' && data.planText.trim() ? data.planText : null,
           firstUserMessage: firstUserMsg ? firstUserMsg.content.slice(0, 500) : null,
+          projectId: typeof data.projectId === 'string' && data.projectId.trim() ? data.projectId.trim() : null,
           repoName: data.repoName || null,
           repoPath: data.repoPath || null,
           repoBranch: data.repoBranch || null,

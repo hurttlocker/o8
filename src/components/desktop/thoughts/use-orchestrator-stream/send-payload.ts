@@ -5,6 +5,7 @@ import type { OrchestratorPermissionMode } from './shared';
 
 export function buildOrchestratorSendPayload(input: {
   repoPath: string;
+  projectId?: string | null;
   threadId: string;
   clientMessageId: string;
   wireMessage: string;
@@ -20,6 +21,7 @@ export function buildOrchestratorSendPayload(input: {
   return JSON.stringify({
     type: 'orchestrator-send',
     repoPath: input.repoPath,
+    ...(input.projectId ? { projectId: input.projectId } : {}),
     threadId: input.threadId,
     clientMessageId: input.clientMessageId,
     message: input.wireMessage,

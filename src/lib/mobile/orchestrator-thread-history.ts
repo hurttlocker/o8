@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
+import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
 import {
   effectiveBackend,
@@ -19,7 +21,7 @@ import {
   type OrchestratorHistoryRecord,
 } from './orchestrator-thread-projection';
 
-export const ORCHESTRATOR_HISTORY_DIR = join(getDataDir(), 'chat-history');
+export { ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 const MAX_THREADS = 20;
 const DEFAULT_MODEL = 'claude-code';
 const DEFAULT_BACKEND: MobileOrchestratorBackend = 'claude';
@@ -46,15 +48,6 @@ type CachedHistoryRecord = {
 
 const historyParseCache = new Map<string, CachedHistoryRecord>();
 let historyWriteVersion = 0;
-
-function ensureHistoryDir() {
-  mkdirSync(ORCHESTRATOR_HISTORY_DIR, { recursive: true });
-}
-
-export function safeOrchestratorHistoryPath(tabId: string): string {
-  const safe = tabId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return join(ORCHESTRATOR_HISTORY_DIR, `${safe}.json`);
-}
 
 function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
   try {
@@ -387,6 +380,7 @@ export function listArchivedOrchestratorThreadIds(): string[] {
 
 export function createMobileOrchestratorThread(input: {
   repoPath: string;
+  projectId?: unknown;
   title?: string | null;
   repoName?: string | null;
   repoBranch?: string | null;
@@ -402,6 +396,7 @@ export function createMobileOrchestratorThread(input: {
   const now = new Date().toISOString();
   const tabId = nextThreadId();
   const backend = input.backend ?? DEFAULT_BACKEND;
+  const projectId = resolveOrchestratorThreadProjectId(null, input.projectId);
   const record: OrchestratorHistoryRecord = {
     messages: [],
     model: modelForBackend(backend) ?? DEFAULT_MODEL,
@@ -409,6 +404,7 @@ export function createMobileOrchestratorThread(input: {
     starred: false,
     pinned: false,
     title: trimTitle(input.title, 'New chat'),
+    projectId,
     repoPath,
     repoName: trimTitle(input.repoName, repoNameFromPath(repoPath) ?? 'Project'),
     repoBranch: typeof input.repoBranch === 'string' && input.repoBranch.trim() ? input.repoBranch.trim() : null,
@@ -433,6 +429,7 @@ export function createMobileOrchestratorThread(input: {
 export function appendMobileOrchestratorUserMessage(input: {
   tabId: string | null | undefined;
   repoPath: string;
+  projectId?: unknown;
   message: string;
   messageId?: string;
   backend?: MobileOrchestratorBackend | null;
@@ -450,7 +447,7 @@ export function appendMobileOrchestratorUserMessage(input: {
     : Date.now();
   const now = new Date(timestamp);
   const nowIso = now.toISOString();
-  const existing = readHistoryRecord(tabId) ?? {
+  const existing: OrchestratorHistoryRecord = readHistoryRecord(tabId) ?? {
     messages: [],
     savedAt: nowIso,
     model: modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
@@ -466,6 +463,7 @@ export function appendMobileOrchestratorUserMessage(input: {
     orchestratorSessionIds: {},
     orchestratorSessionUpdatedAt: null,
   };
+  const projectId = resolveOrchestratorThreadProjectId(existing.projectId, input.projectId);
   const messages = Array.isArray(existing.messages) ? existing.messages : [];
   const last = messages[messages.length - 1];
   const alreadyLastUserMessage = last?.role === 'user' && last.content === content;
@@ -486,6 +484,7 @@ export function appendMobileOrchestratorUserMessage(input: {
     messages: nextMessages,
     model: existing.model ?? modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
     savedAt: nowIso,
+    projectId,
     title: typeof existing.title === 'string' && existing.title.trim() ? existing.title.trim() : null,
     repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
       ? existing.repoPath

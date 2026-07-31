@@ -1233,8 +1233,7 @@ function OrchestratorTabInner({
       // live-caught 2026-07-16: fresh tab emitted the old thread id ~450ms
       // after mount, then vanished).
       suppressAutoRestore={!restoreLastThread || Boolean(initialThreadId)}
-      // Thread-bound tab: until its history load lands the composer chip
-      // shows '…', never the default backend ("they all say o8", 2026-07-16).
+      // Until a thread-bound tab's history lands, show '…', never the default backend.
       expectsThreadLoad={Boolean(initialThreadId)}
       draftInjection={effectiveDraftInjection}
       imageInjection={data?.imageInjection ?? null}
@@ -1245,6 +1244,7 @@ function OrchestratorTabInner({
       sessionTargets={sessionTargets}
       workspaceTargets={data.workspaceTargets ?? []}
       repoPath={effectiveRepoPath}
+      projectId={data.activeProjectId ?? null}
       thoughtsBodyBackground={thoughtsBodyBackground}
       thoughtsElevatedSurface={thoughtsElevatedSurface}
       thoughtsElevatedBorder={thoughtsElevatedBorder}

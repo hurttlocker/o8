@@ -27,6 +27,25 @@ export interface OrchestratorSendOptions {
   attachments?: Array<{ dataUri: string; name?: string }>;
 }
 
+export interface OrchestratorStreamOptions {
+  projectId?: string | null;
+  seededPlanText?: string | null;
+  hasHistory?: boolean;
+  threadId?: string | null;
+  /**
+   * Called when the hook synchronously mints a threadId inside `send()`
+   * because the parent hasn't supplied one yet (first-message-on-empty-tab
+   * path). The parent MUST update its own threadId state in response so the
+   * next render keeps both sides aligned. Without this, ws-server's
+   * `isThreadBacked` guard skips assistant-message persistence and the reply
+   * silently drops on reload. See bug investigation 2026-05-27.
+   */
+  onThreadIdMint?: (threadId: string) => void;
+  /** Requests a same-thread history refresh when server turn truth says a
+   * settled assistant message is missing from the visible transcript. */
+  onSettledAssistantMissing?: (assistantMessageId: string) => void;
+}
+
 export interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
   planText: string | null;

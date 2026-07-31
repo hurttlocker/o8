@@ -172,6 +172,7 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
           sessionTargets={sessionTargets}
           workspaceTargets={data.workspaceTargets ?? []}
           repoPath={repoPath ?? null}
+          projectId={data.activeProjectId ?? null}
           thoughtsBodyBackground="transparent"
           thoughtsElevatedSurface="var(--t-glass-elevated)"
           thoughtsElevatedBorder="1px solid var(--t-glass-border-strong)"

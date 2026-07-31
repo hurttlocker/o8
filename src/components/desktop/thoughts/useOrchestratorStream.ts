@@ -62,6 +62,7 @@ import {
 import type {
   OrchestratorSendHandle,
   OrchestratorSendOptions,
+  OrchestratorStreamOptions,
   OrchestratorStreamResult,
 } from './use-orchestrator-stream/types';
 
@@ -99,23 +100,7 @@ interface ActiveTurnState {
  */
 export function useOrchestratorStream(
   repoPath: string | null,
-  options?: {
-    seededPlanText?: string | null;
-    hasHistory?: boolean;
-    threadId?: string | null;
-    /**
-     * Called when the hook synchronously mints a threadId inside `send()`
-     * because the parent hasn't supplied one yet (first-message-on-empty-tab
-     * path). The parent MUST update its own threadId state in response so the
-     * next render keeps both sides aligned. Without this, ws-server's
-     * `isThreadBacked` guard skips assistant-message persistence and the reply
-     * silently drops on reload. See bug investigation 2026-05-27.
-     */
-    onThreadIdMint?: (threadId: string) => void;
-    /** Requests a same-thread history refresh when server turn truth says a
-     * settled assistant message is missing from the visible transcript. */
-    onSettledAssistantMissing?: (assistantMessageId: string) => void;
-  },
+  options?: OrchestratorStreamOptions,
 ): OrchestratorStreamResult {
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
@@ -140,6 +125,8 @@ export function useOrchestratorStream(
   statusRef.current = status;
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
+  const projectIdRef = useRef<string | null>(options?.projectId ?? null);
+  projectIdRef.current = options?.projectId ?? null;
   const threadId = options?.threadId ?? null;
   const threadIdRef = useRef<string | null>(threadId);
   // Only mirror the parent-supplied threadId when it is set. If the hook has
@@ -1003,6 +990,7 @@ export function useOrchestratorStream(
       turnTranscriptEventCountRef.current = 0;
       const payload = buildOrchestratorSendPayload({
         repoPath: activeRepoPath,
+        projectId: projectIdRef.current,
         threadId: sendHandle.threadId,
         clientMessageId,
         wireMessage: outboundMessage,

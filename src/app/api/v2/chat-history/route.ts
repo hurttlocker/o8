@@ -14,6 +14,10 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
+import {
+  OrchestratorThreadProjectError,
+  resolveOrchestratorThreadProjectId,
+} from '@/lib/mobile/orchestrator-thread-project';
 import { maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
@@ -130,6 +134,7 @@ function emptyHistoryRecord(): Record<string, unknown> {
     repoName: null,
     repoPath: null,
     repoBranch: null,
+    projectId: null,
     githubOwner: null,
     githubRepo: null,
     remoteUrl: null,
@@ -163,6 +168,9 @@ export async function GET(request: NextRequest) {
   const stableRecord = {
     ...parsed,
     messages: ensureStableChatMessageIds(Array.isArray(parsed.messages) ? parsed.messages : []),
+    projectId: typeof parsed.projectId === 'string' && parsed.projectId.trim()
+      ? parsed.projectId.trim()
+      : null,
   };
   const pageRequest = parseChatHistoryPageRequest(
     request.nextUrl.searchParams.get('limit'),
@@ -219,6 +227,7 @@ export async function POST(request: NextRequest) {
   let repoName: string | undefined;
   let repoPath: string | undefined;
   let repoBranch: string | undefined;
+  let existingProjectId: unknown = null;
   let remoteUrl: string | null | undefined;
   let backend: OrchestratorBackendId | undefined;
   let agent: string | undefined;
@@ -241,6 +250,7 @@ export async function POST(request: NextRequest) {
     repoName = existing.repoName;
     repoPath = existing.repoPath;
     repoBranch = existing.repoBranch;
+    existingProjectId = existing.projectId;
     remoteUrl = existing.remoteUrl;
     backend = normalizeBackend(existing.backend);
     agent = normalizeAgent(existing.agent);
@@ -290,6 +300,15 @@ export async function POST(request: NextRequest) {
     bodyRepoName: body.repoName,
     bodyRepoBranch: body.repoBranch,
   });
+  let projectId: string | null;
+  try {
+    projectId = resolveOrchestratorThreadProjectId(existingProjectId, body.projectId);
+  } catch (error) {
+    if (error instanceof OrchestratorThreadProjectError) {
+      return NextResponse.json({ error: error.toPayload() }, { status: 422 });
+    }
+    throw error;
+  }
 
   writeFileSync(filePath, JSON.stringify({
     messages: finalMessages,
@@ -306,6 +325,7 @@ export async function POST(request: NextRequest) {
     repoName: repoMetadata.repoName,
     repoPath: repoMetadata.repoPath,
     repoBranch: repoMetadata.repoBranch,
+    projectId,
     remoteUrl: body.remoteUrl ?? remoteUrl ?? null,
     backend: nextBackend,
     agent: normalizeAgent(body.agent) ?? agent ?? null,
@@ -343,6 +363,7 @@ export async function PATCH(request: NextRequest) {
       messages: [],
       savedAt: new Date().toISOString(),
       starred: false,
+      projectId: null,
     };
   }
 

@@ -25,6 +25,7 @@ export type OrchestratorHistoryRecord = {
   title?: string | null;
   titleSource?: 'code' | 'llm' | 'operator' | null;
   autoTitledAtCount?: number | null;
+  projectId?: string | null;
   repoPath?: string | null;
   repoName?: string | null;
   repoBranch?: string | null;
@@ -151,6 +152,9 @@ export function projectOrchestratorThread(
       ? 'failed'
       : messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
     messageCount: messages.length,
+    projectId: typeof record.projectId === 'string' && record.projectId.trim()
+      ? record.projectId.trim()
+      : null,
     repoPath,
     repoName: typeof record.repoName === 'string' && record.repoName.trim()
       ? record.repoName

@@ -99,7 +99,6 @@ import { getBrowserProvider } from './lib/browser/inventory';
 import type { CommandCenterSnapshot } from './lib/command-center/snapshot';
 import type { MobileInboxSnapshot, MobileOrchestratorThread, MobileTranscriptEntry } from './lib/mobile/types';
 import {
-  appendMobileOrchestratorUserMessage,
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
   markMobileOrchestratorThreadFailed,
@@ -108,6 +107,8 @@ import {
   upsertMobileOrchestratorAssistantMessage,
   writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
+import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
+import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
@@ -4413,10 +4414,11 @@ async function handleOrchestratorSendMsgOnce(
     // that case the client already restored the draft and there is no turn to
     // start or persist.
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
-    const updatedThread = appendMobileOrchestratorUserMessage({
+    const updatedThread = persistOrchestratorThreadUserMessageFromWire({
+      message: msg,
       tabId: threadId,
       repoPath,
-      message: transcriptMessage,
+      transcriptMessage,
       messageId: userMessageId,
       backend: activeBackend.id,
       agent: activeAgentTag,
@@ -4867,6 +4869,7 @@ async function handleOrchestratorSendMsgOnce(
     // After the user message completes, drain any queued supervisor escalations.
     void drainOrchestratorAutoQueue();
   } catch (err) {
+    const projectError = err instanceof OrchestratorThreadProjectError ? err : null;
     const turnWasUndone = undoneOrchestratorUserMessageIds.has(userMessageId);
     activeOrchestratorRoutes.release(activeRouteHandle);
     if (turnController) {
@@ -4879,7 +4882,7 @@ async function handleOrchestratorSendMsgOnce(
     // Save any partial assistant text accumulated before the failure so
     // mobile listings still show what arrived rather than a blank turn.
     persistAssistantText(null);
-    if (!turnWasUndone) {
+    if (!turnWasUndone && !projectError) {
       try {
         const failedThread = markMobileOrchestratorThreadFailed({
           tabId: threadId,
@@ -4918,6 +4921,7 @@ async function handleOrchestratorSendMsgOnce(
       event: 'error' as const,
       data: {
         error: err instanceof Error ? err.message : 'Failed to send message',
+        ...(projectError?.toPayload() ?? {}),
         repoPath,
         threadId,
         backend: activeBackend.id,

@@ -440,6 +440,8 @@ export interface MobileOrchestratorThread {
   runtime: MobileOrchestratorRuntime;
   status: MobileOrchestratorThreadStatus;
   messageCount: number;
+  /** Stable desktop project identity; null for legacy threads. */
+  projectId: string | null;
   repoPath: string | null;
   repoName: string | null;
   repoBranch: string | null;

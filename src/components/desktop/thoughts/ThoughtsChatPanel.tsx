@@ -92,6 +92,8 @@ import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
   ThoughtsChatPermissionMode,
+  ThoughtsHistoryListResponse,
+  ThoughtsHistoryResponse,
   ThoughtsSendNowOptions,
 } from './chat-panel/types';
 import {
@@ -154,6 +156,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   sessionTargets: AgentTarget[];
   workspaceTargets: OrchestratorWorkspaceTarget[];
   repoPath?: string | null;
+  projectId?: string | null;
   thoughtsBodyBackground: string;
   thoughtsElevatedSurface: string;
   thoughtsElevatedBorder: string;
@@ -242,6 +245,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   sessionTargets,
   workspaceTargets,
   repoPath: repoPathProp,
+  projectId: projectIdProp,
   thoughtsBodyBackground,
   thoughtsElevatedSurface,
   thoughtsElevatedBorder,
@@ -449,8 +453,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const loadGenerationRef = useRef(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const [threadProjectId, setThreadProjectId] = useState<string | null>(projectIdProp ?? null);
+  useEffect(() => {
+    if (threadIdRef.current !== null) return;
+    setThreadProjectId(projectIdProp ?? null);
+  }, [projectIdProp]);
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
-  const { persistThread, persistThreadNow, cancelPendingPersist } = usePersistChatThread(resolvedRepoPath);
+  const { persistThread, persistThreadNow, cancelPendingPersist } = usePersistChatThread(
+    resolvedRepoPath,
+    threadProjectId,
+  );
   const thinkingEffort: ThinkingEffort = thinkingOverride ?? (adaptiveThinkingEnabled ? 'adaptive' : 'max');
   const composerDropHostRef = useRef<HTMLDivElement>(null);
   const {
@@ -486,6 +498,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
+    projectId: threadProjectId,
     seededPlanText: planText,
     hasHistory: chatMessages.length > 0,
     threadId,
@@ -1097,6 +1110,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     setActiveThreadBackend(composerBackendTurnOverride(orchestratorBackend) ?? null);
     setActiveThreadAgent(null);
+    setThreadProjectId(projectIdProp ?? null);
     // #597 minted a fresh threadId AND eagerly persisted an empty placeholder
     // file "so History shows the slot before typing" — but the list route now
     // HIDES empty unpinned threads (and GCs them after an hour), so the eager
@@ -1115,7 +1129,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend]);
+  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend, projectIdProp]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -1220,14 +1234,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       try {
         const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
         if (!res.ok) return;
-        const data = await res.json() as {
-          conversations?: Array<{
-            tabId: string;
-            modifiedAt?: string;
-            backend?: OrchestratorBackendId | null;
-            agent?: string | null;
-          }>;
-        };
+        const data = await res.json() as ThoughtsHistoryListResponse;
         const thoughtsThreads = (data.conversations ?? [])
           .filter((t) => t.tabId.startsWith('thoughts-'))
           .sort((a, b) => new Date(b.modifiedAt ?? 0).getTime() - new Date(a.modifiedAt ?? 0).getTime());
@@ -1246,12 +1253,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
         const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);
         if (!histRes.ok) return;
-        const histData = await histRes.json() as {
-          messages?: ThoughtsHistoryMessage[];
-          planText?: string | null;
-          backend?: OrchestratorBackendId | null;
-          agent?: string | null;
-        };
+        const histData = await histRes.json() as ThoughtsHistoryResponse;
         const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
         // Hard cap: never auto-restore a thread above 100 messages — the user
         // almost certainly didn't want yesterday's giant thread paged back in
@@ -1273,6 +1275,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           return;
         }
         setPlanText(histData.planText ?? null);
+        setThreadProjectId(histData.projectId ?? latest.projectId ?? null);
         setActiveThreadBackend(histData.backend ?? latest.backend ?? null);
         setActiveThreadAgent(histData.agent ?? latest.agent ?? null);
         if (msgs.length > 0) {
@@ -1370,13 +1373,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         console.warn(`[orchestrator] loadThread ${tabId} — history fetch failed twice (server booting?)`);
         return;
       }
-      const data = await res.json() as {
-        messages?: ThoughtsHistoryMessage[];
-        planText?: string | null;
-        backend?: OrchestratorBackendId | null;
-        agent?: string | null;
-        page?: ThreadHistoryPage<ThoughtsHistoryMessage>['page'];
-      };
+      const data = await res.json() as ThoughtsHistoryResponse;
       // A newer loadThread started while this one was awaiting the network — its
       // results are stale and must NOT overwrite the newer thread's state.
       if (loadGenerationRef.current !== myGeneration) {
@@ -1401,6 +1398,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       });
       setChatMessages(loadPlan.entries);
       setPlanText(data.planText ?? null);
+      setThreadProjectId(data.projectId ?? null);
       setActiveThreadBackend(data.backend ?? null);
       setActiveThreadAgent(data.agent ?? null);
       // Continue the conversation where it lives: adopt the thread's stored

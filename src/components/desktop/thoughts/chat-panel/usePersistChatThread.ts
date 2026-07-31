@@ -8,7 +8,7 @@ function serializeMessages(msgs: MobileTranscriptEntry[]) {
   return serializeTranscriptForStorage(msgs);
 }
 
-export function usePersistChatThread(resolvedRepoPath: string | null) {
+export function usePersistChatThread(resolvedRepoPath: string | null, projectId: string | null) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titlePokeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -51,6 +51,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
             model: 'claude-code',
             planText: nextPlanText ?? undefined,
             repoPath: resolvedRepoPath,
+            projectId: projectId ?? undefined,
             title: options?.title ?? undefined,
           }),
         });
@@ -59,7 +60,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
         // silent
       }
     },
-    [resolvedRepoPath, scheduleTitlePoke],
+    [projectId, resolvedRepoPath, scheduleTitlePoke],
   );
 
   const persistThread = useCallback(

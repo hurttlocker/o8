@@ -1,3 +1,7 @@
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import type { ThoughtsHistoryMessage } from '../history-transcript';
+import type { ThreadHistoryPage } from './useThreadHistoryBackfill';
+
 export interface ThoughtsOrchestratorBusyState {
   active: boolean;
   startedAt: number | null;
@@ -40,3 +44,22 @@ export interface ThoughtsChatPanelChromeState {
 }
 
 export type ThoughtsChatPermissionMode = 'full' | 'plan';
+
+export interface ThoughtsHistoryListResponse {
+  conversations?: Array<{
+    tabId: string;
+    modifiedAt?: string;
+    backend?: OrchestratorBackendId | null;
+    agent?: string | null;
+    projectId?: string | null;
+  }>;
+}
+
+export interface ThoughtsHistoryResponse {
+  messages?: ThoughtsHistoryMessage[];
+  planText?: string | null;
+  backend?: OrchestratorBackendId | null;
+  agent?: string | null;
+  projectId?: string | null;
+  page?: ThreadHistoryPage<ThoughtsHistoryMessage>['page'];
+}

@@ -5,6 +5,7 @@ import type {
 
 export interface CreateMobileOrchestratorThreadInput {
   repoPath: string;
+  projectId?: string | null;
   repoName?: string | null;
   repoBranch?: string | null;
   backend?: MobileOrchestratorBackend | null;
@@ -41,6 +42,7 @@ export async function createMobileOrchestratorThreadFromRepo(
     headers,
     body: JSON.stringify({
       repoPath,
+      projectId: input.projectId ?? undefined,
       repoName: input.repoName ?? undefined,
       repoBranch: input.repoBranch ?? undefined,
       backend: input.backend ?? undefined,
@@ -49,10 +51,11 @@ export async function createMobileOrchestratorThreadFromRepo(
   });
   const payload = await response.json().catch(() => null) as {
     thread?: MobileOrchestratorThread;
-    error?: string;
+    error?: string | { message?: string };
   } | null;
   if (!response.ok || !payload?.thread) {
-    throw new Error(payload?.error ?? `Unable to create conversation (HTTP ${response.status}).`);
+    const message = typeof payload?.error === 'string' ? payload.error : payload?.error?.message;
+    throw new Error(message ?? `Unable to create conversation (HTTP ${response.status}).`);
   }
   return payload.thread;
 }

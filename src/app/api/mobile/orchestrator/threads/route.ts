@@ -17,6 +17,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend } from '@/lib/mobile/types';
+import { OrchestratorThreadProjectError } from '@/lib/mobile/orchestrator-thread-project';
 import {
   createMobileOrchestratorThread,
   listArchivedOrchestratorThreadIds,
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as
     | {
         repoPath?: string;
+        projectId?: unknown;
         title?: string | null;
         repoName?: string | null;
         repoBranch?: string | null;
@@ -90,6 +92,7 @@ export async function POST(request: NextRequest) {
   try {
     const thread = createMobileOrchestratorThread({
       repoPath: body.repoPath,
+      projectId: body.projectId,
       title: body.title,
       repoName: body.repoName,
       repoBranch: body.repoBranch,
@@ -99,6 +102,9 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ thread }, { headers: NO_STORE });
   } catch (error) {
+    if (error instanceof OrchestratorThreadProjectError) {
+      return NextResponse.json({ error: error.toPayload() }, { status: 422, headers: NO_STORE });
+    }
     const message = error instanceof Error ? error.message : 'Failed to create orchestrator thread.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
