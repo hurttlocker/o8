@@ -432,8 +432,10 @@ fn is_model_unavailable_error(error: &str) -> bool {
 }
 
 fn should_retry_with_claude_fallback(model: &str, error: &str) -> bool {
-    model == crate::models::CLAUDE_FABLE_5
-        && error.starts_with(FIRST_TURN_MODEL_UNAVAILABLE_PREFIX)
+    matches!(
+        model,
+        crate::models::CLAUDE_FABLE_5 | crate::models::CLAUDE_OPUS_5
+    ) && error.starts_with(FIRST_TURN_MODEL_UNAVAILABLE_PREFIX)
 }
 
 impl Drop for ClaudeSession {
@@ -568,32 +570,29 @@ async fn run_loop_with_fallback(
     mcp_cfg: &str,
     correlation: Option<ConfirmCorrelation>,
 ) -> Result<LoopResult, String> {
-    let model = super::planner_route::effective_claude_model(requested_model);
-    let first = run_loop_once(bin, model, intent, ctx, mcp_cfg, correlation.clone()).await;
-    let Err(error) = first else {
-        return first;
-    };
-    if !should_retry_with_claude_fallback(model, &error) {
-        return Err(error);
+    let mut binary = bin.to_string();
+    let mut model = super::planner_route::effective_claude_model(requested_model);
+    loop {
+        match run_loop_once(&binary, model, intent, ctx, mcp_cfg, correlation.clone()).await {
+            Ok(result) => return Ok(result),
+            Err(error) if should_retry_with_claude_fallback(model, &error) => {
+                let Some(fallback) =
+                    super::planner_route::claude_fallback_selection(&binary, model)
+                else {
+                    return Err(error);
+                };
+                super::planner_route::remember_claude_model_unavailable(model);
+                log::warn!(
+                    "[symon-agent] {model} unavailable; retrying with {} / {}",
+                    fallback.model,
+                    fallback.effort
+                );
+                binary = fallback.binary;
+                model = fallback.model;
+            }
+            Err(error) => return Err(error),
+        }
     }
-    let Some(fallback) = super::planner_route::claude_fallback_selection(bin, model) else {
-        return Err(error);
-    };
-    super::planner_route::remember_claude_fable_unavailable();
-    log::warn!(
-        "[symon-agent] {model} unavailable; retrying once with {} / {}",
-        fallback.model,
-        fallback.effort
-    );
-    run_loop_once(
-        &fallback.binary,
-        fallback.model,
-        intent,
-        ctx,
-        mcp_cfg,
-        correlation,
-    )
-    .await
 }
 
 pub(crate) trait TextPlannerSession: Send + 'static {
@@ -838,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_model_not_found_event_selects_first_turn_fallback() {
+    fn claude_model_not_found_event_selects_first_turn_fallback_chain() {
         let event = json!({
             "type": "assistant",
             "error": "model_not_found",
@@ -856,6 +855,10 @@ mod tests {
         );
         assert!(should_retry_with_claude_fallback(
             crate::models::CLAUDE_FABLE_5,
+            &error
+        ));
+        assert!(should_retry_with_claude_fallback(
+            crate::models::CLAUDE_OPUS_5,
             &error
         ));
         assert!(!should_retry_with_claude_fallback(

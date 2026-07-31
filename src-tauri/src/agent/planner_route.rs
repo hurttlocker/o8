@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub(crate) const NO_AGENT_CLI_MESSAGE: &str = "no agent CLI found — install claude or codex";
 const INVALID_PLANNER_SELECTION_MESSAGE: &str = "invalid or unavailable Symon planner selection";
 static CLAUDE_FABLE_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+static CLAUDE_OPUS_5_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlannerProvider {
@@ -55,24 +56,48 @@ pub(crate) fn resolve_bound(engine: &str, model: &str, effort: &str) -> PlannerR
 }
 
 pub(crate) fn effective_claude_model(model: &str) -> &str {
-    if model == crate::models::CLAUDE_FABLE_5 && CLAUDE_FABLE_UNAVAILABLE.load(Ordering::Relaxed) {
-        crate::models::CLAUDE_OPUS_4_8
-    } else {
-        model
+    effective_claude_model_with_availability(
+        model,
+        CLAUDE_FABLE_UNAVAILABLE.load(Ordering::Relaxed),
+        CLAUDE_OPUS_5_UNAVAILABLE.load(Ordering::Relaxed),
+    )
+}
+
+fn effective_claude_model_with_availability(
+    model: &str,
+    fable_unavailable: bool,
+    opus_5_unavailable: bool,
+) -> &str {
+    match model {
+        crate::models::CLAUDE_FABLE_5 if fable_unavailable && opus_5_unavailable => {
+            crate::models::CLAUDE_OPUS_4_8
+        }
+        crate::models::CLAUDE_FABLE_5 if fable_unavailable => crate::models::CLAUDE_OPUS_5,
+        crate::models::CLAUDE_OPUS_5 if opus_5_unavailable => crate::models::CLAUDE_OPUS_4_8,
+        _ => model,
     }
 }
 
 pub(crate) fn claude_fallback_selection(binary: &str, model: &str) -> Option<PlannerSelection> {
-    (model == crate::models::CLAUDE_FABLE_5).then(|| PlannerSelection {
+    let model = match model {
+        crate::models::CLAUDE_FABLE_5 => crate::models::CLAUDE_OPUS_5,
+        crate::models::CLAUDE_OPUS_5 => crate::models::CLAUDE_OPUS_4_8,
+        _ => return None,
+    };
+    Some(PlannerSelection {
         provider: PlannerProvider::Claude,
         binary: binary.to_string(),
-        model: crate::models::CLAUDE_OPUS_4_8,
+        model,
         effort: "high",
     })
 }
 
-pub(crate) fn remember_claude_fable_unavailable() {
-    CLAUDE_FABLE_UNAVAILABLE.store(true, Ordering::Relaxed);
+pub(crate) fn remember_claude_model_unavailable(model: &str) {
+    match model {
+        crate::models::CLAUDE_FABLE_5 => CLAUDE_FABLE_UNAVAILABLE.store(true, Ordering::Relaxed),
+        crate::models::CLAUDE_OPUS_5 => CLAUDE_OPUS_5_UNAVAILABLE.store(true, Ordering::Relaxed),
+        _ => {}
+    }
 }
 
 fn resolve_bound_with<F>(engine: &str, model: &str, effort: &str, mut locate: F) -> PlannerRouting
@@ -228,9 +253,18 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_fable_falls_back_to_opus_high() {
+    fn unavailable_models_advance_the_high_effort_fallback_chain() {
         assert_eq!(
             claude_fallback_selection("/mock/claude", crate::models::CLAUDE_FABLE_5),
+            Some(PlannerSelection {
+                provider: PlannerProvider::Claude,
+                binary: "/mock/claude".to_string(),
+                model: crate::models::CLAUDE_OPUS_5,
+                effort: "high",
+            })
+        );
+        assert_eq!(
+            claude_fallback_selection("/mock/claude", crate::models::CLAUDE_OPUS_5),
             Some(PlannerSelection {
                 provider: PlannerProvider::Claude,
                 binary: "/mock/claude".to_string(),
@@ -241,6 +275,23 @@ mod tests {
         assert_eq!(
             claude_fallback_selection("/mock/claude", crate::models::CLAUDE_OPUS_4_8),
             None
+        );
+
+        assert_eq!(
+            effective_claude_model_with_availability(crate::models::CLAUDE_FABLE_5, false, false),
+            crate::models::CLAUDE_FABLE_5
+        );
+        assert_eq!(
+            effective_claude_model_with_availability(crate::models::CLAUDE_FABLE_5, true, false),
+            crate::models::CLAUDE_OPUS_5
+        );
+        assert_eq!(
+            effective_claude_model_with_availability(crate::models::CLAUDE_FABLE_5, true, true),
+            crate::models::CLAUDE_OPUS_4_8
+        );
+        assert_eq!(
+            effective_claude_model_with_availability(crate::models::CLAUDE_OPUS_5, false, true),
+            crate::models::CLAUDE_OPUS_4_8
         );
     }
 }
