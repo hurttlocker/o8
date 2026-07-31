@@ -2209,6 +2209,12 @@ const lastRealtimeFingerprint = {
   mobileInbox: '',
   history: new Map<string, string>(),
 };
+// #1650: review/browser snapshots on the global stream coalesce to ≤1Hz.
+// Genuine churn (per-action browser lastActionAt, mid-rebase review states)
+// emits latest-wins via a trailing refresh instead of at event rate — every
+// mobile client subscribes to this stream and parses every byte.
+const GLOBAL_SNAPSHOT_MIN_EMIT_MS = 1000;
+const lastGlobalSnapshotEmitAt = { review: 0, browser: 0 };
 let mobileInboxRevision = 0;
 let lastMobileInboxSnapshot: MobileInboxSnapshot | null = null;
 let mobileInboxDeltasSinceCheckpoint = 0;
@@ -2628,28 +2634,26 @@ function fingerprintRuntimeSnapshot(fleet: CommandCenterSnapshot['fleet']) {
   return fp;
 }
 
-function fingerprintReviewSnapshot(review: CommandCenterSnapshot['review']) {
-  if (!review) return 'no-review';
-  let fp = `${review.repoSlug}\x01${review.branch}\x01${review.dirty ? 1 : 0}\x01${review.diffStat}`;
-  for (const issue of review.activeIssues) fp += `\x02i${issue.number}`;
-  for (const pr of review.pullRequests) fp += `\x02p${pr.number}`;
-  for (const f of review.changedFiles) fp += `\x02${f.path}\x01${f.status}\x01${f.additions ?? 0}\x01${f.deletions ?? 0}`;
-  return fp;
+// #1650: hash the COMPLETE wire payload (minus the volatile generatedAt
+// stamp) instead of hand-picking fields — same lesson as the inbox
+// fingerprint below. The old hand-picked review/browser fingerprints were
+// lossy, and the options.fresh gate bypass papered over that by
+// re-broadcasting identical snapshots on every event-driven nudge (measured
+// 5.8Hz each on the mobile global stream). A complete fingerprint makes the
+// bypass unnecessary; the gate decides purely on content.
+function fingerprintReviewSnapshot(review: CommandCenterSnapshot['review'], error: string | null = null) {
+  if (!review) return `no-review\x01${error ?? ''}`;
+  const { generatedAt: _generatedAt, ...semantic } = review;
+  return createHash('sha256').update(JSON.stringify({ review: semantic, error })).digest('base64url');
 }
 
 function fingerprintBrowserSnapshot(
   browserInventory: CommandCenterSnapshot['browserInventory'],
   attachedBrowser: BrowserAttachmentSummary | null,
+  error: string | null = null,
 ) {
-  let fp = '';
-  for (const s of browserInventory.surfaces) {
-    fp += `\x02${s.id}\x01${s.provider}\x01${s.status}\x01${s.url}\x01${s.title}\x01${s.lastAction}\x01${s.lastActionAt ?? 0}`;
-  }
-  if (attachedBrowser) {
-    fp += `\x03${attachedBrowser.provider}\x01${attachedBrowser.surface.id}\x01${attachedBrowser.attachedAt}`;
-    for (const page of attachedBrowser.pages) fp += `\x02${page.id}\x01${page.title ?? page.url ?? ''}`;
-  }
-  return fp;
+  const { generatedAt: _generatedAt, ...semanticInventory } = browserInventory;
+  return createHash('sha256').update(JSON.stringify({ inventory: semanticInventory, attachedBrowser, error })).digest('base64url');
 }
 
 function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInboxSnapshot>>) {
@@ -2717,40 +2721,54 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
       ));
     }
 
-    const reviewFingerprint = fingerprintReviewSnapshot(snapshot.review);
-    if (reviewFingerprint !== lastRealtimeFingerprint.review || options.fresh) {
-      lastRealtimeFingerprint.review = reviewFingerprint;
-      events.push(buildRealtimeEnvelope(
-        'global',
-        'review',
-        'review.snapshot',
-        { review: snapshot.review, error: snapshot.reviewError ?? null },
-        {
-          snapshot: true,
-          entityId: 'workflow-review',
-          health: snapshot.reviewError ? { state: 'stale', reason: snapshot.reviewError } : runtimeHealth,
-        },
-      ));
+    const reviewFingerprint = fingerprintReviewSnapshot(snapshot.review, snapshot.reviewError ?? null);
+    if (reviewFingerprint !== lastRealtimeFingerprint.review) {
+      const sinceLastReview = Date.now() - lastGlobalSnapshotEmitAt.review;
+      if (sinceLastReview < GLOBAL_SNAPSHOT_MIN_EMIT_MS) {
+        // Stored fingerprint stays untouched so the trailing refresh still
+        // sees the change — or coalesces it away if content reverted.
+        scheduleRealtimeRuntimeRefresh({ reason: 'review.coalesce', delayMs: GLOBAL_SNAPSHOT_MIN_EMIT_MS - sinceLastReview });
+      } else {
+        lastRealtimeFingerprint.review = reviewFingerprint;
+        lastGlobalSnapshotEmitAt.review = Date.now();
+        events.push(buildRealtimeEnvelope(
+          'global',
+          'review',
+          'review.snapshot',
+          { review: snapshot.review, error: snapshot.reviewError ?? null },
+          {
+            snapshot: true,
+            entityId: 'workflow-review',
+            health: snapshot.reviewError ? { state: 'stale', reason: snapshot.reviewError } : runtimeHealth,
+          },
+        ));
+      }
     }
 
-    const browserFingerprint = fingerprintBrowserSnapshot(snapshot.browserInventory, snapshot.attachedBrowser);
-    if (browserFingerprint !== lastRealtimeFingerprint.browser || options.fresh) {
-      lastRealtimeFingerprint.browser = browserFingerprint;
-      events.push(buildRealtimeEnvelope(
-        'global',
-        'browser',
-        'browser.snapshot',
-        {
-          browserInventory: snapshot.browserInventory,
-          attachedBrowser: snapshot.attachedBrowser,
-          error: snapshot.browserError ?? null,
-        },
-        {
-          snapshot: true,
-          entityId: 'browser-inventory',
-          health: snapshot.browserError ? { state: 'stale', reason: snapshot.browserError } : runtimeHealth,
-        },
-      ));
+    const browserFingerprint = fingerprintBrowserSnapshot(snapshot.browserInventory, snapshot.attachedBrowser, snapshot.browserError ?? null);
+    if (browserFingerprint !== lastRealtimeFingerprint.browser) {
+      const sinceLastBrowser = Date.now() - lastGlobalSnapshotEmitAt.browser;
+      if (sinceLastBrowser < GLOBAL_SNAPSHOT_MIN_EMIT_MS) {
+        scheduleRealtimeRuntimeRefresh({ reason: 'browser.coalesce', delayMs: GLOBAL_SNAPSHOT_MIN_EMIT_MS - sinceLastBrowser });
+      } else {
+        lastRealtimeFingerprint.browser = browserFingerprint;
+        lastGlobalSnapshotEmitAt.browser = Date.now();
+        events.push(buildRealtimeEnvelope(
+          'global',
+          'browser',
+          'browser.snapshot',
+          {
+            browserInventory: snapshot.browserInventory,
+            attachedBrowser: snapshot.attachedBrowser,
+            error: snapshot.browserError ?? null,
+          },
+          {
+            snapshot: true,
+            entityId: 'browser-inventory',
+            health: snapshot.browserError ? { state: 'stale', reason: snapshot.browserError } : runtimeHealth,
+          },
+        ));
+      }
     }
 
     broadcastRealtimeEvents(events);
@@ -2943,7 +2961,7 @@ async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh =
   }
 }
 
-function scheduleRealtimeRuntimeRefresh(options: { fresh?: boolean; reason?: string } = {}) {
+function scheduleRealtimeRuntimeRefresh(options: { fresh?: boolean; reason?: string; delayMs?: number } = {}) {
   runtimeRefreshFreshRequested = runtimeRefreshFreshRequested || Boolean(options.fresh);
   if (runtimeRefreshTimer) return;
   runtimeRefreshTimer = setTimeout(() => {
@@ -2951,7 +2969,9 @@ function scheduleRealtimeRuntimeRefresh(options: { fresh?: boolean; reason?: str
     runtimeRefreshFreshRequested = false;
     runtimeRefreshTimer = null;
     void publishGlobalRealtimeSnapshot({ fresh, reason: options.reason });
-  }, options.fresh ? 50 : 250);
+  // delayMs carries the #1650 coalesce floor's trailing edge — a suppressed
+  // review/browser change re-publishes exactly when its 1s window opens.
+  }, options.delayMs ?? (options.fresh ? 50 : 250));
 }
 
 function scheduleRealtimeMobileInboxRefresh(delayMs = 250, fresh = false) {
@@ -3050,6 +3070,7 @@ function startBrowserDiscoveryRealtimeLoop() {
       const fingerprint = fingerprintBrowserSnapshot(browserInventory, attachedBrowser);
       if (fingerprint === lastRealtimeFingerprint.browser) return;
       lastRealtimeFingerprint.browser = fingerprint;
+      lastGlobalSnapshotEmitAt.browser = Date.now();
       broadcastRealtimeEvents([
         buildRealtimeEnvelope(
           'global',
