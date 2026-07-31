@@ -19,6 +19,7 @@ credentials, user identity, and machine identity are never allowed. Crash-log
 upload, Sentry crash/error sharing, and user-initiated issue reports have their
 own controls and do not inherit product-telemetry consent.
 
-Issue #1451 has not shipped a local-only setting. The shared policy predicate
-already gives local-only mode precedence over product consent, so that future
-resolver can fail closed without adding another telemetry preference.
+A dedicated local-only mode is planned but not yet shipped. The shared policy
+predicate already gives local-only mode precedence over product consent, so
+that future resolver can fail closed without adding another telemetry
+preference.

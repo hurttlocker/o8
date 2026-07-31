@@ -1,11 +1,11 @@
-# o8 Operator MCP Bridge — What This Unlocks
+# o8 Operator MCP Bridge
 
 > **Current transport (2026-07):** the running app hosts the shared operator
 > tool registry once at the token-gated streamable-HTTP endpoint `/api/mcp`.
 > Client configs launch the thin `operator-mcp-proxy` stdio shim; the standalone
 > stdio server remains only for headless use when the app is not running.
 
-## What We Built
+## What it is
 
 An MCP host that turns any compatible client into a remote control for o8. The
 dashboard, mobile app, and terminal clients are peer surfaces over the same
@@ -21,9 +21,9 @@ Install and inspect client configuration from Settings → MCP.
 
 ---
 
-## What This Unlocks for Us (o8 Devs)
+## What this unlocks
 
-**1. Dogfooding while building.** We can edit o8's source code in Claude Code AND control the running o8 app from the same session. "Launch a Codex agent to fix the auth bug" without switching windows. The dev loop shrinks from alt-tab to one sentence.
+**1. Building and steering from one session.** Edit your project's source in Claude Code AND control the running o8 app from the same session. "Launch a Codex agent to fix the auth bug" without switching windows. The dev loop shrinks from alt-tab to one sentence.
 
 **2. Testing the orchestrator without the dashboard.** The MCP bridge hits the same API routes the dashboard uses. If `o8_status` returns wrong data, the dashboard is also wrong — catch bugs at the API layer.
 
@@ -55,7 +55,7 @@ isn't represented there or in the CLI, the API surface is incomplete.
 
 **3. Team-scale delegation without context switching.** A tech lead reviews PRs in their terminal while agents work across 5 repos. `o8_status` gives the fleet view. `o8_approve` merges the clean ones. `o8_reject` sends feedback. All from one Claude Code session.
 
-**4. The invisible IDE.** o8's thesis is "the best IDE is no IDE." The MCP bridge takes this literally — you never open the app. You talk to your agent, your agent talks to o8, work gets done, results appear. The dashboard exists for when you WANT to look, not because you HAVE to.
+**4. The control room follows you.** The MCP bridge means you never HAVE to open the app — you talk to your agent, your agent talks to o8, work gets done, and the governance record is there when you want to look. The dashboard is the control room; the bridge means it's never a prerequisite.
 
 ---
 

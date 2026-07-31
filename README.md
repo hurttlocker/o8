@@ -85,7 +85,7 @@ Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aide
 
 ### Phone
 
-- **iOS app:** Pair by QR in seconds.
+- **iOS app:** Pair by QR in seconds — beta access via [o8.run](https://o8.run).
 - **Any phone:** the mobile web surface ships in this repo — pair any device on your network through the browser, no app needed.
 - **Build your own:** the pairing protocol and WebSocket surface are open in this repo. Third-party clients are welcome.
 
@@ -99,7 +99,7 @@ Settings → MCP → Install. o8 exposes its operator tools — `create_mission`
 
 Optional paid services (coming after launch) are the things that run on **our** servers: managed inference for the no-setup path, hosted voice, remote access without network config. Convenience, never capability. If you never pay, you have the whole product.
 
-A capped **Founders Edition** — supporter badge, name in these credits, permanent founder pricing on future services — is available at launch.
+A capped **Founders Edition** — supporter badge, a numbered founding serial in the app, permanent founder pricing on future services — is available at launch via [o8.run](https://o8.run).
 
 ## Design
 

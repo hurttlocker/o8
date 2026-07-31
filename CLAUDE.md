@@ -15,8 +15,8 @@ See `docs/user/o8-product-brief.md` for the public product overview.
 ```bash
 # Development
 npm run dev              # Next + ws-server together (kills stale ports, concurrently) — default
-npm run dev:next         # Next.js dev server alone → http://localhost:3001
-npm run dev:ws           # WebSocket server alone → ws://localhost:3002
+npm run dev:next         # Next.js dev server alone → http://localhost:47120
+npm run dev:ws           # WebSocket server alone → ws://localhost:47125
 npm run desktop:dev      # Alias for `npm run dev` (kept for muscle memory + Tauri beforeDevCommand)
 cargo tauri dev          # Tauri native shell (from src-tauri/)
 
@@ -93,7 +93,7 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Go
 
 Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-Seven adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `cursor.ts`, `grok.ts`, `pi.ts` (plus the `antigravity` discovery skeleton). All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+**13 dispatchable runtimes** register in `orchestrator/runtime-capabilities.ts` (the count README advertises). Seven have dedicated adapter files — `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `cursor.ts`, `grok.ts`, `pi.ts` — while `declarative-workers.ts` carries the CLI-described rest (openhands, goose, qwen, kimi, aider) and `antigravity` ships as a discovery skeleton. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
 
@@ -109,7 +109,7 @@ After step 4, `npx tsc --noEmit` points to every genuine dispatch switch needing
 
 ### WebSocket Server (`src/ws-server.ts`)
 
-Separate process on port 3002 (proxied via Next.js rewrite at `/ws`). Multiplexes real-time data for mobile clients.
+Separate process on the WS port (dev 47125, prod 47105; proxied via Next.js rewrite at `/ws`). Multiplexes real-time data for mobile clients.
 
 Channel semantics matter:
 - **LOSSY** channels (`chat` deltas, `terminal` data, `pong`): intermediate messages dropped under backpressure
@@ -117,7 +117,7 @@ Channel semantics matter:
 
 Backpressure: 64KB buffer limit, max 32 queued messages, 50ms flush interval.
 
-Architecture: `Mobile ←WS:3002→ ws-server` + HTTP to Next.js API. Supervisor polls runtime inventory via direct function imports (not HTTP).
+Architecture: `Mobile ←WS→ ws-server` + HTTP to Next.js API. Supervisor polls runtime inventory via direct function imports (not HTTP).
 
 ### Desktop vs Mobile
 
@@ -139,13 +139,13 @@ CSS variable system, **two-axis: palette × surface** — `palette` ∈ {light, 
 
 ### Port resolution (`src/lib/panel/api-port.ts`)
 
-**Never hardcode port 3001/3002.** The Tauri sidecar probes `3001-3050` (API) and `3002-3100` (WS) for free ports at startup and writes the chosen values to `~/.o8/api-port` and `~/.o8/ws-port`. All consumers must resolve the port via:
+**Never hardcode API/WS ports.** The Tauri sidecar probes the o8 port blocks (`src/lib/panel/port-constants.ts` — prod API 47100-47104, prod WS 47105-47109; dev 47120-47124 / 47125-47129) for free ports at startup and writes the chosen values to `~/.o8/api-port` and `~/.o8/ws-port`. All consumers must resolve the port via:
 
 1. `process.env.O8_API_PORT` (set by sidecar)
 2. `process.env.PORT` (Next server runtime)
 3. `process.env.O8_DEV_FRONTEND_URL` (dev-bridge mode — prod app launched against a separate Next dev server, this URL is the source of truth)
 4. `~/.o8/api-port` file (standalone MCP processes)
-5. Legacy default `3001` (dev workflow)
+5. Default `47100` (`DEFAULT_API_PORT`, sidecar-free workflow)
 
 Server-side TS: `import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port'`. MCP servers that run as standalone node processes duplicate a small `resolveApiBase()` helper because they can't import from `@/lib`.
 
@@ -325,7 +325,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 **~74 feature domains.** This grew fast; the canonical list is `ls src/lib/`. Don't try to enumerate every dir here — point at it and call out the load-bearing ones:
 
-- **Runtime layer**: `runtimes/` (7 adapters: codex, claude-code, gemini, opencode, cursor, grok, pi + antigravity skeleton), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`, `pi/`.
+- **Runtime layer**: `runtimes/` (13 dispatchable runtimes — 7 dedicated adapters: codex, claude-code, gemini, opencode, cursor, grok, pi; declarative-workers for openhands/goose/qwen/kimi/aider; + antigravity skeleton), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`, `pi/`.
 - **Dispatch + lanes**: `lane/` (single-lane logic incl. `worktree-side-merge.ts` + `codex-orchestrator-session.ts`), `lanes/` (multi-lane fleet view), `dispatch/`, `supervisor/`, `intake/`.
 - **Orchestrator**: `orchestrator/` (types, backends, runtime-capabilities, auto-compact), `agents/`.
 - **Cortex v2**: `cortex/` (see "Cortex v2" section above — directives, ledger, qa, embeddings, indexer, ingest).
@@ -346,7 +346,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 - **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
 - **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
 - **Never hardcode rgba colors for surfaces** — use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`. Hardcoded `rgba(255,255,255,0.xx)` becomes a light-gray blob in midnight theme. See commit 929ffdf.
-- **Never hardcode port 3001 or 3002** — use `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or `resolveApiBase()` helper (standalone MCP node processes). The Tauri sidecar picks ports dynamically and writes them to `~/.o8/{api-port,ws-port}`.
+- **Never hardcode API/WS ports** — use `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or `resolveApiBase()` helper (standalone MCP node processes). The Tauri sidecar picks ports dynamically from the 47100/47120 blocks and writes them to `~/.o8/{api-port,ws-port}`.
 - **Never hardcode `/Users/example/*` paths** — use `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit env var. The clone-readiness audit found 15+ leaks; they've been fixed but don't reintroduce.
 - **Never bypass the middleware in `src/middleware.ts`** — it gates all dangerous API routes on loopback + ws-token. If you add a new route prefix that touches state, add it to `GATED_PREFIXES`. If you need public GET access, add it to `ALLOWLIST_READ_ONLY`.
 - **Never use emoji** — icon libraries only, as raw SVG. **Both Phosphor and Lucide are in active use across the app** (Lucide via the raw-SVG shim system), with Tabler/Iconoir swaps where eye ergonomics demand (per hurttlocker.md). No standardization on a single library is planned — don't migrate icons between libraries; match whichever the surrounding surface already uses.
