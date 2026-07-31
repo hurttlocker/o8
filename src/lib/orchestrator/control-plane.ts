@@ -4,6 +4,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
+import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import {
@@ -170,18 +171,36 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
   return next.mission;
 }
 
+const RUNTIME_EXIT_OVERRIDE_STATUSES = new Set<Lane['status']>([
+  'launching',
+  'running',
+  'recovering',
+]);
+
+function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
+  if (!RUNTIME_EXIT_OVERRIDE_STATUSES.has(lane.status)) return false;
+  const runtimeExit = events.findLast((event) => event.verb === 'runtime_process_exit');
+  if (!runtimeExit) return false;
+  const exitAt = Date.parse(runtimeExit.timestamp);
+  const laneEventAt = lane.lastEventAt ? Date.parse(lane.lastEventAt) : 0;
+  if (!Number.isFinite(exitAt)) return false;
+  return !Number.isFinite(laneEventAt) || exitAt >= laneEventAt;
+}
+
 export function buildDomainLaneSummaries(): DomainLaneSummary[] {
   const mergePolicy = currentLaneMergePolicy();
   return listLanes()
     .filter((lane) => lane.packetId)
     .map((lane) => {
-      const recovery = recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100));
+      const events = getLaneEvents(lane.id, 100);
+      const recovery = recoveryInfoFromLaneEvents(events);
+      const runtimeExited = hasUnreconciledRuntimeExit(lane, events);
       return {
         laneId: lane.id,
         packetId: lane.packetId!,
-        status: lane.status,
+        status: runtimeExited ? 'failed' : lane.status,
         sessionKey: lane.sessionKey,
-        lastEventLabel: lane.lastEventLabel,
+        lastEventLabel: runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,
         recovery,
         mergeMode: mergePolicy.mode,
         mergeModeNote: mergePolicy.note,

@@ -15,7 +15,8 @@
  * "beautiful cards, inline" direction.
  */
 
-import { resolveDisplayRuntime, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { orchestratorRuntimeTone, orchestratorStatusTone, resolveDisplayRuntime } from '@/lib/orchestrator/display';
+import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 const SWARM_ACCENT = '#FF5A1F';
@@ -29,52 +30,45 @@ export interface SwarmScoutView {
   status: 'running' | 'done';
 }
 
-// Statuses that mean a packet is genuinely in-flight as part of the LIVE crew.
-// The card mirrors the operator's "cards while it's working" intent, so only
-// active-lifecycle states show. Excluded on purpose:
-//   - `idle`   — a launched-then-idle / errored packet that isn't working.
-//   - `failed` — terminal and dead; a failed agent surfaces in the agents list
-//                and the orchestrator's chat report, not as a stale card that
-//                bleeds dead packets into unrelated conversations.
-//   - archived / released / draft — settled or not-yet-real.
-const ACTIVE_STATUSES = new Set<OrchestratorPacketStatus>([
+// A mission's crew remains truthful at the live edge after it settles. Idle
+// and draft packets are not dispatched crew, but terminal packets stay visible
+// with the existing Failed / Completed / Archived vocabulary instead of
+// disappearing while a stale Running row remains in the transcript.
+const VISIBLE_STATUSES = new Set<OrchestratorPacketStatus>([
   'queued',
   'launching',
   'running',
   'recovering',
   'awaiting_review',
   'blocked',
+  'failed',
+  'released',
+  'archived',
 ]);
 
 type StatusTone = { label: string; color: string; pulse: boolean };
 
 function statusTone(status: OrchestratorPacketStatus): StatusTone {
-  switch (status) {
-    case 'running':
-      return { label: 'Running', color: '#16a34a', pulse: true };
-    case 'launching':
-      return { label: 'Launching', color: '#2563eb', pulse: true };
-    case 'queued':
-      return { label: 'Queued', color: 'var(--t-text-faint)', pulse: false };
-    case 'idle':
-      return { label: 'Idle', color: 'var(--t-text-faint)', pulse: false };
-    case 'awaiting_review':
-      return { label: 'Review', color: '#d97706', pulse: false };
-    case 'recovering':
-      return { label: 'Recovering', color: '#d97706', pulse: true };
-    case 'blocked':
-      return { label: 'Blocked', color: '#dc2626', pulse: false };
-    case 'failed':
-      return { label: 'Failed', color: '#dc2626', pulse: false };
-    default:
-      return { label: status, color: 'var(--t-text-faint)', pulse: false };
-  }
+  const tone = orchestratorStatusTone(status);
+  return {
+    label: tone.label,
+    color: tone.dot,
+    pulse: status === 'running' || status === 'launching' || status === 'recovering',
+  };
 }
 
 function scoutStatusTone(status: SwarmScoutView['status']): StatusTone {
   return status === 'running'
     ? { label: 'Running', color: '#16a34a', pulse: true }
     : { label: 'Done', color: 'var(--t-text-faint)', pulse: false };
+}
+
+function packetCardStatus(packet: OrchestratorPacket): OrchestratorPacketStatus {
+  const terminal = packetTerminalState(packet);
+  if (terminal === 'released') return 'released';
+  if (terminal === 'archived') return 'archived';
+  if (terminal === 'failed') return packet.status === 'blocked' ? 'blocked' : 'failed';
+  return packet.status;
 }
 
 function SwarmGlyph({ size = 13, color = SWARM_ACCENT }: { size?: number; color?: string }) {
@@ -207,17 +201,16 @@ export function focusSwarmPacket(packet: OrchestratorPacket, onFocusPacket?: (pa
 }
 
 export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmStatusCardProps) {
-  const active = packets.filter((packet) => {
-    if (!ACTIVE_STATUSES.has(packet.status)) return false;
-    if (packet.archivedAt) return false;
-    if (packet.releaseState === 'released') return false;
+  const active = packets.flatMap((packet) => {
+    const status = packetCardStatus(packet);
+    if (!VISIBLE_STATUSES.has(status)) return [];
     // Pre-dispatch packets only belong to the live crew once a lane is bound.
     // Otherwise an archived lane hidden from the client's active-lane reconcile
     // can revive an orphaned packet as a phantom "Queued" swarm card.
-    if ((packet.status === 'queued' || packet.status === 'launching') && !packet.lane?.laneId) {
-      return false;
+    if ((status === 'queued' || status === 'launching') && !packet.lane?.laneId) {
+      return [];
     }
-    return true;
+    return [{ packet, status }];
   });
   if (active.length === 0 && scouts.length === 0) return null;
 
@@ -225,7 +218,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmSt
 
   // Runtime breakdown for the header ("Scouts 5 · Codex 3").
   const byRuntime = new Map<OrchestratorRuntime, number>();
-  for (const packet of active) {
+  for (const { packet } of active) {
     const runtime = resolveDisplayRuntime(packet);
     byRuntime.set(runtime, (byRuntime.get(runtime) ?? 0) + 1);
   }
@@ -301,10 +294,12 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmSt
             showTopBorder={index > 0}
           />
         ))}
-        {active.map((packet, index) => {
+        {active.map(({ packet, status }, index) => {
           const runtime = resolveDisplayRuntime(packet);
           const tone = orchestratorRuntimeTone(runtime);
-          const eventLabel = packet.lane?.lastEventLabel?.trim() || packet.lastEventLabel?.trim() || null;
+          const eventLabel = packet.blockedReason === 'runtime_process_exit'
+            ? packet.blockedReason
+            : packet.lane?.lastEventLabel?.trim() || packet.lastEventLabel?.trim() || null;
           const title = packet.title?.trim() || packet.referenceLabel?.trim() || 'Agent';
           return (
             <CrewRow
@@ -313,7 +308,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmSt
               dotGlow={tone.background}
               title={title}
               sub={`${tone.label}${eventLabel ? ` · ${eventLabel}` : ''}`}
-              status={statusTone(packet.status)}
+              status={statusTone(status)}
               showTopBorder={index > 0 || scouts.length > 0}
               onClick={() => focusSwarmPacket(packet, onFocusPacket)}
             />
