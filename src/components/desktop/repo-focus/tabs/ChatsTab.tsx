@@ -87,7 +87,7 @@ export function ChatsTab({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
-    if (stored === 'repo' || stored === 'date' || stored === 'flat' || stored === 'activity') {
+    if (stored === 'repo' || stored === 'date' || stored === 'flat') {
       setChatGroupBy(stored);
     }
   }, []);
@@ -391,7 +391,7 @@ export function ChatsTab({
     () => deriveHistoryDateGroups(flatHistoryItems),
     [flatHistoryItems],
   );
-  const activitySplit = useMemo(() => {
+  const flatPrioritySplit = useMemo(() => {
     const eligibleItems = sortedChatItems.slice(0, historyCap);
     const split = derivePrioritySplit(eligibleItems.map((item) => {
       const packet = historyPacketsByTabId.get(item.tabId);
@@ -411,17 +411,13 @@ export function ChatsTab({
       remainder: split.remainder.map((entry) => entry.item),
     };
   }, [historyCap, historyPacketsByTabId, sortedChatItems]);
-  const activityDateItems = activitySplit.remainder.slice(
+  const flatRemainderItems = flatPrioritySplit.remainder.slice(
     0,
-    compact && !showAllChats ? Math.max(0, 12 - activitySplit.priority.length) : Number.POSITIVE_INFINITY,
+    compact && !showAllChats ? Math.max(0, 12 - flatPrioritySplit.priority.length) : Number.POSITIVE_INFINITY,
   );
-  const activityDateGroups = useMemo(
-    () => deriveHistoryDateGroups(activityDateItems),
-    [activityDateItems],
-  );
-  const shownActivityCount = activitySplit.priority.length + activityDateItems.length;
+  const shownActivityCount = flatPrioritySplit.priority.length + flatRemainderItems.length;
   const hiddenChatCount = Math.max(0, cappedChatCount - (
-    chatGroupBy === 'activity' ? shownActivityCount : flatHistoryItems.length
+    chatGroupBy === 'flat' ? shownActivityCount : flatHistoryItems.length
   ));
   const showRepoSuffix = deriveShowRepoSuffix([...visibleHistory, ...visibleArchivedHistory]);
 
@@ -558,20 +554,20 @@ export function ChatsTab({
         ))
       ) : null}
 
-      {groupMode === 'flat' && (flatHistoryItems.length > 0 || (compact && chatGroupBy === 'activity')) ? (
+      {groupMode === 'flat' && (flatHistoryItems.length > 0 || (compact && chatGroupBy === 'flat')) ? (
         <div>
           {compact ? (
             <>
               <SectionLabel label="Chats" compact />
-              {chatGroupBy === 'activity' ? (
+              {chatGroupBy === 'flat' ? (
                 <>
                   <RepoGroupLabel
                     label="Priority"
                     noIcon
                     trailing={<ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />}
                   />
-                  {activitySplit.priority.length > 0 ? (
-                    activitySplit.priority.map((item) => renderHistoryRow(item))
+                  {flatPrioritySplit.priority.length > 0 ? (
+                    flatPrioritySplit.priority.map((item) => renderHistoryRow(item))
                   ) : (
                     <div
                       style={{
@@ -589,19 +585,7 @@ export function ChatsTab({
                       Nothing needs attention
                     </div>
                   )}
-                  {activityDateGroups.map((group) => (
-                    <div key={group.key}>
-                      <RepoGroupLabel label={group.label} noIcon />
-                      {group.items.map((item) => renderHistoryRow(item))}
-                    </div>
-                  ))}
-                </>
-              ) : chatGroupBy === 'flat' ? (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 0, paddingRight: 10, paddingBottom: 2 }}>
-                    <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
-                  </div>
-                  {flatHistoryItems.map((item) => renderHistoryRow(item))}
+                  {flatRemainderItems.map((item) => renderHistoryRow(item))}
                 </>
               ) : chatGroupBy === 'date' ? (
                 flatHistoryDateGroups.map((group, index) => (

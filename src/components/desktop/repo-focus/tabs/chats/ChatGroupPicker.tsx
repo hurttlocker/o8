@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { FilterList } from 'iconoir-react';
 import { REPO_FOCUS_FONT } from '../../utils';
 
-export type ChatGroupMode = 'repo' | 'date' | 'flat' | 'activity';
+export type ChatGroupMode = 'repo' | 'date' | 'flat';
 
 /** Group-by picker — vertical-sliders icon rendered inline at the
  *  right of the FIRST group header. Click opens a popover with three
@@ -103,8 +103,8 @@ export function ChatGroupPicker({
         >
           <ChatGroupPickerItem label="Group by repo" selected={mode === 'repo'} onClick={() => { onChange('repo'); setOpen(false); }} />
           <ChatGroupPickerItem label="Group by date" selected={mode === 'date'} onClick={() => { onChange('date'); setOpen(false); }} />
-          <ChatGroupPickerItem label="Activity (priority first)" selected={mode === 'activity'} onClick={() => { onChange('activity'); setOpen(false); }} />
-          <ChatGroupPickerItem label="Flat (no groups)" selected={mode === 'flat'} onClick={() => { onChange('flat'); setOpen(false); }} />
+          {/* Persisted id stays `flat` for compatibility; operator vocabulary calls this Activity. */}
+          <ChatGroupPickerItem label="Activity" selected={mode === 'flat'} onClick={() => { onChange('flat'); setOpen(false); }} />
       </div>
     </div>
   );
