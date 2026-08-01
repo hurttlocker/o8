@@ -68,6 +68,8 @@ A mission is a goal. Each packet is a scoped unit of work, and each lane is the 
 
 ![Four agents on the canvas: two finished and waiting for review, one still working, and a live browser card previewing the page they built](./assets/fleet.gif)
 
+*The canvas — a spatial view of the same fleet. Two agents done and waiting at the gate, one still working, and a browser card previewing the page they just built.*
+
 Merges that fail don't silently die — a five-layer escalation chain (auto-retry → orchestrator escalation → steer the warm session → fresh redispatch → human card) means a lane always has a defined next step. Approvals can route to your phone. The whole loop is drivable three ways: **the app**, **the `o8` CLI**, or **MCP tools** from any MCP client — same verbs, same gates.
 
 ## Symon — the voice layer
@@ -95,7 +97,7 @@ Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aide
 
 ### Phone
 
-<img src="./assets/phone.jpg" alt="The o8 iOS app: a morning catch-up screen showing 34 new commits ready to review across three tracked repositories, with a composer for asking the voice agent" width="300">
+<img src="./assets/phone.gif" alt="The o8 iOS app alternating between a morning catch-up screen showing 34 new commits across three repositories, and a voice session where Symon answers with a generated status view" width="300">
 
 - **iOS app:** Pair by QR in seconds — beta access via [o8.run](https://o8.run).
 - **Any phone:** the mobile web surface ships in this repo — pair any device on your network through the browser, no app needed.
