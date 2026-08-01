@@ -1,6 +1,6 @@
 //! Worker pulse — background fleet visibility in the dock (dossier #8).
 //!
-//! a voice competitor's background agents are invisible-until-done; o8's are governed
+//! Invisible-until-done background agents are the anti-pattern; o8's are governed
 //! AND visible. A lightweight poller reads `/api/lanes?active=true` (the same
 //! loopback route the `o8_status` tool uses) and emits `o8:worker-status`
 //! `{ count, repos }` so the idle sliver can carry the slow orbiting dot +
