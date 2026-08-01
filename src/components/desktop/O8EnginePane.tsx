@@ -14,14 +14,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
 
-const ENGINE_SCOPE = 'operator';
-
-async function engineAct(action: string, extra: Record<string, unknown> = {}): Promise<{ ok?: boolean; error?: unknown }> {
+async function engineAct(scope: string, action: string, extra: Record<string, unknown> = {}): Promise<{ ok?: boolean; error?: unknown }> {
   try {
     const res = await fetch('/api/browser/engine/act', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ scope: ENGINE_SCOPE, action, ...extra }),
+      body: JSON.stringify({ scope, action, ...extra }),
     });
     return (await res.json()) as { ok?: boolean; error?: unknown };
   } catch (error) {
@@ -31,21 +29,61 @@ async function engineAct(action: string, extra: Record<string, unknown> = {}): P
 
 const PRESS_KEYS = new Set(['Enter', 'Backspace', 'Tab', 'Delete', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
 
-export function O8EnginePane({ url, agentGlow = false }: { url: string; agentGlow?: boolean }) {
+export function O8EnginePane({
+  url,
+  agentGlow = false,
+  scope = 'operator',
+  closeOnUnmount = false,
+}: {
+  url: string;
+  agentGlow?: boolean;
+  scope?: string;
+  closeOnUnmount?: boolean;
+}) {
   const imgRef = useRef<HTMLImageElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const openedTargetRef = useRef<string | null>(null);
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<'opening' | 'live' | 'error'>('opening');
   const [error, setError] = useState<string | null>(null);
+  const [surfaceVisible, setSurfaceVisible] = useState(() => typeof IntersectionObserver === 'undefined');
+  const [pageVisible, setPageVisible] = useState(() => (
+    typeof document === 'undefined' || document.visibilityState !== 'hidden'
+  ));
 
-  // Open the page in the engine whenever the url changes.
   useEffect(() => {
+    const node = wrapRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setSurfaceVisible(Boolean(entry?.isIntersecting));
+    }, { threshold: 0 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  // Open only while this pane is on screen. O8 keeps inactive utility tabs
+  // mounted to preserve their state, so opening from a hidden pane wastes a
+  // Chrome session and starts screenshot polling the operator cannot see.
+  useEffect(() => {
+    if (!surfaceVisible || !pageVisible) return;
+    const target = `${scope}\n${url}`;
+    if (openedTargetRef.current === target) return;
     let cancelled = false;
-    setStatus('opening');
-    setError(null);
-    void engineAct('open', { url }).then((r) => {
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setStatus('opening');
+      setError(null);
+    });
+    void engineAct(scope, 'open', { url }).then((r) => {
       if (cancelled) return;
       if (r.ok) {
+        openedTargetRef.current = target;
         setStatus('live');
         setTick((t) => t + 1);
       } else {
@@ -54,14 +92,18 @@ export function O8EnginePane({ url, agentGlow = false }: { url: string; agentGlo
       }
     });
     return () => { cancelled = true; };
-  }, [url]);
+  }, [pageVisible, scope, surfaceVisible, url]);
 
-  // Poll the live-view frame while the session is live.
+  useEffect(() => () => {
+    if (closeOnUnmount) void engineAct(scope, 'close');
+  }, [closeOnUnmount, scope]);
+
+  // Poll the live-view frame only while the app and pane are visible.
   useEffect(() => {
-    if (status !== 'live') return undefined;
-    const timer = setInterval(() => setTick((t) => t + 1), 700);
+    if (status !== 'live' || !surfaceVisible || !pageVisible) return undefined;
+    const timer = setInterval(() => setTick((value) => value + 1), 1200);
     return () => clearInterval(timer);
-  }, [status]);
+  }, [pageVisible, status, surfaceVisible]);
 
   // Pull a couple of frames quickly so the human sees their action land.
   const refreshSoon = useCallback(() => {
@@ -87,22 +129,22 @@ export function O8EnginePane({ url, agentGlow = false }: { url: string; agentGlo
     wrapRef.current?.focus();
     const point = toViewport(event.clientX, event.clientY);
     if (!point) return;
-    void engineAct('click', point).then(refreshSoon);
-  }, [refreshSoon]);
+    void engineAct(scope, 'click', point).then(refreshSoon);
+  }, [refreshSoon, scope]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
       event.preventDefault();
-      void engineAct('type', { text: event.key }).then(refreshSoon);
+      void engineAct(scope, 'type', { text: event.key }).then(refreshSoon);
     } else if (PRESS_KEYS.has(event.key)) {
       event.preventDefault();
-      void engineAct('press', { key: event.key }).then(refreshSoon);
+      void engineAct(scope, 'press', { key: event.key }).then(refreshSoon);
     }
-  }, [refreshSoon]);
+  }, [refreshSoon, scope]);
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
-    void engineAct('scroll', { deltaY: Math.round(event.deltaY) }).then(refreshSoon);
-  }, [refreshSoon]);
+    void engineAct(scope, 'scroll', { deltaY: Math.round(event.deltaY) }).then(refreshSoon);
+  }, [refreshSoon, scope]);
 
   return (
     <div
@@ -143,11 +185,13 @@ export function O8EnginePane({ url, agentGlow = false }: { url: string; agentGlo
         }}
       >
         {status === 'live' ? (
+          // eslint-disable-next-line @next/next/no-img-element -- no-store engine frames cannot use the image optimizer.
           <img
             ref={imgRef}
-            src={`/api/browser/engine/view?scope=${ENGINE_SCOPE}&t=${tick}`}
+            src={`/api/browser/engine/view?scope=${encodeURIComponent(scope)}&t=${tick}`}
             alt="Engine live view"
             draggable={false}
+            decoding="async"
             onClick={handleClick}
             style={{ display: 'block', width: '100%', height: 'auto' }}
           />

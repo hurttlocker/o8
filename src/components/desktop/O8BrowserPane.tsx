@@ -18,44 +18,16 @@ import { createPortal } from 'react-dom';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
+import {
+  browserFrameSrc,
+  browserTitleFromUrl,
+  isLoopbackBrowserUrl,
+  normalizeBrowserUrl,
+} from '@/lib/browser/url';
 import { isTauri, browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
 import { O8EnginePane } from './O8EnginePane';
 import { NativeBrowserSurface } from './NativeBrowserSurface';
-
-// ── live proxy ──
-// Loading a localhost dev server directly makes the iframe cross-origin with
-// our dashboard (different port), which blocks both agent driving and the
-// Design Mode grab. Routing local URLs through our own origin
-// (`/api/browser/proxy?url=...`) makes the page same-origin and inspectable
-// WITHOUT stripping scripts, so the SPA still boots and stays interactive.
-// External URLs load directly (best-effort; grabbing them routes to the engine).
-const PROXY_PATH = '/api/browser/proxy?url=';
-
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const host = u.hostname;
-    return (
-      host === 'localhost'
-      || host === '127.0.0.1'
-      || host === '0.0.0.0'
-      || host === '::1'
-      || /^10\./.test(host)
-      || /^192\.168\./.test(host)
-      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function liveSrc(url: string): string {
-  return isLoopbackUrl(url)
-    ? `${PROXY_PATH}${encodeURIComponent(url.replace('0.0.0.0', 'localhost'))}`
-    : url;
-}
 
 // ── Types ──
 
@@ -91,26 +63,6 @@ interface O8BrowserPaneProps {
 
 // ── Helpers ──
 
-function normalizeUrl(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-  if (trimmed.startsWith('localhost') || trimmed.match(/^\d+\.\d+\.\d+\.\d+/)) return 'http://' + trimmed;
-  return 'https://' + trimmed;
-}
-
-function titleFromUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
-      return `localhost:${u.port || '80'}`;
-    }
-    return u.hostname.replace(/^www\./, '');
-  } catch {
-    return url || 'New Tab';
-  }
-}
-
 let tabCounter = 0;
 function newTabId(): string {
   tabCounter += 1;
@@ -127,7 +79,7 @@ function TabFavicon({ url }: { url: string }) {
   let host: string | null = null;
   try {
     const parsed = new URL(url);
-    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isLoopbackUrl(url)) {
+    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isLoopbackBrowserUrl(url)) {
       host = parsed.hostname;
     }
   } catch {
@@ -143,6 +95,7 @@ function TabFavicon({ url }: { url: string }) {
     );
   }
   return (
+    // eslint-disable-next-line @next/next/no-img-element -- remote favicons are tiny fallbacks, not page content.
     <img
       src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
       width={12}
@@ -322,7 +275,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   useEffect(() => {
     if (!navigateToUrl || navigateToUrl === lastNavigatedUrl.current) return;
     lastNavigatedUrl.current = navigateToUrl;
-    const normalized = normalizeUrl(navigateToUrl);
+    const normalized = normalizeBrowserUrl(navigateToUrl);
     if (!normalized) return;
     // Check if a tab with this URL already exists
     const existing = tabs.find(t => t.url === normalized);
@@ -337,7 +290,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     }
     // Create a new tab for this URL
     const id = newTabId();
-    const newTab: BrowserTab = { id, url: normalized, title: titleFromUrl(normalized) };
+    const newTab: BrowserTab = { id, url: normalized, title: browserTitleFromUrl(normalized) };
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
@@ -365,10 +318,10 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
 
   const navigateTo = useCallback((url: string) => {
     if (!activeTabId) return;
-    const normalized = normalizeUrl(url);
+    const normalized = normalizeBrowserUrl(url);
     if (!normalized) return;
     setTabs(prev => prev.map(t =>
-      t.id === activeTabId ? { ...t, url: normalized, title: titleFromUrl(normalized) } : t
+      t.id === activeTabId ? { ...t, url: normalized, title: browserTitleFromUrl(normalized) } : t
     ));
     setUrlInput(normalized);
   }, [activeTabId]);
@@ -448,7 +401,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     }
   }, [activeTab?.url, nativeEnabled]);
 
-  const iframeSrc = activeTab?.url ? liveSrc(activeTab.url) : '';
+  const iframeSrc = activeTab?.url ? browserFrameSrc(activeTab.url) : '';
 
   // Origin-sensitive SPAs (Clerk/OAuth) render BLANK when proxied to our origin
   // — their frontend rejects the mismatched origin. Give the proxied page a
@@ -472,7 +425,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
         // cross-origin — keep the hostname title
       }
     }
-    if (!iframe || !url || !isLoopbackUrl(url) || engineUrls.has(url)) return;
+    if (!iframe || !url || !isLoopbackBrowserUrl(url) || engineUrls.has(url)) return;
     window.setTimeout(() => {
       if (iframeRef.current !== iframe) return; // navigated away
       try {
@@ -538,7 +491,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
           const isActive = tab.id === activeTabId;
           const isHovered = tab.id === hoveredTabId;
           const showLabel = labelMode !== 'icon' || isActive;
-          const labelText = labelMode === 'title' ? tab.title : titleFromUrl(tab.url);
+          const labelText = labelMode === 'title' ? tab.title : browserTitleFromUrl(tab.url);
           return (
             <div
               key={tab.id}

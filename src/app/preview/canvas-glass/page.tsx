@@ -61,7 +61,7 @@ import { SpecGlassCard, type SpecCard } from './spec-card';
 import { BrainGlassCard, type BrainCard } from './brain-card';
 import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
-import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
+import { DiffGlassCard, type DiffCard } from './diff-card';
 import { AgentGlassCard, AGENT_FULL_W, AGENT_FULL_H, AGENT_COMPACT_W, AGENT_COMPACT_H, type AgentCard } from './agent-card';
 import { codename } from '@/lib/agents/codename';
 import { ChatGlassCard, type ChatCard } from './chat-card';
@@ -88,7 +88,7 @@ import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orch
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
 import { DispatchDock, phaseFor, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
-import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
+import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 import { SymonVoicePresencePill } from './symon-voice-presence';
 import { useCanvasQuickActions } from './use-canvas-quick-actions';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
@@ -306,7 +306,6 @@ export default function CanvasGlassPreviewPage() {
   // off refs so their identity stays stable — reading pan directly would churn
   // every callback that depends on them on each scroll frame.
   const panRef = useRef(pan);
-  const panningRef = useRef(false);
   const panTweenRef = useRef<number | null>(null);
   const [composerValue, setComposerValue] = useState('');
   const [composerFocused, setComposerFocused] = useState(false);
@@ -816,25 +815,6 @@ export default function CanvasGlassPreviewPage() {
     setOrbSettings({ ...ORB_DEFAULTS });
   }, [settings.tone]);
 
-  const spawnCard = useCallback((kind: CardKind, title: string, meta: string, tone: MockCard['tone'], at?: { x: number; y: number }, src?: string) => {
-    setCards((previous) => {
-      const id = nextIdRef.current;
-      nextIdRef.current += 1;
-      const column = previous.length % 3;
-      const row = Math.floor(previous.length / 3) % 3;
-      return [...previous, {
-        id,
-        kind,
-        title,
-        meta,
-        tone,
-        x: at ? at.x : 300 + column * 250 + (id % 5) * 8,
-        y: at ? at.y : 150 + row * 130 + (id % 7) * 6,
-        src,
-      }];
-    });
-  }, []);
-
   const appendEntries = useCallback((lane: string, entries: NewDockEntry[]) => {
     setConvos((previous) => {
       const next: DockEntry[] = entries.map((entry) => {
@@ -1308,8 +1288,6 @@ export default function CanvasGlassPreviewPage() {
     let freeDist = Infinity;
     let best = { x: minX, y: minY };
     let bestOverlap = Infinity;
-    const nearestFree: { x: number; y: number } | null = null;
-    const nearestDist = Infinity;
     for (let y = minY; y <= maxY; y += 56) {
       for (let x = minX; x <= maxX; x += 64) {
         let overlap = 0;
@@ -2604,11 +2582,10 @@ export default function CanvasGlassPreviewPage() {
     });
   }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
 
-  // Save: one debounced snapshot whenever anything persistent changes.
-  // The signature string IS the snapshot body — transient fields (term
-  // liveness, diff text, chat entries) are excluded so churn never
-  // thrashes localStorage.
-  const persistSignature = useMemo(() => JSON.stringify({
+  // Build the snapshot only when the debounce fires. Dragging used to stringify
+  // every card on every pointer move even though localStorage writes were delayed.
+  const buildCanvasSnapshot = useCallback(() => ({
+    v: 1 as const,
     activeRepoPath,
     dockOpen,
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel, sessionName: card.sessionName })),
@@ -2624,8 +2601,8 @@ export default function CanvasGlassPreviewPage() {
   }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, markdownCards, brainCards]);
   const flushCanvasSnapshot = useCallback((force = false) => {
     if (!restoredRef.current || (!force && Date.now() < persistArmedAtRef.current)) return;
-    saveCanvasSnapshot({ v: 1, ...JSON.parse(persistSignature) });
-  }, [persistSignature]);
+    saveCanvasSnapshot(buildCanvasSnapshot());
+  }, [buildCanvasSnapshot]);
 
   useEffect(() => {
     const target = window as unknown as Record<string, unknown>;
