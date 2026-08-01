@@ -24,11 +24,13 @@ export type CanvasOrchStatus = 'idle' | 'connecting' | 'ready' | 'busy' | 'dead'
 
 /** Thread ids survive reloads — same conversation, same repo, every visit. */
 const THREADS_KEY = 'o8:canvas-threads';
+/** Pre-rename key — read-only fallback so saved threads survive the rename. */
+const LEGACY_THREADS_KEY = 'o8:canvas-threads';
 
 function loadThreadMap(): Map<string, string> {
   if (typeof window === 'undefined') return new Map();
   try {
-    const raw = window.localStorage.getItem(THREADS_KEY);
+    const raw = window.localStorage.getItem(THREADS_KEY) ?? window.localStorage.getItem(LEGACY_THREADS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     if (parsed && typeof parsed === 'object') {
       return new Map(Object.entries(parsed as Record<string, string>).filter(([, value]) => typeof value === 'string'));

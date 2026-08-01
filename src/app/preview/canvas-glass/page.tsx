@@ -243,6 +243,16 @@ const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
 const CANVAS_MODEL_KEY = 'o8:canvas-model';
 const CANVAS_EFFORT_KEY = 'o8:canvas-effort';
 const CANVAS_MODE_KEY = 'o8:canvas-mode';
+/** Pre-rename keys — read-only fallback so a saved canvas survives the rename. */
+const LEGACY_CANVAS_KEYS: Record<string, string> = {
+  [CANVAS_MODEL_KEY]: 'o8:canvas-model',
+  [CANVAS_EFFORT_KEY]: 'o8:canvas-effort',
+  [CANVAS_MODE_KEY]: 'o8:canvas-mode',
+};
+const readCanvasSetting = (key: string): string | null => {
+  const legacy = LEGACY_CANVAS_KEYS[key];
+  return window.localStorage.getItem(key) ?? (legacy ? window.localStorage.getItem(legacy) : null);
+};
 /** First-run welcome modal — set once the operator dismisses the hero. */
 const CANVAS_WELCOME_KEY = 'o8:canvas-welcome-seen';
 /** Guided coach-mark tour — set once the operator finishes or skips it. */
@@ -518,11 +528,11 @@ export default function CanvasGlassPreviewPage() {
     setPersonalDefault(readPersonalDefault());
     setTermVeil(readTermVeil());
     try {
-      const storedModel = window.localStorage.getItem(CANVAS_MODEL_KEY);
+      const storedModel = readCanvasSetting(CANVAS_MODEL_KEY);
       if (storedModel && CANVAS_MODEL_OPTIONS.some((option) => option.value === storedModel)) setOrchModel(storedModel);
-      const storedEffort = window.localStorage.getItem(CANVAS_EFFORT_KEY);
+      const storedEffort = readCanvasSetting(CANVAS_EFFORT_KEY);
       if (isThinkingEffort(storedEffort)) setOrchEffort(storedEffort);
-      const storedMode = window.localStorage.getItem(CANVAS_MODE_KEY);
+      const storedMode = readCanvasSetting(CANVAS_MODE_KEY);
       if (storedMode === 'fleet' || storedMode === 'single' || storedMode === 'fusion') setOrchMode(storedMode);
       // First-run welcome — springs in over a frosted canvas until dismissed.
       if (window.localStorage.getItem(CANVAS_WELCOME_KEY) !== '1') setWelcomeOpen(true);
