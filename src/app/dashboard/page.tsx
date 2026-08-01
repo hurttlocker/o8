@@ -35,7 +35,8 @@ import { useProjects, type ProjectRecord } from '@/components/desktop/repo-regis
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
-import { BrowserPipCard } from '@/components/desktop/BrowserPipCard';
+import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserPipCard';
+import { O8SpecPipCard, O8_SPEC_PIP_EVENT } from '@/components/desktop/O8SpecPipCard';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
@@ -1134,6 +1135,10 @@ function DashboardInner() {
     ));
   }, [getResponsiveViewportWidth]);
   const openRightPanelFromUser = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(BROWSER_PIP_EVENT, { detail: { open: false } }));
+      window.dispatchEvent(new CustomEvent(O8_SPEC_PIP_EVENT, { detail: { open: false } }));
+    }
     noteRightPanelManualIntent(true);
     setChatVisible(true);
   }, [noteRightPanelManualIntent]);
@@ -2443,6 +2448,16 @@ function DashboardInner() {
     setRightPanelKind('o8');
     openRightPanelFromUser();
   }, [openRightPanelFromUser]);
+
+  const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {
+    if (repoPath) setO8RepoPathOverride(repoPath);
+    closeRightPanelFromUser();
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(
+      surface === 'browser' ? BROWSER_PIP_EVENT : O8_SPEC_PIP_EVENT,
+      { detail: { toggle: true } },
+    ));
+  }, [closeRightPanelFromUser]);
 
   const handleSelectSession = useCallback((sessionKey: string, hint?: { title?: string }) => {
     // Open the session transcript in a canvas chat tab.
@@ -5333,6 +5348,7 @@ function DashboardInner() {
             selectedPacketId={selectedPacketId}
             onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
+            onToggleWorkspacePip={handleToggleWorkspacePip}
             o8PanelVisible={showRightPanelColumn && rightPanelKind === 'o8'}
           >
             <TileContainer
@@ -5793,6 +5809,11 @@ function DashboardInner() {
         active={!showRightPanelColumn}
         scopeKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
         onOpenBrowser={() => handleOpenO8Panel({ tab: 'browser' })}
+      />
+      <O8SpecPipCard
+        active={!showRightPanelColumn}
+        repoPath={currentO8RepoPath}
+        onOpenSpec={() => handleOpenO8Panel({ tab: 'spec' })}
       />
 
     </div>

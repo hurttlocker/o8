@@ -59,6 +59,8 @@ export interface OrchestratorDataValue {
    * the workspace tab AND auto-pops the diff view for that worktree.
    */
   onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' | 'review' | 'compare'; reviewLaneId?: string | null }) => void;
+  /** Toggle a lightweight workspace preview without opening the wide panel. */
+  onToggleWorkspacePip?: (surface: 'browser' | 'spec', repoPath?: string | null) => void;
   /**
    * Whether the wide O8 right panel is currently visible. Surfaced so the
    * OrchestratorTab can render a Codex-style Branch details launcher in the
@@ -97,6 +99,7 @@ export function OrchestratorDataProvider({
   selectedPacketId,
   onSelectedPacketChange,
   onOpenO8Panel,
+  onToggleWorkspacePip,
   o8PanelVisible,
   projectContextRailVisible,
 }: OrchestratorDataProviderProps) {
@@ -131,6 +134,7 @@ export function OrchestratorDataProvider({
       selectedPacketId,
       onSelectedPacketChange,
       onOpenO8Panel,
+      onToggleWorkspacePip,
       o8PanelVisible,
       projectContextRailVisible,
     }),
@@ -151,6 +155,7 @@ export function OrchestratorDataProvider({
       selectedPacketId,
       onSelectedPacketChange,
       onOpenO8Panel,
+      onToggleWorkspacePip,
       o8PanelVisible,
       projectContextRailVisible,
     ],

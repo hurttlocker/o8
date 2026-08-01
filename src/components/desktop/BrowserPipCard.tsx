@@ -1,24 +1,14 @@
 'use client';
 
 /**
- * BrowserPipCard — floating browser picture-in-picture (Codex borrow,
- * operator ask 2026-07-31). When NO side panel is open, hovering a browser
- * tool cluster in the transcript floats a live, mobile-aspect preview of the
- * current browser tab, viewport-anchored top-right — the operator sees what
- * the agent is building without giving up the full-width transcript.
- *
- * Mechanics from the reference video (verbatim borrow notes):
- * - trigger from context (the whole tool cluster, not a tiny pill target)
- * - viewport-anchored, never follows the hovered row
- * - stays alive while the pointer is on the trigger OR the card itself
- * - fast fade+scale (≤200ms), X + pop-out controls on the card
- *
- * Emitters dispatch BROWSER_PIP_EVENT with { hovering } — see
- * ToolCallChipCluster. The card owns all dwell/grace timing.
+ * BrowserPipCard — browser-specific content for the shared hover PiP shell.
+ * Emitters dispatch BROWSER_PIP_EVENT; HoverPipCard owns visibility timing,
+ * orientation, positioning, controls, and motion.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import type { CSSProperties } from 'react';
+import { useState } from 'react';
+import { HoverPipCard } from '@/components/desktop/HoverPipCard';
 import { NativeBrowserSurface } from '@/components/desktop/NativeBrowserSurface';
 import { useO8BrowserTabs } from '@/components/desktop/use-o8-browser-tabs';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
@@ -26,46 +16,7 @@ import { isTauri } from '@/lib/tauri/bridge';
 
 export const BROWSER_PIP_EVENT = 'o8:browser-pip';
 
-const FONT = 'var(--font-sans-system)';
-const OPEN_DWELL_MS = 240;
-const CLOSE_GRACE_MS = 200;
 const ORIENTATION_KEY = 'o8:browser-pip-orientation';
-
-/**
- * Two card shapes (operator ask 2026-07-31): TALL is a phone — the page
- * renders at a real 390px viewport so sites show their MOBILE layout; WIDE
- * is a desktop-style letterbox at a 1280px viewport. In Tauri the native
- * window's viewport is simply the card box, so tall reads mobile naturally;
- * the wide box is still narrow enough that heavy sites may keep tablet
- * breakpoints — the iframe fallback is the exact-viewport path.
- */
-const SHAPES = {
-  tall: { width: 300, frameHeight: 470, viewport: 390 },
-  wide: { width: 440, frameHeight: 264, viewport: 1280 },
-} as const;
-type PipOrientation = keyof typeof SHAPES;
-
-function PopOutGlyph() {
-  return (
-    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <path d="M15 3h6v6M10 14L21 3" />
-    </svg>
-  );
-}
-
-/** Rotation toggle — shows the shape you would SWITCH TO. */
-function OrientationGlyph({ next }: { next: PipOrientation }) {
-  return next === 'tall' ? (
-    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
-      <rect x="7" y="3" width="10" height="18" rx="2" />
-    </svg>
-  ) : (
-    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="7" width="18" height="10" rx="2" />
-    </svg>
-  );
-}
 
 export function BrowserPipCard({
   active,
@@ -81,180 +32,24 @@ export function BrowserPipCard({
   const tabs = useO8BrowserTabs(scopeKey);
   const [inTauri] = useState<boolean>(() => isTauri());
   const nativeEnabled = useNativeBrowserViewFlag() && inTauri;
-  const [visible, setVisible] = useState(false);
-  const [orientation, setOrientation] = useState<PipOrientation>(() => {
-    if (typeof window === 'undefined') return 'tall';
-    try { return window.localStorage.getItem(ORIENTATION_KEY) === 'wide' ? 'wide' : 'tall'; } catch { return 'tall'; }
-  });
-  const toggleOrientation = useCallback(() => {
-    setOrientation((current) => {
-      const next: PipOrientation = current === 'tall' ? 'wide' : 'tall';
-      try { window.localStorage.setItem(ORIENTATION_KEY, next); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
-  const cardHoverRef = useRef(false);
-  const openTimerRef = useRef<number | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
-
-  const clearTimers = useCallback(() => {
-    if (openTimerRef.current) window.clearTimeout(openTimerRef.current);
-    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
-    openTimerRef.current = null;
-    closeTimerRef.current = null;
-  }, []);
-
-  const scheduleClose = useCallback(() => {
-    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = window.setTimeout(() => {
-      if (!cardHoverRef.current) setVisible(false);
-    }, CLOSE_GRACE_MS);
-  }, []);
-
-  useEffect(() => {
-    const onPipHover = (event: Event) => {
-      const hovering = Boolean((event as CustomEvent<{ hovering?: boolean }>).detail?.hovering);
-      if (hovering) {
-        clearTimers();
-        openTimerRef.current = window.setTimeout(() => setVisible(true), OPEN_DWELL_MS);
-      } else {
-        if (openTimerRef.current) window.clearTimeout(openTimerRef.current);
-        openTimerRef.current = null;
-        scheduleClose();
-      }
-    };
-    window.addEventListener(BROWSER_PIP_EVENT, onPipHover);
-    return () => {
-      window.removeEventListener(BROWSER_PIP_EVENT, onPipHover);
-      clearTimers();
-    };
-  }, [clearTimers, scheduleClose]);
-
   const tab = tabs[0] ?? null;
-  const show = active && visible && Boolean(tab);
-  const shape = SHAPES[orientation];
-  const iframeScale = shape.width / shape.viewport;
 
   return (
-    <AnimatePresence>
-      {show && tab ? (
-        <motion.div
-          key="browser-pip"
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.96 }}
-          transition={{ duration: 0.16, ease: 'easeOut' }}
-          onMouseEnter={() => {
-            cardHoverRef.current = true;
-            if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
-          }}
-          onMouseLeave={() => {
-            cardHoverRef.current = false;
-            scheduleClose();
-          }}
-          style={{
-            position: 'fixed',
-            top: 52,
-            right: 16,
-            width: shape.width,
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            borderRadius: 14,
-            overflow: 'hidden',
-            background: 'var(--t-panel-solid, var(--t-panel))',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-panel-border)',
-            boxShadow: 'var(--t-panel-shadow, 0 12px 32px rgba(0, 0, 0, 0.25))',
-            fontFamily: FONT,
-            transformOrigin: 'top right',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 30, paddingLeft: 10, paddingRight: 4 }}>
-            <span
-              title={tab.url}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                fontSize: 10.5,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                color: 'var(--t-text-muted)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {tab.title || tab.host || tab.url}
-            </span>
-            <button
-              type="button"
-              aria-label={orientation === 'tall' ? 'Switch to desktop-style view' : 'Switch to mobile-style view'}
-              title={orientation === 'tall' ? 'Desktop-style view' : 'Mobile-style view'}
-              onClick={toggleOrientation}
-              style={{
-                flexShrink: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 24,
-                height: 24,
-                borderWidth: 0,
-                borderRadius: 6,
-                background: 'transparent',
-                color: 'var(--t-text-faint)',
-                cursor: 'pointer',
-              }}
-            >
-              <OrientationGlyph next={orientation === 'tall' ? 'wide' : 'tall'} />
-            </button>
-            <button
-              type="button"
-              aria-label="Open in Browser tab"
-              title="Open in Browser tab"
-              onClick={() => {
-                setVisible(false);
-                onOpenBrowser?.();
-              }}
-              style={{
-                flexShrink: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 24,
-                height: 24,
-                borderWidth: 0,
-                borderRadius: 6,
-                background: 'transparent',
-                color: 'var(--t-text-faint)',
-                cursor: 'pointer',
-              }}
-            >
-              <PopOutGlyph />
-            </button>
-            <button
-              type="button"
-              aria-label="Close preview"
-              title="Close preview"
-              onClick={() => setVisible(false)}
-              style={{
-                flexShrink: 0,
-                minWidth: 24,
-                minHeight: 24,
-                borderWidth: 0,
-                borderRadius: 6,
-                background: 'transparent',
-                color: 'var(--t-text-faint)',
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: 300,
-                fontFamily: FONT,
-              }}
-            >
-              ×
-            </button>
-          </div>
+    <HoverPipCard
+      active={active}
+      available={Boolean(tab)}
+      eventName={BROWSER_PIP_EVENT}
+      storageKey={ORIENTATION_KEY}
+      title={tab?.title || tab?.host || tab?.url || ''}
+      titleTooltip={tab?.url}
+      openLabel="Open in Browser tab"
+      onOpen={onOpenBrowser}
+    >
+      {({ shape, close }) => {
+        if (!tab) return null;
+        const iframeScale = shape.width / shape.viewport;
+
+        return (
           <div style={{ position: 'relative', height: shape.frameHeight, overflow: 'hidden', background: 'var(--t-canvas-bg)' }}>
             {nativeEnabled ? (
               <NativeBrowserSurface url={tab.url} />
@@ -271,13 +66,13 @@ export function BrowserPipCard({
                     transform: `scale(${iframeScale})`,
                     transformOrigin: '0 0',
                     pointerEvents: 'none',
-                  } as React.CSSProperties}
+                  } as CSSProperties}
                 />
                 <button
                   type="button"
                   aria-label="Open browser tab"
                   onClick={() => {
-                    setVisible(false);
+                    close();
                     onOpenBrowser?.();
                   }}
                   style={{
@@ -294,8 +89,8 @@ export function BrowserPipCard({
               </>
             )}
           </div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+        );
+      }}
+    </HoverPipCard>
   );
 }

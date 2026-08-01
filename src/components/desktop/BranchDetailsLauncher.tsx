@@ -252,6 +252,10 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
     data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
   };
 
+  const togglePip = (surface: 'browser' | 'spec') => {
+    data.onToggleWorkspacePip?.(surface, resolvedRepoPath);
+  };
+
   // Open a source link in the right-side browser panel. Reveal the Browser tab
   // first, then push the URL once the pane has mounted (the o8:open-browser
   // listener switches to the tab + navigates — see O8Panel / O8BrowserPane).
@@ -325,7 +329,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
               ? <Mail width={14} height={14} color="currentColor" strokeWidth={2} />
               : <MailOpen width={14} height={14} color="currentColor" strokeWidth={2} />}
           </CollapsedRailIcon>
-          <CollapsedRailIcon title="o8.md" onClick={() => open('spec')}><PageEdit width={14} height={14} color="currentColor" strokeWidth={2} /></CollapsedRailIcon>
+          <CollapsedRailIcon title="o8.md preview" onClick={() => togglePip('spec')}><PageEdit width={14} height={14} color="currentColor" strokeWidth={2} /></CollapsedRailIcon>
           {prDetail ? (
             <CollapsedRailIcon title={`Pull request #${prDetail.number}`} onClick={() => open('prs')}><GhIcon /></CollapsedRailIcon>
           ) : null}
@@ -338,11 +342,11 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
             // Clicking a page in the hover opens that url in o8's browser —
             // the same path the Sources rows already take.
             onPortPreview={(_port, url) => openSource(url)}
-            onTriggerClick={() => open('browser')}
+            onTriggerClick={() => togglePip('browser')}
             renderTrigger={({ pageCount }) => (
               <CollapsedRailIcon
-                title={pageCount > 0 ? `Browser · ${pageCount} local page${pageCount === 1 ? '' : 's'}` : 'Browser'}
-                onClick={() => open('browser')}
+                title={pageCount > 0 ? `Browser preview · ${pageCount} local page${pageCount === 1 ? '' : 's'}` : 'Browser preview'}
+                onClick={NOOP}
               >
                 <GlobeIcon />
               </CollapsedRailIcon>
