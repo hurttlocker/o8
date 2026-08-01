@@ -278,15 +278,16 @@ export function HistoryChatRow({
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
-  const backendLabel = !compact && item.backend
-    ? orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent })
-    : null;
   const dotState: AgentDotState =
     rowTone.key === 'running' ? 'running'
       : rowTone.key === 'review' ? 'review'
         : rowTone.key === 'merged' ? 'merged'
           : rowTone.key === 'failed' ? 'failed'
             : 'idle';
+  const statusLabel = !repoLabel ? tone?.label ?? rowTone.label ?? 'Idle' : null;
+  const backendLabel = !repoLabel && !compact && item.backend
+    ? orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent })
+    : null;
 
   return (
     <div
@@ -406,7 +407,7 @@ export function HistoryChatRow({
         >
           {item.title}
         </span>
-        {(repoLabel || branchLabel || backendLabel) ? (
+        {(repoLabel || branchLabel || statusLabel || backendLabel) ? (
           <span
             style={{
               display: 'flex',
@@ -435,6 +436,7 @@ export function HistoryChatRow({
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{branchLabel}</span>
               </span>
             ) : null}
+            {statusLabel ? <span>{statusLabel}</span> : null}
             {backendLabel ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{backendLabel}</span> : null}
           </span>
         ) : null}
