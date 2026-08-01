@@ -94,6 +94,8 @@ const LOOPBACK_READ = [
   /^\/api\/browser\/proxy\/?$/,
   /^\/api\/browser\/engine\/view\/?$/,
   /^\/api\/panel\/proxy\/?$/,
+  // o8.md inline images load as <img> tags — no bearer possible (2026-07-31).
+  /^\/api\/panel\/file-asset\/?$/,
   // Boot-gate identity probe — the packaged boot page is static HTML that
   // cannot attach a bearer (v0.1.600 stuck-boot incident).
   /^\/api\/setup\/identity\/?$/,

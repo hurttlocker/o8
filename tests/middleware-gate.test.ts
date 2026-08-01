@@ -612,6 +612,64 @@ describe('panelGateMiddleware — default-deny (RF-2: no fail-open)', () => {
   });
 });
 
+describe('panelGateMiddleware — o8.md inline images (file-asset loopback-read, 2026-07-31 regression)', () => {
+  // Spec-panel images render as plain <img src="/api/panel/file-asset?…"> —
+  // an <img> tag CANNOT attach a bearer. The mobile-auth hardening removed
+  // blanket loopback trust and every inline o8.md image silently 401'd.
+  // These replay the REAL webview <img> request shape through the gate.
+
+  it('passes the webview <img> shape (same-origin subresource on socket-truth loopback)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/panel/file-asset?workspace=%2Frepo&path=o8-assets%2Fa.png', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'sec-fetch-site': 'same-origin',
+          'x-o8-client-addr': '127.0.0.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('still denies file-asset from a LAN socket (socket truth wins)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/panel/file-asset?workspace=%2Frepo&path=o8-assets%2Fa.png', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '192.168.1.50',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('still denies file-asset from a hostile Origin even on loopback', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/panel/file-asset?workspace=%2Frepo&path=o8-assets%2Fa.png', {
+        headers: {
+          host: '127.0.0.1:47100',
+          origin: 'https://evil.example',
+          'x-o8-client-addr': '127.0.0.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('still denies non-GET file-asset requests even from loopback', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/panel/file-asset?workspace=%2Frepo&path=o8-assets%2Fa.png', {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('panelGateMiddleware — boot-gate identity probe (v0.1.600 stuck-boot regression)', () => {
   // The packaged boot page (out/frontend/index.html, served by the Tauri shell)
   // probes GET /api/setup/identity to find its own server before navigating to

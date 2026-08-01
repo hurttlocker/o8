@@ -70,12 +70,19 @@ export async function GET(request: NextRequest) {
   const buffer = await readFile(resolved);
   const filename = path.split('/').pop()?.replace(/"/g, '') || 'asset';
 
-  return new Response(buffer, {
-    headers: {
-      'Cache-Control': 'private, max-age=60',
-      'Content-Disposition': `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      'Content-Length': String(buffer.byteLength),
-      'Content-Type': mimeType,
-    },
-  });
+  const headers: Record<string, string> = {
+    'Cache-Control': 'private, max-age=60',
+    'Content-Disposition': `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    'Content-Length': String(buffer.byteLength),
+    'Content-Type': mimeType,
+    'X-Content-Type-Options': 'nosniff',
+  };
+  if (mimeType === 'image/svg+xml') {
+    // This route is reachable on socket-truth loopback (no bearer — <img> tags
+    // can't attach one). A repo-committed SVG iframed at this origin would
+    // otherwise execute script; sandbox neuters it while <img> rendering is
+    // unaffected.
+    headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+  }
+  return new Response(buffer, { headers });
 }
