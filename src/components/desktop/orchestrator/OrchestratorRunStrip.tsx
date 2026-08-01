@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react';
 import { deriveManagedRunLabel } from '@/lib/runtimes/managed-runs/labels';
+import { DEGRADED_FALLBACK_REFRESH_MS, REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import { ShimmerLine, TURN_LINE_FONT_SIZE } from '../thoughts/chat-panel/turn-line';
 import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 
@@ -32,18 +33,17 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
-    const fetchRuns = () => {
-      fetch('/api/panel/managed-runs')
-        .then((r) => r.json())
-        .then((data: { runs?: ManagedRun[] }) => {
-          if (cancelled) return;
-          setRuns((data.runs ?? []).filter((r) => r.status === 'running'));
-        })
-        .catch(() => {});
+    const fetchRuns = async () => {
+      try {
+        const response = await fetch('/api/panel/managed-runs');
+        const data = await response.json() as { runs?: ManagedRun[] };
+        if (cancelled) return;
+        setRuns((data.runs ?? []).filter((run) => run.status === 'running'));
+      } catch {
+        // The lifecycle event or fallback timer will repair a transient miss.
+      }
     };
-    fetchRuns();
-    const handler = () => fetchRuns();
-    window.addEventListener('o8:lifecycle-reconcile', handler);
+    void fetchRuns();
 
     // PERF: this strip renders NOTHING when no run is active, yet it polled every
     // 8s to find out whether one had started — the busiest idle endpoint after
@@ -57,13 +57,15 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
     // agent, another surface — reaches us immediately instead of up to 8s later.
     //
     // The interval is therefore a safety net, not the signal. When the socket is
-    // down we genuinely have no signal, so we fall back to the old cadence rather
-    // than go blind.
-    const timer = setInterval(fetchRuns, wsConnected ? 60_000 : 8_000);
+    // down we use a one-minute recovery cadence rather than wait five minutes.
+    const stopDurableRefresh = startDurableRefresh({
+      refresh: fetchRuns,
+      intervalMs: wsConnected ? REALTIME_FALLBACK_REFRESH_MS : DEGRADED_FALLBACK_REFRESH_MS,
+      events: ['o8:lifecycle-reconcile'],
+    });
     return () => {
       cancelled = true;
-      clearInterval(timer);
-      window.removeEventListener('o8:lifecycle-reconcile', handler);
+      stopDurableRefresh();
     };
     // wsConnected in deps: reconnecting re-establishes the slow cadence AND
     // refetches immediately, resyncing anything missed while the socket was down.

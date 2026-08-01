@@ -15,7 +15,7 @@ export interface ThreadHistoryPage<T> {
 interface ThreadHistoryBackfillOptions<T> {
   fetchPage: (tabId: string, before: string) => Promise<ThreadHistoryPage<T> | null>;
   getScrollContainer: () => HTMLElement | null;
-  onPrepend: (messages: T[]) => void;
+  onPrepend: (messages: T[]) => boolean | void;
 }
 
 /**
@@ -54,7 +54,10 @@ export function useThreadHistoryBackfill<T>({
       current.hasMore = result.page?.hasMore === true;
       current.before = result.page?.beforeCursor ?? null;
       if (result.messages.length > 0) {
-        onPrepend(result.messages);
+        if (onPrepend(result.messages) === false) {
+          current.hasMore = false;
+          current.before = null;
+        }
         requestAnimationFrame(() => {
           if (!container?.isConnected) return;
           container.scrollTop += container.scrollHeight - priorHeight;

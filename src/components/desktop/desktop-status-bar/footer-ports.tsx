@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
 import { Internet, Server as ServerIcon } from 'iconoir-react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { DEGRADED_FALLBACK_REFRESH_MS, REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 
@@ -134,14 +136,15 @@ export function FooterPorts({
 
   useEffect(() => {
     let cancelled = false;
-    function fetchPorts() {
-      fetch('/api/panel/ports')
-        .then((r) => r.json())
-        .then((data: { ports?: PortEntry[] }) => {
-          if (cancelled) return;
-          setPorts(data.ports ?? []);
-        })
-        .catch(() => {});
+    async function fetchPorts() {
+      try {
+        const response = await fetchOnce('/api/panel/ports');
+        const data = await response.json() as { ports?: PortEntry[] };
+        if (cancelled) return;
+        setPorts(data.ports ?? []);
+      } catch {
+        // The lifecycle event or fallback timer will repair a transient miss.
+      }
     }
     let rICHandle: SafeIdleCallbackHandle | undefined;
     let timeoutHandle: number | undefined;
@@ -151,26 +154,27 @@ export function FooterPorts({
         clearTimeout(timeoutHandle);
         timeoutHandle = undefined;
       }
-      fetchPorts();
+      void fetchPorts();
     }, { timeout: 3000, fallbackDelayMs: 1500 });
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = undefined;
       if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       rICHandle = undefined;
-      fetchPorts();
+      void fetchPorts();
     }, 1500);
-    const handler = () => fetchPorts();
-    window.addEventListener('o8:lifecycle-reconcile', handler);
     // Socket bridges agent-lifecycle into this window event; the interval is a
     // safety net (slower when the socket is live, faster when it's down so we
     // don't go blind). Reconnecting refetches immediately (wsConnected in deps).
-    const fallback = setInterval(fetchPorts, wsConnected ? 60_000 : 20_000);
+    const stopDurableRefresh = startDurableRefresh({
+      refresh: fetchPorts,
+      intervalMs: wsConnected ? REALTIME_FALLBACK_REFRESH_MS : DEGRADED_FALLBACK_REFRESH_MS,
+      events: ['o8:lifecycle-reconcile'],
+    });
     return () => {
       cancelled = true;
       if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-      clearInterval(fallback);
-      window.removeEventListener('o8:lifecycle-reconcile', handler);
+      stopDurableRefresh();
     };
   }, [wsConnected]);
 

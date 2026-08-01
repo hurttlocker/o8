@@ -6,6 +6,7 @@ import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
+import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
 
 export interface InlineImage {
   id: string;
@@ -118,7 +119,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
             : 'image/png';
       const dataUrl = `data:${mime};base64,${imageB64}`;
       imageCountRef.current += 1;
-      setInlineImages((previous) => [...previous, { id: `img-${imageCountRef.current}`, dataUrl, filename }]);
+      setInlineImages((previous) => retainInlineTerminalImages([
+        ...previous,
+        { id: `img-${imageCountRef.current}`, dataUrl, filename },
+      ]));
       if (termRef.current) {
         termRef.current.write('\r\n\r\n');
       }
@@ -198,7 +202,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           cursorStyle: 'block',
           allowTransparency: transparent === true,
           allowProposedApi: true,
-          scrollback: 10000,
+          scrollback: TERMINAL_SCROLLBACK_LINES,
           theme: {
             ...buildXtermTheme(),
             ...(transparent ? { background: 'rgba(0,0,0,0)' } : {}),

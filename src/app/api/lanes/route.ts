@@ -8,12 +8,24 @@ import { codename } from '@/lib/agents/codename';
 import { dispatch } from '@/lib/lane/commands';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
+import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import type { LaneCommand } from '@/lib/lane/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const ROUTE_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+let lastRouteReconcileAt = 0;
+
+async function reconcileLanesIfDue(): Promise<void> {
+  const now = Date.now();
+  if (now - lastRouteReconcileAt < ROUTE_RECONCILE_INTERVAL_MS) return;
+  lastRouteReconcileAt = now;
+  await reconcileOrphanedWorktrees();
+}
+
 export async function GET(req: NextRequest) {
+  const startedAt = performance.now();
   const denied = requirePanelAuth(req);
   if (denied) return denied;
 
@@ -21,7 +33,7 @@ export async function GET(req: NextRequest) {
   // (orchestrator bash-merge bypasses the merge verb) so the sidebar doesn't
   // keep showing stale 'reviewing' rows. Awaited (async git probes since #1498)
   // so the response below reflects the reconciled lane state.
-  await reconcileOrphanedWorktrees();
+  await reconcileLanesIfDue();
 
   const url = new URL(req.url);
   const activeOnly = url.searchParams.get('active') !== 'false';
@@ -61,7 +73,7 @@ export async function GET(req: NextRequest) {
   }));
 
   return NextResponse.json({ lanes }, {
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
+    headers: serverTimingHeaders(startedAt, { 'Cache-Control': 'no-store, max-age=0' }),
   });
 }
 

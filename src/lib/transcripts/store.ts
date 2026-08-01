@@ -19,6 +19,14 @@ type GlobalListener = (key: string, slice: TranscriptSlice) => void;
 
 const EMPTY_MESSAGES: MobileTranscriptEntry[] = [];
 
+export const MAX_TRANSCRIPT_ENTRIES_PER_SLICE = 200;
+export const MAX_TRANSCRIPT_STORE_SLICES = 32;
+
+export function retainTranscriptEntries(entries: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
+  if (entries.length <= MAX_TRANSCRIPT_ENTRIES_PER_SLICE) return entries;
+  return entries.slice(-MAX_TRANSCRIPT_ENTRIES_PER_SLICE);
+}
+
 const EMPTY_SLICE: TranscriptSlice = Object.freeze({
   messages: EMPTY_MESSAGES,
   status: 'idle',
@@ -47,22 +55,47 @@ interface MergeOptions {
   touchTimestamp?: boolean;
 }
 
-class TranscriptStore {
+export class TranscriptStore {
   private readonly slices = new Map<string, TranscriptSlice>();
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly globalListeners = new Set<GlobalListener>();
+  private readonly accessOrder = new Map<string, number>();
+  private accessOrdinal = 0;
+
+  private touch(key: string): void {
+    this.accessOrdinal += 1;
+    this.accessOrder.set(key, this.accessOrdinal);
+  }
+
+  private evictUnusedSlices(): void {
+    while (this.slices.size > MAX_TRANSCRIPT_STORE_SLICES) {
+      const candidate = [...this.slices.keys()]
+        .filter((key) => (this.listeners.get(key)?.size ?? 0) === 0)
+        .sort((left, right) => (this.accessOrder.get(left) ?? 0) - (this.accessOrder.get(right) ?? 0))[0];
+      if (!candidate) return;
+      this.slices.delete(candidate);
+      this.accessOrder.delete(candidate);
+    }
+  }
 
   getSlice(key: string | null | undefined): TranscriptSlice {
     if (!key) return EMPTY_SLICE;
-    return this.slices.get(key) ?? EMPTY_SLICE;
+    const slice = this.slices.get(key);
+    if (!slice) return EMPTY_SLICE;
+    this.touch(key);
+    return slice;
   }
 
   setSlice(key: string, slice: TranscriptSlice): void {
     if (!key) return;
+    const messages = retainTranscriptEntries(slice.messages);
+    const boundedSlice = messages === slice.messages ? slice : { ...slice, messages };
     const previous = this.slices.get(key);
-    if (previous === slice) return;
-    this.slices.set(key, slice);
-    this.emit(key, slice);
+    this.touch(key);
+    if (previous === boundedSlice) return;
+    this.slices.set(key, boundedSlice);
+    this.evictUnusedSlices();
+    this.emit(key, boundedSlice);
   }
 
   mergeEntries(
@@ -74,7 +107,7 @@ class TranscriptStore {
     const previous = this.slices.get(key);
     const merger = options?.merge ?? defaultMerge;
     const previousMessages = previous?.messages ?? [];
-    const merged = merger(previousMessages, entries);
+    const merged = retainTranscriptEntries(merger(previousMessages, entries));
     if (previous && merged === previousMessages && previous.status === 'fresh') {
       return previous;
     }
@@ -85,7 +118,9 @@ class TranscriptStore {
         ? (previous?.lastUpdated ?? Date.now())
         : Date.now(),
     };
+    this.touch(key);
     this.slices.set(key, next);
+    this.evictUnusedSlices();
     this.emit(key, next);
     return next;
   }
@@ -106,12 +141,15 @@ class TranscriptStore {
       lastUpdated: previous.lastUpdated,
       ...(error ? { error } : {}),
     };
+    this.touch(key);
     this.slices.set(key, next);
+    this.evictUnusedSlices();
     this.emit(key, next);
     return next;
   }
 
   subscribe(key: string, listener: Listener): () => void {
+    if (this.slices.has(key)) this.touch(key);
     let bucket = this.listeners.get(key);
     if (!bucket) {
       bucket = new Set();
@@ -124,6 +162,8 @@ class TranscriptStore {
       current.delete(listener);
       if (current.size === 0) {
         this.listeners.delete(key);
+        if (!this.slices.has(key)) this.accessOrder.delete(key);
+        this.evictUnusedSlices();
       }
     };
   }
@@ -136,6 +176,7 @@ class TranscriptStore {
   }
 
   clear(key: string): void {
+    this.accessOrder.delete(key);
     if (!this.slices.has(key)) return;
     this.slices.delete(key);
     this.emit(key, EMPTY_SLICE);

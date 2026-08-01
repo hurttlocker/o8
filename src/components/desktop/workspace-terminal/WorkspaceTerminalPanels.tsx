@@ -1,6 +1,6 @@
 'use client';
 
-import { MutableRefObject, Suspense, memo, useEffect, useRef, useState } from 'react';
+import { MutableRefObject, Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
@@ -8,6 +8,7 @@ import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/resident-tabs';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
@@ -84,6 +85,22 @@ function WorkspaceTerminalPanelsBase({
   useEffect(() => {
     if (visibleTabs.length > 0) hasEverHadTabsRef.current = true;
   }, [visibleTabs.length]);
+  const visibleTabIdsKey = visibleTabs.map((tab) => tab.id).join('|');
+  const [residentTabIds, setResidentTabIds] = useState<string[]>(() => (
+    updateResidentTabIds([], visibleTabs.map((tab) => tab.id), effectiveActiveTabId)
+  ));
+  useEffect(() => {
+    const visibleTabIds = visibleTabIdsKey ? visibleTabIdsKey.split('|') : [];
+    setResidentTabIds((previous) => updateResidentTabIds(previous, visibleTabIds, effectiveActiveTabId));
+  }, [effectiveActiveTabId, visibleTabIdsKey]);
+  const residentTabIdSet = useMemo(
+    () => new Set(updateResidentTabIds(
+      residentTabIds,
+      visibleTabIdsKey ? visibleTabIdsKey.split('|') : [],
+      effectiveActiveTabId,
+    )),
+    [effectiveActiveTabId, residentTabIds, visibleTabIdsKey],
+  );
   // Boot claim while the tab restore is UNSETTLED — even when default tabs
   // already render. The boot restore re-runs when the repo registry hydrates
   // late (restoreKey flips 'no-repo' → repo), and without this hold the
@@ -103,7 +120,7 @@ function WorkspaceTerminalPanelsBase({
   return (
     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {!restoreSettled && !restoreHoldExpired ? <WorkspaceBootLoaderClaim /> : null}
-      {visibleTabs.map((tab) => (
+      {visibleTabs.map((tab) => residentTabIdSet.has(tab.id) ? (
         tab.kind === 'orchestrator' ? (
           <OrchestratorResidentPanel
             key={tab.id}
@@ -166,7 +183,7 @@ function WorkspaceTerminalPanelsBase({
             active={tab.id === effectiveActiveTabId}
           />
         )
-      ))}
+      ) : null)}
 
       {visibleTabs.length === 0 ? (
         <EmptyWorkspaceState hasEverHadTabs={hasEverHadTabsRef.current} restoreSettled={restoreSettled} />

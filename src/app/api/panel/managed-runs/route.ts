@@ -8,6 +8,7 @@ import {
 import { killTmuxSession } from '@/lib/terminal/tmux';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { serverTimingHeaders } from '@/lib/performance/server-timing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,17 +19,21 @@ const MAX_FIELD = 4096; // cap persisted/echoed strings — no unbounded command
 
 /** GET — list managed runs (reconciled against live tmux). */
 export async function GET(request: Request) {
+  const startedAt = performance.now();
   try {
     const principal = resolveRequestPrincipalContext(request);
     const allRuns = await listManagedRuns();
     const runs = principal.role === 'worker'
       ? allRuns.filter((run) => Boolean(principal.packetId) && run.packetId === principal.packetId)
       : allRuns;
-    return NextResponse.json({ schema: 'o8/managed-runs/v1', runs });
+    return NextResponse.json(
+      { schema: 'o8/managed-runs/v1', runs },
+      { headers: serverTimingHeaders(startedAt) },
+    );
   } catch (err) {
     return NextResponse.json(
       { schema: 'o8/managed-runs/v1', runs: [], error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { status: 500, headers: serverTimingHeaders(startedAt) },
     );
   }
 }

@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -133,8 +134,9 @@ async function probePort(port: number): Promise<HttpProbeResult> {
 }
 
 export async function GET() {
+  const startedAt = performance.now();
   if (portsCache && (Date.now() - portsCache.ts) < PORTS_CACHE_TTL_MS) {
-    return NextResponse.json(portsCache.data);
+    return NextResponse.json(portsCache.data, { headers: serverTimingHeaders(startedAt) });
   }
 
   try {
@@ -278,7 +280,7 @@ export async function GET() {
       total: ports.length,
     };
     portsCache = { data: result, ts: Date.now() };
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: serverTimingHeaders(startedAt) });
   } catch (err) {
     return NextResponse.json({
       ports: [],
@@ -287,6 +289,6 @@ export async function GET() {
       serviceCount: 0,
       total: 0,
       error: err instanceof Error ? err.message : 'Failed to scan ports',
-    });
+    }, { headers: serverTimingHeaders(startedAt) });
   }
 }

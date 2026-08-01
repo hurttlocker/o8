@@ -43,6 +43,7 @@ import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-jso
 import type { PendingSteer } from '@/components/desktop/thoughts/chat-panel/PendingSteerCard';
 import { interruptRuntimeSurface } from '@/components/desktop/thoughts/chat-panel/runtimeInterrupt';
 import { useSteerAutoFire } from '@/components/desktop/thoughts/chat-panel/useSteerAutoFire';
+import { useWorkspaceChatDraftRetention } from '@/components/desktop/workspace-terminal/workspace-chat-drafts';
 
 interface UseWorkspaceChatPaneOptions {
   tab: TerminalTab;
@@ -61,10 +62,9 @@ export function useWorkspaceChatPane({
   onSelectModel,
   onConsumeDraftInjection,
 }: UseWorkspaceChatPaneOptions) {
-  const [draft, setDraft] = useState('');
+  const { draft, setDraft, queuedContextCards, setQueuedContextCards } = useWorkspaceChatDraftRetention(tab.id);
   const [sending, setSending] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
-  const [queuedContextCards, setQueuedContextCards] = useState<ReturnType<typeof buildQueuedContextCard>[]>([]);
   const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
@@ -723,7 +723,7 @@ export function useWorkspaceChatPane({
         transcriptStore.setStatus(normalizedSessionKey, 'loading');
       }
     }
-  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, isOwnedRuntimeBound, linkedIssue, normalizedSessionKey, onUpdateSessionKey, queuePendingSteer, refreshOwnedSessionReady, runtimeLabel, scrollToBottom, selectedModel, sending, streamRequest, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
+  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, isOwnedRuntimeBound, linkedIssue, normalizedSessionKey, onUpdateSessionKey, queuePendingSteer, refreshOwnedSessionReady, runtimeLabel, scrollToBottom, selectedModel, sending, setDraft, streamRequest, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
 
   queuedSteerSendNowRef.current = (text?: string) => {
     if (text?.trim()) void sendText(text);
@@ -776,7 +776,7 @@ export function useWorkspaceChatPane({
     setQueuedContextCards([]);
     setDraft('');
     await sendText(text);
-  }, [draft, queuedContextCards, sendText, sending]);
+  }, [draft, queuedContextCards, sendText, sending, setDraft, setQueuedContextCards]);
 
   useEffect(() => {
     const injection = tab.chatDraftInjection;
@@ -798,7 +798,7 @@ export function useWorkspaceChatPane({
     }
 
     onConsumeDraftInjection(tabId, injection.id);
-  }, [onConsumeDraftInjection, sendText, tab.chatDraftInjection, tabId]);
+  }, [onConsumeDraftInjection, sendText, setDraft, setQueuedContextCards, tab.chatDraftInjection, tabId]);
 
   const handleClaudePermissionDecision = useCallback(async (
     request: Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>,
@@ -815,7 +815,7 @@ export function useWorkspaceChatPane({
     setClaudePlanMode(claudeMode.planMode);
     setClaudeBypassPermissions(claudeMode.bypassPermissions);
     await sendText(message, { claudeMode });
-  }, [sendText, sending]);
+  }, [sendText, sending, setDraft]);
 
   const visibleTranscriptEntries = useMemo(
     () => (agentRunning && liveAssistantId ? messages.filter((message) => message.id !== liveAssistantId) : messages),
@@ -830,7 +830,7 @@ export function useWorkspaceChatPane({
 
   const handleRemoveQueuedContext = useCallback((contextId: string) => {
     setQueuedContextCards((previous) => previous.filter((card) => card.id !== contextId));
-  }, []);
+  }, [setQueuedContextCards]);
 
   return {
     activeToolCalls,

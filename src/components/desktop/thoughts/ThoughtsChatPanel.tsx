@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
 import { formatModelLabel } from '@/lib/format';
@@ -28,6 +28,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { retainedTranscriptReducer } from '@/lib/transcripts/retained-state';
 import { serializeThreadToMarkdown } from '@/lib/llm/export-thread';
 import {
   executeOrchestratorSlashCommand,
@@ -83,7 +84,11 @@ import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { isFileEditCall } from './chat-panel/file-edits';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
-import { useThreadHistoryBackfill, type ThreadHistoryPage } from './chat-panel/useThreadHistoryBackfill';
+import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
+import {
+  fetchOlderThreadPage,
+  useBoundedThreadHistoryWindow,
+} from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
@@ -407,10 +412,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
   );
   const [orchestratorModel, setOrchestratorModel] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorModel);
-  // Clarify-first (#1489) — per-send toggle. When on, the next orchestrator
-  // message carries the clarify-first directive (interview before dispatch) and
-  // resets to off after it fires. Off → the outgoing message is unchanged.
-  const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
+  const [chatMessages, setChatMessages] = useReducer(retainedTranscriptReducer, []);
+  const {
+    entries: threadHistoryEntries,
+    prependHistoryMessages,
+    reset: resetThreadHistoryWindow,
+  } = useBoundedThreadHistoryWindow();
   const [planText, setPlanText] = useState<string | null>(null);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [targetAgentKey, setTargetAgentKey] = useState<string>('__claude__');
@@ -1095,6 +1102,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput('');
     setPreEnhanceInput(null);
     setChatMessages([]);
+    resetThreadHistoryWindow();
     setPlanText(null);
     setWaitingForReply(false);
     clearPolling();
@@ -1129,7 +1137,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend, projectIdProp]);
+  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend, projectIdProp, resetThreadHistoryWindow]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -1307,33 +1315,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     isOrchestratorMode ? resolvedRepoPath : null,
   );
 
-  const fetchOlderThreadPage = useCallback(async (
-    tabId: string,
-    before: string,
-  ): Promise<ThreadHistoryPage<ThoughtsHistoryMessage> | null> => {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 6000);
-    try {
-      const params = new URLSearchParams({ tabId, limit: '60', before });
-      const res = await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
-      if (!res.ok) return null;
-      return await res.json() as ThreadHistoryPage<ThoughtsHistoryMessage>;
-    } catch {
-      return null;
-    } finally {
-      window.clearTimeout(timer);
-    }
-  }, []);
-
   const prependThreadHistoryPage = useCallback((historyMessages: ThoughtsHistoryMessage[]) => {
-    const olderEntries = mapHistoryMessagesToTranscript(historyMessages);
-    if (olderEntries.length === 0) return;
     suppressNextTranscriptAutoScrollRef.current = true;
-    const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
-    const entries = mergeTranscriptEntries(olderEntries, liveTranscript);
-    setChatMessages(entries);
-    orchStream.replaceTranscript(entries);
-  }, [chatMessages, orchStream]);
+    return prependHistoryMessages(historyMessages);
+  }, [prependHistoryMessages]);
 
   const { startBackfill, cancelBackfill, onScroll: loadOlderHistoryOnScroll } = useThreadHistoryBackfill({
     fetchPage: fetchOlderThreadPage,
@@ -1352,6 +1337,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     lastLoadAtRef.current = now;
     const myGeneration = ++loadGenerationRef.current;
     cancelBackfill();
+    resetThreadHistoryWindow();
     try {
       const fetchHistoryOnce = async (): Promise<Response | null> => {
         const controller = new AbortController();
@@ -1442,7 +1428,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, startBackfill]);
+  }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
 
   settledAssistantRefetchRef.current = () => {
     const activeThreadId = threadIdRef.current;
@@ -1461,8 +1447,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // the same user turn can survive in both the restored (persisted id) and
     // the live-minted (optimistic id) form. Dedupe so it never double-renders.
     const base = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
-    return dedupeDisplayMessages(base);
-  }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages]);
+    return dedupeDisplayMessages(threadHistoryEntries.length > 0
+      ? [...threadHistoryEntries, ...base]
+      : base);
+  }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
   // See `composerRepoLabelBase` for the rationale — derived here so
   // the empty-state check matches the empty-state-override condition.
   const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;

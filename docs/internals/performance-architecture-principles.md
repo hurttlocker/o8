@@ -109,6 +109,22 @@ arrived last.
   DOM size can grow materially.
 - Narrow interactions should not rerender broad parent screens unnecessarily.
 
+## Idle and Long-Session Budgets
+
+- Realtime events are the primary refresh signal for always-mounted desktop
+  surfaces. Their HTTP resilience path must use `startDurableRefresh`, wait at
+  least five minutes while realtime is connected, coalesce overlapping
+  triggers, and make no requests while the document is hidden.
+- Routes used by an always-mounted fallback must expose `Server-Timing` so an
+  installed-app profile can attribute server CPU to route frequency and cost.
+- Hidden workspace tabs may preserve lightweight tab metadata, but only three
+  heavy React surfaces remain mounted per workspace. Evicted terminals replay
+  from tmux and chats reload from persisted history when selected again.
+- Client transcript and terminal media caches must remain bounded. The current
+  limits are 200 transcript entries per slice, 32 cached transcript slices,
+  3,000 xterm scrollback lines, and six inline terminal image overlays within
+  a 32 MiB data-URL budget.
+
 ## Broker Rules
 
 If route bootstrap uses a hot in-memory broker:

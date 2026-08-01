@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 
 /**
@@ -13,11 +14,9 @@ import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackH
  * unsubscribe.
  */
 
-const POLL_MS = 15_000;
-
 let humanRequiredCount = 0;
 const listeners = new Set<() => void>();
-let pollTimer: number | undefined;
+let stopDurableRefresh: (() => void) | undefined;
 let idleHandle: SafeIdleCallbackHandle | undefined;
 let primeTimeout: number | undefined;
 
@@ -53,14 +52,9 @@ function handleInboxEvent(event: Event): void {
   else void refresh();
 }
 
-function handleFocus(): void {
-  void refresh();
-}
-
 function start(): void {
   if (typeof window === 'undefined') return;
   window.addEventListener('o8:supervisor-inbox', handleInboxEvent);
-  window.addEventListener('focus', handleFocus);
   idleHandle = safeRequestIdleCallback(() => {
     idleHandle = undefined;
     if (primeTimeout !== undefined) {
@@ -75,21 +69,21 @@ function start(): void {
     idleHandle = undefined;
     void refresh();
   }, 1200);
-  pollTimer = window.setInterval(() => {
-    void refresh();
-  }, POLL_MS);
+  stopDurableRefresh = startDurableRefresh({
+    refresh,
+    intervalMs: REALTIME_FALLBACK_REFRESH_MS,
+  });
 }
 
 function stop(): void {
   if (typeof window === 'undefined') return;
   window.removeEventListener('o8:supervisor-inbox', handleInboxEvent);
-  window.removeEventListener('focus', handleFocus);
   if (idleHandle !== undefined) safeCancelIdleCallback(idleHandle);
   idleHandle = undefined;
   if (primeTimeout !== undefined) window.clearTimeout(primeTimeout);
   primeTimeout = undefined;
-  if (pollTimer !== undefined) window.clearInterval(pollTimer);
-  pollTimer = undefined;
+  stopDurableRefresh?.();
+  stopDurableRefresh = undefined;
 }
 
 function subscribe(listener: () => void): () => void {

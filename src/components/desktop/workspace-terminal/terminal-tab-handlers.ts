@@ -1,5 +1,6 @@
 import { stripPersistedTabs, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { retainTranscriptEntries } from '@/lib/transcripts/store';
 import {
   adHocLaneTitle,
 } from '@/lib/orchestrator/display';
@@ -166,14 +167,15 @@ export function computeUpdatedChatMessages(
   tab: TerminalTab,
   messages: MobileTranscriptEntry[],
 ): TerminalTab {
+  const retainedMessages = retainTranscriptEntries(messages);
   const previousMessages = tab.chatMessages ?? [];
-  if (sameTranscriptMessages(previousMessages, messages)) {
-    return previousMessages === messages ? tab : { ...tab, chatMessages: messages };
+  if (sameTranscriptMessages(previousMessages, retainedMessages)) {
+    return previousMessages === retainedMessages ? tab : { ...tab, chatMessages: retainedMessages };
   }
-  const latestTimestamp = messages.reduce((max, entry) => Math.max(max, entry.timestamp ?? 0), 0);
+  const latestTimestamp = retainedMessages.reduce((max, entry) => Math.max(max, entry.timestamp ?? 0), 0);
   return {
     ...tab,
-    chatMessages: messages,
+    chatMessages: retainedMessages,
     supervisorStatus: tab.supervisorStatus === 'launched' ? 'running' : tab.supervisorStatus,
     lastActivity: latestTimestamp > 0 ? latestTimestamp : Date.now(),
   };

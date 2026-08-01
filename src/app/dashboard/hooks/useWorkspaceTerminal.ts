@@ -23,6 +23,7 @@ import type { TerminalTab } from '@/components/desktop/workspace-terminal/types'
 import type { Lane, LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import {
   loadOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
@@ -381,16 +382,15 @@ export function useWorkspaceTerminal({
   }, []);
 
   useEffect(() => {
-    const handler = () => { void refreshAutomationLaneSessions(); };
-    const initialRefreshId = window.setTimeout(handler, 0);
-    window.addEventListener('o8:lifecycle-reconcile', handler);
-    window.addEventListener('o8:supervisor-inbox', handler);
-    const intervalId = window.setInterval(handler, 30_000);
+    const initialRefreshId = window.setTimeout(() => { void refreshAutomationLaneSessions(); }, 0);
+    const stopDurableRefresh = startDurableRefresh({
+      refresh: refreshAutomationLaneSessions,
+      intervalMs: REALTIME_FALLBACK_REFRESH_MS,
+      events: ['o8:lifecycle-reconcile', 'o8:supervisor-inbox'],
+    });
     return () => {
       window.clearTimeout(initialRefreshId);
-      window.clearInterval(intervalId);
-      window.removeEventListener('o8:lifecycle-reconcile', handler);
-      window.removeEventListener('o8:supervisor-inbox', handler);
+      stopDurableRefresh();
     };
   }, [refreshAutomationLaneSessions]);
 
@@ -841,15 +841,14 @@ export function useWorkspaceTerminal({
     }
 
     const initTimer = setTimeout(pollLanes, 2_000);
-    // WS-driven: instant refresh on lane events instead of 15s polling
-    const handler = () => { void pollLanes(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(pollLanes, 300_000);
+    const stopDurableRefresh = startDurableRefresh({
+      refresh: pollLanes,
+      intervalMs: REALTIME_FALLBACK_REFRESH_MS,
+      events: ['o8:lifecycle-reconcile'],
+    });
     return () => {
       clearTimeout(initTimer);
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
+      stopDurableRefresh();
     };
   }, [openWorkspaceTabForLane]);
 

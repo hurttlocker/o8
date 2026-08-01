@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import {
   FOCUS_REPO_SETUP_EVENT,
   OPEN_REPO_WORKSPACE_EVENT,
@@ -309,28 +311,26 @@ function RepoRegistrySectionBase({
   const [portsByRepo, setPortsByRepo] = useState<Map<string, number[]>>(new Map());
 
   useEffect(() => {
-    function fetchPorts() {
-      fetch('/api/panel/ports')
-        .then(r => r.json())
-        .then((data: { groups?: { repo: string; ports: number[] }[] }) => {
-          const map = new Map<string, number[]>();
-          for (const g of data.groups ?? []) {
-            map.set(g.repo, g.ports);
-          }
-          setPortsByRepo(map);
-        })
-        .catch(() => {});
+    async function fetchPorts() {
+      try {
+        const response = await fetchOnce('/api/panel/ports');
+        const data = await response.json() as { groups?: { repo: string; ports: number[] }[] };
+        const map = new Map<string, number[]>();
+        for (const group of data.groups ?? []) {
+          map.set(group.repo, group.ports);
+        }
+        setPortsByRepo(map);
+      } catch {
+        // The lifecycle event or fallback timer will repair a transient miss.
+      }
     }
-    fetchPorts();
+    void fetchPorts();
     // WS-driven: refresh on agent events instead of 10s polling
-    const handler = () => { fetchPorts(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(fetchPorts, 120_000); // 2min fallback
-    return () => {
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
-    };
+    return startDurableRefresh({
+      refresh: fetchPorts,
+      intervalMs: REALTIME_FALLBACK_REFRESH_MS,
+      events: ['o8:lifecycle-reconcile'],
+    });
   }, []);
 
   const resetAddModal = useCallback(() => {

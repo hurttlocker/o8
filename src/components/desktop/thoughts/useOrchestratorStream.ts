@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptToolLaunchLink,
 } from '@/lib/mobile/types';
+import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isMeteredOrchestratorBackend } from '@/lib/lane/orchestrator-backends/billing';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -78,9 +79,8 @@ export type {
   OrchestratorTokenUsageDetail,
 } from './use-orchestrator-stream/shared';
 
-// Mission ids whose completed-thread rotation already ran this app session —
-// module-level so remounts (tab flaps) can't re-rotate a mission whose
-// completion event re-fires from boot-time state oscillation.
+// Mission ids whose completed-thread rotation already ran this app session.
+// Module scope prevents remounts from re-rotating on boot-time state oscillation.
 const rotatedMissionIds = new Set<string>();
 
 interface ActiveTurnState {
@@ -102,7 +102,7 @@ export function useOrchestratorStream(
   repoPath: string | null,
   options?: OrchestratorStreamOptions,
 ): OrchestratorStreamResult {
-  const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
+  const [messages, setMessages] = useReducer(retainedTranscriptReducer, []);
   const [planText, setPlanText] = useState<string | null>(null);
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
   const [busyState, setBusyState] = useState(() => createIdleBusyState());
@@ -230,9 +230,9 @@ export function useOrchestratorStream(
   }, [resetFirstTurnPlanCapture]);
 
   const syncMessages = useCallback((entries: MobileTranscriptEntry[]) => {
-    messagesRef.current = entries;
-    setMessages(entries);
-  }, []);
+    messagesRef.current = retainTranscriptEntries(entries);
+    setMessages(messagesRef.current);
+  }, [setMessages]);
 
   const updateRunningTotal = useCallback((value: number) => {
     runningTotalRef.current = value;

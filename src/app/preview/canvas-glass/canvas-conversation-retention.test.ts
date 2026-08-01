@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DockEntry } from './ui';
 import {
   type CanvasConversationStore,
+  clearCanvasTurnAccumulators,
   MAX_CANVAS_CONVERSATION_ENTRIES,
   MAX_CANVAS_CONVERSATIONS,
   removeCanvasConversations,
@@ -33,5 +34,13 @@ describe('Canvas conversation retention', () => {
 
     store = removeCanvasConversations(store, [`thread:${MAX_CANVAS_CONVERSATIONS + 7}`]);
     expect(store[`thread:${MAX_CANVAS_CONVERSATIONS + 7}`]).toBeUndefined();
+  });
+
+  it('clears failed-turn text and tools before a retry', () => {
+    const text = new Map([['repo', 'stale answer']]);
+    const tools = new Map([['repo', { files: ['stale.ts'] }]]);
+    clearCanvasTurnAccumulators('repo', text, tools);
+    expect(text.has('repo')).toBe(false);
+    expect(tools.has('repo')).toBe(false);
   });
 });

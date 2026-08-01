@@ -16,6 +16,7 @@ function coerceAgentRuntime(value?: string | null): OrchestratorRuntime {
   return 'codex';
 }
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { retainTranscriptEntries } from '@/lib/transcripts/store';
 import type { AgentTarget, ContextSuggestion, FleetAgent } from './types';
 
 export function normalizeMissionText(value: string) {
@@ -208,7 +209,7 @@ export function mergeTranscriptEntries(
     next[existingIndex] = entry;
   }
 
-  return next;
+  return retainTranscriptEntries(next);
 }
 
 export function mergeSameThreadHistoryLoad(

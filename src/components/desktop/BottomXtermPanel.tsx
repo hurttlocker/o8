@@ -12,6 +12,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
+import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
 
 interface InlineImage {
   id: string;
@@ -71,7 +72,10 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'gif' ? 'image/gif' : ext === 'svg' ? 'image/svg+xml' : 'image/png';
       const dataUrl = `data:${mime};base64,${imageB64}`;
       imageCountRef.current += 1;
-      setInlineImages(prev => [...prev, { id: `img-${imageCountRef.current}`, dataUrl, filename }]);
+      setInlineImages((previous) => retainInlineTerminalImages([
+        ...previous,
+        { id: `img-${imageCountRef.current}`, dataUrl, filename },
+      ]));
       if (termRef.current) termRef.current.write('\r\n\r\n');
     },
     setError: (err: string) => setError(err),
@@ -129,7 +133,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           // terminal into the vibrancy chrome; solid keeps an opaque canvas.
           allowTransparency: true,
           allowProposedApi: true,
-          scrollback: 10000,
+          scrollback: TERMINAL_SCROLLBACK_LINES,
           // Watch posture: a read-only agent-run view never captures input.
           disableStdin: readOnly,
           theme: { ...buildXtermTheme(), ...(glassRef.current ? { background: 'rgba(0,0,0,0)' } : {}) },

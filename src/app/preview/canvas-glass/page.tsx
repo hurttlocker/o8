@@ -91,6 +91,8 @@ import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, 
 import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 import { SymonVoicePresencePill } from './symon-voice-presence';
 import { useCanvasQuickActions } from './use-canvas-quick-actions';
+import { useCanvasMediaLifecycle } from './use-canvas-media-lifecycle';
+import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -343,6 +345,7 @@ export default function CanvasGlassPreviewPage() {
   const imageCardsRef = useRef<ImageCard[]>([]);
   imageCardsRef.current = imageCards;
   const [videoCards, setVideoCards] = useState<VideoCard[]>([]);
+  const canvasMedia = useCanvasMediaLifecycle(videoCards);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
   const [filePathPickerOpen, setFilePathPickerOpen] = useState(false);
@@ -822,14 +825,12 @@ export default function CanvasGlassPreviewPage() {
         entryIdRef.current += 1;
         return { ...entry, id };
       });
-      return { ...previous, [lane]: [...(previous[lane] ?? []), ...next] };
+      return updateCanvasConversation(previous, lane, (current) => [...current, ...next]);
     });
   }, []);
 
   const resolveStatus = useCallback((lane: string, text: string) => {
-    setConvos((previous) => ({
-      ...previous,
-      [lane]: (previous[lane] ?? []).map((entry) => {
+    setConvos((previous) => updateCanvasConversation(previous, lane, (entries) => entries.map((entry) => {
         // The turn settling also settles any live reasoning stream.
         if (entry.role === 'thinking' && entry.live) return { ...entry, live: false };
         if (entry.role !== 'status' || !entry.pending) return entry;
@@ -839,8 +840,7 @@ export default function CanvasGlassPreviewPage() {
           return { ...entry, pending: false, text: `${count} action${count === 1 ? '' : 's'}` };
         }
         return { ...entry, pending: false, text };
-      }),
-    }));
+      })));
   }, []);
 
   /** Tool calls absorb into one live cluster per work phase — the row
@@ -853,14 +853,11 @@ export default function CanvasGlassPreviewPage() {
       if (last && last.role === 'status' && last.kind === 'tool' && last.pending) {
         const updated = [...entries];
         updated[updated.length - 1] = { ...last, text: name, count: (last.count ?? 1) + 1 };
-        return { ...previous, [lane]: updated };
+        return setCanvasConversation(previous, lane, updated);
       }
       const id = entryIdRef.current;
       entryIdRef.current += 1;
-      return {
-        ...previous,
-        [lane]: [...entries, { role: 'status', text: name, pending: true, kind: 'tool', count: 1, id }],
-      };
+      return setCanvasConversation(previous, lane, [...entries, { role: 'status', text: name, pending: true, kind: 'tool', count: 1, id }]);
     });
   }, []);
 
@@ -878,12 +875,12 @@ export default function CanvasGlassPreviewPage() {
       if (last && last.role === 'text' && last.live) {
         const updated = [...entries];
         updated[updated.length - 1] = { ...last, text: last.text + delta };
-        return { ...previous, [lane]: updated };
+        return setCanvasConversation(previous, lane, updated);
       }
       const id = entryIdRef.current;
       entryIdRef.current += 1;
       const settled = entries.map((entry) => (entry.role === 'thinking' && entry.live ? { ...entry, live: false } : entry));
-      return { ...previous, [lane]: [...settled, { role: 'text', text: delta, live: true, id }] };
+      return setCanvasConversation(previous, lane, [...settled, { role: 'text', text: delta, live: true, id }]);
     });
   }, []);
 
@@ -904,11 +901,11 @@ export default function CanvasGlassPreviewPage() {
           : last.marks;
         const updated = [...entries];
         updated[updated.length - 1] = { ...last, text, marks };
-        return { ...previous, [lane]: updated };
+        return setCanvasConversation(previous, lane, updated);
       }
       const id = entryIdRef.current;
       entryIdRef.current += 1;
-      return { ...previous, [lane]: [...entries, { role: 'thinking', text: delta, live: true, startedAt: Date.now(), marks: [], id }] };
+      return setCanvasConversation(previous, lane, [...entries, { role: 'thinking', text: delta, live: true, startedAt: Date.now(), marks: [], id }]);
     });
   }, []);
 
@@ -961,8 +958,7 @@ export default function CanvasGlassPreviewPage() {
       recordToolResult(ensureTurnTools(lane), event.name, event.args, event.output);
     } else if (event.type === 'status') {
       if (event.status === 'dead') {
-        turnToolsRef.current.delete(lane);
-        turnTextRef.current.delete(lane);
+        clearCanvasTurnAccumulators(lane, turnTextRef.current, turnToolsRef.current);
         setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
         resolveStatus(lane, 'Session ended');
       } else if (event.status === 'ready') {
@@ -972,14 +968,15 @@ export default function CanvasGlassPreviewPage() {
         // …then a playback bar at the very end, carrying the full answer so the
         // operator can hear the whole turn read back (Symon voice).
         const said = (turnTextRef.current.get(lane) ?? '').trim();
-        turnTextRef.current.delete(lane);
         if (said) toAppend.push({ role: 'playback', text: said });
         if (toAppend.length) appendEntries(lane, toAppend);
-        turnToolsRef.current.delete(lane);
+        clearCanvasTurnAccumulators(lane, turnTextRef.current, turnToolsRef.current);
         setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
         resolveStatus(lane, 'Done');
       }
     } else if (event.type === 'notice') { appendEntries(lane, [{ role: 'status', text: event.message, pending: false }]); } else {
+      clearCanvasTurnAccumulators(lane, turnTextRef.current, turnToolsRef.current);
+      setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
       resolveStatus(lane, 'Failed');
       appendEntries(lane, [{ role: 'status', text: event.error.slice(0, 200), pending: false }]);
     }
@@ -1032,7 +1029,7 @@ export default function CanvasGlassPreviewPage() {
           entries.push(message.role === 'user' ? { role: 'user', text, id } : { role: 'text', text, id });
         }
         // A turn that started while we fetched wins the lane.
-        setConvos((previous) => ((previous[repo]?.length ?? 0) > 0 ? previous : { ...previous, [repo]: entries }));
+        setConvos((previous) => ((previous[repo]?.length ?? 0) > 0 ? previous : setCanvasConversation(previous, repo, entries)));
       })
       .catch(() => {});
   }, [dockOpen, activeRepoPath, convos, orch]);
@@ -1040,10 +1037,7 @@ export default function CanvasGlassPreviewPage() {
   /** Erase a lane's transcript back to a boundary — powers undo-send
    *  (everything at/after the just-sent user entry vanishes, like it never was). */
   const truncateLane = useCallback((lane: string, fromEntryId: number) => {
-    setConvos((previous) => ({
-      ...previous,
-      [lane]: (previous[lane] ?? []).filter((entry) => entry.id < fromEntryId),
-    }));
+    setConvos((previous) => updateCanvasConversation(previous, lane, (entries) => entries.filter((entry) => entry.id < fromEntryId)));
   }, []);
 
   /** The raw send for the docked / bottom conversation — fires the turn,
@@ -1076,7 +1070,7 @@ export default function CanvasGlassPreviewPage() {
     // appending this turn, then fold the card away — never two views at once.
     const tId = orch.threadIdFor(lane);
     if (tId) {
-      setConvos((previous) => (previous[`thread:${tId}`] ? { ...previous, [lane]: previous[`thread:${tId}`] } : previous));
+      setConvos((previous) => (previous[`thread:${tId}`] ? setCanvasConversation(previous, lane, previous[`thread:${tId}`]) : previous));
       setChatCards((previous) => previous.filter((card) => card.threadId !== tId));
     }
     appendEntries(lane, [userEntry, { role: 'status', text: 'Thinking', pending: true }]);
@@ -1331,7 +1325,7 @@ export default function CanvasGlassPreviewPage() {
         const spot = at ?? findFreeSpot(380, 400);
         // The card's live convo lane starts from the history transcript —
         // its in-card composer streams onto the same lane from there.
-        setConvos((previous) => ({ ...previous, [`thread:${threadId}`]: entries }));
+        setConvos((previous) => setCanvasConversation(previous, `thread:${threadId}`, entries));
         setChatCards((previous) => [...previous, {
           id,
           threadId,
@@ -1370,8 +1364,15 @@ export default function CanvasGlassPreviewPage() {
   }, []);
 
   const closeChatCard = useCallback((id: number) => {
+    const target = chatCards.find((card) => card.id === id);
     setChatCards((previous) => previous.filter((card) => card.id !== id));
-  }, []);
+    if (!target) return;
+    const lanes = [`thread:${target.threadId}`];
+    if (target.repoPath && orch.threadIdFor(target.repoPath) === target.threadId) lanes.push(target.repoPath);
+    setConvos((previous) => removeCanvasConversations(previous, lanes));
+    firstOutputRef.current.delete(lanes[0]!);
+    clearCanvasTurnAccumulators(lanes[0]!, turnTextRef.current, turnToolsRef.current);
+  }, [chatCards, orch]);
 
   /** Promote a chat card into the dock — adopt its thread on the live
    *  socket; the next composer message continues that conversation. */
@@ -1380,7 +1381,7 @@ export default function CanvasGlassPreviewPage() {
     if (!repo) return;
     setActiveRepoPath(repo);
     orch.adoptThread(repo, card.threadId);
-    setConvos((previous) => ({ ...previous, [repo]: previous[`thread:${card.threadId}`] ?? card.entries }));
+    setConvos((previous) => setCanvasConversation(previous, repo, previous[`thread:${card.threadId}`] ?? card.entries));
     setChatCards((previous) => previous.filter((existing) => existing.id !== card.id));
     setDockOpen(true);
   }, [activeRepoPath, orch]);
@@ -1412,7 +1413,7 @@ export default function CanvasGlassPreviewPage() {
     const spot = findFreeSpot(380, 400);
     // Seed the card's live lane from the dock lane so its transcript is there
     // on first paint and its socket streams onto the same conversation.
-    setConvos((previous) => ({ ...previous, [`thread:${threadId}`]: previous[repo] ?? entries }));
+    setConvos((previous) => setCanvasConversation(previous, `thread:${threadId}`, previous[repo] ?? entries));
     setChatCards((previous) => [...previous, {
       id,
       threadId,
@@ -2537,13 +2538,11 @@ export default function CanvasGlassPreviewPage() {
       })]);
     }
     snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
-    // Video cards restore async — the bytes come back from IndexedDB and get a
-    // fresh object URL (the snapshot only carried the media id). A clip whose
-    // blob is gone (storage cleared) drops silently.
     const videoRestores = (snap.video ?? []).map(async (saved) => {
       const blob = await getMedia(saved.mediaId);
       if (!blob) return;
-      const src = URL.createObjectURL(blob);
+      const src = canvasMedia.createObjectURL(blob);
+      if (!src) return;
       const id = nextIdRef.current;
       nextIdRef.current += 1;
       zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
@@ -2580,7 +2579,7 @@ export default function CanvasGlassPreviewPage() {
       // guard, padded past the terminal respawn timer.
       persistArmedAtRef.current = Math.min(persistArmedAtRef.current, Date.now() + 2000);
     });
-  }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
+  }, [canvasMedia, pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
 
   // Build the snapshot only when the debounce fires. Dragging used to stringify
   // every card on every pointer move even though localStorage writes were delayed.
@@ -2855,15 +2854,15 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  /** Drop a video clip onto the canvas — the bytes go to IndexedDB (a clip is
-   *  far too big for the localStorage photos ride on), and the card renders an
-   *  object URL minted from them. The snapshot keeps only the media id. */
+  /** Drop a video clip onto the canvas. IndexedDB stores the bytes, the card
+   *  renders an object URL, and the snapshot keeps only the media id. */
   const spawnVideoCard = useCallback((file: File, at: { x: number; y: number }) => {
     const src = URL.createObjectURL(file);
     const mediaId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `vid-${Date.now()}-${nextIdRef.current}`;
     const probe = document.createElement('video');
     probe.preload = 'metadata';
     probe.onloadedmetadata = () => {
+      if (!canvasMedia.retainObjectURL(src)) return;
       const natW = probe.videoWidth || 16;
       const natH = probe.videoHeight || 9;
       const aspect = natW / natH;
@@ -2889,7 +2888,7 @@ export default function CanvasGlassPreviewPage() {
     };
     probe.onerror = () => { URL.revokeObjectURL(src); };
     probe.src = src;
-  }, []);
+  }, [canvasMedia]);
 
   const moveVideoCard = useCallback((id: number, x: number, y: number) => {
     setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));

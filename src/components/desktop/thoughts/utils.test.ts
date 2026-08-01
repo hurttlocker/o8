@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-import { mergeSameThreadHistoryLoad, resolveThreadLoadPlan } from './utils';
+import { MAX_TRANSCRIPT_ENTRIES_PER_SLICE } from '@/lib/transcripts/store';
+import { mergeSameThreadHistoryLoad, mergeTranscriptEntries, resolveThreadLoadPlan } from './utils';
 
 function entry(id: string, role: MobileTranscriptEntry['role'], text: string, timestamp: number): MobileTranscriptEntry {
   return { id, role, text, timestamp, timestampLabel: `${timestamp}` };
 }
+
+describe('mergeTranscriptEntries retention', () => {
+  it('bounds a long-running conversation to the newest messages', () => {
+    const existing = Array.from({ length: MAX_TRANSCRIPT_ENTRIES_PER_SLICE }, (_, index) => (
+      entry(`entry-${index}`, 'assistant', `message ${index}`, index)
+    ));
+    const incoming = entry('newest', 'assistant', 'latest answer', existing.length);
+
+    const merged = mergeTranscriptEntries(existing, [incoming]);
+
+    expect(merged).toHaveLength(MAX_TRANSCRIPT_ENTRIES_PER_SLICE);
+    expect(merged[0]?.id).toBe('entry-1');
+    expect(merged.at(-1)?.id).toBe('newest');
+  });
+});
 
 describe('mergeSameThreadHistoryLoad', () => {
   it('preserves live entries missing from a stale same-thread history fetch', () => {
