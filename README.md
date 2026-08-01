@@ -85,6 +85,8 @@ Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aide
 
 ### Phone
 
+<img src="./assets/phone.jpg" alt="The o8 iOS app: a morning catch-up screen showing 34 new commits ready to review across three tracked repositories, with a composer for asking the voice agent" width="300">
+
 - **iOS app:** Pair by QR in seconds — beta access via [o8.run](https://o8.run).
 - **Any phone:** the mobile web surface ships in this repo — pair any device on your network through the browser, no app needed.
 - **Build your own:** the pairing protocol and WebSocket surface are open in this repo. Third-party clients are welcome.
