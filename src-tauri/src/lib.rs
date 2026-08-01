@@ -5976,6 +5976,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             agent::machine::symon_machine_switch,
             #[cfg(target_os = "macos")]
+            agent::machine::symon_machine_session_end,
+            #[cfg(target_os = "macos")]
             agent::realtime_bridge::realtime_interrupt_review,
             #[cfg(target_os = "macos")]
             agent::realtime_bridge::record_realtime_event,

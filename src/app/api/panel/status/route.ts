@@ -50,6 +50,7 @@ export async function GET() {
   ensureExternalMergeBootHook();
 
   return NextResponse.json({
+    product: 'o8',
     connected: false,
     gatewayUrl: null,
     version: readServerVersion(),

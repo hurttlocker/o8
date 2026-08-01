@@ -136,3 +136,30 @@ export function buildTransportedToolEval(
     return JSON.stringify(slot.done ? { state: 'done', ok: slot.ok, result: slot.result } : { state: 'pending' });
   })()`;
 }
+
+/** End one native active-machine session after the server drops its owner row. */
+export function buildMachineSessionEndEval(sessionId: string): string {
+  const session = JSON.stringify(sessionId);
+  return `(() => {
+    const A = window.__o8SymonAgent;
+    if (!A || typeof A.endMachineSession !== 'function') return JSON.stringify({ state: 'no_bridge' });
+    const store = (window.__o8SymonMachineSessionEnds = window.__o8SymonMachineSessionEnds || {});
+    const sessionId = ${session};
+    const NOW = Date.now();
+    for (const key in store) {
+      if (store[key] && NOW - (store[key].completedAt || store[key].startedAt || 0) > 300000) delete store[key];
+    }
+    let slot = store[sessionId];
+    if (!slot) {
+      slot = store[sessionId] = { done: false, startedAt: NOW };
+      Promise.resolve(A.endMachineSession(sessionId)).then((removed) => {
+        store[sessionId] = { done: true, completedAt: Date.now(), removed: Boolean(removed) };
+      }).catch((error) => {
+        store[sessionId] = { done: true, completedAt: Date.now(), error: String((error && error.message) || error) };
+      });
+    }
+    if (!slot.done) return JSON.stringify({ state: 'pending' });
+    if (slot.error) return JSON.stringify({ state: 'error', detail: slot.error });
+    return JSON.stringify({ state: 'done', removed: slot.removed === true });
+  })()`;
+}

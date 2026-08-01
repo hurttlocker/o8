@@ -108,6 +108,7 @@ interface SymonAgentBridge {
   invokeTool: SymonInvokeTool | null;
   invokeTransportedTool: SymonInvokeTool | null;
   interruptTool: SymonInterruptTool | null;
+  endMachineSession: ((sessionId: string) => Promise<boolean>) | null;
   resolveConfirm: SymonResolveConfirm | null;
   config: { model: string; voice: string; tools: Array<Record<string, unknown>> } | null;
   /** Legacy relay alias; entries are now fully correlated when callers pass metadata. */
@@ -330,6 +331,7 @@ export function RealtimeVoiceHost() {
       invokeTool: null,
       invokeTransportedTool: null,
       interruptTool: null,
+      endMachineSession: null,
       resolveConfirm: null,
       config: null,
       confirms,
@@ -376,6 +378,9 @@ export function RealtimeVoiceHost() {
         });
         bridge.interruptTool = (correlation) => invoke<boolean>('realtime_interrupt_review', {
           reviewGuardId: symonReviewGuardId(correlation.sessionId, correlation.callId),
+        });
+        bridge.endMachineSession = (sessionId) => invoke<boolean>('symon_machine_session_end', {
+          sessionId,
         });
         bridge.resolveConfirm = async (confirmationId, allow, correlation, terminal) => {
           const result = await invoke<SymonConfirmResolution>('agent_confirm_v2', {

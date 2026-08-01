@@ -3318,6 +3318,17 @@ const symonConfirmationTracker = new SymonConfirmationTracker();
 /** Accepted Code actions waiting for the correlated lane's terminal transition. */
 const symonAsyncActionTracker = new SymonAsyncActionTracker();
 
+function endSymonMachineSession(sessionId: string): void {
+  void fetchNextJson<{ ok?: boolean; removed?: boolean }>('/api/symon/machine/session', {
+    method: 'POST',
+    body: { sessionId },
+  }).catch((error) => {
+    console.warn(
+      `[symon-machine] failed to end ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+}
+
 function symonProtocolVersion(msg: Record<string, unknown>): SymonProtocolVersion {
   return msg.protocolVersion === 2 ? 2 : 1;
 }
@@ -3657,6 +3668,7 @@ function preemptOtherSymonSessions(keepSessionId: string, detail: string): void 
     pushSymonStatus(route.clientId, sid, 'idle', detail);
     symonSessions.delete(sid);
     clearSymonScopeGrant(sid);
+    endSymonMachineSession(sid);
   }
 }
 
@@ -3682,6 +3694,7 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
     }
     stopAgentSession(sessionId);
     clearSymonScopeGrant(sessionId);
+    endSymonMachineSession(sessionId);
     persistAgentRegistry();
     return;
   }
@@ -3717,6 +3730,7 @@ function handleSymonStop(client: ClientState, msg: Record<string, unknown>): voi
     }
     symonTextOwners.delete(sessionId);
     dropSymonTextSession(sessionId);
+    endSymonMachineSession(sessionId);
     return;
   }
   const grant = activeSymonGrant(client, sessionId);
@@ -3731,6 +3745,7 @@ function handleSymonStop(client: ClientState, msg: Record<string, unknown>): voi
   if (owner) void abortSymonSessionCalls(sessionId, owner, 'session_stopped');
   stopAgentSession(sessionId);
   clearSymonScopeGrant(sessionId);
+  endSymonMachineSession(sessionId);
   persistAgentRegistry();
 }
 
@@ -4230,6 +4245,8 @@ function cleanupSymonForClient(clientId: string): void {
       void interruptSymonTextNative(turn.sessionId, turn.turnId);
       pushSymonTextDone(turn, 'interrupted');
     }
+    dropSymonTextSession(sessionId);
+    endSymonMachineSession(sessionId);
   }
   let changed = false;
   for (const [sid, route] of Array.from(symonSessions.entries())) {
@@ -4239,6 +4256,7 @@ function cleanupSymonForClient(clientId: string): void {
     void abortSymonSessionCalls(sid, route, 'session_stopped');
     stopAgentSession(sid);
     clearSymonScopeGrant(sid);
+    endSymonMachineSession(sid);
     changed = true;
   }
   if (changed) persistAgentRegistry();
@@ -4261,6 +4279,7 @@ function sweepStaleSymon(): void {
     }
     symonSessions.delete(dropped.sessionId);
     clearSymonScopeGrant(dropped.sessionId);
+    endSymonMachineSession(dropped.sessionId);
     persistAgentRegistry();
   }
   for (const call of symonToolTracker.timedOut(Date.now())) {
@@ -4301,6 +4320,7 @@ async function sweepDeskPreemption(): Promise<void> {
     pushSymonStatus(route.clientId, sid, 'idle', 'preempted_by_desk');
     symonSessions.delete(sid);
     clearSymonScopeGrant(sid);
+    endSymonMachineSession(sid);
   }
   stopAgentSession();
   persistAgentRegistry();
