@@ -6,7 +6,7 @@ o8 is an open-source desktop control plane for AI coding agents.
 
 [Download the latest signed macOS build](https://github.com/hurttlocker/o8/releases) · [Build from source](#quickstart)
 
-<!-- hero -->
+![o8 running a fleet of coding agents: three agents at work in isolated worktrees on the left, the governance queue holding incidents that need an operator decision on the right](./assets/hero.jpg)
 
 **Run a fleet of coding agents. Approve what ships.**
 
