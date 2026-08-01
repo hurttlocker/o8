@@ -29,9 +29,9 @@ import { ensureV18FactsSourceAuthoritySchema } from '@/lib/db/v18-facts-source-a
 import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-migration';
 import { ensureV20FactsEmbeddingSchema } from '@/lib/db/v20-facts-embedding-migration';
 import { ensureV35UnifiedSearchSchema } from '@/lib/db/v35-unified-search-migration';
+import { ensureV36HarnessSchema } from '@/lib/db/v36-harness-migration';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 // ── Data directory ──
-
 migrateDataDirOnce();
 const DATA_DIR = getDataDir();
 // Keep the filename as cortex-ide.db so the data dir migration's byte-for-byte
@@ -39,8 +39,7 @@ const DATA_DIR = getDataDir();
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 35;
-
+const DB_SCHEMA_VERSION = 36;
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
 }
@@ -162,6 +161,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // scoring. Backfill is opt-in via `scripts/backfill-fact-embeddings.ts`.
   ensureV20FactsEmbeddingSchema(sqlite);
   ensureV35UnifiedSearchSchema(sqlite);
+  ensureV36HarnessSchema(sqlite);
   // #835 — recover any session_outcomes rows whose `valid_from` was inserted
   // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only

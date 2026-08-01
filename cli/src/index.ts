@@ -22,6 +22,18 @@ import { runBrowser } from './commands/browser.js';
 import { runConnect } from './commands/connect.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
+import { runCi } from './commands/ci.js';
+import {
+  runBoot,
+  runCapabilities,
+  runContract,
+  runEvaluateDiff,
+  runFeature,
+  runGround,
+  runHarness,
+  runSprint,
+  runVerify,
+} from './commands/harness.js';
 import { runInbox } from './commands/inbox.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runMission } from './commands/mission.js';
@@ -91,6 +103,30 @@ interface ParsedArgs {
   help: boolean;
 }
 
+const SINGLE_LEVEL_BOOLEAN_FLAGS = new Set([
+  '--blocked',
+  '--failed',
+  '--failing',
+  '--passed',
+  '--passing',
+  '--skipped',
+  '--terse',
+]);
+
+/**
+ * The shared parser reserves the first two bare tokens for command groups. For
+ * a one-level command whose first argument is a valued flag, that flag's value
+ * lands in `secondary`; put it back after the flag before command-level parsing.
+ */
+function singleLevelArgs(secondary: string | undefined, rest: string[]): string[] {
+  if (!secondary) return rest;
+  const first = rest[0];
+  if (first?.startsWith('--') && !first.includes('=') && !SINGLE_LEVEL_BOOLEAN_FLAGS.has(first)) {
+    return [first, secondary, ...rest.slice(1)];
+  }
+  return [secondary, ...rest];
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
   const command: string[] = [];
   const rest: string[] = [];
@@ -133,6 +169,16 @@ commands:
   run --list           list managed runs (running + recent, with exit codes)
   run stop <runId>     stop a managed run from o8 run --list
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
+  feature list|next|add|verify  durable repo-scoped feature ledger
+  ground "<task>"      persist a real-path impact map before execution
+  boot [--task "..."]  session boot envelope: git, instructions, ledger, contract, grounding
+  contract ...         propose and accept generator/evaluator contracts
+  sprint ...           start or tick a one-feature-at-a-time sprint
+  verify <feature-id>  record computational evidence and optionally tick a sprint
+  harness ...          model-keyed lift, lifecycle, and HarnessBundle operations
+  capabilities         discover harness artifacts and recommended call order
+  evaluate-diff        independent skeptic review of a supplied or git diff
+  ci [--config path]   run the versioned o8/ci/v1 local check contract
   app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
   update apply [--force]  apply an available update when idle; --force overrides live-work refusal
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
@@ -226,7 +272,27 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'ask':
       // The question lands in `secondary` (first positional) when quoted, or
       // spreads across secondary + rest when unquoted — hand both to the parser.
-      return runAsk(args.mode, secondary ? [secondary, ...args.rest] : args.rest);
+      return runAsk(args.mode, singleLevelArgs(secondary, args.rest));
+    case 'feature':
+      return runFeature(args.mode, secondary, args.rest);
+    case 'ground':
+      return runGround(args.mode, singleLevelArgs(secondary, args.rest));
+    case 'boot':
+      return runBoot(args.mode, singleLevelArgs(secondary, args.rest));
+    case 'contract':
+      return runContract(args.mode, secondary, args.rest);
+    case 'sprint':
+      return runSprint(args.mode, secondary, args.rest);
+    case 'verify':
+      return runVerify(args.mode, singleLevelArgs(secondary, args.rest));
+    case 'harness':
+      return runHarness(args.mode, secondary, args.rest);
+    case 'capabilities':
+      return runCapabilities(args.mode, singleLevelArgs(secondary, args.rest));
+    case 'evaluate-diff':
+      return runEvaluateDiff(args.mode, singleLevelArgs(secondary, args.rest));
+    case 'ci':
+      return runCi(args.mode, singleLevelArgs(secondary, args.rest));
     case 'app':
       return runApp(args.mode, secondary, args.rest);
     case 'update':
