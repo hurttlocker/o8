@@ -2459,7 +2459,10 @@ function DashboardInner() {
     ));
   }, [closeRightPanelFromUser]);
 
-  const handleSelectSession = useCallback((sessionKey: string, hint?: { title?: string }) => {
+  const handleSelectSession = useCallback((
+    sessionKey: string,
+    hint?: { title?: string; runtime?: OrchestratorRuntime; repoPath?: string | null },
+  ) => {
     // Open the session transcript in a canvas chat tab.
     // `hint.title` is the pass-through (Option D): an archived row already has
     // its real title in hand — thread it so the tab opens with the right label
@@ -2475,6 +2478,7 @@ function DashboardInner() {
       ));
       const sessionScope = selectedSession?.workspace
         ?? selectedSession?.runtimeSurface?.cwd
+        ?? hint?.repoPath
         ?? null;
       const targetRepo = sessionScope
         ? workspaceScopeEntries.find((repo) => (
@@ -2486,15 +2490,15 @@ function DashboardInner() {
         repoPath: targetRepo?.localPath ?? sessionScope ?? undefined,
       });
       if (!target) return;
-      const runtime = selectedSession?.runtime === 'claude-code'
+      const runtime = hint?.runtime ?? (selectedSession?.runtime === 'claude-code'
         || selectedSession?.runtime === 'gemini'
         || selectedSession?.runtime === 'opencode'
         || selectedSession?.runtime === 'codex'
         ? selectedSession.runtime
-        : sessionKey.startsWith('claude-code:') ? 'claude-code'
+        : sessionKey.startsWith('claude-code:') || sessionKey.startsWith('claude-code-owned:') ? 'claude-code'
         : sessionKey.startsWith('gemini-owned:') ? 'gemini'
         : sessionKey.startsWith('opencode-owned:') ? 'opencode'
-        : 'codex';
+        : 'codex');
       // Canonical label — never an id slice. agentDisplayLabel falls back to
       // the runtime's human name ("Codex") rather than a raw `codex-owned:...`
       // key, so the old `sessionKey.split(':').pop()?.slice(0,12)` → literal
@@ -2728,17 +2732,28 @@ function DashboardInner() {
       focusOrchestrationPacketLane(packet);
       return;
     }
-    if (sessionKey) {
-      handleSelectSession(sessionKey, title ? { title } : undefined);
-      return;
-    }
     void (async () => {
       const resolved = await resolveFocusableLaneBinding({
         laneId: laneId ?? '',
         packetId: packetId ?? '',
-        runtime: 'codex',
+        sessionKey: sessionKey ?? '',
+        runtime: sessionKey?.startsWith('claude-code')
+          ? 'claude-code'
+          : sessionKey?.startsWith('gemini')
+            ? 'gemini'
+            : sessionKey?.startsWith('opencode')
+              ? 'opencode'
+              : 'codex',
       });
-      if (resolved?.sessionKey) handleSelectSession(resolved.sessionKey, title ? { title } : undefined);
+      if (resolved?.sessionKey) {
+        handleSelectSession(resolved.sessionKey, {
+          ...(title ? { title } : {}),
+          runtime: resolved.runtime,
+          repoPath: resolved.repoPath,
+        });
+      } else if (sessionKey) {
+        handleSelectSession(sessionKey, title ? { title } : undefined);
+      }
     })();
   }, [focusOrchestrationPacketLane, handleSelectSession]);
 
