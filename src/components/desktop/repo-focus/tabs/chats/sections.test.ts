@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   attentionBand,
   attentionRank,
+  deriveHistoryDateGroups,
+  derivePrioritySplit,
   deriveSweptThreads,
   isCompletionUnread,
   shouldRecede,
@@ -42,6 +44,43 @@ describe('sidebar section derivation', () => {
     expect(band).toBe('in-flight');
     expect(shouldRecede({ band, active: false, hovered: false })).toBe(true);
     expect(shouldRecede({ band, active: true, hovered: false })).toBe(false);
+  });
+
+  it('orders priority rows by rank, then recency', () => {
+    const items = [
+      { id: 'review-new', status: 'awaiting_review', modifiedAt: '2026-07-31T12:00:00.000Z' },
+      { id: 'failed-old', status: 'failed', modifiedAt: '2026-07-29T12:00:00.000Z' },
+      { id: 'review-old', status: 'awaiting_review', modifiedAt: '2026-07-30T12:00:00.000Z' },
+      { id: 'neutral', status: 'completed', modifiedAt: '2026-07-31T13:00:00.000Z' },
+    ];
+
+    const split = derivePrioritySplit(items);
+    expect(split.priority.map((item) => item.id)).toEqual(['failed-old', 'review-new', 'review-old']);
+    expect(split.remainder.map((item) => item.id)).toEqual(['neutral']);
+  });
+
+  it('returns an empty priority section when nothing needs attention', () => {
+    const split = derivePrioritySplit([
+      { id: 'running', status: 'running', modifiedAt: '2026-07-31T12:00:00.000Z' },
+      { id: 'done', status: 'completed', modifiedAt: '2026-07-30T12:00:00.000Z' },
+    ]);
+
+    expect(split.priority).toEqual([]);
+    expect(split.remainder.map((item) => item.id)).toEqual(['running', 'done']);
+  });
+
+  it('does not duplicate priority rows in date groups', () => {
+    const split = derivePrioritySplit([
+      { ...thread({ tabId: 'failed', modifiedAt: '2026-07-31T12:00:00.000Z' }), status: 'failed' },
+      { ...thread({ tabId: 'today', modifiedAt: '2026-07-31T10:00:00.000Z' }), status: 'running' },
+      { ...thread({ tabId: 'yesterday', modifiedAt: '2026-07-30T10:00:00.000Z' }), status: 'completed' },
+    ]);
+    const dateIds = deriveHistoryDateGroups(split.remainder, new Date('2026-07-31T15:00:00.000Z'))
+      .flatMap((group) => group.items.map((item) => item.tabId));
+
+    expect(split.priority.map((item) => item.tabId)).toEqual(['failed']);
+    expect(dateIds).toEqual(['today', 'yesterday']);
+    expect(new Set([...split.priority.map((item) => item.tabId), ...dateIds]).size).toBe(3);
   });
 
   it('sweeps only stale disposable threads without mutating pinned or active rows', () => {

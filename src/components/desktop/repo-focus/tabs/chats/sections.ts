@@ -77,6 +77,21 @@ export function attentionRank(subject: AttentionSubject): number {
   return ATTENTION_RANK[attentionBand(subject)];
 }
 
+export function derivePrioritySplit<T extends AttentionSubject & { modifiedAt: string }>(
+  items: T[],
+): { priority: T[]; remainder: T[] } {
+  const priority: T[] = [];
+  const remainder: T[] = [];
+  for (const item of items) {
+    (attentionRank(item) > 0 ? priority : remainder).push(item);
+  }
+  priority.sort((left, right) => (
+    attentionRank(right) - attentionRank(left)
+      || Date.parse(right.modifiedAt) - Date.parse(left.modifiedAt)
+  ));
+  return { priority, remainder };
+}
+
 export function shouldRecede({
   band,
   active,

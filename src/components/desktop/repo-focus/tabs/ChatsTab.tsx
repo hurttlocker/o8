@@ -12,7 +12,7 @@ import {
   REPO_FOCUS_FONT,
 } from '../utils';
 import { SessionRow } from './AgentRows';
-import { ChatGroupPicker } from './chats/ChatGroupPicker';
+import { ChatGroupPicker, type ChatGroupMode } from './chats/ChatGroupPicker';
 import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
@@ -23,6 +23,7 @@ import {
   isAutomationSession,
   packetSortTime,
   packetStateTone,
+  packetTimestamp,
   pickHistoryPacket,
   sessionBelongsToRepo,
   sessionIdentity,
@@ -38,12 +39,14 @@ import {
   deriveArchivedLanes,
   deriveHistoryDateGroups,
   deriveHistoryRepoGroups,
+  derivePrioritySplit,
   deriveShowRepoSuffix,
   deriveSweptThreads,
+  isCompletionUnread,
   repoSuffix,
   SIDEBAR_HOVER_THREAD_EVENT,
 } from './chats/sections';
-import { markVisited } from './chats/read-state';
+import { getLastVisited, markVisited } from './chats/read-state';
 import type {
   ArchivedLaneRow,
   ChatHistoryItem,
@@ -79,17 +82,16 @@ export function ChatsTab({
   // Three modes, persisted to localStorage. Borrowed from Claude's
   // sidebar pattern in the operator's reference video — the filter
   // icon on a group header opens a Group by / Sort by popover.
-  type ChatGroupBy = 'repo' | 'date' | 'flat';
   const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
-  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupBy>('flat');
+  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupMode>('flat');
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
-    if (stored === 'repo' || stored === 'date' || stored === 'flat') {
+    if (stored === 'repo' || stored === 'date' || stored === 'flat' || stored === 'activity') {
       setChatGroupBy(stored);
     }
   }, []);
-  const updateChatGroupBy = useCallback((next: ChatGroupBy) => {
+  const updateChatGroupBy = useCallback((next: ChatGroupMode) => {
     setChatGroupBy(next);
     if (typeof window !== 'undefined') {
       try { window.localStorage.setItem(CHAT_GROUP_BY_KEY, next); } catch { /* ignore */ }
@@ -381,7 +383,6 @@ export function ChatsTab({
   const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
   const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
   const cappedChatCount = Math.min(sortedChatItems.length, historyCap);
-  const hiddenChatCount = Math.max(0, cappedChatCount - flatHistoryItems.length);
   const flatHistoryRepoGroups = useMemo(
     () => deriveHistoryRepoGroups(flatHistoryItems, targetRepos),
     [flatHistoryItems, targetRepos],
@@ -390,6 +391,38 @@ export function ChatsTab({
     () => deriveHistoryDateGroups(flatHistoryItems),
     [flatHistoryItems],
   );
+  const activitySplit = useMemo(() => {
+    const eligibleItems = sortedChatItems.slice(0, historyCap);
+    const split = derivePrioritySplit(eligibleItems.map((item) => {
+      const packet = historyPacketsByTabId.get(item.tabId);
+      return {
+        item,
+        modifiedAt: item.modifiedAt,
+        status: packet?.status ?? null,
+        rejected: packet?.review?.approved === false,
+        outcome: packet?.releaseState === 'released' ? 'merged' : null,
+        unread: packet
+          ? isCompletionUnread(packetTimestamp(packet), getLastVisited(`packet:${packet.id}`))
+          : false,
+      };
+    }));
+    return {
+      priority: split.priority.map((entry) => entry.item),
+      remainder: split.remainder.map((entry) => entry.item),
+    };
+  }, [historyCap, historyPacketsByTabId, sortedChatItems]);
+  const activityDateItems = activitySplit.remainder.slice(
+    0,
+    compact && !showAllChats ? Math.max(0, 12 - activitySplit.priority.length) : Number.POSITIVE_INFINITY,
+  );
+  const activityDateGroups = useMemo(
+    () => deriveHistoryDateGroups(activityDateItems),
+    [activityDateItems],
+  );
+  const shownActivityCount = activitySplit.priority.length + activityDateItems.length;
+  const hiddenChatCount = Math.max(0, cappedChatCount - (
+    chatGroupBy === 'activity' ? shownActivityCount : flatHistoryItems.length
+  ));
   const showRepoSuffix = deriveShowRepoSuffix([...visibleHistory, ...visibleArchivedHistory]);
 
   const flatArchivedLanes = useMemo(
@@ -525,12 +558,45 @@ export function ChatsTab({
         ))
       ) : null}
 
-      {groupMode === 'flat' && flatHistoryItems.length > 0 ? (
+      {groupMode === 'flat' && (flatHistoryItems.length > 0 || (compact && chatGroupBy === 'activity')) ? (
         <div>
           {compact ? (
             <>
               <SectionLabel label="Chats" compact />
-              {chatGroupBy === 'flat' ? (
+              {chatGroupBy === 'activity' ? (
+                <>
+                  <RepoGroupLabel
+                    label="Priority"
+                    noIcon
+                    trailing={<ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />}
+                  />
+                  {activitySplit.priority.length > 0 ? (
+                    activitySplit.priority.map((item) => renderHistoryRow(item))
+                  ) : (
+                    <div
+                      style={{
+                        paddingTop: 2,
+                        paddingRight: 12,
+                        paddingBottom: 5,
+                        paddingLeft: 29,
+                        color: 'var(--t-text-faint)',
+                        fontSize: 9.5,
+                        lineHeight: 1.25,
+                        fontWeight: 260,
+                        letterSpacing: '-0.4px',
+                      }}
+                    >
+                      Nothing needs attention
+                    </div>
+                  )}
+                  {activityDateGroups.map((group) => (
+                    <div key={group.key}>
+                      <RepoGroupLabel label={group.label} noIcon />
+                      {group.items.map((item) => renderHistoryRow(item))}
+                    </div>
+                  ))}
+                </>
+              ) : chatGroupBy === 'flat' ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 0, paddingRight: 10, paddingBottom: 2 }}>
                     <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
