@@ -48,6 +48,8 @@ export async function assessDurableApprovedReview(
         approval.toolName === 'orchestrator_review'
         && approval.status === 'approved'
         && approval.args?.reviewSuperseded !== true
+        && typeof approval.args?.reviewTurnId === 'string'
+        && approval.args.reviewTurnOutcome === 'completed'
       ),
     );
     if (approved.length === 0) {

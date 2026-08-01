@@ -16,6 +16,7 @@ describe('Codex orchestrator error events', () => {
     expect(onEvent).toHaveBeenCalledWith({
       type: 'error',
       error: 'You have hit your usage limit. Try again when it resets.',
+      code: 'usage_limit_reached',
     });
   });
 });

@@ -2,7 +2,6 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
-import type { Lane } from './types';
 
 const explainerMocks = vi.hoisted(() => ({
   patchMissionPacket: vi.fn(),
@@ -32,6 +31,7 @@ process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-explainer-')
 
 const { generatePacketExplainer, parseExplainerQuiz } = await import('./packet-explainer');
 const { artifactAbsPath, artifactExtForMime, listArtifacts } = await import('@/lib/artifacts/store');
+const { createLane } = await import('@/lib/lane/registry');
 
 const quizJson = JSON.stringify({
   questions: [
@@ -88,6 +88,13 @@ describe('generatePacketExplainer', () => {
     const packetId = `pkt-cleanup-${Date.now()}`;
     const scratchPath = join(worktree, `.o8-packet-explainer-${packetId}.html`);
     const html = `<html><body><h1>Packet proof</h1><script type="application/json" id="o8-quiz">${quizJson}</script></body></html>`;
+    const lane = createLane({
+      repoPath: worktree,
+      worktreePath: worktree,
+      branch: 'inline/packet-explainer-test',
+      runtime: 'codex',
+      packetId,
+    });
 
     explainerMocks.patchMissionPacket.mockClear();
     explainerMocks.sendTurn.mockReset();
@@ -96,11 +103,7 @@ describe('generatePacketExplainer', () => {
     });
 
     await generatePacketExplainer({
-      lane: {
-        id: 'lane-cleanup',
-        repoPath: worktree,
-        worktreePath: worktree,
-      } as Lane,
+      lane,
       packetId,
       packetTitle: 'Cleanup proof',
       packetSummary: 'Persist the report and remove its scratch copy.',
@@ -113,7 +116,7 @@ describe('generatePacketExplainer', () => {
     expect(existsSync(scratchPath)).toBe(false);
     const reports = listArtifacts({ packetId });
     expect(reports).toHaveLength(1);
-    expect(reports[0]).toMatchObject({ kind: 'report', laneId: 'lane-cleanup', mimeType: 'text/html' });
+    expect(reports[0]).toMatchObject({ kind: 'report', laneId: lane.id, mimeType: 'text/html' });
     expect(readFileSync(artifactAbsPath(reports[0].relPath), 'utf8')).toBe(html);
     expect(explainerMocks.patchMissionPacket).toHaveBeenLastCalledWith(
       packetId,

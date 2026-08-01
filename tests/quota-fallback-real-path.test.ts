@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +23,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { handleCodexJsonLine } = await import('@/lib/lane/codex-orchestrator-events');
 const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
+const { recordLaneEvent } = await import('@/lib/lane/events');
 const { runReviewerTurnWithQuotaFallback } = await import('@/lib/lane/review-quota-fallback');
 const {
   buildCrossHouseFallbackMessage,
@@ -30,6 +32,10 @@ const {
 const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
+const { composeSupervisorInboxCardCopy } = await import('@/lib/inbox/card-copy');
+const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
+const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+const { listApprovalsForContext } = await import('@/lib/approvals/store');
 
 function fakeBackend(
   id: 'codex' | 'claude',
@@ -82,7 +88,7 @@ describe('cross-house quota fallback real paths', () => {
     });
     const codex = fakeBackend('codex', vi.fn(async (_repo, _prompt, onEvent) => {
       onEvent({ type: 'text', text: 'partial review that must be discarded' });
-      onEvent({ type: 'error', error: 'usage_limit_reached: limit resets tomorrow' });
+      onEvent({ type: 'error', code: 'usage_limit_reached', error: 'You have hit your usage limit. Try again when it resets.' });
     }));
     const claude = fakeBackend('claude', vi.fn(async (_repo, prompt, onEvent, options) => {
       expect(prompt).toBe('Review the complete packet.');
@@ -114,6 +120,57 @@ describe('cross-house quota fallback real paths', () => {
         fromHouse: 'openai',
         toHouse: 'anthropic',
       },
+    });
+  });
+
+  it('invalidates a durable approval written by a quota-failed review turn', async () => {
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-review-turn-outcome-'));
+    execFileSync('git', ['init', '-q'], { cwd: repoPath });
+    execFileSync('git', ['config', 'user.email', 'quota-test@o8.local'], { cwd: repoPath });
+    execFileSync('git', ['config', 'user.name', 'o8 quota test'], { cwd: repoPath });
+    writeFileSync(join(repoPath, 'fixture.txt'), 'review me\n', 'utf8');
+    execFileSync('git', ['add', 'fixture.txt'], { cwd: repoPath });
+    execFileSync('git', ['commit', '-qm', 'test: review fixture'], { cwd: repoPath });
+    const packetId = `pkt-review-artifact-${Date.now()}`;
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/review-artifact',
+      baseBranch: 'master',
+      runtime: 'codex',
+      packetId,
+    });
+    const codex = fakeBackend('codex', vi.fn(async (_repo, _prompt, onEvent) => {
+      await submitPacketReview({ packetId, approved: true, findings: [] });
+      onEvent({ type: 'error', code: 'usage_limit_reached', error: 'You have hit your usage limit.' });
+    }));
+    const claude = fakeBackend('claude', vi.fn(async (_repo, _prompt, onEvent) => {
+      onEvent({ type: 'text', text: 'Fallback review completed without writing a verdict.' });
+      onEvent({ type: 'done', cost: null });
+    }));
+
+    await runReviewerTurnWithQuotaFallback({
+      laneId: lane.id,
+      repoPath,
+      threadId: `auto-review-${lane.id}`,
+      surface: 'auto-review',
+      prompt: 'Review the complete packet.',
+      initialBackend: codex,
+      backendResolver: () => claude,
+    });
+
+    const approval = listApprovalsForContext({ packetId, laneId: lane.id })
+      .find((candidate) => candidate.toolName === 'orchestrator_review');
+    expect(approval).toMatchObject({
+      status: 'approved',
+      args: {
+        reviewTurnOutcome: 'quota_discarded',
+        reviewSuperseded: true,
+      },
+    });
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      reason: 'No durable approved AI review exists.',
     });
   });
 
@@ -173,7 +230,7 @@ describe('cross-house quota fallback real paths', () => {
         model: 'gpt-5.6-terra',
         surfaceId: 'codex:auto-quota-seam',
         prompt: 'Finish the packet automatically.',
-        rawFailure: 'usage_limit_reached: retry tomorrow',
+        rawFailure: JSON.stringify({ type: 'turn.failed', error: { code: 'usage_limit_reached' } }),
       });
 
       expect(result).toMatchObject({
@@ -193,6 +250,80 @@ describe('cross-house quota fallback real paths', () => {
         status: 'running',
       });
       expect(getLaneEvents(lane.id).find((event) => event.verb === 'worker_fallback')).toBeTruthy();
+    } finally {
+      await updateOperatorDefaults({ crossHouseWorkerFallback: false });
+    }
+  });
+
+  it('cards terminally after both worker subscription houses exhaust', async () => {
+    const packetId = `pkt-worker-both-quota-${Date.now()}`;
+    const lane = createLane({
+      repoPath: '/tmp/o8-worker-both-quota-seam',
+      worktreePath: '/tmp/o8-worker-both-quota-seam',
+      branch: 'inline/worker-both-quota-seam',
+      runtime: 'codex',
+      packetId,
+    });
+    launchRuntimeSurface.mockClear();
+    await updateOperatorDefaults({ crossHouseWorkerFallback: true, subscriptionProfile: 'both' });
+
+    try {
+      const first = await handleWorkerRuntimeFailure({
+        laneId: lane.id,
+        runtime: 'codex',
+        model: 'gpt-5.6-terra',
+        surfaceId: 'codex:first-house',
+        prompt: 'Finish the packet automatically.',
+        rawFailure: JSON.stringify({ type: 'turn.failed', error: { code: 'usage_limit_reached' } }),
+      });
+      expect(first.action).toBe('redispatched');
+      const duplicate = await handleWorkerRuntimeFailure({
+        laneId: lane.id,
+        runtime: 'codex',
+        model: 'gpt-5.6-terra',
+        surfaceId: 'codex:first-house',
+        prompt: 'Finish the packet automatically.',
+        rawFailure: JSON.stringify({ type: 'turn.failed', error: { code: 'usage_limit_reached' } }),
+      });
+      expect(duplicate).toMatchObject({
+        action: 'redispatched',
+        sessionKey: 'claude-code:fallback-seam',
+      });
+      expect(launchRuntimeSurface).toHaveBeenCalledTimes(1);
+      for (let index = 0; index < 550; index += 1) {
+        recordLaneEvent(lane.id, 'update', 'system', { index, reason: 'terminal-state-window-proof' });
+      }
+
+      const second = await handleWorkerRuntimeFailure({
+        laneId: lane.id,
+        runtime: 'claude-code',
+        model: 'claude-sonnet-5',
+        surfaceId: 'claude-code:fallback-seam',
+        prompt: 'Finish the packet automatically.',
+        rawFailure: JSON.stringify({
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          result: "You've hit your usage limit",
+        }),
+      });
+
+      expect(second.action).toBe('card');
+      expect(launchRuntimeSurface).toHaveBeenCalledTimes(1);
+      expect(getLane(lane.id)?.status).toBe('paused');
+      expect(getLaneEvents(lane.id).find((event) => event.verb === 'worker_fallback_terminal')).toMatchObject({
+        payload: { status: 'both_houses_exhausted', bothHousesExhausted: true },
+      });
+      const terminalCard = listInboxItems({ includeAllProjects: true }).find((item) => item.packetId === packetId);
+      expect(terminalCard).toMatchObject({
+        status: 'human_required',
+        payload: {
+          bothHousesExhausted: true,
+          suggestedRuntime: null,
+          suggestedModel: null,
+        },
+      });
+      expect(composeSupervisorInboxCardCopy(terminalCard!).headline).toContain('Both comparable worker subscriptions are exhausted');
     } finally {
       await updateOperatorDefaults({ crossHouseWorkerFallback: false });
     }

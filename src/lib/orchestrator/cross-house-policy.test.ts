@@ -60,12 +60,28 @@ describe('cross-house equivalence policy', () => {
     expect(resolveCrossHouseFallback({ role: 'orchestrator', backend: 'fable' })).toBeNull();
   });
 
-  it('recognizes emitted and structured Codex quota failures', () => {
-    expect(isRuntimeQuotaLimitError({
-      type: 'turn.failed',
-      error: { code: 'usage_limit_reached', message: 'You have hit your usage limit' },
-    })).toBe(true);
-    expect(isRuntimeQuotaLimitError('429 too many requests: exceeded your current quota')).toBe(true);
-    expect(isRuntimeQuotaLimitError(new Error('process exited with code 1'))).toBe(false);
+  it.each([
+    ['Codex structured usage cap', { type: 'turn.failed', error: { code: 'usage_limit_reached', message: 'You have hit your usage limit. Try again when it resets.' } }],
+    ['Codex workspace cap', { type: 'turn.failed', error: { code: 'workspace_member_usage_limit_reached' } }],
+    ['Claude Code subscription cap', { type: 'result', subtype: 'error_during_execution', is_error: true, result: "You've hit your usage limit" }],
+    ['Claude Code disabled allocation', { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Your usage allocation has been disabled by your admin' }],
+  ])('recognizes the observed exhaustion frame: %s', (_name, frame) => {
+    expect(isRuntimeQuotaLimitError(frame)).toBe(true);
+  });
+
+  it.each([
+    ['single 429', { status: 429, message: 'Too Many Requests' }],
+    ['same-window retry', { status: 429, message: 'Too Many Requests', headers: { 'retry-after': '10' } }],
+    ['retry-after overrides quota-looking text', { status: 429, message: 'You have hit your usage limit.', headers: { 'retry-after': '10' } }],
+    ['Claude transient limiter', { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Server is temporarily limiting requests (not your usage limit)' }],
+    ['HTTP 500', { status: 500, message: 'Internal Server Error' }],
+    ['HTTP 500 overrides a misleading quota code', { status: 500, code: 'usage_limit_reached', message: 'Internal Server Error' }],
+    ['HTTP 503', 'HTTP 503 Service Unavailable'],
+    ['network reset', new Error('ECONNRESET while reading response')],
+    ['network timeout', new Error('ETIMEDOUT')],
+    ['401 auth', { status: 401, message: 'Unauthorized: token expired' }],
+    ['403 auth', { status: 403, message: 'Forbidden' }],
+  ])('keeps transient/auth failures in-house: %s', (_name, frame) => {
+    expect(isRuntimeQuotaLimitError(frame)).toBe(false);
   });
 });

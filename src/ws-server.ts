@@ -4962,7 +4962,7 @@ async function handleOrchestratorSendMsgOnce(
             break;
 
           case 'error':
-            if (suppressQuotaError && isRuntimeQuotaLimitError(event.error)) {
+            if (suppressQuotaError && isRuntimeQuotaLimitError(event)) {
               quotaFallbackError = event.error;
               break;
             }

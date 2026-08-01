@@ -186,6 +186,7 @@ export async function recordCodexAutoReviewVerdict(input: {
   lane: Lane;
   rawText: string;
   requiresSecondPass: boolean;
+  reviewTurnId: string | null;
 }): Promise<RecordedCodexAutoReviewVerdict | null> {
   if (!input.lane.packetId) {
     console.warn(`[auto-review] Codex verdict for lane ${input.lane.id} had no packet id; skipping approval record`);
@@ -203,6 +204,10 @@ export async function recordCodexAutoReviewVerdict(input: {
     requiresSecondPass: verdict.approved && input.requiresSecondPass,
     rawText: verdict.parseWarning ? verdict.rawText : undefined,
     parseWarning: verdict.parseWarning,
+    ...(input.reviewTurnId ? {
+      reviewTurnId: input.reviewTurnId,
+      reviewTurnOutcome: 'completed',
+    } : {}),
   });
 
   return { event, verdict, reviewedHeadSha };

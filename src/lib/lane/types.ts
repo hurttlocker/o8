@@ -289,8 +289,11 @@ export type LaneEventVerb =
   // A subscription-backed model surface crossed houses at the same policy
   // tier after quota exhaustion. These events are operator-visible audit rows.
   | 'review_fallback'
+  | 'review_turn_started'
+  | 'review_turn_finished'
   | 'worker_quota_exhausted'
   | 'worker_fallback'
+  | 'worker_fallback_terminal'
   // Orchestrator review verdict, append-only (#1476 lie 3). Lane events are
   // never rescored or evicted, so review-state can always recover the verdict
   // even after mission-state resets or approval-context drift.

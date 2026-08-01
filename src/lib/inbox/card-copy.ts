@@ -107,6 +107,12 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
         subline: supervisorMetadata(item, [item.errorExcerpt]),
       };
     case 'worker_quota_exhausted':
+      if (item.payload.bothHousesExhausted === true) {
+        return {
+          headline: 'Both comparable worker subscriptions are exhausted; dispatch is paused for human action.',
+          subline: supervisorMetadata(item, [clean(item.payload.fromModel), item.errorExcerpt]),
+        };
+      }
       return {
         headline: `The selected worker subscription is exhausted; rerun on ${clean(item.payload.suggestedRuntime) ?? 'the equal-tier runtime from the other house'}.`,
         subline: supervisorMetadata(item, [

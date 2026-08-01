@@ -162,34 +162,100 @@ export function resolveCrossHouseFallbackForQuota(
   return isRuntimeQuotaLimitError(error) ? resolveCrossHouseFallback(input) : null;
 }
 
-const QUOTA_LIMIT_PATTERNS = [
-  /\busage[ _-]?limit(?:[ _-]?reached)?\b/i,
-  /\b(?:weekly|daily|monthly)[ _-]?limit\b/i,
-  /\bquota\b/i,
-  /\brate[ _-]?limit(?:ed|[ _-]?reached)?\b/i,
-  /\bexceeded your current quota\b/i,
-  /\btoo many requests\b/i,
-  /\b429\b/,
-  /\blimit resets?\b/i,
-  /\bcredits? exhausted\b/i,
+const EXHAUSTION_CODES = new Set([
+  'usage_limit_reached',
+  'workspace_owner_credits_depleted',
+  'workspace_member_credits_depleted',
+  'workspace_owner_usage_limit_reached',
+  'workspace_member_usage_limit_reached',
+]);
+
+const EXHAUSTION_MESSAGES = [
+  /^\s*you(?:'ve| have) hit your (?:(?:weekly|daily|monthly|\d+[ -]hour) )?(?:usage )?limit\b/i,
+  /^\s*you(?:'ve| have) reached your (?:(?:weekly|daily|monthly|\d+[ -]hour) )?(?:usage )?limit\b/i,
+  /^\s*you(?:'re| are) out of usage credits\b/i,
+  /^\s*your org is out of usage\b/i,
+  /^\s*your seat type doesn't include (?:extra )?usage credits\b/i,
+  /^\s*your usage allocation has been disabled by your admin\b/i,
+  /^\s*your group's usage limit is set to \$0\b/i,
 ];
 
-function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object') {
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return String(error);
+const TRANSIENT_PATTERNS = [
+  /\bHTTP\/?\s*5\d\d\b/i,
+  /\b(?:status(?: code)?[:= ]+)?5\d\d\b.*\b(?:server|upstream|gateway|service)\b/i,
+  /\b(?:ECONN[A-Z]+|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|network (?:error|unreachable)|connection (?:reset|refused|timed out))\b/i,
+  /\b(?:401|403)\b|\b(?:unauthori[sz]ed|forbidden|authentication failed|invalid api key|token (?:expired|revoked))\b/i,
+  /\bserver is temporarily limiting requests\b/i,
+  /\bretry-after\b/i,
+];
+
+interface QuotaErrorFacts {
+  codes: Set<string>;
+  messages: string[];
+  statuses: Set<number>;
+  retryAfter: boolean;
+}
+
+function collectQuotaFacts(error: unknown): QuotaErrorFacts {
+  const facts: QuotaErrorFacts = { codes: new Set(), messages: [], statuses: new Set(), retryAfter: false };
+  const seen = new Set<unknown>();
+  const visit = (value: unknown, depth = 0): void => {
+    if (depth > 4 || value === null || value === undefined || seen.has(value)) return;
+    if (typeof value === 'string') {
+      facts.messages.push(value);
+      const trimmed = value.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try { visit(JSON.parse(trimmed), depth + 1); } catch { /* plain CLI output */ }
+      } else if (trimmed.includes('\n')) {
+        for (const line of trimmed.split(/\r?\n/)) {
+          const candidate = line.trim();
+          if (!candidate.startsWith('{')) continue;
+          try { visit(JSON.parse(candidate), depth + 1); } catch { /* non-JSON log line */ }
+        }
+      }
+      return;
     }
-  }
-  return String(error ?? '');
+    if (typeof value !== 'object') return;
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    for (const key of ['code', 'error_code', 'rate_limit_reached_type']) {
+      if (typeof record[key] === 'string') facts.codes.add(record[key].toLowerCase());
+    }
+    for (const key of ['status', 'statusCode', 'status_code']) {
+      if (typeof record[key] === 'number') facts.statuses.add(record[key]);
+    }
+    const headers = record.headers && typeof record.headers === 'object'
+      ? record.headers as Record<string, unknown>
+      : null;
+    if (headers && Object.keys(headers).some((key) => key.toLowerCase() === 'retry-after')) {
+      facts.retryAfter = true;
+    }
+    for (const key of ['message', 'result', 'detail', 'error']) {
+      visit(record[key], depth + 1);
+    }
+    if (value instanceof Error) {
+      visit(value.message, depth + 1);
+      visit((value as Error & { cause?: unknown }).cause, depth + 1);
+    }
+  };
+  visit(error);
+  return facts;
 }
 
 export function isRuntimeQuotaLimitError(error: unknown): boolean {
-  const message = errorText(error);
-  return QUOTA_LIMIT_PATTERNS.some((pattern) => pattern.test(message));
+  const facts = collectQuotaFacts(error);
+  const message = facts.messages.join('\n');
+  if (TRANSIENT_PATTERNS.some((pattern) => pattern.test(message))) return false;
+  if (facts.retryAfter) return false;
+  if ([...facts.statuses].some((status) => status >= 500 || status === 401 || status === 403)) return false;
+  if ([...facts.codes].some((code) => EXHAUSTION_CODES.has(code))) return true;
+  const hasExhaustionMessage = EXHAUSTION_MESSAGES.some((pattern) => (
+    facts.messages.some((candidate) => pattern.test(candidate))
+  ));
+  if (hasExhaustionMessage) return true;
+  // A bare 429 is ordinary throttling. Only a structured exhaustion code or
+  // an observed subscription-cap message above may cross houses.
+  return false;
 }
 
 export function buildCrossHouseFallbackMessage(decision: CrossHouseFallbackDecision): string {

@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+
+import { getSqlite } from '@/lib/db';
 import {
   buildCrossHouseFallbackMessage,
   isRuntimeQuotaLimitError,
@@ -6,8 +9,6 @@ import {
 import { resolveCrossHouseWorkerFallbackSync, getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
-
-const RECENT_FALLBACK_WINDOW_MS = 10 * 60_000;
 
 function backendForRuntime(runtime: string): 'codex' | 'claude' | null {
   if (runtime === 'codex') return 'codex';
@@ -21,6 +22,51 @@ export interface WorkerQuotaFallbackResult {
   toRuntime?: OrchestratorRuntime;
   inboxId?: string;
   sessionKey?: string;
+}
+
+function activeFallbackAttemptForFailure(
+  laneId: string,
+  runtime: string,
+  surfaceId: string,
+): { attemptId: string; kind: 'candidate_exhausted' | 'source_duplicate'; sessionKey?: string } | null {
+  const rows = getSqlite().prepare(`
+    SELECT verb, payload_json
+    FROM lane_events
+    WHERE lane_id = ? AND verb IN ('worker_fallback', 'worker_fallback_terminal')
+    ORDER BY rowid DESC
+  `).all(laneId) as Array<{ verb: string; payload_json: string }>;
+  const terminal = new Set<string>();
+  const seen = new Set<string>();
+  for (const row of rows) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const attemptId = typeof payload.attemptId === 'string' ? payload.attemptId : null;
+    if (!attemptId) continue;
+    if (row.verb === 'worker_fallback_terminal') {
+      terminal.add(attemptId);
+      continue;
+    }
+    if (row.verb !== 'worker_fallback' || terminal.has(attemptId) || seen.has(attemptId)) continue;
+    seen.add(attemptId);
+    if (payload.toRuntime === runtime) {
+      if (payload.status === 'launching') return { attemptId, kind: 'candidate_exhausted' };
+      if (payload.status === 'redispatched' && payload.sessionKey === surfaceId) {
+        return { attemptId, kind: 'candidate_exhausted', sessionKey: surfaceId };
+      }
+    }
+    if (payload.fromRuntime === runtime && payload.surfaceId === surfaceId) {
+      return {
+        attemptId,
+        kind: 'source_duplicate',
+        ...(typeof payload.sessionKey === 'string' ? { sessionKey: payload.sessionKey } : {}),
+      };
+    }
+  }
+  return null;
 }
 
 /** Runtime-adapter exit seam. Keeping detection here lets tests drive the same
@@ -57,7 +103,7 @@ export async function handleWorkerQuotaExhaustion(input: {
   const backend = backendForRuntime(input.runtime);
   if (!backend) return { handled: false, action: 'ignored' };
 
-  const [{ getLane, getLaneEvents, setLaneStatus, attachSession }, { recordLaneEvent }, { rebindLaneRuntime }] = await Promise.all([
+  const [{ getLane, setLaneStatus, attachSession }, { recordLaneEvent }, { rebindLaneRuntime }] = await Promise.all([
     import('@/lib/lane/registry'),
     import('@/lib/lane/events'),
     import('@/lib/lane/runtime-rebind'),
@@ -87,13 +133,48 @@ export async function handleWorkerQuotaExhaustion(input: {
   };
   recordLaneEvent(lane.id, 'worker_quota_exhausted', 'system', payload);
 
-  const recentFallback = getLaneEvents(lane.id, 100).find((event) => (
-    event.verb === 'worker_fallback'
-    && Date.now() - new Date(event.timestamp).getTime() < RECENT_FALLBACK_WINDOW_MS
-  ));
+  const activeFallbackAttempt = activeFallbackAttemptForFailure(
+    lane.id,
+    input.runtime,
+    input.surfaceId,
+  );
+  if (activeFallbackAttempt?.kind === 'source_duplicate') {
+    return {
+      handled: true,
+      action: 'redispatched',
+      toRuntime: decision.toRuntime,
+      sessionKey: activeFallbackAttempt.sessionKey,
+    };
+  }
+  if (activeFallbackAttempt?.kind === 'candidate_exhausted') {
+    const terminalPayload = {
+      ...payload,
+      attemptId: activeFallbackAttempt.attemptId,
+      suggestedRuntime: null,
+      suggestedModel: null,
+      status: 'both_houses_exhausted',
+      bothHousesExhausted: true,
+      note: 'Both comparable subscription houses are exhausted. Worker dispatch is paused for human action.',
+    };
+    recordLaneEvent(lane.id, 'worker_fallback_terminal', 'system', {
+      ...terminalPayload,
+    });
+    setLaneStatus(lane.id, 'paused', 'system', 'worker_cross_house_fallback_exhausted');
+    const item = enqueueInboxItem({
+      repoPath: lane.repoPath,
+      packetId: lane.packetId,
+      kind: 'worker_quota_exhausted',
+      status: 'human_required',
+      payload: {
+        ...terminalPayload,
+        autoFallbackEnabled: resolveCrossHouseWorkerFallbackSync(),
+      },
+    });
+    return { handled: true, action: 'card', inboxId: item.id };
+  }
+
   const autoFallback = resolveCrossHouseWorkerFallbackSync()
-    && decision.action === 'handoff'
-    && !recentFallback;
+    && decision.action === 'handoff';
 
   if (!autoFallback) {
     const item = enqueueInboxItem({
@@ -103,13 +184,20 @@ export async function handleWorkerQuotaExhaustion(input: {
       status: 'human_required',
       payload: {
         ...payload,
-        fallbackAlreadyTried: Boolean(recentFallback),
+        fallbackAlreadyTried: false,
         autoFallbackEnabled: resolveCrossHouseWorkerFallbackSync(),
       },
     });
     return { handled: true, action: 'card', toRuntime: decision.toRuntime, inboxId: item.id };
   }
 
+  const attemptId = `worker-fallback-${randomUUID()}`;
+  recordLaneEvent(lane.id, 'worker_fallback', 'system', {
+    ...payload,
+    attemptId,
+    toRuntime: decision.toRuntime,
+    status: 'launching',
+  });
   rebindLaneRuntime(lane.id, decision.toRuntime, {
     reason: 'cross_house_worker_fallback',
     fromRuntime: lane.runtime,
@@ -140,6 +228,8 @@ export async function handleWorkerQuotaExhaustion(input: {
     setLaneStatus(lane.id, 'running', 'system', 'worker_quota_fallback_launched');
     recordLaneEvent(lane.id, 'worker_fallback', 'system', {
       ...payload,
+      attemptId,
+      toRuntime: decision.toRuntime,
       status: 'redispatched',
       sessionKey: result.surfaceId,
     });
@@ -159,6 +249,13 @@ export async function handleWorkerQuotaExhaustion(input: {
     };
   } catch (error) {
     const fallbackError = error instanceof Error ? error.message : String(error);
+    recordLaneEvent(lane.id, 'worker_fallback_terminal', 'system', {
+      ...payload,
+      attemptId,
+      toRuntime: decision.toRuntime,
+      status: 'launch_failed',
+      fallbackError,
+    });
     rebindLaneRuntime(lane.id, lane.runtime, {
       reason: 'cross_house_worker_fallback_failed',
       attemptedRuntime: decision.toRuntime,

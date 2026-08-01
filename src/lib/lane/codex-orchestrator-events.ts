@@ -5,6 +5,7 @@ export interface ParsedCodexLine {
   type?: string;
   thread_id?: string;
   message?: string;
+  code?: string;
   error?: unknown;
   payload?: Record<string, unknown>;
   item?: Record<string, unknown>;
@@ -80,7 +81,12 @@ export function handleCodexJsonLine(
           : typeof nestedError?.message === 'string'
             ? nestedError.message
             : JSON.stringify(parsed.error ?? parsed);
-      onEvent({ type: 'error', error: message });
+      const code = typeof nestedError?.code === 'string'
+        ? nestedError.code
+        : typeof parsed.code === 'string'
+          ? parsed.code
+          : undefined;
+      onEvent({ type: 'error', error: message, ...(code ? { code } : {}) });
       return true;
     }
 
@@ -93,7 +99,12 @@ export function handleCodexJsonLine(
           : typeof nestedError?.message === 'string'
             ? nestedError.message
             : JSON.stringify(payload);
-      onEvent({ type: 'error', error: message });
+      const code = typeof nestedError?.code === 'string'
+        ? nestedError.code
+        : typeof payload.code === 'string'
+          ? payload.code
+          : undefined;
+      onEvent({ type: 'error', error: message, ...(code ? { code } : {}) });
       return true;
     }
 

@@ -44,6 +44,7 @@ describe('Codex auto-review verdict fallback', () => {
     const recorded = await recordCodexAutoReviewVerdict({
       lane,
       requiresSecondPass: false,
+      reviewTurnId: 'review-turn-codex-verdict-test',
       rawText: [
         'Review complete.',
         'CODEX_AUTO_REVIEW: {"approved":true,"findings":[]}',
@@ -76,6 +77,8 @@ describe('Codex auto-review verdict fallback', () => {
       reviewedHeadSha: head,
       requiresSecondPass: false,
       secondPassAgreed: false,
+      reviewTurnId: 'review-turn-codex-verdict-test',
+      reviewTurnOutcome: 'completed',
     });
 
     const events = approval ? listApprovalEvents(approval.id) : [];

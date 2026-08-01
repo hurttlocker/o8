@@ -547,6 +547,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       lane,
       rawText: reviewTurn.text,
       requiresSecondPass: reviewRisk.tier === 'high',
+      reviewTurnId: reviewTurn.reviewTurnId,
     });
     if (recorded?.verdict.parseWarning) {
       console.warn(`[auto-review] Codex verdict for lane ${lane.id} needed parser fallback: ${recorded.verdict.parseWarning}`);

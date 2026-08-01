@@ -10,7 +10,7 @@ export type OrchestratorEvent =
   // `plan-update` orchestrator event. Step ids are stable within a turn.
   | { type: 'plan'; explanation: string | null; steps: OrchestratorPlanStep[] }
   | { type: 'done'; sessionId: string | null; cost: number | null }
-  | { type: 'error'; error: string }
+  | { type: 'error'; error: string; code?: string; status?: number }
   // ── Collide (MoA) — emitted ONLY by the collide backend (moa.ts). Proposer
   //    text is buffered, not streamed, so it never pollutes the visible answer
   //    or the persisted assistant text; these two carry it to the faint pre-roll
@@ -243,6 +243,28 @@ export function processStreamEvent(
       if (id) onSessionId(id);
       const totalCost = event.total_cost_usd as number | undefined;
       if (typeof totalCost === 'number') onCost(totalCost);
+      const subtype = typeof event.subtype === 'string' ? event.subtype : undefined;
+      const isError = event.is_error === true || subtype?.startsWith('error_') === true;
+      if (isError) {
+        const nestedError = event.error && typeof event.error === 'object'
+          ? event.error as Record<string, unknown>
+          : null;
+        const error = typeof event.result === 'string'
+          ? event.result
+          : typeof event.message === 'string'
+            ? event.message
+            : typeof event.error === 'string'
+              ? event.error
+              : typeof nestedError?.message === 'string'
+                ? nestedError.message
+                : 'Claude Code turn failed.';
+        const code = typeof event.error_code === 'string'
+          ? event.error_code
+          : typeof nestedError?.code === 'string'
+            ? nestedError.code
+            : subtype;
+        onEvent({ type: 'error', error, ...(code ? { code } : {}) });
+      }
       break;
     }
   }

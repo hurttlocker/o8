@@ -6,6 +6,7 @@ import {
   type CrossHouseFallbackDecision,
 } from '@/lib/orchestrator/cross-house-policy';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { finishReviewTurn, startReviewTurn } from '@/lib/lane/review-turn-state';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import {
   getActiveReviewerBackend,
@@ -19,12 +20,14 @@ export interface ReviewFallbackTurnResult {
   text: string;
   errors: string[];
   fallback: CrossHouseFallbackDecision | null;
+  reviewTurnId: string | null;
 }
 
 interface ReviewAttemptResult {
   text: string;
   errors: string[];
   quotaError: string | null;
+  reviewTurnId: string | null;
 }
 
 function message(error: unknown): string {
@@ -35,6 +38,8 @@ async function runAttempt(input: {
   backend: OrchestratorBackend;
   repoPath: string;
   threadId: string;
+  laneId: string;
+  surface: string;
   prompt: string;
   model?: string;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
@@ -45,9 +50,16 @@ async function runAttempt(input: {
       text: '',
       errors: [`${input.backend.label} session ${session.status}`],
       quotaError: null,
+      reviewTurnId: null,
     };
   }
 
+  const reviewTurnId = startReviewTurn({
+    laneId: input.laneId,
+    threadId: input.threadId,
+    backend: input.backend.id,
+    surface: input.surface,
+  });
   let text = '';
   let quotaError: string | null = null;
   const errors: string[] = [];
@@ -55,7 +67,7 @@ async function runAttempt(input: {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
       if (event.type === 'text') text += event.text;
       if (event.type === 'error') {
-        if (isRuntimeQuotaLimitError(event.error)) quotaError = event.error;
+        if (isRuntimeQuotaLimitError(event)) quotaError = event.error;
         else errors.push(event.error);
       }
       input.onEvent?.(input.backend, event);
@@ -67,7 +79,13 @@ async function runAttempt(input: {
     if (isRuntimeQuotaLimitError(error)) quotaError = message(error);
     else errors.push(message(error));
   }
-  return { text, errors, quotaError };
+  const outcome = quotaError ? 'quota_discarded' : errors.length > 0 ? 'failed' : 'completed';
+  try {
+    finishReviewTurn({ laneId: input.laneId, reviewTurnId, outcome });
+  } catch (error) {
+    errors.push(`Review turn finalization failed: ${message(error)}`);
+  }
+  return { text, errors, quotaError, reviewTurnId };
 }
 
 export async function runReviewerTurnWithQuotaFallback(input: {
@@ -87,6 +105,8 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   );
   const first = await runAttempt({
     backend: initialBackend,
+    laneId: input.laneId,
+    surface: input.surface,
     repoPath: input.repoPath,
     threadId: input.threadId,
     prompt: promptFor(initialBackend.id),
@@ -99,6 +119,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       text: first.text,
       errors: first.errors,
       fallback: null,
+      reviewTurnId: first.reviewTurnId,
     };
   }
 
@@ -114,6 +135,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       text: '',
       errors: [first.quotaError],
       fallback: null,
+      reviewTurnId: first.reviewTurnId,
     };
   }
 
@@ -136,12 +158,15 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       text: '',
       errors: [first.quotaError],
       fallback: decision,
+      reviewTurnId: first.reviewTurnId,
     };
   }
 
   const fallbackBackend = backendResolver(decision.toBackend);
   const second = await runAttempt({
     backend: fallbackBackend,
+    laneId: input.laneId,
+    surface: input.surface,
     repoPath: input.repoPath,
     threadId: input.threadId,
     prompt: promptFor(fallbackBackend.id),
@@ -164,5 +189,6 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     text: errors.length === 0 ? second.text : '',
     errors,
     fallback: decision,
+    reviewTurnId: second.reviewTurnId,
   };
 }

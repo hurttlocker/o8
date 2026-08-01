@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { resolveApproval } from '@/lib/approvals/resolution';
 import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
@@ -5,6 +7,7 @@ import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
+import { findActiveReviewTurnId } from '@/lib/lane/review-turn-state';
 import type { Lane } from '@/lib/lane/types';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
@@ -123,7 +126,14 @@ function requiresSecondPassForLane(lane: Lane | null, approved: boolean) {
   }
 }
 
-function recordPacketReviewAudit(packet: OrchestratorPacket, findings: OrchestratorReviewFinding[], approved: boolean, summary: string, reviewedHeadSha?: string) {
+function recordPacketReviewAudit(
+  packet: OrchestratorPacket,
+  findings: OrchestratorReviewFinding[],
+  approved: boolean,
+  summary: string,
+  reviewedHeadSha: string | undefined,
+  reviewTurn: { id: string; outcome: 'active' | 'completed' },
+) {
   const lane = findLaneByPacket(packet.id);
   const requiresSecondPass = requiresSecondPassForLane(lane, approved);
   const approval = createApproval({
@@ -142,12 +152,16 @@ function recordPacketReviewAudit(packet: OrchestratorPacket, findings: Orchestra
       reviewedHeadSha,
       requiresSecondPass,
       secondPassAgreed: false,
+      reviewTurnId: reviewTurn.id,
+      reviewTurnOutcome: reviewTurn.outcome,
     },
     risk: deriveApprovalRisk(findings, approved),
     metadata: {
       Packet: packet.id,
       ...(lane ? { Lane: lane.id, Branch: lane.branch, Base: lane.baseBranch } : {}),
       ...(reviewedHeadSha ? { 'Reviewed HEAD': reviewedHeadSha } : {}),
+      'Review Turn': reviewTurn.id,
+      'Review Turn Outcome': reviewTurn.outcome,
     },
   });
   recordApprovalAudit(approval.id, 'orchestrator_review', 'system', summary);
@@ -196,8 +210,20 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       }
     }
   }
+  const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
+  const activeReviewTurnId = verdictLane ? findActiveReviewTurnId(verdictLane.id) : null;
+  const reviewTurn = activeReviewTurnId
+    ? { id: activeReviewTurnId, outcome: 'active' as const }
+    : { id: `review-turn-standalone-${randomUUID()}`, outcome: 'completed' as const };
   const summary = buildReviewSummary(input.findings, input.approved);
-  const auditApprovalId = recordPacketReviewAudit(packet, input.findings, input.approved, summary, reviewedHeadSha);
+  const auditApprovalId = recordPacketReviewAudit(
+    packet,
+    input.findings,
+    input.approved,
+    summary,
+    reviewedHeadSha,
+    reviewTurn,
+  );
 
   // Only update mission state when the packet actually lives there — orphan
   // path leaves state unchanged (the audit log is the record of truth for
@@ -232,7 +258,6 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   // score-based approvals lookup can miss). Lane events are append-only and
   // keyed by lane id alone, so review-state can always recover the latest
   // verdict from here as its final fallback.
-  const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
   if (verdictLane) {
     try {
       const { appendEvent } = await import('@/lib/lane/registry');
@@ -241,6 +266,8 @@ export async function submitPacketReview(input: SubmitReviewInput) {
         summary,
         reviewedHeadSha: reviewedHeadSha ?? null,
         auditApprovalId: resolvedAuditApprovalId,
+        reviewTurnId: reviewTurn.id,
+        reviewTurnOutcome: reviewTurn.outcome,
       });
     } catch (error) {
       console.warn(`[review] Failed to append review_recorded event for packet ${input.packetId}:`, error);

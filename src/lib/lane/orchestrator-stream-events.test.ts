@@ -69,3 +69,19 @@ describe('processStreamEvent — tool_result is_error threading (turn grammar)',
     expect(result?.isError).toBeUndefined();
   });
 });
+
+describe('processStreamEvent — Claude Code terminal errors', () => {
+  it('emits an error from the observed error_during_execution result frame', () => {
+    const out = run([{
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: "You've hit your usage limit",
+    }]);
+    expect(out).toContainEqual({
+      type: 'error',
+      code: 'error_during_execution',
+      error: "You've hit your usage limit",
+    });
+  });
+});

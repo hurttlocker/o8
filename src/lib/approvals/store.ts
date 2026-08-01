@@ -38,6 +38,8 @@ const APPROVAL_CONTEXT_LOOKUP_LIMIT = 100;
 const APPROVAL_CONTEXT_LOOKBACK_MS = 1000 * 60 * 60 * 24 * 90;
 const STALE_APPROVAL_TTL_MS = 1000 * 60 * 30;
 
+export type ReviewTurnOutcome = 'active' | 'completed' | 'failed' | 'quota_discarded';
+
 function getApprovalDb() {
   const db = getDb();
   if (!db) {
@@ -591,12 +593,52 @@ export function supersedeOrchestratorReviewApprovals(packetId: string, reason: s
   return approvals.length;
 }
 
+export function finalizeOrchestratorReviewTurn(reviewTurnId: string, outcome: ReviewTurnOutcome): number {
+  const normalizedTurnId = reviewTurnId.trim();
+  if (!normalizedTurnId) return 0;
+  const approvals = queryApprovals(eq(approvalsTable.toolName, 'orchestrator_review'))
+    .filter((approval) => approval?.args?.reviewTurnId === normalizedTurnId);
+  const finalizedAt = Date.now();
+  for (const approval of approvals) {
+    const discarded = outcome !== 'completed';
+    const note = discarded
+      ? `Review turn ${normalizedTurnId} ended as ${outcome}; approval is not merge-authorizing.`
+      : `Review turn ${normalizedTurnId} completed.`;
+    const event = auditEvent('updated', 'system', note);
+    updateApprovalRecord({
+      ...approval,
+      args: {
+        ...approval.args,
+        reviewTurnId: normalizedTurnId,
+        reviewTurnOutcome: outcome,
+        ...(discarded ? {
+          reviewSuperseded: true,
+          reviewSupersededAt: finalizedAt,
+          reviewSupersededReason: note,
+        } : {}),
+      },
+      metadata: {
+        ...approval.metadata,
+        'Review Turn': normalizedTurnId,
+        'Review Turn Outcome': outcome,
+      },
+      updatedAt: finalizedAt,
+      audit: [...approval.audit, event],
+    });
+    insertApprovalEvent(approval.id, event);
+  }
+  return approvals.length;
+}
+
 export function recordOrchestratorReview(
   packetId: string,
   review: OrchestratorReviewRecordInput,
 ): ApprovalAuditEvent {
   const normalizedPacketId = packetId.trim();
   const normalizedReview = normalizeOrchestratorReview(review);
+  const reviewTurnId = normalizedReview.reviewTurnId
+    ?? `review-turn-standalone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const reviewTurnOutcome = normalizedReview.reviewTurnOutcome ?? 'completed';
   const lane = normalizedPacketId ? findLaneByPacket(normalizedPacketId) : null;
 
   let approval = getApprovalDb()
@@ -646,6 +688,8 @@ export function recordOrchestratorReview(
       secondPassAgreed: approval.args?.secondPassAgreed === true ? true : false,
       ...(normalizedReview.parseWarning ? { parseWarning: normalizedReview.parseWarning } : {}),
       ...(normalizedReview.rawText ? { rawText: normalizedReview.rawText } : {}),
+      reviewTurnId,
+      reviewTurnOutcome,
     },
     audit: [...approval.audit, reviewEvent],
   };

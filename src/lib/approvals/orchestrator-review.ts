@@ -15,6 +15,8 @@ export interface OrchestratorReviewRecordInput {
   requiresSecondPass?: boolean;
   rawText?: string;
   parseWarning?: string;
+  reviewTurnId?: string;
+  reviewTurnOutcome?: 'active' | 'completed' | 'failed' | 'quota_discarded';
 }
 
 function trimOptional(value?: string) {
@@ -58,6 +60,8 @@ export function normalizeOrchestratorReview(review: OrchestratorReviewRecordInpu
     requiresSecondPass: review.requiresSecondPass === true,
     rawText: trimOptional(review.rawText),
     parseWarning: trimOptional(review.parseWarning),
+    reviewTurnId: trimOptional(review.reviewTurnId),
+    reviewTurnOutcome: review.reviewTurnOutcome,
   };
 }
 
@@ -127,6 +131,8 @@ export function buildOrchestratorReviewApprovalInput(
       secondPassAgreed: false,
       ...(review.parseWarning ? { parseWarning: review.parseWarning } : {}),
       ...(review.rawText ? { rawText: review.rawText } : {}),
+      ...(review.reviewTurnId ? { reviewTurnId: review.reviewTurnId } : {}),
+      ...(review.reviewTurnOutcome ? { reviewTurnOutcome: review.reviewTurnOutcome } : {}),
     },
     risk: deriveOrchestratorReviewRisk(review),
     metadata: {
