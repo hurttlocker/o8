@@ -89,6 +89,14 @@ const PUBLIC_READ = [
   /^\/api\/v2\/auth\/session\/?$/,
   /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
   /^\/api\/mobile\/push\/public-key(\/|$)/,
+  // #1529 — a paired phone whose saved API port moved probes this to find the
+  // new one. Credential-free by design: it returns port metadata plus a
+  // signature over a domain-separated transcript
+  // (`o8-e2ee-v1|pairing-discovery|…`), binding the caller's nonce to the
+  // server identity the device already pinned, so a rogue listener cannot
+  // solicit the device credential. Exposes no bearer or enrollment material,
+  // and 404s entirely unless mobile E2EE is enabled.
+  /^\/api\/mobile\/pairing-discovery\/?$/,
 ];
 const LOOPBACK_READ = [
   /^\/api\/browser\/proxy\/?$/,
