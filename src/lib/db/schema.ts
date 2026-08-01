@@ -14,6 +14,8 @@ import {
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 
+export * from './harness-schema';
+
 const ORCHESTRATOR_RUNTIME_ENUM = [...ORCHESTRATOR_RUNTIME_IDS] as [
   OrchestratorRuntime,
   ...OrchestratorRuntime[],

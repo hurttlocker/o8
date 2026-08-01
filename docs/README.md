@@ -11,6 +11,7 @@ For operators who want to understand the product and run governed agent work wit
 | [Product brief](user/o8-product-brief.md) | What o8 is, who it serves, and the boundaries of the product. |
 | [How o8 works](user/how-o8-works.md) | How missions, packets, lanes, review, and memory fit together. |
 | [Canonical workflow](user/canonical-workflow.md) | The expected path from a task request through reviewed integration. |
+| [Self-tuning harness](user/self-tuning-harness.md) | How grounded features, execution contracts, lift measurements, skeptical review, CI, and portable bundles fit together. |
 | [Orchestration playbook](user/orchestration-playbook.md) | How to brief, monitor, review, recover, and close agent work well. |
 | [Operator MCP bridge](user/operator-mcp-bridge.md) | How terminal and MCP clients drive the same governed control plane as the app. |
 | [Persistent terminals](user/persistent-terminals.md) | How terminal sessions survive restarts and recover their scrollback. |
