@@ -286,6 +286,9 @@ export type LaneEventVerb =
   // An owned runtime child exited. Payload includes exit code/signal, stderr,
   // and whether the runtime emitted its protocol-level result event.
   | 'runtime_process_exit'
+  // An opted-in macOS worker sandbox blocked a concrete resource. Payload:
+  // { runtime, surfaceId, runId, operation, resource, denialLine, message }
+  | 'sandbox_denied'
   // A subscription-backed model surface crossed houses at the same policy
   // tier after quota exhaustion. These events are operator-visible audit rows.
   | 'review_fallback'

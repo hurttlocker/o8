@@ -23,6 +23,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   let repoPath: string;
   let priorRoot: string | undefined;
   let priorBin: string | undefined;
+  let priorSandbox: string | undefined;
 
   beforeEach(async () => {
     tempRoot = await mkdtemp(path.join(process.cwd(), '.tmp-owned-child-exit-'));
@@ -30,6 +31,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     execFileSync('git', ['init', '-q', repoPath]);
     priorRoot = process.env.O8_TEST_CHILD_EXIT_ROOT;
     priorBin = process.env.O8_TEST_CHILD_EXIT_BIN;
+    priorSandbox = process.env.O8_WORKER_SANDBOX;
     process.env.O8_TEST_CHILD_EXIT_ROOT = path.join(tempRoot, 'sessions');
     process.env.O8_TEST_CHILD_EXIT_BIN = process.execPath;
     process.env.O8_TEST_CHILD_EXIT_REPO = repoPath;
@@ -42,7 +44,10 @@ describe('createOwnedSessionStore child exit recording', () => {
     else process.env.O8_TEST_CHILD_EXIT_ROOT = priorRoot;
     if (priorBin === undefined) delete process.env.O8_TEST_CHILD_EXIT_BIN;
     else process.env.O8_TEST_CHILD_EXIT_BIN = priorBin;
+    if (priorSandbox === undefined) delete process.env.O8_WORKER_SANDBOX;
+    else process.env.O8_WORKER_SANDBOX = priorSandbox;
     delete process.env.O8_TEST_CHILD_EXIT_REPO;
+    delete process.env.O8_TEST_SANDBOX_DENIED_PATH;
     await rm(tempRoot, { recursive: true, force: true });
   });
 
@@ -78,6 +83,46 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
   }, 20_000);
 
+  it.skipIf(process.platform !== 'darwin')('persists a readable lane event from a real sandbox-exec denial', async () => {
+    const deniedPath = path.join(tempRoot, 'outside-packet.txt');
+    await writeFile(deniedPath, 'must stay outside the packet\n', 'utf8');
+    process.env.O8_WORKER_SANDBOX = '1';
+    process.env.O8_TEST_CHILD_EXIT_BIN = '/bin/cat';
+    process.env.O8_TEST_SANDBOX_DENIED_PATH = deniedPath;
+
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }] = await Promise.all([
+      import('@/lib/lane/registry'),
+      import('./store'),
+    ]);
+    const packetId = `pkt-sandbox-denial-${Date.now()}`;
+    const lane = createLane({
+      label: 'sandbox denial real path',
+      repoPath,
+      branch: `agent/${packetId}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    const store = createOwnedSessionStore(testAdapter('sandbox-denial'));
+
+    const launched = await store.launch({
+      cwd: repoPath,
+      prompt: 'attempt denied read',
+      laneId: lane.id,
+      packetId,
+    });
+    const session = await waitForRecordedExit(launched.surfaceId);
+    const denialEvent = await waitForLaneEvent(lane.id, 'sandbox_denied', getLaneEvents);
+
+    expect(session.recentRuns[0]).toMatchObject({
+      sandboxed: true,
+      sandboxDenial: { operation: 'file-read', resource: deniedPath },
+    });
+    expect(session.latestSummary).toContain(`blocked file-read access to ${deniedPath}`);
+    expect(denialEvent.payload).toMatchObject({ operation: 'file-read', resource: deniedPath });
+    expect(denialEvent.payload.message).toContain(`blocked file-read access to ${deniedPath}`);
+  }, 20_000);
+
   it('sweeps an old active owned session when no lane references its surface id', async () => {
     const { createOwnedSessionStore } = await import('./store');
     const store = createOwnedSessionStore(testAdapter('exit-1'));
@@ -100,7 +145,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 });
 
-function testAdapter(kind: 'exit-1' | 'sigkill'): OwnedRuntimeAdapter {
+function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial'): OwnedRuntimeAdapter {
   return {
     runtimeId: `test-child-${kind}`,
     surfaceIdPrefix: `test-child-${kind}:`,
@@ -110,8 +155,12 @@ function testAdapter(kind: 'exit-1' | 'sigkill'): OwnedRuntimeAdapter {
     binaryEnvOverride: 'O8_TEST_CHILD_EXIT_BIN',
     humanLabel: 'Owned Child Exit Test',
     squadShortName: 'ChildExit',
-    launchArgs: () => ['-e', childScript(kind)],
-    resumeArgs: () => ['-e', childScript(kind)],
+    launchArgs: () => kind === 'sandbox-denial'
+      ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
+      : ['-e', childScript(kind)],
+    resumeArgs: () => kind === 'sandbox-denial'
+      ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
+      : ['-e', childScript(kind)],
     parseRunLog: (): ParsedRunLog => ({
       entries: [],
       outcome: 'running',
@@ -126,6 +175,19 @@ function childScript(kind: 'exit-1' | 'sigkill') {
     return `process.stderr.write(${JSON.stringify(stderrLine)}); process.exit(1);`;
   }
   return `process.stderr.write(${JSON.stringify(stderrLine)}); process.stderr.write('', () => process.kill(process.pid, 'SIGKILL'));`;
+}
+
+async function waitForLaneEvent(
+  laneId: string,
+  verb: string,
+  getLaneEvents: (id: string, limit?: number) => Array<{ verb: string; payload: Record<string, unknown> }>,
+) {
+  for (let i = 0; i < 400; i += 1) {
+    const event = getLaneEvents(laneId, 20).find((candidate) => candidate.verb === verb);
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${verb} lane event on ${laneId}`);
 }
 
 async function waitForRecordedExit(surfaceId: string): Promise<OwnedSessionRecord> {

@@ -97,6 +97,21 @@ describe('buildSeatbeltProfile — policy shape', () => {
     expect(profile).toContain('(allow network*)');
   });
 
+  it('allows required cache/session writes while keeping global CLI prefixes read-only', () => {
+    expect(profile).toContain('(subpath "/Users/op/.npm")');
+    expect(profile).toContain('(subpath "/Users/op/.codex")');
+    expect(profile).toContain('(subpath "/Users/op/.claude")');
+    expect(profile).toContain('(subpath "/Users/op/.npm-global")');
+    const writeAllow = profile.indexOf(';; --- read+write: packet, Git metadata, TMPDIR, and tool state ---');
+    expect(profile.indexOf('(subpath "/Users/op/.npm")', writeAllow)).toBeGreaterThan(writeAllow);
+    expect(profile.indexOf('(subpath "/Users/op/.npm-global")', writeAllow)).toBe(-1);
+    expect(profile.indexOf('(literal "/Users/op/.claude.json")', writeAllow)).toBeGreaterThan(writeAllow);
+    const codexConfigDeny = profile.lastIndexOf('(literal "/Users/op/.codex/config.toml")');
+    const claudeSettingsDeny = profile.lastIndexOf('(literal "/Users/op/.claude/settings.json")');
+    expect(codexConfigDeny).toBeGreaterThan(profile.indexOf('(subpath "/Users/op/.codex")', writeAllow));
+    expect(claudeSettingsDeny).toBeGreaterThan(profile.indexOf('(subpath "/Users/op/.claude")', writeAllow));
+  });
+
   it('does NOT whitelist HOME wholesale (so ~/.o8 stays out of the read allowlist)', () => {
     expect(profile).not.toContain('(subpath "/Users/op")\n');
     // toolchain subdirs are allowed, but never .o8 as a READ root
@@ -109,7 +124,9 @@ describe('buildSeatbeltProfile — policy shape', () => {
     expect(profile).toContain('(regex #"(^|/)codex\\.js$")');
     expect(profile).toContain('file-link file-clone\n  (literal "/tmp/immutable.rules")');
     expect(profile).toContain('(allow file-read* file-write*\n  (subpath "/tmp/active-state")');
-    expect(profile).toContain('file-link file-clone\n  (literal "/tmp/active-state/policy.rules")');
+    const activeStateAllow = profile.indexOf('(allow file-read* file-write*\n  (subpath "/tmp/active-state")');
+    const activePolicyDeny = profile.indexOf('(literal "/tmp/active-state/policy.rules")');
+    expect(activePolicyDeny).toBeGreaterThan(activeStateAllow);
     const execDeny = profile.indexOf('(deny process-exec');
     const execAllow = profile.indexOf('(allow process-exec\n  (literal "/tmp/private-codex")');
     expect(execAllow).toBeGreaterThan(execDeny);
@@ -141,6 +158,68 @@ describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
     // (b) generated profile denies ~/.o8 and allows the worktree.
     expect(prepared.profileText).toContain(`(subpath "${path.join(os.homedir(), '.o8')}")`);
     expect(prepared.profileText).not.toContain('(subpath "/")');
+  });
+
+  it.skipIf(!isDarwin)('permits Claude root-state atomic writes without opening HOME', async () => {
+    const home = tmpRoot('o8-sbx-home-');
+    const worktree = tmpRoot('o8-sbx-wt-');
+    const profileDir = tmpRoot('o8-sbx-prof-');
+    const prepared = await prepareWorkerSandbox({
+      runId: 'claude-root-state',
+      profileDir,
+      cwd: worktree,
+      repoPath: worktree,
+      binary: '/bin/sh',
+      args: [],
+      homeDir: home,
+    });
+
+    execFileSync(
+      SANDBOX_EXEC_PATH,
+      ['-f', prepared.profilePath, '/bin/sh', '-c', 'printf ok > "$HOME/.claude.json.tmp" && mv "$HOME/.claude.json.tmp" "$HOME/.claude.json"'],
+      { env: { ...process.env, HOME: home }, stdio: 'ignore' },
+    );
+    expect(existsSync(path.join(home, '.claude.json'))).toBe(true);
+    expect(prepared.profileText).not.toContain(`(subpath "${home}")`);
+  });
+
+  it.skipIf(!isDarwin)('includes and enforces a real packet worktree git dir and backing common dir', async () => {
+    const repo = tmpRoot('o8-sbx-repo-');
+    execFileSync('git', ['init', '-q', repo]);
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 'sandbox@example.test']);
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'Sandbox Test']);
+    writeFileSync(path.join(repo, 'tracked.txt'), 'base\n');
+    execFileSync('git', ['-C', repo, 'add', '--', 'tracked.txt']);
+    execFileSync('git', ['-C', repo, 'commit', '-qm', 'base']);
+    const packetWorktree = tmpRoot('o8-sbx-packet-');
+    rmSync(packetWorktree, { recursive: true, force: true });
+    execFileSync('git', ['-C', repo, 'worktree', 'add', '-qb', 'packet/sandbox-profile', packetWorktree]);
+    const profileDir = tmpRoot('o8-sbx-prof-');
+
+    const prepared = await prepareWorkerSandbox({
+      runId: 'real-packet-paths',
+      profileDir,
+      cwd: packetWorktree,
+      repoPath: packetWorktree,
+      binary: '/bin/sh',
+      args: ['-lc', 'git status --short'],
+    });
+    const gitPaths = execFileSync(
+      'git',
+      ['-C', packetWorktree, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'],
+      { encoding: 'utf8' },
+    ).trim().split(/\r?\n/);
+
+    expect(prepared.profileText).toContain(`(subpath "${packetWorktree}")`);
+    for (const gitPath of gitPaths) {
+      expect(prepared.profileText).toContain(`(subpath "${gitPath}")`);
+    }
+    const status = execFileSync(
+      SANDBOX_EXEC_PATH,
+      ['-f', prepared.profilePath, '/usr/bin/git', '-C', packetWorktree, 'status', '--short'],
+      { encoding: 'utf8' },
+    );
+    expect(status).toBe('');
   });
 
   it('is FAIL-CLOSED — throws SandboxUnavailableError when the profile cannot be written', async () => {

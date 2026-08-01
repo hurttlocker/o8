@@ -17,6 +17,7 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
+import { detectSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
   AUTO_RETRY_FRESHNESS_MS,
   MAX_AUTO_RETRIES,
@@ -89,6 +90,24 @@ export function createOwnedRunController({
   }>();
   const RUN_ARTIFACT_CACHE_MAX = 48;
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
+
+  function recordSandboxDenialEvent(
+    laneId: string,
+    surfaceId: string,
+    runId: string,
+    denial: NonNullable<OwnedRunRecord['sandboxDenial']>,
+  ): void {
+    const message = sandboxDenialOperatorMessage(runtimeId, denial);
+    recordLaneEvent(laneId, 'sandbox_denied', 'system', {
+      runtime: runtimeId,
+      surfaceId,
+      runId,
+      operation: denial.operation,
+      resource: denial.resource,
+      denialLine: denial.line,
+      message,
+    });
+  }
 
   function quoteShellArg(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
@@ -174,6 +193,7 @@ export function createOwnedRunController({
     let laneId: string | undefined;
     let model: string | undefined;
     let latestPrompt = '';
+    let sandboxDenial: OwnedRunRecord['sandboxDenial'];
     await withSurfaceLock(surfaceId, async () => {
       const current = await io.findSession(surfaceId);
       if (!current) return;
@@ -197,6 +217,13 @@ export function createOwnedRunController({
           finishedAt: run.finishedAt ?? finishedAt,
           outcome: nextOutcome,
         };
+        if (run.sandboxed && childExit.classification !== 'clean-exit') {
+          sandboxDenial = detectSandboxDenial(childExit.stderrTail ?? '') ?? undefined;
+          if (sandboxDenial) {
+            nextRun.sandboxDenial = sandboxDenial;
+            current.latestSummary = sandboxDenialOperatorMessage(runtimeId, sandboxDenial);
+          }
+        }
         exitedRun = nextRun;
         return nextRun;
       };
@@ -228,7 +255,13 @@ export function createOwnedRunController({
       } catch (error) {
         console.warn(`[owned-store] Failed to record runtime_process_exit for lane ${laneId}:`, error);
       }
-      if (!finishedClean) {
+      if (sandboxDenial) {
+        try {
+          recordSandboxDenialEvent(laneId, surfaceId, runId, sandboxDenial);
+        } catch (error) {
+          console.warn(`[owned-store] Failed to record sandbox_denied for lane ${laneId}:`, error);
+        }
+      } else if (!finishedClean) {
         try {
           const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
           await handleWorkerRuntimeFailure({
@@ -305,7 +338,7 @@ export function createOwnedRunController({
     let dirty = false;
 
     for (const run of session.recentRuns) {
-      const { stderrRaw, parsed } = await readRunArtifacts(run);
+      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
 
       if (!session.threadId && parsed.threadId) {
         session.threadId = parsed.threadId;
@@ -319,6 +352,22 @@ export function createOwnedRunController({
           dirty = true;
         }
         continue;
+      }
+
+      if (run.sandboxed && !run.sandboxDenial) {
+        const denial = detectSandboxDenial(`${stdoutRaw}\n${stderrRaw}`);
+        if (denial) {
+          run.sandboxDenial = denial;
+          session.latestSummary = sandboxDenialOperatorMessage(runtimeId, denial);
+          dirty = true;
+          if (session.laneId) {
+            try {
+              recordSandboxDenialEvent(session.laneId, session.surfaceId, run.id, denial);
+            } catch (error) {
+              console.warn(`[owned-store] Failed to record sandbox_denied for lane ${session.laneId}:`, error);
+            }
+          }
+        }
       }
 
       const nextOutcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
@@ -344,7 +393,7 @@ export function createOwnedRunController({
     const retryBudget = adapter.chooseRetryModel ? MAX_AUTO_RETRIES : 1;
     if (session.autoRetry && (session.retryCount ?? 0) < retryBudget) {
       const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
-      if (latestFailedRun && !session.activeRun) {
+      if (latestFailedRun && !latestFailedRun.sandboxDenial && !session.activeRun) {
         const failAge = latestFailedRun.finishedAt
           ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
           : Infinity;
@@ -444,7 +493,8 @@ export function createOwnedRunController({
     let spawnBinary = binary;
     let spawnArgs = args;
     const sandboxEnvExtra: Record<string, string> = {};
-    if (workerSandboxEnabled()) {
+    const sandboxEnabled = workerSandboxEnabled();
+    if (sandboxEnabled) {
       try {
         const prepared = await prepareWorkerSandbox({
           runId,
@@ -581,6 +631,7 @@ export function createOwnedRunController({
       stdoutPath,
       stderrPath,
       outcome: 'running',
+      sandboxed: sandboxEnabled,
       tmuxSession: terminalSessionName,
       detachMode,
     };

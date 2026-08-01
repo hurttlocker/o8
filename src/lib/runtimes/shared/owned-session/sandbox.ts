@@ -30,9 +30,13 @@
 
 import { realpath, writeFile } from 'node:fs/promises';
 import { access, constants as fsConstants } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+
+const execFileAsync = promisify(execFile);
 
 /** Absolute path to Apple's seatbelt runner. */
 export const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec';
@@ -83,6 +87,35 @@ function uniq(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function expandHomePath(value: string, home: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed === '~') return home;
+  if (trimmed.startsWith(`~${path.sep}`)) return path.join(home, trimmed.slice(2));
+  return path.isAbsolute(trimmed) ? trimmed : null;
+}
+
+function workerPathReadRoots(home: string): string[] {
+  return uniq((process.env.PATH ?? '')
+    .split(path.delimiter)
+    .map((entry) => expandHomePath(entry, home))
+    .filter((entry): entry is string => Boolean(entry)));
+}
+
+/** Git worktrees keep their mutable index/refs under the backing repo, outside cwd. */
+export async function resolveGitSandboxPaths(cwd: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'],
+      { cwd, encoding: 'utf8', timeout: 5_000 },
+    );
+    return uniq(String(stdout).split(/\r?\n/).map((entry) => entry.trim()));
+  } catch {
+    return [];
+  }
+}
+
 /** Package root for an npm-installed binary target, including scoped packages. */
 function nodePackageRoot(binaryPath: string): string | null {
   const parsed = path.parse(binaryPath);
@@ -108,6 +141,8 @@ export interface SeatbeltProfileInput {
   extraReadWritePaths?: string[];
   /** Extra read-only roots (toolchain dirs resolved by the caller). */
   extraReadPaths?: string[];
+  /** Absolute PATH entries used to discover nested CLIs. */
+  pathReadRoots?: string[];
   /** Additional credential/control-plane roots that must stay unreachable. */
   extraDenyPaths?: string[];
   /** Narrow state roots re-opened after broad secret-tree denials. */
@@ -153,12 +188,20 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     '/tmp', '/private/tmp',
   ]);
 
-  // Toolchain dirs under HOME the CLIs legitimately read (auth, caches,
-  // configs). Never includes `.o8` / `.tauri`.
-  const homeToolchainDirs = uniq([
-    '.nvm', '.volta', '.n', '.local', '.npm', '.cache', '.config',
-    '.codex', '.claude', '.yarn', '.pnpm-store', '.asdf', '.rustup',
-    '.cargo', '.bun', '.deno',
+  // User-owned CLI/global prefixes are executable inputs, never general HOME.
+  const homeToolchainReadDirs = uniq([
+    '.nvm', '.volta', '.n', '.local', '.npm-global', '.config', '.asdf',
+    '.rustup', '.cargo', '.bun', '.deno', 'bin', 'Library/pnpm',
+  ].map((d) => path.join(home, d)));
+
+  // Normal packet work writes caches and model-CLI session state. Global
+  // executable prefixes remain read-only above so a worker cannot persist a
+  // replacement npm/cargo binary outside its packet.
+  const homeToolchainWriteDirs = uniq([
+    '.npm', '.cache', '.yarn', '.pnpm-store',
+    path.join('.cargo', 'registry'), path.join('.cargo', 'git'),
+    path.join('.bun', 'install', 'cache'), '.deno', '.codex', '.claude', '.gemini',
+    path.join('.config', 'gemini'),
   ].map((d) => path.join(home, d)));
 
   // Individual dotfiles the CLIs read (git identity, npm registry, etc.).
@@ -168,10 +211,19 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   const homeToolchainFiles = uniq([
     '.gitconfig', '.gitignore', '.npmrc', '.yarnrc',
   ].map((f) => path.join(home, f)));
+  // Claude Code 2.1.x persists per-project/session state in this legacy root
+  // file even when its main state directory is ~/.claude.
+  const homeToolchainMutableFiles = [path.join(home, '.claude.json')];
+  const homeToolchainMutableFileFilters = homeToolchainMutableFiles.flatMap((file) => [
+    `(literal ${sbplString(file)})`,
+    `(regex #"^${regexFragment(file)}(?:\\..*)?$")`,
+  ]);
 
   const readRoots = uniq([
     ...systemReadRoots,
-    ...homeToolchainDirs,
+    ...homeToolchainReadDirs,
+    ...homeToolchainWriteDirs,
+    ...(input.pathReadRoots ?? []),
     ...(input.extraReadPaths ?? []),
   ]);
 
@@ -179,6 +231,7 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     input.worktreePath,
     input.repoPath,
     input.tmpDir,
+    ...homeToolchainWriteDirs,
     ...(input.extraReadWritePaths ?? []),
   ]);
 
@@ -194,6 +247,18 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     ...(input.extraDenyPaths ?? []),
   ]);
 
+  // Keep model credentials and launch policy immutable even though the CLIs
+  // need mutable session databases inside the same home directories.
+  const immutableToolchainPaths = uniq([
+    '.codex/auth.json', '.codex/config.toml', '.codex/AGENTS.md',
+    '.codex/agents', '.codex/plugins', '.codex/rules', '.codex/skills',
+    '.claude/.credentials.json', '.claude/settings.json', '.claude/settings.local.json',
+    '.claude/agents', '.claude/hooks', '.claude/mcp-servers', '.claude/plugins',
+    '.claude/skills', '.claude/statusline.sh',
+    '.gemini/google_accounts.json', '.gemini/settings.json', '.gemini/policies',
+    '.gemini/skills', '.gemini/trustedFolders.json',
+  ].map((entry) => path.join(home, entry)));
+
   const trustedReadWritePaths = uniq(input.trustedReadWritePaths ?? []);
   const finalDenyPaths = uniq(input.finalDenyPaths ?? []);
   const finalAllowReadWritePaths = uniq(input.finalAllowReadWritePaths ?? []);
@@ -201,7 +266,10 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   const finalDenyExecNamePrefixes = uniq(input.finalDenyExecNamePrefixes ?? []);
   const finalDenyReadBasenames = uniq(input.finalDenyReadBasenames ?? []);
   const finalDenyWritePaths = uniq(input.finalDenyWritePaths ?? []);
-  const finalImmutableWritePaths = uniq(input.finalImmutableWritePaths ?? []);
+  const finalImmutableWritePaths = uniq([
+    ...immutableToolchainPaths,
+    ...(input.finalImmutableWritePaths ?? []),
+  ]);
   const finalAllowReadPaths = uniq(input.finalAllowReadPaths ?? []);
   const finalAllowExecPaths = uniq(input.finalAllowExecPaths ?? []);
 
@@ -236,11 +304,13 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     '  (literal "/")',
     ...readRoots.map((p) => `  ${subpath(p)}`),
     ...homeToolchainFiles.map((p) => `  (literal ${sbplString(p)})`),
+    ...homeToolchainMutableFileFilters.map((filter) => `  ${filter}`),
     ')',
     '',
-    ';; --- read+write: the worktree, its repo, and TMPDIR ---',
+    ';; --- read+write: packet, Git metadata, TMPDIR, and tool state ---',
     `(allow file-read* file-write*`,
     ...rwRoots.map((p) => `  ${subpath(p)}`),
+    ...homeToolchainMutableFileFilters.map((filter) => `  ${filter}`),
     ')',
     '',
     ';; --- write: scratch devices ---',
@@ -424,11 +494,13 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const binaryPackageRoot = nodePackageRoot(binaryReal);
   const nodeDir = path.dirname(process.execPath);
   const nodeDirReal = await safeRealpath(nodeDir);
+  const gitPaths = await resolveGitSandboxPaths(worktreeReal);
 
   const extraRW = uniq([
     input.cwd, worktreeReal,
     input.repoPath, repoReal,
     tmp, tmpReal,
+    ...gitPaths,
     ...(input.extraReadWritePaths ?? []),
   ]);
   const extraRead = uniq([
@@ -460,6 +532,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     tmpDir: tmpReal,
     extraReadWritePaths: extraRW,
     extraReadPaths: extraRead,
+    pathReadRoots: await resolveAll(workerPathReadRoots(homeReal)),
     extraDenyPaths: extraDeny,
     trustedReadWritePaths: trustedReadWrite,
     finalDenyPaths: finalDeny,

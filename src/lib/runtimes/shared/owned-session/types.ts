@@ -13,6 +13,7 @@ import type {
   SquadSummary,
 } from '@/lib/fleet/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { SandboxDenial } from './sandbox-denial';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
 
@@ -49,6 +50,10 @@ export interface OwnedRunRecord {
   // ws-server, today's default); 'detached' = setsid+unref child that outlives
   // both node processes, transcript streaming to stdoutPath.
   detachMode?: 'bridge' | 'detached';
+  /** True only when this run was wrapped by sandbox-exec. */
+  sandboxed?: boolean;
+  /** Persisted so refresh/restart cannot re-emit the same denial event. */
+  sandboxDenial?: SandboxDenial;
   childExit?: OwnedChildExitOutcome;
 }
 
