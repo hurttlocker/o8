@@ -129,6 +129,8 @@ const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
+const chatHistoryRoute = await import('@/app/api/v2/chat-history/route');
+const searchRoute = await import('@/app/api/panel/search/route');
 const { archiveLane, createLane, findLaneByPacket, getLane, getLaneEvents, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { dispatch } = await import('@/lib/lane/commands');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
@@ -143,6 +145,7 @@ const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged
 const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
+const { syncTranscriptSearchDocument } = await import('@/lib/search/transcripts');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 const { enforceWedgeTimeouts, WEDGE_AWAITING_ORCHESTRATOR_MS } = await import('@/lib/lane/wedge-timeouts');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
@@ -1139,5 +1142,140 @@ describe('seam L — ralph retry and post-completion lookup preserve the persist
     expect(getLaneEvents(lane.id).some((event) =>
       event.payload.lastEventLabel === 'post_completion_typecheck_packet_not_found'
     )).toBe(false);
+  });
+});
+
+// ── Seam M — Cmd+K reaches persisted Stage 1 search stores (#984) ───────────
+
+async function searchPersistedRows(query: string) {
+  const response = await searchRoute.GET(new Request(
+    `http://localhost/api/panel/search?q=${encodeURIComponent(query)}`,
+  ));
+  expect(response.status).toBe(200);
+  return response.json() as Promise<{
+    groups: Record<string, Array<{
+      id: string;
+      detail: string;
+      target?: Record<string, unknown>;
+    }>>;
+  }>;
+}
+
+describe('seam M — the real Cmd+K route searches persisted Stage 1 rows', () => {
+  it('finds a phrase from the middle of a persisted chat and keeps its thread id', async () => {
+    const tabId = `thoughts-search-seam-${Date.now()}`;
+    const phrase = `midconversationquartz${Date.now()}`;
+    const persistResponse = await chatHistoryRoute.POST(new NextRequest(
+      'http://localhost/api/v2/chat-history',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tabId,
+          title: 'Search seam conversation',
+          messages: [
+            { id: 'm1', role: 'user', content: 'Opening message', timestamp: Date.now() - 2 },
+            { id: 'm2', role: 'assistant', content: `The hidden ${phrase} appears in the middle.`, timestamp: Date.now() - 1 },
+            { id: 'm3', role: 'user', content: 'Closing message', timestamp: Date.now() },
+          ],
+        }),
+      },
+    ));
+    expect(persistResponse.status).toBe(200);
+
+    const payload = await searchPersistedRows(phrase);
+    expect(payload.groups.chat).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        detail: expect.stringContaining(phrase),
+        target: expect.objectContaining({ chatTabId: tabId }),
+      }),
+    ]));
+  });
+
+  it('finds indexed transcript text and a session-outcome summary by packet id', async () => {
+    const now = Date.now();
+    const transcriptPacketId = `pkt-search-transcript-${now}`;
+    const transcriptPhrase = `runtimeamber${now}`;
+    syncTranscriptSearchDocument({
+      packetId: transcriptPacketId,
+      laneId: `lane-search-transcript-${now}`,
+      sessionKey: `codex-search-transcript-${now}`,
+      title: 'Transcript search seam',
+      repoPath: '/tmp/o8-search-seam',
+      runtime: 'codex',
+      entries: [{
+        id: 'entry-1',
+        role: 'assistant',
+        text: `Completed the ${transcriptPhrase} implementation path.`,
+        timestamp: new Date(),
+      }],
+      completedAt: new Date().toISOString(),
+    });
+
+    const outcomePacketId = `pkt-search-outcome-${now}`;
+    const outcomePhrase = `outcomesaffron${now}`;
+    getSqlite().prepare(`
+      INSERT INTO session_outcomes (
+        id, repo_path, runtime, packet_id, outcome, summary,
+        retry_history_json, patterns_json, conflict_zones_json,
+        changed_files_json, started_at, completed_at, valid_from
+      ) VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '[]', ?, ?, ?)
+    `).run(
+      `outcome-search-seam-${now}`,
+      '/tmp/o8-search-seam',
+      'codex',
+      outcomePacketId,
+      'succeeded',
+      `Persisted ${outcomePhrase} in the session ledger.`,
+      new Date(now - 1000).toISOString(),
+      new Date(now).toISOString(),
+      new Date(now).toISOString(),
+    );
+
+    const transcriptPayload = await searchPersistedRows(transcriptPhrase);
+    expect(transcriptPayload.groups.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        detail: expect.stringContaining(transcriptPhrase),
+        target: expect.objectContaining({ packetId: transcriptPacketId }),
+      }),
+    ]));
+
+    const outcomePayload = await searchPersistedRows(outcomePhrase);
+    expect(outcomePayload.groups.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        detail: expect.stringContaining(outcomePhrase),
+        target: expect.objectContaining({ packetId: outcomePacketId }),
+      }),
+    ]));
+  });
+
+  it('finds a persisted approval and routes it to Inbox', async () => {
+    const now = Date.now();
+    const approvalId = `approval-search-seam-${now}`;
+    const phrase = `approvalcobalt${now}`;
+    getSqlite().prepare(`
+      INSERT INTO approvals (
+        id, source, runtime, agent, session_key, title, description, summary,
+        risk, status, created_at, updated_at, audit_json, fingerprint
+      ) VALUES (?, 'test', 'codex', 'search-seam', ?, ?, ?, ?, 'medium',
+        'pending', ?, ?, '[]', ?)
+    `).run(
+      approvalId,
+      `codex-search-approval-${now}`,
+      'Approval search seam',
+      `Requires ${phrase} confirmation.`,
+      `Pending ${phrase} review.`,
+      now,
+      now,
+      `fingerprint-${approvalId}`,
+    );
+
+    const payload = await searchPersistedRows(phrase);
+    expect(payload.groups.approval).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: `approval:${approvalId}`,
+        target: expect.objectContaining({ approvalId, openInbox: true }),
+      }),
+    ]));
   });
 });

@@ -2713,6 +2713,39 @@ function DashboardInner() {
     handleSelectSession(sessionKey);
   }, [handleSelectSession]);
 
+  const handlePaletteSelectPacket = useCallback((
+    packetId?: string,
+    laneId?: string,
+    sessionKey?: string,
+    title?: string,
+  ) => {
+    const packet = thoughtsMissionStateRef.current.packets.find((candidate) => (
+      (packetId && candidate.id === packetId)
+      || (laneId && candidate.lane?.laneId === laneId)
+      || (sessionKey && candidate.lane?.sessionKey === sessionKey)
+    ));
+    if (packet) {
+      focusOrchestrationPacketLane(packet);
+      return;
+    }
+    if (sessionKey) {
+      handleSelectSession(sessionKey, title ? { title } : undefined);
+      return;
+    }
+    void (async () => {
+      const resolved = await resolveFocusableLaneBinding({
+        laneId: laneId ?? '',
+        packetId: packetId ?? '',
+        runtime: 'codex',
+      });
+      if (resolved?.sessionKey) handleSelectSession(resolved.sessionKey, title ? { title } : undefined);
+    })();
+  }, [focusOrchestrationPacketLane, handleSelectSession]);
+
+  const handlePaletteSelectDirective = useCallback((_directiveId: string) => {
+    setActiveNavSection('customize');
+  }, [setActiveNavSection]);
+
   // Opens a file path. Shared by (a) agent-chat file clicks routed through
   // O8Panel's `o8:open-file` → onOpenFile, and (b) Finder "Open With → o8"
   // (FileOpenBridge). Surface-aware (Q ruling 2026-07-11): open the file where
@@ -4907,6 +4940,10 @@ function DashboardInner() {
             onSelectIssue={handlePaletteSelectIssue}
             onSelectFile={handlePaletteSelectFile}
             onSelectAgent={handlePaletteSelectAgent}
+            onSelectChat={handleOpenHistoryChatFromPanel}
+            onSelectPacket={handlePaletteSelectPacket}
+            onSelectInbox={handleOpenInbox}
+            onSelectDirective={handlePaletteSelectDirective}
           />
         </Suspense>
       ) : null}

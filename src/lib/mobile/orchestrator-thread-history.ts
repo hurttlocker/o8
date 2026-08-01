@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { syncChatHistorySearchRecord } from '@/lib/search/conversations';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
@@ -25,7 +26,6 @@ export { ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchest
 const MAX_THREADS = 20;
 const DEFAULT_MODEL = 'claude-code';
 const DEFAULT_BACKEND: MobileOrchestratorBackend = 'claude';
-
 export interface OrchestratorThreadRevealRequest {
   requestedAt: string;
   thread: MobileOrchestratorThread;
@@ -83,6 +83,7 @@ function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   ensureHistoryDir();
   const filePath = safeOrchestratorHistoryPath(tabId);
   writeFileSync(filePath, JSON.stringify(record));
+  syncChatHistorySearchRecord(tabId, record);
   historyParseCache.delete(filePath);
   historyWriteVersion += 1;
 }

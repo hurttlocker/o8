@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync,
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
+import { deleteChatHistorySearchRecord, syncChatHistorySearchRecord } from '@/lib/search/conversations';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
@@ -125,20 +126,23 @@ export function writePersistedLlmChat(
     ? history.messages
     : mergeChatMessages(existingMessages, history.messages);
 
-  writeFileSync(filePath, JSON.stringify({
+  const persistedRecord = {
     ...history,
     messages: mergedMessages.map(stripImages),
     savedAt: new Date().toISOString(),
     starred: history.starred ?? starred,
     title: history.title ?? title,
     planText: normalizePlanText(history.planText) ?? planText,
-  }));
+  };
+  writeFileSync(filePath, JSON.stringify(persistedRecord));
+  syncChatHistorySearchRecord(tabId, persistedRecord);
 }
 
 export function deletePersistedLlmChat(tabId: string) {
   const filePath = safePath(tabId);
   try {
     if (existsSync(filePath)) unlinkSync(filePath);
+    deleteChatHistorySearchRecord(tabId);
   } catch {
     // ignore
   }

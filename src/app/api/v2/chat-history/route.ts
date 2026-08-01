@@ -28,6 +28,10 @@ import {
   pageChatHistoryMessages,
   parseChatHistoryPageRequest,
 } from '@/lib/llm/chat-history-pagination';
+import {
+  deleteChatHistorySearchRecord,
+  syncChatHistorySearchRecord,
+} from '@/lib/search/conversations';
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
@@ -310,7 +314,7 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
-  writeFileSync(filePath, JSON.stringify({
+  const persistedRecord = {
     messages: finalMessages,
     model: nextModel,
     savedAt: new Date().toISOString(),
@@ -335,7 +339,15 @@ export async function POST(request: NextRequest) {
     mobileRevealRequestedAt,
     orchestratorSessionIds: nextSessionIds,
     orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
-  }));
+  };
+  try {
+    writeFileSync(filePath, JSON.stringify(persistedRecord));
+    syncChatHistorySearchRecord(body.tabId, persistedRecord);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'chat persist failed';
+    console.error('[chat-history] POST failed', { tabId: body.tabId, message });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
 
   // Auto-title (2026-07-13): once the thread has a real exchange, a free
   // model names it properly — fire-and-forget, never blocks the persist.
@@ -387,8 +399,15 @@ export async function PATCH(request: NextRequest) {
     data.orchestratorSessionUpdatedAt = normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? null;
   }
 
-  writeFileSync(filePath, JSON.stringify(data));
-  return NextResponse.json({ ok: true });
+  try {
+    writeFileSync(filePath, JSON.stringify(data));
+    syncChatHistorySearchRecord(body.tabId, data);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'chat update failed';
+    console.error('[chat-history] PATCH failed', { tabId: body.tabId, message });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: NextRequest) {
@@ -396,12 +415,9 @@ export async function DELETE(request: NextRequest) {
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
   const filePath = safePath(tabId);
-  if (!existsSync(filePath)) {
-    // Idempotent — already gone is still a success.
-    return NextResponse.json({ ok: true });
-  }
   try {
-    unlinkSync(filePath);
+    if (existsSync(filePath)) unlinkSync(filePath);
+    deleteChatHistorySearchRecord(tabId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     // Surface the actual failure so the client can show a toast and

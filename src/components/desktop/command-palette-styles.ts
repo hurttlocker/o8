@@ -1,6 +1,16 @@
 import type { CSSProperties } from 'react';
 
-export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'chat' | 'directive' | 'action';
+export type GroupKey =
+  | 'recent'
+  | 'issue'
+  | 'file'
+  | 'agent'
+  | 'chat'
+  | 'transcript'
+  | 'approval'
+  | 'inbox'
+  | 'directive'
+  | 'action';
 
 export const overlayStyle: CSSProperties = {
   position: 'fixed',

@@ -11,7 +11,16 @@ import {
   type GroupKey,
 } from '../command-palette-styles';
 
-export type PaletteIconKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive' | 'action';
+export type PaletteIconKind =
+  | 'issue'
+  | 'file'
+  | 'agent'
+  | 'chat'
+  | 'transcript'
+  | 'approval'
+  | 'inbox'
+  | 'directive'
+  | 'action';
 
 export interface PaletteListItem {
   id: string;
@@ -20,6 +29,7 @@ export interface PaletteListItem {
   meta: string;
   iconKind: PaletteIconKind;
   swatchColor?: string;
+  highlight?: string;
 }
 
 const GROUP_LABEL: Record<GroupKey, string> = {
@@ -28,7 +38,10 @@ const GROUP_LABEL: Record<GroupKey, string> = {
   agent: 'Agents',
   file: 'Files',
   issue: 'Issues',
-  chat: 'Chats',
+  chat: 'Conversations',
+  transcript: 'Transcripts',
+  approval: 'Approvals',
+  inbox: 'Inbox',
   directive: 'Rules',
 };
 
@@ -84,7 +97,7 @@ export const PaletteList = memo(function PaletteList({
                   )}
                 </span>
                 <span style={titleTextStyle}>{item.title}</span>
-                {item.meta ? <span style={metaTextStyle}>{item.meta}</span> : null}
+                {item.meta ? <span style={metaTextStyle}>{highlightMatch(item.meta, item.highlight)}</span> : null}
                 <span aria-hidden="true" style={{ ...enterHintStyle, opacity: active ? 1 : 0 }}>↵</span>
               </button>
             );
@@ -102,6 +115,12 @@ function PaletteKindGlyph({ kind }: { kind: PaletteIconKind }) {
       ? 'var(--t-success)'
       : kind === 'chat'
         ? 'var(--t-accent)'
+        : kind === 'transcript'
+          ? 'var(--t-accent)'
+          : kind === 'approval'
+            ? 'var(--t-warning)'
+            : kind === 'inbox'
+              ? 'var(--t-brand-orange)'
         : kind === 'directive'
           ? 'var(--t-text-secondary)'
           : 'var(--t-text-muted)';
@@ -129,6 +148,30 @@ function PaletteKindGlyph({ kind }: { kind: PaletteIconKind }) {
       </svg>
     );
   }
+  if (kind === 'transcript') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 3h12v18H6z" />
+        <path d="M9 8h6M9 12h6M9 16h4" />
+      </svg>
+    );
+  }
+  if (kind === 'approval') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8 12 2.5 2.5L16 9" />
+      </svg>
+    );
+  }
+  if (kind === 'inbox') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 4h16v14H4z" />
+        <path d="M4 13h5l2 2h2l2-2h5" />
+      </svg>
+    );
+  }
   if (kind === 'directive') {
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -149,6 +192,21 @@ function PaletteKindGlyph({ kind }: { kind: PaletteIconKind }) {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m9 18 6-6-6-6" />
     </svg>
+  );
+}
+
+function highlightMatch(text: string, query?: string) {
+  const needle = query?.trim();
+  if (!needle) return text;
+  const start = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (start < 0) return text;
+  const end = start + needle.length;
+  return (
+    <>
+      {text.slice(0, start)}
+      <span style={{ color: 'var(--t-accent)', fontWeight: 500 }}>{text.slice(start, end)}</span>
+      {text.slice(end)}
+    </>
   );
 }
 

@@ -33,7 +33,15 @@ import {
   type GroupKey,
 } from './command-palette-styles';
 
-export type CommandPaletteSearchKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive';
+export type CommandPaletteSearchKind =
+  | 'issue'
+  | 'file'
+  | 'agent'
+  | 'chat'
+  | 'transcript'
+  | 'approval'
+  | 'inbox'
+  | 'directive';
 
 export interface CommandPaletteSearchTarget {
   issueNumber?: number;
@@ -42,6 +50,15 @@ export interface CommandPaletteSearchTarget {
   line?: number;
   sessionKey?: string;
   chatTabId?: string;
+  chatRepoName?: string;
+  chatRepoPath?: string;
+  chatRepoBranch?: string;
+  chatRemoteUrl?: string;
+  packetId?: string;
+  laneId?: string;
+  approvalId?: string;
+  inboxItemId?: string;
+  openInbox?: boolean;
   directiveId?: string;
 }
 
@@ -81,12 +98,18 @@ export interface CommandPaletteProps {
   onSelectIssue: (issueNumber: number, repo?: string) => void;
   onSelectFile: (filePath: string, line?: number) => void;
   onSelectAgent: (sessionKey: string) => void;
-  onSelectChat?: (chatTabId: string, title?: string) => void;
+  onSelectChat?: (
+    chatTabId: string,
+    title: string,
+    repo?: { name?: string; localPath?: string; branch?: string | null; remoteUrl?: string | null } | null,
+  ) => void;
+  onSelectPacket?: (packetId?: string, laneId?: string, sessionKey?: string, title?: string) => void;
+  onSelectInbox?: () => void;
   onSelectDirective?: (directiveId: string) => void;
 }
 
-type PaletteScope = 'all' | 'agent' | 'file' | 'action' | 'issue' | 'chat' | 'directive';
-type FilterScope = Exclude<PaletteScope, 'all'>;
+type FilterScope = CommandPaletteSearchKind | 'action';
+type PaletteScope = 'all' | FilterScope;
 
 interface PaletteItem extends PaletteListItem {
   groupKey: GroupKey;
@@ -111,6 +134,9 @@ const EMPTY_GROUPS: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[
   file: [],
   agent: [],
   chat: [],
+  transcript: [],
+  approval: [],
+  inbox: [],
   directive: [],
 };
 
@@ -129,6 +155,9 @@ const KIND_ICON: Record<CommandPaletteSearchKind, PaletteIconKind> = {
   file: 'file',
   agent: 'agent',
   chat: 'chat',
+  transcript: 'transcript',
+  approval: 'approval',
+  inbox: 'inbox',
   directive: 'directive',
 };
 
@@ -137,6 +166,9 @@ function isSearchKind(value: unknown): value is CommandPaletteSearchKind {
     || value === 'file'
     || value === 'agent'
     || value === 'chat'
+    || value === 'transcript'
+    || value === 'approval'
+    || value === 'inbox'
     || value === 'directive';
 }
 
@@ -192,14 +224,6 @@ function relativeTimestamp(timestamp: number | null): string {
   return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-function chatTimestamp(result: CommandPaletteSearchResult): number | null {
-  const source = result.target?.chatTabId ?? result.id;
-  const match = source.match(/(?:^|\D)(\d{13})(?:\D|$)/);
-  if (!match) return null;
-  const timestamp = Number(match[1]);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
 function dirname(path: string): string {
   const normalized = path.replace(/^\.\//, '');
   const parts = normalized.split('/');
@@ -217,11 +241,11 @@ function resultMeta(result: CommandPaletteSearchResult): string {
     }
     return dirname(result.target?.filePath ?? result.detail);
   }
-  if (result.kind === 'chat') return relativeTimestamp(chatTimestamp(result)) || result.detail;
+  if (result.kind === 'chat' || result.kind === 'transcript') return result.detail;
   return result.detail;
 }
 
-function paletteItemForResult(result: CommandPaletteSearchResult): PaletteItem {
+function paletteItemForResult(result: CommandPaletteSearchResult, query = ''): PaletteItem {
   return {
     id: result.id,
     groupKey: result.kind,
@@ -230,6 +254,7 @@ function paletteItemForResult(result: CommandPaletteSearchResult): PaletteItem {
     detail: result.detail,
     meta: resultMeta(result),
     iconKind: KIND_ICON[result.kind],
+    highlight: query.trim(),
     result,
   };
 }
@@ -244,6 +269,8 @@ export const CommandPalette = memo(function CommandPalette({
   onSelectFile,
   onSelectAgent,
   onSelectChat,
+  onSelectPacket,
+  onSelectInbox,
   onSelectDirective,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
@@ -362,7 +389,7 @@ export const CommandPalette = memo(function CommandPalette({
   const unscopedItems = useMemo<PaletteItem[]>(() => {
     if (query.trim().length < 2) {
       if (scope !== 'all' && scope !== 'action') {
-        return groups[scope].map(paletteItemForResult);
+        return groups[scope].map((result) => paletteItemForResult(result, query));
       }
       const recentItems = recents.map<PaletteItem>((entry) => ({
         id: `recent:${entry.id}`,
@@ -387,13 +414,16 @@ export const CommandPalette = memo(function CommandPalette({
     const ordered: PaletteItem[] = [...filteredActionItems];
     const appendGroup = (kind: CommandPaletteSearchKind) => {
       for (const result of groups[kind]) {
-        ordered.push(paletteItemForResult(result));
+        ordered.push(paletteItemForResult(result, query));
       }
     };
     appendGroup('agent');
     appendGroup('issue');
     appendGroup('file');
     appendGroup('chat');
+    appendGroup('transcript');
+    appendGroup('approval');
+    appendGroup('inbox');
     appendGroup('directive');
     return ordered;
   }, [filteredActionItems, groups, query, recents, scope]);
@@ -435,7 +465,11 @@ export const CommandPalette = memo(function CommandPalette({
       }));
     }
 
-    if (target.issueNumber !== undefined) {
+    if (target.openInbox) {
+      onSelectInbox?.();
+    } else if (target.packetId || target.laneId) {
+      onSelectPacket?.(target.packetId, target.laneId, target.sessionKey, item.title);
+    } else if (target.issueNumber !== undefined) {
       onSelectIssue(target.issueNumber, target.repo);
     } else if (target.filePath) {
       onSelectFile(target.filePath, target.line);
@@ -443,7 +477,12 @@ export const CommandPalette = memo(function CommandPalette({
       onSelectAgent(target.sessionKey);
     } else if (target.chatTabId) {
       if (onSelectChat) {
-        onSelectChat(target.chatTabId, item.title);
+        onSelectChat(target.chatTabId, item.title, {
+          name: target.chatRepoName,
+          localPath: target.chatRepoPath,
+          branch: target.chatRepoBranch,
+          remoteUrl: target.chatRemoteUrl,
+        });
       } else if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('o8:command-palette:open-chat', {
           detail: { chatTabId: target.chatTabId, title: item.title },
@@ -459,7 +498,7 @@ export const CommandPalette = memo(function CommandPalette({
       }
     }
     onClose();
-  }, [onClose, onSelectAgent, onSelectChat, onSelectDirective, onSelectFile, onSelectIssue]);
+  }, [onClose, onSelectAgent, onSelectChat, onSelectDirective, onSelectFile, onSelectInbox, onSelectIssue, onSelectPacket]);
 
   const chooseScope = useCallback((nextScope: PaletteScope) => {
     setScope(nextScope);

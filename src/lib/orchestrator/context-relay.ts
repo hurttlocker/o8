@@ -20,8 +20,9 @@ import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { truncateText } from '@/lib/util/text';
+import { syncTranscriptSearchDocument } from '@/lib/search/transcripts';
 
-const TRANSCRIPT_CAPTURE_LIMIT = 80;
+const TRANSCRIPT_CAPTURE_LIMIT = 5_000;
 const SUMMARY_LIMIT = 1_200;
 const NOTE_LIMIT = 320;
 const NOTE_PATTERN = /\b(blocker|blocked|blocking|note|notes|remaining|next step|todo|unable|could not|can't|cannot|failed|failure|error|waiting)\b/i;
@@ -469,6 +470,23 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   };
 
   packetCompletionContextStore.set(normalizedPacketId, context);
+
+  // #984 Stage 1 — index the transcript once, at packet completion. Cmd+K
+  // reads this durable FTS document and never scans runtime files per keystroke.
+  try {
+    syncTranscriptSearchDocument({
+      packetId: normalizedPacketId,
+      laneId: lane?.id ?? null,
+      sessionKey: normalizedSessionKey,
+      title: lane?.label?.trim() || `Packet ${normalizedPacketId}`,
+      repoPath: lane?.repoPath ?? null,
+      runtime: runtimeId,
+      entries: transcript,
+      completedAt: context.completedAt,
+    });
+  } catch (error) {
+    console.warn('[transcript-search-write] failed for', normalizedPacketId, error);
+  }
 
   // #1108 — Persist to the session_outcomes ledger. Without this, the implicit
   // brain (Recent Outcomes context, the auto-directive proposer, and the runtime
