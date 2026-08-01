@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useCallback, useRef, type KeyboardEvent, type WheelEvent } from 'react';
 import { HoverPipCard } from '@/components/desktop/HoverPipCard';
 
 export const O8_SPEC_PIP_EVENT = 'o8:spec-pip';
@@ -38,6 +39,36 @@ export function O8SpecPipCard({
   repoPath?: string | null;
   onOpenSpec?: () => void;
 }) {
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const movePreview = useCallback((deltaX: number, deltaY: number) => {
+    const scroller = previewRef.current?.querySelector<HTMLElement>('.o8-notes-scroll');
+    if (!scroller) return false;
+    scroller.scrollLeft += deltaX;
+    scroller.scrollTop += deltaY;
+    return true;
+  }, []);
+
+  const onPreviewWheel = useCallback((event: WheelEvent<HTMLButtonElement>, pageHeight: number) => {
+    const multiplier = event.deltaMode === 1
+      ? 16
+      : event.deltaMode === 2 ? pageHeight : 1;
+    if (!movePreview(event.deltaX * multiplier, event.deltaY * multiplier)) return;
+    event.stopPropagation();
+  }, [movePreview]);
+
+  const onPreviewKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, pageHeight: number) => {
+    const pageStep = pageHeight * 0.8;
+    let deltaY = 0;
+    if (event.key === 'ArrowDown') deltaY = 40;
+    else if (event.key === 'ArrowUp') deltaY = -40;
+    else if (event.key === 'PageDown') deltaY = pageStep;
+    else if (event.key === 'PageUp') deltaY = -pageStep;
+    else return;
+    if (!movePreview(0, deltaY)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, [movePreview]);
+
   return (
     <HoverPipCard
       active={active}
@@ -51,6 +82,7 @@ export function O8SpecPipCard({
     >
       {({ shape, close }) => (
         <div
+          ref={previewRef}
           style={{
             position: 'relative',
             display: 'flex',
@@ -74,6 +106,8 @@ export function O8SpecPipCard({
           <button
             type="button"
             aria-label="Open o8.md panel"
+            onWheel={(event) => onPreviewWheel(event, shape.frameHeight)}
+            onKeyDown={(event) => onPreviewKeyDown(event, shape.frameHeight)}
             onClick={() => {
               close();
               onOpenSpec?.();

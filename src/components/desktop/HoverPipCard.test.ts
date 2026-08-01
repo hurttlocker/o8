@@ -81,10 +81,10 @@ describe('HoverPipCard', () => {
     })));
     act(() => window.dispatchEvent(new CustomEvent('test:open-pip', { detail: { toggle: true } })));
 
-    const orientation = container.querySelector<HTMLButtonElement>('button[aria-label="Switch to desktop-style view"]');
+    const orientation = container.querySelector<HTMLButtonElement>('button[aria-label="Switch to mobile-style view"]');
     expect(orientation).not.toBeNull();
     act(() => orientation?.click());
-    expect(localStorage.getItem('test:open-pip:orientation')).toBe('wide');
+    expect(localStorage.getItem('test:open-pip:orientation')).toBe('tall');
 
     const open = container.querySelector<HTMLButtonElement>('button[aria-label="Open preview"]');
     expect(open).not.toBeNull();

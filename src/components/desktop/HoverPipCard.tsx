@@ -101,11 +101,11 @@ export function HoverPipCard({
   const hoverVisibleRef = useRef(false);
   const manualVisibleRef = useRef(false);
   const [orientation, setOrientation] = useState<HoverPipOrientation>(() => {
-    if (typeof window === 'undefined') return 'tall';
+    if (typeof window === 'undefined') return 'wide';
     try {
-      return window.localStorage.getItem(storageKey) === 'wide' ? 'wide' : 'tall';
+      return window.localStorage.getItem(storageKey) === 'tall' ? 'tall' : 'wide';
     } catch {
-      return 'tall';
+      return 'wide';
     }
   });
   const [position, setPosition] = useState<PipPosition | null>(() => readPosition(positionKey));
