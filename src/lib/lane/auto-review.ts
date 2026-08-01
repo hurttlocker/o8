@@ -22,6 +22,7 @@ import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-ris
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
+import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
@@ -491,7 +492,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       console.warn(`[auto-review] Failed to prepare review screenshot for lane ${lane.id}:`, error);
     }
   }
-  let reviewPrompt = buildReviewPrompt(
+  const reviewPrompt = buildReviewPrompt(
     lane,
     diffSummary.summary,
     diffSummary.changedFiles,
@@ -519,40 +520,32 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   // #reviewer-split (2026-07-07): reviews resolve their OWN backend so the
   // accuracy-critical review can run on Claude while the bulk orchestrator
   // stays on Codex. 'follow' (default) = pre-split behavior.
-  const { getActiveReviewerBackend } = await import('./orchestrator-backends/registry');
-  const backend = getActiveReviewerBackend();
-  if (backend.id === 'codex') {
-    reviewPrompt = appendCodexAutoReviewVerdictInstructions(reviewPrompt);
-  }
-
-  console.log(`[auto-review] Routing lane ${lane.id} via ${backend.label} orchestrator`);
-
-  const session = backend.ensureSession(lane.repoPath);
-  if (session.status === 'busy') {
-    throw new Error(`${backend.label} orchestrator session busy — will retry`);
-  }
-  if (session.status === 'dead') {
-    throw new Error(`${backend.label} orchestrator session dead — will retry after recovery`);
-  }
-
-  console.log(`[auto-review] Sending review prompt to ${backend.label} orchestrator for lane ${lane.id}`);
-
-  let codexReviewText = '';
-  await backend.sendTurn(lane.repoPath, reviewPrompt, (event) => {
-    if (event.type === 'text') {
-      if (backend.id === 'codex') codexReviewText += event.text;
-      console.log(`[auto-review] ${backend.label}: ${event.text.slice(0, 100)}`);
-    } else if (event.type === 'tool_use') {
-      console.log(`[auto-review] ${backend.label} called tool: ${event.name}`);
-    } else if (event.type === 'error') {
-      console.error(`[auto-review] ${backend.label} error: ${event.error}`);
-    }
+  const reviewTurn = await runReviewerTurnWithQuotaFallback({
+    laneId: lane.id,
+    repoPath: lane.repoPath,
+    threadId: `auto-review-${lane.id}-${review.id}`,
+    surface: 'auto-review',
+    prompt: (backendId) => backendId === 'codex'
+      ? appendCodexAutoReviewVerdictInstructions(reviewPrompt)
+      : reviewPrompt,
+    onEvent: (turnBackend, event) => {
+      if (event.type === 'text') {
+        console.log(`[auto-review] ${turnBackend.label}: ${event.text.slice(0, 100)}`);
+      } else if (event.type === 'tool_use') {
+        console.log(`[auto-review] ${turnBackend.label} called tool: ${event.name}`);
+      } else if (event.type === 'error') {
+        console.error(`[auto-review] ${turnBackend.label} error: ${event.error}`);
+      }
+    },
   });
+  if (!reviewTurn.ok) {
+    throw new Error(`Review turn failed: ${reviewTurn.errors.join('; ').slice(0, 500)}`);
+  }
 
-  if (backend.id === 'codex') {
+  if (reviewTurn.backend === 'codex') {
     const recorded = await recordCodexAutoReviewVerdict({
       lane,
-      rawText: codexReviewText,
+      rawText: reviewTurn.text,
       requiresSecondPass: reviewRisk.tier === 'high',
     });
     if (recorded?.verdict.parseWarning) {
@@ -604,22 +597,25 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   let secondPassText = '';
   const secondPassErrors: string[] = [];
 
-  console.log(`[auto-review] Sending blind second-pass review to ${backend.label} for lane ${lane.id}`);
-  try {
-    await backend.sendTurn(lane.repoPath, blindPrompt, (event) => {
+  console.log(`[auto-review] Sending blind second-pass review for lane ${lane.id}`);
+  const secondPassTurn = await runReviewerTurnWithQuotaFallback({
+    laneId: lane.id,
+    repoPath: lane.repoPath,
+    threadId: secondPassThreadId,
+    surface: 'merge-gate-review',
+    prompt: blindPrompt,
+    onEvent: (turnBackend, event) => {
       if (event.type === 'text') {
-        secondPassText += event.text;
-        console.log(`[auto-review] ${backend.label} second-pass: ${event.text.slice(0, 100)}`);
+        console.log(`[auto-review] ${turnBackend.label} second-pass: ${event.text.slice(0, 100)}`);
       } else if (event.type === 'tool_use') {
-        console.log(`[auto-review] ${backend.label} second-pass called tool: ${event.name}`);
+        console.log(`[auto-review] ${turnBackend.label} second-pass called tool: ${event.name}`);
       } else if (event.type === 'error') {
-        secondPassErrors.push(event.error);
-        console.error(`[auto-review] ${backend.label} second-pass error: ${event.error}`);
+        console.error(`[auto-review] ${turnBackend.label} second-pass error: ${event.error}`);
       }
-    }, { threadId: secondPassThreadId });
-  } catch (error) {
-    secondPassErrors.push(error instanceof Error ? error.message : String(error));
-  }
+    },
+  });
+  secondPassText = secondPassTurn.text;
+  secondPassErrors.push(...secondPassTurn.errors);
 
   const [{ normalizeHeadSha, readHeadSha }, { createApproval, markSecondPassAgreed }] = await Promise.all([
     import('@/lib/lane/head-sha-lock'),

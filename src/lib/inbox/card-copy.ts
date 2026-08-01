@@ -106,6 +106,15 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
         headline: 'An o8 background service is restarting repeatedly; inspect its LaunchAgent logs before retrying it.',
         subline: supervisorMetadata(item, [item.errorExcerpt]),
       };
+    case 'worker_quota_exhausted':
+      return {
+        headline: `The selected worker subscription is exhausted; rerun on ${clean(item.payload.suggestedRuntime) ?? 'the equal-tier runtime from the other house'}.`,
+        subline: supervisorMetadata(item, [
+          clean(item.payload.fromModel),
+          clean(item.payload.suggestedModel),
+          item.errorExcerpt,
+        ]),
+      };
     default:
       return {
         headline: itemPacketLabel(item) ?? item.errorExcerpt,

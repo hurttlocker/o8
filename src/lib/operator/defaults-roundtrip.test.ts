@@ -39,6 +39,7 @@ const NON_DEFAULT_UPDATE = {
   inAppOrchestratorEnabled: false,
   brainUseClaudeCli: false,
   workersUseBrain: 'off',
+  crossHouseWorkerFallback: true,
   orchestratorBackend: 'collide',
   reviewerBackend: 'codex',
   packetExplainerEnabled: false,

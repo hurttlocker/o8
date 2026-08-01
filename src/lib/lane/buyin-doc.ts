@@ -35,6 +35,7 @@ import {
   recordArtifact,
 } from '@/lib/artifacts/store';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 
 /**
  * The file the backend agent is told to write at the repo root. PER-PACKET so
@@ -44,18 +45,6 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 export function buyinDocFilename(packetId: string): string {
   const safe = packetId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) || 'packet';
   return `.o8-buyin-doc-${safe}.html`;
-}
-
-interface ReviewerBackend {
-  id: string;
-  label: string;
-  ensureSession: (repoPath: string, agent?: string, threadId?: string | null) => { status: string };
-  sendTurn: (
-    repoPath: string,
-    prompt: string,
-    onEvent: (event: { type: string; text?: string; name?: string; error?: string }) => void,
-    opts?: { threadId?: string },
-  ) => Promise<void>;
 }
 
 /** A demo/proof artifact captured for the packet (screenshot/video). */
@@ -151,19 +140,20 @@ export async function generateBuyinDoc(params: GenerateBuyinDocParams): Promise<
   const docPath = join(params.repoPath, buyinDocFilename(params.packetId));
   const threadId = `buyin-${params.laneId}`;
   try {
-    const { getActiveReviewerBackend } = await import('./orchestrator-backends/registry');
-    const backend = getActiveReviewerBackend() as unknown as ReviewerBackend;
-    const session = backend.ensureSession(params.repoPath, undefined, threadId);
-    if (session.status === 'busy' || session.status === 'dead') {
-      throw new Error(`${backend.label} session ${session.status}`);
-    }
-
     const prompt = buildBuyinDocPrompt(params);
-    await backend.sendTurn(params.repoPath, prompt, (event) => {
+    const turn = await runReviewerTurnWithQuotaFallback({
+      laneId: params.laneId,
+      repoPath: params.repoPath,
+      threadId,
+      surface: 'buyin-doc',
+      prompt,
+      onEvent: (backend, event) => {
       if (event.type === 'error' && event.error) {
         console.warn(`[buyin-doc] ${backend.label} error: ${event.error}`);
       }
-    }, { threadId });
+      },
+    });
+    if (!turn.ok) throw new Error(turn.errors.join('; ') || 'reviewer turn failed');
 
     const html = await readFile(docPath, 'utf8');
     if (!html.trim()) {

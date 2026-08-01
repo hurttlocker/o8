@@ -76,6 +76,7 @@ export interface OperatorDefaults {
   inAppOrchestratorEnabled: boolean;
   brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
+  crossHouseWorkerFallback: boolean;
   orchestratorBackend: OrchestratorBackendSetting;
   reviewerBackend: ReviewerBackendSetting;
   packetExplainerEnabled: boolean;

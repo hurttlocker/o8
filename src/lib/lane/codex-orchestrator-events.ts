@@ -4,6 +4,8 @@ import { planFromCodexTodoList, planFromToolInput, type OrchestratorPlanSnapshot
 export interface ParsedCodexLine {
   type?: string;
   thread_id?: string;
+  message?: string;
+  error?: unknown;
   payload?: Record<string, unknown>;
   item?: Record<string, unknown>;
   usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number };
@@ -66,6 +68,32 @@ export function handleCodexJsonLine(
 
     if (type === 'thread.started' && typeof parsed.thread_id === 'string') {
       state.threadId = parsed.thread_id;
+      return true;
+    }
+
+    if (type === 'error' || type === 'turn.failed' || type === 'run.failed') {
+      const nestedError = safeObject(parsed.error);
+      const message = typeof parsed.message === 'string'
+        ? parsed.message
+        : typeof parsed.error === 'string'
+          ? parsed.error
+          : typeof nestedError?.message === 'string'
+            ? nestedError.message
+            : JSON.stringify(parsed.error ?? parsed);
+      onEvent({ type: 'error', error: message });
+      return true;
+    }
+
+    if (type === 'event_msg' && payload?.type === 'error') {
+      const nestedError = safeObject(payload.error);
+      const message = typeof payload.message === 'string'
+        ? payload.message
+        : typeof payload.error === 'string'
+          ? payload.error
+          : typeof nestedError?.message === 'string'
+            ? nestedError.message
+            : JSON.stringify(payload);
+      onEvent({ type: 'error', error: message });
       return true;
     }
 

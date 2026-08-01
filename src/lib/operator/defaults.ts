@@ -7,7 +7,6 @@ import { MODEL_IDS } from '@/lib/models';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
@@ -90,6 +89,13 @@ export type {
 } from './defaults-env';
 export { coerceStoredTier, isTargetingTier, mergeTier } from './targeting-tier';
 export type { TargetingTier } from './targeting-tier';
+export {
+  CLASS_A_COMPOSER_OPTIONS,
+  DISPATCH_RUNTIME_OPTIONS,
+  ORCHESTRATOR_BACKEND_OPTIONS,
+  ORCHESTRATOR_MODEL_OPTIONS,
+  PARALLEL_CAP_PRESETS,
+} from './default-options';
 /**
  * Operator defaults — the dispatch/supervision knobs exposed in Settings
  * (one field per knob in {@link OperatorDefaults}; the count grows, don't
@@ -215,6 +221,10 @@ export interface OperatorDefaults {
   brainUseClaudeCli: boolean;
   /** See {@link WorkersUseBrain}. Default 'auto'. */
   workersUseBrain: WorkersUseBrain;
+  /** Automatically redispatch a quota-capped packet worker on its equal-tier
+   *  runtime from the other subscription house. Off preserves operator choice
+   *  and raises an Incident Queue card instead. */
+  crossHouseWorkerFallback: boolean;
   /**
    * Which backend drives the in-app Orchestrator. **'auto' (default)** = the
    * legacy derivation from {@link inAppOrchestratorEnabled} (toggle ON → Claude,
@@ -346,6 +356,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // anyone with a Claude sub. Independent of the orchestrator toggle (2026-06-22).
   brainUseClaudeCli: true,
   workersUseBrain: 'auto',
+  crossHouseWorkerFallback: false,
   // 'auto' → defer to inAppOrchestratorEnabled (legacy claude/codex derivation),
   // so the default is byte-identical to pre-setting behavior.
   orchestratorBackend: 'auto',
@@ -382,45 +393,6 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxCount: 20,
   worktreeMaxTotalGb: 20,
 };
-
-export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
-  { value: 'haiku-cli', label: 'Haiku', detail: 'Free for Claude Max users via the warm REPL pool.' },
-  { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, free, slower bootstrap.' },
-  { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite first (~1-3s, pennies per question, daily-capped). Free tiers as fallback.' },
-];
-
-export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> =
-  listDispatchableRuntimes().map((value) => {
-    const capability = getRuntimeCapability(value);
-    return { value, label: capability.label, detail: capability.description };
-  });
-
-export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSetting; label: string; detail: string }> = [
-  { value: 'auto', label: 'Auto', detail: 'Follow the in-app orchestrator toggle below (Claude when on, Codex when off).' },
-  { value: 'codex', label: 'Codex', detail: 'Codex GPT-5.5 xhigh — free for ChatGPT Plus / Codex subscribers.' },
-  { value: 'claude', label: 'Claude', detail: 'Claude Code REPL — subscription-billed (Claude Max pool).' },
-  { value: 'openclaw', label: 'OpenClaw', detail: 'Governed openclaw orchestrator — dispatches Codex workers through o8.' },
-  { value: 'hermes', label: 'Hermes', detail: 'Hermes via ACP — needs Hermes installed + a model provider configured (hermes setup).' },
-  { value: 'collide', label: 'Collide', detail: 'Mixture-of-Agents: Claude + Codex propose independently, Claude synthesizes + does the work — the upgraded Claude.' },
-];
-
-export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'power-user'; label: string; value: number }> = [
-  { key: 'conservative', label: 'Conservative', value: 2 },
-  { key: 'balanced', label: 'Balanced', value: 5 },
-  { key: 'power-user', label: 'Power-user', value: 8 },
-];
-
-export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
-  // Subscription-billed via the claude CLI like every other entry. Fable is
-  // included in Claude Code MAX subscriptions through 2026-06-22.
-  { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5' },
-  { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8' },
-  { value: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7' },
-  { value: MODEL_IDS.raw.anthropicClaudeOpus46, label: 'Opus 4.6' },
-  { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5' },
-  { value: MODEL_IDS.raw.anthropicClaudeSonnet45, label: 'Sonnet 4.5' },
-  { value: MODEL_IDS.raw.anthropicClaudeHaiku45, label: 'Haiku 4.5' },
-];
 
 const OPERATOR_DEFAULTS_FILE = 'operator-defaults.json';
 
@@ -463,6 +435,7 @@ interface StoredOperatorDefaults {
   inAppOrchestratorEnabled?: boolean;
   brainUseClaudeCli?: boolean;
   workersUseBrain?: WorkersUseBrain;
+  crossHouseWorkerFallback?: boolean;
   orchestratorBackend?: OrchestratorBackendSetting;
   reviewerBackend?: ReviewerBackendSetting;
   packetExplainerEnabled?: boolean;
@@ -592,6 +565,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (isWorkersUseBrain(stored.workersUseBrain)) {
     result.workersUseBrain = stored.workersUseBrain;
+  }
+  if (typeof stored.crossHouseWorkerFallback === 'boolean') {
+    result.crossHouseWorkerFallback = stored.crossHouseWorkerFallback;
   }
   if (isOrchestratorBackendSetting(stored.orchestratorBackend)) {
     result.orchestratorBackend = stored.orchestratorBackend;
@@ -743,6 +719,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     brainUseClaudeCli:
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
+    crossHouseWorkerFallback:
+      fileValues.crossHouseWorkerFallback ?? OPERATOR_DEFAULTS_FALLBACK.crossHouseWorkerFallback,
     orchestratorBackend,
     reviewerBackend: profileDefaults?.reviewerBackend
       ?? envRevBackend
@@ -801,6 +779,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     brainUseClaudeCli:
       envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
+    crossHouseWorkerFallback: fileValues.crossHouseWorkerFallback !== undefined ? 'file' : 'default',
     orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
     reviewerBackend: envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
     packetExplainerEnabled: envExplainer !== null ? 'env' : fileValues.packetExplainerEnabled !== undefined ? 'file' : 'default',
@@ -996,6 +975,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.workersUseBrain = update.workersUseBrain;
   }
+  if (update.crossHouseWorkerFallback !== undefined) {
+    stored.crossHouseWorkerFallback = Boolean(update.crossHouseWorkerFallback);
+  }
   if (update.orchestratorBackend !== undefined) {
     if (!isOrchestratorBackendSetting(update.orchestratorBackend)) {
       throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
@@ -1185,6 +1167,10 @@ export function resolveBrainUseClaudeCliSync(): boolean {
 
 export function resolveWorkersUseBrainSync(): WorkersUseBrain {
   return getOperatorDefaultsSync().values.workersUseBrain;
+}
+
+export function resolveCrossHouseWorkerFallbackSync(): boolean {
+  return getOperatorDefaultsSync().values.crossHouseWorkerFallback;
 }
 
 /**

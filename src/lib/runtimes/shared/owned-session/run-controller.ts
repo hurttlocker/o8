@@ -171,10 +171,14 @@ export function createOwnedRunController({
     let finishedClean = false;
     let exitedRun: OwnedRunRecord | null = null;
     let laneId: string | undefined;
+    let model: string | undefined;
+    let latestPrompt = '';
     await withSurfaceLock(surfaceId, async () => {
       const current = await io.findSession(surfaceId);
       if (!current) return;
       laneId = current.laneId;
+      model = current.model;
+      latestPrompt = current.latestPrompt;
       let dirty = false;
       const finishedAt = nowIso();
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
@@ -208,6 +212,7 @@ export function createOwnedRunController({
     if (laneId && exitedRun) {
       const artifacts = await readRunArtifacts(exitedRun).catch(() => null);
       const stderr = compactText(artifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
+      const rawFailure = `${artifacts?.stdoutRaw ?? ''}\n${artifacts?.stderrRaw ?? childExit.stderrTail ?? ''}`;
       try {
         recordLaneEvent(laneId, 'runtime_process_exit', 'system', {
           runtime: runtimeId,
@@ -221,6 +226,21 @@ export function createOwnedRunController({
         });
       } catch (error) {
         console.warn(`[owned-store] Failed to record runtime_process_exit for lane ${laneId}:`, error);
+      }
+      if (!finishedClean) {
+        try {
+          const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
+          await handleWorkerRuntimeFailure({
+            laneId,
+            runtime: runtimeId,
+            model,
+            surfaceId,
+            prompt: latestPrompt,
+            rawFailure: compactText(rawFailure, 4_000),
+          });
+        } catch (error) {
+          console.error(`[owned-store] Worker quota fallback handling failed for lane ${laneId}:`, error);
+        }
       }
     }
 

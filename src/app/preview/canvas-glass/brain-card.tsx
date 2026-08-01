@@ -50,6 +50,7 @@ interface BrainMessage {
   pending?: boolean;
   sources?: { count: number; top: Array<{ kind: string; title: string }> };
   citations?: BrainCitation[];
+  alert?: string;
 }
 
 /** SSE frames arrive as `event: name` + `data: {…}` blocks split on \n\n. */
@@ -159,6 +160,8 @@ export function BrainConversation({
             });
           } else if (frame.event === 'citation') {
             citations.push(frame.payload as BrainCitation);
+          } else if (frame.event === 'alert' && typeof frame.payload.message === 'string') {
+            patch({ alert: frame.payload.message });
           } else if (frame.event === 'error' && typeof frame.payload.message === 'string') {
             throw new Error(frame.payload.message);
           }
@@ -228,6 +231,11 @@ export function BrainConversation({
                   <SourcesLine count={message.sources.count} pending={message.pending && !message.content} />
                 ) : message.pending && !message.content ? (
                   <span style={{ fontSize: CHROME.captionSize, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>Thinking…</span>
+                ) : null}
+                {message.alert ? (
+                  <span role="alert" style={{ fontSize: CHROME.captionSize, fontWeight: 350, lineHeight: 1.45, color: 'var(--cnv-warning, #b45309)', fontFamily: FONT }}>
+                    {message.alert}
+                  </span>
                 ) : null}
                 {message.content ? (
                   <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>

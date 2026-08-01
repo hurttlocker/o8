@@ -683,7 +683,7 @@ export function O8ScratchChat({
           citations.push(payload as unknown as ScratchCitation);
         } else if (eventName === 'error' && typeof payload.message === 'string') {
           streamError = payload.message;
-        }
+        } else if (eventName === 'alert' && typeof payload.message === 'string') setHandoffNote(payload.message);
       };
 
       const reader = response.body.getReader();
@@ -957,7 +957,7 @@ export function O8ScratchChat({
           </div>
 
           {error || handoffNote ? (
-            <div style={{ borderTop: '1px solid var(--t-divider-subtle)', color: error ? 'var(--t-brand-red)' : 'var(--t-terminal-ansi-bright-green, #16a34a)', fontSize: 11, fontWeight: 350, letterSpacing: '-0.1px', paddingTop: 8, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
+            <div role="alert" style={{ borderTop: '1px solid var(--t-divider-subtle)', color: error ? 'var(--t-brand-red)' : 'var(--t-terminal-ansi-bright-green, #16a34a)', fontSize: 11, fontWeight: 350, letterSpacing: '-0.1px', paddingTop: 8, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
               {error ?? handoffNote}
             </div>
           ) : null}

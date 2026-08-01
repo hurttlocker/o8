@@ -207,6 +207,10 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: ['off', 'auto', 'all'],
           description: 'Whether packet workers are taught to consult the Engineering Brain.',
         },
+        crossHouseWorkerFallback: {
+          type: 'boolean',
+          description: 'Automatically redispatch quota-capped workers on the equal-tier runtime from the other subscription house.',
+        },
         healBotEnabled: {
           type: 'boolean',
           description: 'Enable the heal bot for stuck packets.',
@@ -241,6 +245,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'defaultDispatchRuntime',
   'defaultDispatchModel',
   'workersUseBrain',
+  'crossHouseWorkerFallback',
   'healBotEnabled',
   'supervisorAutoEscalate',
   'promptCachingEnabled',

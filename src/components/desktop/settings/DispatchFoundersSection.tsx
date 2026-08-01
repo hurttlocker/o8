@@ -366,6 +366,15 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
                 ]}
               />
             }
+            divider
+          />
+          <SettingsRow
+            icon={<TargetIcon />}
+            label="Worker quota fallback"
+            subtitle={lockedSub('crossHouseWorkerFallback', 'Redispatch capped workers sideways to the equal-tier subscription runtime')}
+            checked={values.crossHouseWorkerFallback}
+            disabled={busyField === 'crossHouseWorkerFallback'}
+            onToggle={(next) => { updateField('crossHouseWorkerFallback', next); }}
           />
         </SettingsGroup>
       </section>

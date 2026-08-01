@@ -23,6 +23,7 @@ import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
+import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
 export type SseEmit = (name: string, payload: unknown) => void;
 
@@ -50,6 +51,7 @@ export async function composeClassA(
   emit: SseEmit,
   options: ComposeOptions = {},
 ): Promise<void> {
+  flushBrainQuotaAlerts(emit);
   const lookup = buildCitationLookup(topRows);
   const rowsJson = JSON.stringify(
     topRows.slice(0, 15).map((r) => ({
@@ -108,6 +110,7 @@ export async function composeClassA(
   // OpenRouter credits on the Anthropic models.
   if (evalMode) {
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
+    flushBrainQuotaAlerts(emit);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-repl (eval tier 0)');
       emitClassAAnswer(sonnetAnswer, lookup, emit, options);
@@ -115,6 +118,7 @@ export async function composeClassA(
     }
     // Eval-mode tier 0b: Haiku 4.5 via the REPL adapter as cheap fallback.
     const haikuAnswer = await tryComposeHaiku(composePrompt);
+    flushBrainQuotaAlerts(emit);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-repl (eval tier 0b)');
       emitClassAAnswer(haikuAnswer, lookup, emit, options);
@@ -148,6 +152,7 @@ export async function composeClassA(
   // stay skipped because the user explicitly opted in to Sonnet quality).
   if (sonnetCliFirst) {
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
+    flushBrainQuotaAlerts(emit);
     triedSonnetCli = true;
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli (mode=sonnet-cli)');
@@ -175,6 +180,7 @@ export async function composeClassA(
   // mode, or when the setting is OFF.
   if (!evalMode && !sonnetCliFirst && brainCliOn) {
     const haikuAnswer = await tryComposeHaiku(composePrompt);
+    flushBrainQuotaAlerts(emit);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-cli (tier 1)');
       emitClassAAnswer(haikuAnswer, lookup, emit, options);
@@ -185,6 +191,7 @@ export async function composeClassA(
   // Tier 1 (brainUseClaudeCli OFF) / Tier 2 (ON): Codex CLI.
   if (!evalMode && !sonnetCliFirst) {
     const codexAnswer = await tryComposeCodex(composePrompt);
+    flushBrainQuotaAlerts(emit);
     if (codexAnswer) {
       console.info(
         `[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${brainCliOn ? 'tier 2' : 'tier 1 default'})`,
@@ -214,6 +221,7 @@ export async function composeClassA(
   // in eval mode or when sonnet-cli mode already tried it above (#971).
   if (!evalMode && !triedSonnetCli) {
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
+    flushBrainQuotaAlerts(emit);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli');
       emitClassAAnswer(sonnetAnswer, lookup, emit, options);
@@ -266,6 +274,7 @@ async function tryComposeHaiku(prompt: string): Promise<string | null> {
     const text = await callHaiku(prompt, { timeoutMs: 30_000 });
     return text.trim() ? text : null;
   } catch (err) {
+    noteBrainQuotaError(err, 'anthropic');
     console.warn('[qa][composer-A] Haiku CLI failed:', err instanceof Error ? err.message : err);
     return null;
   }
@@ -280,6 +289,7 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
     const text = await callCodex(prompt, { timeoutMs: 30_000 });
     return text.trim() ? text : null;
   } catch (err) {
+    noteBrainQuotaError(err, 'openai');
     console.warn('[qa][composer-A] Codex CLI failed:', err instanceof Error ? err.message : err);
     return null;
   }
@@ -392,6 +402,7 @@ async function tryComposeSonnet(
     }
     return result.text.trim() ? result.text : null;
   } catch (err) {
+    noteBrainQuotaError(err, 'anthropic');
     console.warn('[qa][composer-A] Sonnet CLI failed:', err instanceof Error ? err.message : err);
     return null;
   }

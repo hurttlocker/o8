@@ -140,10 +140,11 @@ import {
 } from './lib/lane/orchestrator-backends/registry';
 import { isMeteredOrchestratorBackend } from './lib/lane/orchestrator-backends/billing';
 import {
-  buildCrossHouseHandoffMessage,
+  buildCrossHouseFallbackMessage,
   isRuntimeQuotaLimitError,
-  resolveCrossHouseOrchestratorFallback,
-} from './lib/lane/orchestrator-backends/quota-fallback';
+  resolveCrossHouseFallback,
+  resolveCrossHouseFallbackForQuota,
+} from './lib/orchestrator/cross-house-policy';
 import { isOrchestratorBackendId, type OrchestratorBackend, type OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
 import type { OrchestratorTurnRecord } from './lib/lane/orchestrator-crash-survival';
 import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
@@ -4584,6 +4585,7 @@ async function handleOrchestratorSendMsgOnce(
   const model = typeof msg.model === 'string' && msg.model.trim()
     ? msg.model.trim()
     : undefined;
+  const crossHouseRole = msg.surface === 'canvas-agent' ? 'canvas-agent' : 'orchestrator';
   // Composer picture pills — validated data URIs only, capped so one send
   // can't balloon the stdin payload (8 images, ~5MB base64 each).
   const attachments = Array.isArray(msg.attachments)
@@ -5002,9 +5004,11 @@ async function handleOrchestratorSendMsgOnce(
     // for openclaw) so fallback handoffs do not cross-contaminate transcripts.
     const resolveQuotaFallback = (currentModel: string | null = model ?? null) => (
       orchestratorModeAllowsBackendFallback(msg.orchestrationMode)
-        ? resolveCrossHouseOrchestratorFallback(activeBackend.id, {
+        ? resolveCrossHouseFallback({
+            role: crossHouseRole,
+            backend: activeBackend.id,
             subscriptionProfile,
-            currentModel,
+            model: currentModel,
           })
         : null
     );
@@ -5015,10 +5019,17 @@ async function handleOrchestratorSendMsgOnce(
       quotaFallbackError = err instanceof Error ? err.message : String(err);
     }
 
-    const fallback = quotaFallbackError ? resolveQuotaFallback() : null;
+    const fallback = quotaFallbackError
+      ? resolveCrossHouseFallbackForQuota(quotaFallbackError, {
+          role: crossHouseRole,
+          backend: activeBackend.id,
+          subscriptionProfile,
+          model,
+        })
+      : null;
     if (fallback && sessionName && turnController && !turnController.signal.aborted) {
       const handoffNoticeId = `cross-house-handoff-${threadId ?? 'repo'}-${Date.now()}`;
-      const handoffMessage = buildCrossHouseHandoffMessage(fallback);
+      const handoffMessage = buildCrossHouseFallbackMessage(fallback);
       const handoffNoticePayload = {
         repoPath,
         threadId,
@@ -5089,37 +5100,33 @@ async function handleOrchestratorSendMsgOnce(
           await runBackendTurn(
             activeBackend,
             activeAgentTag,
-            fallback.action === 'downgrade',
-            fallback.action === 'downgrade' ? fallback.toModel : undefined,
+            true,
+            fallback.toModel,
           );
         } catch (err) {
-          if (fallback.action !== 'downgrade' || !isRuntimeQuotaLimitError(err)) throw err;
+          if (!isRuntimeQuotaLimitError(err)) throw err;
           quotaFallbackError = err instanceof Error ? err.message : String(err);
         }
-        if (fallback.action === 'downgrade' && quotaFallbackError) {
-          const exhaustedFallback = resolveQuotaFallback(fallback.toModel);
-          if (exhaustedFallback) {
-            sawTerminal = true;
-            const exhaustedMessage = buildCrossHouseHandoffMessage(exhaustedFallback);
-            broadcastToOrchestratorSession(sessionName, JSON.stringify({
-              channel: 'orchestrator',
-              event: 'notice',
-              data: {
-                repoPath,
-                threadId,
-                kind: exhaustedFallback.noticeKind,
-                noticeId: `cross-house-handoff-${threadId ?? 'repo'}-${Date.now()}`,
-                message: exhaustedMessage,
-                registered: [`${exhaustedFallback.fromModel} -> ${exhaustedFallback.toModel}`],
-                backend: activeBackend.id,
-              },
-            }));
-            broadcastToOrchestratorSession(sessionName, JSON.stringify({
-              channel: 'orchestrator',
-              event: 'status',
-              data: { status: 'ready', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
-            }));
-          }
+        if (quotaFallbackError) {
+          sawTerminal = true;
+          broadcastToOrchestratorSession(sessionName, JSON.stringify({
+            channel: 'orchestrator',
+            event: 'notice',
+            data: {
+              repoPath,
+              threadId,
+              kind: fallback.noticeKind,
+              noticeId: `cross-house-handoff-${threadId ?? 'repo'}-${Date.now()}`,
+              message: `${fallback.toHouse === 'anthropic' ? 'Anthropic' : 'OpenAI'} subscription also exhausted. Orchestrator work is paused without a metered fallback.`,
+              registered: [`${fallback.toModel} exhausted`],
+              backend: activeBackend.id,
+            },
+          }));
+          broadcastToOrchestratorSession(sessionName, JSON.stringify({
+            channel: 'orchestrator',
+            event: 'status',
+            data: { status: 'ready', repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag },
+          }));
         }
       }
     }

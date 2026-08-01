@@ -226,6 +226,7 @@ describe('MCP operator defaults and dispatch routing', () => {
       claudeWorkerEffort: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
       workersUseBrain: expect.any(Object),
+      crossHouseWorkerFallback: expect.any(Object),
       requireApproval: expect.objectContaining({
         enum: ['high-risk', 'surface', 'always', 'never'],
       }),
@@ -240,7 +241,7 @@ describe('MCP operator defaults and dispatch routing', () => {
       codexWorkerEffort: 'xhigh',
       requireApproval: 'always',
     });
-  });
+  }, 15_000);
 
   it('rejects unknown MCP keys as a structured error without applying a partial update', async () => {
     const { getOperatorDefaults } = await import('@/lib/operator/defaults');

@@ -15,6 +15,7 @@ import {
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
+import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
 export async function composeClassB(
   question: string,
@@ -91,6 +92,8 @@ export async function composeClassB(
 
     emit('done', {});
   } catch (err) {
+    noteBrainQuotaError(err, 'anthropic');
+    flushBrainQuotaAlerts(emit);
     const message = err instanceof Error ? err.message : 'composer-B error';
     console.warn('[qa][composer-B] error:', message);
     // Degrade to Flash on any failure.
@@ -171,6 +174,8 @@ async function composeClassBViaSonnetAdapter(
 
     emit('done', {});
   } catch (err) {
+    noteBrainQuotaError(err, 'anthropic');
+    flushBrainQuotaAlerts(emit);
     const message = err instanceof Error ? err.message : 'composer-B-eval error';
     console.warn('[qa][composer-B-eval] error:', message);
     return composeClassA(question, repoPath, topRows, emit, options);

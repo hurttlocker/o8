@@ -42,6 +42,7 @@ import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
+import { noteBrainQuotaError } from './brain-quota-alert';
 
 export type QuestionClass = 'A' | 'B';
 
@@ -264,6 +265,7 @@ async function tryHaiku(prompt: string, question: string): Promise<ClassifierRes
     const text = await callHaiku(prompt, { timeoutMs: 12_000 });
     return parseClassifierJson(text, question);
   } catch (err) {
+    noteBrainQuotaError(err, 'anthropic');
     console.warn('[qa][classifier] Haiku CLI failed:', err instanceof Error ? err.message : err);
     return null;
   }
@@ -291,6 +293,7 @@ async function trySonnetRepl(prompt: string, question: string): Promise<Classifi
     }
     return parseClassifierJson(result.text, question);
   } catch (err) {
+    noteBrainQuotaError(err, 'anthropic');
     console.warn('[qa][classifier] Sonnet REPL failed:', err instanceof Error ? err.message : err);
     return null;
   }
@@ -304,6 +307,7 @@ async function tryCodex(prompt: string, question: string): Promise<ClassifierRes
     const text = await callCodex(prompt, { timeoutMs: 30_000 });
     return parseClassifierJson(text, question);
   } catch (err) {
+    noteBrainQuotaError(err, 'openai');
     console.warn('[qa][classifier] Codex CLI failed:', err instanceof Error ? err.message : err);
     return null;
   }

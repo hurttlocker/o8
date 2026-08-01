@@ -27,6 +27,7 @@ import {
   recordArtifact,
 } from '@/lib/artifacts/store';
 import type { PacketExplainerQuiz } from '@/lib/orchestrator/types';
+import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 import type { Lane } from './types';
 
 /**
@@ -37,18 +38,6 @@ import type { Lane } from './types';
 function explainerFilename(packetId: string): string {
   const safe = packetId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) || 'packet';
   return `.o8-packet-explainer-${safe}.html`;
-}
-
-interface ReviewerBackend {
-  id: string;
-  label: string;
-  ensureSession: (repoPath: string, agent?: string, threadId?: string | null) => { status: string };
-  sendTurn: (
-    repoPath: string,
-    prompt: string,
-    onEvent: (event: { type: string; text?: string; name?: string; error?: string }) => void,
-    opts?: { threadId?: string },
-  ) => Promise<void>;
 }
 
 interface GenerateExplainerParams {
@@ -152,20 +141,21 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
   stamp({ status: 'generating', changedFileCount: params.changedFileCount, generatedAt: null });
 
   try {
-    const { getActiveReviewerBackend } = await import('./orchestrator-backends/registry');
-    const backend = getActiveReviewerBackend() as unknown as ReviewerBackend;
     const threadId = `explainer-${params.lane.id}`;
-    const session = backend.ensureSession(params.lane.repoPath, undefined, threadId);
-    if (session.status === 'busy' || session.status === 'dead') {
-      throw new Error(`${backend.label} session ${session.status}`);
-    }
-
     const prompt = buildExplainerPrompt(params);
-    await backend.sendTurn(params.lane.repoPath, prompt, (event) => {
+    const turn = await runReviewerTurnWithQuotaFallback({
+      laneId: params.lane.id,
+      repoPath: params.lane.repoPath,
+      threadId,
+      surface: 'packet-explainer',
+      prompt,
+      onEvent: (backend, event) => {
       if (event.type === 'error' && event.error) {
         console.warn(`[explainer] ${backend.label} error: ${event.error}`);
       }
-    }, { threadId });
+      },
+    });
+    if (!turn.ok) throw new Error(turn.errors.join('; ') || 'reviewer turn failed');
 
     const worktree = params.lane.worktreePath || params.lane.repoPath;
     const scratchPath = join(worktree, explainerFilename(params.packetId));

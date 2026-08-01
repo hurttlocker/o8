@@ -999,7 +999,7 @@ export default function CanvasGlassPreviewPage() {
         setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
         resolveStatus(lane, 'Done');
       }
-    } else {
+    } else if (event.type === 'notice') { appendEntries(lane, [{ role: 'status', text: event.message, pending: false }]); } else {
       resolveStatus(lane, 'Failed');
       appendEntries(lane, [{ role: 'status', text: event.error.slice(0, 200), pending: false }]);
     }
@@ -1019,10 +1019,8 @@ export default function CanvasGlassPreviewPage() {
     onToolResult: (repo, name, args, output) => {
       handleOrchEvent(repo, { type: 'tool-result', name, args, output });
     },
-    onStatus: (repo, status) => {
-      setOrchBusy(status === 'busy');
-      handleOrchEvent(repo, { type: 'status', status });
-    },
+    onStatus: (repo, status) => { setOrchBusy(status === 'busy'); handleOrchEvent(repo, { type: 'status', status }); },
+    onNotice: (repo, message) => { setDockOpen(true); handleOrchEvent(repo, { type: 'notice', message }); },
     onError: (repo, error) => {
       handleOrchEvent(repo, { type: 'error', error });
     },

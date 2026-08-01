@@ -57,6 +57,7 @@ export interface CanvasOrchCallbacks {
   /** A tool finished — carries its output (the PR-card wire reads `gh pr` URLs). */
   onToolResult?: (repoPath: string, name: string, args: Record<string, unknown> | undefined, output: string | undefined) => void;
   onStatus?: (repoPath: string, status: CanvasOrchStatus) => void;
+  onNotice?: (repoPath: string, message: string) => void;
   onError?: (repoPath: string, error: string) => void;
   /** A lane changed state somewhere (agent spawned, review-ready, merged…)
    *  — the ws-server broadcasts these to every client. The canvas uses it
@@ -71,6 +72,7 @@ export type CanvasThreadEvent =
   | { type: 'tool'; name: string; args?: Record<string, unknown> }
   | { type: 'tool-result'; name: string; args?: Record<string, unknown>; output?: string }
   | { type: 'status'; status: CanvasOrchStatus }
+  | { type: 'notice'; message: string }
   | { type: 'error'; error: string };
 
 export function useCanvasOrchestrator(repoPath: string | null, callbacks: CanvasOrchCallbacks) {
@@ -153,6 +155,8 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
           const next = data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
           setStatus(next);
           cbRef.current.onStatus?.(repoPath, next);
+        } else if (msg.event === 'notice' && typeof data.message === 'string') {
+          cbRef.current.onNotice?.(repoPath, data.message);
         } else if (msg.event === 'error' && typeof data.error === 'string') {
           cbRef.current.onError?.(repoPath, data.error);
         }
@@ -201,6 +205,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     backendByThreadRef.current.delete(threadId);
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
+      surface: 'canvas-agent',
       repoPath,
       threadId,
       message,
@@ -317,6 +322,8 @@ export function useThreadOrchestrator(
           const next: CanvasOrchStatus = data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
           setStatus(next);
           onEventRef.current({ type: 'status', status: next });
+        } else if (msg.event === 'notice' && typeof data.message === 'string') {
+          onEventRef.current({ type: 'notice', message: data.message });
         } else if (msg.event === 'error' && typeof data.error === 'string') {
           onEventRef.current({ type: 'error', error: data.error });
         }
@@ -348,6 +355,7 @@ export function useThreadOrchestrator(
     activeBackendRef.current = null;
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
+      surface: 'canvas-agent',
       repoPath,
       threadId,
       message,

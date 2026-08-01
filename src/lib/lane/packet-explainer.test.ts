@@ -14,14 +14,18 @@ vi.mock('@/lib/orchestrator/operator-mission-service/packet-patch', () => ({
   patchMissionPacket: explainerMocks.patchMissionPacket,
 }));
 
-vi.mock('./orchestrator-backends/registry', () => ({
-  getActiveReviewerBackend: () => ({
+vi.mock('./orchestrator-backends/registry', () => {
+  const backend = {
     id: 'codex',
     label: 'Codex',
     ensureSession: explainerMocks.ensureSession,
     sendTurn: explainerMocks.sendTurn,
-  }),
-}));
+  };
+  return {
+    getActiveReviewerBackend: () => backend,
+    getOrchestratorBackend: () => backend,
+  };
+});
 
 // store.ts (imported transitively) resolves the data dir at load — set first.
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-explainer-'));

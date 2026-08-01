@@ -18,6 +18,7 @@ export type SupervisorInboxKind =
   | 'repo_misconfigured'
   | 'launch_agent_crash_loop'
   | 'packet_no_changes'
+  | 'worker_quota_exhausted'
   // #1502 — a lane reported progress/heartbeat while its sessionKey was null:
   // the worker is running into the void (no transcript, no completion signal).
   // FAULT queue item — never self-closes.
@@ -120,6 +121,7 @@ export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
   launch_agent_crash_loop: { defaultStatus: 'human_required' },
   no_session_binding: { defaultStatus: 'human_required' },
   packet_no_changes: { defaultStatus: 'pending', autoDismissAfterMs: 7 * 24 * HOUR_MS },
+  worker_quota_exhausted: { defaultStatus: 'human_required' },
 };
 
 function ensureSupervisorInboxTable() {

@@ -119,6 +119,7 @@ export function AskAnythingRow({ open, onToggle, repoPath }: AskAnythingRowProps
   const [contradiction, setContradiction] = useState<ContradictionNote | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alert, setAlert] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const cancel = useCallback(() => {
@@ -136,6 +137,7 @@ export function AskAnythingRow({ open, onToggle, repoPath }: AskAnythingRowProps
     setCitations([]);
     setContradiction(null);
     setError(null);
+    setAlert(null);
     setStreaming(true);
 
     const controller = new AbortController();
@@ -186,6 +188,11 @@ export function AskAnythingRow({ open, onToggle, repoPath }: AskAnythingRowProps
                 ? String((frame.data as Record<string, unknown>).message ?? 'stream error')
                 : 'stream error';
             setError(message);
+          } else if (frame.name === 'alert') {
+            const message = typeof frame.data === 'object' && frame.data !== null
+              ? String((frame.data as Record<string, unknown>).message ?? '')
+              : '';
+            if (message) setAlert(message);
           }
         }
       }
@@ -282,6 +289,20 @@ export function AskAnythingRow({ open, onToggle, repoPath }: AskAnythingRowProps
               }}
             >
               {error}
+            </div>
+          ) : null}
+          {alert ? (
+            <div
+              role="alert"
+              style={{
+                fontFamily: FONT_FAMILY,
+                fontSize: 10.5,
+                color: 'var(--t-brand-orange)',
+                paddingTop: 2,
+                paddingLeft: 0,
+              }}
+            >
+              {alert}
             </div>
           ) : null}
         </div>

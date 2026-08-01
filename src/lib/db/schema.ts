@@ -594,7 +594,7 @@ export const supervisorInbox = sqliteTable('supervisor_inbox', {
   repoPath: text('repo_path').notNull(),
   packetId: text('packet_id'),
   kind: text('kind', {
-    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked', 'fetch_unreachable', 'repo_misconfigured', 'silent_exit_verification_failed', 'silent_exit_no_work', 'silent_exit_but_work_present'],
+    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked', 'fetch_unreachable', 'repo_misconfigured', 'silent_exit_verification_failed', 'silent_exit_no_work', 'silent_exit_but_work_present', 'worker_quota_exhausted'],
   }).notNull(),
   payload: text('payload').notNull().default('{}'),
   status: text('status', {

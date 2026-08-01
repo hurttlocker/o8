@@ -13,6 +13,7 @@
  *        event: open       { ok: true }
  *        event: token      { text: string }
  *        event: citation   { kind, rowId, table, excerpt?, url? }
+ *        event: alert      { kind, message, fromHouse, toHouse, fromModel, toModel }
  *        event: done       {}
  *        event: error      { message: string }
  *

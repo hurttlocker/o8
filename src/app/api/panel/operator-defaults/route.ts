@@ -233,6 +233,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.workersUseBrain = raw;
   }
 
+  if (body.crossHouseWorkerFallback !== undefined) {
+    if (typeof body.crossHouseWorkerFallback !== 'boolean') {
+      throw new Error('crossHouseWorkerFallback must be boolean.');
+    }
+    update.crossHouseWorkerFallback = body.crossHouseWorkerFallback;
+  }
+
   if (body.orchestratorBackend !== undefined) {
     const raw = body.orchestratorBackend;
     // Single-source guard from defaults.ts — a hand-rolled list here silently

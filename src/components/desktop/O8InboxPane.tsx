@@ -17,6 +17,7 @@ const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   repo_misconfigured: 'Repo Misconfigured',
   launch_agent_crash_loop: 'LaunchAgent Crash Loop',
   packet_no_changes: 'Finished · No Changes',
+  worker_quota_exhausted: 'Worker Quota Exhausted',
   silent_exit_verification_failed: 'Silent Exit · Verification Failed',
   silent_exit_no_work: 'Silent Exit · No Work',
   silent_exit_but_work_present: 'Silent Exit · Work Salvaged',
