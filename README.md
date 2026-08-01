@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/hurttlocker/o8/actions/workflows/ci.yml/badge.svg)](https://github.com/hurttlocker/o8/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/hurttlocker/o8)](https://github.com/hurttlocker/o8/releases) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gH3UbbTJ7k)
 
-o8 is an open-source desktop control plane for AI coding agents.
+o8 is an open-source desktop control room for AI coding agents.
 
 [Download the latest signed macOS build](https://github.com/hurttlocker/o8/releases) · [Build from source](#quickstart)
 
@@ -78,7 +78,7 @@ Merges that fail don't silently die — a five-layer escalation chain (auto-retr
 
 ## Symon — the voice layer
 
-**Why a voice agent is in a control plane:** a fleet generates decisions while you're doing something else. Agents finish, reviews queue, a merge blocks — and the cost of that isn't the decision, it's having to stop, find the window, and reload the context. Symon closes that gap. You ask "what needs me?" without turning around, and approve the one thing that's blocking, hands still on whatever you were doing.
+**Why a voice agent is in a control room:** a fleet generates decisions while you're doing something else. Agents finish, reviews queue, a merge blocks — and the cost of that isn't the decision, it's having to stop, find the window, and reload the context. Symon closes that gap. You ask "what needs me?" without turning around, and approve the one thing that's blocking, hands still on whatever you were doing.
 
 He runs on the rest of your Mac too, because an operator's day isn't only the fleet:
 
@@ -135,7 +135,7 @@ o8 is built like every pixel matters, because you stare at a control room all da
 ## More
 
 - **Documentation:** [`docs/README.md`](./docs/README.md) — user guides, engineering internals, and operating runbooks.
-- [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control plane, headless).
+- [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control room, headless).
 - [`CLAUDE.md`](./CLAUDE.md) — the canonical agent/contributor brief: architecture, conventions, critical rules.
 
 ## Contributing
