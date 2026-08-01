@@ -1,9 +1,12 @@
 import 'server-only';
 
 import type { BrowserContext } from 'playwright-core';
-import { assertPublicHttpUrl, assertPublicWebSocketUrl } from '@/lib/network/safe-url';
+import { isIP } from 'node:net';
+import { assertPublicHttpUrl, assertPublicWebSocketUrl, isPublicNetworkAddress } from '@/lib/network/safe-url';
 
 export const BROWSER_NETWORK_CONTEXT_OPTIONS = { serviceWorkers: 'block' as const };
+export type BrowserNetworkPolicyId = 'public' | 'capture';
+export interface BrowserResolvedAddress { address: string; family: number }
 
 /** Install the complete engine-tier egress policy before creating a page. */
 export async function installBrowserNetworkPolicy(
@@ -38,13 +41,33 @@ export async function installBrowserNetworkPolicy(
   });
 }
 
-/** Literal-loopback hosts only — no DNS involved, so nothing can rebind a
- *  name into a pass. `localhost` itself is fine to allow by name: resolving
- *  it AWAY from loopback would make the request fail this policy's intent
- *  in the caller's favor (their own dev server), not open private ranges. */
-function isLoopbackLiteralHost(hostname: string): boolean {
+/** Exact loopback targets allowed by capture contexts. The connection proxy
+ *  resolves `localhost` once and requires every answer to remain loopback. */
+export function isLoopbackLiteralHost(hostname: string): boolean {
   if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') return true;
   return /^127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+function isLoopbackNetworkAddress(address: string): boolean {
+  const normalized = address.toLowerCase().split('%')[0];
+  if (normalized === '::1') return true;
+  if (isIP(normalized) === 4) return /^127(?:\.\d{1,3}){3}$/.test(normalized);
+  const mapped = normalized.match(/^::ffff:(127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  return Boolean(mapped);
+}
+
+/** Validate the exact DNS answers the connection-level proxy will dial. */
+export function assertBrowserResolvedAddresses(
+  policy: BrowserNetworkPolicyId,
+  hostname: string,
+  addresses: BrowserResolvedAddress[],
+): void {
+  if (addresses.length === 0) throw new Error('Browser proxy DNS resolution returned no addresses.');
+  const normalizedHost = hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  const allowed = policy === 'capture' && isLoopbackLiteralHost(normalizedHost)
+    ? addresses.every(({ address }) => isLoopbackNetworkAddress(address))
+    : addresses.every(({ address }) => isPublicNetworkAddress(address));
+  if (!allowed) throw new Error('Browser proxy refused a private or non-routable connection address.');
 }
 
 /**

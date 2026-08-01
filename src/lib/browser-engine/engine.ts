@@ -16,6 +16,7 @@ import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
 import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
 import { assertPublicHttpUrl } from '@/lib/network/safe-url';
 import { BROWSER_NETWORK_CONTEXT_OPTIONS, installBrowserNetworkPolicy, installCaptureNetworkPolicy } from '@/lib/browser-engine/network-policy';
+import { startBrowserEgressProxy, type BrowserEgressProxy } from '@/lib/browser-engine/egress-proxy';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -100,11 +101,24 @@ function grabScript(selector: string): string {
 
 class BrowserEngine {
   private browserPromise: Promise<Browser> | null = null;
+  private egressProxyPromise: Promise<BrowserEgressProxy> | null = null;
   private sessions = new Map<string, EngineSession>();
   private reaper: ReturnType<typeof setInterval> | null = null;
   /** In-flight one-shot captures — holds the shared browser open so a reap
    *  triggered by one capture can't close it under the next (#1648). */
   private activeCaptures = 0;
+
+  private egressProxy(): Promise<BrowserEgressProxy> {
+    if (!this.egressProxyPromise) this.egressProxyPromise = startBrowserEgressProxy();
+    return this.egressProxyPromise;
+  }
+
+  private async closeEgressProxy(): Promise<void> {
+    const promise = this.egressProxyPromise;
+    this.egressProxyPromise = null;
+    const proxy = await promise?.catch(() => null);
+    await proxy?.close().catch(() => undefined);
+  }
 
   private async browser(): Promise<Browser> {
     if (!this.browserPromise) {
@@ -130,14 +144,17 @@ class BrowserEngine {
           { cause },
         );
       }
+      await this.egressProxy();
       this.browserPromise = chromium.launch({ channel: 'chrome', headless: true }).then((browser) => {
         browser.on('disconnected', () => {
           this.browserPromise = null;
           this.sessions.clear();
+          void this.closeEgressProxy();
         });
         return browser;
-      }).catch((error) => {
+      }).catch(async (error) => {
         this.browserPromise = null;
+        await this.closeEgressProxy();
         throw error;
       });
     }
@@ -151,9 +168,10 @@ class BrowserEngine {
       return existing;
     }
     const browser = await this.browser();
+    const proxy = (await this.egressProxy()).contextOptions('public');
     // Service workers can bypass Playwright request routing, so engine contexts
     // disable them rather than leaving a second, unguarded fetch path.
-    const context = await browser.newContext({ viewport: VIEWPORT, ...BROWSER_NETWORK_CONTEXT_OPTIONS });
+    const context = await browser.newContext({ viewport: VIEWPORT, proxy, ...BROWSER_NETWORK_CONTEXT_OPTIONS });
     await installBrowserNetworkPolicy(context);
     const page = await context.newPage();
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
@@ -182,6 +200,9 @@ class BrowserEngine {
       if (this.sessions.size !== 0 || this.activeCaptures !== 0 || this.browserPromise !== promise) return;
       this.browserPromise = null;
       await browser?.close().catch(() => undefined);
+      if (!this.browserPromise && this.sessions.size === 0 && this.activeCaptures === 0) {
+        await this.closeEgressProxy();
+      }
       if (this.reaper) {
         clearInterval(this.reaper);
         this.reaper = null;
@@ -318,7 +339,8 @@ class BrowserEngine {
     this.activeCaptures += 1;
     try {
       const browser = await this.browser();
-      context = await browser.newContext({ viewport: VIEWPORT, ...BROWSER_NETWORK_CONTEXT_OPTIONS });
+      const proxy = (await this.egressProxy()).contextOptions('capture');
+      context = await browser.newContext({ viewport: VIEWPORT, proxy, ...BROWSER_NETWORK_CONTEXT_OPTIONS });
       await installCaptureNetworkPolicy(context);
       const page = await context.newPage();
       page.setDefaultTimeout(ACTION_TIMEOUT_MS);
