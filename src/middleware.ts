@@ -90,6 +90,10 @@ const ALLOWLIST_READ_ONLY: RegExp[] = [
   // VAPID public key — public by definition; the mobile client needs it
   // to call pushManager.subscribe before any token handshake.
   /^\/api\/mobile\/push\/public-key(\/|$)/,
+  // A paired phone's bounded stale-port probe. The response is public port
+  // metadata signed with the already pinned E2EE server identity; it exposes
+  // no bearer, enrollment code, or other operator capability.
+  /^\/api\/mobile\/pairing-discovery\/?$/,
   // Backend availability is non-sensitive setup state for mobile runtime tabs.
   /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
 ];

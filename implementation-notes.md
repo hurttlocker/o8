@@ -230,3 +230,22 @@
 ## Deviations
 
 - None.
+
+## Mobile stale direct pairing recovery (#1529)
+
+### Approach
+
+- Added a public, nonce-bound discovery response at `/api/mobile/pairing-discovery`. It returns only the current API and WebSocket ports, signed by the E2EE server identity already pinned on the phone.
+- The native client probes only its saved port plus the five production and five development API ports. It verifies the nonce and signature before sending its device bearer to the discovered port, then persists the refreshed metadata without replacing the device token or pinned identity.
+- Direct-only E2EE inbox failures trigger one automatic recovery attempt. The disconnected surface and Settings also expose Refresh pairing and Re-pair, with separate messages for an unreachable desktop, legacy pairing, and a found desktop that rejects the device credential.
+
+### Verification
+
+- Desktop focused route and middleware tests passed: 2 files, 93 tests.
+- Mobile recovery tests passed: 2 tests, including a dev-to-production port move and an unsigned-listener rejection.
+- `npx tsc --noEmit` and scoped ESLint passed in both repositories.
+- Browser and physical-phone validation were intentionally not run in the packet sandbox; validate the dynamic port transition on the enrolled device before release.
+
+## Deviations
+
+- None.
