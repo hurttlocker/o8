@@ -136,6 +136,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // never go silent.
         "term_list" => SafetyClass::ReadOnly,
         "term_read" => SafetyClass::ReadOnly,
+        // Session watcher (#1653): pure transcript reads, never a confirm card.
+        "session_list" => SafetyClass::ReadOnly,
+        "session_peek" => SafetyClass::ReadOnly,
         "term_send" => SafetyClass::Reversible,
         "agent_turn" => SafetyClass::Reversible,
         "agent_turn_result" => SafetyClass::ReadOnly,
