@@ -106,7 +106,7 @@
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^5.5.0",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "ai": "^6.0.174",
     "better-sqlite3": "^12.8.0",
     "dompurify": "^3.4.11",
@@ -153,6 +153,7 @@
     "dompurify": "$dompurify",
     "esbuild": "0.28.1",
     "postcss": "8.5.19",
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "sharp": "0.35.0"
   }
 }
