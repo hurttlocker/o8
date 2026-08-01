@@ -491,10 +491,10 @@ export function SettingsQuickDrawer({
   const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
   const auth = useO8Auth();
   const { paletteId, setPalette, surface, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
-  // CLI token telemetry is Founders-mode content (epic #1450) — visibility
-  // only; the /api/panel/cli-usage route stays gated the same either way.
-  const { founder, plan } = useEntitlement();
-  const foundersMode = founder !== null || plan === 'founder';
+  // CLI usage telemetry is ungated (Q ruling 2026-07-31, supersedes the #1450
+  // founders-mode visibility): it reads the operator's OWN local CLI files, so
+  // neither an account nor an entitlement has any business gating it. The
+  // /api/panel/cli-usage route stays operator-bearer gated as always.
   const [version, setVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'current' | 'available'>('idle');
 
@@ -605,13 +605,14 @@ export function SettingsQuickDrawer({
   }, [anchorRect]);
 
   const snapshot = usageState.snapshot;
-  const usageSummary = !auth.signedIn
-    ? 'Sign in to view usage'
-    : snapshot
-      ? formatGeneratedAt(snapshot.generatedAt)
-      : usageState.status === 'loading'
-        ? 'Syncing'
-        : 'Codex + Claude';
+  // No sign-in requirement here (Q ruling 2026-07-31): this is the operator's
+  // OWN local CLI telemetry (~/.codex + Claude session files) — an account
+  // adds nothing to reading your own disk.
+  const usageSummary = snapshot
+    ? formatGeneratedAt(snapshot.generatedAt)
+    : usageState.status === 'loading'
+      ? 'Syncing'
+      : 'Codex + Claude';
 
   if (!mounted || !open) return null;
 
@@ -651,8 +652,6 @@ export function SettingsQuickDrawer({
             <AppearanceControl paletteId={paletteId} setPalette={setPalette} surface={surface} setReduceTransparency={setReduceTransparency} allGlass={workspaceGlass} onLeaveAllGlass={() => setWorkspaceGlass(false)} />
           </div>
 
-          {foundersMode ? (
-            <>
           <div style={separatorStyle()} />
 
           <RowButton
@@ -728,8 +727,6 @@ export function SettingsQuickDrawer({
                 </div>
               ) : null}
             </div>
-          ) : null}
-            </>
           ) : null}
 
           <div style={separatorStyle()} />
