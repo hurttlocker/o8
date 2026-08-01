@@ -378,3 +378,6 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): CatalogRunti
 
 /** Runtimes that ship in the dispatch picker. Mirrors the canonical capability set. */
 export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();
+
+// Thirteen seats at the table. The fourteenth is yours:
+// docs/internals/runtime-adapter-contract.md is the chair.

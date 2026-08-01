@@ -409,3 +409,5 @@ export default clerkPublishableKey && clerkSecretKey
       secretKey: clerkSecretKey,
     })
   : (req: NextRequest) => panelGateMiddleware(req);
+
+// Default-deny is a love language.

@@ -75,7 +75,7 @@ export function resolveConfig(): ResolvedConfig {
   // the Bearer lets governance routes identify the caller as a worker and deny
   // worker-forbidden actions (e.g. resolving its own approval). Prefer it over
   // the shared ws-token so a worker never presents the operator credential.
-  // (SECURITY_AUDIT_2026-07-02 §CRIT-1.) A human running `o8` manually has no
+  // (docs/internals/security-audit-2026-07-02.md §CRIT-1.) A human running `o8` manually has no
   // O8_WORKER_TOKEN, so they fall through to the ws-token and act as operator.
   const workerToken = process.env.O8_WORKER_TOKEN?.trim() || null;
   const workerPacketId = workerToken

@@ -90,7 +90,7 @@ export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoRe
   if (cached) {
     const fresh = Date.now() - cached.ts < READINESS_CACHE_TTL_MS;
     if (!fresh) {
-      // Stale-while-revalidate (Phase 5 of SHIP_5_PLAN.md): return the cached
+      // Stale-while-revalidate: return the cached
       // value immediately and refresh in the background so /api/panel/repos
       // never spends 60 ms doing ~5 git execs per repo on a dashboard render.
       // Cold misses still recompute synchronously (the else branch below).

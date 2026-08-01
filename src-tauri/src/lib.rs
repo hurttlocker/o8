@@ -3039,8 +3039,7 @@ fn ensure_cli_on_path(cli_source: &Path) {
                             // left /usr/local/bin/o8 pointing at
                             // <repo>/src-tauri/target/{debug,release}/server/bin/o8).
                             // Those bundles go stale once the user runs the production
-                            // app — replace with the current bundled CLI. Phase 6 of
-                            // SHIP_5_PLAN.md (#1104 hardening).
+                            // app — replace with the current bundled CLI (#1104 hardening).
                             let _ = std::fs::remove_file(target);
                         }
                         Ok(_) => {
@@ -5811,7 +5810,7 @@ pub fn run() {
         // Require an auth token on the webview-control socket. Without it the
         // plugin processes every command UNAUTHENTICATED, so any same-uid process
         // (incl. a dispatched worker) could `execute_js` arbitrary JS into the
-        // operator's authenticated webview (SECURITY_AUDIT_2026-07-02 §HIGH-5).
+        // operator's authenticated webview (docs/internals/security-audit-2026-07-02.md §HIGH-5).
         // The plugin writes the token to `<socket>.token` (0600); the operator
         // MCP server reads it there (o8-webview-client.ts resolveAuthToken). A
         // per-launch random token means a stale/guessed value never works.

@@ -60,3 +60,5 @@ For maintainers who build, verify, release, recover, or harden o8.
 | [Substrate evaluation gate](operations/substrate-eval-gate.md) | The thresholds and sustainment checks for memory and retrieval quality. |
 
 Questions or problems? [Open an issue](https://github.com/hurttlocker/o8/issues) — the bug template asks for the details that make reports actionable.
+
+<sub>Written by the fleet. Governed by one human.</sub>
