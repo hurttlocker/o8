@@ -56,6 +56,16 @@ fn projects_root() -> PathBuf {
     PathBuf::from(home).join(".claude").join("projects")
 }
 
+fn codex_sessions_root() -> PathBuf {
+    if let Ok(dir) = std::env::var("SYMON_CODEX_SESSIONS_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join(".codex").join("sessions")
+}
+
 // ── secret masking ────────────────────────────────────────────────────────────
 
 /// Known credential prefixes: mask from the prefix to the next whitespace/quote.
@@ -135,6 +145,75 @@ struct Turn {
     text: String,
     tool_use: Option<String>,
     timestamp: Option<String>,
+}
+
+/// Parse one Codex rollout line (`response_item` messages / function calls;
+/// `session_meta` yields cwd + branch). Developer-role messages are injected
+/// context, not conversation — skipped.
+fn parse_codex_line(line: &str) -> Option<(Turn, Option<String>, Option<String>)> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    let kind = v.get("type").and_then(Value::as_str)?;
+    let payload = v.get("payload")?;
+    if kind == "session_meta" {
+        let cwd = payload.get("cwd").and_then(Value::as_str).map(str::to_string);
+        let branch = payload
+            .get("git")
+            .and_then(|g| g.get("branch"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return Some((
+            Turn { role: String::new(), text: String::new(), tool_use: None, timestamp: None },
+            cwd,
+            branch,
+        ));
+    }
+    if kind != "response_item" {
+        return None;
+    }
+    match payload.get("type").and_then(Value::as_str) {
+        Some("message") => {
+            let role = payload.get("role").and_then(Value::as_str)?;
+            if role != "user" && role != "assistant" {
+                return None;
+            }
+            let mut text = String::new();
+            if let Some(Value::Array(blocks)) = payload.get("content") {
+                for block in blocks {
+                    if matches!(
+                        block.get("type").and_then(Value::as_str),
+                        Some("input_text") | Some("output_text") | Some("text")
+                    ) {
+                        if let Some(t) = block.get("text").and_then(Value::as_str) {
+                            if !t.trim().is_empty() {
+                                text = t.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+            Some((
+                Turn {
+                    role: role.to_string(),
+                    text,
+                    tool_use: None,
+                    timestamp: v.get("timestamp").and_then(Value::as_str).map(str::to_string),
+                },
+                None,
+                None,
+            ))
+        }
+        Some("function_call") => Some((
+            Turn {
+                role: "assistant".to_string(),
+                text: String::new(),
+                tool_use: payload.get("name").and_then(Value::as_str).map(str::to_string),
+                timestamp: v.get("timestamp").and_then(Value::as_str).map(str::to_string),
+            },
+            None,
+            None,
+        )),
+        _ => None,
+    }
 }
 
 fn parse_line(line: &str) -> Option<(Turn, Option<String>, Option<String>)> {
@@ -222,22 +301,47 @@ struct TailDigest {
     turns: Vec<Turn>,
 }
 
-fn digest_tail(path: &Path, limit: u64) -> TailDigest {
+fn digest_tail(path: &Path, limit: u64, runtime: &str) -> TailDigest {
     let mut cwd = None;
     let mut branch = None;
     let mut turns = Vec::new();
     for line in read_tail_lines(path, limit) {
-        if let Some((turn, line_cwd, line_branch)) = parse_line(&line) {
+        let parsed = if runtime == "codex" {
+            parse_codex_line(&line)
+        } else {
+            parse_line(&line)
+        };
+        if let Some((turn, line_cwd, line_branch)) = parsed {
             if line_cwd.is_some() {
                 cwd = line_cwd;
             }
             if line_branch.is_some() {
                 branch = line_branch;
             }
-            turns.push(turn);
+            if !turn.role.is_empty() {
+                turns.push(turn);
+            }
         }
     }
     TailDigest { cwd, branch, turns }
+}
+
+/// Codex rollouts open with a `session_meta` line that can be enormous
+/// (it embeds base_instructions) — read just that one line, bounded.
+fn codex_meta(path: &Path) -> (Option<String>, Option<String>) {
+    let Ok(f) = fs::File::open(path) else {
+        return (None, None);
+    };
+    let mut buf = Vec::new();
+    let mut take = std::io::BufReader::new(f).take(256 * 1024);
+    if std::io::BufRead::read_until(&mut take, b'\n', &mut buf).is_err() {
+        return (None, None);
+    }
+    let line = String::from_utf8_lossy(&buf);
+    match parse_codex_line(line.trim_end()) {
+        Some((_, cwd, branch)) => (cwd, branch),
+        None => (None, None),
+    }
 }
 
 /// Deterministic one-liner: the newest turn that says something — assistant
@@ -276,41 +380,64 @@ fn state_for(mtime: SystemTime) -> &'static str {
 
 struct SessionFile {
     id: String,
+    runtime: &'static str,
     path: PathBuf,
     mtime: SystemTime,
 }
 
-fn scan_sessions() -> Vec<SessionFile> {
-    let root = projects_root();
-    let mut sessions = Vec::new();
-    let Ok(project_dirs) = fs::read_dir(&root) else {
-        return sessions;
+fn push_session(sessions: &mut Vec<SessionFile>, path: PathBuf, runtime: &'static str) {
+    if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        return;
+    }
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        return;
     };
-    for dir in project_dirs.flatten() {
-        let dir_path = dir.path();
-        if !dir_path.is_dir() {
-            continue;
-        }
-        let Ok(files) = fs::read_dir(&dir_path) else {
-            continue;
-        };
-        for file in files.flatten() {
-            let path = file.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+    // Codex stems look like `rollout-2026-07-31T23-04-28-<uuid>`; the trailing
+    // 36 chars are the session uuid. Claude stems ARE the uuid.
+    let id = if runtime == "codex" && stem.len() > 36 {
+        stem[stem.len() - 36..].to_string()
+    } else {
+        stem.to_string()
+    };
+    let Ok(meta) = fs::metadata(&path) else { return };
+    let Ok(mtime) = meta.modified() else { return };
+    sessions.push(SessionFile { id, runtime, path, mtime });
+}
+
+fn scan_sessions() -> Vec<SessionFile> {
+    let mut sessions = Vec::new();
+
+    // Claude Code: ~/.claude/projects/<slug>/<uuid>.jsonl
+    if let Ok(project_dirs) = fs::read_dir(projects_root()) {
+        for dir in project_dirs.flatten() {
+            let dir_path = dir.path();
+            if !dir_path.is_dir() {
                 continue;
             }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            let Ok(meta) = file.metadata() else { continue };
-            let Ok(mtime) = meta.modified() else { continue };
-            sessions.push(SessionFile {
-                id: stem.to_string(),
-                path,
-                mtime,
-            });
+            if let Ok(files) = fs::read_dir(&dir_path) {
+                for file in files.flatten() {
+                    push_session(&mut sessions, file.path(), "claude-code");
+                }
+            }
         }
     }
+
+    // Codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl
+    if let Ok(years) = fs::read_dir(codex_sessions_root()) {
+        for year in years.flatten() {
+            let Ok(months) = fs::read_dir(year.path()) else { continue };
+            for month in months.flatten() {
+                let Ok(days) = fs::read_dir(month.path()) else { continue };
+                for day in days.flatten() {
+                    let Ok(files) = fs::read_dir(day.path()) else { continue };
+                    for file in files.flatten() {
+                        push_session(&mut sessions, file.path(), "codex");
+                    }
+                }
+            }
+        }
+    }
+
     sessions.sort_by(|a, b| b.mtime.cmp(&a.mtime));
     sessions
 }
@@ -334,17 +461,23 @@ pub async fn list(args: Value) -> Result<Value, String> {
         if !include_all && age_seconds(session.mtime) > RETENTION.as_secs() {
             continue;
         }
-        let digest = digest_tail(&session.path, TAIL_BYTES);
-        let repo = digest
-            .cwd
+        let digest = digest_tail(&session.path, TAIL_BYTES, session.runtime);
+        let (cwd, branch) = if session.runtime == "codex" {
+            // Codex tails don't repeat cwd; it lives in the meta first line.
+            codex_meta(&session.path)
+        } else {
+            (digest.cwd.clone(), digest.branch.clone())
+        };
+        let repo = cwd
             .as_deref()
             .and_then(|c| Path::new(c).file_name().and_then(|n| n.to_str()))
             .map(str::to_string);
         rows.push(json!({
             "id": session.id,
+            "runtime": session.runtime,
             "repo": repo,
-            "cwd": digest.cwd,
-            "branch": digest.branch,
+            "cwd": cwd,
+            "branch": branch,
             "state": state_for(session.mtime),
             "idleSeconds": age_seconds(session.mtime),
             "doing": one_liner(&digest.turns),
@@ -373,13 +506,24 @@ pub async fn peek(args: Value) -> Result<Value, String> {
     let session = scan_sessions()
         .into_iter()
         .find(|s| s.id == id)
-        .ok_or_else(|| format!("no Claude Code session '{id}' — call session_list first"))?;
+        .ok_or_else(|| format!("no coding session '{id}' — call session_list first"))?;
 
-    // Opening arc: the first real user ask in the transcript head.
+    // Opening arc: the first real user ask in the transcript head. Codex heads
+    // open with a huge meta line plus injected developer context, so their
+    // head budget is larger.
+    let head_budget = if session.runtime == "codex" { HEAD_BYTES * 16 } else { HEAD_BYTES };
     let mut opening = None;
     let mut started = None;
-    for line in read_head_lines(&session.path, HEAD_BYTES) {
-        if let Some((turn, _, _)) = parse_line(&line) {
+    for line in read_head_lines(&session.path, head_budget) {
+        let parsed = if session.runtime == "codex" {
+            parse_codex_line(&line)
+        } else {
+            parse_line(&line)
+        };
+        if let Some((turn, _, _)) = parsed {
+            if turn.role.is_empty() {
+                continue;
+            }
             if started.is_none() {
                 started = turn.timestamp.clone();
             }
@@ -390,7 +534,12 @@ pub async fn peek(args: Value) -> Result<Value, String> {
         }
     }
 
-    let digest = digest_tail(&session.path, TAIL_BYTES * 2);
+    let (meta_cwd, meta_branch) = if session.runtime == "codex" {
+        codex_meta(&session.path)
+    } else {
+        (None, None)
+    };
+    let digest = digest_tail(&session.path, TAIL_BYTES * 2, session.runtime);
     let recent: Vec<Value> = digest
         .turns
         .iter()
@@ -423,8 +572,9 @@ pub async fn peek(args: Value) -> Result<Value, String> {
 
     Ok(json!({
         "id": session.id,
-        "cwd": digest.cwd,
-        "branch": digest.branch,
+        "runtime": session.runtime,
+        "cwd": meta_cwd.or(digest.cwd),
+        "branch": meta_branch.or(digest.branch),
         "state": state_for(session.mtime),
         "idleSeconds": age_seconds(session.mtime),
         "started": started,
@@ -485,7 +635,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_reports_repo_state_and_one_liner() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = fixture_root("list");
         write_session(
             &root,
@@ -494,8 +644,10 @@ mod tests {
             &[user_line("fix the flaky login test"), assistant_text("Found the race in auth.ts — patching it now.")],
         );
         std::env::set_var("SYMON_CLAUDE_PROJECTS_DIR", &root);
+        std::env::set_var("SYMON_CODEX_SESSIONS_DIR", root.join("no-codex"));
         let out = list(json!({})).await.unwrap();
         std::env::remove_var("SYMON_CLAUDE_PROJECTS_DIR");
+        std::env::remove_var("SYMON_CODEX_SESSIONS_DIR");
 
         assert_eq!(out["count"], 1);
         let row = &out["sessions"][0];
@@ -509,7 +661,7 @@ mod tests {
 
     #[tokio::test]
     async fn peek_digests_and_masks_secrets() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = fixture_root("peek");
         write_session(
             &root,
@@ -521,10 +673,12 @@ mod tests {
             ],
         );
         std::env::set_var("SYMON_CLAUDE_PROJECTS_DIR", &root);
+        std::env::set_var("SYMON_CODEX_SESSIONS_DIR", root.join("no-codex"));
         let out = peek(json!({"id":"22222222-aaaa-bbbb-cccc-000000000002"}))
             .await
             .unwrap();
         std::env::remove_var("SYMON_CLAUDE_PROJECTS_DIR");
+        std::env::remove_var("SYMON_CODEX_SESSIONS_DIR");
 
         assert_eq!(out["cwd"], "/Users/me/demo-repo");
         let dump = out.to_string();
@@ -536,7 +690,7 @@ mod tests {
 
     #[tokio::test]
     async fn peek_flags_probable_permission_wait_and_rejects_bad_ids() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = fixture_root("await");
         let path = write_session(
             &root,
@@ -551,6 +705,7 @@ mod tests {
         drop(f);
 
         std::env::set_var("SYMON_CLAUDE_PROJECTS_DIR", &root);
+        std::env::set_var("SYMON_CODEX_SESSIONS_DIR", root.join("no-codex"));
         let out = peek(json!({"id":"33333333-aaaa-bbbb-cccc-000000000003"}))
             .await
             .unwrap();
@@ -559,15 +714,16 @@ mod tests {
             .await
             .unwrap_err();
         std::env::remove_var("SYMON_CLAUDE_PROJECTS_DIR");
+        std::env::remove_var("SYMON_CODEX_SESSIONS_DIR");
 
         assert_eq!(out["maybeAwaitingApproval"], true);
         assert!(err.contains("invalid session id"));
-        assert!(missing.contains("no Claude Code session"));
+        assert!(missing.contains("no coding session"));
     }
 
     #[tokio::test]
     async fn retention_hides_stale_sessions_unless_all() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = fixture_root("retention");
         let path = write_session(
             &root,
@@ -581,13 +737,97 @@ mod tests {
         drop(f);
 
         std::env::set_var("SYMON_CLAUDE_PROJECTS_DIR", &root);
+        std::env::set_var("SYMON_CODEX_SESSIONS_DIR", root.join("no-codex"));
         let hidden = list(json!({})).await.unwrap();
         let shown = list(json!({"all": true})).await.unwrap();
         std::env::remove_var("SYMON_CLAUDE_PROJECTS_DIR");
+        std::env::remove_var("SYMON_CODEX_SESSIONS_DIR");
 
         assert_eq!(hidden["count"], 0);
         assert_eq!(shown["count"], 1);
         assert_eq!(shown["sessions"][0]["state"], "idle");
+    }
+
+    fn write_codex_session(root: &Path, id: &str, lines: &[Value]) -> PathBuf {
+        let dir = root.join("2026").join("08").join("01");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("rollout-2026-08-01T05-00-00-{id}.jsonl"));
+        let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn codex_meta_line(cwd: &str) -> Value {
+        json!({"type":"session_meta","timestamp":"2026-08-01T05:00:00Z",
+               "payload":{"id":"ignored","cwd":cwd,"git":{"branch":"main"},
+                          "base_instructions":"x".repeat(4000)}})
+    }
+
+    fn codex_user(text: &str) -> Value {
+        json!({"type":"response_item","timestamp":"2026-08-01T05:00:01Z",
+               "payload":{"type":"message","role":"user",
+                          "content":[{"type":"input_text","text":text}]}})
+    }
+
+    fn codex_assistant(text: &str) -> Value {
+        json!({"type":"response_item","timestamp":"2026-08-01T05:00:02Z",
+               "payload":{"type":"message","role":"assistant",
+                          "content":[{"type":"output_text","text":text}]}})
+    }
+
+    fn codex_developer(text: &str) -> Value {
+        json!({"type":"response_item","timestamp":"2026-08-01T05:00:00Z",
+               "payload":{"type":"message","role":"developer",
+                          "content":[{"type":"input_text","text":text}]}})
+    }
+
+    #[tokio::test]
+    async fn codex_sessions_list_and_peek() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let claude_root = fixture_root("codex-claude");
+        let codex_root = fixture_root("codex-rollouts");
+        write_session(
+            &claude_root,
+            "-Users-me-demo-repo",
+            "55555555-aaaa-bbbb-cccc-000000000005",
+            &[user_line("claude side work")],
+        );
+        let codex_id = "019fbb47-bdb2-7ad3-a963-000000000006";
+        write_codex_session(
+            &codex_root,
+            codex_id,
+            &[
+                codex_meta_line("/Users/me/matori"),
+                codex_developer("injected context that must not be the opening ask"),
+                codex_user("build the restaurant page"),
+                codex_assistant("Route added — running the typecheck now."),
+            ],
+        );
+
+        std::env::set_var("SYMON_CLAUDE_PROJECTS_DIR", &claude_root);
+        std::env::set_var("SYMON_CODEX_SESSIONS_DIR", &codex_root);
+        let out = list(json!({})).await.unwrap();
+        let peeked = peek(json!({"id": codex_id})).await.unwrap();
+        std::env::remove_var("SYMON_CLAUDE_PROJECTS_DIR");
+        std::env::remove_var("SYMON_CODEX_SESSIONS_DIR");
+
+        assert_eq!(out["count"], 2);
+        let codex_row = out["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["runtime"] == "codex")
+            .expect("codex row present");
+        assert_eq!(codex_row["id"], codex_id);
+        assert_eq!(codex_row["repo"], "matori");
+        assert_eq!(codex_row["branch"], "main");
+        assert!(codex_row["doing"].as_str().unwrap().contains("typecheck"));
+
+        assert_eq!(peeked["runtime"], "codex");
+        assert_eq!(peeked["cwd"], "/Users/me/matori");
+        assert_eq!(peeked["openingAsk"], "build the restaurant page");
+        let recent = peeked["recent"].as_array().unwrap();
+        assert!(recent.iter().all(|r| r["role"] != "developer"));
     }
 
     /// Real-path seam: the tools must actually be registered — in the spec
