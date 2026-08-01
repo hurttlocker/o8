@@ -29,6 +29,14 @@ o8's answer:
 - **Memory that compounds.** An organizational-memory layer (Cortex) turns session outcomes into durable directives, and an **Engineering Brain** answers questions about your repo and your fleet's history with citations — "what did the agents ship yesterday?" is a query, not an archaeology dig.
 - **Operate from anywhere.** A paired iPhone app and mobile web surface: watch the fleet, steer a session, approve a merge from wherever you are.
 
+## Your data
+
+o8 runs on your machine, against your own subscriptions and keys. Your agents talk to whichever providers you configure — o8 itself is not in that path and adds no relay of its own.
+
+Nothing is reported back to us unless you switch it on. Product telemetry, crash reports, and error transmission are each **off by default and opt-in**; crashes are captured to a local file so *you* can read them, and stay there until you decide otherwise. A packaged build carrying a Sentry DSN still transmits nothing until the toggle is on.
+
+[`SECURITY.md`](./SECURITY.md) documents the rest plainly — including how dispatched workers run on your machine, and what OS-level sandboxing does and does not do today.
+
 ## The runtimes
 
 | Orchestrate or work | Workers (dispatchable) |
@@ -114,6 +122,18 @@ o8 is built like every pixel matters, because you stare at a control room all da
 - **Documentation:** [`docs/README.md`](./docs/README.md) — user guides, engineering internals, and operating runbooks.
 - [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control plane, headless).
 - [`CLAUDE.md`](./CLAUDE.md) — the canonical agent/contributor brief: architecture, conventions, critical rules.
+
+## Contributing
+
+Looking for a way in? Start with the [help-wanted issues](https://github.com/hurttlocker/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) — each one carries the diagnosis, the files involved, and what "done" looks like, so you're not reverse-engineering intent:
+
+- **A worker sandbox profile that could be the default** ([#1657](https://github.com/hurttlocker/o8/issues/1657)) — the evidence map of what a real worker touches is already written.
+- **Local models as a first-class profile** ([#1451](https://github.com/hurttlocker/o8/issues/1451)) — dispatch prefixes and a Brain tier exist; the coverage map and a verifiable no-egress test don't.
+- **A repeatable per-release benchmark suite** ([#1158](https://github.com/hurttlocker/o8/issues/1158)) — four measurement scripts already run; they need a versioned scorecard.
+- **The wrapper thesis on SWE-bench** ([#1159](https://github.com/hurttlocker/o8/issues/1159)) — an honest negative result is publishable, and we'll link it.
+- **A canvas glass bug with a finished diagnosis** ([#1662](https://github.com/hurttlocker/o8/issues/1662)) — contained enough to land in an evening.
+
+New runtimes are welcome too: adding one is a small documented patch ([`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md)).
 
 Community: [Discord](https://discord.gg/gH3UbbTJ7k) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 
