@@ -45,6 +45,8 @@ export interface ApiRequestOptions {
   timeoutMs?: number;
   /** Treat 404 as success and return null instead of throwing. */
   allowNotFound?: boolean;
+  /** Return a structured 409/422 response instead of throwing. */
+  allowConflict?: boolean;
 }
 
 export interface ApiResponse<T> {
@@ -320,8 +322,11 @@ export async function apiFetch<T = unknown>(
     throw new CliError('not_found', `404 from ${path}`, EXIT.NOT_FOUND);
   }
   if (res.status === 409 || res.status === 422) {
-    let detail = '';
     const json = parseResponseJson(responseText);
+    if (opts.allowConflict && json) {
+      return { status: res.status, data: json as T };
+    }
+    let detail = '';
     const error = json?.error;
     const errorText = typeof error === 'string'
       ? error

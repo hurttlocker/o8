@@ -11,7 +11,7 @@ const REALTIME_INTERNAL_TIMEOUT_MS = 2_500;
 
 async function postInternalRealtimeRequest(payload: RealtimeInternalRequest) {
   try {
-    await fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/realtime`, {
+    const response = await fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/realtime`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${getOrCreateWsToken()}`,
@@ -20,9 +20,11 @@ async function postInternalRealtimeRequest(payload: RealtimeInternalRequest) {
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS),
     });
+    return response.ok;
   } catch {
     // Best-effort: the app must remain correct even if the local WS bridge
     // is not running yet. Poll fallback still reconciles eventually.
+    return false;
   }
 }
 

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { lookupOwnedActiveRun, resetOwnedSessionIndex } from './owned-session-index';
+import { listOwnedActiveRuns, lookupOwnedActiveRun, resetOwnedSessionIndex } from './owned-session-index';
 
 let root = '';
 function writeSession(dir: string, surfaceId: string, activeRun: unknown) {
@@ -22,12 +22,16 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'o8-owned-idx-'));
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = root;
   process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = root;
+  process.env.O8_OWNED_GEMINI_ROOT = root;
+  process.env.O8_OWNED_OPENCODE_ROOT = root;
   resetOwnedSessionIndex();
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
   delete process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
+  delete process.env.O8_OWNED_GEMINI_ROOT;
+  delete process.env.O8_OWNED_OPENCODE_ROOT;
   resetOwnedSessionIndex();
 });
 
@@ -46,6 +50,15 @@ describe('lookupOwnedActiveRun', () => {
     writeSession('s2', 'codex-owned:live', { pid: 4242, tmuxSession: 'sess-x' });
     resetOwnedSessionIndex();
     expect(await lookupOwnedActiveRun('codex-owned:live', 1000)).toEqual({ pid: 4242, tmuxSession: 'sess-x' });
+  });
+
+  it('lists active runs once and omits cleared session metadata', async () => {
+    writeSession('s-live', 'codex-owned:list-live', { pid: 99 });
+    writeSession('s-cleared', 'codex-owned:list-cleared', undefined);
+    resetOwnedSessionIndex();
+    expect(await listOwnedActiveRuns(1000)).toEqual([
+      { surfaceId: 'codex-owned:list-live', pid: 99, tmuxSession: undefined },
+    ]);
   });
 
   it('indexes Claude Code owned workers under their own root marker', async () => {

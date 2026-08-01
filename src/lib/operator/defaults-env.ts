@@ -3,7 +3,7 @@ import 'server-only';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
+import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { isSubscriptionProfile, type SubscriptionProfile } from './subscription-profile';
 
 /**
@@ -301,9 +301,11 @@ export function envCollideAggregator(): CollideAggregator | null {
   return null;
 }
 
-export function envAutoApplyUpdates(): AutoApplyUpdates | null {
-  const raw = process.env.O8_AUTO_APPLY_UPDATES?.trim();
-  if (raw === 'off' || raw === 'when-idle') return raw;
+export function envUpdateAutoApply(): UpdateAutoApply | null {
+  const raw = process.env.O8_UPDATE_AUTO_APPLY?.trim()
+    ?? process.env.O8_AUTO_APPLY_UPDATES?.trim();
+  if (raw === 'off' || raw === 'idle') return raw;
+  if (raw === 'when-idle') return 'idle';
   return null;
 }
 

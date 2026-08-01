@@ -38,7 +38,7 @@ import {
   ENV_LOCKED_REASON,
   REQUIRE_APPROVAL_OPTIONS,
   resolvePickerGroupOpen,
-  type AutoApplyUpdates,
+  type UpdateAutoApply,
   type DispatchRuntime,
   type OperatorDefaults,
   type OperatorDefaultsResponse,
@@ -400,18 +400,18 @@ export function OperatorDefaultsTab() {
           <SettingsRow
             icon={<UpdateIcon />}
             label="Auto-apply updates"
-            subtitle={lockedSub('autoApplyUpdates', 'Install downloaded updates when everything is idle')}
+            subtitle={lockedSub('updateAutoApply', 'Install updates on headless nodes when lanes and terminals are idle')}
             accessory={
               <SettingsSegmented
-                value={values.autoApplyUpdates}
-                onChange={(next) => { updateField('autoApplyUpdates', next as AutoApplyUpdates); }}
+                value={values.updateAutoApply}
+                onChange={(next) => { updateField('updateAutoApply', next as UpdateAutoApply); }}
                 options={[
                   { value: 'off', label: 'Off' },
-                  { value: 'when-idle', label: 'When idle' },
+                  { value: 'idle', label: 'When idle' },
                 ]}
               />
             }
-            disabled={envLocked('autoApplyUpdates') || busyField === 'autoApplyUpdates'}
+            disabled={envLocked('updateAutoApply') || busyField === 'updateAutoApply'}
           />
         </SettingsGroup>
       </section>

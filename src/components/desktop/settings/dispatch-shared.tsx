@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { MODEL_IDS } from '@/lib/models';
 import {
   getRuntimeCapability,
@@ -36,7 +37,7 @@ export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
 export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
 export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
-export type AutoApplyUpdates = 'off' | 'when-idle';
+export type { UpdateAutoApply };
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
 export type PrLinkDestination = 'in-app' | 'browser';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
@@ -82,7 +83,7 @@ export interface OperatorDefaults {
   buyinDocEnabled: boolean;
   targetingTriage: TargetingTierUI;
   targetingAction: TargetingTierUI;
-  autoApplyUpdates: AutoApplyUpdates;
+  updateAutoApply: UpdateAutoApply;
   collideAggregator: CollideAggregator;
   productTelemetryEnabled: boolean;
   telemetryOptIn: boolean;

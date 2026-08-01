@@ -168,4 +168,23 @@ describe('CLI apiFetch network error taxonomy', () => {
       ambiguous: false,
     });
   });
+
+  it('returns structured conflict details when a command opts into handling them', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: false,
+      error: { code: 'update_apply_busy' },
+      idle: { active: { lanes: [{ id: 'lane-live' }] } },
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    const response = await apiFetch<Record<string, unknown>>(config, '/api/panel/update/apply', {
+      method: 'POST',
+      body: { force: false },
+      allowConflict: true,
+    });
+    expect(response.status).toBe(409);
+    expect(response.data).toMatchObject({ error: { code: 'update_apply_busy' } });
+  });
 });

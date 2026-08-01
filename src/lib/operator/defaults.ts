@@ -8,7 +8,7 @@ import { MODEL_IDS } from '@/lib/models';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
-import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
+import type { UpdateAutoApply } from '@/lib/app-update/types';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
 } from './dispatch-runtime-default';
@@ -33,7 +33,7 @@ import {
   isDispatchRuntime,
   isClassAComposer,
   isWorkersUseBrain,
-  envAutoApplyUpdates,
+  envUpdateAutoApply,
   envBranchPrefix,
   envCommitAttribution,
   envPrLinkDestination,
@@ -253,7 +253,7 @@ export interface OperatorDefaults {
   /** Targeting Machine — the premium "point a real agent here" tier (default high). */
   targetingAction: TargetingTier;
   /** Auto-apply downloaded desktop updates only under conservative idle gates. */
-  autoApplyUpdates: AutoApplyUpdates;
+  updateAutoApply: UpdateAutoApply;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
   /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */
@@ -361,7 +361,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // operator can point triage at a cheaper runtime/model (gemini, a local model).
   targetingTriage: { runtime: 'codex', model: '', effort: 'low' },
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
-  autoApplyUpdates: 'off',
+  updateAutoApply: 'off',
   collideAggregator: 'auto',
   productTelemetryEnabled: false,
   // Crash telemetry OFF by default — local capture only, nothing uploaded.
@@ -470,7 +470,8 @@ interface StoredOperatorDefaults {
   buyinDocEnabled?: boolean;
   targetingTriage?: TargetingTier;
   targetingAction?: TargetingTier;
-  autoApplyUpdates?: AutoApplyUpdates;
+  updateAutoApply?: UpdateAutoApply;
+  autoApplyUpdates?: 'off' | 'when-idle';
   collideAggregator?: CollideAggregator;
   productTelemetryEnabled?: boolean;
   telemetryOptIn?: boolean;
@@ -607,9 +608,8 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.buyinDocEnabled === 'boolean') {
     result.buyinDocEnabled = stored.buyinDocEnabled;
   }
-  if (stored.autoApplyUpdates === 'off' || stored.autoApplyUpdates === 'when-idle') {
-    result.autoApplyUpdates = stored.autoApplyUpdates;
-  }
+  const storedUpdateAutoApply = stored.updateAutoApply ?? (stored.autoApplyUpdates === 'when-idle' ? 'idle' : stored.autoApplyUpdates);
+  if (storedUpdateAutoApply === 'off' || storedUpdateAutoApply === 'idle') result.updateAutoApply = storedUpdateAutoApply;
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
@@ -680,7 +680,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envExplainer = envPacketExplainerEnabled();
   const envQuizGate = envQuizGateEnabled();
   const envBuyinDoc = envBuyinDocEnabled();
-  const envApplyUpdates = envAutoApplyUpdates();
+  const envApplyUpdates = envUpdateAutoApply();
   const envCollideAgg = envCollideAggregator();
   const envTelemetry = envTelemetryOptIn();
   const envTelemetryUrl = envTelemetryIngestUrl();
@@ -753,7 +753,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     buyinDocEnabled: envBuyinDoc ?? fileValues.buyinDocEnabled ?? OPERATOR_DEFAULTS_FALLBACK.buyinDocEnabled,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
-    autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
+    updateAutoApply: envApplyUpdates ?? fileValues.updateAutoApply ?? OPERATOR_DEFAULTS_FALLBACK.updateAutoApply,
     collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
     productTelemetryEnabled: fileValues.productTelemetryEnabled ?? OPERATOR_DEFAULTS_FALLBACK.productTelemetryEnabled,
     telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
@@ -808,7 +808,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     buyinDocEnabled: envBuyinDoc !== null ? 'env' : fileValues.buyinDocEnabled !== undefined ? 'file' : 'default',
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
-    autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
+    updateAutoApply: envApplyUpdates !== null ? 'env' : fileValues.updateAutoApply !== undefined ? 'file' : 'default',
     collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
     productTelemetryEnabled: fileValues.productTelemetryEnabled !== undefined ? 'file' : 'default',
     telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
@@ -1017,11 +1017,11 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   if (update.buyinDocEnabled !== undefined) {
     stored.buyinDocEnabled = Boolean(update.buyinDocEnabled);
   }
-  if (update.autoApplyUpdates !== undefined) {
-    if (update.autoApplyUpdates !== 'off' && update.autoApplyUpdates !== 'when-idle') {
-      throw new Error('autoApplyUpdates must be "off" or "when-idle".');
+  if (update.updateAutoApply !== undefined) {
+    if (update.updateAutoApply !== 'off' && update.updateAutoApply !== 'idle') {
+      throw new Error('updateAutoApply must be "off" or "idle".');
     }
-    stored.autoApplyUpdates = update.autoApplyUpdates;
+    stored.updateAutoApply = update.updateAutoApply;
   }
   if (update.collideAggregator !== undefined) {
     if (!isCollideAggregator(update.collideAggregator)) {

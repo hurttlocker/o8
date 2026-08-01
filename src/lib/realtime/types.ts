@@ -54,6 +54,8 @@ export interface RealtimeMutationRecord {
   timestamp?: string;
   note?: string;
   optimistic?: boolean;
+  /** Explicit operator override for safety-gated mutations. */
+  force?: boolean;
   createdAt: string;
   settledAt?: string;
   /** Populated when action === 'runtime-fallback'. */

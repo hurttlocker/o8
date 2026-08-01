@@ -272,12 +272,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.buyinDocEnabled = body.buyinDocEnabled;
   }
 
-  if (body.autoApplyUpdates !== undefined) {
-    const raw = body.autoApplyUpdates;
-    if (raw !== 'off' && raw !== 'when-idle') {
-      throw new Error('autoApplyUpdates must be one of "off", "when-idle".');
+  if (body.updateAutoApply !== undefined) {
+    const raw = body.updateAutoApply;
+    if (raw !== 'off' && raw !== 'idle') {
+      throw new Error('updateAutoApply must be one of "off", "idle".');
     }
-    update.autoApplyUpdates = raw;
+    update.updateAutoApply = raw;
   }
 
   if (body.collideAggregator !== undefined) {

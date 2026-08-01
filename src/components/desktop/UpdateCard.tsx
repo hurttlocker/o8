@@ -21,8 +21,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
-import { installUpdateAndRestart, RELEASE_URL } from '@/lib/app-update/client-restart';
+import {
+  installUpdateAndRestart,
+  relaunchInstalledUpdate,
+  RELEASE_URL,
+} from '@/lib/app-update/client-restart';
 
 interface UpdateInfo {
   version: string;
@@ -36,12 +41,19 @@ const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
 const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
+const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
-const AUTO_APPLY_IDLE_MS = 5 * 60 * 1000;
 const AUTO_APPLY_CHECK_MS = 60 * 1000;
+let updateInstallInFlight = false;
 
-type AutoApplyUpdates = 'off' | 'when-idle';
+interface InstallRequest {
+  requireIdle?: boolean;
+}
+
+interface UpdateIdleResponse {
+  idle?: { idle?: boolean };
+}
 
 function readDismissedVersion() {
   if (typeof window === 'undefined') return null;
@@ -83,6 +95,19 @@ function writeCachedSummary(version: string, summary: string) {
   } catch { /* ignore */ }
 }
 
+function claimApplyMutation(mutationId: string): boolean {
+  try {
+    const raw = window.localStorage.getItem(APPLY_MUTATIONS_KEY);
+    const processed = raw ? JSON.parse(raw) as unknown : [];
+    const ids = Array.isArray(processed)
+      ? processed.filter((value): value is string => typeof value === 'string')
+      : [];
+    if (ids.includes(mutationId)) return false;
+    window.localStorage.setItem(APPLY_MUTATIONS_KEY, JSON.stringify([...ids.slice(-31), mutationId]));
+  } catch { /* duplicate suppression is best-effort */ }
+  return true;
+}
+
 function stringFromRecord(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = record[key];
@@ -113,14 +138,12 @@ export function UpdateCard() {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [autoApplyUpdates, setAutoApplyUpdates] = useState<AutoApplyUpdates>('off');
+  const [updateAutoApply, setUpdateAutoApply] = useState<UpdateAutoApply>('off');
   const [blockedNote, setBlockedNote] = useState<string | null>(null);
   const updateRef = useRef<UpdateInfo | null>(null);
   const installingRef = useRef(false);
   const autoApplyingRef = useRef(false);
-  const lastOperatorInputRef = useRef(Date.now());
-  const orchestratorStreamingRef = useRef(false);
-  const orchestratorBusyTabsRef = useRef<Map<string, boolean>>(new Map());
+  const restartDeferredRef = useRef(false);
 
   useEffect(() => {
     updateRef.current = update;
@@ -190,10 +213,10 @@ export function UpdateCard() {
       .then(async (response) => {
         if (!response.ok) return;
         const payload = await response.json() as {
-          values?: { autoApplyUpdates?: AutoApplyUpdates };
+          values?: { updateAutoApply?: UpdateAutoApply };
         };
-        const next = payload.values?.autoApplyUpdates;
-        if (next === 'when-idle' || next === 'off') setAutoApplyUpdates(next);
+        const next = payload.values?.updateAutoApply;
+        if (next === 'idle' || next === 'off') setUpdateAutoApply(next);
       })
       .catch(() => { /* default off */ });
   }, []);
@@ -214,6 +237,7 @@ export function UpdateCard() {
       clearUnlisten = listen<void>(UPDATE_CLEAR_EVENT, () => {
         setUpdate(null);
         setInstalling(false);
+        restartDeferredRef.current = false;
       });
     }).catch(() => { /* polling fallback below */ });
     return () => {
@@ -273,11 +297,37 @@ export function UpdateCard() {
     return () => controller.abort();
   }, [expanded, update?.version]);
 
-  const handleInstall = useCallback(async () => {
+  const checkUpdateIdle = useCallback(async () => {
+    const response = await fetch('/api/panel/update/apply', { cache: 'no-store' }).catch(() => null);
+    if (!response?.ok) return false;
+    const payload = await response.json().catch(() => null) as UpdateIdleResponse | null;
+    return payload?.idle?.idle === true;
+  }, []);
+
+  const handleInstall = useCallback(async (request: InstallRequest = {}) => {
+    if (installingRef.current || updateInstallInFlight) return;
+    updateInstallInFlight = true;
+    installingRef.current = true;
     try {
       setInstalling(true);
       setBlockedNote(null);
-      const outcome = await installUpdateAndRestart(updateRef.current?.releaseUrl ?? RELEASE_URL);
+      if (request.requireIdle && !(await checkUpdateIdle())) {
+        setBlockedNote('Update ready. Restart is waiting for lanes and terminals to become idle.');
+        return;
+      }
+      if (restartDeferredRef.current) {
+        const restarted = await relaunchInstalledUpdate({
+          beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
+        });
+        if (!restarted) {
+          setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
+        }
+        return;
+      }
+      const outcome = await installUpdateAndRestart(
+        updateRef.current?.releaseUrl ?? RELEASE_URL,
+        { beforeRestart: request.requireIdle ? checkUpdateIdle : undefined },
+      );
       if (outcome.blocked) {
         // Kill-switch: this version was pulled post-release. Surface a quiet
         // note instead of restarting; the operator waits for the next build.
@@ -286,56 +336,42 @@ export function UpdateCard() {
             || `Update to v${outcome.blocked.version} was paused by the o8 team — waiting for a fixed build.`,
         );
       }
-      setInstalling(false);
+      if (outcome.restartDeferred) {
+        restartDeferredRef.current = true;
+        setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
+      }
     } catch (err) {
       console.error('[update-card] install failed:', err);
+    } finally {
+      updateInstallInFlight = false;
+      installingRef.current = false;
       setInstalling(false);
     }
-  }, []);
-
-  useEffect(() => {
-    const onRealtime = (event: Event) => {
-      const detail = (event as CustomEvent<{ tabId?: unknown; busy?: unknown }>).detail;
-      const busy = detail?.busy === true;
-      if (typeof detail?.tabId === 'string' && detail.tabId) {
-        if (busy) {
-          orchestratorBusyTabsRef.current.set(detail.tabId, true);
-        } else {
-          orchestratorBusyTabsRef.current.delete(detail.tabId);
-        }
-        orchestratorStreamingRef.current = orchestratorBusyTabsRef.current.size > 0;
-      } else {
-        orchestratorStreamingRef.current = busy;
-      }
-    };
-    window.addEventListener('o8:orchestrator', onRealtime);
-    return () => window.removeEventListener('o8:orchestrator', onRealtime);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => { lastOperatorInputRef.current = Date.now(); };
-    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
-    for (const event of events) window.addEventListener(event, handler, { passive: true });
-    return () => {
-      for (const event of events) window.removeEventListener(event, handler);
-    };
-  }, []);
+  }, [checkUpdateIdle]);
 
   useEffect(() => {
     const onRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{
         data?: {
           events?: Array<{
-            data?: { mutation?: { action?: string; status?: string } };
+            data?: { mutation?: {
+              action?: string;
+              status?: string;
+              mutationId?: string;
+              force?: boolean;
+            } };
           }>;
         };
       }>).detail;
-      const requested = detail?.data?.events?.some((item) => {
-        const mutation = item.data?.mutation;
-        return mutation?.action === 'app-relaunch-requested' && mutation.status === 'queued';
-      });
-      if (requested) {
-        void handleInstall();
+      const mutations = detail?.data?.events?.map((item) => item.data?.mutation) ?? [];
+      for (let index = mutations.length - 1; index >= 0; index -= 1) {
+        const mutation = mutations[index];
+        if (mutation?.status !== 'queued') continue;
+        if (mutation.action !== 'app-relaunch-requested' && mutation.action !== 'app-update-apply-requested') continue;
+        if (mutation.mutationId && !claimApplyMutation(mutation.mutationId)) continue;
+        const requireIdle = mutation.action === 'app-update-apply-requested' && mutation.force !== true;
+        void handleInstall({ requireIdle });
+        return;
       }
     };
     window.addEventListener('o8:realtime', onRealtime);
@@ -343,22 +379,15 @@ export function UpdateCard() {
   }, [handleInstall]);
 
   useEffect(() => {
-    if (autoApplyUpdates !== 'when-idle') return;
+    if (updateAutoApply !== 'idle') return;
 
     async function maybeApplyWhenIdle() {
       if (!updateRef.current || installingRef.current || autoApplyingRef.current) return;
-      if (Date.now() - lastOperatorInputRef.current < AUTO_APPLY_IDLE_MS) return;
-      if (orchestratorStreamingRef.current) return;
-
-      const response = await fetch('/api/lanes?active=true', { cache: 'no-store' }).catch(() => null);
-      if (!response?.ok) return;
-      const payload = await response.json().catch(() => null) as { lanes?: Array<{ status?: string }> } | null;
-      const lanes = Array.isArray(payload?.lanes) ? payload.lanes : [];
-      if (lanes.some((lane) => lane.status === 'running' || lane.status === 'launching')) return;
+      if (!(await checkUpdateIdle())) return;
 
       autoApplyingRef.current = true;
       try {
-        await handleInstall();
+        await handleInstall({ requireIdle: true });
       } finally {
         autoApplyingRef.current = false;
       }
@@ -367,7 +396,7 @@ export function UpdateCard() {
     const interval = window.setInterval(() => void maybeApplyWhenIdle(), AUTO_APPLY_CHECK_MS);
     void maybeApplyWhenIdle();
     return () => window.clearInterval(interval);
-  }, [autoApplyUpdates, handleInstall]);
+  }, [checkUpdateIdle, handleInstall, updateAutoApply]);
 
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;

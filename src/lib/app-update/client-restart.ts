@@ -6,10 +6,16 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 export const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 
 export interface InstallUpdateOutcome {
-  /** True when the update downloaded + a restart was initiated. */
+  /** True when the update downloaded and installed. */
   installed: boolean;
+  /** The update installed, but the caller's final safety check deferred relaunch. */
+  restartDeferred?: boolean;
   /** Set when the update was skipped because the version is pulled (kill-switch). */
   blocked?: { version: string; note?: string };
+}
+
+export interface InstallUpdateOptions {
+  beforeRestart?: () => Promise<boolean>;
 }
 
 /**
@@ -40,7 +46,22 @@ async function isVersionPulled(version: string): Promise<{ pulled: boolean; note
   }
 }
 
-export async function installUpdateAndRestart(releaseUrl?: string): Promise<InstallUpdateOutcome> {
+export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+  if (options.beforeRestart && !(await options.beforeRestart())) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('restart_app');
+  } catch {
+    const { relaunch } = await import('@tauri-apps/plugin-process');
+    await relaunch();
+  }
+  return true;
+}
+
+export async function installUpdateAndRestart(
+  releaseUrl?: string,
+  options: InstallUpdateOptions = {},
+): Promise<InstallUpdateOutcome> {
   if (!isTauri()) {
     openExternalUrl(releaseUrl ?? RELEASE_URL);
     return { installed: false };
@@ -58,12 +79,6 @@ export async function installUpdateAndRestart(releaseUrl?: string): Promise<Inst
   }
 
   await result.downloadAndInstall();
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('restart_app');
-  } catch {
-    const { relaunch } = await import('@tauri-apps/plugin-process');
-    await relaunch();
-  }
-  return { installed: true };
+  const restarted = await relaunchInstalledUpdate(options);
+  return { installed: true, restartDeferred: !restarted };
 }

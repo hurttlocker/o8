@@ -26,6 +26,10 @@ export interface OwnedActiveRun {
   tmuxSession?: string;
 }
 
+export interface IndexedOwnedActiveRun extends OwnedActiveRun {
+  surfaceId: string;
+}
+
 /** Resolve the owned roots FRESH per call — env may be set after import (tests),
  *  and the resolution is cheap. */
 export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
@@ -107,6 +111,18 @@ export async function lookupOwnedActiveRun(surfaceId: string, now: number = Date
   if (!match) return null;
   const index = await getRootIndex(match.root, now);
   return index.get(surfaceId) ?? null;
+}
+
+/** List every owned session whose persisted metadata still carries an active run. */
+export async function listOwnedActiveRuns(now: number = Date.now()): Promise<IndexedOwnedActiveRun[]> {
+  const indexes = await Promise.all(ownedRoots().map(({ root }) => getRootIndex(root, now)));
+  const active = new Map<string, IndexedOwnedActiveRun>();
+  for (const index of indexes) {
+    for (const [surfaceId, run] of index) {
+      if (run.pid !== undefined || run.tmuxSession !== undefined) active.set(surfaceId, { surfaceId, ...run });
+    }
+  }
+  return [...active.values()];
 }
 
 /** Test-only: drop the memo so a test's fs writes are read fresh. */

@@ -6278,6 +6278,8 @@ const httpServer = createServer((req, res) => {
     }
     const sessions = [...terminalAttachments.values()].map((attachment) => ({
       name: attachment.sessionName,
+      kind: attachment.kind,
+      clientCount: attachment.clientIds.size,
       cwd: attachment.cwd ?? null,
       commandHint: attachment.commandHint ?? null,
       createdAt: new Date(attachment.createdAt).toISOString(),

@@ -68,6 +68,7 @@ import {
   runTaskPrune,
   runTaskReport,
 } from './commands/task.js';
+import { runUpdate } from './commands/update.js';
 import { printError, type OutputMode } from './output.js';
 import { CliError, EXIT } from './api.js';
 
@@ -133,6 +134,7 @@ commands:
   run stop <runId>     stop a managed run from o8 run --list
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
   app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
+  update apply [--force]  apply an available update when idle; --force overrides live-work refusal
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
   browser read         page text + interactive elements (selectors)
   browser click <sel>  click an element (ghost cursor paints in the o8 UI)
@@ -227,6 +229,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runAsk(args.mode, secondary ? [secondary, ...args.rest] : args.rest);
     case 'app':
       return runApp(args.mode, secondary, args.rest);
+    case 'update':
+      return runUpdate(args.mode, secondary, args.rest);
     case 'browser':
       return runBrowser(args.mode, secondary, args.rest);
     case 'cortex': {

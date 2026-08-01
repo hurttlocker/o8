@@ -1,7 +1,5 @@
 import 'server-only';
 
-export type AutoApplyUpdates = 'off' | 'when-idle';
-
 export interface AppUpdateState {
   updatePending: boolean;
   version: string | null;

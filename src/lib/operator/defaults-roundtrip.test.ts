@@ -1,12 +1,13 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-operator-defaults-'));
+const dataDir = mkdtempSync(join(tmpdir(), 'o8-operator-defaults-'));
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-const { updateOperatorDefaults } = await import('./defaults');
+const { getOperatorDefaults, updateOperatorDefaults } = await import('./defaults');
 
 /**
  * Evaporation guard: updateOperatorDefaults copies each field from the update
@@ -43,7 +44,7 @@ const NON_DEFAULT_UPDATE = {
   packetExplainerEnabled: false,
   quizGateEnabled: true,
   buyinDocEnabled: true,
-  autoApplyUpdates: 'off',
+  updateAutoApply: 'idle',
   collideAggregator: 'claude',
   productTelemetryEnabled: true,
   telemetryOptIn: true,
@@ -57,6 +58,13 @@ const NON_DEFAULT_UPDATE = {
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {
+  it('migrates the legacy autoApplyUpdates value to updateAutoApply', async () => {
+    writeFileSync(join(dataDir, 'operator-defaults.json'), JSON.stringify({
+      autoApplyUpdates: 'when-idle',
+    }));
+    expect((await getOperatorDefaults()).values.updateAutoApply).toBe('idle');
+  });
+
   it('persists every settable field (no silent evaporation)', async () => {
     const result = await updateOperatorDefaults({ ...NON_DEFAULT_UPDATE });
     for (const [field, expected] of Object.entries(NON_DEFAULT_UPDATE)) {

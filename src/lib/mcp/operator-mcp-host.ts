@@ -69,6 +69,7 @@ import {
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
 import { TARGETING_TOOLS, handleTargets } from '@/lib/mcp/operator-handlers/targeting';
+import { UPDATE_TOOLS, handleUpdateApply } from '@/lib/mcp/operator-handlers/update';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface OperatorMcpRequest {
@@ -238,6 +239,7 @@ const TOOLS: McpTool[] = [
   ...DIGEST_TOOLS,
   ...SPEC_TOOLS,
   ...TARGETING_TOOLS,
+  ...UPDATE_TOOLS,
   ...O8_WEBVIEW_TOOLS,
   ...CANVAS_TOOLS,
   ...LOOP_OBSERVABILITY_TOOLS,
@@ -304,6 +306,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   digest: handleDigest,
   fetch_raw: handleFetchRaw,
   o8_targets: handleTargets,
+  o8_update_apply: handleUpdateApply,
   o8_spec_read: handleSpecRead,
   o8_spec_review_index: handleSpecReviewIndex,
   o8_spec_pending_feedback: handleSpecPendingFeedback,
