@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/o8-icon.png" alt="" width="104">
+</p>
+
 # o8
 
 [![CI](https://github.com/hurttlocker/o8/actions/workflows/ci.yml/badge.svg)](https://github.com/hurttlocker/o8/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/hurttlocker/o8)](https://github.com/hurttlocker/o8/releases) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gH3UbbTJ7k)
@@ -74,7 +78,16 @@ Merges that fail don't silently die — a five-layer escalation chain (auto-retr
 
 ## Symon — the voice layer
 
-o8 ships with a voice agent for the rest of your Mac: push-to-talk dictation, fleet status by voice ("what needs me?"), approve-by-voice behind spoken confirm cards, terminal watching ("tell me when that finishes"), calendar/reminders/mail. Free tier uses on-device Apple transcription or your own Whisper key. An optional managed voice service (hosted polish, speech-to-speech) is the paid convenience — the app never requires it.
+**Why a voice agent is in a control plane:** a fleet generates decisions while you're doing something else. Agents finish, reviews queue, a merge blocks — and the cost of that isn't the decision, it's having to stop, find the window, and reload the context. Symon closes that gap. You ask "what needs me?" without turning around, and approve the one thing that's blocking, hands still on whatever you were doing.
+
+He runs on the rest of your Mac too, because an operator's day isn't only the fleet:
+
+- **Fleet by voice** — status, what's blocked, what shipped. Approvals ride a *spoken confirm card*: he says what he's about to do and waits, so voice never becomes a way to skip governance.
+- **Push-to-talk dictation** anywhere on the machine, with a local polish pass that fixes the transcript without shipping your words to a server.
+- **Terminal watching** — "tell me when that finishes" — plus reading what's on screen when you ask about it.
+- **The ordinary Mac** — calendar, reminders, mail, music, files, browser. Same confirm-card discipline for anything with a side effect.
+
+Free tier uses on-device Apple transcription or your own Whisper key. An optional managed voice service (hosted polish, speech-to-speech) is the paid convenience — the app never requires it, and voice is never the only way to do anything.
 
 ## Quickstart
 
@@ -97,7 +110,7 @@ Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aide
 
 ### Phone
 
-<img src="./assets/phone.gif" alt="The o8 iOS app alternating between a morning catch-up screen showing 34 new commits across three repositories, and a voice session where Symon answers with a generated status view" width="300">
+![The o8 iOS app, two screens side by side: a morning catch-up showing 34 new commits across three tracked repositories, and a voice session where Symon answers with a generated status view and a checklist of what needs attention](./assets/phone.jpg)
 
 - **iOS app:** Pair by QR in seconds — beta access via [o8.run](https://o8.run).
 - **Any phone:** the mobile web surface ships in this repo — pair any device on your network through the browser, no app needed.
