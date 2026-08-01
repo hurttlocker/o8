@@ -33,7 +33,7 @@
  *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -146,6 +146,10 @@ const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await im
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
 const { syncTranscriptSearchDocument } = await import('@/lib/search/transcripts');
+const {
+  runChatHistorySearchBackfill,
+  runPacketTranscriptSearchBackfill,
+} = await import('@/lib/search/backfill');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 const { enforceWedgeTimeouts, WEDGE_AWAITING_ORCHESTRATOR_MS } = await import('@/lib/lane/wedge-timeouts');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
@@ -1186,10 +1190,89 @@ describe('seam M — the real Cmd+K route searches persisted Stage 1 rows', () =
     const payload = await searchPersistedRows(phrase);
     expect(payload.groups.chat).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        detail: expect.stringContaining(phrase),
+        detail: expect.stringContaining(`\u0001${phrase}\u0002`),
         target: expect.objectContaining({ chatTabId: tabId }),
       }),
     ]));
+  });
+
+  it('does not index serialized message keys and safely rejects hostile FTS syntax', async () => {
+    const tabId = `thoughts-search-clean-text-${Date.now()}`;
+    await chatHistoryRoute.POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tabId,
+        title: 'Clean text index seam',
+        messages: [{
+          id: 'clean-message',
+          role: 'assistant',
+          content: 'Only human-readable prose belongs in this index.',
+          timestamp: Date.now(),
+        }],
+      }),
+    }));
+
+    const metadataPayload = await searchPersistedRows('timestamp');
+    expect(metadataPayload.groups.chat.map((result) => result.id)).not.toContain(`chat:${tabId}`);
+
+    const hostilePayload = await searchPersistedRows('"unbalanced or co-op* NEAR(');
+    expect(hostilePayload.groups.chat).toEqual([]);
+    expect(hostilePayload.groups.transcript).toEqual([]);
+  });
+
+  it('removes the parent and FTS rows when a canonical thread is deleted', async () => {
+    const tabId = `thoughts-search-delete-${Date.now()}`;
+    const phrase = `deleteindexviolet${Date.now()}`;
+    await chatHistoryRoute.POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tabId,
+        messages: [{ id: 'delete-message', role: 'user', content: phrase, timestamp: Date.now() }],
+      }),
+    }));
+    const response = await chatHistoryRoute.DELETE(new NextRequest(
+      `http://localhost/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`,
+      { method: 'DELETE' },
+    ));
+    expect(response.status).toBe(200);
+    expect(getSqlite().prepare('SELECT 1 FROM chat_history WHERE tab_id = ?').get(tabId)).toBeUndefined();
+    expect(getSqlite().prepare('SELECT 1 FROM chat_history_fts WHERE tab_id = ?').get(tabId)).toBeUndefined();
+  });
+
+  it('resumes bounded legacy chat backfill and indexes the final file', async () => {
+    const historyDir = join(dataDir, 'chat-history');
+    mkdirSync(historyDir, { recursive: true });
+    const stamp = Date.now();
+    const phrase = `backfillindigo${stamp}`;
+    for (let index = 0; index < 13; index += 1) {
+      writeFileSync(join(historyDir, `000-backfill-${stamp}-${String(index).padStart(2, '0')}.json`), JSON.stringify({
+        title: `Backfill ${index}`,
+        messages: [{
+          id: `backfill-message-${index}`,
+          role: 'user',
+          content: index === 12 ? phrase : `Backfill body ${index}`,
+          timestamp: stamp + index,
+        }],
+      }));
+    }
+    getSqlite().prepare("DELETE FROM search_backfill_state WHERE name = 'v35-chat-history'").run();
+
+    await runChatHistorySearchBackfill({ maxBatches: 1 });
+    const paused = getSqlite().prepare(`
+      SELECT cursor, completed_at FROM search_backfill_state WHERE name = 'v35-chat-history'
+    `).get() as { cursor: string; completed_at: string | null };
+    expect(paused.cursor).not.toBe('');
+    expect(paused.completed_at).toBeNull();
+
+    await runChatHistorySearchBackfill();
+    const completed = getSqlite().prepare(`
+      SELECT completed_at FROM search_backfill_state WHERE name = 'v35-chat-history'
+    `).get() as { completed_at: string | null };
+    expect(completed.completed_at).not.toBeNull();
+    const payload = await searchPersistedRows(phrase);
+    expect(payload.groups.chat.some((result) => result.id.includes(`000-backfill-${stamp}-12`))).toBe(true);
   });
 
   it('finds indexed transcript text and a session-outcome summary by packet id', async () => {
@@ -1246,6 +1329,46 @@ describe('seam M — the real Cmd+K route searches persisted Stage 1 rows', () =
         detail: expect.stringContaining(outcomePhrase),
         target: expect.objectContaining({ packetId: outcomePacketId }),
       }),
+    ]));
+  });
+
+  it('backfills a pre-upgrade completed packet through its runtime transcript reader', async () => {
+    const now = Date.now();
+    const packetId = `pkt-search-preupgrade-${now}`;
+    const phrase = `preupgradeumber${now}`;
+    getSqlite().prepare(`
+      INSERT INTO session_outcomes (
+        id, repo_path, runtime, session_key, packet_id, outcome, summary,
+        retry_history_json, patterns_json, conflict_zones_json,
+        changed_files_json, started_at, completed_at, valid_from
+      ) VALUES (?, ?, 'codex', ?, ?, 'succeeded', 'Legacy packet summary',
+        '[]', '[]', '[]', '[]', ?, ?, ?)
+    `).run(
+      `outcome-preupgrade-${now}`,
+      '/tmp/o8-search-seam',
+      `codex-preupgrade-${now}`,
+      packetId,
+      new Date(now - 1_000).toISOString(),
+      new Date(now).toISOString(),
+      new Date(now).toISOString(),
+    );
+    getSqlite().prepare("DELETE FROM search_backfill_state WHERE name = 'v35-packet-transcripts'").run();
+
+    await runPacketTranscriptSearchBackfill({
+      resolveRuntime: () => ({
+        capabilities: { readTranscript: true },
+        readTranscript: async () => [{
+          id: 'preupgrade-entry',
+          role: 'assistant',
+          text: `Recovered ${phrase} from the runtime transcript.`,
+          timestamp: new Date(now),
+        }],
+      }) as never,
+    });
+
+    const payload = await searchPersistedRows(phrase);
+    expect(payload.groups.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({ target: expect.objectContaining({ packetId }) }),
     ]));
   });
 

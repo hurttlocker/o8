@@ -43,4 +43,12 @@ export async function register(): Promise<void> {
       // never blocks boot
     }
   })();
+
+  // #984 — legacy search ingestion is resumable and deliberately deferred so
+  // schema initialization and app boot never scan transcript/history stores.
+  setTimeout(() => {
+    void import('@/lib/search/backfill')
+      .then(({ runUnifiedSearchBackfills }) => runUnifiedSearchBackfills())
+      .catch((error) => console.warn('[search] backfill bootstrap failed', { error: String(error) }));
+  }, 1_500);
 }

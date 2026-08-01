@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import {
   enterHintStyle,
   iconWrapStyle,
@@ -196,6 +196,21 @@ function PaletteKindGlyph({ kind }: { kind: PaletteIconKind }) {
 }
 
 function highlightMatch(text: string, query?: string) {
+  if (text.includes('\u0001') && text.includes('\u0002')) {
+    let highlighted = false;
+    return text.split(/([\u0001\u0002])/).reduce<ReactNode[]>((parts, segment, index) => {
+      if (segment === '\u0001') {
+        highlighted = true;
+      } else if (segment === '\u0002') {
+        highlighted = false;
+      } else if (segment) {
+        parts.push(highlighted
+          ? <span key={`${index}:${segment}`} style={{ color: 'var(--t-accent)', fontWeight: 500 }}>{segment}</span>
+          : segment);
+      }
+      return parts;
+    }, []);
+  }
   const needle = query?.trim();
   if (!needle) return text;
   const start = text.toLowerCase().indexOf(needle.toLowerCase());

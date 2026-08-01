@@ -29,6 +29,7 @@ interface ChatSearchRow {
   repo_branch: string | null;
   remote_url: string | null;
   modified_at: string;
+  snippet?: string;
   rank?: number;
 }
 
@@ -113,7 +114,7 @@ function resultFromRow(row: ChatSearchRow, query: string, browse: boolean): Sear
   }
   if (messages.length === 0) return null;
   const title = rowTitle(row, messages);
-  const snippet = rowSnippet(messages, query);
+  const snippet = browse ? rowSnippet(messages, query) : row.snippet?.trim() ?? '';
   const modified = Date.parse(row.modified_at);
   return {
     kind: 'chat',
@@ -152,6 +153,7 @@ export async function searchConversations(query: string, browse = false): Promis
     rows = sqlite.prepare(`
       SELECT ch.tab_id, ch.messages_json, ch.title, ch.repo_name, ch.repo_path,
         ch.repo_branch, ch.remote_url, ch.modified_at,
+        snippet(chat_history_fts, 4, char(1), char(2), ' … ', 24) AS snippet,
         bm25(chat_history_fts, 0.0, 8.0, 2.0, 2.0, 1.0) AS rank
       FROM chat_history_fts
       JOIN chat_history ch ON ch.tab_id = chat_history_fts.tab_id
