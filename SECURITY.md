@@ -12,6 +12,14 @@ o8's supported production platform is macOS. Provider voice secrets saved throug
 
 The at-rest encryption master key also uses the macOS Keychain when it is available. If Keychain storage is unavailable, o8 persists a randomly generated key in a plaintext `master-key` file with mode `0600`. This preserves a stable encryption key across restarts, but it provides weaker protection than Keychain-backed storage, so production support assumes that the macOS Keychain path is available.
 
+## How dispatched workers run
+
+A worker that o8 dispatches on your machine runs under your user account by default — the same posture as running `claude` or `codex` yourself in a terminal, which is what o8 is orchestrating on your behalf. o8 governs what an agent may do to your repository: what it can reach, what it may merge, and what requires your approval. That governance holds regardless of this setting, and it is enforced in o8's own principal and approval layers rather than by the operating system.
+
+Operating-system confinement is a separate layer, and it is available: setting `O8_WORKER_SANDBOX` runs locally dispatched workers inside an OS sandbox, which is fail-closed — if the sandbox cannot be established, the worker does not run. It is off by default because the profile has not yet been validated against the full range of work real workers do (repository and worktree access, the data directory, language toolchains, spawning further CLIs). Enabling it before that validation would break legitimate dispatches rather than degrade gracefully. Making it the default is tracked in [issue #1657](https://github.com/hurttlocker/o8/issues/1657).
+
+The practical read: o8's default does not expand the trust you already extend to the coding CLIs it drives, and it adds a governance layer those CLIs do not have on their own. If your threat model includes a fully malicious worker rather than a prompt-injected one, enable the sandbox.
+
 ## Known dependency risk
 
 The current `next` dependency inherits known high-severity `sharp` and libvips advisories. The automated npm remediation would move the application across a breaking Next.js major version, so that change is deferred until it can be migrated and tested safely. This remains a tracked residual risk and is surfaced by the scheduled dependency-audit job.
