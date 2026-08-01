@@ -27,6 +27,14 @@ export const RAW_MODEL_IDS = {
   gemini3ProPreview: 'gemini-3-pro-preview',
 } as const;
 
+export const SUPPORTED_MODEL_IDS = Object.freeze(
+  [...new Set(Object.values(RAW_MODEL_IDS))],
+);
+
+export function isSupportedModelId(value: unknown): value is ModelId {
+  return typeof value === 'string' && (SUPPORTED_MODEL_IDS as readonly string[]).includes(value);
+}
+
 export const MODEL_IDS = {
   orchestratorDefault: RAW_MODEL_IDS.anthropicClaudeOpus48,
   // Codex ORCHESTRATOR default (flagship, Opus-class) — the "just like 5.5 xhigh"

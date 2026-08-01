@@ -84,25 +84,35 @@ const buttonBase = {
 
 export function SettingsTomlEditor({
   initialText,
+  initialRevision,
   filePath,
   initialError,
   onCancel,
+  onReload,
   onSaved,
 }: {
   initialText: string;
+  initialRevision: string;
   filePath: string;
   initialError: string | null;
   onCancel: () => void;
+  onReload: () => Promise<void>;
   onSaved: (payload: OperatorDefaultsResponse) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const valueRef = useRef(initialText);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
 
   useEffect(() => {
     if (!hostRef.current) return;
+    valueRef.current = initialText;
+    setDirty(false);
+    setConflict(false);
+    setError(initialError);
     const view = new EditorView({
       parent: hostRef.current,
       state: EditorState.create({
@@ -128,7 +138,7 @@ export function SettingsTomlEditor({
       }),
     });
     return () => view.destroy();
-  }, [initialText]);
+  }, [initialError, initialRevision, initialText]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -137,10 +147,20 @@ export function SettingsTomlEditor({
       const response = await fetchOperatorDefaults({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settingsToml: valueRef.current }),
+        body: JSON.stringify({
+          settingsToml: valueRef.current,
+          settingsTomlRevision: initialRevision,
+        }),
       });
       const payload = await response.json().catch(() => ({})) as OperatorDefaultsResponse & { error?: string };
       if (!response.ok) {
+        if (response.status === 409) {
+          setConflict(true);
+          setError(typeof payload.error === 'string'
+            ? payload.error
+            : 'settings.toml changed on disk — reload to see the current file');
+          return;
+        }
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to save settings.toml.');
       }
       setDirty(false);
@@ -150,7 +170,16 @@ export function SettingsTomlEditor({
     } finally {
       setSaving(false);
     }
-  }, [onSaved]);
+  }, [initialRevision, onSaved]);
+
+  const reload = useCallback(async () => {
+    setReloading(true);
+    try {
+      await onReload();
+    } finally {
+      setReloading(false);
+    }
+  }, [onReload]);
 
   return (
     <div style={{
@@ -238,7 +267,24 @@ export function SettingsTomlEditor({
           fontWeight: 300,
           lineHeight: 1.45,
         }}>
-          {error}
+          <div>{error}</div>
+          {conflict ? (
+            <button
+              type="button"
+              onClick={() => { void reload(); }}
+              disabled={reloading}
+              style={{
+                ...buttonBase,
+                marginTop: 8,
+                border: '1px solid var(--t-danger-border)',
+                background: 'var(--t-input-bg)',
+                color: 'var(--t-danger)',
+                opacity: reloading ? 0.55 : 1,
+              }}
+            >
+              {reloading ? 'Reloading...' : 'Reload from disk'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 

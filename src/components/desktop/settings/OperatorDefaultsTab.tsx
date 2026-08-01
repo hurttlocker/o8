@@ -12,7 +12,7 @@
  * Env-sourced fields stay locked with the reason in the row subtitle.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   APP_FONT_STACK,
@@ -170,21 +170,27 @@ export function OperatorDefaultsTab() {
   const [editingToml, setEditingToml] = useState(false);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
   const [openDispatchPicker, setOpenDispatchPicker] = useState<string | null>(null);
+  const loadSequenceRef = useRef(0);
+  const mutationSequenceRef = useRef(0);
 
   const loadDefaults = useCallback(async () => {
+    const sequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = sequence;
     try {
-      const response = await fetchOperatorDefaults();
+      const response = await fetchOperatorDefaults({}, { fresh: true });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load operator defaults.');
       }
+      if (loadSequenceRef.current !== sequence) return;
       const next = payload as OperatorDefaultsResponse;
       setData(next);
       setNotice(next.settingsToml?.error ?? null);
     } catch (error) {
+      if (loadSequenceRef.current !== sequence) return;
       setNotice(error instanceof Error ? error.message : 'Failed to load operator defaults.');
     } finally {
-      setLoading(false);
+      if (loadSequenceRef.current === sequence) setLoading(false);
     }
   }, []);
 
@@ -192,7 +198,16 @@ export function OperatorDefaultsTab() {
     void loadDefaults();
   }, [loadDefaults]);
 
+  useEffect(() => {
+    if (editingToml) return;
+    const refreshOnFocus = () => { void loadDefaults(); };
+    window.addEventListener('focus', refreshOnFocus);
+    return () => window.removeEventListener('focus', refreshOnFocus);
+  }, [editingToml, loadDefaults]);
+
   const updateFieldAsync = useCallback(async <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => {
+    const sequence = mutationSequenceRef.current + 1;
+    mutationSequenceRef.current = sequence;
     setBusyField(field);
     setNotice(null);
     try {
@@ -205,11 +220,13 @@ export function OperatorDefaultsTab() {
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to update setting.');
       }
-      setData(payload as OperatorDefaultsResponse);
+      if (mutationSequenceRef.current === sequence) setData(payload as OperatorDefaultsResponse);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Failed to update setting.');
+      if (mutationSequenceRef.current === sequence) {
+        setNotice(error instanceof Error ? error.message : 'Failed to update setting.');
+      }
     } finally {
-      setBusyField(null);
+      if (mutationSequenceRef.current === sequence) setBusyField(null);
     }
   }, []);
 
@@ -222,6 +239,11 @@ export function OperatorDefaultsTab() {
     setNotice(payload.settingsToml?.error ?? null);
     setEditingToml(false);
   }, []);
+
+  const openTomlEditor = useCallback(async () => {
+    await loadDefaults();
+    setEditingToml(true);
+  }, [loadDefaults]);
 
   const values = data?.values;
   const sources = data?.sources;
@@ -263,9 +285,11 @@ export function OperatorDefaultsTab() {
     return (
       <SettingsTomlEditor
         initialText={data.settingsToml.text}
+        initialRevision={data.settingsToml.revision}
         filePath={data.settingsToml.path}
         initialError={data.settingsToml.error}
         onCancel={() => setEditingToml(false)}
+        onReload={loadDefaults}
         onSaved={handleTomlSaved}
       />
     );
@@ -309,7 +333,7 @@ export function OperatorDefaultsTab() {
         />
         <button
           type="button"
-          onClick={() => setEditingToml(true)}
+          onClick={() => { void openTomlEditor(); }}
           style={{
             flexShrink: 0,
             height: 30,

@@ -16,18 +16,27 @@ async function syncTauriStore(response: Response): Promise<Response> {
   return response;
 }
 
-export async function fetchOperatorDefaults(init: RequestInit = {}): Promise<Response> {
+export function invalidateOperatorDefaultsSnapshot(): void {
+  version += 1;
+  snapshot = null;
+  inFlight = null;
+}
+
+export async function fetchOperatorDefaults(
+  init: RequestInit = {},
+  options: { fresh?: boolean } = {},
+): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   if (method !== 'GET') {
-    version += 1;
-    snapshot = null;
-    inFlight = null;
+    invalidateOperatorDefaultsSnapshot();
     return fetch(OPERATOR_DEFAULTS_URL, init).then(syncTauriStore);
   }
+  if (options.fresh) invalidateOperatorDefaultsSnapshot();
   if (snapshot && snapshot.expiresAt > Date.now()) return snapshot.response.clone();
   if (!inFlight) {
     const requestVersion = version;
-    const request = fetch(OPERATOR_DEFAULTS_URL, { ...init, cache: 'no-store' }).then(syncTauriStore).then((response) => {
+    const request = fetch(OPERATOR_DEFAULTS_URL, { ...init, cache: 'no-store' }).then(async (response) => {
+      if (version === requestVersion) await syncTauriStore(response);
       if (response.ok && version === requestVersion) {
         snapshot = { response: response.clone(), expiresAt: Date.now() + SNAPSHOT_TTL_MS };
       }

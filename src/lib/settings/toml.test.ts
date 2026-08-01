@@ -12,6 +12,7 @@ const {
   OPERATOR_DEFAULTS_FALLBACK,
   applyOperatorDefaultsToml,
   getOperatorDefaults,
+  getOperatorDefaultsTomlState,
   getOperatorDefaultsTomlPath,
   resolveOrchestratorBackendSync,
 } = await import('@/lib/operator/defaults');
@@ -37,6 +38,14 @@ function postDefaults(body: unknown): Request {
   });
 }
 
+async function currentRevision(): Promise<string> {
+  return (await getOperatorDefaultsTomlState()).revision;
+}
+
+async function applyToml(raw: string): Promise<void> {
+  await applyOperatorDefaultsToml(raw, await currentRevision());
+}
+
 describe('settings.toml operator defaults', () => {
   it('maps every OperatorDefaults key to settings.toml (exhaustive-key-coverage)', () => {
     expect(Object.keys(OPERATOR_DEFAULTS_TOML_MAPPING).sort()).toEqual(
@@ -45,10 +54,13 @@ describe('settings.toml operator defaults', () => {
   });
 
   it('applies a valid TOML edit through the consumer read path', async () => {
-    const response = await POST(postDefaults({ settingsToml: `
+    const response = await POST(postDefaults({
+      settingsToml: `
 [orchestrator]
 backend = "codex"
-` }));
+`,
+      settingsTomlRevision: await currentRevision(),
+    }));
 
     expect(response.status).toBe(200);
     expect(resolveOrchestratorBackendSync()).toBe('codex');
@@ -56,17 +68,20 @@ backend = "codex"
   });
 
   it('rejects an invalid value with its key and leaves settings unchanged', async () => {
-    await applyOperatorDefaultsToml(`
+    await applyToml(`
 [models]
 thinking_effort = "high"
 `);
     const beforeToml = readFileSync(tomlPath, 'utf8');
     const beforeValues = (await getOperatorDefaults()).values;
 
-    const response = await POST(postDefaults({ settingsToml: `
+    const response = await POST(postDefaults({
+      settingsToml: `
 [models]
 thinking_effort = "many"
-` }));
+`,
+      settingsTomlRevision: await currentRevision(),
+    }));
     const payload = await response.json();
 
     expect(response.status).toBe(400);
@@ -76,7 +91,7 @@ thinking_effort = "many"
   });
 
   it('round-trips a GUI change without dropping mapped or unknown keys', async () => {
-    await applyOperatorDefaultsToml(`
+    await applyToml(`
 # This direct-editor comment remains until a GUI rewrite.
 [operator]
 parallel_cap = 4
@@ -106,7 +121,7 @@ mode = "custom"
   });
 
   it('uses last-good defaults when settings.toml is unparseable', async () => {
-    await applyOperatorDefaultsToml(`
+    await applyToml(`
 [orchestrator]
 backend = "claude"
 `);
@@ -115,5 +130,127 @@ backend = "claude"
     expect((await getOperatorDefaults()).values.orchestratorBackend).toBe('claude');
     expect(resolveOrchestratorBackendSync()).toBe('claude');
     expect(readFileSync(tomlPath, 'utf8')).toBe('[orchestrator\nbackend = "codex"\n');
+  });
+
+  it('rejects a stale full-document save without overwriting the agent edit', async () => {
+    const editorRevision = await currentRevision();
+    await applyOperatorDefaultsToml(`
+[orchestrator]
+backend = "codex"
+`, editorRevision);
+    const agentFile = readFileSync(tomlPath, 'utf8');
+
+    const response = await POST(postDefaults({
+      settingsToml: '[orchestrator]\nbackend = "claude"\n',
+      settingsTomlRevision: editorRevision,
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'settings.toml changed on disk — reload to see the current file',
+    });
+    expect(readFileSync(tomlPath, 'utf8')).toBe(agentFile);
+    expect(resolveOrchestratorBackendSync()).toBe('codex');
+  });
+
+  it('requires a revision for every full-document save', async () => {
+    const response = await POST(postDefaults({
+      settingsToml: '[orchestrator]\nbackend = "codex"\n',
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'settingsTomlRevision is required to save settings.toml.',
+    });
+    expect(() => readFileSync(tomlPath, 'utf8')).toThrow();
+  });
+
+  it('serializes concurrent field updates without losing either value', async () => {
+    await applyToml('[operator]\nparallel_cap = 4\n');
+
+    const [effortResponse, branchResponse] = await Promise.all([
+      POST(postDefaults({ thinkingEffort: 'xhigh' })),
+      POST(postDefaults({ branchPrefix: 'concurrent' })),
+    ]);
+
+    expect(effortResponse.status).toBe(200);
+    expect(branchResponse.status).toBe(200);
+    const resolved = (await getOperatorDefaults()).values;
+    expect(resolved.thinkingEffort).toBe('xhigh');
+    expect(resolved.branchPrefix).toBe('concurrent');
+  });
+
+  it('merges a field update onto the latest direct settings.toml edit', async () => {
+    await applyToml('[orchestrator]\nbackend = "claude"\n');
+    writeFileSync(tomlPath, '[orchestrator]\nbackend = "codex"\nagent_note = "keep"\n');
+
+    const response = await POST(postDefaults({ branchPrefix: 'latest' }));
+
+    expect(response.status).toBe(200);
+    const resolved = (await getOperatorDefaults()).values;
+    expect(resolved.orchestratorBackend).toBe('codex');
+    expect(resolved.branchPrefix).toBe('latest');
+    const document = parse(readFileSync(tomlPath, 'utf8')) as {
+      orchestrator: Record<string, unknown>;
+    };
+    expect(document.orchestrator.agent_note).toBe('keep');
+  });
+
+  it('preserves unknown scalar and nested table keys inside a known targeting table', async () => {
+    await applyToml(`
+[targeting.triage]
+runtime = "codex"
+model = ""
+effort = "low"
+future_toggle = true
+
+[targeting.triage.future_table]
+mode = "keep-me"
+`);
+
+    const response = await POST(postDefaults({ parallelCap: 6 }));
+    expect(response.status).toBe(200);
+    const document = parse(readFileSync(tomlPath, 'utf8')) as {
+      targeting: { triage: Record<string, unknown> };
+    };
+    expect(document.targeting.triage.future_toggle).toBe(true);
+    expect(document.targeting.triage.future_table).toEqual({ mode: 'keep-me' });
+  });
+
+  it('rejects an unsupported orchestrator model through TOML and field APIs', async () => {
+    const tomlResponse = await POST(postDefaults({
+      settingsToml: '[models]\norchestrator_model = "gpt5"\n',
+      settingsTomlRevision: await currentRevision(),
+    }));
+    expect(tomlResponse.status).toBe(400);
+    await expect(tomlResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining('models.orchestrator_model expected a supported model id; received "gpt5"'),
+    });
+
+    const apiResponse = await POST(postDefaults({ orchestratorModel: 'gpt5' }));
+    expect(apiResponse.status).toBe(400);
+    await expect(apiResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining('orchestratorModel "gpt5" is unsupported'),
+    });
+  });
+
+  it.each([
+    ['userinfo', 'local_models', 'inference_base_url', 'localInferenceBaseUrl', 'http://user:secret@localhost:11434'],
+    ['signed query token', 'telemetry', 'ingest_url', 'telemetryIngestUrl', 'https://telemetry.example/ingest?X-Amz-Signature=secret'],
+  ])('rejects credential-bearing URL %s through TOML and field APIs', async (_shape, section, key, apiKey, url) => {
+    const tomlResponse = await POST(postDefaults({
+      settingsToml: `[${section}]\n${key} = ${JSON.stringify(url)}\n`,
+      settingsTomlRevision: await currentRevision(),
+    }));
+    expect(tomlResponse.status).toBe(400);
+    await expect(tomlResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining('use an environment variable or keychain for authenticated endpoints'),
+    });
+
+    const apiResponse = await POST(postDefaults({ [apiKey]: url }));
+    expect(apiResponse.status).toBe(400);
+    await expect(apiResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining('use an environment variable or keychain for authenticated endpoints'),
+    });
   });
 });

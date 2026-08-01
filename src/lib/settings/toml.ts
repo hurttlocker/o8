@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { parse, stringify } from 'smol-toml';
 
+import { isSupportedModelId, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import type { OperatorDefaults } from '@/lib/operator/defaults';
 import {
   isClassAComposer,
@@ -18,6 +19,7 @@ import {
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { AUTHENTICATED_ENDPOINT_GUIDANCE, credentialBearingUrlPart } from './credential-safe-url';
 
 type TomlRecord = Record<string, unknown>;
 
@@ -45,6 +47,33 @@ function stringField(section: string, key: string, options: { nonEmpty?: boolean
       const trimmed = value.trim();
       if (options.nonEmpty && !trimmed) return invalid(tomlKey, 'a non-empty string');
       return trimmed;
+    },
+  };
+}
+
+function orchestratorModelField(section: string, key: string): TomlField<OperatorDefaults['orchestratorModel']> {
+  return {
+    path: [section, key],
+    parse: (value, tomlKey) => {
+      if (typeof value !== 'string') return invalid(tomlKey, 'a supported model id string');
+      const trimmed = value.trim();
+      return isSupportedModelId(trimmed)
+        ? trimmed
+        : invalid(tomlKey, `a supported model id; received ${JSON.stringify(trimmed)}; valid values are ${SUPPORTED_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}`);
+    },
+  };
+}
+
+function credentialSafeUrlField(section: string, key: string): TomlField<string> {
+  return {
+    path: [section, key],
+    parse: (value, tomlKey) => {
+      if (typeof value !== 'string') return invalid(tomlKey, 'a string URL');
+      const trimmed = value.trim();
+      const part = credentialBearingUrlPart(trimmed);
+      return part
+        ? invalid(tomlKey, `a URL without credential-bearing ${part}; ${AUTHENTICATED_ENDPOINT_GUIDANCE}`)
+        : trimmed;
     },
   };
 }
@@ -124,13 +153,13 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   promptCachingEnabled: booleanField('models', 'prompt_caching_enabled'),
   mergeTestReplayEnabled: booleanField('review', 'merge_test_replay_enabled'),
   requireApproval: enumField('review', 'require_approval', 'one of "high-risk", "surface", "always", or "never"', (value): value is OperatorDefaults['requireApproval'] => value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'),
-  orchestratorModel: stringField('models', 'orchestrator_model', { nonEmpty: true }),
+  orchestratorModel: orchestratorModelField('models', 'orchestrator_model'),
   defaultDispatchRuntime: enumField('models', 'default_dispatch_runtime', 'a dispatchable runtime name', isDispatchRuntime),
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
   claudeWorkerEffort: enumField('models', 'claude_worker_effort', 'a valid thinking effort', isThinkingEffort),
   defaultDispatchModel: stringField('models', 'default_dispatch_model'),
-  localInferenceBaseUrl: stringField('local_models', 'inference_base_url'),
+  localInferenceBaseUrl: credentialSafeUrlField('local_models', 'inference_base_url'),
   localEmbedModel: stringField('local_models', 'embed_model'),
   localChatModel: stringField('local_models', 'chat_model'),
   experimentalOpencode: booleanField('experimental', 'opencode_enabled'),
@@ -154,7 +183,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   collideAggregator: enumField('orchestrator', 'collide_aggregator', 'one of "auto", "claude", or "codex"', isCollideAggregator),
   productTelemetryEnabled: booleanField('telemetry', 'product_enabled'),
   telemetryOptIn: booleanField('telemetry', 'crash_log_opt_in'),
-  telemetryIngestUrl: stringField('telemetry', 'ingest_url'),
+  telemetryIngestUrl: credentialSafeUrlField('telemetry', 'ingest_url'),
   crashReportsEnabled: booleanField('telemetry', 'sentry_enabled'),
   branchPrefix: branchPrefixField('git', 'branch_prefix'),
   commitAttributionEnabled: booleanField('git', 'commit_attribution_enabled'),
@@ -213,7 +242,10 @@ function writePath(document: TomlRecord, field: TomlField<unknown>, value: unkno
   const current = document[section];
   if (current !== undefined && !isRecord(current)) invalid(section, 'a table');
   const table = current ?? {};
-  (table as TomlRecord)[key] = value;
+  const existingValue = (table as TomlRecord)[key];
+  (table as TomlRecord)[key] = isRecord(existingValue) && isRecord(value)
+    ? { ...existingValue, ...value }
+    : value;
   document[section] = table;
 }
 
@@ -245,16 +277,22 @@ export function serializeOperatorDefaultsToml(
   for (const operatorKey of OPERATOR_DEFAULTS_TOML_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(values, operatorKey)) continue;
     const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as TomlField<unknown>;
-    writePath(document, field, values[operatorKey]);
+    const tomlKey = field.path.join('.');
+    writePath(document, field, field.parse(values[operatorKey], tomlKey));
   }
   return stringify(document);
 }
 
-export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+export async function writeFileAtomic(
+  filePath: string,
+  content: string,
+  beforeRename?: () => Promise<void>,
+): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
   try {
     await writeFile(tempPath, content, { encoding: 'utf8', flag: 'wx' });
+    await beforeRename?.();
     await rename(tempPath, filePath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => {});

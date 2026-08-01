@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { isSupportedModelId, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import {
   applyOperatorDefaultsToml,
   getOperatorDefaults,
@@ -16,6 +17,8 @@ import {
 } from '@/lib/operator/defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { SettingsTomlConflictError } from '@/lib/settings/operator-defaults-store';
+import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import {
   getDispatchableRuntimeAvailability,
   getRuntimeAuthSnapshot,
@@ -114,10 +117,11 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   }
 
   if (body.orchestratorModel !== undefined) {
-    if (typeof body.orchestratorModel !== 'string' || !body.orchestratorModel.trim()) {
-      throw new Error('orchestratorModel must be a non-empty string.');
+    const model = typeof body.orchestratorModel === 'string' ? body.orchestratorModel.trim() : '';
+    if (!isSupportedModelId(model)) {
+      throw new Error(`orchestratorModel ${JSON.stringify(model)} is unsupported; valid values are ${SUPPORTED_MODEL_IDS.map((value) => JSON.stringify(value)).join(', ')}.`);
     }
-    update.orchestratorModel = body.orchestratorModel.trim();
+    update.orchestratorModel = model;
   }
 
   if (body.defaultDispatchRuntime !== undefined) {
@@ -161,7 +165,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     if (typeof body.localInferenceBaseUrl !== 'string') {
       throw new Error('localInferenceBaseUrl must be a string.');
     }
-    update.localInferenceBaseUrl = body.localInferenceBaseUrl.trim();
+    update.localInferenceBaseUrl = validateCredentialSafeUrl(body.localInferenceBaseUrl, 'localInferenceBaseUrl');
   }
 
   if (body.localEmbedModel !== undefined) {
@@ -315,7 +319,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     if (typeof body.telemetryIngestUrl !== 'string') {
       throw new Error('telemetryIngestUrl must be a string.');
     }
-    update.telemetryIngestUrl = body.telemetryIngestUrl.trim();
+    update.telemetryIngestUrl = validateCredentialSafeUrl(body.telemetryIngestUrl, 'telemetryIngestUrl');
   }
 
   if (body.crashReportsEnabled !== undefined) {
@@ -407,8 +411,11 @@ export async function POST(request: Request) {
       if (typeof body.settingsToml !== 'string') {
         return response({ error: 'settingsToml must be a string.' }, 400);
       }
+      if (typeof body.settingsTomlRevision !== 'string' || !body.settingsTomlRevision) {
+        return response({ error: 'settingsTomlRevision is required to save settings.toml.' }, 400);
+      }
       const [updated, cliAuth] = await Promise.all([
-        applyOperatorDefaultsToml(body.settingsToml),
+        applyOperatorDefaultsToml(body.settingsToml, body.settingsTomlRevision),
         getRuntimeAuthSnapshot(),
       ]);
       const [settingsToml, dispatchableRuntimes] = await Promise.all([
@@ -438,6 +445,6 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update operator defaults.';
     console.error('[panel-operator-defaults] Failed to update operator defaults:', message);
-    return response({ error: message }, 400);
+    return response({ error: message }, error instanceof SettingsTomlConflictError ? 409 : 400);
   }
 }

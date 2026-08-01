@@ -101,6 +101,7 @@ export interface OperatorDefaultsResponse {
   settingsToml?: {
     path: string;
     text: string;
+    revision: string;
     error: string | null;
   };
   cliAuth?: {

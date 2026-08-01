@@ -1,10 +1,11 @@
 import 'server-only';
 
-import { MODEL_IDS } from '@/lib/models';
+import { isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
+import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
 } from './dispatch-runtime-default';
@@ -73,13 +74,14 @@ import {
   type WorkersUseBrain,
 } from './defaults-env';
 import {
-  applyOperatorDefaultsTomlFile,
+  applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
   loadOperatorDefaultsFiles,
   loadOperatorDefaultsFilesSync,
   persistOperatorDefaults,
   readLegacyOperatorDefaults,
   readOperatorDefaultsTomlForUpdate,
+  withOperatorDefaultsUpdateRetry,
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
@@ -819,9 +821,9 @@ export async function getOperatorDefaultsTomlState(): Promise<OperatorDefaultsTo
   return readOperatorDefaultsTomlState(values);
 }
 
-export async function updateOperatorDefaults(update: Partial<OperatorDefaults>): Promise<OperatorDefaultsWithSources> {
+async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Promise<OperatorDefaultsWithSources> {
   let stored: StoredOperatorDefaults = {};
-  const { raw: existingToml, values: tomlValues } = await readOperatorDefaultsTomlForUpdate();
+  const { raw: existingToml, revision, values: tomlValues } = await readOperatorDefaultsTomlForUpdate();
   const legacyRaw = await readLegacyOperatorDefaults();
   if (legacyRaw) stored = parseStoredDefaults(legacyRaw);
 
@@ -879,8 +881,8 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.orchestratorModel !== undefined) {
     const trimmed = update.orchestratorModel.trim();
-    if (!trimmed) {
-      throw new Error('orchestratorModel cannot be empty.');
+    if (!isSupportedModelId(trimmed)) {
+      throw new Error(`orchestratorModel ${JSON.stringify(trimmed)} is unsupported; valid values are ${SUPPORTED_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}.`);
     }
     stored.orchestratorModel = trimmed;
   }
@@ -915,10 +917,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     stored.defaultDispatchModel = update.defaultDispatchModel.trim();
   }
   if (update.localInferenceBaseUrl !== undefined) {
-    if (typeof update.localInferenceBaseUrl !== 'string') {
-      throw new Error('localInferenceBaseUrl must be a string.');
-    }
-    stored.localInferenceBaseUrl = update.localInferenceBaseUrl.trim();
+    stored.localInferenceBaseUrl = validateCredentialSafeUrl(update.localInferenceBaseUrl, 'localInferenceBaseUrl');
   }
   if (update.localEmbedModel !== undefined) {
     if (typeof update.localEmbedModel !== 'string') {
@@ -1009,10 +1008,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     stored.crashReportsEnabled = Boolean(update.crashReportsEnabled);
   }
   if (update.telemetryIngestUrl !== undefined) {
-    if (typeof update.telemetryIngestUrl !== 'string') {
-      throw new Error('telemetryIngestUrl must be a string.');
-    }
-    stored.telemetryIngestUrl = update.telemetryIngestUrl.trim();
+    stored.telemetryIngestUrl = validateCredentialSafeUrl(update.telemetryIngestUrl, 'telemetryIngestUrl');
   }
   if (update.branchPrefix !== undefined) {
     const cleaned = sanitizeBranchPrefix(update.branchPrefix);
@@ -1060,13 +1056,17 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     ...OPERATOR_DEFAULTS_FALLBACK,
     ...fileValues,
   };
-  await persistOperatorDefaults(canonicalValues, stored, existingToml);
+  await persistOperatorDefaults(canonicalValues, stored, existingToml, revision);
 
   return getOperatorDefaults();
 }
 
-export async function applyOperatorDefaultsToml(raw: string): Promise<OperatorDefaultsWithSources> {
-  return applyOperatorDefaultsTomlFile(raw, OPERATOR_DEFAULTS_FALLBACK, getOperatorDefaults);
+export async function updateOperatorDefaults(update: Partial<OperatorDefaults>): Promise<OperatorDefaultsWithSources> {
+  return withOperatorDefaultsUpdateRetry(() => updateOperatorDefaultsOnce(update));
+}
+
+export async function applyOperatorDefaultsToml(raw: string, expectedRevision: string): Promise<OperatorDefaultsWithSources> {
+  return applyOperatorDefaultsTomlWithLock(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, getOperatorDefaults);
 }
 
 /**

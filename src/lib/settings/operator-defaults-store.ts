@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,7 +21,50 @@ type FileOperatorDefaults = Partial<OperatorDefaults> & {
 export interface OperatorDefaultsTomlState {
   path: string;
   text: string;
+  revision: string;
   error: string | null;
+}
+
+export class SettingsTomlConflictError extends Error {
+  constructor() {
+    super('settings.toml changed on disk — reload to see the current file');
+    this.name = 'SettingsTomlConflictError';
+  }
+}
+
+let writeQueue: Promise<void> = Promise.resolve();
+
+export async function withOperatorDefaultsWriteLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = writeQueue;
+  let release!: () => void;
+  writeQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
+export async function withOperatorDefaultsUpdateRetry<T>(work: () => Promise<T>): Promise<T> {
+  return withOperatorDefaultsWriteLock(async () => {
+    let conflict: SettingsTomlConflictError | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await work();
+      } catch (error) {
+        if (!(error instanceof SettingsTomlConflictError)) throw error;
+        conflict = error;
+      }
+    }
+    throw conflict ?? new SettingsTomlConflictError();
+  });
+}
+
+function settingsTomlRevision(raw: string | undefined): string {
+  return createHash('sha256')
+    .update(raw === undefined ? 'missing\0' : `present\0${raw}`)
+    .digest('hex');
 }
 
 export function getLegacyOperatorDefaultsPath(): string {
@@ -84,15 +128,38 @@ export function loadOperatorDefaultsFilesSync(
 
 export async function readOperatorDefaultsTomlForUpdate(): Promise<{
   raw: string | undefined;
+  revision: string;
   values: Partial<OperatorDefaults>;
 }> {
   try {
     const raw = await readFile(getOperatorDefaultsTomlPath(), 'utf8');
-    return { raw, values: parseOperatorDefaultsToml(raw) };
+    return { raw, revision: settingsTomlRevision(raw), values: parseOperatorDefaultsToml(raw) };
   } catch (error) {
     if (!isMissingFile(error)) throw error;
-    return { raw: undefined, values: {} };
+    return { raw: undefined, revision: settingsTomlRevision(undefined), values: {} };
   }
+}
+
+async function readCurrentSettingsToml(): Promise<string | undefined> {
+  try {
+    return await readFile(getOperatorDefaultsTomlPath(), 'utf8');
+  } catch (error) {
+    if (!isMissingFile(error)) throw error;
+    return undefined;
+  }
+}
+
+async function assertSettingsTomlRevision(expectedRevision: string): Promise<void> {
+  const current = await readCurrentSettingsToml();
+  if (settingsTomlRevision(current) !== expectedRevision) throw new SettingsTomlConflictError();
+}
+
+async function writeSettingsTomlAtRevision(content: string, expectedRevision: string): Promise<void> {
+  await writeFileAtomic(
+    getOperatorDefaultsTomlPath(),
+    content,
+    () => assertSettingsTomlRevision(expectedRevision),
+  );
 }
 
 export async function readLegacyOperatorDefaults(): Promise<string | null> {
@@ -114,42 +181,58 @@ export async function getOperatorDefaultsTomlState(
   try {
     raw = await readFile(filePath, 'utf8');
     parseOperatorDefaultsToml(raw);
-    return { path: filePath, text: raw, error: null };
+    return { path: filePath, text: raw, revision: settingsTomlRevision(raw), error: null };
   } catch (error) {
     if (!isMissingFile(error)) {
       return {
         path: filePath,
         text: raw ?? '',
+        revision: settingsTomlRevision(raw ?? undefined),
         error: error instanceof Error ? error.message : 'settings.toml is invalid.',
       };
     }
   }
-  return { path: filePath, text: serializeOperatorDefaultsToml(projection), error: null };
+  return {
+    path: filePath,
+    text: serializeOperatorDefaultsToml(projection),
+    revision: settingsTomlRevision(undefined),
+    error: null,
+  };
 }
 
 export async function persistOperatorDefaults(
   values: OperatorDefaults,
   stored: object,
   existingToml?: string,
+  expectedRevision?: string,
 ): Promise<void> {
-  await writeFileAtomic(
-    getOperatorDefaultsTomlPath(),
-    serializeOperatorDefaultsToml(values, existingToml),
-  );
+  if (!expectedRevision) throw new Error('A settings.toml revision is required for field updates.');
+  await writeSettingsTomlAtRevision(serializeOperatorDefaultsToml(values, existingToml), expectedRevision);
   await writeFileAtomic(getLegacyOperatorDefaultsPath(), `${JSON.stringify(stored, null, 2)}\n`);
 }
 
 export async function applyOperatorDefaultsTomlFile(
   raw: string,
+  expectedRevision: string,
   fallback: OperatorDefaults,
   resolve: () => Promise<OperatorDefaultsWithSources>,
 ): Promise<OperatorDefaultsWithSources> {
+  await assertSettingsTomlRevision(expectedRevision);
   const parsed = parseOperatorDefaultsToml(raw);
   const stored: Record<string, unknown> = { ...fallback, ...parsed };
   if (Object.prototype.hasOwnProperty.call(parsed, 'defaultDispatchRuntime')) {
     stored.defaultDispatchRuntimeExplicit = true;
   }
-  await writeFileAtomic(getOperatorDefaultsTomlPath(), raw.endsWith('\n') ? raw : `${raw}\n`);
+  await writeSettingsTomlAtRevision(raw.endsWith('\n') ? raw : `${raw}\n`, expectedRevision);
   await writeFileAtomic(getLegacyOperatorDefaultsPath(), `${JSON.stringify(stored, null, 2)}\n`);
   return resolve();
+}
+
+export async function applyOperatorDefaultsTomlWithLock(
+  raw: string,
+  expectedRevision: string,
+  fallback: OperatorDefaults,
+  resolve: () => Promise<OperatorDefaultsWithSources>,
+): Promise<OperatorDefaultsWithSources> {
+  return withOperatorDefaultsWriteLock(() => applyOperatorDefaultsTomlFile(raw, expectedRevision, fallback, resolve));
 }
