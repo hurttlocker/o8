@@ -432,9 +432,9 @@ try {
   }
 } catch { /* never let a cache failure stop the server booting */ }
 
-// Select the better-sqlite3 and node-pty binaries for the user's Node ABI and
-// architecture before either package loads. The helper retains read-only
-// fallbacks for an installed app bundle whose build/Release cannot be replaced.
+// Select the immutable packaged prebuild for the user's Node ABI and
+// architecture before either package loads. This must never copy or chmod files
+// inside the signed app bundle; native-bundle.mjs removes build/ at export time.
 require('./native-addon-runtime.cjs').prepareNativeAddons(__dirname);
 
 const http = require('node:http');

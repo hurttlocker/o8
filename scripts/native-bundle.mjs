@@ -194,6 +194,17 @@ function prepareNodePtyBundle({ projectRoot, serverRoot, nodeAbis }) {
   return { version };
 }
 
+export function removePackagedNativeBuildOutputs(serverRoot) {
+  const removed = [];
+  for (const packageName of ['better-sqlite3', 'node-pty']) {
+    const buildPath = join(serverRoot, 'node_modules', packageName, 'build');
+    if (!existsSync(buildPath)) continue;
+    rmSync(buildPath, { recursive: true, force: true });
+    removed.push(buildPath);
+  }
+  return removed;
+}
+
 export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot } = {}) {
   const resolvedProjectRoot = resolve(projectRoot ?? process.cwd());
   const resolvedServerRoot = resolve(serverRoot ?? join(resolvedProjectRoot, 'out', 'server'));
@@ -211,6 +222,7 @@ export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot }
     serverRoot: resolvedServerRoot,
     nodeAbis,
   });
+  removePackagedNativeBuildOutputs(resolvedServerRoot);
 
   const manifest = {
     schema: 'o8/native-addon-abis/v1',
@@ -262,6 +274,27 @@ export function verifyNativeBundle(serverRoot, log = console.log) {
         join(resolvedServerRoot, 'node_modules', 'node-pty', abiRoot, NODE_PTY_HELPER),
         arch,
       ]);
+    }
+  }
+
+  for (const arch of ['x64', 'arm64']) {
+    const loaderRoot = join('prebuilds', `darwin-${arch}`);
+    required.push([
+      `node-pty loader ${arch}`,
+      join(resolvedServerRoot, 'node_modules', 'node-pty', loaderRoot, NODE_PTY_ADDON),
+      arch,
+    ]);
+    required.push([
+      `node-pty loader helper ${arch}`,
+      join(resolvedServerRoot, 'node_modules', 'node-pty', loaderRoot, NODE_PTY_HELPER),
+      arch,
+    ]);
+  }
+
+  for (const packageName of ['better-sqlite3', 'node-pty']) {
+    const buildPath = join(resolvedServerRoot, 'node_modules', packageName, 'build');
+    if (existsSync(buildPath)) {
+      throw new Error(`[native-gate] FAILED packaged runtime build output must be absent: ${buildPath}`);
     }
   }
 

@@ -1898,6 +1898,14 @@ fn get_desktop_info() -> DesktopInfo {
     }
 }
 
+/// Return the once-per-launch macOS signature assessment for the running app.
+/// The launch updater starts the check during boot; this command replays the
+/// cached result so the webview cannot miss the warning event during startup.
+#[tauri::command]
+fn get_running_bundle_integrity() -> launch_updater::BundleIntegrityStatus {
+    launch_updater::running_bundle_integrity()
+}
+
 /// Check if a process is listening on a given port
 #[tauri::command]
 fn check_port(port: u16) -> bool {
@@ -5868,6 +5876,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_desktop_info,
+            get_running_bundle_integrity,
             check_port,
             restart_app,
             start_ws_server,

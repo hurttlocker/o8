@@ -24,6 +24,10 @@ import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
+  BundleIntegrityWarning,
+  type BundleIntegrityStatus,
+} from '@/components/desktop/BundleIntegrityWarning';
+import {
   installUpdateAndRestart,
   relaunchInstalledUpdate,
   RELEASE_URL,
@@ -44,6 +48,7 @@ const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
 const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
+const BUNDLE_SIGNATURE_INVALID_EVENT = 'o8://bundle-signature-invalid';
 const AUTO_APPLY_CHECK_MS = 60 * 1000;
 let updateInstallInFlight = false;
 
@@ -140,6 +145,8 @@ export function UpdateCard() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [updateAutoApply, setUpdateAutoApply] = useState<UpdateAutoApply>('off');
   const [blockedNote, setBlockedNote] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [bundleIntegrity, setBundleIntegrity] = useState<BundleIntegrityStatus | null>(null);
   const updateRef = useRef<UpdateInfo | null>(null);
   const installingRef = useRef(false);
   const autoApplyingRef = useRef(false);
@@ -222,12 +229,23 @@ export function UpdateCard() {
   }, []);
 
   useEffect(() => {
+    if (!isTauri() || !canUseTauriEvents()) return;
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<BundleIntegrityStatus>('get_running_bundle_integrity'))
+      .then((status) => setBundleIntegrity(status))
+      .catch((error) => {
+        console.warn('[update-card] bundle integrity status unavailable:', error);
+      });
+  }, []);
+
+  useEffect(() => {
     // Main-window only — these update listeners in the native browser-view
     // would ACL-crash (see canUseTauriEvents).
     if (!canUseTauriEvents()) return;
     let cancelled = false;
     let availableUnlisten: Promise<() => void> | null = null;
     let clearUnlisten: Promise<() => void> | null = null;
+    let integrityUnlisten: Promise<() => void> | null = null;
     void import('@tauri-apps/api/event').then(({ listen }) => {
       if (cancelled) return;
       availableUnlisten = listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, (event) => {
@@ -239,11 +257,15 @@ export function UpdateCard() {
         setInstalling(false);
         restartDeferredRef.current = false;
       });
+      integrityUnlisten = listen<BundleIntegrityStatus>(BUNDLE_SIGNATURE_INVALID_EVENT, (event) => {
+        setBundleIntegrity(event.payload);
+      });
     }).catch(() => { /* polling fallback below */ });
     return () => {
       cancelled = true;
       void availableUnlisten?.then((u) => u()).catch(() => {});
       void clearUnlisten?.then((u) => u()).catch(() => {});
+      void integrityUnlisten?.then((u) => u()).catch(() => {});
     };
   }, []);
 
@@ -311,6 +333,7 @@ export function UpdateCard() {
     try {
       setInstalling(true);
       setBlockedNote(null);
+      setInstallError(null);
       if (request.requireIdle && !(await checkUpdateIdle())) {
         setBlockedNote('Update ready. Restart is waiting for lanes and terminals to become idle.');
         return;
@@ -342,6 +365,10 @@ export function UpdateCard() {
       }
     } catch (err) {
       console.error('[update-card] install failed:', err);
+      const detail = err instanceof Error && err.message.trim()
+        ? ` ${err.message.trim()}`
+        : '';
+      setInstallError(`Update failed before restart.${detail}`);
     } finally {
       updateInstallInFlight = false;
       installingRef.current = false;
@@ -398,6 +425,9 @@ export function UpdateCard() {
     return () => window.clearInterval(interval);
   }, [checkUpdateIdle, handleInstall, updateAutoApply]);
 
+  if (bundleIntegrity?.status === 'invalid') {
+    return <BundleIntegrityWarning status={bundleIntegrity} />;
+  }
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
 
@@ -562,6 +592,24 @@ export function UpdateCard() {
           }}
         >
           {blockedNote}
+        </div>
+      ) : null}
+
+      {installError ? (
+        <div
+          role="alert"
+          style={{
+            marginTop: 8,
+            paddingTop: 8,
+            borderTop: '1px solid var(--t-danger-border)',
+            fontSize: 10.5,
+            fontWeight: 320,
+            lineHeight: 1.5,
+            color: 'var(--t-danger)',
+            wordBreak: 'break-word',
+          }}
+        >
+          {installError}
         </div>
       ) : null}
 

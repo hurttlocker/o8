@@ -64,7 +64,7 @@ function selectNodePtyPrebuild(
   return selectPrebuild(moduleRoot, 'node-pty', 'pty.node', arch, abi, pathExists);
 }
 
-function installReadOnlyFallback() {
+function installNativeRedirects() {
   if (resolverInstalled) return;
   resolverInstalled = true;
 
@@ -101,14 +101,8 @@ function prepareBetterSqlite3(serverRoot, arch = process.arch, abi = process.ver
   for (const moduleRoot of moduleRoots) {
     const source = selectBetterSqlite3Prebuild(moduleRoot, arch, fs.existsSync, abi);
     const target = path.join(moduleRoot, 'build', 'Release', 'better_sqlite3.node');
-    try {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.copyFileSync(source, target);
-    } catch (error) {
-      redirects.set(path.resolve(target), source);
-      installReadOnlyFallback();
-      console.warn(`[native-addon] ${target} is not writable; loading the ${arch} ABI ${abi} prebuild directly (${error.code || error.message})`);
-    }
+    redirects.set(path.resolve(target), source);
+    installNativeRedirects();
   }
 }
 
@@ -121,17 +115,13 @@ function prepareNodePty(serverRoot, arch = process.arch, abi = process.versions.
   for (const moduleRoot of moduleRoots) {
     const source = selectNodePtyPrebuild(moduleRoot, arch, fs.existsSync, abi);
     const sourceHelper = path.join(path.dirname(source), 'spawn-helper');
-    const targetDir = path.join(moduleRoot, 'build', 'Release');
-    try {
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.copyFileSync(sourceHelper, path.join(targetDir, 'spawn-helper'));
-      fs.chmodSync(path.join(targetDir, 'spawn-helper'), 0o755);
-      fs.copyFileSync(source, path.join(targetDir, 'pty.node'));
-    } catch (error) {
-      // node-pty's published Darwin prebuild is Node-API compatible across 22
-      // and 24. Its loader will reject a wrong-arch build/Release binary and
-      // then use the existing prebuilds/darwin-<arch> package fallback.
-      console.warn(`[native-addon] ${targetDir} is not writable; node-pty will use its ${arch} Node-API prebuild (${error.code || error.message})`);
+    const loaderDir = path.join(moduleRoot, 'prebuilds', `darwin-${arch}`);
+    const loaderSource = path.join(loaderDir, 'pty.node');
+    const loaderHelper = path.join(loaderDir, 'spawn-helper');
+    for (const required of [sourceHelper, loaderSource, loaderHelper]) {
+      if (!fs.existsSync(required)) {
+        throw new Error(`[native-addon] Missing packaged node-pty runtime: ${required}`);
+      }
     }
   }
 }
