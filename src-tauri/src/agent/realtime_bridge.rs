@@ -140,6 +140,33 @@ pub async fn realtime_invoke_tool(
     .await
 }
 
+/// Execute a tool that was already governed and confirmed on the controlling
+/// machine. This command is reachable only through the authenticated loopback
+/// SSH transport route on the active remote Mac; it deliberately calls the
+/// native dispatcher directly so the same action is not confirmed twice.
+#[tauri::command]
+pub async fn symon_transport_invoke_tool(
+    app: tauri::AppHandle,
+    name: String,
+    args: Value,
+    session_id: String,
+    call_id: String,
+) -> Result<Value, String> {
+    let ctx = TaskCtx {
+        task_id: format!("transport:{session_id}:{call_id}"),
+        utterance: String::new(),
+        ledger_session_id: Some(session_id.clone()),
+        machine_session_id: session_id,
+        app: Some(app),
+        screen: None,
+        spatial: false,
+        crop_png_base64: None,
+        edit: None,
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    tools::dispatch_tool_call(&name, args, &ctx).await
+}
+
 async fn realtime_invoke_tool_inner(
     app: Option<tauri::AppHandle>,
     name: String,
@@ -169,6 +196,11 @@ async fn realtime_invoke_tool_inner(
             .as_ref()
             .filter(|value| !value.trim().is_empty())
             .cloned(),
+        machine_session_id: session_id
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "desktop".to_string()),
         app,
         screen: None,
         spatial: false,

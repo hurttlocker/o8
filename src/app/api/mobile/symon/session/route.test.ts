@@ -129,6 +129,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(json.session.baseUrl).toBe('https://api.openai.com/v1/realtime');
     expect(json.session.expiresAt).toBe(1_783_490_000 * 1000); // seconds → ms
     expect(json.session.scopeVersion).toBe(1);
+    expect(json.session.activeMachine).toEqual({ id: 'local', displayName: 'This Mac' });
     expect(json.scope).toEqual({
       version: 1,
       repoId: null,

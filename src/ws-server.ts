@@ -62,6 +62,7 @@ import {
   startAgentSession,
   updateAgentStatus,
   touchAgentSession,
+  updateAgentMachine,
   stopAgentSession,
   sweepStaleAgentSession,
   getAgentSession,
@@ -94,8 +95,14 @@ import {
   dropSymonTextSession,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
+  updateSymonTextMachine,
   type SymonTextSessionRecord,
 } from '@/lib/mobile/symon-text-session-store';
+import {
+  DEFAULT_SYMON_MACHINE,
+  parseSymonMachineIdentity,
+  type SymonMachineIdentity,
+} from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
@@ -3288,6 +3295,7 @@ type SymonSessionRoute = {
   clientId: string;
   scope: SymonScopeGrant;
   protocolVersion: SymonProtocolVersion;
+  activeMachine: SymonMachineIdentity;
 };
 
 type SymonConfirmationRoute = Pick<SymonSessionRoute, 'clientId' | 'protocolVersion'>;
@@ -3343,7 +3351,10 @@ function isSameSymonGrant(left: SymonScopeGrant, right: SymonScopeGrant): boolea
 function pushSymonStatus(clientId: string, sessionId: string, status: AgentSessionStatus, detail?: string): void {
   const client = clients.get(clientId);
   if (!client) return;
-  send(client, { channel: 'symon', type: 'symon-agent-status', sessionId, status, ...(detail ? { detail } : {}) });
+  const activeMachine = symonSessions.get(sessionId)?.activeMachine
+    ?? getAgentSession()?.activeMachine
+    ?? DEFAULT_SYMON_MACHINE;
+  send(client, { channel: 'symon', type: 'symon-agent-status', sessionId, status, activeMachine, ...(detail ? { detail } : {}) });
 }
 
 function pushSymonToolResult(
@@ -3402,6 +3413,7 @@ function pushSymonTextDone(
   turn: SymonTextTurnState,
   status: 'done' | 'failed' | 'interrupted',
   detail?: string,
+  activeMachine?: SymonMachineIdentity,
 ): void {
   if (turn.terminal) return;
   turn.terminal = true;
@@ -3413,6 +3425,7 @@ function pushSymonTextDone(
       sessionId: turn.sessionId,
       turnId: turn.turnId,
       status,
+      activeMachine: activeMachine ?? loadSymonTextSession(turn.sessionId)?.activeMachine ?? DEFAULT_SYMON_MACHINE,
       ...(detail ? { detail } : {}),
     });
   }
@@ -3434,7 +3447,7 @@ async function interruptSymonTextNative(sessionId: string, turnId: string): Prom
 
 type SymonTextRelayResult = {
   state?: 'pending' | 'done' | 'needs_confirmation' | 'error' | 'call_mismatch';
-  result?: { status?: 'done' | 'interrupted'; text?: string };
+  result?: { status?: 'done' | 'interrupted'; text?: string; activeMachine?: unknown };
   confirmation?: unknown;
   detail?: string;
   error?: string;
@@ -3459,6 +3472,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
       sessionId: turn.sessionId,
       turnId: turn.turnId,
       status: 'thinking',
+      activeMachine: initial.activeMachine,
     });
   }
   const deadline = Date.now() + 5 * 60_000;
@@ -3516,6 +3530,8 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
       return;
     }
     if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
+      const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
+      if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
       const answer = outcome.result.text;
       appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
       const owner = clients.get(turn.clientId);
@@ -3528,7 +3544,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
           delta: answer,
         });
       }
-      pushSymonTextDone(turn, 'done');
+      pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
       return;
     }
     pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
@@ -3682,6 +3698,7 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
     clientId: client.id,
     scope: grant,
     protocolVersion: existingOwner?.protocolVersion === 2 ? 2 : symonProtocolVersion(msg),
+    activeMachine: existingOwner?.activeMachine ?? DEFAULT_SYMON_MACHINE,
   });
   preemptOtherSymonSessions(sessionId, 'preempted');
   updateAgentStatus(sessionId, status);
@@ -3779,6 +3796,15 @@ async function resolveSymonConfirmation(
 
 function publishCompletedSymonToolCall(completed: CompletedToolCall): void {
   const { call, outcome } = completed;
+  const resultRecord = outcome.result && typeof outcome.result === 'object'
+    ? outcome.result as Record<string, unknown>
+    : null;
+  const activeMachine = parseSymonMachineIdentity(resultRecord?.activeMachine);
+  const currentRoute = symonSessions.get(call.sessionId);
+  if (activeMachine && currentRoute) {
+    currentRoute.activeMachine = activeMachine;
+    updateAgentMachine(call.sessionId, activeMachine);
+  }
   if (completed.action.status === 'accepted') {
     const repoPath = typeof call.args?.repoPath === 'string' ? call.args.repoPath : '';
     symonAsyncActionTracker.register(completed.action, repoPath, completed.completedAt);
@@ -4122,7 +4148,12 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
   const existingOwner = symonSessions.get(sessionId);
   const protocolVersion = existingOwner?.protocolVersion === 2 ? 2 : requestedProtocol;
   if (!existingOwner) {
-    symonSessions.set(sessionId, { clientId: client.id, scope: grant, protocolVersion });
+    symonSessions.set(sessionId, {
+      clientId: client.id,
+      scope: grant,
+      protocolVersion,
+      activeMachine: DEFAULT_SYMON_MACHINE,
+    });
     startAgentSession(sessionId);
     preemptOtherSymonSessions(sessionId, 'preempted');
   } else if (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant)
@@ -4132,7 +4163,12 @@ async function handleSymonToolCall(client: ClientState, msg: Record<string, unkn
       void abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
       pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
     }
-    symonSessions.set(sessionId, { clientId: client.id, scope: grant, protocolVersion });
+    symonSessions.set(sessionId, {
+      clientId: client.id,
+      scope: grant,
+      protocolVersion,
+      activeMachine: existingOwner.activeMachine,
+    });
   }
   touchAgentSession(sessionId);
   persistAgentRegistry();

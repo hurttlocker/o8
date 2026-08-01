@@ -146,6 +146,8 @@ export const SURFACE_TOOL_NAME = 'render_surface';
  */
 export const PHONE_CODE_TOOL_NAMES = [
   'symon_execute_plan',
+  'symon_machine_list',
+  'symon_machine_switch',
   'o8_status',
   'o8_needs_me',
   'o8_review_diff',

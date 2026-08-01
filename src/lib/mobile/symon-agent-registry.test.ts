@@ -39,7 +39,13 @@ describe('symon-agent-registry — last-start-wins', () => {
   it('first start has no preemption and sets connecting', () => {
     const { record, preempted } = startAgentSession('sym-a', 1_000);
     expect(preempted).toBeNull();
-    expect(record).toMatchObject({ sessionId: 'sym-a', startedAt: 1_000, lastStatus: 'connecting', source: 'phone' });
+    expect(record).toMatchObject({
+      sessionId: 'sym-a',
+      startedAt: 1_000,
+      lastStatus: 'connecting',
+      source: 'phone',
+      activeMachine: { id: 'local', displayName: 'This Mac' },
+    });
     expect(getAgentSession()?.sessionId).toBe('sym-a');
   });
 

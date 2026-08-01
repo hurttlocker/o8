@@ -153,6 +153,7 @@ export async function POST(request: NextRequest) {
         model: session.model,
         effort: session.effort,
         engine: session.engine,
+        activeMachine: session.activeMachine,
       },
       scope: {
         version: 1,
