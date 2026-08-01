@@ -476,6 +476,8 @@ export function ChatsTab({
 
   const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
     const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
+    const packet = historyPacketsByTabId.get(item.tabId);
+    const worktreeBacked = Boolean(packet?.lane || item.repoPath?.includes('/.cortex-worktrees/'));
     return (
       <HistoryChatRow
         key={item.tabId}
@@ -483,8 +485,9 @@ export function ChatsTab({
         compact={compact}
         disabled={!onOpenHistoryChat}
         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-        tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(historyPacketsByTabId.get(item.tabId))}
-        repoLabel={showRepoSuffix ? repoSuffix(item) : null}
+        tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
+        repoLabel={repoSuffix(item) ?? (!showRepoSuffix && targetRepos.length === 1 ? targetRepos[0]?.name : null)}
+        branchLabel={worktreeBacked ? item.repoBranch ?? packet?.branchTarget ?? null : null}
         ownedCount={owned.length}
         onHoverChange={owned.length > 0
           ? (rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { CheckCircle2 } from '../../../lucide-shims';
+import { CheckCircle2, Folder } from '../../../lucide-shims';
+import { GitBranch } from '@/components/desktop/tabler-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
 import { HISTORY_ROW_TONES } from './constants';
@@ -225,6 +226,7 @@ export function HistoryChatRow({
   onOpenMenu,
   ownedCount = 0,
   repoLabel,
+  branchLabel,
   recede = false,
   washBand,
   onHoverChange,
@@ -239,6 +241,7 @@ export function HistoryChatRow({
   /** Static count only; worker rows live in the flat Agents section. */
   ownedCount?: number;
   repoLabel?: string | null;
+  branchLabel?: string | null;
   recede?: boolean;
   washBand?: AttentionBand | null;
   /** Fleet-reveal hook: rect on enter, null on leave. Wired only for threads
@@ -275,11 +278,9 @@ export function HistoryChatRow({
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
-  const metaParts = compact ? [] : [
-    item.backend ? { text: orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent }) ?? null, status: false } : null,
-    rowTone.label ? { text: rowTone.label, status: true } : null,
-    { text: formatElapsedAgo(item.modifiedAt), status: false },
-  ].filter((part): part is { text: string; status: boolean } => Boolean(part?.text));
+  const backendLabel = !compact && item.backend
+    ? orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent })
+    : null;
   const dotState: AgentDotState =
     rowTone.key === 'running' ? 'running'
       : rowTone.key === 'review' ? 'review'
@@ -320,10 +321,10 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: compact ? 31 : 42,
+        minHeight: 47,
         display: 'flex',
         alignItems: 'center',
-        gap: compact ? 6 : 8,
+        gap: 8,
         // Selection + hover both paint on the rounded inset layer below —
         // the row itself stays transparent so the fill never hits the rail's
         // edges sharp (Q ruling 2026-07-16: rounded selector, no shimmer).
@@ -334,9 +335,9 @@ export function HistoryChatRow({
         textAlign: 'left',
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: 5,
-        paddingRight: compact ? 12 : 14,
-        paddingBottom: 5,
+        paddingTop: 6,
+        paddingRight: 12,
+        paddingBottom: 6,
         // Indented to align with top-nav text X (MiniAgentPanelAction =
         // paddingLeft 12 + 17 icon + 8 gap = 37). Folder icon on repo
         // header sits at X=12, so chats nest visually under their group.
@@ -362,10 +363,10 @@ export function HistoryChatRow({
             ...(active || hovered ? {
               position: 'absolute',
               top: 2,
-              right: 6,
+              right: 4,
               bottom: 2,
-              left: 6,
-              borderRadius: 8,
+              left: 4,
+              borderRadius: 9,
               background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
               zIndex: 0,
             } : {}),
@@ -404,24 +405,13 @@ export function HistoryChatRow({
           }}
         >
           {item.title}
-          {repoLabel ? (
-            <span
-              style={{
-                marginLeft: 6,
-                fontSize: 9.5,
-                fontWeight: 260,
-                letterSpacing: '-0.4px',
-                color: active || hovered ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
-              }}
-            >
-              {repoLabel}
-            </span>
-          ) : null}
         </span>
-        {metaParts.length > 0 && !compact ? (
+        {(repoLabel || branchLabel || backendLabel) ? (
           <span
             style={{
-              display: 'block',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
               marginTop: 4,
               color: 'var(--t-text-faint)',
               fontSize: 9.5,
@@ -433,14 +423,19 @@ export function HistoryChatRow({
               whiteSpace: 'nowrap',
             }}
           >
-            {metaParts
-              .filter((part) => !(part.status && rowTone.label)) // status moves to trailing slot
-              .map((part, index) => (
-                <span key={`${part.text}-${index}`}>
-                  {index > 0 ? <span>{' · '}</span> : null}
-                  <span>{part.text}</span>
-                </span>
-              ))}
+            {repoLabel ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                <Folder size={10} strokeWidth={1.7} style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{repoLabel}</span>
+              </span>
+            ) : null}
+            {branchLabel ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+                <GitBranch size={10} strokeWidth={1.7} style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{branchLabel}</span>
+              </span>
+            ) : null}
+            {backendLabel ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{backendLabel}</span> : null}
           </span>
         ) : null}
       </span>
@@ -472,9 +467,7 @@ export function HistoryChatRow({
             <span>{ownedCount} {ownedCount === 1 ? 'agent' : 'agents'}</span>
           </span>
         ) : null}
-        {compact ? (
-          <span>{formatElapsedAgo(item.modifiedAt)}</span>
-        ) : null}
+        <span>{formatElapsedAgo(item.modifiedAt)}</span>
       </span>
     </div>
   );
