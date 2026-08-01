@@ -98,6 +98,11 @@ export interface OperatorDefaults {
 export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
   sources: Record<keyof OperatorDefaults, SettingSource>;
+  settingsToml?: {
+    path: string;
+    text: string;
+    error: string | null;
+  };
   cliAuth?: {
     statuses: Record<RuntimeAuthHouse, {
       installed: boolean;

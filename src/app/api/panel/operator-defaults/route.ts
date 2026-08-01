@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 
 import {
+  applyOperatorDefaultsToml,
   getOperatorDefaults,
+  getOperatorDefaultsTomlState,
   isCollideAggregator,
   isOrchestratorBackendSetting,
   isPrLinkDestination,
@@ -382,12 +384,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
 export async function GET() {
   try {
-    const [data, cliAuth] = await Promise.all([
+    const [data, settingsToml, cliAuth] = await Promise.all([
       getOperatorDefaults(),
+      getOperatorDefaultsTomlState(),
       getRuntimeAuthSnapshot(),
     ]);
     const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
-    return response({ ...data, cliAuth, dispatchableRuntimes });
+    return response({ ...data, settingsToml, cliAuth, dispatchableRuntimes });
   } catch (error) {
     console.error('[panel-operator-defaults] Failed to load operator defaults:', error);
     return response({ error: 'Failed to load operator defaults.' }, 500);
@@ -399,6 +402,20 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
     if (!isRecord(body)) {
       return response({ error: 'Invalid request body.' }, 400);
+    }
+    if (body.settingsToml !== undefined) {
+      if (typeof body.settingsToml !== 'string') {
+        return response({ error: 'settingsToml must be a string.' }, 400);
+      }
+      const [updated, cliAuth] = await Promise.all([
+        applyOperatorDefaultsToml(body.settingsToml),
+        getRuntimeAuthSnapshot(),
+      ]);
+      const [settingsToml, dispatchableRuntimes] = await Promise.all([
+        getOperatorDefaultsTomlState(),
+        getDispatchableRuntimeAvailability(cliAuth),
+      ]);
+      return response({ ...updated, settingsToml, cliAuth, dispatchableRuntimes });
     }
     if (body.workerRuntimes !== undefined && !isWorkerRuntimeList(body.workerRuntimes)) {
       return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
@@ -413,8 +430,11 @@ export async function POST(request: Request) {
       updateOperatorDefaults(update),
       getRuntimeAuthSnapshot(),
     ]);
-    const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
-    return response({ ...updated, cliAuth, dispatchableRuntimes });
+    const [settingsToml, dispatchableRuntimes] = await Promise.all([
+      getOperatorDefaultsTomlState(),
+      getDispatchableRuntimeAvailability(cliAuth),
+    ]);
+    return response({ ...updated, settingsToml, cliAuth, dispatchableRuntimes });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update operator defaults.';
     console.error('[panel-operator-defaults] Failed to update operator defaults:', message);

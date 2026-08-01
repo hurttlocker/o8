@@ -1,8 +1,5 @@
 import 'server-only';
 
-import { readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { MODEL_IDS } from '@/lib/models';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -75,7 +72,17 @@ import {
   type ClassAComposer,
   type WorkersUseBrain,
 } from './defaults-env';
-import { getDataDir } from '@/lib/data-dir-migration';
+import {
+  applyOperatorDefaultsTomlFile,
+  getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
+  loadOperatorDefaultsFiles,
+  loadOperatorDefaultsFilesSync,
+  persistOperatorDefaults,
+  readLegacyOperatorDefaults,
+  readOperatorDefaultsTomlForUpdate,
+  type OperatorDefaultsTomlState,
+} from '@/lib/settings/operator-defaults-store';
+export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
 
 export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination } from './defaults-env';
 export type {
@@ -103,7 +110,9 @@ export {
  *
  * Resolution order (every knob): env var > persisted file > hardcoded fallback.
  *
- * Persisted file: `~/.o8/operator-defaults.json`
+ * Canonical file: `~/.o8/settings.toml`. The legacy
+ * `operator-defaults.json` remains a synchronized last-good fallback so an
+ * invalid hand edit never prevents startup.
  * (override root with CORTEX_IDE_DATA_DIR). NOTE: `~/.cortex-ide/` is NOT
  * read — a stale copy of this file there silently does nothing (bit the
  * operator flow 2026-07-07; always verify against getOperatorDefaultsPath()).
@@ -394,15 +403,6 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
 };
 
-const OPERATOR_DEFAULTS_FILE = 'operator-defaults.json';
-
-function getOperatorDefaultsPath() {
-  return path.join(
-    getDataDir(),
-    OPERATOR_DEFAULTS_FILE,
-  );
-}
-
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -471,10 +471,6 @@ function parseStoredDefaults(raw: string): StoredOperatorDefaults {
     // ignore malformed file
   }
   return {};
-}
-
-function isMissingFile(error: unknown) {
-  return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
@@ -804,41 +800,35 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
 }
 
 export async function getOperatorDefaults(): Promise<OperatorDefaultsWithSources> {
-  let fileValues: FileOperatorDefaults = {};
-  try {
-    const raw = await readFile(getOperatorDefaultsPath(), 'utf8');
-    fileValues = resolveFromFile(parseStoredDefaults(raw));
-  } catch (error) {
-    if (!isMissingFile(error)) {
-      console.error('[operator-defaults] Failed to read operator defaults:', error);
-    }
-  }
-  return resolveDefaults(fileValues);
+  return resolveDefaults(await loadOperatorDefaultsFiles((raw) => resolveFromFile(parseStoredDefaults(raw))));
 }
 
 export function getOperatorDefaultsSync(): OperatorDefaultsWithSources {
-  let fileValues: FileOperatorDefaults = {};
-  try {
-    const raw = readFileSync(getOperatorDefaultsPath(), 'utf8');
-    fileValues = resolveFromFile(parseStoredDefaults(raw));
-  } catch (error) {
-    if (!isMissingFile(error)) {
-      console.error('[operator-defaults] Failed to read operator defaults during sync read:', error);
-    }
-  }
-  return resolveDefaults(fileValues);
+  return resolveDefaults(loadOperatorDefaultsFilesSync((raw) => resolveFromFile(parseStoredDefaults(raw))));
+}
+
+export type { OperatorDefaultsTomlState };
+
+export async function getOperatorDefaultsTomlState(): Promise<OperatorDefaultsTomlState> {
+  const legacyRaw = await readLegacyOperatorDefaults();
+  const stored = legacyRaw ? parseStoredDefaults(legacyRaw) : {};
+  const values: OperatorDefaults = {
+    ...OPERATOR_DEFAULTS_FALLBACK,
+    ...resolveFromFile(stored),
+  };
+  return readOperatorDefaultsTomlState(values);
 }
 
 export async function updateOperatorDefaults(update: Partial<OperatorDefaults>): Promise<OperatorDefaultsWithSources> {
-  const filePath = getOperatorDefaultsPath();
   let stored: StoredOperatorDefaults = {};
+  const { raw: existingToml, values: tomlValues } = await readOperatorDefaultsTomlForUpdate();
+  const legacyRaw = await readLegacyOperatorDefaults();
+  if (legacyRaw) stored = parseStoredDefaults(legacyRaw);
 
-  try {
-    const raw = await readFile(filePath, 'utf8');
-    stored = parseStoredDefaults(raw);
-  } catch (error) {
-    if (!isMissingFile(error)) {
-      console.error('[operator-defaults] Failed to read existing operator defaults before write:', error);
+  if (existingToml !== undefined) {
+    Object.assign(stored, tomlValues);
+    if (Object.prototype.hasOwnProperty.call(tomlValues, 'defaultDispatchRuntime')) {
+      stored.defaultDispatchRuntimeExplicit = true;
     }
   }
 
@@ -1065,10 +1055,18 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     stored.targetingAction = update.targetingAction;
   }
 
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
+  const fileValues = resolveFromFile(stored);
+  const canonicalValues: OperatorDefaults = {
+    ...OPERATOR_DEFAULTS_FALLBACK,
+    ...fileValues,
+  };
+  await persistOperatorDefaults(canonicalValues, stored, existingToml);
 
   return getOperatorDefaults();
+}
+
+export async function applyOperatorDefaultsToml(raw: string): Promise<OperatorDefaultsWithSources> {
+  return applyOperatorDefaultsTomlFile(raw, OPERATOR_DEFAULTS_FALLBACK, getOperatorDefaults);
 }
 
 /**

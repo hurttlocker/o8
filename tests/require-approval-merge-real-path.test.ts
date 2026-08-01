@@ -16,6 +16,7 @@ process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
 const tempDirs: string[] = [];
 const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.json');
+const settingsTomlPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'settings.toml');
 
 const { listApprovals, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
@@ -266,11 +267,13 @@ function reviewRequest(token: string, packetId: string, reviewedHeadSha: string)
 
 beforeEach(() => {
   rmSync(defaultsPath, { force: true });
+  rmSync(settingsTomlPath, { force: true });
   publishRealtimeMutation.mockClear();
 });
 
 afterEach(() => {
   rmSync(defaultsPath, { force: true });
+  rmSync(settingsTomlPath, { force: true });
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }

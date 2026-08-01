@@ -28,6 +28,7 @@ import { fetchOperatorDefaults } from './operator-defaults-client';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { WorktreeRetentionSection } from './WorktreeRetentionSection';
+import { SettingsTomlEditor } from './SettingsTomlEditor';
 import {
   PickerMenu,
   SUBSCRIPTION_PROFILE_OPTIONS,
@@ -166,6 +167,7 @@ export function OperatorDefaultsTab() {
     return () => { alive = false; };
   }, []);
   const [notice, setNotice] = useState<string | null>(null);
+  const [editingToml, setEditingToml] = useState(false);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
   const [openDispatchPicker, setOpenDispatchPicker] = useState<string | null>(null);
 
@@ -176,8 +178,9 @@ export function OperatorDefaultsTab() {
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load operator defaults.');
       }
-      setData(payload as OperatorDefaultsResponse);
-      setNotice(null);
+      const next = payload as OperatorDefaultsResponse;
+      setData(next);
+      setNotice(next.settingsToml?.error ?? null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Failed to load operator defaults.');
     } finally {
@@ -213,6 +216,12 @@ export function OperatorDefaultsTab() {
   const updateField = useCallback(<K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => {
     void updateFieldAsync(field, value);
   }, [updateFieldAsync]);
+
+  const handleTomlSaved = useCallback((payload: OperatorDefaultsResponse) => {
+    setData(payload);
+    setNotice(payload.settingsToml?.error ?? null);
+    setEditingToml(false);
+  }, []);
 
   const values = data?.values;
   const sources = data?.sources;
@@ -250,6 +259,18 @@ export function OperatorDefaultsTab() {
     );
   }
 
+  if (editingToml && data.settingsToml) {
+    return (
+      <SettingsTomlEditor
+        initialText={data.settingsToml.text}
+        filePath={data.settingsToml.path}
+        initialError={data.settingsToml.error}
+        onCancel={() => setEditingToml(false)}
+        onSaved={handleTomlSaved}
+      />
+    );
+  }
+
   const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(field) ? ENV_LOCKED_REASON : normal;
@@ -281,10 +302,34 @@ export function OperatorDefaultsTab() {
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabHeading
-        title="dispatch & supervision"
-        subtitle="How the fleet runs: how many agents at once, what happens when work overlaps, and who the orchestrator brain is."
-      />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20 }}>
+        <TabHeading
+          title="dispatch & supervision"
+          subtitle="How the fleet runs: how many agents at once, what happens when work overlaps, and who the orchestrator brain is."
+        />
+        <button
+          type="button"
+          onClick={() => setEditingToml(true)}
+          style={{
+            flexShrink: 0,
+            height: 30,
+            marginTop: 2,
+            paddingLeft: 13,
+            paddingRight: 13,
+            border: '1px solid var(--t-panel-border)',
+            borderRadius: 7,
+            background: 'var(--t-input-bg)',
+            color: 'var(--t-text-muted)',
+            fontFamily: APP_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            cursor: 'pointer',
+          }}
+        >
+          Edit in settings.toml
+        </button>
+      </div>
 
       {notice ? (
         <div style={{
