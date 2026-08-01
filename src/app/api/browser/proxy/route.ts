@@ -54,9 +54,8 @@ export async function GET(request: NextRequest) {
     // redirect escapes the localhost allow-list (→ metadata/external/own-API
     // SSRF). On a 3xx, revalidate the resolved Location (#1644): a target
     // that passes the same localhost/own-port gate stays INSIDE the proxy
-    // (document remains same-origin + grabbable); anything else hands the
-    // iframe the DIRECT original url so the browser follows it in its own
-    // context (matching the Clerk fallback below).
+    // (document remains same-origin + grabbable); anything else is refused
+    // before the browser can follow it.
     const upstream = await fetch(url, { redirect: 'manual', headers: { accept: 'text/html,*/*' } });
     if (upstream.status >= 300 && upstream.status < 400) {
       const location = upstream.headers.get('location');
@@ -66,12 +65,15 @@ export async function GET(request: NextRequest) {
       } catch {
         resolved = null;
       }
-      if (resolved && LOCAL_TARGET.test(resolved) && !targetsOwnPort(resolved)) {
-        const proxied = new URL('/api/browser/proxy', request.nextUrl.origin);
-        proxied.searchParams.set('url', resolved);
-        return NextResponse.redirect(proxied, 302);
+      if (!resolved || !LOCAL_TARGET.test(resolved) || targetsOwnPort(resolved)) {
+        return NextResponse.json(
+          { error: 'redirect target is not permitted by the browser proxy policy' },
+          { status: 400 },
+        );
       }
-      return NextResponse.redirect(url, 302);
+      const proxied = new URL('/api/browser/proxy', request.nextUrl.origin);
+      proxied.searchParams.set('url', resolved);
+      return NextResponse.redirect(proxied, 302);
     }
     // Origin-sensitive auth frameworks (Clerk, etc.) break when proxied to a
     // different origin — their frontend API rejects the mismatched origin and

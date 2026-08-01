@@ -146,6 +146,7 @@ const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged
 const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
+const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { syncTranscriptSearchDocument } = await import('@/lib/search/transcripts');
 const { getActiveProjectScopeForRepo } = await import('@/lib/repos/projects');
 const {
@@ -231,10 +232,10 @@ describe('seam A — buildPacketPrompt carries the thread session rules into the
 
 // ── Seam B — worker merge raises a governance card, not a merge ──────────────
 
-function workerReq(url: string, body: unknown): NextRequest {
+function workerReq(url: string, body: unknown, token = WORKER_TOKEN): NextRequest {
   return new NextRequest(url, {
     method: 'POST',
-    headers: { host: 'localhost:3001', authorization: `Bearer ${WORKER_TOKEN}` },
+    headers: { host: 'localhost:3001', authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
 }
@@ -257,7 +258,7 @@ describe('seam B — a dispatched worker approve_and_merge raises an operator ca
     const lane = createLane({ repoPath: '/tmp/o8-seam-repo', branch: 'inline/seam-b', runtime: 'codex', packetId });
     expect(findLaneByPacket(packetId)?.id).toBe(lane.id);
 
-    const res = await mergeRoute.POST(workerReq(url, { packetId }));
+    const res = await mergeRoute.POST(workerReq(url, { packetId }, mintPacketWorkerToken(packetId)));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);

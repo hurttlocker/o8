@@ -233,7 +233,14 @@ export const codexRuntime: AgentRuntime = {
     // workers. A per-mission model still wins.
     const model = opts.model ?? (resolveDefaultDispatchModelSync() || undefined);
     const effort = resolveDefaultWorkerEffortSync('codex', opts.effort);
-    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model, effort });
+    const result = await launchOwnedCodexSession({
+      cwd: opts.cwd,
+      prompt: opts.prompt,
+      model,
+      effort,
+      laneId: opts.laneId,
+      packetId: opts.packetId,
+    });
     if (result.ok && result.surfaceId) {
       scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, model, () =>
         waitForOwnedRunToFinish(result.surfaceId, startedAtMs));

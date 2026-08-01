@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
@@ -36,6 +37,10 @@ export async function GET(
   const lane = getLane(id) ?? findLatestLaneByPacket(id);
   if (!lane) {
     return NextResponse.json({ ok: false, note: 'No lane found for that id/packet.' }, { status: 404 });
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), lane.packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   let cwd: string;

@@ -202,7 +202,13 @@ export const cursorRuntime: AgentRuntime = {
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     const startedAtMs = Date.now();
-    const result = await launchOwnedCursorSession({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model });
+    const result = await launchOwnedCursorSession({
+      cwd: opts.cwd,
+      prompt: opts.prompt,
+      model: opts.model,
+      laneId: opts.laneId,
+      packetId: opts.packetId,
+    });
     if (result.ok && result.surfaceId) {
       scheduleCursorUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, opts.model);
     }

@@ -39,6 +39,8 @@ export type OwnedGeminiLaunchRequest = {
   cwd: string;
   prompt: string;
   model?: string;
+  laneId?: string;
+  packetId?: string;
 };
 
 export type OwnedGeminiLaunchResponse = {

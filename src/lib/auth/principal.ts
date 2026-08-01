@@ -1,9 +1,21 @@
-import { isLocalWorkerToken } from './worker-token';
+import { isLegacyLocalWorkerToken, isPacketWorkerToken } from './worker-token';
+import { resolvePacketWorkerToken } from './packet-worker-token';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 
 export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'anonymous';
+
+export type RequestPrincipalContext =
+  | { role: 'operator' }
+  | { role: 'worker'; packetId: string | null; tokenId: string | null }
+  | { role: 'device' }
+  | { role: 'anonymous' };
+
+export interface WorkerPacketRefusal {
+  code: 'worker_packet_mismatch';
+  message: string;
+}
 
 function tokenMatches(presented: string, expected: string): boolean {
   const left = Buffer.from(presented, 'utf8');
@@ -31,10 +43,38 @@ function isDeviceToken(presented: string): boolean {
  * and the `Request`-typed panel routes share one resolver.
  */
 export function resolveRequestPrincipal(req: Request): RequestPrincipal {
+  return resolveRequestPrincipalContext(req).role;
+}
+
+export function resolveRequestPrincipalContext(req: Request): RequestPrincipalContext {
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (isLocalWorkerToken(bearer)) return 'worker';
-  if (bearer && tokenMatches(bearer, getOrCreateWsToken().trim())) return 'operator';
-  if (isDeviceToken(bearer)) return 'device';
-  return 'anonymous';
+  if (isPacketWorkerToken(bearer)) {
+    const worker = resolvePacketWorkerToken(bearer);
+    return worker
+      ? { role: 'worker', packetId: worker.packetId, tokenId: worker.tokenId }
+      : { role: 'worker', packetId: null, tokenId: null };
+  }
+  if (isLegacyLocalWorkerToken(bearer)) {
+    return { role: 'worker', packetId: null, tokenId: null };
+  }
+  if (bearer && tokenMatches(bearer, getOrCreateWsToken().trim())) return { role: 'operator' };
+  if (isDeviceToken(bearer)) return { role: 'device' };
+  return { role: 'anonymous' };
+}
+
+/** Fail closed whenever a worker credential targets any packet but its owner. */
+export function workerPacketRefusal(
+  principal: RequestPrincipalContext,
+  targetPacketId: string | null | undefined,
+): WorkerPacketRefusal | null {
+  if (principal.role !== 'worker') return null;
+  const target = targetPacketId?.trim() || null;
+  if (principal.packetId && target === principal.packetId) return null;
+  return {
+    code: 'worker_packet_mismatch',
+    message: principal.packetId
+      ? `Worker credential for packet ${principal.packetId} cannot address packet ${target ?? '(unbound)'}.`
+      : 'This legacy worker credential is not bound to a packet and cannot address packet-scoped routes.',
+  };
 }

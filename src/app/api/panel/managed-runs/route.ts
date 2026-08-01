@@ -7,6 +7,7 @@ import {
 } from '@/lib/runtimes/managed-runs/registry';
 import { killTmuxSession } from '@/lib/terminal/tmux';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,9 +17,13 @@ const RUN_SESSION_RE = /^cortex-run-[A-Za-z0-9]+$/;
 const MAX_FIELD = 4096; // cap persisted/echoed strings — no unbounded command/cwd
 
 /** GET — list managed runs (reconciled against live tmux). */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const runs = await listManagedRuns();
+    const principal = resolveRequestPrincipalContext(request);
+    const allRuns = await listManagedRuns();
+    const runs = principal.role === 'worker'
+      ? allRuns.filter((run) => Boolean(principal.packetId) && run.packetId === principal.packetId)
+      : allRuns;
     return NextResponse.json({ schema: 'o8/managed-runs/v1', runs });
   } catch (err) {
     return NextResponse.json(
@@ -51,6 +56,21 @@ export async function POST(req: Request) {
     body = (await req.json()) as RegisterBody;
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
+  const principal = resolveRequestPrincipalContext(req);
+
+  if (body.action === 'register' || !body.action) {
+    const ownershipRefusal = workerPacketRefusal(principal, body.packetId);
+    if (ownershipRefusal) {
+      return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+    }
+  } else if (principal.role === 'worker') {
+    const key = body.session ?? body.id ?? '';
+    const target = (await listManagedRuns()).find((run) => run.session === key || run.id === key);
+    const ownershipRefusal = workerPacketRefusal(principal, target?.packetId);
+    if (ownershipRefusal) {
+      return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+    }
   }
 
   if (body.action === 'finish') {

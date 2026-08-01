@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
+import { mintPacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -497,6 +498,9 @@ export function createOwnedRunController({
     const cliCmd = [spawnBinary, ...spawnArgs].map(quoteShellArg).join(' ');
     const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
     const adapterEnv = adapter.extraSpawnEnv ? adapter.extraSpawnEnv() : {};
+    const workerToken = session.packetId
+      ? mintPacketWorkerToken(session.packetId)
+      : getOrCreateLocalWorkerToken();
     const spawnEnv = {
       ...adapterEnv,
       PATH: pathWithNodeRuntime(),
@@ -507,7 +511,8 @@ export function createOwnedRunController({
       // (report J4FHM2). 'none' is the CRA disable convention; tools that
       // treat BROWSER as a launch binary fail to exec it, same net effect.
       BROWSER: 'none',
-      O8_WORKER_TOKEN: getOrCreateLocalWorkerToken(),
+      O8_WORKER_TOKEN: workerToken,
+      ...(session.packetId ? { O8_WORKER_PACKET_ID: session.packetId } : {}),
       ...sandboxEnvExtra,
     };
 

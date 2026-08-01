@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getOrCreateWsToken } from '@/lib/ws-auth';
-import { isLocalWorkerToken } from '@/lib/auth/worker-token';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { getLane } from '@/lib/lane/registry';
 import {
   isAgentReportReason,
   isPacketAgentReportEvent,
@@ -32,13 +32,8 @@ function requireLoopbackBearer(req: NextRequest): NextResponse | null {
     return NextResponse.json({ ok: false, note: 'Lane event reports must come from loopback.' }, { status: 403 });
   }
 
-  const expected = getOrCreateWsToken().trim();
-  const auth = req.headers.get('authorization');
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  // Dispatched workers present O8_WORKER_TOKEN, never the operator ws-token
-  // (SECURITY_AUDIT_2026-07-02 §CRIT-1) — reporting on a lane is exactly the
-  // worker credential's intended scope, so accept it alongside the ws-token.
-  if (!expected || (token !== expected && !isLocalWorkerToken(token))) {
+  const principal = resolveRequestPrincipalContext(req);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
     return NextResponse.json({ ok: false, note: 'Unauthorized.' }, { status: 401 });
   }
 
@@ -81,6 +76,10 @@ export async function GET(
   const packetId = resolvePacketTailPacketId(id);
   if (!packetId) {
     return NextResponse.json({ ok: false, note: 'packetId or lane id is required.' }, { status: 400 });
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   const query = req.nextUrl.searchParams;
@@ -146,6 +145,10 @@ export async function POST(
     : normalizeAgentReportMetadata(body.metadata);
   if (body.metadata !== undefined && body.metadata !== null && !metadata) {
     return NextResponse.json({ ok: false, note: 'metadata must be a JSON object.' }, { status: 400 });
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), getLane(id)?.packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   const result = reportAgentEvent({

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import {
+  resolveRequestPrincipal,
+  resolveRequestPrincipalContext,
+  workerPacketRefusal,
+} from '@/lib/auth/principal';
 import { applyApprovedFileEdit } from '@/lib/approvals/file-edit';
 import { applyApprovedSpecUpdate } from '@/lib/approvals/spec-update';
 import { verifySpokenReviewMutationEvidence } from '@/lib/approvals/spoken-review-guard';
@@ -22,7 +26,7 @@ import type { RuntimeId } from '@/lib/runtimes';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { getLane } from '@/lib/lane/registry';
+import { findLaneBySession, getLane } from '@/lib/lane/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -63,6 +67,13 @@ export async function GET(request: NextRequest) {
   const status = statusParam === 'all' ? 'all' : 'pending';
   const isContextQuery = Boolean(packetId || laneId);
   const includeDiff = request.nextUrl.searchParams.get('include')?.trim() === 'diff';
+  const ownershipRefusal = workerPacketRefusal(
+    resolveRequestPrincipalContext(request),
+    packetId || (laneId ? getLane(laneId)?.packetId : null) || (sessionKey ? findLaneBySession(sessionKey)?.packetId : null),
+  );
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
   const approvals = isContextQuery
     ? listApprovalsForContext({ packetId, laneId, sessionKey })
       .filter((approval) => status === 'all' || approval.status === status)

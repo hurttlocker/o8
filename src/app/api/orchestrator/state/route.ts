@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import {
   syncOrchestratorControlPlaneState,
   withLockedState,
@@ -214,6 +215,10 @@ export async function PATCH(req: NextRequest) {
     const updates = body.updates && typeof body.updates === 'object' ? body.updates : null;
     if (!packetId || !updates) {
       return buildErrorResponse('packetId and a non-empty updates object are required.', 400);
+    }
+    const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), packetId);
+    if (ownershipRefusal) {
+      return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
     }
 
     const statusRejection = packetStatusWriteRejection(updates);

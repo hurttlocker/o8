@@ -1,5 +1,5 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -17,6 +17,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
  */
 const DATA_DIR = getDataDir();
 export const LOCAL_WORKER_TOKEN_PATH = path.join(DATA_DIR, 'worker-token');
+export const PACKET_WORKER_TOKEN_HASHES_PATH = path.join(DATA_DIR, 'worker-packet-token-hashes');
 const TOKEN_LENGTH = 32; // 256-bit
 const MIN_TOKEN_LENGTH = 16;
 
@@ -50,8 +51,8 @@ export function getOrCreateLocalWorkerToken(): string {
   }
 }
 
-/** True if `presented` is the active local-worker token (constant-time). */
-export function isLocalWorkerToken(presented: string | null | undefined): boolean {
+/** True only for the legacy shared local-worker token. */
+export function isLegacyLocalWorkerToken(presented: string | null | undefined): boolean {
   if (!presented) return false;
   const stored = readStored();
   if (!stored) return false;
@@ -59,4 +60,36 @@ export function isLocalWorkerToken(presented: string | null | undefined): boolea
   const b = Buffer.from(stored, 'utf-8');
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+/**
+ * Register a packet-scoped token hash for the DB-free middleware gate. The
+ * route-level principal resolver still checks the authoritative worker_tokens
+ * row and packet binding; this file only identifies the bearer as worker-class
+ * early enough for middleware capability filtering.
+ */
+export function registerPacketWorkerTokenHash(tokenHash: string): void {
+  if (!/^[a-f0-9]{64}$/.test(tokenHash)) {
+    throw new Error('Packet worker token hash must be a SHA-256 hex digest.');
+  }
+  mkdirSync(DATA_DIR, { recursive: true });
+  appendFileSync(PACKET_WORKER_TOKEN_HASHES_PATH, `${tokenHash}\n`, { mode: 0o600 });
+}
+
+/** DB-free packet-worker recognition for middleware. */
+export function isPacketWorkerToken(presented: string | null | undefined): boolean {
+  if (!presented || !existsSync(PACKET_WORKER_TOKEN_HASHES_PATH)) return false;
+  try {
+    const hash = createHash('sha256').update(presented, 'utf8').digest('hex');
+    return readFileSync(PACKET_WORKER_TOKEN_HASHES_PATH, 'utf8')
+      .split(/\r?\n/)
+      .some((candidate) => candidate === hash);
+  } catch {
+    return false;
+  }
+}
+
+/** True for either legacy-unbound or packet-bound local worker credentials. */
+export function isLocalWorkerToken(presented: string | null | undefined): boolean {
+  return isLegacyLocalWorkerToken(presented) || isPacketWorkerToken(presented);
 }

@@ -55,6 +55,7 @@ const steer = await import('@/app/api/orchestrator/steer-packet/route');
 const reset = await import('@/app/api/orchestrator/reset-packet/route');
 const rerun = await import('@/app/api/orchestrator/rerun-with-feedback/route');
 const sessionRules = await import('@/app/api/orchestrator/session-rules/route');
+const merge = await import('@/app/api/orchestrator/merge/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
@@ -62,6 +63,7 @@ const { createTestApproval, getApproval } = await import('@/lib/approvals/store'
 const { panelGateMiddleware } = await import('@/middleware');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 
 type Principal = 'operator' | 'worker';
 
@@ -70,11 +72,17 @@ type Principal = 'operator' | 'worker';
  *  CLI actually calls the loopback API. */
 function req(
   url: string,
-  { principal, method = 'POST', body, workerPacketId }: { principal: Principal; method?: string; body?: unknown; workerPacketId?: string },
+  { principal, method = 'POST', body, workerPacketId, workerToken }: {
+    principal: Principal;
+    method?: string;
+    body?: unknown;
+    workerPacketId?: string;
+    workerToken?: string;
+  },
 ): NextRequest {
   const headers: Record<string, string> = { host: 'localhost:3001' };
   if (principal === 'worker') {
-    headers.authorization = `Bearer ${WORKER_TOKEN}`;
+    headers.authorization = `Bearer ${workerToken ?? WORKER_TOKEN}`;
     if (workerPacketId) headers['x-o8-worker-packet-id'] = workerPacketId;
   } else {
     headers.authorization = `Bearer ${WS_TOKEN}`;
@@ -197,6 +205,61 @@ describe('principal-authz — packet control verbs reject worker principals (HIG
   }
 });
 
+describe('principal-authz — worker credentials are bound to their persisted packet owner (#1644)', () => {
+  const url = 'http://localhost:3001/api/orchestrator/merge';
+
+  it('refuses packet B, accepts packet A, and leaves operator context unaffected through the real merge route', async () => {
+    const { createLane } = await import('@/lib/lane/registry');
+    const packetA = `pkt-authz-owner-a-${Date.now()}`;
+    const packetB = `pkt-authz-owner-b-${Date.now()}`;
+    createLane({
+      label: 'packet ownership A',
+      repoPath: '/tmp/authz-packet-owner-a',
+      branch: `agent/${packetA}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: packetA,
+    });
+    createLane({
+      label: 'packet ownership B',
+      repoPath: '/tmp/authz-packet-owner-b',
+      branch: `agent/${packetB}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: packetB,
+    });
+    const packetAToken = mintPacketWorkerToken(packetA);
+
+    const mismatch = await merge.POST(req(url, {
+      principal: 'worker',
+      workerToken: packetAToken,
+      body: { packetId: packetB },
+    }));
+    expect(mismatch.status).toBe(403);
+    expect(await mismatch.json()).toMatchObject({
+      ok: false,
+      error: { code: 'worker_packet_mismatch' },
+    });
+
+    const owned = await merge.POST(req(url, {
+      principal: 'worker',
+      workerToken: packetAToken,
+      body: { packetId: packetA },
+    }));
+    expect(owned.status).toBe(200);
+    expect(await owned.json()).toMatchObject({
+      ok: true,
+      result: { merged: false, status: 'pending_operator_approval' },
+    });
+
+    const operator = await merge.POST(req(url, {
+      principal: 'operator',
+      body: { packetId: packetB, requestedByWorker: true },
+    }));
+    expect(operator.status).toBe(200);
+  });
+});
+
 // Managed remote access (#relay): steer-packet is the ONE control verb the
 // operator's phone may drive. It must accept an enrolled per-device bearer while
 // still rejecting a worker — driven through the REAL route handler, because the
@@ -256,25 +319,29 @@ describe('principal-authz — session rules writes are operator-only (#1329 HIGH
   });
 
   it('GET: WORKER → 200 only for the thread that dispatched its packet', async () => {
+    const packetId = 'pkt-authz-owned-thread';
     writeMissionWithPackets([
-      packetFixture({ id: 'pkt-authz-owned-thread', orchestratorThreadId: 't-owned' }),
+      packetFixture({ id: packetId, orchestratorThreadId: 't-owned' }),
     ]);
     const res = await sessionRules.GET(req(`${url}?threadId=t-owned`, {
       principal: 'worker',
       method: 'GET',
-      workerPacketId: 'pkt-authz-owned-thread',
+      workerPacketId: packetId,
+      workerToken: mintPacketWorkerToken(packetId),
     }));
     expect(res.status).toBe(200);
   });
 
   it('GET: WORKER naming another thread → 403', async () => {
+    const packetId = 'pkt-authz-other-thread';
     writeMissionWithPackets([
-      packetFixture({ id: 'pkt-authz-other-thread', orchestratorThreadId: 't-owned' }),
+      packetFixture({ id: packetId, orchestratorThreadId: 't-owned' }),
     ]);
     const res = await sessionRules.GET(req(`${url}?threadId=t-stolen`, {
       principal: 'worker',
       method: 'GET',
-      workerPacketId: 'pkt-authz-other-thread',
+      workerPacketId: packetId,
+      workerToken: mintPacketWorkerToken(packetId),
     }));
     expect(res.status).toBe(403);
   });
@@ -400,9 +467,11 @@ describe('principal-authz — /api/lanes actor comes from the credential, never 
       branch: 'agent/authz-clamp-w',
       baseBranch: 'main',
       runtime: 'codex',
+      packetId: `pkt-authz-clamp-worker-${Date.now()}`,
     });
     const res = await lanesRoute.POST(req('http://localhost:3001/api/lanes', {
       principal: 'worker',
+      workerToken: mintPacketWorkerToken(lane.packetId!),
       body: { verb: 'archive', laneId: lane.id, actor: 'user' },
     }));
     expect(res.status).toBeLessThan(500);

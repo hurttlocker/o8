@@ -125,6 +125,7 @@ export function createDeclarativeAgentRuntime(
         cwd: opts.cwd,
         prompt: opts.prompt,
         laneId: opts.laneId,
+        packetId: opts.packetId,
         model: opts.model,
         effort: opts.effort,
       });

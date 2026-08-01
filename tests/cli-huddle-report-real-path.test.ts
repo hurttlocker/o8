@@ -20,17 +20,18 @@ const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-function workerReportRequest(body: Record<string, unknown>): NextRequest {
+function workerReportRequest(body: Record<string, unknown>, token = workerToken): NextRequest {
   return new NextRequest('http://localhost:3001/api/lanes/lane/events', {
     method: 'POST',
     headers: {
       host: 'localhost:3001',
-      authorization: `Bearer ${workerToken}`,
+      authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
   });
@@ -109,7 +110,7 @@ describe('#1495 huddle packet report real path', () => {
         verb: 'agent_report',
         event: parsed.event,
         message: parsed.message,
-      }),
+      }, mintPacketWorkerToken(packetId)),
       { params: Promise.resolve({ id: lane.id }) },
     );
     expect(response.status).toBe(200);

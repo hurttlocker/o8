@@ -56,6 +56,8 @@ export interface OwnedSessionRecord {
   surfaceId: string;
   /** Lane known at spawn time, so an immediate child exit can reach its audit stream. */
   laneId?: string;
+  /** Packet that owns this worker credential and every packet-scoped API call. */
+  packetId?: string;
   sessionDir: string;
   cwd: string;
   repoPath: string;
@@ -140,6 +142,7 @@ export interface OwnedLaunchRequest {
   cwd: string;
   prompt: string;
   laneId?: string;
+  packetId?: string;
   model?: string;
   /** Requested reasoning effort — a per-runtime no-op unless the adapter uses it. */
   effort?: ThinkingEffort;

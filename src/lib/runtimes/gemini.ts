@@ -253,7 +253,13 @@ export const geminiRuntime: AgentRuntime = {
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     const startedAtMs = Date.now();
-    const result = await launchOwnedGeminiSession({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model });
+    const result = await launchOwnedGeminiSession({
+      cwd: opts.cwd,
+      prompt: opts.prompt,
+      model: opts.model,
+      laneId: opts.laneId,
+      packetId: opts.packetId,
+    });
     if (result.ok && result.surfaceId) {
       scheduleGeminiUsageDispatch(
         result.surfaceId,

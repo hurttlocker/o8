@@ -437,6 +437,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
     worktreePath: launchWorktree?.worktree?.path,
     laneId: payload.existingLaneId ?? undefined,
+    packetId: payload.packetId,
   });
 
   if (!result.ok || !result.sessionKey) {

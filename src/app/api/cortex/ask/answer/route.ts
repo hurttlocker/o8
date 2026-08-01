@@ -25,6 +25,7 @@ import { performance } from 'node:perf_hooks';
 import { askCortex, type AskCortexResult } from '@/lib/cortex/qa/ask';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 
 interface AskAnswerBody {
   question?: unknown;
@@ -71,6 +72,10 @@ export async function POST(request: NextRequest) {
   const terse = body?.terse === true;
   const packetId =
     typeof body?.packetId === 'string' && body.packetId.trim() ? body.packetId.trim() : null;
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
 
   // Worker path: the CLI runs inside a packet worktree whose directory name
   // (`packet-<id>`) doesn't match any registered repo slug, so directive

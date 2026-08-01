@@ -447,12 +447,15 @@ export const dispatchRules = sqliteTable('dispatch_rules', {
 export const workerTokens = sqliteTable('worker_tokens', {
   id: text('id').primaryKey(),
   tokenHash: text('token_hash').notNull().unique(),
+  packetId: text('packet_id'),
   label: text('label'),
   scope: text('scope').notNull(),
   maxWorkers: integer('max_workers').notNull().default(10),
   createdAt: text('created_at').notNull(),
   revokedAt: text('revoked_at'),
-});
+}, (table) => ({
+  packetIdIdx: index('idx_worker_tokens_packet_id').on(table.packetId),
+}));
 
 export const workerRuns = sqliteTable('worker_runs', {
   id: text('id').primaryKey(),

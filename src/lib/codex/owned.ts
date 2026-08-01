@@ -54,6 +54,8 @@ export type OwnedCodexLaunchRequest = {
   prompt: string;
   model?: string;
   effort?: ThinkingEffort;
+  laneId?: string;
+  packetId?: string;
 };
 
 export type OwnedCodexLaunchResponse = {

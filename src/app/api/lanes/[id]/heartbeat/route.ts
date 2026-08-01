@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { getLane } from '@/lib/lane/registry';
 import { recordLaneHeartbeat } from '@/lib/lane/reaper';
 import { checkSessionBindingFault } from '@/lib/lane/session-binding-fault';
 
@@ -14,6 +16,10 @@ export async function POST(
   if (denied) return denied;
 
   const { id } = await params;
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), getLane(id)?.packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
   const body = await req.json().catch(() => null) as { heartbeatAt?: unknown } | null;
   const heartbeatAt = typeof body?.heartbeatAt === 'number' && Number.isFinite(body.heartbeatAt)
     ? body.heartbeatAt

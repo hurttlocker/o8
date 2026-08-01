@@ -23,7 +23,7 @@ const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
 const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
-const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
+const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { dispatch } = await import('@/lib/lane/commands');
 const { decideSurfaceMerge } = await import('@/lib/lane/surface-merge-decision');
@@ -453,7 +453,10 @@ describe('requireApproval merge governance through the real command path', () =>
     const worker = await createStandardLane('surface-worker-explicit', true, true);
     const workerDispatcherId = `thoughts-worker-${Date.now()}`;
     persistDispatcherMission(worker.lane.packetId!, worker.repo, workerDispatcherId);
-    const workerResponse = await mergeRoute.POST(mergeRequest(getOrCreateLocalWorkerToken(), worker.lane.packetId!));
+    const workerResponse = await mergeRoute.POST(mergeRequest(
+      mintPacketWorkerToken(worker.lane.packetId!),
+      worker.lane.packetId!,
+    ));
     const workerPayload = await workerResponse.json();
 
     expect(workerResponse.status).toBe(200);

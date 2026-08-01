@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { previewPacketMerge } from '@/lib/lane/preview-merge';
 import { branchUnresolvedPayload, LaneBranchUnresolvedError } from '@/lib/lane/review-target';
 
@@ -23,6 +24,10 @@ export async function GET(request: NextRequest) {
   const packetId = request.nextUrl.searchParams.get('packetId')?.trim();
   if (!packetId) {
     return NextResponse.json({ error: 'packetId is required.' }, { status: 400 });
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   try {

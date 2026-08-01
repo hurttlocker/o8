@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readPacketTranscriptEvents, readSessionTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { findLaneBySession } from '@/lib/lane/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,6 +51,11 @@ export async function GET(request: NextRequest) {
       { ok: false, error: { code: 'packet_id_required', message: 'packetId or sessionKey is required' } },
       { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
+  }
+  const resolvedPacketId = packetId || findLaneBySession(sessionKey)?.packetId || null;
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), resolvedPacketId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   try {

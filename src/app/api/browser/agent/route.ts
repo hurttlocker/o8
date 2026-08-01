@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { browserAgentEval, nativeReturnEval } from '@/lib/mcp/o8-webview-tools';
 import { getBrowserEngine } from '@/lib/browser-engine/engine';
@@ -200,6 +201,10 @@ export async function POST(request: NextRequest) {
   }
   const args = (body?.args && typeof body.args === 'object' ? body.args : {}) as Record<string, unknown>;
   const packetId = typeof body?.packetId === 'string' && body.packetId ? body.packetId : null;
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
   const scope = packetId ?? 'operator';
 
   // Native-only Design Mode click-to-grab (Stage 4b) — handled before engine

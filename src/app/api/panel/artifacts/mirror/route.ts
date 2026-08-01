@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { mirrorProofToPr } from '@/lib/artifacts/pr-mirror';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { getLane } from '@/lib/lane/registry';
 
 /**
  * POST /api/panel/artifacts/mirror — mirror a packet/lane's before/after proof
@@ -27,6 +29,13 @@ export async function POST(request: Request) {
   }
   if (!packetId && !laneId) {
     return NextResponse.json({ error: 'Provide packetId or laneId.' }, { status: 400 });
+  }
+  const ownershipRefusal = workerPacketRefusal(
+    resolveRequestPrincipalContext(request),
+    packetId || (laneId ? getLane(laneId)?.packetId : null),
+  );
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   const result = await mirrorProofToPr({ repoSlug, prNumber, packetId, laneId });

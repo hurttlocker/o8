@@ -16,6 +16,8 @@ import {
   type ArtifactPhase,
 } from '@/lib/artifacts/store';
 import { publishArtifactRecorded } from '@/lib/realtime/publisher';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { getLane } from '@/lib/lane/registry';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25MB — generous for PNG; videos gate later.
 const VALID_SOURCES: ReadonlySet<string> = new Set<ArtifactSource>(['agent-capture', 'review-boundary', 'manual']);
@@ -86,6 +88,13 @@ export async function GET(request: Request) {
   if (!packetId && prNumber === null && !laneId && !threadId) {
     return NextResponse.json({ error: 'Provide one of packetId, prNumber, laneId, threadId.' }, { status: 400 });
   }
+  const ownershipRefusal = workerPacketRefusal(
+    resolveRequestPrincipalContext(request),
+    packetId || (laneId ? getLane(laneId)?.packetId : null),
+  );
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
 
   try {
     const rows = listArtifacts({ packetId, prNumber, laneId, threadId });
@@ -139,6 +148,13 @@ export async function POST(request: Request) {
 
   if (buffer.length > MAX_BYTES) {
     return NextResponse.json({ error: `Artifact too large (max ${Math.round(MAX_BYTES / 1024 / 1024)} MB).` }, { status: 413 });
+  }
+  const ownershipRefusal = workerPacketRefusal(
+    resolveRequestPrincipalContext(request),
+    meta.packetId || (meta.laneId ? getLane(meta.laneId)?.packetId : null),
+  );
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   const id = newArtifactId();

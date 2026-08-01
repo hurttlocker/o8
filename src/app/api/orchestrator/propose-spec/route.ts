@@ -6,6 +6,7 @@ import { findLaneByPacket } from '@/lib/lane/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -49,6 +50,10 @@ export async function POST(request: NextRequest) {
   const packetId = readPacketId(record.packetId);
   if (!packetId) {
     return operatorError('invalid_request', 'packetId is required.', 400);
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
   }
 
   const proposedSpec = typeof record.proposedSpec === 'string' ? record.proposedSpec : '';

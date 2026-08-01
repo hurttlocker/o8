@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { loadMergeModule } from '@/lib/orchestrator/operator-mission-service/merge-warmup';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
@@ -47,11 +47,15 @@ export async function POST(request: NextRequest) {
   // otherwise a worker could omit the flag and take the direct-merge path
   // (SECURITY_AUDIT_2026-07-02 §HIGH-4). The body flag is retained as an
   // additional signal for older CLIs.
-  const principal = resolveRequestPrincipal(request);
-  if (principal !== 'operator' && principal !== 'worker') {
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
     return operatorError('forbidden', 'Merging packets requires an operator or dispatched-worker credential.', 403);
   }
-  const isWorkerContext = record.requestedByWorker === true || principal === 'worker';
+  const ownershipRefusal = workerPacketRefusal(principal, packetId);
+  if (ownershipRefusal) {
+    return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
+  }
+  const isWorkerContext = record.requestedByWorker === true || principal.role === 'worker';
   if (isWorkerContext) {
     const { findLaneByPacket } = await import('@/lib/lane/registry');
     const lane = findLaneByPacket(packetId);

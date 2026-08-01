@@ -167,6 +167,7 @@ export interface LaunchOptions {
   worktreeFlag?: string;
   worktreePath?: string;
   laneId?: string;
+  packetId?: string;
 }
 
 // ── Telemetry ──

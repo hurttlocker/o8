@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import {
+  resolveRequestPrincipal,
+  resolveRequestPrincipalContext,
+  type RequestPrincipalContext,
+} from '@/lib/auth/principal';
 import {
   addSessionRule,
   listSessionRules,
@@ -33,10 +37,9 @@ function findPacketForWorker(packetId: string): OrchestratorPacket | null {
   return registry?.mission.packets.find((packet) => packet.id === packetId) ?? null;
 }
 
-function workerMayReadThread(request: NextRequest, threadId: string): boolean {
-  const packetId = request.headers.get('x-o8-worker-packet-id')?.trim() ?? '';
-  if (!packetId) return false;
-  const packet = findPacketForWorker(packetId);
+function workerMayReadThread(principal: RequestPrincipalContext, threadId: string): boolean {
+  if (principal.role !== 'worker' || !principal.packetId) return false;
+  const packet = findPacketForWorker(principal.packetId);
   return packet?.orchestratorThreadId === threadId;
 }
 
@@ -51,8 +54,8 @@ export async function GET(request: NextRequest) {
   if (!threadId) {
     return operatorError('invalid_request', 'threadId query param is required.', 400);
   }
-  const principal = resolveRequestPrincipal(request);
-  if (principal !== 'operator' && (principal !== 'worker' || !workerMayReadThread(request, threadId))) {
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role !== 'operator' && !workerMayReadThread(principal, threadId)) {
     return operatorError('forbidden', 'A dispatched worker can only read session rules for the thread that dispatched its packet.', 403);
   }
   try {

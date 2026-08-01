@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { stopPacket, stopAllLanes } from '@/lib/orchestrator/stop-packet';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -29,6 +30,10 @@ export async function POST(request: NextRequest) {
     const packetId = typeof record.packetId === 'string' ? record.packetId.trim() : '';
     if (!packetId) {
       return operatorError('invalid_request', 'packetId is required (or pass all:true).', 400);
+    }
+    const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+    if (ownershipRefusal) {
+      return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
     }
     const result = await stopPacket(packetId);
     return operatorSuccess(result);

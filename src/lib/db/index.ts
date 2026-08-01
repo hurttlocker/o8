@@ -20,6 +20,7 @@ import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migr
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-migration';
 import { ensureSessionOutcomeRoutingColumns } from '@/lib/db/session-outcome-routing-migration';
+import { ensureWorkerTokenStorage } from '@/lib/db/worker-token-migration';
 import { ensureV14Fts5Schema } from '@/lib/db/v14-fts5-migration';
 import { ensureV15CommentsFtsSchema } from '@/lib/db/v15-comments-fts-migration';
 import { ensureV16DocsFtsSchema } from '@/lib/db/v16-docs-fts-migration';
@@ -126,6 +127,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureProjectsTables(sqlite);
   ensureProjectScopeColumns(sqlite);
   ensureMissionStateColumn(sqlite);
+  ensureWorkerTokenStorage(sqlite);
   // #915 sub-1 — Schema v14 — Q&A retrieval foundation. FTS5 virtual tables
   // for outcomes/prs/issues/directives plus qa_eval_runs table. Skips with a
   // warning when FTS5 isn't compiled in. Always-on via the same idempotent
@@ -526,6 +528,7 @@ export function getDbPath(): string {
  * When we move to PostgreSQL, we'll use proper migrations.
  */
 function ensureTables(sqlite: Database.Database): void {
+  ensureWorkerTokenStorage(sqlite);
   const approvalsTablePreviouslyMissing = !sqlite
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'approvals'`)
     .get();
@@ -835,16 +838,6 @@ function ensureTables(sqlite: Database.Database): void {
       demoted_at TEXT,
       created_at TEXT NOT NULL,
       last_used_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS worker_tokens (
-      id TEXT PRIMARY KEY,
-      token_hash TEXT NOT NULL UNIQUE,
-      label TEXT,
-      scope TEXT NOT NULL,
-      max_workers INTEGER NOT NULL DEFAULT 10,
-      created_at TEXT NOT NULL,
-      revoked_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS worker_runs (

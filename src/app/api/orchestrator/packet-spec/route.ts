@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { readPacketSpec, writePacketSpec } from '@/lib/orchestrator/packet-spec';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -21,6 +22,10 @@ export async function GET(request: NextRequest) {
   const packetId = readPacketId(request.nextUrl.searchParams.get('packetId'));
   if (!packetId) {
     return operatorError('invalid_request', 'packetId is required.', 400);
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
   }
 
   try {
@@ -45,6 +50,10 @@ export async function PUT(request: NextRequest) {
   const packetId = readPacketId(record.packetId);
   if (!packetId) {
     return operatorError('invalid_request', 'packetId is required.', 400);
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
   }
 
   const content = typeof record.content === 'string' ? record.content : '';

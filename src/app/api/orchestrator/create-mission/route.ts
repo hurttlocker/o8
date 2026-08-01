@@ -13,7 +13,7 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
-import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import type { PacketDispatcherAttribution } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -70,10 +70,10 @@ function normalizeComparisonModels(value: unknown): string[] | undefined {
 }
 
 function resolveDispatcher(request: NextRequest, record: Record<string, unknown>): PacketDispatcherAttribution {
-  const principal = resolveRequestPrincipal(request);
+  const principal = resolveRequestPrincipalContext(request);
   const workerPacketId = request.headers.get('x-o8-worker-packet-id')?.trim() ?? '';
-  if (principal === 'worker') {
-    return { surface: 'agent', id: workerPacketId || 'unknown-worker' };
+  if (principal.role === 'worker') {
+    return { surface: 'agent', id: principal.packetId || workerPacketId || 'unknown-worker' };
   }
 
   const threadId = typeof record.orchestratorThreadId === 'string' ? record.orchestratorThreadId.trim() : '';

@@ -39,6 +39,7 @@ import { findCurrentSpokenReviewApproval } from '@/lib/orchestrator/spoken-revie
 import { fingerprintSpokenReviewGovernance } from '@/lib/orchestrator/spoken-review-governance';
 import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -197,6 +198,10 @@ export async function GET(request: NextRequest) {
   }
   if (!packetId) {
     return errorResponse('invalid_request', 'packetId or sessionKey query parameter is required.', 400);
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  if (ownershipRefusal) {
+    return errorResponse(ownershipRefusal.code, ownershipRefusal.message, 403);
   }
   const includeSpokenReview = request.nextUrl.searchParams.get('spoken') === '1';
   const spokenApprovalId = request.nextUrl.searchParams.get('approvalId')?.trim() ?? '';

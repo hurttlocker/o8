@@ -238,6 +238,8 @@ export const opencodeRuntime: AgentRuntime = {
       cwd: opts.cwd,
       prompt: opts.prompt,
       model: opts.model,
+      laneId: opts.laneId,
+      packetId: opts.packetId,
     });
     if (result.ok && result.surfaceId) {
       scheduleOpencodeUsageDispatch(

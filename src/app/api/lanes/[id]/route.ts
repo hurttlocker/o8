@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { getLane, getLaneEvents } from '@/lib/lane/registry';
 
 export const runtime = 'nodejs';
@@ -16,6 +17,10 @@ export async function GET(
   const lane = getLane(id);
   if (!lane) {
     return NextResponse.json({ ok: false, note: 'Lane not found.' }, { status: 404 });
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), lane.packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   const url = new URL(req.url);

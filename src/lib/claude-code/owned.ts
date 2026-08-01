@@ -114,6 +114,8 @@ export async function launchOwnedClaudeCodeSession(request: {
   prompt: string;
   model?: string;
   effort?: ThinkingEffort;
+  laneId?: string;
+  packetId?: string;
 }) {
   return claudeCodeOwnedStore.launch(request);
 }

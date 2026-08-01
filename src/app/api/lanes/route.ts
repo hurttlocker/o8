@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { resolveRequestPrincipal } from '@/lib/auth/principal';
-import { getLaneEvents, listLanes, listActiveLanes } from '@/lib/lane/registry';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { getLane, getLaneEvents, listLanes, listActiveLanes } from '@/lib/lane/registry';
 import { summarizeLaneArchive } from '@/lib/lane/archive-summary';
 import { collapseArchivedLanesByTask } from '@/lib/lanes/collapse-archived-by-task';
 import { codename } from '@/lib/agents/codename';
@@ -32,7 +32,11 @@ export async function GET(req: NextRequest) {
   // pass through untouched; only retired (archived/completed) lanes collapse.
   const collapse = url.searchParams.get('collapse') === 'true';
 
-  const baseLanes = activeOnly ? listActiveLanes() : listLanes();
+  const principal = resolveRequestPrincipalContext(req);
+  const visibleLanes = activeOnly ? listActiveLanes() : listLanes();
+  const baseLanes = principal.role === 'worker'
+    ? visibleLanes.filter((lane) => Boolean(principal.packetId) && lane.packetId === principal.packetId)
+    : visibleLanes;
   const resolvedLanes = collapse
     ? [
         ...baseLanes.filter((lane) => lane.status !== 'archived' && lane.status !== 'completed'),
@@ -79,10 +83,22 @@ export async function POST(req: NextRequest) {
   // 'orchestrator', which routes governed verbs through the approval card
   // exactly like /api/orchestrator/merge's worker branch. Internal server
   // callers import dispatch() directly and are unaffected.
-  const principal = resolveRequestPrincipal(req);
+  const principal = resolveRequestPrincipalContext(req);
+  const commandPacketId = body.verb === 'open_lane'
+    ? body.packetId ?? null
+    : 'laneId' in body
+      ? getLane(body.laneId)?.packetId ?? null
+      : null;
+  const ownershipRefusal = workerPacketRefusal(principal, commandPacketId);
+  if (ownershipRefusal) {
+    return NextResponse.json(
+      { ok: false, error: { code: ownershipRefusal.code, message: ownershipRefusal.message } },
+      { status: 403 },
+    );
+  }
   const command: LaneCommand = {
     ...body,
-    actor: principal === 'operator' ? (body.actor ?? 'user') : 'orchestrator',
+    actor: principal.role === 'operator' ? (body.actor ?? 'user') : 'orchestrator',
   };
 
   try {

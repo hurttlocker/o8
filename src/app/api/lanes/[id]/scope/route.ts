@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { getPacketScope } from '@/lib/lanes/scope';
 
 export const runtime = 'nodejs';
@@ -17,6 +18,10 @@ export async function GET(
     ?? await getPacketScope({ packetId: id });
   if (!scope) {
     return NextResponse.json({ ok: false, note: 'Packet scope not found.' }, { status: 404 });
+  }
+  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), scope.packetId);
+  if (ownershipRefusal) {
+    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   return NextResponse.json(scope, {
