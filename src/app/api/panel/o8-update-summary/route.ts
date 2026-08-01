@@ -1,11 +1,12 @@
 /**
  * /api/panel/o8-update-summary — slim summarizer for the UpdateCard.
  *
- * Pulls a GitHub release (and its commit list) for o8 itself and runs
- * the body through one of the free OpenRouter models (same pool the
- * scratch chat / GitHub summary route uses). Returns a 1–2 sentence
- * professional paragraph the operator can read in the AgentPanel
- * sidebar without opening the GH release page.
+ * Pulls a GitHub release (and its commit list) for o8 itself and writes
+ * a 1–2 sentence professional paragraph the operator can read in the
+ * AgentPanel sidebar without opening the GH release page. Model ladder
+ * (Q ruling 2026-07-31): the o8-default gateway model first (the ship
+ * note deserves the stronger house model), then the free OpenRouter
+ * pool, then the non-LLM digest — the note never gates on inference.
  *
  * Pure GET — no body required, version is a query param so this is safe
  * to cache by version. Stays read-only and never falls outside o8's
@@ -103,13 +104,8 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-async function summarizeWithOpenRouter(prompt: string): Promise<string> {
-  const route = await resolveOpenRouterRoute();
-  if (!route) {
-    throw new Error('No inference route — set an OpenRouter key or apply a plan.');
-  }
-
-  const messages = [
+function summaryMessages(prompt: string) {
+  return [
     {
       role: 'system',
       content: [
@@ -122,6 +118,41 @@ async function summarizeWithOpenRouter(prompt: string): Promise<string> {
     },
     { role: 'user', content: prompt },
   ];
+}
+
+/// o8-default first: plain fetch to the Vercel AI Gateway's OpenAI-compatible
+/// endpoint (the ai-SDK carve-out stays scoped to chat/gateway-client.ts).
+/// max_tokens stays generous — the V4-Flash gateway build thinks before it
+/// writes, and a starved budget returns an empty 200. Null = fall through.
+async function summarizeWithGatewayDefault(prompt: string): Promise<string | null> {
+  const key = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
+  if (!key) return null;
+  try {
+    const response = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'deepseek/deepseek-v4-flash',
+        messages: summaryMessages(prompt),
+        max_tokens: 2048,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) return null;
+    const parsed = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return parsed.choices?.[0]?.message?.content?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function summarizeWithOpenRouter(prompt: string): Promise<string> {
+  const route = await resolveOpenRouterRoute();
+  if (!route) {
+    throw new Error('No inference route — set an OpenRouter key or apply a plan.');
+  }
+
+  const messages = summaryMessages(prompt);
 
   const failures: string[] = [];
   for (const model of route.model ? [route.model] : summaryModels()) {
@@ -216,7 +247,7 @@ export async function GET(request: NextRequest) {
     let summary: string;
     let fallback = false;
     try {
-      summary = await summarizeWithOpenRouter(prompt);
+      summary = await summarizeWithGatewayDefault(prompt) ?? await summarizeWithOpenRouter(prompt);
     } catch {
       // Prefer changelog entries over commit titles — the o8-releases repo's
       // own commit subjects are "sync: Update changelog" noise.

@@ -39,7 +39,9 @@ const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const POLL_MS = 30_000;
 const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 const DOCS_URL = 'https://o8.run';
-const DISCORD_URL = 'https://discord.gg/uSU9TXsk5d';
+// The canonical community invite — MUST match the README footer + o8.run
+// (the drawer previously carried a different, stale invite).
+const DISCORD_URL = 'https://discord.gg/gH3UbbTJ7k';
 // Paint the panel token directly — NOT through color-mix. In glass mode
 // --t-panel-solid is a linear-gradient (an <image>), and color-mix() only
 // accepts <color> args, so the old color-mix() was invalid CSS → the whole
@@ -324,12 +326,13 @@ function separatorStyle(): CSSProperties {
   };
 }
 
-/** Founding Operator mark — the hairline serial chip ("FOUNDING · 001"),
- *  founders-only. Lives on the drawer's account row, not in the always-visible
- *  chrome (Q ruling 2026-07-27): founder identity shows only once settings is
- *  opened. The one founding orange (#ff5a1f, the founders-wall + edition
- *  color) marks the serial. Hides while View-as-free is active because the
- *  effective entitlement's `founder` goes null under the override. */
+/** Founding Operator mark — founders-only, drawer account row ONLY (Q ruling
+ *  2026-07-27: founder identity shows only once settings is opened). Restyled
+ *  2026-07-31 (Q: the bordered FOUNDING pill read too loud and sat glued to
+ *  the drawer's right edge): now the quiet plain-dot vocabulary — one founding
+ *  orange dot + the tabular serial, no box, breathing room from the edge. The
+ *  full title lives in the tooltip. Hides while View-as-free is active because
+ *  the effective entitlement's `founder` goes null under the override. */
 const FOUNDER_ORANGE = '#ff5a1f';
 
 function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
@@ -340,32 +343,21 @@ function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 5,
-        height: 22,
-        paddingLeft: 9,
-        paddingRight: 9,
-        borderRadius: 6,
-        background: 'rgba(255, 90, 31, 0.08)',
-        borderWidth: '0.5px',
-        borderStyle: 'solid',
-        borderColor: 'rgba(255, 90, 31, 0.24)',
-        fontFamily: 'var(--font-sans-system)',
-        fontSize: 10,
-        fontWeight: 500,
-        letterSpacing: '0.11em',
-        textTransform: 'uppercase',
-        color: 'var(--t-text-muted)',
+        gap: 6,
+        marginRight: 5,
         userSelect: 'none',
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }}
     >
-      <span>Founding</span>
-      <span style={{ color: 'var(--t-text-faint)', letterSpacing: 0 }}>·</span>
+      <span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: FOUNDER_ORANGE, opacity: 0.9, flexShrink: 0 }} />
       <span
         style={{
-          color: FOUNDER_ORANGE,
-          letterSpacing: '0.04em',
+          fontFamily: 'var(--font-sans-system)',
+          fontSize: 10.5,
+          fontWeight: 400,
+          letterSpacing: '0.08em',
+          color: 'var(--t-text-muted)',
           fontVariantNumeric: 'tabular-nums',
         }}
       >
@@ -531,6 +523,10 @@ export function SettingsQuickDrawer({
             date: update.date ?? undefined,
           },
         }));
+        // The card mounts BEHIND this drawer's overlay — leaving the drawer
+        // open made "Check for updates" feel like it did nothing (Q report
+        // 2026-07-31). Found an update → get out of its way.
+        window.setTimeout(onClose, 350);
       } else {
         setUpdateStatus('current');
         window.setTimeout(() => setUpdateStatus('idle'), 2600);
@@ -538,7 +534,7 @@ export function SettingsQuickDrawer({
     } catch {
       setUpdateStatus('idle');
     }
-  }, []);
+  }, [onClose]);
 
   const loadUsage = useCallback(async (preserveSnapshot = true) => {
     setUsageState((current) => ({
