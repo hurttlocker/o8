@@ -1,18 +1,16 @@
 /**
  * Brain spend ledger + daily cap (2026-06-11 brain perf pass, Tier-1 guard).
  *
- * The brain's OpenRouter calls go straight to openrouter.ai — they never pass
- * through /api/v2/proxy/llm, so before this module they were invisible to the
- * app's own usage ledger and bounded by nothing but the account's credit
- * balance (the literal failure mode that motivated the 402 circuit breaker).
+ * The brain's direct provider calls do not pass through /api/v2/proxy/llm, so
+ * without this module they are invisible to the app's usage ledger and bounded
+ * only by the provider account's credit balance.
  *
  * Two jobs:
- *   1. Record every successful brain OpenRouter call into usage_logs
+ *   1. Record every successful paid Brain call into usage_logs
  *      (agentName 'cortex-qa') so spend is visible in the usage dashboard.
  *   2. Enforce a hard daily cap (O8_QA_OPENROUTER_DAILY_CAP_USD, default
- *      $0.50/day). When the cap is hit the OpenRouter tier throws and the
- *      cascade falls through to the free subscription/Flash tiers — the brain
- *      keeps answering, it just stops spending.
+ *      $0.50/day). Existing Q&A callers may fall through to free tiers; palette
+ *      Recall stops and renders nothing.
  *
  * Both paths fail-open on DB errors: a broken ledger must never take the
  * fast tier down with it (the cap is a spend guardrail, not a correctness
@@ -47,6 +45,8 @@ export interface OpenRouterUsage {
   cost?: number;
 }
 
+type BrainSpendProvider = 'google' | 'openrouter';
+
 export function estimateCostUsd(model: string, usage: OpenRouterUsage): number {
   if (typeof usage.cost === 'number' && usage.cost >= 0) return usage.cost;
   const pricing = MODEL_PRICING_PER_TOKEN[model] ?? WORST_CASE_PRICING;
@@ -54,10 +54,15 @@ export function estimateCostUsd(model: string, usage: OpenRouterUsage): number {
 }
 
 /**
- * Fire-and-forget: write one brain OpenRouter call into usage_logs. Never
+ * Fire-and-forget: write one Brain provider call into usage_logs. Never
  * throws — a ledger failure must not fail the answer that already succeeded.
  */
-export function recordBrainOpenRouterSpend(model: string, usage: OpenRouterUsage): void {
+function recordBrainSpend(
+  provider: BrainSpendProvider,
+  model: string,
+  usage: OpenRouterUsage,
+  requestType: 'chat' | 'embedding',
+): void {
   // Invalidate the cap memo SYNCHRONOUSLY, before the async ledger write —
   // resetting it inside the async block left a window where every concurrent
   // ask kept reading the stale (lower) memo and sailed past the cap check
@@ -70,16 +75,39 @@ export function recordBrainOpenRouterSpend(model: string, usage: OpenRouterUsage
       logUsage({
         userId: null,
         model,
-        provider: 'openrouter',
+        provider,
         inputTokens: usage.prompt_tokens ?? 0,
         outputTokens: usage.completion_tokens ?? 0,
         costUsd: estimateCostUsd(model, usage),
         agentName: BRAIN_AGENT_NAME,
+        requestType,
       });
     } catch (err) {
       console.warn('[qa][brain-spend] ledger write failed:', err instanceof Error ? err.message : err);
     }
   })();
+}
+
+export function recordBrainOpenRouterSpend(model: string, usage: OpenRouterUsage): void {
+  recordBrainSpend('openrouter', model, usage, 'chat');
+}
+
+/**
+ * Gemini endpoints do not consistently return token usage. Estimate from text
+ * length and charge the unknown-model worst-case rate so the daily cap remains
+ * conservative. This puts embeddings and direct Flash calls in the same Brain
+ * ledger as OpenRouter rather than leaving a paid side channel unmetered.
+ */
+export function recordBrainGeminiSpend(
+  model: string,
+  inputText: string,
+  outputText = '',
+  requestType: 'chat' | 'embedding' = 'chat',
+): void {
+  recordBrainSpend('google', model, {
+    prompt_tokens: Math.max(1, Math.ceil(inputText.length / 4)),
+    completion_tokens: outputText ? Math.ceil(outputText.length / 4) : 0,
+  }, requestType);
 }
 
 // 60s memo so the cap check doesn't run a SQL sum on every single ask.

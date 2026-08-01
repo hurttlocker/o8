@@ -25,24 +25,22 @@ import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, rowDisplayTitle, type ComposeOptions, type SseEmit } from '@/lib/cortex/qa/composer';
 import { rowFullText } from '@/lib/cortex/qa/citations';
 import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
-import { dot, embedQuestion } from '@/lib/cortex/qa/llm/gemini-embed';
+import { embedQuestion } from '@/lib/cortex/qa/llm/gemini-embed';
 import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { prewarmSonnetCli } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { detectLiteralLookup } from '@/lib/cortex/qa/literal-lookup';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
+import {
+  findSemanticMatch,
+  invalidateRegisteredSemanticCaches,
+  normalizeSemanticCacheQuestion,
+} from '@/lib/cortex/qa/semantic-cache';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 // ── In-process cache ──────────────────────────────────────────────────────────
 
 const CACHE_TTL_MS = 30 * 60_000;
-
-/** Cosine floor for a semantic cache hit (#1226). Calibrated live against
- *  gemini-embedding-001 (2026-06-11): a true rephrase measures ~0.905,
- *  unrelated questions ~0.51-0.55. 0.86 sits well below real rephrasings
- *  and far above the unrelated band — a wrong reuse is worse than a re-ask,
- *  so the margin leans conservative. */
-const SEMANTIC_HIT_THRESHOLD = 0.86;
 
 interface CacheEntry {
   answer: string;
@@ -66,20 +64,7 @@ function scopeKey(repoPath: string | undefined, projectId: string | undefined, t
  * Scan same-scope vectored entries for a cosine-near duplicate (#1226).
  * Pure given the candidates — exported for tests.
  */
-export function findSemanticMatch(
-  vector: number[],
-  candidates: Array<{ key: string; vector: number[] }>,
-  threshold = SEMANTIC_HIT_THRESHOLD,
-): { key: string; score: number } | null {
-  let best: { key: string; score: number } | null = null;
-  for (const candidate of candidates) {
-    const score = dot(vector, candidate.vector);
-    if (score >= threshold && (best === null || score > best.score)) {
-      best = { key: candidate.key, score };
-    }
-  }
-  return best;
-}
+export { findSemanticMatch } from '@/lib/cortex/qa/semantic-cache';
 
 /**
  * Semantic lookup: agent fleets ask the same thing ten structurally-different
@@ -127,9 +112,7 @@ function attachVector(key: string, question: string): void {
  * are the same question — the classifier cache already normalizes this way,
  * the answer cache historically didn't.
  */
-export function normalizeQuestionForCache(question: string): string {
-  return question.trim().toLowerCase().replace(/\s+/g, ' ');
-}
+export const normalizeQuestionForCache = normalizeSemanticCacheQuestion;
 
 /**
  * Drop every cached answer. Called by the knowledge write paths (spec ingest,
@@ -138,6 +121,7 @@ export function normalizeQuestionForCache(question: string): string {
  */
 export function invalidateAnswerCache(): void {
   answerCache.clear();
+  invalidateRegisteredSemanticCaches();
 }
 
 function cacheKey(

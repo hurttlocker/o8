@@ -32,6 +32,7 @@ import {
   statusRowStyle,
   type GroupKey,
 } from './command-palette-styles';
+import { shouldRequestRecall } from '@/lib/search/recall-trigger';
 
 export type CommandPaletteSearchKind =
   | 'issue'
@@ -41,7 +42,8 @@ export type CommandPaletteSearchKind =
   | 'transcript'
   | 'approval'
   | 'inbox'
-  | 'directive';
+  | 'directive'
+  | 'recall';
 
 export interface CommandPaletteSearchTarget {
   issueNumber?: number;
@@ -129,6 +131,7 @@ interface SearchResponse {
 const RECENTS_KEY = 'o8:command-palette:recents:v1';
 const RECENTS_MAX = 8;
 const DEBOUNCE_MS = 200;
+const RECALL_DEBOUNCE_MS = 350;
 const EMPTY_GROUPS: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]> = {
   issue: [],
   file: [],
@@ -138,6 +141,7 @@ const EMPTY_GROUPS: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[
   approval: [],
   inbox: [],
   directive: [],
+  recall: [],
 };
 
 const SCOPE_TABS: Array<{ id: PaletteScope; label: string }> = [
@@ -159,6 +163,7 @@ const KIND_ICON: Record<CommandPaletteSearchKind, PaletteIconKind> = {
   approval: 'approval',
   inbox: 'inbox',
   directive: 'directive',
+  recall: 'directive',
 };
 
 function isSearchKind(value: unknown): value is CommandPaletteSearchKind {
@@ -169,7 +174,8 @@ function isSearchKind(value: unknown): value is CommandPaletteSearchKind {
     || value === 'transcript'
     || value === 'approval'
     || value === 'inbox'
-    || value === 'directive';
+    || value === 'directive'
+    || value === 'recall';
 }
 
 function readRecents(): CommandPaletteRecent[] {
@@ -276,6 +282,8 @@ export const CommandPalette = memo(function CommandPalette({
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<PaletteScope>('all');
   const [groups, setGroups] = useState<Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]>>(EMPTY_GROUPS);
+  const [recallResults, setRecallResults] = useState<CommandPaletteSearchResult[]>([]);
+  const [recallCandidate, setRecallCandidate] = useState<{ query: string; keywordHits: number } | null>(null);
   const [recents, setRecents] = useState<CommandPaletteRecent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +292,9 @@ export const CommandPalette = memo(function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const recallDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recallAbortRef = useRef<AbortController | null>(null);
+  const lastRecallKeyRef = useRef('');
   const listRef = useRef<HTMLDivElement>(null);
   const selectedIndexRef = useRef(0);
 
@@ -292,6 +303,9 @@ export const CommandPalette = memo(function CommandPalette({
     setQuery('');
     setScope('all');
     setGroups(EMPTY_GROUPS);
+    setRecallResults([]);
+    setRecallCandidate(null);
+    lastRecallKeyRef.current = '';
     setRecents(readRecents());
     setLoading(false);
     setError(null);
@@ -310,6 +324,16 @@ export const CommandPalette = memo(function CommandPalette({
       abortRef.current.abort();
       abortRef.current = null;
     }
+    if (recallDebounceRef.current) {
+      clearTimeout(recallDebounceRef.current);
+      recallDebounceRef.current = null;
+    }
+    if (recallAbortRef.current) {
+      recallAbortRef.current.abort();
+      recallAbortRef.current = null;
+    }
+    setRecallResults([]);
+    setRecallCandidate(null);
 
     const trimmed = query.trim();
     const browseScope = scope === 'agent'
@@ -348,6 +372,12 @@ export const CommandPalette = memo(function CommandPalette({
           return;
         }
         setGroups(data.groups ?? EMPTY_GROUPS);
+        const keywordHits = Array.isArray(data.results)
+          ? data.results.length
+          : Object.values(data.groups ?? EMPTY_GROUPS).reduce((sum, entries) => sum + entries.length, 0);
+        if (scope === 'all' && shouldRequestRecall(trimmed, keywordHits)) {
+          setRecallCandidate({ query: trimmed, keywordHits });
+        }
         setError(null);
       } catch (caught) {
         if ((caught as { name?: string })?.name === 'AbortError') return;
@@ -363,6 +393,38 @@ export const CommandPalette = memo(function CommandPalette({
       if (abortRef.current) abortRef.current.abort();
     };
   }, [open, query, repo, scope, workspace]);
+
+  useEffect(() => {
+    if (!open || !recallCandidate || scope !== 'all') return;
+    const key = `${recallCandidate.query}\u0000${workspace ?? ''}\u0000${repo ?? ''}`;
+    if (lastRecallKeyRef.current === key) return;
+
+    recallDebounceRef.current = setTimeout(async () => {
+      lastRecallKeyRef.current = key;
+      const controller = new AbortController();
+      recallAbortRef.current = controller;
+      try {
+        const params = new URLSearchParams({
+          q: recallCandidate.query,
+          mode: 'recall',
+          keywordHits: String(recallCandidate.keywordHits),
+        });
+        if (workspace) params.set('workspace', workspace);
+        if (repo) params.set('repo', repo);
+        const response = await fetch(`/api/panel/search?${params.toString()}`, { signal: controller.signal });
+        if (!response.ok) return;
+        const data = await response.json() as SearchResponse;
+        setRecallResults(data.groups?.recall ?? []);
+      } catch {
+        // Recall is optional and never replaces the keyword result surface.
+      }
+    }, RECALL_DEBOUNCE_MS);
+
+    return () => {
+      if (recallDebounceRef.current) clearTimeout(recallDebounceRef.current);
+      if (recallAbortRef.current) recallAbortRef.current.abort();
+    };
+  }, [open, recallCandidate, repo, scope, workspace]);
 
   const filteredActionItems = useMemo<PaletteItem[]>(() => {
     if (!actionItems?.length) return [];
@@ -425,8 +487,11 @@ export const CommandPalette = memo(function CommandPalette({
     appendGroup('approval');
     appendGroup('inbox');
     appendGroup('directive');
+    for (const result of recallResults) {
+      ordered.push(paletteItemForResult(result, query));
+    }
     return ordered;
-  }, [filteredActionItems, groups, query, recents, scope]);
+  }, [filteredActionItems, groups, query, recallResults, recents, scope]);
 
   const items = useMemo(
     () => scope === 'all' ? unscopedItems : unscopedItems.filter((item) => item.scope === scope),

@@ -43,6 +43,7 @@ const GROUP_LABEL: Record<GroupKey, string> = {
   approval: 'Approvals',
   inbox: 'Inbox',
   directive: 'Rules',
+  recall: 'Recall',
 };
 
 export const PaletteList = memo(function PaletteList({

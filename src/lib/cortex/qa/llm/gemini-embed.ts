@@ -14,6 +14,10 @@
 
 import 'server-only';
 
+import {
+  assertUnderBrainDailyCap,
+  recordBrainGeminiSpend,
+} from '@/lib/cortex/qa/llm/brain-spend';
 import { resolveEmbedRoute } from '@/lib/cortex/qa/llm/inference-route';
 
 // text-embedding-004 was RETIRED (404, verified live 2026-06-11) — same
@@ -21,7 +25,7 @@ import { resolveEmbedRoute } from '@/lib/cortex/qa/llm/inference-route';
 // replacement; 768-dim truncation (re-normalized below) keeps entries at
 // 1/4 memory with an identical rephrase-vs-unrelated cosine gap (measured
 // 0.905 vs 0.505 at both 3072 and 768 dims).
-const EMBED_MODEL = 'gemini-embedding-001';
+export const EMBED_MODEL = 'gemini-embedding-001';
 const EMBED_DIMS = 768;
 const EMBED_TIMEOUT_MS = 5_000;
 
@@ -42,12 +46,17 @@ export function dot(a: number[], b: number[]): number {
   return sum;
 }
 
+export function hasEmbeddingRoute(): boolean {
+  return resolveEmbedRoute(EMBED_MODEL) !== null;
+}
+
 export async function embedQuestion(text: string): Promise<number[] | null> {
   if (!text.trim()) return null;
   // Direct (local Gemini key) or proxy (plan token) — see inference-route.ts.
   const route = resolveEmbedRoute(EMBED_MODEL);
   if (!route) return null;
   try {
+    await assertUnderBrainDailyCap();
     // The direct Gemini API takes the native `content.parts` shape; the proxy
     // takes a flat `{ text }` (and builds the Gemini body server-side). Both
     // return `{ embedding: { values } }`, so parsing below is identical.
@@ -65,6 +74,7 @@ export async function embedQuestion(text: string): Promise<number[] | null> {
     const json = await res.json() as { embedding?: { values?: number[] } };
     const values = json.embedding?.values;
     if (!Array.isArray(values) || values.length === 0) return null;
+    recordBrainGeminiSpend(EMBED_MODEL, text, '', 'embedding');
     return unitNormalize(values);
   } catch {
     return null;

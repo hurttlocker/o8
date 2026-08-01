@@ -35,12 +35,13 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { TypedRow } from '@/lib/cortex/qa/types';
 
 const runtimeInventoryMock = vi.hoisted(() => ({
   agents: [] as Array<{
@@ -146,6 +147,12 @@ const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await im
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
 const { syncTranscriptSearchDocument } = await import('@/lib/search/transcripts');
+const { getActiveProjectScopeForRepo } = await import('@/lib/repos/projects');
+const {
+  resetRecallCacheForTests,
+  seedRecallCacheForTests,
+  setRecallDependenciesForTests,
+} = await import('@/lib/cortex/qa/recall');
 const {
   runChatHistorySearchBackfill,
   runPacketTranscriptSearchBackfill,
@@ -162,6 +169,7 @@ const {
 afterEach(() => {
   runtimeInventoryMock.agents = [];
   authDetectMock.unauthRuntime = null;
+  resetRecallCacheForTests();
   rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -1159,6 +1167,7 @@ async function searchPersistedRows(query: string) {
   return response.json() as Promise<{
     groups: Record<string, Array<{
       id: string;
+      title: string;
       detail: string;
       target?: Record<string, unknown>;
     }>>;
@@ -1400,5 +1409,161 @@ describe('seam M — the real Cmd+K route searches persisted Stage 1 rows', () =
         target: expect.objectContaining({ approvalId, openInbox: true }),
       }),
     ]));
+  });
+});
+
+// ── Seam N — settled sparse Cmd+K queries reach Brain Recall (#984) ─────────
+
+function recallDirectiveRow(id: string, title: string): TypedRow {
+  return {
+    citation: {
+      kind: 'directive',
+      rowId: id,
+      table: 'directives_fts',
+      excerpt: 'Semantically related directive body.',
+    },
+    fields: { id, title, body: 'Semantically related directive body.' },
+    score: 1,
+  };
+}
+
+async function searchRecallRoute(query: string, keywordHits: number) {
+  const response = await searchRoute.GET(new Request(
+    `http://localhost/api/panel/search?mode=recall&q=${encodeURIComponent(query)}&workspace=${encodeURIComponent(dataDir)}&keywordHits=${keywordHits}`,
+  ));
+  expect(response.status).toBe(200);
+  return response.json() as Promise<{
+    groups: Record<string, Array<{
+      id: string;
+      title: string;
+      target?: Record<string, unknown>;
+    }>>;
+  }>;
+}
+
+describe('seam N — the real Cmd+K route gates and serves semantic Recall', () => {
+  it('runs once for sparse settled results and skips rich keyword results', async () => {
+    const classify = vi.fn(async () => ({ class: 'A' as const, bm25Variants: ['adjacent wording'] }));
+    const stamp = Date.now();
+    const outcomeId = `recall-outcome-${stamp}`;
+    const packetId = `pkt-recall-${stamp}`;
+    const laneId = `lane-recall-${stamp}`;
+    const sessionKey = `codex-recall-${stamp}`;
+    getSqlite().prepare(`
+      INSERT INTO session_outcomes (
+        id, repo_path, runtime, session_key, packet_id, lane_id, outcome, summary,
+        retry_history_json, patterns_json, conflict_zones_json,
+        changed_files_json, started_at, completed_at, valid_from
+      ) VALUES (?, ?, 'codex', ?, ?, ?, 'succeeded', ?,
+        '[]', '[]', '[]', '[]', ?, ?, ?)
+    `).run(
+      outcomeId,
+      dataDir,
+      sessionKey,
+      packetId,
+      laneId,
+      'Recall outcome summary head',
+      new Date(stamp - 1_000).toISOString(),
+      new Date(stamp).toISOString(),
+      new Date(stamp).toISOString(),
+    );
+    const rows: TypedRow[] = [
+      recallDirectiveRow('recall-sparse-directive', 'Sparse semantic directive'),
+      {
+        citation: { kind: 'outcome', rowId: outcomeId, table: 'session_outcomes', excerpt: 'Outcome excerpt' },
+        fields: { summary: 'Recall outcome summary head', repoPath: dataDir },
+        score: 0.9,
+      },
+      {
+        citation: { kind: 'doc', rowId: `doc-${stamp}`, table: 'docs', sourcePath: 'docs/recall.md' },
+        fields: { title: 'Recall architecture document', repoName: basename(dataDir), relPath: 'docs/recall.md' },
+        score: 0.8,
+      },
+    ];
+    setRecallDependenciesForTests({
+      assertSpend: async () => {},
+      classify,
+      embed: async () => [1, 0],
+      hasEmbedding: () => true,
+      retrieve: async () => [{ retriever: 'fts', rows, durationMs: 1 }],
+    });
+
+    const sparse = await searchRecallRoute('adjacent wording', 4);
+    expect(sparse.groups.recall).toEqual([expect.objectContaining({
+      title: 'Sparse semantic directive',
+      target: { directiveId: 'recall-sparse-directive' },
+    }), expect.objectContaining({
+      title: 'Recall outcome summary head',
+      target: { packetId, laneId, sessionKey },
+    }), expect.objectContaining({
+      title: 'Recall architecture document',
+      target: { filePath: join(dataDir, 'docs/recall.md') },
+    })]);
+    expect(classify).toHaveBeenCalledTimes(1);
+
+    const repeatedSparse = await searchRecallRoute('adjacent wording', 4);
+    expect(repeatedSparse.groups.recall).toHaveLength(3);
+    expect(classify).toHaveBeenCalledTimes(1);
+
+    const rich = await searchRecallRoute('another rich query', 5);
+    expect(rich.groups.recall).toEqual([]);
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves a semantically adjacent query from a pre-seeded scope-fenced cache row', async () => {
+    const projectId = (await getActiveProjectScopeForRepo(dataDir)).projectId;
+    const row = recallDirectiveRow('recall-cache-directive', 'Cached Brain citation title');
+    seedRecallCacheForTests({
+      question: 'durable conversation storage',
+      repoPath: dataDir,
+      projectId,
+      rows: [row],
+      vector: [1, 0],
+    });
+    const classify = vi.fn(async () => { throw new Error('classifier must not run on a semantic hit'); });
+    setRecallDependenciesForTests({
+      assertSpend: async () => {},
+      classify,
+      embed: async () => [1, 0],
+      hasEmbedding: () => true,
+    });
+
+    const payload = await searchRecallRoute('keep chat writes consistent', 0);
+    expect(payload.groups.recall).toEqual([expect.objectContaining({
+      title: 'Cached Brain citation title',
+      target: { directiveId: 'recall-cache-directive' },
+    })]);
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it('renders no Recall rows when the Brain daily cap is exhausted', async () => {
+    const classify = vi.fn(async () => ({ class: 'A' as const, bm25Variants: ['must not run'] }));
+    const embed = vi.fn(async () => [1, 0]);
+    setRecallDependenciesForTests({
+      assertSpend: async () => { throw new Error('daily cap reached'); },
+      classify,
+      embed,
+      hasEmbedding: () => true,
+    });
+
+    const payload = await searchRecallRoute('cap exhausted recall', 0);
+    expect(payload.groups.recall).toEqual([]);
+    expect(classify).not.toHaveBeenCalled();
+    expect(embed).not.toHaveBeenCalled();
+  });
+
+  it('renders no Recall rows on a keyless install', async () => {
+    const assertSpend = vi.fn(async () => {});
+    const classify = vi.fn(async () => ({ class: 'A' as const, bm25Variants: ['must not run'] }));
+    setRecallDependenciesForTests({
+      assertSpend,
+      classify,
+      hasEmbedding: () => false,
+    });
+
+    const payload = await searchRecallRoute('keyless recall query', 0);
+    expect(payload.groups.recall).toEqual([]);
+    expect(assertSpend).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
   });
 });

@@ -34,6 +34,10 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import {
+  assertUnderBrainDailyCap,
+  recordBrainGeminiSpend,
+} from '@/lib/cortex/qa/llm/brain-spend';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
@@ -222,6 +226,35 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
   return fallback(question);
 }
 
+/**
+ * Palette Recall must never fall through to subscription CLIs after a paid
+ * tier is unavailable or capped. It may reuse the classifier cache, then tries
+ * only the ledgered HTTP tiers and returns null when neither can answer.
+ */
+export async function classifyQuestionForRecall(question: string): Promise<ClassifierResult | null> {
+  const cached = getCachedClassification(question);
+  if (cached) return cached;
+
+  try {
+    await assertUnderBrainDailyCap();
+  } catch {
+    return null;
+  }
+
+  const prompt = `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`;
+  const openrouterResult = await tryOpenRouter(prompt, question, undefined, 6_000);
+  if (openrouterResult) {
+    setCachedClassification(question, openrouterResult);
+    return openrouterResult;
+  }
+
+  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  const flashResult = await tryFlash(question, apiKey);
+  if (flashResult) setCachedClassification(question, flashResult);
+  return flashResult;
+}
+
 /** Tier 1: Haiku CLI. Returns null on any failure so caller can chain. */
 async function tryHaiku(prompt: string, question: string): Promise<ClassifierResult | null> {
   try {
@@ -279,12 +312,17 @@ async function tryCodex(prompt: string, question: string): Promise<ClassifierRes
 /** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback.
  * Optional `model` override routes to a specific model instead of the primary
  * (used by the eval-mode Haiku-4.5 tier). */
-async function tryOpenRouter(prompt: string, question: string, model?: string): Promise<ClassifierResult | null> {
+async function tryOpenRouter(
+  prompt: string,
+  question: string,
+  model?: string,
+  timeoutMs = 25_000,
+): Promise<ClassifierResult | null> {
   try {
     // 25s — bumped from 10s alongside composer's bump to handle multi-row
     // prompts under load. Classifier prompts are small but grok-4.1-fast
     // occasionally takes 8-12s when OpenRouter routes through a slow upstream.
-    const text = await callOpenRouter(prompt, { timeoutMs: 25_000, model });
+    const text = await callOpenRouter(prompt, { timeoutMs, model });
     return parseClassifierJson(text, question);
   } catch (err) {
     console.warn('[qa][classifier] OpenRouter failed:', err instanceof Error ? err.message : err);
@@ -295,6 +333,7 @@ async function tryOpenRouter(prompt: string, question: string, model?: string): 
 /** Tier 4: Flash JSON-mode call. Returns null on any failure so caller can chain. */
 async function tryFlash(question: string, apiKey: string): Promise<ClassifierResult | null> {
   try {
+    await assertUnderBrainDailyCap();
     const body = {
       contents: [
         {
@@ -336,6 +375,8 @@ async function tryFlash(question: string, apiKey: string): Promise<ClassifierRes
 
     const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     if (!rawText.trim()) return null;
+
+    recordBrainGeminiSpend('gemini-2.5-flash', `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`, rawText);
 
     return parseClassifierJson(rawText, question);
   } catch (err) {

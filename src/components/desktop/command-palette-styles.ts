@@ -10,6 +10,7 @@ export type GroupKey =
   | 'approval'
   | 'inbox'
   | 'directive'
+  | 'recall'
   | 'action';
 
 export const overlayStyle: CSSProperties = {

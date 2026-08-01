@@ -6,7 +6,8 @@ export type SearchKind =
   | 'transcript'
   | 'approval'
   | 'inbox'
-  | 'directive';
+  | 'directive'
+  | 'recall';
 
 export interface SearchTarget {
   issueNumber?: number;
@@ -57,5 +58,6 @@ export function emptySearchGroups(): SearchGroups {
     approval: [],
     inbox: [],
     directive: [],
+    recall: [],
   };
 }

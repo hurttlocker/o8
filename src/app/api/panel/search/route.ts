@@ -11,6 +11,7 @@ import { searchDirectives } from '@/lib/search/directives';
 import { searchFiles } from '@/lib/search/files';
 import { searchInbox } from '@/lib/search/inbox';
 import { browseIssues, searchIssues } from '@/lib/search/issues';
+import { shouldRequestRecall } from '@/lib/search/recall-trigger';
 import { searchTranscripts } from '@/lib/search/transcripts';
 import {
   emptySearchGroups,
@@ -21,6 +22,7 @@ import {
 } from '@/lib/search/types';
 
 const SEARCH_DEADLINE_MS = 1_500;
+const RECALL_DEADLINE_MS = 20_000;
 const RESULT_CAP = 8;
 
 function isBrowseKind(value: string | null): value is SearchKind {
@@ -56,6 +58,35 @@ export async function GET(request: Request): Promise<NextResponse<SearchResponse
     const workspace = searchParams.get('workspace');
     const repoParam = searchParams.get('repo');
     const scopeParam = searchParams.get('scope');
+    const mode = searchParams.get('mode');
+
+    if (mode === 'recall') {
+      const keywordHitsParam = searchParams.get('keywordHits');
+      const keywordHits = keywordHitsParam === null ? Number.NaN : Number(keywordHitsParam);
+      if (!workspace?.trim() || !shouldRequestRecall(query, keywordHits)) {
+        return NextResponse.json({ query, results: [], groups: emptyGroups });
+      }
+      const startedAt = performance.now();
+      try {
+        const { searchRecall } = await import('@/lib/search/recall');
+        const recalled = await withDeadline(searchRecall(query, workspace), RECALL_DEADLINE_MS);
+        const results = recalled.results.slice(0, RESULT_CAP);
+        return NextResponse.json({
+          query,
+          results,
+          groups: { ...emptyGroups, recall: results },
+          timings: { recall: Number((performance.now() - startedAt).toFixed(1)) },
+        });
+      } catch (error) {
+        console.warn('[search] recall unavailable', { error: error instanceof Error ? error.message : String(error) });
+        return NextResponse.json({
+          query,
+          results: [],
+          groups: emptyGroups,
+          timings: { recall: Number((performance.now() - startedAt).toFixed(1)) },
+        });
+      }
+    }
 
     if (query.length < 2) {
       const browseKind = isBrowseKind(scopeParam) ? scopeParam : null;
