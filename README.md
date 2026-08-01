@@ -58,6 +58,8 @@ A mission is a goal. Each packet is a scoped unit of work, and each lane is the 
             merge  ──▶  audit trail, session ledger, memory
 ```
 
+![Four agents on the canvas: two finished and waiting for review, one still working, and a live browser card previewing the page they built](./assets/fleet.gif)
+
 Merges that fail don't silently die — a five-layer escalation chain (auto-retry → orchestrator escalation → steer the warm session → fresh redispatch → human card) means a lane always has a defined next step. Approvals can route to your phone. The whole loop is drivable three ways: **the app**, **the `o8` CLI**, or **MCP tools** from any MCP client — same verbs, same gates.
 
 ## Symon — the voice layer
