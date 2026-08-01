@@ -321,7 +321,7 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: 39,
+        minHeight: 47,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
