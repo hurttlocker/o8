@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { SymonClientSubject, SymonWorkspaceMode } from '@/lib/mobile/symon-agent-registry';
+import { DEFAULT_SYMON_MACHINE, type SymonMachineIdentity } from '@/lib/symon/machine-registry';
 
 export const SYMON_TEXT_SESSION_STALE_MS = 10 * 60 * 1_000;
 const MAX_SESSIONS = 20;
@@ -26,6 +27,7 @@ export interface SymonTextSessionRecord extends SymonClientSubject {
   createdAt: number;
   lastActivityAt: number;
   transcript: SymonTextTranscriptEntry[];
+  activeMachine: SymonMachineIdentity;
 }
 
 function path(): string {
@@ -50,11 +52,13 @@ function persist(records: SymonTextSessionRecord[]): void {
 }
 
 function active(records: SymonTextSessionRecord[], now: number): SymonTextSessionRecord[] {
-  return records.filter((record) => now - record.lastActivityAt <= SYMON_TEXT_SESSION_STALE_MS);
+  return records
+    .filter((record) => now - record.lastActivityAt <= SYMON_TEXT_SESSION_STALE_MS)
+    .map((record) => ({ ...record, activeMachine: record.activeMachine ?? DEFAULT_SYMON_MACHINE }));
 }
 
 export function createSymonTextSession(
-  input: Omit<SymonTextSessionRecord, 'sessionId' | 'createdAt' | 'lastActivityAt' | 'transcript'>,
+  input: Omit<SymonTextSessionRecord, 'sessionId' | 'createdAt' | 'lastActivityAt' | 'transcript' | 'activeMachine'>,
   now: number = Date.now(),
 ): SymonTextSessionRecord {
   const record: SymonTextSessionRecord = {
@@ -63,9 +67,23 @@ export function createSymonTextSession(
     createdAt: now,
     lastActivityAt: now,
     transcript: [],
+    activeMachine: DEFAULT_SYMON_MACHINE,
   };
   persist([record, ...active(loadAll(), now)].slice(0, MAX_SESSIONS));
   return record;
+}
+
+export function updateSymonTextMachine(
+  sessionId: string,
+  activeMachine: SymonMachineIdentity,
+  now: number = Date.now(),
+): SymonTextSessionRecord | null {
+  const records = active(loadAll(), now);
+  const index = records.findIndex((record) => record.sessionId === sessionId);
+  if (index < 0) return null;
+  records[index] = { ...records[index], activeMachine, lastActivityAt: now };
+  persist(records);
+  return records[index];
 }
 
 export function loadSymonTextSession(sessionId: string, now: number = Date.now()): SymonTextSessionRecord | null {

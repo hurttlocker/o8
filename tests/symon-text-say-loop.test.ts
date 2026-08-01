@@ -37,7 +37,11 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
       return {
         result: JSON.stringify({
           state: 'done',
-          result: { status: 'done', text: 'The desktop planner answered.' },
+          result: {
+            status: 'done',
+            text: 'The desktop planner answered.',
+            activeMachine: { id: 'macbook', displayName: 'MacBook' },
+          },
         }),
       };
     }
@@ -177,7 +181,13 @@ async function mint(model?: string) {
   return {
     response,
     body: await response.json() as {
-      session: { sessionId: string; model: string; effort: string; engine: string };
+      session: {
+        sessionId: string;
+        model: string;
+        effort: string;
+        engine: string;
+        activeMachine: { id: string; displayName: string };
+      };
     },
   };
 }
@@ -187,6 +197,7 @@ describe('Symon text-first say loop wire', () => {
     const { response, body: minted } = await mint('codex-sol-xhigh');
     expect(response.status).toBe(200);
     expect(minted.session).toMatchObject({ model: 'gpt-5.6-sol', effort: 'xhigh', engine: 'codex' });
+    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This Mac' });
     testState.evalCalls.length = 0;
 
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
@@ -234,6 +245,11 @@ describe('Symon text-first say loop wire', () => {
       channel: 'symon',
       type: 'symon-text-done',
       status: 'done',
+      activeMachine: { id: 'macbook', displayName: 'MacBook' },
+    }));
+    expect(frames[0]).toEqual(expect.objectContaining({
+      type: 'symon-text-status',
+      activeMachine: { id: 'local', displayName: 'This Mac' },
     }));
     const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
     expect(spawnEval).toContain('"engine":"codex"');

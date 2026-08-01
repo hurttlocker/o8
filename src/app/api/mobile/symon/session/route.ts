@@ -14,6 +14,7 @@ import {
   type SymonClientSubject,
   type SymonWorkspaceMode,
 } from '@/lib/mobile/symon-agent-registry';
+import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
@@ -560,6 +561,7 @@ export async function POST(request: NextRequest) {
         voice,
         baseUrl: REALTIME_BASE_URL,
         scopeVersion: SYMON_SCOPE_VERSION,
+        activeMachine: DEFAULT_SYMON_MACHINE,
       },
       scope: {
         version: SYMON_SCOPE_VERSION,

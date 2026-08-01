@@ -210,6 +210,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // inverse and always receives a fresh confirmation card.
         "symon_ledger_recent" => SafetyClass::ReadOnly,
         "symon_ledger_undo" => SafetyClass::Reversible,
+        "symon_machine_list" => SafetyClass::ReadOnly,
+        "symon_machine_switch" => SafetyClass::Reversible,
         // The pseudo-tool only proposes a native-validated, immutable plan.
         // Its one card grants exact read-only/reversible steps; destructive
         // steps still receive their own confirmation during execution.
@@ -232,6 +234,7 @@ pub fn is_plan_control_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "symon_execute_plan"
+            | "symon_machine_switch"
             | "symon_ledger_undo"
             | "escalate"
             | "o8_dispatch"

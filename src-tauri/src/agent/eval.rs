@@ -72,6 +72,7 @@ pub async fn run_eval(app: tauri::AppHandle, models: Vec<String>) -> String {
                 task_id: format!("eval-{i}-{model}"),
                 utterance: f.intent.to_string(),
                 ledger_session_id: None,
+                machine_session_id: "eval".to_string(),
                 app: Some(app.clone()),
                 screen: None,
                 spatial: false,

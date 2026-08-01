@@ -219,7 +219,7 @@ async fn execute_tracked_tool_call(
                 dispatch_args["__symonCallId"] = json!(value);
             }
         }
-        let dispatched = tools::dispatch_tool_call(tool_name, dispatch_args, ctx).await;
+        let dispatched = super::machine::dispatch_tool_call(tool_name, dispatch_args, ctx).await;
         if let Err(error) = &dispatched {
             log::warn!("[symon-agent] tool {tool_name} error: {error}");
         }
@@ -227,7 +227,8 @@ async fn execute_tracked_tool_call(
     };
 
     let outcome = action_outcome(&result);
-    let inverse = if outcome == ActionOutcome::Succeeded {
+    let remote_execution = result.get("_symon_remote_execution") == Some(&Value::Bool(true));
+    let inverse = if outcome == ActionOutcome::Succeeded && !remote_execution {
         prepared_undo.and_then(|prepared| undo::finalize(prepared, &result))
     } else {
         None
@@ -302,7 +303,7 @@ fn action_outcome(result: &Value) -> ActionOutcome {
 
 fn strip_internal_result_fields(result: &mut Value) {
     if let Some(object) = result.as_object_mut() {
-        object.retain(|key, _| !key.starts_with("_ledger_"));
+        object.retain(|key, _| !key.starts_with("_ledger_") && !key.starts_with("_symon_"));
     }
 }
 

@@ -44,6 +44,21 @@ pub(crate) use safe_file::{
 pub fn all_tools() -> Vec<Value> {
     vec![
         json!({
+            "name": "symon_machine_list",
+            "description": "List the known machines Symon can control. The session has exactly one active machine at a time.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }),
+        json!({
+            "name": "symon_machine_switch",
+            "description": "Deliberately hand this Symon session to one known machine. Refuses while a confirmation card is pending or active work cannot settle.",
+            "parameters": {
+                "type": "object",
+                "properties": { "machine_id": { "type": "string", "enum": ["local", "macbook"] } },
+                "required": ["machine_id"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "symon_execute_plan",
             "description": "Compose and execute one ordered plan when the user asks for 2 to 5 concrete actions in sequence (for example, 'do X, then Y, then tell me'). Put every action in steps in the exact order requested. Native code validates and reads back the immutable plan, then asks once before running its read-only/reversible steps. Destructive steps still ask separately. Never include another symon_execute_plan, an approval/undo, or an orchestration control tool as a step.",
             "parameters": {
@@ -1174,6 +1189,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
     }
 
     match name {
+        "symon_machine_list" | "symon_machine_switch" => {
+            Err("Symon machine controls must run through the machine router".to_string())
+        }
         "symon_execute_plan" => Err(
             "symon_execute_plan must run through the governed native plan executor".to_string(),
         ),

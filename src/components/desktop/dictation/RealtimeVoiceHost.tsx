@@ -22,6 +22,7 @@ import {
 } from '@/lib/voice/realtime-client';
 import { symonReviewGuardId } from '@/lib/mobile/symon-tool-relay';
 import { REALTIME_MODEL, DEFAULT_VOICE } from '@/lib/voice/realtime-session-config';
+import { SymonMachineControl } from './SymonMachineControl';
 
 const LOG = '[realtime-host]';
 
@@ -105,6 +106,7 @@ function confirmationPlan(value: unknown): SymonConfirmPlan | undefined {
 /** window.__o8SymonAgent — the phone-hosted Agent Mode surface (see the bridge effect). */
 interface SymonAgentBridge {
   invokeTool: SymonInvokeTool | null;
+  invokeTransportedTool: SymonInvokeTool | null;
   interruptTool: SymonInterruptTool | null;
   resolveConfirm: SymonResolveConfirm | null;
   config: { model: string; voice: string; tools: Array<Record<string, unknown>> } | null;
@@ -326,6 +328,7 @@ export function RealtimeVoiceHost() {
     const confirms: SymonConfirmEntry[] = [];
     const bridge: SymonAgentBridge = {
       invokeTool: null,
+      invokeTransportedTool: null,
       interruptTool: null,
       resolveConfirm: null,
       config: null,
@@ -365,6 +368,12 @@ export function RealtimeVoiceHost() {
           void pending.then(markSettled, markSettled);
           return pending;
         };
+        bridge.invokeTransportedTool = (name, args, correlation) => invoke('symon_transport_invoke_tool', {
+          name,
+          args,
+          sessionId: correlation?.sessionId,
+          callId: correlation?.callId,
+        });
         bridge.interruptTool = (correlation) => invoke<boolean>('realtime_interrupt_review', {
           reviewGuardId: symonReviewGuardId(correlation.sessionId, correlation.callId),
         });
@@ -496,7 +505,9 @@ export function RealtimeVoiceHost() {
   // A fixed, full-width, click-through container handles centering so the pill's
   // own framer transform (y/scale) never fights a translateX centering hack.
   return (
-    <div
+    <>
+      <SymonMachineControl />
+      <div
       style={{
         position: 'fixed',
         top: 12,
@@ -560,6 +571,7 @@ export function RealtimeVoiceHost() {
           </motion.button>
         )}
       </AnimatePresence>
-    </div>
+      </div>
+    </>
   );
 }

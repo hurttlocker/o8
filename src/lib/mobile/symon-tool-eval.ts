@@ -105,3 +105,34 @@ export function buildToolInterruptEval(sessionId: string, callId: string): strin
     return JSON.stringify({ state: 'pending' });
   })()`;
 }
+
+/** Invoke one already-confirmed SSH-transported tool on the remote webview. */
+export function buildTransportedToolEval(
+  sessionId: string,
+  callId: string,
+  tool: string,
+  args: unknown,
+): string {
+  return `(() => {
+    const A = window.__o8SymonAgent;
+    if (!A || typeof A.invokeTransportedTool !== 'function') return JSON.stringify({ state: 'no_bridge' });
+    const key = ${JSON.stringify(JSON.stringify([sessionId, callId]))};
+    const store = (window.__o8SymonTransportCalls = window.__o8SymonTransportCalls || {});
+    let slot = store[key];
+    if (!slot) {
+      slot = store[key] = { done: false, tool: ${JSON.stringify(tool)} };
+      Promise.resolve(A.invokeTransportedTool(
+        ${JSON.stringify(tool)},
+        ${JSON.stringify(args ?? {})},
+        { sessionId: ${JSON.stringify(sessionId)}, callId: ${JSON.stringify(callId)} }
+      )).then((result) => {
+        const errored = !!(result && typeof result === 'object' && 'error' in result);
+        store[key] = { done: true, tool: slot.tool, ok: !errored, result };
+      }).catch((error) => {
+        store[key] = { done: true, tool: slot.tool, ok: false, result: { error: 'tool_failed', detail: String((error && error.message) || error) } };
+      });
+    }
+    if (slot.tool !== ${JSON.stringify(tool)}) return JSON.stringify({ state: 'call_mismatch' });
+    return JSON.stringify(slot.done ? { state: 'done', ok: slot.ok, result: slot.result } : { state: 'pending' });
+  })()`;
+}

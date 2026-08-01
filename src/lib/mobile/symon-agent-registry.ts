@@ -29,6 +29,11 @@ import {
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import {
+  DEFAULT_SYMON_MACHINE,
+  parseSymonMachineIdentity,
+  type SymonMachineIdentity,
+} from '@/lib/symon/machine-registry';
 
 export type AgentSessionStatus = 'connecting' | 'live' | 'acting' | 'idle' | 'error';
 
@@ -38,6 +43,7 @@ export interface AgentSessionRecord {
   lastStatus: AgentSessionStatus;
   lastActivityAt: number;
   source: 'phone';
+  activeMachine: SymonMachineIdentity;
 }
 
 export const SYMON_SCOPE_VERSION = 1 as const;
@@ -136,6 +142,7 @@ export function startAgentSession(
     lastStatus: 'connecting',
     lastActivityAt: now,
     source: 'phone',
+    activeMachine: prior?.sessionId === sessionId ? prior.activeMachine : DEFAULT_SYMON_MACHINE,
   };
   return { record: s.current, preempted };
 }
@@ -166,6 +173,17 @@ export function touchAgentSession(sessionId: string, now: number = Date.now()): 
   const s = store();
   if (!s.current || s.current.sessionId !== sessionId) return null;
   s.current = { ...s.current, lastActivityAt: now };
+  return s.current;
+}
+
+export function updateAgentMachine(
+  sessionId: string,
+  activeMachine: SymonMachineIdentity,
+  now: number = Date.now(),
+): AgentSessionRecord | null {
+  const s = store();
+  if (!s.current || s.current.sessionId !== sessionId) return null;
+  s.current = { ...s.current, activeMachine, lastActivityAt: now };
   return s.current;
 }
 
@@ -437,6 +455,7 @@ export function loadPersistedAgentSession(
       lastStatus: (parsed.lastStatus as AgentSessionStatus) || 'live',
       lastActivityAt: parsed.lastActivityAt,
       source: 'phone',
+      activeMachine: parseSymonMachineIdentity(parsed.activeMachine) ?? DEFAULT_SYMON_MACHINE,
     };
     return isAgentSessionStale(record, now, ttlMs) ? null : record;
   } catch {

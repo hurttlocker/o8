@@ -23,6 +23,7 @@ pub mod event_kit;
 mod execution;
 pub mod gemini;
 pub mod ledger;
+pub mod machine;
 pub mod o8_http;
 pub mod openrouter;
 mod plan;
@@ -71,6 +72,8 @@ pub struct TaskCtx {
     /// immutable session boundary so a repo-scoped Code session cannot inspect
     /// or reverse actions from a Life or desktop session.
     pub ledger_session_id: Option<String>,
+    /// Stable identity for the voice/text session's exactly-one active machine.
+    pub machine_session_id: String,
     /// Real desktop handle in production. The command seam permits `None` only
     /// in persisted read-only tests; any app-dependent action fails closed.
     pub app: Option<tauri::AppHandle>,
@@ -552,6 +555,39 @@ struct ConfirmEntry {
 }
 
 static CONFIRM_CHANNELS: Mutex<Vec<ConfirmEntry>> = Mutex::new(Vec::new());
+
+pub(super) fn has_pending_confirmations() -> bool {
+    let now = epoch_millis();
+    let mut entries = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+    prune_confirmations(&mut entries, now);
+    entries.iter().any(|entry| entry.sender.is_some() && now < entry.expires_at_ms)
+}
+
+#[cfg(test)]
+pub(super) fn insert_pending_confirmation_for_test(task_id: &str) {
+    let (sender, _receiver) = oneshot::channel();
+    CONFIRM_CHANNELS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(ConfirmEntry {
+            confirmation_id: format!("confirmation-{task_id}"),
+            task_id: task_id.to_string(),
+            correlation: None,
+            expires_at_ms: epoch_millis() + 60_000,
+            settled_at_ms: None,
+            decision: None,
+            terminal: None,
+            sender: Some(sender),
+        });
+}
+
+#[cfg(test)]
+pub(super) fn clear_confirmations_for_test() {
+    CONFIRM_CHANNELS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clear();
+}
 
 fn epoch_millis() -> u64 {
     std::time::SystemTime::now()
@@ -1459,9 +1495,11 @@ pub struct SymonTextPlannerInfo {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SymonTextTurnResult {
     status: &'static str,
     text: String,
+    active_machine: machine::MachineIdentity,
 }
 
 fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
@@ -1538,6 +1576,7 @@ pub async fn run_symon_text_turn(
         task_id: task_id.clone(),
         utterance: prompt.clone(),
         ledger_session_id: Some(session_id.clone()),
+        machine_session_id: session_id.clone(),
         app: Some(app),
         screen: None,
         spatial: false,
@@ -1578,11 +1617,13 @@ pub async fn run_symon_text_turn(
         return Ok(SymonTextTurnResult {
             status: "interrupted",
             text: String::new(),
+            active_machine: machine::active_machine(&ctx.machine_session_id),
         });
     }
     result.map(|value| SymonTextTurnResult {
         status: "done",
         text: value.result_text,
+        active_machine: machine::active_machine(&ctx.machine_session_id),
     })
 }
 
@@ -1764,6 +1805,7 @@ async fn run_agent_inner(
         task_id: task_id.clone(),
         utterance: prompt.clone(),
         ledger_session_id: None,
+        machine_session_id: "desktop".to_string(),
         app: Some(app.clone()),
         screen: screen_ctx,
         spatial: spatial_active,
