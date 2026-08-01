@@ -1,8 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
-import { deleteChatHistorySearchRecord, syncChatHistorySearchRecord } from '@/lib/search/conversations';
+import {
+  deleteChatHistorySearchRecord,
+  syncChatHistorySearchRecord,
+  type SearchableChatHistoryRecord,
+} from '@/lib/search/conversations';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
@@ -60,9 +64,46 @@ function ensureDir() {
   mkdirSync(HISTORY_DIR, { recursive: true });
 }
 
-function safePath(tabId: string): string {
+export function getCanonicalChatHistoryPath(tabId: string): string {
   const safe = tabId.replace(/[^a-zA-Z0-9_-]/g, '_');
   return join(HISTORY_DIR, `${safe}.json`);
+}
+
+export type CanonicalChatHistoryRecord = SearchableChatHistoryRecord & {
+  [key: string]: unknown;
+};
+
+/**
+ * The only canonical chat-history write seam. SQLite is authoritative and is
+ * updated first; the file replacement is atomic, so search can never lag a
+ * successful durable history write.
+ */
+export function persistCanonicalChatHistoryRecord(
+  tabId: string,
+  record: CanonicalChatHistoryRecord,
+  modifiedAt = new Date().toISOString(),
+): void {
+  ensureDir();
+  syncChatHistorySearchRecord(tabId, record, modifiedAt);
+  const filePath = getCanonicalChatHistoryPath(tabId);
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, JSON.stringify(record));
+    renameSync(temporaryPath, filePath);
+  } catch (error) {
+    try {
+      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    } catch {
+      // Preserve the original file when temporary cleanup also fails.
+    }
+    throw error;
+  }
+}
+
+export function deleteCanonicalChatHistoryRecord(tabId: string): void {
+  deleteChatHistorySearchRecord(tabId);
+  const filePath = getCanonicalChatHistoryPath(tabId);
+  if (existsSync(filePath)) unlinkSync(filePath);
 }
 
 function stripImages(message: PersistedLlmChatMessage): PersistedLlmChatMessage {
@@ -81,7 +122,7 @@ function normalizePlanText(value: unknown): string | undefined {
 }
 
 export function readPersistedLlmChat(tabId: string): PersistedLlmChatRecord | null {
-  const filePath = safePath(tabId);
+  const filePath = getCanonicalChatHistoryPath(tabId);
   try {
     const raw = readFileSync(filePath, 'utf-8');
     const stat = statSync(filePath);
@@ -102,7 +143,7 @@ export function writePersistedLlmChat(
   opts?: { replace?: boolean },
 ) {
   ensureDir();
-  const filePath = safePath(tabId);
+  const filePath = getCanonicalChatHistoryPath(tabId);
   let starred = false;
   let title: string | undefined;
   let planText: string | undefined;
@@ -134,15 +175,12 @@ export function writePersistedLlmChat(
     title: history.title ?? title,
     planText: normalizePlanText(history.planText) ?? planText,
   };
-  writeFileSync(filePath, JSON.stringify(persistedRecord));
-  syncChatHistorySearchRecord(tabId, persistedRecord);
+  persistCanonicalChatHistoryRecord(tabId, persistedRecord);
 }
 
 export function deletePersistedLlmChat(tabId: string) {
-  const filePath = safePath(tabId);
   try {
-    if (existsSync(filePath)) unlinkSync(filePath);
-    deleteChatHistorySearchRecord(tabId);
+    deleteCanonicalChatHistoryRecord(tabId);
   } catch {
     // ignore
   }

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import { compactTitleFromMessage } from '@/lib/llm/thread-auto-title';
@@ -22,7 +22,7 @@ const COMPOSER_PREAMBLE_REPAIR_MARKER = join(
  */
 export function repairComposerPreambleHistory(
   historyDir: string,
-  onRecordWritten: (filePath: string) => void,
+  persistRecord: (tabId: string, record: OrchestratorHistoryRecord, filePath: string) => void,
 ): void {
   try {
     if (existsSync(COMPOSER_PREAMBLE_REPAIR_MARKER)) return;
@@ -64,8 +64,7 @@ export function repairComposerPreambleHistory(
           nextRecord.autoTitledAtCount = messages.length;
         }
       }
-      writeFileSync(fullPath, JSON.stringify(nextRecord));
-      onRecordWritten(fullPath);
+      persistRecord(basename(file, '.json'), nextRecord, fullPath);
       fixedThreads += 1;
     }
     try {

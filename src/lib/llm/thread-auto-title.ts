@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { syncChatHistorySearchRecord } from '@/lib/search/conversations';
+import { readFileSync, existsSync } from 'fs';
+import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 
 /**
  * Thread auto-titling (Q ruling 2026-07-13): chats name themselves like
@@ -167,9 +167,11 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
       fresh.title = nextTitle;
       fresh.titleSource = generated ? 'llm' : 'code';
       fresh.autoTitledAtCount = messages.length;
-      writeFileSync(filePath, JSON.stringify(fresh));
       const tabId = filePath.split('/').pop()?.replace(/\.json$/, '');
-      if (tabId) syncChatHistorySearchRecord(tabId, fresh);
+      if (tabId) persistCanonicalChatHistoryRecord(
+        tabId,
+        fresh as { messages: unknown[]; [key: string]: unknown },
+      );
       console.log(`[thread-auto-title] ${decision.reason}: "${nextTitle}" (${generated ? 'llm' : 'code'})`);
     } catch {
       // best-effort — never break the persist path

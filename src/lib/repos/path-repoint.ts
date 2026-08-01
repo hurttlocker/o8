@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 
 function stateDirs() {
   return Array.from(new Set([getDataDir(), getDataDir({}, homedir())]));
@@ -60,6 +61,23 @@ function migrateJsonFile(filePath: string, previousPath: string, nextPath: strin
     if (!changed) return false;
     mkdirSync(path.dirname(filePath), { recursive: true });
     writeFileSync(filePath, `${JSON.stringify(repointed, null, 2)}\n`, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function migrateChatHistoryFile(filePath: string, previousPath: string, nextPath: string) {
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+    const [repointed, changed] = repointJsonValue(parsed, previousPath, nextPath);
+    if (!changed || !repointed || typeof repointed !== 'object') return false;
+    const record = repointed as Record<string, unknown>;
+    if (!Array.isArray(record.messages)) return false;
+    persistCanonicalChatHistoryRecord(path.basename(filePath, '.json'), {
+      ...record,
+      messages: record.messages,
+    });
     return true;
   } catch {
     return false;
@@ -215,7 +233,7 @@ export function repointRepoPathReferences(previousLocalPath: string, nextLocalPa
     const chatHistoryDir = path.join(stateDir, 'chat-history');
     if (existsSync(chatHistoryDir)) {
       for (const file of readdirSync(chatHistoryDir)) {
-        if (file.endsWith('.json') && migrateJsonFile(path.join(chatHistoryDir, file), previousPath, nextPath)) {
+        if (file.endsWith('.json') && migrateChatHistoryFile(path.join(chatHistoryDir, file), previousPath, nextPath)) {
           jsonFiles += 1;
         }
       }

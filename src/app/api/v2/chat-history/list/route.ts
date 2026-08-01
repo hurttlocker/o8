@@ -8,12 +8,13 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
 // after this window — gives the operator time to come back to a fresh tab
@@ -220,7 +221,7 @@ export async function GET(request: NextRequest) {
     // Opportunistic disk cleanup of orphan empty placeholders. Best-effort —
     // a failure here is silent because the list itself still rendered correctly.
     for (const path of filesToDelete) {
-      try { unlinkSync(path); } catch { /* ignore */ }
+      try { deleteCanonicalChatHistoryRecord(basename(path, '.json')); } catch { /* ignore */ }
     }
 
     return NextResponse.json({ conversations }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });

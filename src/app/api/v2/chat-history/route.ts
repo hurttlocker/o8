@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -19,6 +19,11 @@ import {
   resolveOrchestratorThreadProjectId,
 } from '@/lib/mobile/orchestrator-thread-project';
 import { maybeQueueThreadAutoTitle } from '@/lib/llm/thread-auto-title';
+import {
+  deleteCanonicalChatHistoryRecord,
+  getCanonicalChatHistoryPath,
+  persistCanonicalChatHistoryRecord,
+} from '@/lib/llm/chat-history-store';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
@@ -28,10 +33,6 @@ import {
   pageChatHistoryMessages,
   parseChatHistoryPageRequest,
 } from '@/lib/llm/chat-history-pagination';
-import {
-  deleteChatHistorySearchRecord,
-  syncChatHistorySearchRecord,
-} from '@/lib/search/conversations';
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 
@@ -40,9 +41,7 @@ function ensureDir() {
 }
 
 function safePath(tabId: string): string {
-  // Sanitize tab ID to prevent path traversal
-  const safe = tabId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return join(HISTORY_DIR, `${safe}.json`);
+  return getCanonicalChatHistoryPath(tabId);
 }
 
 function normalizePlanText(value: unknown): string | undefined {
@@ -341,8 +340,7 @@ export async function POST(request: NextRequest) {
     orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
   };
   try {
-    writeFileSync(filePath, JSON.stringify(persistedRecord));
-    syncChatHistorySearchRecord(body.tabId, persistedRecord);
+    persistCanonicalChatHistoryRecord(body.tabId, persistedRecord);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'chat persist failed';
     console.error('[chat-history] POST failed', { tabId: body.tabId, message });
@@ -400,8 +398,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    writeFileSync(filePath, JSON.stringify(data));
-    syncChatHistorySearchRecord(body.tabId, data);
+    persistCanonicalChatHistoryRecord(body.tabId, data as { messages: unknown[]; [key: string]: unknown });
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'chat update failed';
@@ -414,10 +411,8 @@ export async function DELETE(request: NextRequest) {
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
-  const filePath = safePath(tabId);
   try {
-    if (existsSync(filePath)) unlinkSync(filePath);
-    deleteChatHistorySearchRecord(tabId);
+    deleteCanonicalChatHistoryRecord(tabId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     // Surface the actual failure so the client can show a toast and

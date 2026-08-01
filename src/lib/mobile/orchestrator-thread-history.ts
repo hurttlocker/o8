@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { syncChatHistorySearchRecord } from '@/lib/search/conversations';
+import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
@@ -78,16 +78,13 @@ export function readOrchestratorThreadMessages(
   }
   return out;
 }
-
 function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   ensureHistoryDir();
   const filePath = safeOrchestratorHistoryPath(tabId);
-  writeFileSync(filePath, JSON.stringify(record));
-  syncChatHistorySearchRecord(tabId, record);
+  persistCanonicalChatHistoryRecord(tabId, record);
   historyParseCache.delete(filePath);
   historyWriteVersion += 1;
 }
-
 // Marker so the one-time transcript-order repair runs once per install.
 const TRANSCRIPT_REPAIR_MARKER = join(getDataDir(), '.transcript-order-repaired-v1');
 // Pre-v0.1.229, ws-server froze the assistant timestamp at turn START — a
@@ -156,7 +153,7 @@ export function repairFlippedOrchestratorTranscripts(): void {
           .slice()
           .sort((x, y) => (x.timestamp ?? 0) - (y.timestamp ?? 0));
         try {
-          writeFileSync(fullPath, JSON.stringify(record));
+          writeHistoryRecord(basename(file, '.json'), record);
           fixedThreads += 1;
         } catch {
           // best-effort per file
@@ -175,9 +172,12 @@ export function repairFlippedOrchestratorTranscripts(): void {
     console.warn('[transcript-repair] skipped:', err);
   }
 }
-
 export function repairComposerPreamblePollution(): void {
-  repairComposerPreambleHistory(ORCHESTRATOR_HISTORY_DIR, (filePath) => { historyParseCache.delete(filePath); historyWriteVersion += 1; });
+  repairComposerPreambleHistory(ORCHESTRATOR_HISTORY_DIR, (tabId, record, filePath) => {
+    persistCanonicalChatHistoryRecord(tabId, record);
+    historyParseCache.delete(filePath);
+    historyWriteVersion += 1;
+  });
 }
 
 function readProjectedThread(tabId: string): MobileOrchestratorThread | null {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
@@ -294,7 +295,11 @@ export async function autoCompactOrchestratorThread(input: {
       summary,
     }));
     if (thread) {
-      await writeFile(thread.filePath, JSON.stringify({ ...thread.payload, messages: nextTranscript.map(toStoredMessage), savedAt: compactedAt.toISOString() }));
+      persistCanonicalChatHistoryRecord(thread.tabId, {
+        ...thread.payload,
+        messages: nextTranscript.map(toStoredMessage),
+        savedAt: compactedAt.toISOString(),
+      });
     }
     return { applied: true, transcript: nextTranscript, resumePrelude, tokensAfter };
   })().finally(() => {
