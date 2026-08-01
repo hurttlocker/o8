@@ -321,7 +321,7 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: 47,
+        minHeight: 39,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -335,9 +335,9 @@ export function HistoryChatRow({
         textAlign: 'left',
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: 6,
+        paddingTop: 3,
         paddingRight: 12,
-        paddingBottom: 6,
+        paddingBottom: 3,
         // Indented to align with top-nav text X (MiniAgentPanelAction =
         // paddingLeft 12 + 17 icon + 8 gap = 37). Folder icon on repo
         // header sits at X=12, so chats nest visually under their group.
@@ -412,10 +412,10 @@ export function HistoryChatRow({
               display: 'flex',
               alignItems: 'center',
               gap: 7,
-              marginTop: 4,
+              marginTop: 2,
               color: 'var(--t-text-faint)',
               fontSize: 9.5,
-              lineHeight: 1.25,
+              lineHeight: 1.1,
               fontWeight: 260,
               letterSpacing: '-0.4px',
               overflow: 'hidden',
