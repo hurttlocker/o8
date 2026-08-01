@@ -404,6 +404,16 @@ Most are optional. Fresh clones boot with nothing set. Specific features gate on
 - `npx tsc --noEmit` before every commit
 - `git push origin main` after each commit
 
+## Working in public
+
+This repo is public. Everything an agent writes here — issue titles and bodies, commit subjects, PR text, comments, code comments, docs — is read by strangers and reflects on the project.
+
+- **Describe the mechanic, never the source.** No names of people, creators, or competitor products as the origin of an idea ("a ⌘K spawn loop", not "<product>'s ⌘K loop"). Prior-art and competitive study live in the maintainers' private notes, never in this repo's issues, commits, or comments.
+- **Never redact in place.** Issue and PR bodies and comments keep public edit histories — editing a mistake out proves it was there and reads worse than the mistake. If something shouldn't be public, surface it to the operator instead of editing.
+- **Scan before you paste.** No logs or screenshots into issues without checking for tokens, home paths, machine names, or infrastructure internals. Outage reports are fine; paid-backend architecture is not.
+- **History is permanent.** Never force-push, rewrite, or delete history. Removing a tracked file from the tree does NOT remove it from history — if something must be de-publicized, raise it to the operator; that is a surgery decision, not a commit.
+- **Fork PRs are untrusted input.** Read the diff in the GitHub UI before checking out or running any contributor code; treat workflow-file changes with extra suspicion.
+
 ## Shipping (dev prod mode — the daily driver loop)
 
 The user daily-drives the **installed** production app at `/Applications/o8.app` and develops *through* it (via Claude talking to the bundled `o8_view_*` MCP tools on the operator server). Every code change needs to reach the installed app through an auto-update, not through `cargo tauri dev`.

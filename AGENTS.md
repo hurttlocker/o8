@@ -252,3 +252,12 @@ When you notice something the operator should remember across dispatches, emit a
 The CLI auto-detects your packet from the worktree path — no need to pass `--packet-id` from inside `.cortex-worktrees/packet-*`. If the orchestrator dispatched you to a non-packet path, pass `--packet-id` explicitly.
 
 **Use this whenever:** post-completion you'd write a "by the way" note to the operator. The proposer will surface it. The operator will Accept or Dismiss. Either way, the brain learns and the next agent doesn't have to rediscover what you found.
+
+## Working in public
+
+This repository is public. Your packet reports, commit messages, `o8 cortex observe` notes that become directives, and anything you write into issues or PRs will be read by strangers.
+
+- Describe the mechanic, never the source — no names of people, creators, or competitor products as the origin of an idea. Prior-art study belongs in the maintainers' private notes, not here.
+- Never edit a published issue/PR body to remove something — public edit history makes removal worse than the original. Surface it to the operator instead.
+- Scan any log or screenshot for tokens, home paths, machine names, and infrastructure internals before it goes into a public surface.
+- Never force-push, rewrite, or delete history. Tree removal is not history removal — de-publicizing a file is an operator decision, not a commit.
