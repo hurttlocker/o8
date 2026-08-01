@@ -1,5 +1,5 @@
 /**
- * /api/automations — list + create automations (Superset-style scheduled runs).
+ * /api/automations — list + create automations (cron-style scheduled runs).
  *
  * GET   → { automations: AutomationRow[] }
  * POST  → { automation: AutomationRow } | 4xx

@@ -180,7 +180,7 @@ export function formatBranchDisplayName(name: string): string {
 
 /**
  * Compact "Xh ago" / "Xd ago" formatter used by branch/packet list rows.
- * Mirrors the Superconductor reference density — short, always two chars of
+ * Compact density — short, always two chars of
  * unit, no localization overhead. Accepts a unix-ms timestamp.
  */
 export function formatCompactAge(unixMs: number): string {

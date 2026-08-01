@@ -438,7 +438,6 @@ Rules that are permanent. No exceptions, no grandfather clauses.
 - Build against the runtime capability contract, not a Codex/Claude special case. Every dispatchable runtime must remain truthful about the capabilities it supports.
 - Console logging prefix `[feature-name]`
 - Commit prefix `feat:` / `fix:` / `refactor:` / `perf:` / `chore:`
-- Public changelog safety — `.github/workflows/sync-changelog.yml` scrubs commit messages before public sync. Add new internal codenames to BOTH the sed filter AND the blocklist.
 
 Full list lives in `CLAUDE.md`. This doc summarizes; that file is authoritative for invariants.
 

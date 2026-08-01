@@ -1,5 +1,5 @@
 /**
- * Mobile inline diff comments (platform teardown #9, Slice 2).
+ * Mobile inline diff comments (Slice 2).
  *
  * The operator taps a diff line on the phone and leaves a note anchored to a
  * file + line; the agent (and the desktop review surface) read it so the agent

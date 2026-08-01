@@ -1195,7 +1195,7 @@ function OrchestratorTabInner({
         // The rail is ALWAYS the collapsed capsule width in layout now — the
         // expanded card stack floats as a hover overlay (portal) instead of
         // widening this flex item, so revealing it never pushes the chat over
-        // (Cursor-style git/environment popover, Q ruling 2026-07-14).
+        // (git/environment popover, Q ruling 2026-07-14).
         width: projectContextRailVisible ? COLLAPSED_BRANCH_RAIL_WIDTH : 0,
         flexShrink: 0,
         // minHeight:0 keeps this flex item bounded by the row height so the

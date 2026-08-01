@@ -376,8 +376,8 @@ export function HistoryChatRow({
           }}
         />
       ) : null}
-      {/* Status dot leads the row in the 37px indent gutter (Q 2026-07-12,
-          Claude-style): you scan states down the LEFT edge before reading a
+      {/* Status dot leads the row in the 37px indent gutter (Q 2026-07-12):
+          you scan states down the LEFT edge before reading a
           word. Title X stays exactly 37 — the hurttlocker indent is untouched;
           the dot centers in the gutter beside it. */}
       <span

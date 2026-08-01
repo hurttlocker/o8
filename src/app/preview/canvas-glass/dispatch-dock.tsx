@@ -2,9 +2,8 @@
 
 /**
  * DispatchDock — a live "agents working" panel that grows out of the top of the
- * canvas composer (a creator / a video model borrow, 2026-06-15). Their promo had a
- * "3 Workflow's being built…" panel that expanded out of the prompt bar with
- * staggered rows + per-row progress rings; this is the o8 translation — the rows
+ * canvas composer (2026-06-15). The pattern: a panel that expands out of the
+ * prompt bar with staggered rows + per-row progress rings; here the rows
  * are REAL dispatched packets (page.tsx `activeLanes`), not image workflows.
  *
  * o8-specific moves:

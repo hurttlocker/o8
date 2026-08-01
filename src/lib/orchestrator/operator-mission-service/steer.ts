@@ -1,7 +1,7 @@
 /**
  * steerPacket — nudge a packet's warm session with a follow-up message.
  *
- * CLI-as-control-plane symmetry (platform teardown #2, Stage 4). This was the one
+ * CLI-as-control-plane symmetry (Stage 4). This was the one
  * mission verb with no HTTP route: the MCP `steer_packet` handler resolved the
  * lane and flipped its status IN ITS OWN PROCESS (a separate in-memory registry
  * instance from the app), only the runtime steer itself crossing the HTTP seam.

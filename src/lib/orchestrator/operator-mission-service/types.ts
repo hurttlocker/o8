@@ -56,7 +56,7 @@ export interface CreateMissionInput {
    */
   huddle?: boolean;
   /**
-   * Best-of-N (platform-teardown item 3) — stamps the seed packet's
+   * Best-of-N — stamps the seed packet's
    * `comparisonModels` so the scheduler fans it into N sibling candidates (one
    * per model string), each in its own worktree/lane. The operator then compares
    * the N diffs side-by-side and merges the winner through the review gate.

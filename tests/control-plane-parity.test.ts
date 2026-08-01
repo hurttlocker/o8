@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * CLI ↔ MCP control-plane parity (platform teardown #2).
+ * CLI ↔ MCP control-plane parity.
  *
  * Every control-plane verb is reachable from BOTH the `o8` CLI and the MCP
  * operator server, and BOTH surfaces hit the SAME gated route — that shared

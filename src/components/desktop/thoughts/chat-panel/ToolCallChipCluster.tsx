@@ -208,7 +208,7 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  // Browser PIP trigger (Codex borrow): a cluster containing browser work is
+  // Browser PIP trigger: a cluster containing browser work is
   // the hover target — the whole cluster, not a tiny pill, per the reference
   // pattern. The BrowserPipCard host owns dwell/grace timing and gating.
   const hasBrowserWork = useMemo(

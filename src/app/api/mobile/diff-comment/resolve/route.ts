@@ -1,5 +1,5 @@
 /**
- * Resolve an inline diff comment (platform teardown #9) — the agent addressed it or
+ * Resolve an inline diff comment — the agent addressed it or
  * the operator dismissed it. Gated like the rest of /api/mobile/*.
  */
 

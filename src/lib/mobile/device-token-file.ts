@@ -1,5 +1,5 @@
 /**
- * Mobile E2EE — derived active-token-hash file (platform teardown #5).
+ * Mobile E2EE — derived active-token-hash file.
  *
  * The middleware (`src/middleware.ts`) validates per-device bearer tokens, but it
  * is bundled separately and must stay free of the better-sqlite3 native addon —

@@ -295,7 +295,7 @@ export function ModelThinkingChip({
   collideEnabled?: boolean;
   onSetCollide?: (enabled: boolean) => void;
   compact?: boolean;
-  /** Claude Code-style presentation (Q ruling 2026-07-11): model and thinking
+  /** Quiet-text presentation (Q ruling 2026-07-11): model and thinking
       level render as two separate quiet-text triggers ("Fable 5" · "High")
       instead of one bordered chip with bars. Both open the shared menu. */
   split?: boolean;
@@ -423,7 +423,7 @@ export function ModelThinkingChip({
   return (
     <>
       {useSplit ? (
-        // Claude Code-style right cluster: "Fable 5   High" — two quiet text
+        // Right cluster: "Fable 5   High" — two quiet text
         // triggers, no border/bars/chevron at rest. Both open the shared menu.
         <span ref={splitRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}

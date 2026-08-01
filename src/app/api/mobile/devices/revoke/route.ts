@@ -1,5 +1,5 @@
 /**
- * Revoke a paired device (platform teardown #5). Operator-only (gated like the rest
+ * Revoke a paired device. Operator-only (gated like the rest
  * of /api/mobile/*). Marks the device revoked + rewrites the active-token-hash
  * file, so the device's HTTP calls fail at the middleware immediately and its
  * next WS reconnect is refused. (Force-closing a LIVE WS connection lands with

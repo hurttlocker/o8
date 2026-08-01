@@ -1,5 +1,5 @@
 /**
- * Mobile E2EE — pure server-side handshake state machine (platform teardown #5).
+ * Mobile E2EE — pure server-side handshake state machine.
  *
  * The protocol logic, lifted out of the ws-server so it's unit-testable without a
  * socket. ws-server owns the I/O (send the hello, hold per-connection state,

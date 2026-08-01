@@ -31,7 +31,7 @@ function tabStateKey(status: OrchestratorPacketStatus | null | undefined, isLate
 }
 const TAB_BAR_HEIGHT = 38;
 const TAB_GAP = 4;
-// Codex-style flat tabs: no paper-card chrome, active = subtle pill,
+// Flat tabs: no paper-card chrome, active = subtle pill,
 // inactive = transparent text + icon only. Tighter density so the
 // bar fits inline without competing with the workspace below.
 const FLAT_TAB_HEIGHT = 26;

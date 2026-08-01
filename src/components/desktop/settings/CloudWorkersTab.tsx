@@ -3,7 +3,7 @@
 /**
  * CloudWorkersTab — issue #514 v0 scaffolding
  *
- * Settings tab for the Cursor-style self-hosted cloud runtime. Lists the
+ * Settings tab for the self-hosted cloud runtime. Lists the
  * service-account API keys that have been provisioned and surfaces a
  * "Generate API key" flow. Each key scopes to a team; cloud workers use the
  * plaintext key to connect outbound to /api/cloud/worker-poll.

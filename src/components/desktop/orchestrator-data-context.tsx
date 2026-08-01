@@ -63,7 +63,7 @@ export interface OrchestratorDataValue {
   onToggleWorkspacePip?: (surface: 'browser' | 'spec', repoPath?: string | null) => void;
   /**
    * Whether the wide O8 right panel is currently visible. Surfaced so the
-   * OrchestratorTab can render a Codex-style Branch details launcher in the
+   * OrchestratorTab can render a Branch details launcher in the
    * empty right gutter when (and only when) the wide panel is collapsed.
    */
   o8PanelVisible?: boolean;

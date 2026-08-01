@@ -70,7 +70,7 @@ function newTabId(): string {
 }
 
 /**
- * Real site favicon in the tab pill (Cursor borrow, Q 2026-07-12) — external
+ * Real site favicon in the tab pill (Q 2026-07-12) — external
  * sites resolve through Google's favicon service; localhost/dev servers and
  * any failure fall back to the quiet globe glyph.
  */
@@ -201,7 +201,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
    *  bypassed for tabs with a url. */
   const [inTauri] = useState<boolean>(() => isTauri());
   const nativeEnabled = useNativeBrowserViewFlag() && inTauri;
-  /** Browser toolbelt (Cursor borrow, Q 2026-07-12): the Design toggle in the
+  /** Browser toolbelt (Q 2026-07-12): the Design toggle in the
    *  URL row arms the app-wide Design Mode grab; active state mirrors the
    *  hook's broadcast so the keyboard toggle stays in sync. */
   const [designActive, setDesignActive] = useState(false);
@@ -412,7 +412,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     const iframe = iframeRef.current;
     const url = activeTab?.url;
     const loadedTabId = activeTab?.id;
-    // Real page title in the tab (Cursor borrow) — readable whenever the
+    // Real page title in the tab — readable whenever the
     // frame is same-origin (all proxied localhost pages). Cross-origin
     // throws → hostname stays.
     if (iframe && loadedTabId) {

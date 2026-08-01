@@ -206,7 +206,7 @@ export interface AgentPanelProps {
   onFocusAssistantTab?: () => void;
   /** Spawn a fresh Orchestrator tab. The optional repo scopes the new
    *  session to a specific repo — used by the sidebar repo-header [+]
-   *  (Cursor-style contextual New Agent). No arg = the classic global
+   *  (contextual New Agent). No arg = the classic global
    *  New session behavior. */
   onCreateWorkspaceOrchestrator?: (repo?: { name: string; localPath: string; remoteUrl?: string; branch?: string | null } | null) => void;
   onCreateWorkspaceChat?: () => void;

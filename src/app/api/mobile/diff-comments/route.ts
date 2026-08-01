@@ -1,5 +1,5 @@
 /**
- * List inline diff comments for an agent session (platform teardown #9). The phone
+ * List inline diff comments for an agent session. The phone
  * fetches these to render line markers; the desktop review surface reads them
  * too. Gated like the rest of /api/mobile/*. Contract: docs/internals/mobile-diff-comments.md.
  */

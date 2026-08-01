@@ -1,7 +1,7 @@
 /**
  * `o8 inbox list | approve | reject` — the governance approval queue from the CLI.
  *
- * CLI-as-control-plane symmetry (platform teardown #2, Stage 6). Thin clients of the
+ * CLI-as-control-plane symmetry (Stage 6). Thin clients of the
  * gated /api/panel/approvals route — the same queue the o8_approve / o8_reject
  * MCP tools resolve and the desktop inbox surfaces. This is where a worker-context
  * `o8 packet approve-merge` lands its card: the operator lists it here and

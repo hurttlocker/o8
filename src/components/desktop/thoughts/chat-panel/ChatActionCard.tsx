@@ -9,7 +9,7 @@
  * window event; Undo confirms then reverts each file through
  * /api/review/discard.
  *
- * Issue: #1095 (Codex-borrow inline action cards).
+ * Issue: #1095 (inline action cards).
  */
 
 import { useState } from 'react';

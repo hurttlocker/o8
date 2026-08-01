@@ -3,8 +3,7 @@
 /**
  * WelcomeModal — the canvas first-run hero ("welcome to a shift in momentum").
  *
- * Reference: a creator's their product onboarding — a centered split card over a
- * dimmed + frosted canvas. Left pane carries the headline + a single CTA; right
+ * A centered split card over a dimmed + frosted canvas. Left pane carries the headline + a single CTA; right
  * pane is the brand glimpse (a mini canvas, so the very first thing you see is
  * what the surface IS). Shown once per browser (the page owns the localStorage
  * flag) and dismissed by Start / ✕ / Escape.

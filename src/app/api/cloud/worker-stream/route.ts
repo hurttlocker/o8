@@ -14,7 +14,7 @@
  * Why not use `/api/worker/event` which already exists?
  *   The existing /api/worker/* routes are bound to the push-based
  *   `remote-customer` adapter and a different SQLite schema (`worker_runs`,
- *   `worker_events`). This Cursor-style long-poll model is intentionally a
+ *   `worker_events`). This long-poll model is intentionally a
  *   separate tier so the two can evolve independently. DB schema unification
  *   is a follow-up decision, not a v0 task.
  */

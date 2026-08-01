@@ -11,7 +11,7 @@
  * turn touched files.
  *
  * Fires on `busy → ready` transitions in the orchestrator stream.
- * Issue: #1096 (Codex-borrow turn-summary cards). Pairs with #1095.
+ * Issue: #1096 (turn-summary cards). Pairs with #1095.
  */
 
 import { useState } from 'react';

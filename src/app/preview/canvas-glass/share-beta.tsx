@@ -1,12 +1,10 @@
 'use client';
 
 /**
- * ShareBetaModal — the beta referral surface. Reference: a creator's their product
- * "Share Early Access" modal (a glass split-card floating over the canvas) — but
- * rendered in o8's language (paper/ink/restraint) instead of the Kodak-roll
- * look.
+ * ShareBetaModal — the beta referral surface. A glass split-card floating over
+ * the canvas, rendered in o8's language (paper/ink/restraint).
  *
- * Mechanic borrowed, not the skin:
+ * The mechanic:
  *  - the invite is a THING (a collectible "founding pass"), not a bare link;
  *  - status + scarcity framing ("five founding invites") over reward-bait;
  *  - one effortless primitive — Copy code — with instant "Copied ✓" feedback,
@@ -312,7 +310,7 @@ export function ShareBetaModal({
                 </AnimatePresence>
               </div>
 
-              {/* segmented control — ‹  Copy code  › (their product's primitive). */}
+              {/* segmented control — ‹  Copy code  ›. */}
               <div style={{ display: 'flex', alignItems: 'center', height: 40, borderRadius: 999, background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)', border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)', padding: 3 }}>
                 <ChevronButton dir="left" isDark={isDark} onClick={() => flip(-1)} />
                 <button

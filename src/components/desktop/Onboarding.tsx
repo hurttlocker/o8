@@ -11,7 +11,7 @@
  *   5. Bring Your Brain (ChatGPT/Claude import)
  *   6. Ready (summary + enter dashboard)
  *
- * Design ref: Conductor-style glass + feature carousel.
+ * Design: glass card + feature carousel.
  * Full-screen takeover, frosted glass background, no sidebar.
  */
 

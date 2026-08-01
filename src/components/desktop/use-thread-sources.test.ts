@@ -8,9 +8,9 @@ import { sourcesFromMessages } from './use-thread-sources';
 describe('sourcesFromMessages — operator links from a thread transcript', () => {
   it('extracts a bare URL from a user message', () => {
     expect(sourcesFromMessages([
-      { role: 'user', content: 'look at this https://x.com/a creator/status/2077130366623' },
+      { role: 'user', content: 'look at this https://x.com/example/status/123' },
     ])).toEqual([
-      { label: 'x.com/a creator/status/2077130366623', href: 'https://x.com/a creator/status/2077130366623' },
+      { label: 'x.com/example/status/123', href: 'https://x.com/example/status/123' },
     ]);
   });
 

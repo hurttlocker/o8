@@ -14,7 +14,7 @@
  *   - left/right edge → hover-reveal rails (sessions / activity)
  *   - bottom input    → the orchestrator composer for the scoped repo;
  *                       first contact ALWAYS happens here
- *   - right dock      → OPT-IN (a creator borrow): dock the
+ *   - right dock      → OPT-IN: dock the
  *                       conversation after you've talked, or open it to
  *                       see every running orchestrator and switch lanes.
  *                       Fades into the canvas — no hard panel.
@@ -4949,7 +4949,7 @@ export default function CanvasGlassPreviewPage() {
         />
       )}
 
-      {/* ── The docked orchestrator (opt-in, a creator borrow) ── */}
+      {/* ── The docked orchestrator (opt-in) ── */}
       <AnimatePresence>
         {dockOpen ? (
           <OrchestratorDock
@@ -5078,7 +5078,7 @@ export default function CanvasGlassPreviewPage() {
           pointerEvents: dispatchLanes.length || mainQueued.length || mainUndoArmed ? 'auto' : 'none',
         }}
       >
-        {/* Live agents working — grows out of the composer (a creator borrow).
+        {/* Live agents working — grows out of the composer.
             Sits ABOVE the queue so the two stack and never collide. */}
         <div data-canvas-chrome data-canvas-bottom-stack style={{ width: '100%' }}>
           <AnimatePresence>

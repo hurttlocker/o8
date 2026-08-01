@@ -125,7 +125,7 @@ export function GitHubConnectionSections({
   }
 
   // Priority: manage an existing installation → install the managed public
-  // "o8" App (Cursor-style, one click) → BYO-app creation page. Never link a
+  // "o8" App (one click) → BYO-app creation page. Never link a
   // specific app's settings page: those are only visible to the app's owner,
   // so any other account gets GitHub's 404 (report BBX85E).
   const managedInstall = !broker?.installationId && !!broker?.managedInstallUrl;

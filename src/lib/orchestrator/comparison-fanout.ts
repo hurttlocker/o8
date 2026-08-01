@@ -4,7 +4,7 @@ import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 /**
- * Best-of-N fan-out (platform-teardown item 3).
+ * Best-of-N fan-out.
  *
  * A pure mission-state transform, kept in its own leaf module (depends only on
  * the state types + the normalize store) so it stays testable without dragging in

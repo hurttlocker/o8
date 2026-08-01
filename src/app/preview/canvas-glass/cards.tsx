@@ -2,8 +2,8 @@
 
 /**
  * Canvas object cards — the component vocabulary (#1232). Every kind of
- * thing the canvas can hold renders as a glass card with the reference-style
- * anatomy: a mini title bar, a kind-specific body, a position chip while
+ * thing the canvas can hold renders as a glass card with the shared
+ * frosted-frame anatomy: a mini title bar, a kind-specific body, a position chip while
  * dragging, and a selection ring on click.
  */
 
@@ -76,7 +76,7 @@ export function CanvasCard({
         zIndex: card.kind === 'image' ? 2 : 3,
       }}
     >
-      {/* Position chip while dragging — the their product W/H dims pattern. */}
+      {/* Position chip while dragging — live W/H dims. */}
       {dragging ? (
         <div
           style={{

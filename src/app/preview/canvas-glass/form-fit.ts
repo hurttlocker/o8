@@ -1,7 +1,7 @@
 /**
  * Form-fit grid engine (#1239 — the canvas "hard placement" mode). Packs every
  * card into a grid that FILLS the usable viewport: cards snap to slots and
- * RESIZE (w + h) to fit, the way the a creator reference does (vs free-flow,
+ * RESIZE (w + h) to fit — form-fit packing (vs free-flow,
  * where cards keep their size + position). Pure geometry — page.tsx owns the
  * card state and the animated writeback.
  */

@@ -36,7 +36,7 @@ interface SidebarTogglePillProps {
   /**
    * Optional hover handlers — used by WorkspaceHeaderStrip when sidebar is
    * collapsed to drop the hover-preview overlay from the toggle pill itself
-   * (Claude-style). LeftHeaderStrip doesn't pass these — its pill only
+   * LeftHeaderStrip doesn't pass these — its pill only
    * toggles. 2026-05-27.
    */
   onHoverEnter?: () => void;

@@ -8,9 +8,10 @@ import type { ComparisonGroup } from './useComparisonGroups';
 
 /**
  * The N-up "pick the winner" surface (item 3): every best-of-N candidate's diff,
- * side by side, each read from its own isolated worktree. Both the competing platform and o8 market
- * "compare & merge the winner"; neither shipped the N-up matrix — this is it. The
- * gated pick (winner → review-gate merge, losers → archive) lands in a later stage;
+ * side by side, each read from its own isolated worktree. "Compare & merge the
+ * winner" is widely marketed; the N-up matrix is the part nobody ships — this is
+ * it. The gated pick (winner → review-gate merge, losers → archive) lands in a
+ * later stage;
  * here the operator can see all candidates at once.
  *
  * Layout: a horizontal row of fixed-width columns that scrolls past the panel

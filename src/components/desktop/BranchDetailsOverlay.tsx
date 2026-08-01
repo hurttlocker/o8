@@ -83,7 +83,7 @@ const OVERLAY_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /**
  * The expanded branch-details card stack, rendered as a floating overlay
- * (Cursor-style git/environment popover, Q ruling 2026-07-14). It portals to
+ * (git/environment popover, Q ruling 2026-07-14). It portals to
  * document.body to escape the rail's `overflow:hidden` ancestor, right-aligns
  * to the in-layout capsule, and extends LEFTWARD over the chat — so revealing
  * it never pushes the composer. Hover-bridge + pin logic lives in the caller

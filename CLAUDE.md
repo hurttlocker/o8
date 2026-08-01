@@ -257,7 +257,7 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat
 ```
 
 - **Body**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state is a centered hero ("What should we build in <repo>?") over the composer plus a context-chip row (repo · worktree · branch · agent), and (context-dependent) a row of 6 quick-action text links under the hero ("Review pending agent changes", "What did agents ship today?", etc.). The old 6 quick-action cards moved into the ⌘⇧K `QuickActionPalette` (DISPATCH / DECOMPOSE / FIX / REVIEW / STATUS / CLEAR verb rows — rebound from ⌘K in 0.1.351 to stop colliding with the global CommandPalette). When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
-- **Inline transcript blocks (Codex-borrow)**: orchestrator turns get rolled-up `TurnSummaryCard` ("Worked for X min", #1096) and `ChatActionCard` ("Edited N files" + Undo/Review, #1095) inline blocks. Tool-call pill clusters auto-collapse after 3+ calls (`fix(chat): collapse tool-call pill cluster by default after 3+ calls`).
+- **Inline transcript blocks**: orchestrator turns get rolled-up `TurnSummaryCard` ("Worked for X min", #1096) and `ChatActionCard` ("Edited N files" + Undo/Review, #1095) inline blocks. Tool-call pill clusters auto-collapse after 3+ calls (`fix(chat): collapse tool-call pill cluster by default after 3+ calls`).
 - **Thread restore**: `orchestrator-thread-restore.ts` persists the last-active thread id + title under `o8:last-orchestrator-thread-id` / `o8:last-orchestrator-thread-title` localStorage keys so the tab spawns with the right label on first paint (no flash from "Orchestrator" to "o8.v1").
 - **Permission chip retired (2026-07-11, Q ruling):** the composer always runs full access — the Full/Read-only shield toggle and plan-mode banner were removed from both the orchestrator and worker composers. Do not reintroduce.
 - **Past threads** live on the mobile API surface (`/api/mobile/orchestrator/threads`) — desktop reaches the history list through there too. No dedicated desktop sidebar component anymore.
@@ -294,11 +294,11 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat
 | `src/components/desktop/workspace-terminal/orchestrator-thread-restore.ts` | localStorage helpers — restore last-active orchestrator thread id/title across reloads. |
 | `src/components/desktop/thoughts/ThoughtsChatPanel.tsx` | Chat transcript + composer for the orchestrator and CLI lanes. Supports `emptyStateOverride` + `fillInput`/`sendNow` imperative methods. |
 | `src/components/desktop/O8Panel.tsx` | Right-side wide panel — main tabs workspace / browser / prs / activity / inbox / spec / launcher + utility rail (see `o8-panel/types.ts`). Default width 440px, resizable. |
-| `src/components/desktop/pr-panel/PrPanel.tsx` | Cursor-style PR review surface — header + tabs (Changes / Checks / Commits / Reviews). Mounted inside O8Panel's PRs tab. |
-| `src/components/desktop/review/ReviewPanel.tsx` | Dedicated Review surface (epic #1085) — Codex-style, one continuous diff, no file-list rail. Mounted in O8Panel's `review` mode. Hosts `O8ScratchChat` (Engineering Brain composer) in its rail. |
+| `src/components/desktop/pr-panel/PrPanel.tsx` | PR review surface — header + tabs (Changes / Checks / Commits / Reviews). Mounted inside O8Panel's PRs tab. |
+| `src/components/desktop/review/ReviewPanel.tsx` | Dedicated Review surface (epic #1085) — one continuous diff, no file-list rail. Mounted in O8Panel's `review` mode. Hosts `O8ScratchChat` (Engineering Brain composer) in its rail. |
 | `src/components/desktop/o8-panel/workspace-rail/O8ScratchChat.tsx` | "Ask the Brain" composer — Engineering Brain Q&A surface with structured citations, premium dot + cost-hint legend. |
-| `src/components/desktop/thoughts/chat-panel/TurnSummaryCard.tsx` | Inline "Worked for X min" rolled-up transcript card (#1096 Codex borrow). |
-| `src/components/desktop/thoughts/chat-panel/ChatActionCard.tsx` | Inline "Edited N files" action card with Undo/Review (#1095 Codex borrow). |
+| `src/components/desktop/thoughts/chat-panel/TurnSummaryCard.tsx` | Inline "Worked for X min" rolled-up transcript card (#1096). |
+| `src/components/desktop/thoughts/chat-panel/ChatActionCard.tsx` | Inline "Edited N files" action card with Undo/Review (#1095). |
 | `src/components/desktop/repo-focus/LeftPanelProjectFocus.tsx` | Project drawer in the left sidebar — surfaces AgentsTab (live + archived packets), Context, Spec, Files. |
 | `src/components/desktop/dictation/DictationHost.tsx` | Push-to-talk voice input — mounted at dashboard level. Hosts the pill overlay + Ctrl+Z hold shortcut. Mic button lives next to Send in the composer. |
 | `src/components/desktop/Canvas.tsx` | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
@@ -371,7 +371,6 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 - **Don't build what models will commoditize** — Cost dashboards, context optimization, prompt tools, orchestration quality, and briefing features are table-stakes, never differentiators. Our moats are governance, organizational memory, and the operator approval surface.
 - **Console logging prefix**: `[feature-name]` (e.g., `[memory-recall]`, `[compaction]`)
 - **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`
-- **Public changelog safety**: Commit messages are synced (sanitized) to the public repo `hurttlocker/o8-releases` (formerly `o8`, before that `Rainwater`). Only `feat:` / `perf:` / `design:` commits survive the filter. When introducing a new internal codename, framework, or tool name, add it to BOTH the sed filter AND the blocklist in `.github/workflows/sync-changelog.yml` (and the local fallback `scripts/sync-public-changelog.sh`). The blocklist fails the workflow if anything leaks.
 
 ## Design Constants
 

@@ -1244,8 +1244,8 @@ function DashboardInner() {
   // navigation request from the port popover etc.) — this is the live
   // current URL of whichever tab is selected inside the pane.
   const [o8BrowserHoverUrl, setO8BrowserHoverUrl] = useState<string | null>(null);
-  // Header-rail portal target for the browser's page tabs (Cursor borrow,
-  // Q 2026-07-12) — PanelHeaderStrip renders the walled slot; O8Panel hands
+  // Header-rail portal target for the browser's page tabs
+  // (Q 2026-07-12) — PanelHeaderStrip renders the walled slot; O8Panel hands
   // the element to O8BrowserPane, which portals its pills in.
   const [browserHeaderTabSlot, setBrowserHeaderTabSlot] = useState<HTMLElement | null>(null);
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
@@ -2014,7 +2014,7 @@ function DashboardInner() {
 
   // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
   // o8:open-automations when clicked. Flip the activeNavSection so the
-  // AutomationsPage takes the workspace center. Codex-style page-takeover.
+  // AutomationsPage takes the workspace center. Full page-takeover.
   useEffect(() => {
     const handler = () => setActiveNavSection('automations');
     window.addEventListener('o8:open-automations', handler);
@@ -5854,7 +5854,7 @@ function DashboardInner() {
       {/* Failed New-session spawns surface here — never silent (D3YPBP). */}
       <SpawnErrorToast message={spawnErrorMessage} onDismiss={() => setSpawnErrorMessage(null)} />
 
-      {/* Floating browser PIP (Codex borrow) — only when no side panel is
+      {/* Floating browser PIP — only when no side panel is
           open; triggered by hovering browser tool clusters in the transcript.
           Scope key MUST match the O8Panel browserStateKey above. */}
       <BrowserPipCard

@@ -6,7 +6,7 @@ import { GitBranch } from './tabler-shims';
 import { formatBranchDisplayName } from './repo-registry/shared';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
-// Branch-with-check glyph that matches Superconductor's pill icon: two
+// Branch-with-check glyph for the split pill: two
 // branch nodes joined by an arc, with a check mark inside the lower node.
 // Renders crisply at 14px in both light and dark themes.
 function BranchMergeIcon({
@@ -517,7 +517,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
                 opacity: merging ? 0.6 : 1,
               }}
             >
-              {/* Subtle vertical divider to mirror Superconductor's split pill. */}
+              {/* Subtle vertical divider — primary action, then the method chevron. */}
               <span
                 style={{
                   position: 'absolute',

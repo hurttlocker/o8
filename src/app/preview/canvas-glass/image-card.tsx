@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Image cards — photos surface the way the a creator reference does
+ * Image cards — photos surface as free-floating framed objects on the board
  * (#1232): a floating filename pill above the image, the picture itself
  * dissolving into the canvas at its bottom edge, a W×H chip while
  * resizing, and drag-together STACKS — drop one photo onto another and

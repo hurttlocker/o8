@@ -1,5 +1,5 @@
 /**
- * branch-rail-collapse — the Codex-style fold primitives for the
+ * branch-rail-collapse — the fold primitives for the
  * branch-details rail (Q 2026-07-13): the icon button used by both the
  * collapsed 44px column and the » control below the header.
  */

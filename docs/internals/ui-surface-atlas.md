@@ -36,7 +36,7 @@ Tab kinds a human can actually create (`workspace-terminal/types.ts`):
 `src/components/desktop/O8Panel.tsx`, default width 440px (max default 480), localStorage-persisted. **The REAL tab union** (`o8-panel/types.ts`) — note CLAUDE.md's "7 tabs (Pulse/…/o8.md)" listing has drifted; trust this:
 - Main: **workspace · browser · prs · activity · inbox · spec · launcher**
 - Utility (right-rail, launcher-managed): **files · side-chat · browser · review · terminal**
-- **review** mode hosts ReviewPanel (epic #1085, Codex-style single diff) + **O8ScratchChat** ("Ask the Brain", CircleSpark icon — same icon intentionally reused on spec/o8.md surface to unify the "ask o8" affordance).
+- **review** mode hosts ReviewPanel (epic #1085, single continuous diff) + **O8ScratchChat** ("Ask the Brain", CircleSpark icon — same icon intentionally reused on spec/o8.md surface to unify the "ask o8" affordance).
 - **spec** = the o8.md review surface (CriticMarkup threads).
 
 ### E. Settings

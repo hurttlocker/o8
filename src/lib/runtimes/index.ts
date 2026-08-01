@@ -96,7 +96,7 @@ registerRuntime(grokRuntime);
 // JSONL with native steer. Sessions 'pi-owned:'. See src/lib/pi/owned.ts.
 registerRuntime(piRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
-// #514 — Cloud runtime adapter (Cursor-style self-hosted worker pool).
+// #514 — Cloud runtime adapter (self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires
 // a worker CLI to connect to /api/cloud/worker-poll with a provisioned key.
 registerRuntime(cloudRuntime);

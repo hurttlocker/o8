@@ -51,7 +51,7 @@ export interface TermCard {
   agentCli?: string;
 }
 
-// The Claude Code borrow — rotating verbs in o8's own vocabulary while the
+// Rotating verbs in o8's own vocabulary while the
 // shell spawns, with one shimmer band sweeping the text (gradient-clip).
 const SPAWN_VERBS = [
   'Summoning shell',

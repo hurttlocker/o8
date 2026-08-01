@@ -351,7 +351,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             borderRadius: 14,
             border: 'none',
             background: 'var(--t-chat-surface-input-bg, var(--t-input-bg))',
-            // Floating composer (Claude-style, 2026-07-02) — NO border; the input
+            // Floating composer (2026-07-02) — NO border; the input
             // bg + a soft warm lift define it, so the edge just FADES into the
             // transcript instead of drawing a boxed outline. (Supersedes the
             // earlier flat/no-shadow request.)

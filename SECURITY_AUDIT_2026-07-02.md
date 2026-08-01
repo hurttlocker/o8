@@ -71,7 +71,7 @@ o8's access control rests on **one strong control (the middleware socket-truth g
 | PL-2 | Medium | `serve-image` traversal — `startsWith(ALLOWED_ROOTS)` with no `realpath`, `..` survives | `panel/serve-image/route.ts:34-37` |
 | PL-3 | Medium | Updater downgrade: `latest.json.version` is attacker-set if the release channel token (not the signing key) is compromised; no rollback protection | `scripts/release.mjs:106` |
 | PL-4 | Low | Signing key has no passphrase (`TAURI_SIGNING_PRIVATE_KEY_PASSWORD:''`) — a key/CI-secret leak is immediately usable | `.github/workflows/release.yml:56` |
-| PL-5 | Low | Changelog sanitizer residual: fail-closed + subject-only (good), but unlisted model names / a secret in a `feat:` subject would pass sed+blocklist | `sync-changelog.yml` |
+| PL-5 | Low | Changelog sanitizer residual — resolved: the public changelog sync has been retired | n/a |
 | PL-6 | Low | Non-constant-time ws-token compare (`===`) in ws-server + `requirePanelAuth` | `ws-server.ts:3861,4566`, `panel/auth.ts:41` |
 | PL-7 | Medium | Unvalidated `baseBranch`/`targetBranch` positional git args — incidentally defused by a preceding `worktree add`; fragile | `worktree-side-merge.ts:173,493,749` |
 | PL-8 | Low | Worker CLI prompt not `--`-fenced (codex/opencode) — arg-injection into worker CLI, not shell RCE | `runtimes/codex.ts:300` |

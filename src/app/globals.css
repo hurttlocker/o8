@@ -1786,7 +1786,7 @@ button.workflow-file-item.workflow-file-item-active {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Active agent label — Superconductor-style shimmer sweep on the
+/* Active agent label — shimmer sweep on the
    "Orchestrator" text in the agent panel row when the repo is focused.
    Pure opacity pulse so it works identically in light + midnight and
    never makes glyphs disappear. Contrast is deliberately punchy (0.45)
@@ -2028,10 +2028,9 @@ button.workflow-file-item.workflow-file-item-active {
 /* ─────────────────────────────────────────────────────────────────────────
    Loader family — "neo-retro pixel grid" (motion lab, 2026-07-11)
 
-   Bespoke o8 riff on the reference set's animated loading-icon set: low-fidelity
-   pixel cells that flick on/off in discrete steps(), paired (in one variant)
-   with a smooth hi-fi glow — the lo-fi/hi-fi contrast that made the reference
-   read premium. o8's own geometry + the single orange accent, not a clone.
+   Low-fidelity pixel cells that flick on/off in discrete steps(), paired
+   (in one variant) with a smooth hi-fi glow — a lo-fi/hi-fi contrast that
+   reads premium. o8's own geometry + the single orange accent.
 
    PERF: every variant animates transform or opacity ONLY, so the compositor
    drives them with no per-frame raster (the lesson the sweep-dot taught us —

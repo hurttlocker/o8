@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- file fetch effect intentionally toggles loading state */
 
 /**
- * HtmlPreview — Conductor-style live HTML file viewer.
+ * HtmlPreview — live HTML file viewer.
  *
  * Renders `.html` / `.htm` files in a sandboxed iframe with a Preview/Source
  * segmented toggle. Sandbox is `allow-scripts` only — no allow-same-origin,

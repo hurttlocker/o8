@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
- * Managed GitHub App state (the Cursor-style path).
+ * Managed GitHub App state (the managed path).
  *
  * The public "o8" GitHub App is owned by us; the license server holds its
  * private key and mints short-lived installation tokens for signed-in users

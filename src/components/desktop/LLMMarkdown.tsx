@@ -654,7 +654,7 @@ export function renderInline(text: string): React.ReactNode {
           </button>
         );
       } else if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?/i.test(url)) {
-        // Loopback links open o8's EMBEDDED browser (Cursor borrow, Q ruling
+        // Loopback links open o8's EMBEDDED browser (Q ruling
         // 2026-07-12): a dev-server URL the agent just started belongs inside
         // the workspace, not in an external Chrome bounce. Same event the
         // o8_view_open_browser MCP tool uses.

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * PairedDevicesSection — Settings → Mobile → Paired devices (the competing platform #5).
+ * PairedDevicesSection — Settings → Mobile → Paired devices.
  *
  * Lists every device that enrolled a per-device token (GET /api/mobile/devices)
  * and lets the operator revoke any one (POST /api/mobile/devices/revoke). Revoke

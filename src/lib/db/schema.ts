@@ -675,7 +675,7 @@ export const mobileLiveActivityTokens = sqliteTable('mobile_live_activity_tokens
 
 // ══════════════════════════════════════════════════════════════════
 //  Automations — scheduled / on-demand agent runs
-//  (Superset-style; see [[borrow_conductor_steer_queue]] sibling memory.)
+//  (cron-style scheduled runs.)
 // ══════════════════════════════════════════════════════════════════
 
 export const automations = sqliteTable('automations', {

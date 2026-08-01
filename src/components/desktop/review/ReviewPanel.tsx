@@ -29,10 +29,10 @@ import { ReviewSkeleton } from './panel/ReviewSkeleton';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
- * mode. Codex-style: one continuous diff, no file-list rail. Every changed
+ * mode. One continuous diff, no file-list rail. Every changed
  * file is a collapsible row whose diff loads inline on expand.
  *
- * Phase 1: continuous diff.  Phase 2: Codex-style header — file filter +
+ * Phase 1: continuous diff.  Phase 2: header — file filter +
  * unified/split diff toggle.  Phase 3: chat-file clicks → header tabs.
  * (A scope dropdown — Last turn / Staged — needs backend data wiring and is
  * tracked as its own follow-up, not part of this header.)

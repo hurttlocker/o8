@@ -279,7 +279,7 @@ function RepoBranchRowBase({
   const branchBaseBackground = isActiveScope ? 'rgba(37, 99, 235, 0.08)' : 'transparent';
   const branchHoverBackground = 'var(--t-panel-hover)';
 
-  // Status indicator — mirrors Superconductor's left-side glyph column:
+  // Status indicator — a glyph column on the row's left edge:
   //   spinning braille → running agent on this branch
   //   ● solid dot      → has pending changes (additions/deletions) but idle
   //   ?                → worktree needs attention (stale, conflicts)
@@ -662,7 +662,7 @@ function RepoBranchRowBase({
         {(() => {
           // Prefer a live agent's in-progress diff (more informative while an
           // agent is working), otherwise fall back to the branch-level diff
-          // vs the repo's default branch (what Superconductor shows).
+          // vs the repo's default branch.
           const adds = branchDiffAgent?.additions ?? branch.additions ?? 0;
           const dels = branchDiffAgent?.deletions ?? branch.deletions ?? 0;
           if (adds === 0 && dels === 0) return null;

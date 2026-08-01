@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
  * returns `{ packetId, wouldMerge, checks[], blockers[], branch }` — the same
  * MergePreviewResult the `o8_merge_preview` MCP tool surfaces. The N-up compare
  * matrix renders this per column so the operator sees each candidate's GATE
- * VERDICT before picking — the governance signal the competitor's diff view can't show.
+ * VERDICT before picking — the governance signal a plain diff view can't show.
  * Gated by the global middleware (loopback + token under /api/orchestrator/).
  */
 export async function GET(request: NextRequest) {

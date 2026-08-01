@@ -2,7 +2,7 @@
 
 /**
  * WorkspaceBrowserPreview — live browser preview inside the workspace tab
- * (T3-Code borrow, 2026-07-31). When the operator has a browser tab open and
+ * (2026-07-31). When the operator has a browser tab open and
  * the screen is wide enough, the page shows right here above the diff — no
  * need to flip to the Browser tab to see what the agent is building.
  *

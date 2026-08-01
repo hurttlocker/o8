@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
  * useMergePreview — dry-run the merge gate for one comparison candidate so its
  * column can show a GATE VERDICT (passes / blocked-by) before the operator picks.
  * Fetches GET /api/orchestrator/merge-preview only when `enabled` (the candidate is
- * complete); idle otherwise. This is the governance signal the competitor's diff view lacks.
+ * complete); idle otherwise. This is the governance signal a plain diff view lacks.
  */
 export interface MergePreviewState {
   loading: boolean;

@@ -1,5 +1,5 @@
 /**
- * Mobile E2EE — the canonical crypto operations (platform teardown #5).
+ * Mobile E2EE — the canonical crypto operations.
  *
  * This module is the executable half of `docs/internals/mobile-e2ee.md`. The o8-mobile
  * (Expo) client mirrors these EXACT operations with the same `tweetnacl`

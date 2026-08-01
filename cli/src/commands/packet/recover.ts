@@ -1,7 +1,7 @@
 /**
  * `o8 packet reset | retry | rerun | merge-preview` — packet recovery verbs.
  *
- * CLI-as-control-plane symmetry (platform teardown #2, Stage 3). Thin clients of the
+ * CLI-as-control-plane symmetry (Stage 3). Thin clients of the
  * gated /api/orchestrator/{reset-packet,rerun-with-feedback,merge-preview}
  * routes — the same routes the operator MCP server's reset_packet / retry_packet
  * / rerun_with_feedback / o8_merge_preview tools call. packetId resolves from

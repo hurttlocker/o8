@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Scroll-blur fade (operator tip, 2026-06-13 — a creator on X). Heavy
+ * Scroll-blur fade (operator call, 2026-06-13). Heavy
  * backdrop blur during fast scroll wrecks perceived smoothness and spikes GPU
  * cost. While a glass surface's scroll container is moving, scale its blur DOWN
  * via the `--cnv-frost-scale` var on its nearest `[data-glass-surface]`

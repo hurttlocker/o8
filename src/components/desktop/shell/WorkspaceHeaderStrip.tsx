@@ -92,7 +92,7 @@ interface WorkspaceHeaderStripProps {
   headerActiveTabId?: string | null;
   /** Number of non-active finished CLI-session tabs eligible for explicit cleanup. */
   finishedTabCount?: number;
-  /** Header-owned toggle for the Codex-style project context rail.
+  /** Header-owned toggle for the project context rail.
    *  Hidden unless the active workspace tab can render that rail. */
   projectContextRailAvailable?: boolean;
   projectContextRailVisible?: boolean;
@@ -184,7 +184,7 @@ export function WorkspaceHeaderStrip({
           finishedTabCount={finishedTabCount}
         />
       ) : headerLabel ? (
-        // Just the name — Cursor-style. Rename / archive / delete live on the
+        // Just the name. Rename / archive / delete live on the
         // left session list's right-click menu (operator 2026-07-14), so the
         // header needs no `…` actions button.
         <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
@@ -391,7 +391,7 @@ function IconInfoCircle({ size = 16 }: { size?: number }) {
   );
 }
 
-/** Codex-style pill strip — renders in the WorkspaceHeaderStrip's
+/** Pill strip — renders in the WorkspaceHeaderStrip's
  *  center slot when 2+ tabs are open. Active pill is a filled dark
  *  rounded rect; inactive pills are icon + label only. Horizontal
  *  scroll when overflowing. Click → dispatches a window event the
@@ -776,7 +776,7 @@ function significantWords(label: string, count: number): string {
   return words.slice(0, count).join(' ');
 }
 
-// Codex-style "<repo> / <chat title>" split: repo gets emphasis, the
+// The "<repo> / <chat title>" split: repo gets emphasis, the
 // separator is faint, the title is muted. Matches HeaderLabelText in
 // TabBar.tsx — kept duplicated rather than shared since this strip
 // renders at the column-shell layer (no workspace-terminal import).

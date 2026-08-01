@@ -79,9 +79,8 @@ export function ChatsTab({
   const [showAllChats, setShowAllChats] = useState(false);
 
   // Group-by mode for the left-rail chat list (mini / flat variant).
-  // Three modes, persisted to localStorage. Borrowed from Claude's
-  // sidebar pattern in the operator's reference video — the filter
-  // icon on a group header opens a Group by / Sort by popover.
+  // Three modes, persisted to localStorage. The filter icon on a
+  // group header opens a Group by / Sort by popover.
   const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
   const [chatGroupBy, setChatGroupBy] = useState<ChatGroupMode>('flat');
   useEffect(() => {
@@ -98,7 +97,7 @@ export function ChatsTab({
     }
   }, []);
   // Per-repo drawer collapse (repo grouping only) — each repo header is a
-  // minimizable drawer, Cursor-style. Persisted as a JSON array of
+  // minimizable drawer. Persisted as a JSON array of
   // collapsed group keys so the drawer state survives reloads.
   const REPO_COLLAPSED_KEY = 'o8:chat-repo-groups-collapsed';
   const [collapsedRepoGroups, setCollapsedRepoGroups] = useState<Set<string>>(() => new Set());

@@ -1,5 +1,5 @@
 /**
- * Mobile E2EE — feature flag (platform teardown #5).
+ * Mobile E2EE — feature flag.
  *
  * Gates the NEW pairing path: when ON, pairing hands out a one-time enroll code
  * + the server identity (per-device tokens + E2EE handshake); when OFF, pairing

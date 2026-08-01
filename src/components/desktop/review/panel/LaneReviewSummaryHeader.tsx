@@ -68,8 +68,8 @@ export function LaneReviewSummaryHeader({
 
   // The governed merge — same endpoint as the packet banner. If the approvals
   // policy raises a card, the CONFIRM step happens right here on the review
-  // surface (Q ruling 2026-07-18: the merge lives where the review lives,
-  // Codex-style — never bounce the operator to the inbox).
+  // surface (Q ruling 2026-07-18: the merge lives where the review lives —
+  // never bounce the operator to the inbox).
   const runMerge = useCallback(async () => {
     if (!packetId) return;
     setMerge({ step: 'merging' });

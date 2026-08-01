@@ -29,8 +29,8 @@ const STATUS_STATES: Array<{
 const SAMPLE_ROW_TITLE = 'Ingest spec files to improve retrieval awareness';
 const SAMPLE_ROW_META = 'main · automation · idle';
 
-// Neo-retro pixel-grid loaders — bespoke o8 riff on the reference set's animated
-// loading-icon set. Each maps to one borrowed mechanic; CSS lives in
+// Neo-retro pixel-grid loaders — blocky pixel cells that flick on/off in
+// discrete steps(). Each maps to one mechanic; CSS lives in
 // globals.css as .o8-loader-<kind>. (2026-07-11.)
 type LoaderKind = 'bitfield' | 'dispatch' | 'aurora' | 'mirror' | 'stack';
 const LOADERS: Array<{ kind: LoaderKind; title: string; mechanic: string }> = [
@@ -201,16 +201,15 @@ export default function MotionPreviewPage() {
         </div>
       </section>
 
-      {/* Loaders — neo-retro pixel grid. Bespoke o8 riff on the reference set's
-          animated loading-icon set (reference video):
-          low-fi cells flicking on/off in discrete steps(), one variant paired
-          with a smooth hi-fi glow. All compositor-only (transform/opacity). */}
+      {/* Loaders — neo-retro pixel grid: low-fi cells flicking on/off in
+          discrete steps(), one variant paired with a smooth hi-fi glow.
+          All compositor-only (transform/opacity). */}
       <section style={{ maxWidth: 920, margin: '0 auto 40px auto' }}>
         <h2 style={{ fontSize: 14, fontWeight: 440, letterSpacing: '-0.2px', margin: 0, marginBottom: 6 }}>
           Loaders — neo-retro pixel grid
         </h2>
         <p style={{ fontSize: 12.5, color: 'var(--t-text-muted)', margin: 0, marginBottom: 16, lineHeight: 1.5, maxWidth: 660 }}>
-          Bespoke o8 riff on a creator&apos;s animated loading-icon set — blocky pixel cells that flick on/off in discrete <code>steps()</code>, one paired with the lo-fi/hi-fi glow contrast that made the reference read premium. o8 geometry + the single orange accent. Each is shown at its <strong>chrome size</strong> (~16px, where it&apos;d live in a row/composer) and enlarged 3×. Compositor-only — transform + opacity, no per-frame raster.
+          Blocky pixel cells that flick on/off in discrete <code>steps()</code>, one paired with a lo-fi/hi-fi glow contrast that reads premium. o8 geometry + the single orange accent. Each is shown at its <strong>chrome size</strong> (~16px, where it&apos;d live in a row/composer) and enlarged 3×. Compositor-only — transform + opacity, no per-frame raster.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
           {LOADERS.map((l) => (

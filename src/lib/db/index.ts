@@ -167,7 +167,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only
   // fires once when the column is created; this runs every boot.
   backfillSessionOutcomeValidFrom(sqlite);
-  // Schema v23 — `automations` table (Superset-style scheduled agent runs).
+  // Schema v23 — `automations` table (cron-style scheduled agent runs).
   // CREATE TABLE IF NOT EXISTS, so safe on every boot; indexes follow.
   ensureAutomationsTable(sqlite);
   // Schema v24 — `automations.last_error_message` so the UI can surface WHY a
@@ -1012,7 +1012,7 @@ function ensureTables(sqlite: Database.Database): void {
       reason TEXT
     );
 
-    -- Mobile E2EE (platform teardown #5) — per-device revocable tokens. We store the
+    -- Mobile E2EE — per-device revocable tokens. We store the
     -- token HASH only (the token is shown once at enrollment); identity_public_key
     -- is the device's Ed25519 handshake key. The shared ~/.o8/ws-token stays valid
     -- alongside these for the desktop webview + migration.
@@ -1027,7 +1027,7 @@ function ensureTables(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_mobile_devices_token_hash ON mobile_devices(token_hash);
 
-    -- Mobile inline diff comments (platform teardown #9) — operator line notes from
+    -- Mobile inline diff comments — operator line notes from
     -- the phone, anchored to a file + line of an agent session's diff. Read by
     -- the desktop review surface + injected into the agent's iterate prompt.
     CREATE TABLE IF NOT EXISTS mobile_diff_comments (

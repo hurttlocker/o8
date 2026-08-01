@@ -414,7 +414,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   }
 
   if (isUser) {
-    // Cursor-style user row: a full-width neutral card (no accent bubble) so
+    // User row: a full-width neutral card (no accent bubble) so
     // operator prompts read as part of the document flow, not chat balloons.
     return (
       <div style={{

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The the reference-borrow center stage (#1232, a creator reference): a pulsing
+ * The center stage (#1232): a pulsing
  * idle element with cycling hints, morphing into an orbiting summon
  * spinner while the fleet materialises. Owns the canvas while it is empty.
  */

@@ -1,5 +1,5 @@
 /**
- * Mobile device enrollment (platform teardown #5).
+ * Mobile device enrollment.
  *
  * The bootstrap endpoint an UNPAIRED phone calls — it has no bearer token yet,
  * so it authenticates with the single-use `enroll` code carried by the pairing

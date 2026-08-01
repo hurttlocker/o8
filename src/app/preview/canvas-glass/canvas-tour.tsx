@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * CanvasTour — the guided coach-mark tour (reference: their product's onboarding).
+ * CanvasTour — the guided coach-mark tour.
  *
  * Walks a new operator through the canvas by SPOTLIGHTING the real chrome —
  * the composer, the MODE chip, the spawn rail, the review action — one at a

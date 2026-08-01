@@ -1,5 +1,5 @@
 /**
- * Mobile E2EE — the server's persistent Ed25519 identity (platform teardown #5).
+ * Mobile E2EE — the server's persistent Ed25519 identity.
  *
  * One long-term signing keypair per o8 install, stored at `~/.o8/e2ee-identity.key`
  * (mode 600). Its public key is delivered to a phone out-of-band via the pairing

@@ -65,8 +65,8 @@ interface O8PanelProps {
   // Bubbles the browser pane's active URL up so the TitleBar Browser
   // button can render a hover preview iframe pointed at it.
   onBrowserActiveUrlChange?: (url: string | null) => void;
-  /** Header-rail portal target for the browser's page tabs (Cursor borrow,
-   *  Q 2026-07-12) — provided by the dashboard's PanelHeaderStrip. Pages
+  /** Header-rail portal target for the browser's page tabs
+   *  (Q 2026-07-12) — provided by the dashboard's PanelHeaderStrip. Pages
    *  render up there next to the state drawer; the pane skips its own row. */
   browserHeaderTabSlot?: HTMLElement | null;
   onSelectedFileChange?: (filePath: string) => void;
@@ -726,8 +726,7 @@ export function O8Panel({
     >
       {/* Scratch chat — floating Ask-o8 button + dialog, sits across tabs where
           it does not compete with local document/review controls.
-          Operator restored post-#1089 ([[borrow_conductor_steer_queue]]
-          sibling — same restore-after-rework pattern). Mounts once per panel;
+          Operator restored post-#1089 (same restore-after-rework pattern). Mounts once per panel;
           internal Cmd+E hotkey + button click open the floating dialog. The
           review/workspace tab owns its compact toolbar trigger inside
           ReviewPanel; Activity/PR detail suppress it to keep local toolbars

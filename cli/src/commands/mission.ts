@@ -1,7 +1,7 @@
 /**
  * `o8 mission …` — mission lifecycle from the CLI.
  *
- * CLI-as-control-plane symmetry (platform teardown #2, Stage 1). These verbs lived
+ * CLI-as-control-plane symmetry (Stage 1). These verbs lived
  * only in the operator MCP server; they are thin clients of the same gated
  * `/api/orchestrator/*` routes the MCP already calls, so the human operator
  * (headless) and a self-orchestrating agent both drive a mission from one

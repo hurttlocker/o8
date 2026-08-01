@@ -35,8 +35,7 @@ interface QuickAction {
   prompt: string;
 }
 
-// Three prescriptive starting points (Cursor empty-state borrow, operator
-// 2026-07-12): fewer, bigger, clickable pills that teach the tool's core
+// Three prescriptive starting points (operator 2026-07-12): fewer, bigger, clickable pills that teach the tool's core
 // verbs — plan, review, triage — instead of six whisper-weight text links
 // the eye skated past. Each pill sends a real prompt on click.
 const QUICK_ACTIONS: QuickAction[] = [
@@ -650,7 +649,7 @@ function ChipPopover({
         top: coords?.top ?? 0,
         left: coords?.left ?? 0,
         opacity: coords ? 1 : 0,
-        // Slide-down entrance (Cursor-style) — the menu reads as a layer
+        // Slide-down entrance — the menu reads as a layer
         // dropping out from under its chip. Opacity stays gated on `coords`
         // so the pre-measured frame never flashes at the wrong spot.
         animation: 'o8ChipPopIn 130ms cubic-bezier(0.22, 1, 0.36, 1)',

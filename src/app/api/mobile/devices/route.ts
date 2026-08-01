@@ -1,5 +1,5 @@
 /**
- * Paired-device list (platform teardown #5) — the operator's "Paired devices"
+ * Paired-device list — the operator's "Paired devices"
  * surface. Gated like the rest of /api/mobile/* (loopback desktop passes; a
  * cross-origin caller needs the token). Returns device metadata only — never the
  * token or its hash.

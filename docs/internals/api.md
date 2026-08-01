@@ -43,7 +43,7 @@ Note: the realtime `lane-lifecycle` payload carries lane status in the `status` 
 
 Routes are grouped by their first path segment.
 
-### `/api/automations/*` — Superset-style scheduled runs (gated)
+### `/api/automations/*` — cron-style scheduled runs (gated)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -447,7 +447,7 @@ principal for stateful routes. Only session inspection (read) and logout
 | GET | `/api/v2/auth/session` | Read current authenticated user profile. |
 | GET | `/api/v2/chat/ftux` | Personalized first-touch payload for the chat surface. |
 | POST | `/api/v2/chat` | Streaming chat endpoint (free / paid tier routing via gateway). |
-| POST | `/api/v2/chat/suggestions` | Augment-Intent-style suggested-reply chips (0-3 short replies, #771). |
+| POST | `/api/v2/chat/suggestions` | Suggested-reply chips (0-3 short replies, #771). |
 | GET | `/api/v2/chat-history?tabId=...` | Read persisted LLM chat messages per tab. |
 | POST | `/api/v2/chat-history` | Append a message to a tab's history. |
 | PATCH | `/api/v2/chat-history` | Update a tab's history. |

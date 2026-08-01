@@ -1,5 +1,5 @@
 /**
- * Best-of-N fan-out (platform-teardown item 3). The backbone shipped dormant — the
+ * Best-of-N fan-out. The backbone shipped dormant — the
  * fan-out had no production trigger until `comparisonModels` was threaded through
  * create_mission — so this pins the pure state transform that arms it: one seed
  * packet → N sibling candidates, each its own worktree/lane, through a shared

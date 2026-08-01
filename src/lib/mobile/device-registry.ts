@@ -1,5 +1,5 @@
 /**
- * Mobile E2EE — per-device token registry + enrollment (platform teardown #5).
+ * Mobile E2EE — per-device token registry + enrollment.
  *
  * Each paired phone gets its own revocable token; we persist only the sha256
  * HASH (the token is returned once, at enrollment). `identity_public_key` is the

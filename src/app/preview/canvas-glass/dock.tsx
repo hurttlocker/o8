@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The docked orchestrator — the a creator companion borrow (#1232).
+ * The docked orchestrator — a persistent companion rail beside the canvas (#1232).
  * Opt-in: the conversation lives at the bottom composer until the operator
  * docks it. The dock floats directly on the canvas (no hard panel — it
  * fades in), shows every running orchestrator as a switcher row, and the

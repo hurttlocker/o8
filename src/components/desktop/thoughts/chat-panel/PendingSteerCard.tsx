@@ -4,11 +4,10 @@
  * PendingSteerCard — queued ⌘⏎ steers awaiting an idle agent.
  *
  * Renders nothing when the queue is empty. While a row is being inline-edited,
- * the consumer should pause auto-fire of the head (Conductor's "queue pauses
- * during edits" pattern).
+ * the consumer should pause auto-fire of the head (the queue pauses while a
+ * row is being edited).
  *
- * Borrow trail: [[borrow_conductor_steer_queue]] — Codex's pending-card
- * (stacked rows, Steer + Delete actions) merged with Conductor's inline edit.
+ * Shape: stacked pending rows with Steer + Delete actions, plus inline edit.
  */
 
 import { useEffect, useState } from 'react';
