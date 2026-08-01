@@ -8,11 +8,13 @@
  * - search_code: Search through codebase with grep
  */
 
-import { execSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
-import { relative, dirname } from 'node:path';
+import { execFileSync, execSync } from 'node:child_process';
+import { statSync } from 'node:fs';
+import { lstat, unlink } from 'node:fs/promises';
+import { isAbsolute, relative } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
-import { safeJoinReal } from '@/lib/fs/safe-path';
+import { safeJoin, safeJoinReal } from '@/lib/fs/safe-path';
+import { openWorkspaceFile, readWorkspaceFile, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
 import { resolveTerminalWorkingDirectory } from '@/lib/llm/terminal-working-directory';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
@@ -304,15 +306,15 @@ export interface ToolResult {
 export async function executeTool(name: string, args: Record<string, unknown>, repoRoot: string | null = DEFAULT_REPO_ROOT): Promise<ToolResult> {
   switch (name) {
     case 'search_web': return await searchWeb(args.query as string);
-    case 'read_file': return readFile(args.path as string, args.startLine as number | undefined, args.endLine as number | undefined, repoRoot);
+    case 'read_file': return await readFile(args.path as string, args.startLine as number | undefined, args.endLine as number | undefined, repoRoot);
     case 'list_files': return listFiles(args.path as string | undefined, args.pattern as string | undefined, repoRoot);
     case 'search_code': return searchCode(args.query as string, args.filePattern as string | undefined, args.maxResults as number | undefined, repoRoot);
     case 'create_github_issue': return await createGithubIssue(args as Parameters<typeof createGithubIssue>[0]);
     case 'read_github_issue_or_pr': return await readGithubIssueOrPr(args as Parameters<typeof readGithubIssueOrPr>[0]);
     case 'create_pull_request': return await createPullRequest(args as Parameters<typeof createPullRequest>[0]);
-    case 'write_file': return writeFile(args.path as string, args.content as string, repoRoot);
-    case 'edit_file': return editFile(args.path as string, args.oldText as string, args.newText as string, repoRoot);
-    case 'delete_file': return deleteFile(args.path as string, repoRoot);
+    case 'write_file': return await writeFile(args.path as string, args.content as string, repoRoot);
+    case 'edit_file': return await editFile(args.path as string, args.oldText as string, args.newText as string, repoRoot);
+    case 'delete_file': return await deleteFile(args.path as string, repoRoot);
     case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined, repoRoot);
     case 'list_lanes': return await executeListLanes();
     case 'lane_command': return await executeLaneCommand(args);
@@ -431,12 +433,15 @@ function requireRepoScope(repoRoot: string | null): repoRoot is string {
   return Boolean(repoRoot);
 }
 
-function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): { resolved: string; rel: string } | { error: string } {
+function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT, options: { blockSensitive?: boolean } = { blockSensitive: true }): { rel: string } | { error: string } {
   if (!requireRepoScope(repoRoot)) {
     return { error: 'Error: No repository is scoped to this chat' };
   }
 
-  const resolved = safeJoinReal(repoRoot, path, { allowMissing: true });
+  if (isAbsolute(path)) {
+    return { error: 'Error: Path must be relative to the repository' };
+  }
+  const resolved = safeJoin(repoRoot, path);
   if (!resolved) {
     return { error: 'Error: Path must resolve within the repository' };
   }
@@ -446,37 +451,31 @@ function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT)
   }
   // Block sensitive files. Case-insensitive: macOS APFS is case-insensitive by
   // default, so '.ENV' resolves to the same inode as '.env'.
-  const relLower = rel.toLowerCase();
-  if (relLower.includes('.env') && !relLower.includes('.env.example')) {
-    return { error: 'Error: Cannot modify .env files from chat (security)' };
+  if (options.blockSensitive !== false) {
+    const relLower = rel.toLowerCase();
+    if (relLower.includes('.env') && !relLower.includes('.env.example')) {
+      return { error: 'Error: Cannot modify .env files from chat (security)' };
+    }
+    if (relLower === '.git' || relLower.startsWith('.git/')) {
+      return { error: 'Error: Cannot modify .git directory' };
+    }
   }
-  if (relLower === '.git' || relLower.startsWith('.git/')) {
-    return { error: 'Error: Cannot modify .git directory' };
-  }
-  return { resolved, rel };
+  return { rel };
 }
 
-function writeFile(path: string, content: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+async function writeFile(path: string, content: string, repoRoot: string | null = DEFAULT_REPO_ROOT): Promise<ToolResult> {
   const validation = validatePath(path, repoRoot);
   if ('error' in validation) return { content: validation.error };
 
   try {
-    const { resolved, rel } = validation;
-    const isNew = !existsSync(resolved);
-
-    // Create parent directories if needed
-    const dir = dirname(resolved);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-
-    writeFileSync(resolved, content, 'utf-8');
+    const { rel } = validation;
+    const result = await writeWorkspaceFile(repoRoot!, rel, content);
 
     const lineCount = content.split('\n').length;
     const byteCount = Buffer.byteLength(content, 'utf-8');
 
     return {
-      content: `✅ ${isNew ? 'Created' : 'Wrote'} ${rel} (${lineCount} lines, ${byteCount.toLocaleString()} bytes)`,
+      content: `${result.created ? 'Created' : 'Wrote'} ${rel} (${lineCount} lines, ${byteCount.toLocaleString()} bytes)`,
       sources: [{ title: rel, path: rel }],
     };
   } catch (err) {
@@ -484,18 +483,15 @@ function writeFile(path: string, content: string, repoRoot: string | null = DEFA
   }
 }
 
-function editFile(path: string, oldText: string, newText: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+async function editFile(path: string, oldText: string, newText: string, repoRoot: string | null = DEFAULT_REPO_ROOT): Promise<ToolResult> {
   const validation = validatePath(path, repoRoot);
   if ('error' in validation) return { content: validation.error };
 
+  let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
   try {
-    const { resolved, rel } = validation;
-
-    if (!existsSync(resolved)) {
-      return { content: `Error: File not found: ${rel}` };
-    }
-
-    const original = readFileSync(resolved, 'utf-8');
+    const { rel } = validation;
+    opened = await openWorkspaceFile(repoRoot!, rel, 'read-write');
+    const original = (await opened.handle.readFile()).toString('utf-8');
 
     // Check if oldText exists in the file
     const idx = original.indexOf(oldText);
@@ -525,7 +521,10 @@ function editFile(path: string, oldText: string, newText: string, repoRoot: stri
 
     // Apply the edit
     const updated = original.replace(oldText, newText);
-    writeFileSync(resolved, updated, 'utf-8');
+    const updatedBytes = Buffer.from(updated, 'utf-8');
+    await opened.handle.truncate(0);
+    if (updatedBytes.byteLength > 0) await opened.handle.write(updatedBytes, 0, updatedBytes.byteLength, 0);
+    await opened.handle.sync();
 
     // Calculate change stats
     const oldLines = oldText.split('\n').length;
@@ -534,39 +533,39 @@ function editFile(path: string, oldText: string, newText: string, repoRoot: stri
     const removed = Math.max(0, oldLines - newLines);
 
     return {
-      content: `✅ Edited ${rel} — replaced ${oldLines} lines with ${newLines} lines (+${added} -${removed})`,
+      content: `Edited ${rel} — replaced ${oldLines} lines with ${newLines} lines (+${added} -${removed})`,
       sources: [{ title: rel, path: rel }],
     };
   } catch (err) {
     return { content: `Error editing file: ${err instanceof Error ? err.message : 'Unknown'}` };
+  } finally {
+    await opened?.handle.close().catch(() => {});
   }
 }
 
-function deleteFile(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+async function deleteFile(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): Promise<ToolResult> {
   const validation = validatePath(path, repoRoot);
   if ('error' in validation) return { content: validation.error };
 
+  let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
   try {
-    const { resolved, rel } = validation;
-
-    if (!existsSync(resolved)) {
-      return { content: `Error: File not found: ${rel}` };
+    const { rel } = validation;
+    opened = await openWorkspaceFile(repoRoot!, rel, 'read');
+    const size = opened.stat.size;
+    const finalStat = await lstat(opened.realPath);
+    if (finalStat.dev !== opened.stat.dev || finalStat.ino !== opened.stat.ino) {
+      return { content: `Error deleting file: ${rel} changed after open` };
     }
-
-    const stat = statSync(resolved);
-    if (stat.isDirectory()) {
-      return { content: `Error: ${rel} is a directory. Use run_terminal_command with 'rm -r' for directories (requires approval).` };
-    }
-
-    const size = stat.size;
-    unlinkSync(resolved);
+    await unlink(opened.realPath);
 
     return {
-      content: `✅ Deleted ${rel} (${size.toLocaleString()} bytes)`,
+      content: `Deleted ${rel} (${size.toLocaleString()} bytes)`,
       sources: [{ title: `${rel} (deleted)`, path: rel }],
     };
   } catch (err) {
     return { content: `Error deleting file: ${err instanceof Error ? err.message : 'Unknown'}` };
+  } finally {
+    await opened?.handle.close().catch(() => {});
   }
 }
 
@@ -667,25 +666,18 @@ async function searchWeb(query: string): Promise<ToolResult> {
   }
 }
 
-function readFile(path: string, startLine?: number, endLine?: number, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+async function readFile(path: string, startLine?: number, endLine?: number, repoRoot: string | null = DEFAULT_REPO_ROOT): Promise<ToolResult> {
   try {
     if (!requireRepoScope(repoRoot)) {
       return { content: 'Error: No repository is scoped to this chat' };
     }
 
-    const resolved = safeJoinReal(repoRoot, path);
-    if (!resolved) {
-      return { content: 'Error: Path must resolve within the repository' };
-    }
-    const rel = relative(repoRoot, resolved);
-    if (rel.startsWith('..') || rel.startsWith('/')) {
-      return { content: 'Error: Path outside repository' };
-    }
+    const validation = validatePath(path, repoRoot, { blockSensitive: false });
+    if ('error' in validation) return { content: validation.error };
+    const opened = await readWorkspaceFile(repoRoot, validation.rel);
+    let content = opened.bytes.toString('utf-8');
 
-    const stat = statSync(resolved);
-    let content = readFileSync(resolved, 'utf-8');
-
-    if (stat.size > MAX_FILE_SIZE) {
+    if (opened.stat.size > MAX_FILE_SIZE) {
       content = content.slice(0, MAX_FILE_SIZE) + '\n... (truncated)';
     }
 

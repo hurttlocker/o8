@@ -1,10 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { existsSync } from 'node:fs';
-import { expandHome, safeJoinReal } from '@/lib/fs/safe-path';
+import { expandHome } from '@/lib/fs/safe-path';
+import { isWorkspaceFileError, openWorkspaceFile } from '@/lib/fs/workspace-file';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp']);
@@ -37,28 +36,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Workspace is not a registered repository' }, { status: 400 });
   }
 
-  const fullPath = safeJoinReal(root, filePath);
-  if (!fullPath) {
-    return NextResponse.json({ error: 'Path traversal not allowed' }, { status: 403 });
-  }
-
-  if (!existsSync(fullPath)) {
-    return NextResponse.json({ error: 'File not found' }, { status: 404 });
-  }
-
   const ext = extname(filePath).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(ext)) {
     return NextResponse.json({ error: 'Not an image file' }, { status: 400 });
   }
 
+  let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
   try {
-    const fileStats = await stat(fullPath);
+    opened = await openWorkspaceFile(root, filePath, 'read');
     // Limit to 10MB
-    if (fileStats.size > 10 * 1024 * 1024) {
+    if (opened.stat.size > 10 * 1024 * 1024) {
       return NextResponse.json({ error: 'File too large (>10MB)' }, { status: 400 });
     }
 
-    const buffer = await readFile(fullPath);
+    const buffer = await opened.handle.readFile();
     const mimeType = MIME_MAP[ext] || 'application/octet-stream';
 
     // For SVGs, return as text
@@ -67,7 +58,7 @@ export async function GET(request: Request) {
         type: 'svg',
         content: buffer.toString('utf-8'),
         mimeType,
-        size: fileStats.size,
+        size: opened.stat.size,
         path: filePath,
       });
     }
@@ -78,10 +69,15 @@ export async function GET(request: Request) {
       type: 'image',
       dataUrl: `data:${mimeType};base64,${base64}`,
       mimeType,
-      size: fileStats.size,
+      size: opened.stat.size,
       path: filePath,
     });
-  } catch {
-    return NextResponse.json({ error: 'Could not read file' }, { status: 500 });
+  } catch (error) {
+    if (isWorkspaceFileError(error)) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    return NextResponse.json({ error: 'Could not read file', code: 'workspace_file_operation_failed' }, { status: 500 });
+  } finally {
+    await opened?.handle.close().catch(() => {});
   }
 }

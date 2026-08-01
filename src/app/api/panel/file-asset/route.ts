@@ -1,12 +1,10 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
-import { existsSync } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname } from 'node:path';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
-import { safeJoinReal } from '@/lib/fs/safe-path';
+import { openWorkspaceFile } from '@/lib/fs/workspace-file';
 
 const MAX_PREVIEW_BYTES = 50 * 1024 * 1024;
 
@@ -45,44 +43,33 @@ export async function GET(request: NextRequest) {
     return new Response('Workspace is not registered', { status: 400 });
   }
 
-  const resolved = safeJoinReal(root, path);
-  if (!resolved) {
-    return new Response('Path outside repository', { status: 400 });
-  }
-
-  if (!existsSync(resolved)) {
-    return new Response('File not found', { status: 404 });
-  }
-
   const mimeType = MIME_BY_EXTENSION[extname(path).toLowerCase()];
   if (!mimeType) {
     return new Response('Preview type not supported', { status: 415 });
   }
 
-  const fileStats = await stat(resolved);
-  if (!fileStats.isFile()) {
-    return new Response('File not found', { status: 404 });
+  let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
+  try {
+    opened = await openWorkspaceFile(root, path, 'read');
+    if (opened.stat.size > MAX_PREVIEW_BYTES) {
+      return new Response('File too large for preview', { status: 413 });
+    }
+    const buffer = await opened.handle.readFile();
+    const filename = path.split('/').pop()?.replace(/"/g, '') || 'asset';
+    const headers: Record<string, string> = {
+      'Cache-Control': 'private, max-age=60',
+      'Content-Disposition': `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'Content-Length': String(buffer.byteLength),
+      'Content-Type': mimeType,
+      'X-Content-Type-Options': 'nosniff',
+    };
+    if (mimeType === 'image/svg+xml') {
+      headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+    }
+    return new Response(buffer, { headers });
+  } catch {
+    return new Response('File not found or path refused', { status: 404 });
+  } finally {
+    await opened?.handle.close().catch(() => {});
   }
-  if (fileStats.size > MAX_PREVIEW_BYTES) {
-    return new Response('File too large for preview', { status: 413 });
-  }
-
-  const buffer = await readFile(resolved);
-  const filename = path.split('/').pop()?.replace(/"/g, '') || 'asset';
-
-  const headers: Record<string, string> = {
-    'Cache-Control': 'private, max-age=60',
-    'Content-Disposition': `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-    'Content-Length': String(buffer.byteLength),
-    'Content-Type': mimeType,
-    'X-Content-Type-Options': 'nosniff',
-  };
-  if (mimeType === 'image/svg+xml') {
-    // This route is reachable on socket-truth loopback (no bearer — <img> tags
-    // can't attach one). A repo-committed SVG iframed at this origin would
-    // otherwise execute script; sandbox neuters it while <img> rendering is
-    // unaffected.
-    headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
-  }
-  return new Response(buffer, { headers });
 }

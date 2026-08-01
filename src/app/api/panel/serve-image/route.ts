@@ -1,10 +1,10 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { confineToRoots } from '@/lib/fs/safe-path';
+import { isWorkspaceFileError, openWorkspaceFile } from '@/lib/fs/workspace-file';
 
 const MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
@@ -37,31 +37,43 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Path not allowed' }, { status: 403 });
   }
 
-  if (!existsSync(resolved)) {
-    return NextResponse.json({ error: 'File not found' }, { status: 404 });
-  }
-
   const ext = extname(resolved).toLowerCase();
   const mimeType = MIME_MAP[ext];
   if (!mimeType) {
     return NextResponse.json({ error: 'Not an image file' }, { status: 400 });
   }
 
+  const allowedRoot = ALLOWED_ROOTS
+    .map((root) => resolve(root))
+    .find((root) => {
+      const rel = relative(root, resolved);
+      return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
+    });
+  if (!allowedRoot) {
+    return NextResponse.json({ error: 'Path not allowed' }, { status: 403 });
+  }
+
+  let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
   try {
-    const fileStats = await stat(resolved);
-    if (fileStats.size > 20 * 1024 * 1024) {
+    opened = await openWorkspaceFile(allowedRoot, relative(allowedRoot, resolved), 'read');
+    if (opened.stat.size > 20 * 1024 * 1024) {
       return NextResponse.json({ error: 'File too large' }, { status: 400 });
     }
 
-    const buffer = await readFile(resolved);
+    const buffer = await opened.handle.readFile();
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': mimeType,
         'Cache-Control': 'public, max-age=3600',
-        'Content-Length': fileStats.size.toString(),
+        'Content-Length': opened.stat.size.toString(),
       },
     });
-  } catch {
-    return NextResponse.json({ error: 'Could not read file' }, { status: 500 });
+  } catch (error) {
+    if (isWorkspaceFileError(error)) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    return NextResponse.json({ error: 'Could not read file', code: 'workspace_file_operation_failed' }, { status: 500 });
+  } finally {
+    await opened?.handle.close().catch(() => {});
   }
 }

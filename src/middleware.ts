@@ -160,8 +160,8 @@ const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
   // bearer — when the mobile-auth hardening removed blanket loopback trust,
   // every spec-panel image silently 401'd (regression found 2026-07-31). The
   // route itself is jailed: workspace must resolve through the registered-repo
-  // scope, safeJoinReal contains the path, and an image/pdf extension
-  // allowlist bounds what it will ever serve. GET/HEAD only via this gate.
+  // scope, descriptor validation contains the opened file, and an image/pdf
+  // extension allowlist bounds what it will ever serve. GET/HEAD only here.
   /^\/api\/panel\/file-asset\/?$/,
   // Boot-gate identity probe (v0.1.600 stuck-boot incident): the packaged
   // boot page is static HTML served by the Tauri shell — it CANNOT attach a

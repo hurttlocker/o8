@@ -1,10 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
-import { expandHome, safeJoinReal } from '@/lib/fs/safe-path';
+import { expandHome } from '@/lib/fs/safe-path';
+import { isWorkspaceFileError, readWorkspaceFile } from '@/lib/fs/workspace-file';
 
 export async function GET(request: Request) {
   try {
@@ -30,17 +29,8 @@ export async function GET(request: Request) {
       root = getDefaultLlmRepoRoot();
     }
 
-    // Normalize + confine: the file must stay inside the resolved root.
-    const fullPath = safeJoinReal(root, filePath);
-    if (!fullPath) {
-      return NextResponse.json({ content: null, error: 'Path traversal not allowed' }, { status: 403 });
-    }
-
-    if (!existsSync(fullPath)) {
-      return NextResponse.json({ content: null, error: 'File not found' }, { status: 404 });
-    }
-
-    const content = await readFile(fullPath, 'utf-8');
+    const opened = await readWorkspaceFile(root, filePath);
+    const content = opened.bytes.toString('utf-8');
     // Truncate large files
     if (content.length > 100000) {
       return NextResponse.json({
@@ -52,6 +42,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ content, path: filePath });
   } catch (error) {
     console.error('[panel/file-content] Could not read file', error);
-    return NextResponse.json({ content: null, error: 'Could not read file' }, { status: 500 });
+    if (isWorkspaceFileError(error)) {
+      return NextResponse.json({ content: null, error: error.message, code: error.code }, { status: error.status });
+    }
+    return NextResponse.json({ content: null, error: 'Could not read file', code: 'workspace_file_operation_failed' }, { status: 500 });
   }
 }

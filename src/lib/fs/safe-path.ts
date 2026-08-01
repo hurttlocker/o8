@@ -1,10 +1,10 @@
 import 'server-only';
 
 /**
- * Path-safety helpers — the single implementation of "does this path escape its
- * root" for every file-serving API route. Hand-rolled `fullPath.startsWith(root)`
- * checks are unsafe (they trust a caller-supplied root and miss `..` traversal);
- * routes must use these instead. See SECURITY_REMEDIATION_PLAN_2026-07-02.md RF-4.
+ * Lexical and canonical path helpers for display, allowlist selection, and
+ * directory resolution. They do NOT make a later path-based file open safe.
+ * File-content callers must use `workspace-file.ts`, which opens first and
+ * validates the descriptor it will keep using.
  */
 
 import { lstatSync, realpathSync } from 'node:fs';
@@ -49,11 +49,9 @@ function isWithin(root: string, candidate: string): boolean {
 }
 
 /**
- * Resolve a repository-relative path while also checking the filesystem's real
- * path, so an in-repo symlink cannot redirect a read or write outside the root.
- * For a new file, every existing ancestor is resolved before the lexical target
- * is returned. A broken symlink is rejected instead of being treated as a new
- * file. This closes the gap left by normalization-only traversal checks.
+ * Resolve a repository-relative path for display or directory-only operations.
+ * This result MUST NOT be opened later for file contents: a symlink swap can
+ * invalidate the check before the open. Use `openWorkspaceFile` instead.
  */
 export function safeJoinReal(
   root: string,

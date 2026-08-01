@@ -7,9 +7,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
-import { safeJoinReal } from '@/lib/fs/safe-path';
+import { openWorkspaceFile } from '@/lib/fs/workspace-file';
 
 const MAX_FILE_SIZE = 100_000; // 100KB max per file
 const MAX_FILES = 5; // max files per request
@@ -69,24 +68,21 @@ export async function POST(request: NextRequest) {
   const results: { path: string; content: string; truncated: boolean; error?: string }[] = [];
 
   for (const filePath of paths) {
-    // Security: prevent path traversal
-    const resolved = safeJoinReal(repoRoot, filePath);
-    if (!resolved) {
-      results.push({ path: filePath, content: '', truncated: false, error: 'Path outside repo' });
-      continue;
-    }
-
+    let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
     try {
-      const stat = statSync(resolved);
-      if (stat.size > MAX_FILE_SIZE) {
-        const partial = readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_SIZE);
-        results.push({ path: filePath, content: partial, truncated: true });
+      opened = await openWorkspaceFile(repoRoot, filePath, 'read');
+      if (opened.stat.size > MAX_FILE_SIZE) {
+        const buffer = Buffer.alloc(MAX_FILE_SIZE);
+        const { bytesRead } = await opened.handle.read(buffer, 0, buffer.byteLength, 0);
+        results.push({ path: filePath, content: buffer.subarray(0, bytesRead).toString('utf-8'), truncated: true });
       } else {
-        const content = readFileSync(resolved, 'utf-8');
+        const content = (await opened.handle.readFile()).toString('utf-8');
         results.push({ path: filePath, content, truncated: false });
       }
     } catch {
       results.push({ path: filePath, content: '', truncated: false, error: 'File not found' });
+    } finally {
+      await opened?.handle.close().catch(() => {});
     }
   }
 

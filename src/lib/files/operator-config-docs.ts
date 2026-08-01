@@ -1,7 +1,7 @@
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
-import { safeJoinReal } from '@/lib/fs/safe-path';
+import { isAbsolute, resolve } from 'node:path';
+import { safeJoin } from '@/lib/fs/safe-path';
 
 export const ABSOLUTE_PATH_NOT_ALLOWLISTED = 'absolute_path_not_allowlisted';
 
@@ -33,20 +33,13 @@ export function resolveAllowedOperatorConfigPath(filePath: string): string | nul
   if (!isAbsolute(filePath)) return null;
   const resolved = resolve(filePath);
   if (!operatorConfigAllowlist().includes(resolved)) return null;
-
-  try {
-    if (existsSync(resolved) && lstatSync(resolved).isSymbolicLink()) return null;
-  } catch {
-    return null;
-  }
-
-  const home = homedir();
-  return safeJoinReal(home, relative(home, resolved), { allowMissing: true });
+  return resolved;
 }
 
+/** Lexical display resolution only; file-content callers must open through workspace-file.ts. */
 export function resolveRepoRelativeFilePath(root: string, filePath: string): string | null {
   if (isAbsolute(filePath)) return null;
-  return safeJoinReal(root, filePath, { allowMissing: true });
+  return safeJoin(root, filePath);
 }
 
 export function buildQuickDocs(repoRoot?: string | null): { groups: QuickDocGroup[] } {

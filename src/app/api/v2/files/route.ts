@@ -8,10 +8,14 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
+import {
+  isWorkspaceFileError,
+  readWorkspaceFile,
+  writeWorkspaceFile,
+} from '@/lib/fs/workspace-file';
 import {
   ABSOLUTE_PATH_NOT_ALLOWLISTED,
   resolveAllowedOperatorConfigPath,
@@ -39,7 +43,8 @@ async function resolveFileTarget(filePath: string, workspace?: string | null) {
         status: 400,
       } as const;
     }
-    return { resolved } as const;
+    const root = homedir();
+    return { root, relativePath: relative(root, resolved) } as const;
   }
 
   const root = await resolveRoot(workspace);
@@ -60,7 +65,14 @@ async function resolveFileTarget(filePath: string, workspace?: string | null) {
     } as const;
   }
 
-  return { resolved } as const;
+  return { root, relativePath: relative(root, resolved) } as const;
+}
+
+function fileError(error: unknown) {
+  if (isWorkspaceFileError(error)) {
+    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+  }
+  return NextResponse.json({ error: 'Workspace file operation failed', code: 'workspace_file_operation_failed' }, { status: 500 });
 }
 
 export async function GET(request: NextRequest) {
@@ -74,22 +86,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
   }
 
-  if (!existsSync(target.resolved)) {
-    return NextResponse.json({ error: 'File not found', exists: false }, { status: 404 });
-  }
-
   try {
-    const content = readFileSync(target.resolved, 'utf-8');
+    const opened = await readWorkspaceFile(target.root, target.relativePath);
+    const content = opened.bytes.toString('utf-8');
     return NextResponse.json({ content, path, exists: true });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    if (isWorkspaceFileError(err) && err.code === 'workspace_file_not_found') {
+      return NextResponse.json({ error: 'File not found', code: err.code, exists: false }, { status: 404 });
+    }
+    return fileError(err);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { path, content, workspace } = body as { path: string; content: string; workspace?: string };
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const path = typeof body?.path === 'string' ? body.path : '';
+    const content = typeof body?.content === 'string' ? body.content : undefined;
+    const workspace = typeof body?.workspace === 'string' ? body.workspace : undefined;
 
     if (!path || content === undefined) {
       return NextResponse.json({ error: 'path and content required' }, { status: 400 });
@@ -100,27 +114,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
     }
 
-    // Read existing content for diff
-    let oldContent: string | null = null;
-    if (existsSync(target.resolved)) {
-      oldContent = readFileSync(target.resolved, 'utf-8');
-    }
-
-    // Ensure directory exists
-    const dir = dirname(target.resolved);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-
-    writeFileSync(target.resolved, content, 'utf-8');
+    const result = await writeWorkspaceFile(target.root, target.relativePath, content);
+    const oldContent = result.previousBytes?.toString('utf-8') ?? null;
 
     return NextResponse.json({
       success: true,
       path,
-      isNew: oldContent === null,
+      isNew: result.created,
       oldContent,
     });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return fileError(err);
   }
 }
