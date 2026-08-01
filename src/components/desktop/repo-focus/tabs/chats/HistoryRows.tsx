@@ -284,7 +284,9 @@ export function HistoryChatRow({
         : rowTone.key === 'merged' ? 'merged'
           : rowTone.key === 'failed' ? 'failed'
             : 'idle';
-  const statusLabel = !repoLabel ? tone?.label ?? rowTone.label ?? 'Idle' : null;
+  // Status rides WITH the repo (Q ruling 2026-07-31) — the meta line reads
+  // "repo · branch · status", each part optional but never mutually exclusive.
+  const statusLabel = tone?.label ?? rowTone.label ?? 'Idle';
   const backendLabel = !repoLabel && !compact && item.backend
     ? orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent })
     : null;

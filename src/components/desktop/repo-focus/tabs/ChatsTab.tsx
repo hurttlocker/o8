@@ -514,7 +514,10 @@ export function ChatsTab({
         disabled={!onOpenHistoryChat}
         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
         tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
-        repoLabel={showRepoSuffix ? repoSuffix(item) : null}
+        // Repo ALWAYS shows (Q ruling 2026-07-31: glanceability — "where" is
+        // what you scan for). Branch only when the list is single-repo, so
+        // multi-repo meta lines don't crowd at 9.5px.
+        repoLabel={repoSuffix(item)}
         branchLabel={!showRepoSuffix ? item.repoBranch ?? packet?.branchTarget ?? null : null}
         ownedCount={owned.length}
         onHoverChange={owned.length > 0
