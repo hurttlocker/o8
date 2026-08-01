@@ -17,7 +17,7 @@
  * (O8SpecPane maps them off --t-* tokens; the lab maps them off --lab-*).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { EditorState, StateField, StateEffect, Annotation, type Extension, type Range } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
@@ -616,19 +616,25 @@ function MarginNote({ note, onResolve, onResolveComment, onReply, onAct }: {
         </div>
       ))}
       {isSuggestion && !resolved ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
-          <NoteChip label="Accept & apply" tone="add" disabled={pending !== null} busy={pending === 'apply'} onClick={() => { void runAction('apply', () => onResolve(note, true)); }} />
-          <NoteChip label="Accept & act" tone="add" disabled={pending !== null} busy={pending === 'act'} onClick={() => { void runAction('act', () => onAct(note)); }} />
-          <NoteChip label="Reply" tone="muted" disabled={pending !== null} onClick={() => setReplying((v) => !v)} />
-          <NoteChip label="Dismiss" tone="muted" disabled={pending !== null} busy={pending === 'dismiss'} onClick={() => { void runAction('dismiss', () => onResolve(note, false)); }} />
-        </div>
+        <NoteActionRow
+          pending={pending}
+          actions={[
+            { key: 'apply', label: 'Accept & apply', tone: 'add', icon: ICON_APPLY, onClick: () => { void runAction('apply', () => onResolve(note, true)); } },
+            { key: 'act', label: 'Accept & act', tone: 'add', icon: ICON_ACT, onClick: () => { void runAction('act', () => onAct(note)); } },
+            { key: 'reply', label: 'Reply', tone: 'muted', icon: ICON_REPLY, onClick: () => setReplying((v) => !v) },
+            { key: 'dismiss', label: 'Dismiss', tone: 'muted', icon: ICON_DISMISS, onClick: () => { void runAction('dismiss', () => onResolve(note, false)); } },
+          ]}
+        />
       ) : null}
       {isComment && !resolved ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
-          <NoteChip label="Reply" tone="muted" disabled={pending !== null} onClick={() => setReplying((v) => !v)} />
-          <NoteChip label="Accept & act" tone="add" disabled={pending !== null} busy={pending === 'act'} onClick={() => { void runAction('act', () => onAct(note)); }} />
-          <NoteChip label="Resolve" tone="muted" disabled={pending !== null} busy={pending === 'resolve'} onClick={() => { void runAction('resolve', () => onResolveComment(note)); }} />
-        </div>
+        <NoteActionRow
+          pending={pending}
+          actions={[
+            { key: 'reply', label: 'Reply', tone: 'muted', icon: ICON_REPLY, onClick: () => setReplying((v) => !v) },
+            { key: 'act', label: 'Accept & act', tone: 'add', icon: ICON_ACT, onClick: () => { void runAction('act', () => onAct(note)); } },
+            { key: 'resolve', label: 'Resolve', tone: 'muted', icon: ICON_RESOLVE, onClick: () => { void runAction('resolve', () => onResolveComment(note)); } },
+          ]}
+        />
       ) : null}
       {feedback ? (
         <div style={{ marginTop: 5, fontFamily: PROSE, fontSize: 9.5, fontWeight: 300, lineHeight: 1.3, color: feedback.tone === 'error' ? 'var(--o8ed-del)' : 'var(--o8ed-add)' }}>
@@ -653,22 +659,49 @@ function MarginNote({ note, onResolve, onResolveComment, onReply, onAct }: {
   );
 }
 
-function NoteChip({ label, tone, onClick, disabled, busy }: {
-  label: string;
-  tone: 'add' | 'muted';
-  onClick: () => void;
-  disabled?: boolean;
-  busy?: boolean;
+// Icon-only note actions (operator ruling 2026-07-31): the bordered full-text
+// chips at 44px minimums stacked into giant pills inside the 150px rail, so
+// this surface deliberately trades the HIG touch minimum for rail density —
+// 22px icon targets, with the hovered/busy action spelled out in a fixed
+// label line so nothing shifts on hover.
+const NOTE_ICON = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+const ICON_REPLY = <svg width={14} height={14} viewBox="0 0 24 24" {...NOTE_ICON}><polyline points="9 14 4 9 9 4" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" /></svg>;
+const ICON_APPLY = <svg width={14} height={14} viewBox="0 0 24 24" {...NOTE_ICON}><polyline points="20 6 9 17 4 12" /></svg>;
+const ICON_ACT = <svg width={14} height={14} viewBox="0 0 24 24" {...NOTE_ICON}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>;
+const ICON_DISMISS = <svg width={14} height={14} viewBox="0 0 24 24" {...NOTE_ICON}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>;
+const ICON_RESOLVE = <svg width={14} height={14} viewBox="0 0 24 24" {...NOTE_ICON}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.27" /></svg>;
+
+function NoteActionRow({ actions, pending }: {
+  actions: Array<{ key: NoteAction; label: string; tone: 'add' | 'muted'; icon: ReactNode; onClick: () => void }>;
+  pending: NoteAction | null;
 }) {
-  const color = tone === 'add' ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)';
+  const [hovered, setHovered] = useState<NoteAction | null>(null);
+  const activeKey = pending ?? hovered;
+  const active = activeKey ? actions.find((a) => a.key === activeKey) ?? null : null;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      style={{ cursor: disabled ? 'default' : 'pointer', minHeight: 44, minWidth: 44, fontFamily: PROSE, fontSize: 10.5, fontWeight: 350, letterSpacing: '-0.1px', color, opacity: disabled && !busy ? 0.5 : 1, backgroundColor: 'transparent', borderWidth: 1, borderStyle: 'solid', borderColor: color, borderRadius: 6, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, filter: 'saturate(0.55)' }}
-    >
-      {busy ? `${label}…` : label}
-    </button>
+    <div style={{ marginTop: 5 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} onMouseLeave={() => setHovered(null)}>
+        {actions.map((a) => {
+          const color = a.tone === 'add' ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)';
+          const lit = hovered === a.key || pending === a.key;
+          return (
+            <button
+              key={a.key}
+              type="button"
+              title={a.label}
+              onClick={a.onClick}
+              disabled={pending !== null}
+              onMouseEnter={() => setHovered(a.key)}
+              style={{ cursor: pending !== null ? 'default' : 'pointer', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', color, opacity: pending !== null && pending !== a.key ? 0.35 : lit ? 1 : 0.7, backgroundColor: 'transparent', borderWidth: 0, borderStyle: 'none', padding: 0, filter: 'saturate(0.55)', transition: 'opacity 120ms ease' }}
+            >
+              {a.icon}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ height: 13, fontFamily: PROSE, fontSize: 9, fontWeight: 350, letterSpacing: '0.04em', textTransform: 'uppercase', lineHeight: '13px', color: active ? (active.tone === 'add' ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)') : 'transparent', filter: 'saturate(0.55)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        {active ? (pending === active.key ? `${active.label}…` : active.label) : ''}
+      </div>
+    </div>
   );
 }
