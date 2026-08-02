@@ -1,0 +1,150 @@
+{
+  "version": "0.1.652",
+  "gitSha": "ba0df2b0c",
+  "timestamp": "2026-08-02T05:56:25.601Z",
+  "node": "v22.22.2",
+  "tracks": {
+    "speed": {
+      "automatable": true,
+      "status": "ok",
+      "metrics": {
+        "dashboard_cold_ttfb_ms": {
+          "value": 12,
+          "priorValue": 35,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -23
+        },
+        "dashboard_warm_ttfb_ms": {
+          "value": 9,
+          "priorValue": 25,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -16
+        },
+        "bootstrap_warm_total_ms": {
+          "value": 3,
+          "priorValue": 9,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -6
+        },
+        "cli_status_median_ms": {
+          "value": 233,
+          "priorValue": 629,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "improved",
+          "deltaValue": -396
+        },
+        "mcp_client_minus_server_p50_ms": {
+          "value": null,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null,
+          "note": "metric not found"
+        },
+        "socket_avg_conns": {
+          "value": 5.58,
+          "priorValue": 3.07,
+          "direction": "informational",
+          "threshold": null,
+          "delta": "informational",
+          "deltaValue": null
+        }
+      }
+    },
+    "memory": {
+      "automatable": true,
+      "status": "ok",
+      "sourceResults": "/Users/marquisehurtt/o8/tests/qa-eval/three-way-results-2026-08-02T05-56-11-758Z.json",
+      "metrics": {
+        "overall_full_accuracy": {
+          "value": 0.11973684210526316,
+          "priorValue": 0.6860526315789474,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.5663157894736842
+        },
+        "delta_full_vs_strongGrep": {
+          "value": 0.013157894736842105,
+          "priorValue": 0.29078947368421054,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.27763157894736845
+        },
+        "ownership_full_accuracy": {
+          "value": 0.18,
+          "priorValue": 0.536,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.35600000000000004
+        },
+        "decisions_full_accuracy": {
+          "value": 0,
+          "priorValue": 0.72,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.72
+        },
+        "processes_full_accuracy": {
+          "value": 0.4,
+          "priorValue": 0.8,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.4
+        },
+        "incidents_full_accuracy": {
+          "value": 0.1,
+          "priorValue": 0.384,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.28400000000000003
+        },
+        "specs_full_accuracy": {
+          "value": 0.030000000000000006,
+          "priorValue": 0.774,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.744
+        },
+        "cross-repo_full_accuracy": {
+          "value": 0.2,
+          "priorValue": 0.4,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -0.2
+        },
+        "literal-lookup_full_accuracy": {
+          "value": 0,
+          "priorValue": 1,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -1
+        }
+      }
+    },
+    "governance": {
+      "automatable": false,
+      "status": "manual — not run this release"
+    },
+    "coding": {
+      "automatable": false,
+      "status": "manual — not run this release"
+    }
+  }
+}
