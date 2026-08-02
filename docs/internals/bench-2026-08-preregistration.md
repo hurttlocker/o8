@@ -113,3 +113,51 @@ not a result to keep.
 - **H2 (governance catch rate): not tested.**
 - **H3 (memory holds within noise): could not be tested** — harness invalid.
 - **H4 (no speed regression): held.**
+
+---
+
+## Amendment 2 — final run (recorded before any new data)
+
+The 2026-08-02 collection produced **0 scored tasks**: all six contract arms were
+invalidated because the harness looked for the contract in the worker's final
+reply, while the instruction asks for it mid-turn and the transport retains only
+final replies. **The intervention was never observed. It was not measured and
+found wanting**, and no claim about contract-first may be drawn from that run.
+
+Judging the six valid raw arms then surfaced a method defect that matters more
+than the result:
+
+> **Across six judgements, every judge scored its own model family's diff higher.
+> Six for six.** One diff scored 4.00 from one judge and 8.75 from the other — a
+> 4.75-point spread on identical code.
+
+Under a symmetric-bias assumption, 6/6 self-preference occurs by chance about
+1.6% of the time. At N=6 that is suggestive, not proven, but the effect size is
+large enough that single-family judging cannot be trusted.
+
+**Two consequences recorded honestly.** The June benchmark used a single judge
+family, so its coding result carries this same unquantified bias. And the manual
+scoring performed earlier in this session was done by a Claude-family judge that
+scored Claude-alone as winning two of three — that result has a plausible bias
+explanation which cannot be ruled out. Both are now suspect.
+
+### Changes for the final run
+
+1. **Contract observability moves to a file artifact.** The contract arm writes
+   `task-contract.json` to the worktree; validity is decided by parsing that file
+   with the production parser, requiring at least one requirement and every
+   requirement id mapped in `smallestRoute`. Malformed or empty stays invalid.
+   The file is excluded from the judged diff.
+2. **A decisive win now requires judge agreement.** Both the averaged margin must
+   exceed `NOISE_MARGIN` **and** both judges must agree on the direction. Where
+   they disagree, the task reports `judges disagree` rather than averaging into a
+   winner.
+
+Rule 2 is strictly harder to clear than the original bar. It is recorded here,
+before the run, because a scoring rule changed after seeing results is not a rule
+— and applied to the data already collected, it would have produced **zero**
+decisive wins rather than one.
+
+Nothing else changes: same three tasks, same base, same 2x2 design, same
+`NOISE_MARGIN`, same immutable run IDs, same requirement to publish every loss
+and every invalid arm.
