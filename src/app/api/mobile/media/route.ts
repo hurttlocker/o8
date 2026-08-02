@@ -1,13 +1,13 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
-import { homedir } from 'node:os';
+import { basename, extname, join } from 'node:path';
 import { NextRequest } from 'next/server';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || require('os').homedir();
-const MEDIA_ROOT = process.env.CORTEX_IDE_MEDIA_ROOT || `${homedir()}/.o8/media`;
+const MEDIA_ROOT = process.env.CORTEX_IDE_MEDIA_ROOT || join(getDataDir(), 'media');
 const EXTRA_MEDIA_ROOTS = [
   `${WORKSPACE_ROOT}/inbox`,
   `${WORKSPACE_ROOT}/archive/artifacts`,

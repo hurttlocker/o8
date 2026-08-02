@@ -16,6 +16,7 @@ import {
 } from '@/lib/runtime/pty-bridge';
 import type { RuntimeSurfaceLifecycle } from '@/lib/fleet/types';
 import { truncateText } from '@/lib/util/text';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 import type { OwnedRunOutcome, OwnedRunRecord, ParsedRunLog } from './types';
 
@@ -127,8 +128,18 @@ export async function validateWorkspace(targetCwd: string) {
   const expanded = targetCwd.startsWith('~/') ? path.join(os.homedir(), targetCwd.slice(2)) : targetCwd;
   const resolved = path.resolve(expanded);
   const real = await realpath(resolved).catch(() => resolved);
-  if (!real.startsWith(os.homedir())) {
-    throw new Error('Owned runtime launch is restricted to paths under the home directory.');
+  const allowedRoots = await Promise.all(
+    [os.homedir(), getDataDir()].map(async (root) => {
+      const resolvedRoot = path.resolve(root);
+      return realpath(resolvedRoot).catch(() => resolvedRoot);
+    }),
+  );
+  const isAllowed = allowedRoots.some((root) => {
+    const relative = path.relative(root, real);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  });
+  if (!isAllowed) {
+    throw new Error('Owned runtime launch is restricted to paths under the home or configured data directory.');
   }
 
   // Git-toplevel resolution is path NORMALIZATION, not the security boundary —

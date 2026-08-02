@@ -8,9 +8,10 @@
  *
  * Resolution order:
  *   1. env (O8_API_PORT, O8_API_TOKEN — set by dispatch)
- *   2. ~/.o8/{api-port,ws-token} (new data dir)
- *   3. ~/.cortex-ide/{api-port,ws-token} (legacy data dir)
- *   4. fallback port 3001, no token (dev workflow on loopback)
+ *   2. O8_DATA_DIR / CORTEX_IDE_DATA_DIR when explicitly configured
+ *   3. ~/.o8/{api-port,ws-token} (new data dir)
+ *   4. ~/.cortex-ide/{api-port,ws-token} (legacy data dir)
+ *   5. fallback port 3001, no token (dev workflow on loopback)
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -23,14 +24,20 @@ export interface ResolvedConfig {
   token: string | null;
   workerPacketId: string | null;
   source: {
-    port: 'env' | 'o8-dir' | 'cortex-ide-dir' | 'default';
-    token: 'worker' | 'env' | 'o8-dir' | 'cortex-ide-dir' | 'none';
+    port: 'env' | 'data-dir' | 'o8-dir' | 'cortex-ide-dir' | 'default';
+    token: 'worker' | 'env' | 'data-dir' | 'o8-dir' | 'cortex-ide-dir' | 'none';
   };
   dataDir: string | null;
 }
 
 const O8_DIR = () => join(homedir(), '.o8');
 const LEGACY_DIR = () => join(homedir(), '.cortex-ide');
+
+export function resolveCliDataDir(): string {
+  return process.env.O8_DATA_DIR?.trim()
+    || process.env.CORTEX_IDE_DATA_DIR?.trim()
+    || O8_DIR();
+}
 
 function readPortFile(dir: string): number | null {
   const p = join(dir, 'api-port');
@@ -91,17 +98,28 @@ export function resolveConfig(): ResolvedConfig {
     apiPort = envPort;
     portSource = 'env';
   } else {
-    const o8 = readPortFile(O8_DIR());
-    if (o8) {
-      apiPort = o8;
-      portSource = 'o8-dir';
-      dataDir = O8_DIR();
+    const explicitDataDir = process.env.O8_DATA_DIR?.trim()
+      || process.env.CORTEX_IDE_DATA_DIR?.trim();
+    if (explicitDataDir) {
+      const configured = readPortFile(explicitDataDir);
+      if (configured) {
+        apiPort = configured;
+        portSource = 'data-dir';
+      }
+      dataDir = explicitDataDir;
     } else {
-      const legacy = readPortFile(LEGACY_DIR());
-      if (legacy) {
-        apiPort = legacy;
-        portSource = 'cortex-ide-dir';
-        dataDir = LEGACY_DIR();
+      const o8 = readPortFile(O8_DIR());
+      if (o8) {
+        apiPort = o8;
+        portSource = 'o8-dir';
+        dataDir = O8_DIR();
+      } else {
+        const legacy = readPortFile(LEGACY_DIR());
+        if (legacy) {
+          apiPort = legacy;
+          portSource = 'cortex-ide-dir';
+          dataDir = LEGACY_DIR();
+        }
       }
     }
   }
@@ -116,17 +134,28 @@ export function resolveConfig(): ResolvedConfig {
     token = envToken;
     tokenSource = 'env';
   } else {
-    const o8 = readTokenFile(O8_DIR());
-    if (o8) {
-      token = o8;
-      tokenSource = 'o8-dir';
-      if (!dataDir) dataDir = O8_DIR();
+    const explicitDataDir = process.env.O8_DATA_DIR?.trim()
+      || process.env.CORTEX_IDE_DATA_DIR?.trim();
+    if (explicitDataDir) {
+      const configured = readTokenFile(explicitDataDir);
+      if (configured) {
+        token = configured;
+        tokenSource = 'data-dir';
+      }
+      dataDir = explicitDataDir;
     } else {
-      const legacy = readTokenFile(LEGACY_DIR());
-      if (legacy) {
-        token = legacy;
-        tokenSource = 'cortex-ide-dir';
-        if (!dataDir) dataDir = LEGACY_DIR();
+      const o8 = readTokenFile(O8_DIR());
+      if (o8) {
+        token = o8;
+        tokenSource = 'o8-dir';
+        if (!dataDir) dataDir = O8_DIR();
+      } else {
+        const legacy = readTokenFile(LEGACY_DIR());
+        if (legacy) {
+          token = legacy;
+          tokenSource = 'cortex-ide-dir';
+          if (!dataDir) dataDir = LEGACY_DIR();
+        }
       }
     }
   }

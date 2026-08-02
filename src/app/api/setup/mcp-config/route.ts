@@ -33,7 +33,6 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
-import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
@@ -42,6 +41,7 @@ import { getMcpSetupReadiness } from '@/lib/mcp/setup-readiness';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { resolveO8WebviewSocketPath } from '@/lib/mcp/o8-webview-socket';
 
 function findCommand(name: string): string | null {
   try {
@@ -86,7 +86,13 @@ export async function GET() {
     const codexBin = findCommand('codex');
     const ghBin = findCommand('gh');
     const portInfo = resolvePortInfo();
-    const webviewSocketPath = `/tmp/tauri-mcp-o8-${userInfo().username}.sock`;
+    let webviewSocketPath: string | null = null;
+    let webviewToolsBlockedReason: string | null = null;
+    try {
+      webviewSocketPath = resolveO8WebviewSocketPath();
+    } catch (error) {
+      webviewToolsBlockedReason = error instanceof Error ? error.message : String(error);
+    }
 
     const dataDir = getDataDir();
     const dbPath = join(dataDir, 'cortex-ide.db');
@@ -128,7 +134,8 @@ export async function GET() {
         dbExists,
         dbSize,
         webviewSocketPath,
-        webviewToolsAvailable: existsSync(webviewSocketPath),
+        webviewToolsAvailable: webviewSocketPath ? existsSync(webviewSocketPath) : false,
+        webviewToolsBlockedReason,
         codebaseMemoryAvailable: Boolean(codebaseMemory),
         cli: getCliAccessStatus(),
       },

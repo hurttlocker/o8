@@ -8,7 +8,6 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
 
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -63,7 +62,7 @@ vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => undefined),
 }));
 
-const root = mkdtempSync(join(homedir(), '.o8-declarative-dispatch-real-path-'));
+const root = mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'declarative-dispatch-real-path-'));
 const dataDir = join(root, 'data');
 const ownedRoot = join(root, 'owned-qoder');
 const capturePath = join(root, 'qoder-spawns.jsonl');

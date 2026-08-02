@@ -60,6 +60,13 @@ describe('scanForBinary', () => {
 });
 
 describe('ensureCliSymlink', () => {
+  it('uses CORTEX_IDE_DATA_DIR for the default symlink farm', () => {
+    const bin = fakeBinary(['.local', 'bin'], 'isolated-cli');
+    const link = ensureCliSymlink('isolated-cli', bin);
+    expect(link).toBe(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'bin', 'isolated-cli'));
+    expect(readlinkSync(link as string)).toBe(bin);
+  });
+
   it('creates ~/.o8/bin/<name> pointing at the target', () => {
     const bin = fakeBinary(['.local', 'bin'], 'claude');
     const link = ensureCliSymlink('claude', bin, home);

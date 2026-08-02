@@ -36,7 +36,7 @@ async function initRepo(prefix: string) {
 
 afterEach(async () => {
   for (const cleanupPath of cleanupPaths.splice(0)) {
-    await rm(cleanupPath, { recursive: true, force: true });
+    await rm(cleanupPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
   delete process.env.CORTEX_IDE_DATA_DIR;
   delete process.env.O8_WORKTREE_ROOT;

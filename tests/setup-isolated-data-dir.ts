@@ -33,29 +33,42 @@ if (!fs || !os || !path) {
 }
 
 if (!process.env.O8_TEST_DATA_DIR_PINNED) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-test-data-'));
-  delete process.env.O8_DATA_DIR;
-  process.env.CORTEX_IDE_DATA_DIR = dir;
-  process.env.O8_TEST_DATA_DIR_PINNED = dir;
+  const configuredDir = process.env.CORTEX_IDE_DATA_DIR?.trim();
+  const workerId = process.env.VITEST_POOL_ID?.trim()
+    || process.env.VITEST_WORKER_ID?.trim()
+    || String(process.pid);
+  process.env.O8_TEST_DATA_DIR_PINNED = configuredDir
+    ? path.join(path.resolve(configuredDir), `vitest-worker-${workerId.replace(/[^a-zA-Z0-9_-]/g, '_')}`)
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'o8-test-data-'));
+}
 
-  // Layer 3 — sever the OWNED-RUNTIME-ROOT leak (#1585, 2026-07-18).
-  // The canonical root defaults now follow the data-dir redirect above. Keep
-  // the dedicated owned-root variables pinned too as defense in depth: a test
-  // that overrides one adapter's resolution must still never see, let alone
-  // signal, a real session. Keep this list in sync with each adapter's
-  // rootEnvVar.
-  const ownedRootEnvVars = [
-    'CORTEX_IDE_OWNED_CODEX_ROOT',
-    'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
-    'O8_OWNED_GEMINI_ROOT',
-    'O8_OWNED_OPENCODE_ROOT',
-    'O8_OWNED_CURSOR_ROOT',
-    'O8_OWNED_GROK_ROOT',
-    'O8_OWNED_PI_ROOT',
-  ];
-  for (const envVar of ownedRootEnvVars) {
-    process.env[envVar] = path.join(dir, envVar.toLowerCase());
-  }
+// setupFiles runs before every test file, but a file can delete or replace the
+// data-dir variables in its cleanup. Restore the worker's original boundary on
+// every pass so a later file can never fall through to ~/.o8. Keep worker
+// directories under an explicit caller-provided CORTEX_IDE_DATA_DIR so an
+// isolation audit can inspect the supplied scratch root.
+const pinnedDataDir = process.env.O8_TEST_DATA_DIR_PINNED!;
+fs.mkdirSync(pinnedDataDir, { recursive: true });
+delete process.env.O8_DATA_DIR;
+process.env.CORTEX_IDE_DATA_DIR = pinnedDataDir;
+
+// Layer 3 — sever the OWNED-RUNTIME-ROOT leak (#1585, 2026-07-18).
+// The canonical root defaults now follow the data-dir redirect above. Keep
+// the dedicated owned-root variables pinned too as defense in depth: a test
+// that overrides one adapter's resolution must still never see, let alone
+// signal, a real session. Keep this list in sync with each adapter's
+// rootEnvVar.
+const ownedRootEnvVars = [
+  'CORTEX_IDE_OWNED_CODEX_ROOT',
+  'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
+  'O8_OWNED_GEMINI_ROOT',
+  'O8_OWNED_OPENCODE_ROOT',
+  'O8_OWNED_CURSOR_ROOT',
+  'O8_OWNED_GROK_ROOT',
+  'O8_OWNED_PI_ROOT',
+];
+for (const envVar of ownedRootEnvVars) {
+  process.env[envVar] = path.join(pinnedDataDir, envVar.toLowerCase());
 }
 
 // Layer 2 — sever the live-server escape hatch: any code path that resolves
@@ -63,7 +76,14 @@ if (!process.env.O8_TEST_DATA_DIR_PINNED) {
 // on this machine over HTTP and mutate real state (the +1 lane leak, same
 // night). Point it at a dead port; tests that exercise routes import the
 // handlers directly and never notice.
-if (!process.env.O8_TEST_API_PORT_PINNED) {
-  process.env.O8_API_PORT = '59998';
-  process.env.O8_TEST_API_PORT_PINNED = '1';
+process.env.O8_API_PORT = '59998';
+process.env.O8_TEST_API_PORT_PINNED = '1';
+
+// WebView automation controls the installed desktop app and cannot be made
+// hermetic by changing its data directory. Keep it off for the default suite.
+// A live integration run must opt in and may still provide an alternate socket.
+if (process.env.O8_LIVE_APP_TESTS === '1') {
+  process.env.O8_TAURI_MCP_SOCKET ||= `/tmp/tauri-mcp-o8-${os.userInfo().username}.sock`;
+} else {
+  delete process.env.O8_TAURI_MCP_SOCKET;
 }

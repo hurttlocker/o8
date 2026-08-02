@@ -44,7 +44,10 @@ function resolveBotToken() {
   const fromEnv = process.env.O8_DISCORD_BOT_TOKEN?.trim();
   if (fromEnv) return fromEnv;
   try {
-    const file = path.join(process.env.O8_DATA_DIR || path.join(os.homedir(), '.o8'), 'discord-bot-token');
+    const file = path.join(
+      process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
+      'discord-bot-token',
+    );
     const raw = readFileSync(file, 'utf8').trim();
     return raw || null;
   } catch {

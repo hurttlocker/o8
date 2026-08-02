@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
-import * as os from 'node:os';
 
 import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
+import { resolveO8WebviewSocketPath } from '@/lib/mcp/o8-webview-socket';
 import {
   createCodedError, getErrorCode, isMutationAckTimeout, queueCommandWrite,
   type PendingRequest,
@@ -346,8 +346,7 @@ export class O8WebviewClient {
   private typeQueue: Promise<unknown> = Promise.resolve();
 
   constructor() {
-    const username = os.userInfo().username;
-    this.socketPath = process.env.O8_TAURI_MCP_SOCKET ?? `/tmp/tauri-mcp-o8-${username}.sock`;
+    this.socketPath = resolveO8WebviewSocketPath();
     this.tokenPath = `${this.socketPath}.token`;
 
     const cleanup = () => {

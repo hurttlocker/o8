@@ -4,7 +4,7 @@ import { POST, GET, DELETE } from '@/app/api/v2/chat-history/route';
 
 // End-to-end verify for #1282: the real chat-history route must merge by default
 // (a partial POST can't drop a stored turn) and full-replace only on replace:true.
-// Uses a throwaway thoughts- tabId under the real ~/.o8/chat-history; cleaned up.
+// Uses a throwaway thoughts- tabId under the isolated test data dir; cleaned up.
 
 const tabId = `thoughts-itest1282-${process.pid}-${Math.floor(performance.now())}`;
 

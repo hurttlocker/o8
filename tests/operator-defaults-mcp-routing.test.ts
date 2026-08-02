@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -175,7 +174,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  testRoot = mkdtempSync(path.join(os.homedir(), '.o8-operator-mcp-routing-'));
+  testRoot = mkdtempSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-mcp-routing-'));
   process.env.CORTEX_IDE_DATA_DIR = testRoot;
   process.env.O8_DATA_DIR = testRoot;
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = path.join(testRoot, 'owned-codex');

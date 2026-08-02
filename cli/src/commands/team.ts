@@ -24,10 +24,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { CliError, EXIT } from '../api.js';
+import { resolveCliDataDir } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 // PARITY: an agent's o8 team handle is the SAME canonical codename Symon speaks
 // (via o8_status) and the dashboard shows (SessionVisualizer / agent cards) —
@@ -87,7 +87,7 @@ function roomDir(): string {
   } catch {
     /* not a git repo — fall back */
   }
-  return path.join(os.homedir(), '.o8', 'team', 'default');
+  return path.join(resolveCliDataDir(), 'team', 'default');
 }
 
 function ensureRoom(): { room: string; presence: string; leases: string; mailbox: string } {

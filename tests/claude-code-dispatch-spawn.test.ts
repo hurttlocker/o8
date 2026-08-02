@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import os from 'node:os';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,7 +45,7 @@ describe('Claude Code dispatch spawn', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    tempRoot = mkdtempSync(path.join(os.homedir(), '.o8-claude-dispatch-'));
+    tempRoot = mkdtempSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-dispatch-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', repoPath]);
     priorOwnedRoot = process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
@@ -104,7 +103,7 @@ describe('Claude Code dispatch spawn', () => {
     ]);
     expect(argv).not.toContain('-p');
     expect(argv).not.toContain('--print');
-    expect(options.cwd).toBe(repoPath);
+    expect(options.cwd).toBe(realpathSync(repoPath));
     expect(spawnMock.mock.results[0]?.value.stdin.end).toHaveBeenCalledWith(
       expect.stringContaining('implement the packet'),
       'utf8',
