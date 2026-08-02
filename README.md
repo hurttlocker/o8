@@ -95,16 +95,21 @@ macOS today; Windows and Linux ports are mapped and in progress.
 
 **Easiest:** download the latest signed build from [Releases](https://github.com/hurttlocker/o8/releases) — auto-updates included.
 
-**From source** (Node 22+, Rust stable, Xcode CLT):
+**From source** — needs **Node 22.x** (not 23+: native modules are built against the Node 22 ABI), Rust stable, and Xcode Command Line Tools.
 
 ```bash
 git clone https://github.com/hurttlocker/o8.git
 cd o8
+
+# with nvm: .nvmrc pins the right version
+nvm install && nvm use
+node -v                 # must print v22.x
+
 npm install
-npm run dev             # Next.js :47120 + WS :47125
-# native shell (starts its own coordinated dev stack):
-npm run tauri:dev
+npm run dev             # web loop — Next.js :47120 + WS :47125
 ```
+
+`npm run dev` is the whole loop for web/UI work. For the native desktop shell — a much longer first build, and what you need for anything touching Tauri — run `npm run tauri:dev` instead. Stop either with `npm run dev:cleanup` if the ports stay bound.
 
 Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aider`, …) — the first-run picker finds them. No API keys required to start; [`.env.example`](./.env.example) documents every optional one.
 
