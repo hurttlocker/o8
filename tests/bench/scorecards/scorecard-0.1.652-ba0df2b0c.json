@@ -140,11 +140,15 @@
     },
     "governance": {
       "automatable": false,
-      "status": "manual — not run this release"
+      "status": "manual \u2014 not run this release"
     },
     "coding": {
       "automatable": false,
-      "status": "manual — not run this release"
+      "status": "manual \u2014 not run this release"
     }
+  },
+  "memory": {
+    "status": "invalid",
+    "invalidReason": "Harness measured a non-existent repo path: tests/qa-eval/cases.json hardcoded /workspace/o8 (introduced 2026-07-30 by the private-path redaction), so all four conditions scored near zero. Path resolution fixed in the runner on 2026-08-02, but the 38-case ground truth has also drifted from the current tree (literal-lookup scores 0.00 for every condition, including strong-grep, which recorded 100% in June). No memory figure from this release is valid. Do not use these values as a regression baseline; rebuild the case ground truth first."
   }
 }

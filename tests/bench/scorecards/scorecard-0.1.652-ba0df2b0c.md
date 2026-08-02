@@ -34,3 +34,5 @@ _manual — not run this release_
 
 ## Coding
 _manual — not run this release_
+
+> **MEMORY TRACK INVALID (annotated 2026-08-02).** The harness measured a non-existent repo path (`/workspace/o8`, introduced by the 2026-07-30 private-path redaction), so every condition scored near zero — this is not a Brain regression. Path resolution is fixed, but the 38-case ground truth has drifted from the current tree. No memory figure from this release is valid, and these values must not be used as a regression baseline.
